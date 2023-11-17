@@ -1,7 +1,5 @@
 from importlib.metadata import version as _version
 
-from roms_tools import setup
-
 
 try:
     __version__ = _version("roms_tools")

@@ -562,9 +562,6 @@ def _create_grid_ds(
         f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
     )
 
-    nxp = nx + 2
-    nyp = ny + 2
-
     # Coriolis frequency
     f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
 

@@ -5,7 +5,7 @@ import numpy as np
 import xarray as xr
 
 
-RADIUS_OF_EARTH = 6371315.0
+RADIUS_OF_EARTH = 6371315.0  # in m
 
 
 # TODO should we store an xgcm.Grid object instead of an xarray Dataset? Or even subclass xgcm.Grid?
@@ -52,8 +52,6 @@ class Grid:
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        # TODO raise if crossing GMT line
-
         ds = _make_grid_ds(
             nx=self.nx,
             ny=self.ny,
@@ -118,8 +116,8 @@ class Grid:
 
         Parameters
         ----------
-        bathymetry
-            Whether or not to plot the bathymetry on top.
+        bathymetry: bool
+            Whether or not to plot the bathymetry. Default is False.
         """
 
         # TODO optionally plot topography on top?
@@ -182,6 +180,8 @@ def _make_grid_ds(
         domain_length, domain_width = size_y * 1e3, size_x * 1e3  # in m
         nl, nw = ny, nx
 
+    _raise_if_crosses_greenwich_meridian(domain_width, domain_length, center_lat, center_lon, rot)
+
     initial_lon_lat_vars = _make_initial_lon_lat_ds(domain_length, domain_width, nl, nw)
 
     rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
@@ -202,6 +202,38 @@ def _make_grid_ds(
     # TODO add global attributes on dataset, i.e. Title, Date, Type
 
     return ds
+
+
+def _raise_if_crosses_greenwich_meridian(size_x, size_y, center_lat, center_lon, rot):
+    # We have to do this before any of the grid is computed because we don't trust the grid creation routines in this case.
+
+    # TODO it would be nice to handle this case, but we first need to know what ROMS expects / can handle.
+
+    if -45 < rot < +45:
+        half_longitudinal_width_in_km = size_x * np.cos(np.deg2rad(rot))
+        # TODO passing the center latitude not the latitude of the corner here is a bug
+        half_longitudinal_width_in_degrees = _longitudinal_distance_to_longitude_difference_in_degrees(half_longitudinal_width_in_km, center_lat)
+    else:
+        raise ValueError("Why rotate the grid by more than 45 degrees? Please swap the x and y lengths instead.")
+
+    if center_lon - half_longitudinal_width_in_degrees < 0 < center_lon + half_longitudinal_width_in_degrees:
+        raise ValueError("Grid cannot cross Greenwich Meridian") 
+
+
+def _longitudinal_distance_to_longitude_difference_in_degrees(distance, latitude_deg):
+
+    print(latitude_deg)
+
+    # Calculate the radius of the circle at the given latitude
+    earth_radius_at_latitude = RADIUS_OF_EARTH * np.cos(np.radians(latitude_deg))
+
+    # Calculate the circumference of the circle at the given latitude
+    circumference_at_latitude = 2 * np.pi * earth_radius_at_latitude
+
+    # Calculate change in longitude in degrees
+    change_in_longitude_deg = (distance / circumference_at_latitude) * 360.0
+
+    return change_in_longitude_deg
 
 
 def _make_initial_lon_lat_ds(domain_length, domain_width, nl, nw):

@@ -11,6 +11,8 @@ from typing import Any
 RADIUS_OF_EARTH = 6371315.0  # in m
 
 
+# TODO lat_rho and lon_rho should be coordinate variables
+
 # TODO should we store an xgcm.Grid object instead of an xarray Dataset? Or even subclass xgcm.Grid?
 
 

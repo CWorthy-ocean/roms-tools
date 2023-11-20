@@ -85,7 +85,7 @@ Once we are happy with our grid, we can save it as a netCDF file via the `.save`
 grid.save('grids/my_new_roms_grid.nc')
 ```
 
-The basic grid domain is not ready for use by ROMS.
+The basic grid domain is now ready for use by ROMS.
 
 
 ### Steps 2-7: 

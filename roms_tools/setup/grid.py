@@ -92,23 +92,6 @@ class Grid:
         self.ds = xr.open_dataset(filepath)
         raise NotImplementedError()
 
-    def equals(self, other: "Grid") -> bool:
-        """
-        Assert that the parameters of this grid are the same as the parameters of another grid.
-
-        Parameters
-        ----------
-        other
-            Another Grid object to compare to
-
-        Returns
-        -------
-        equals
-            boolean indicating whether or not the two grids have the same parameters
-        """
-        # TODO can the dataclass handle this for us?
-        ...
-
     def to_xgcm() -> Any:
         # TODO we could convert the dataset to an xgcm.Grid object and return here?
         raise NotImplementedError()

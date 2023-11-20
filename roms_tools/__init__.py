@@ -8,4 +8,4 @@ except ImportError:  # pragma: no cover
     __version__ = "999"
 
 
-from roms_tools.setup.grid import Grid
+from roms_tools.setup.grid import Grid  # noqa: F401

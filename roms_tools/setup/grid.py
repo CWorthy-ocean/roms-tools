@@ -641,14 +641,14 @@ def _create_grid_ds(
 
 def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot):
 
-    ds.attrs['Title'] = (
+    ds.attrs["Title"] = (
         "ROMS grid. Settings:"
         f" nx: {nx} ny: {ny} "
         f" xsize: {size_x / 1e3} ysize: {size_y / 1e3}"
         f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
     )
-    ds.attrs['Date'] = date.today()
-    ds.attrs['Type'] = "ROMS grid produced by roms-tools"
+    ds.attrs["Date"] = date.today()
+    ds.attrs["Type"] = "ROMS grid produced by roms-tools"
 
     return ds
 

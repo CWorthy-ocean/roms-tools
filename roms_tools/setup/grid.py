@@ -1,5 +1,6 @@
 import copy
 from dataclasses import dataclass, field
+from datetime import date
 
 import numpy as np
 import xarray as xr
@@ -222,7 +223,7 @@ def _make_grid_ds(
     # TODO topography
     # ds = _make_topography(ds)
 
-    # TODO add global attributes on dataset, i.e. Title, Date, Type
+    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
 
     return ds
 
@@ -553,14 +554,6 @@ def _create_grid_ds(
     lone,
     late,
 ):
-    # TODO do we need a top-level grdname?
-
-    ROMS_title = (
-        "ROMS grid by Easy Grid. Settings:"
-        f" nx: {nx} ny: {ny} "
-        f" xsize: {size_x / 1e3} ysize: {size_y / 1e3}"
-        f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
-    )
 
     # Coriolis frequency
     f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
@@ -642,6 +635,20 @@ def _create_grid_ds(
 
     # TODO this is never written to
     # ds['xy_flip']
+
+    return ds
+
+
+def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot):
+
+    ds.attrs['Title'] = (
+        "ROMS grid. Settings:"
+        f" nx: {nx} ny: {ny} "
+        f" xsize: {size_x / 1e3} ysize: {size_y / 1e3}"
+        f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
+    )
+    ds.attrs['Date'] = date.today()
+    ds.attrs['Type'] = "ROMS grid produced by roms-tools"
 
     return ds
 

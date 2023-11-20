@@ -54,6 +54,8 @@ To visualize the grid we have just created, use the `.plot` method:
 grid.plot()
 ```
 
+![iceland_grid](https://github.com/CWorthy-ocean/roms-tools/assets/35968931/de8c03ab-3c61-4ba5-a9b7-65592fd9280f)
+
 To see the values of the grid variables you can examine the `xarray.Dataset` object returned by the `.ds` property
 
 ```python

@@ -16,7 +16,7 @@ cd roms-tools
 pip install .
 ```
 
-Check the installation has worked by running the tests
+Check the installation has worked by running the tests (you will need to also install pytest to run these)
 ```bash
 pytest
 ```

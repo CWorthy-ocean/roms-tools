@@ -563,7 +563,6 @@ def _create_grid_ds(
 
     # TODO some of these variables are defined but never written to in Easy Grid
 
-    # ds['spherical'] = ...
     ds["angle"] = xr.Variable(
         data=angle,
         dims=["eta_rho", "xi_rho"],
@@ -605,6 +604,15 @@ def _create_grid_ds(
         data=lat * 180 / np.pi,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
+    )
+
+    ds["spherical"] = xr.Variable(
+        data=["T"],
+        dims=["one"],
+        attrs={
+            "long_name": "Grid type logical switch",
+            "option_T": "spherical",
+        },
     )
 
     # TODO this mask is obtained from hraw

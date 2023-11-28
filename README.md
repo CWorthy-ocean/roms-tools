@@ -21,14 +21,14 @@ Check the installation has worked by running the tests (you will need to also in
 pytest
 ```
 
-Dependencies required are xarray and netcdf4, plus matplotlib and cartopy for visualising grids. 
+Dependencies required are xarray and netcdf4, plus matplotlib and cartopy for visualising grids.
 
 ROMS-tools should run on any platform that can install the above dependencies.
 
 
 ## Usage instructions
 
-To set up all the input files for a new ROMS simulation from scratch, follow these steps in order. 
+To set up all the input files for a new ROMS simulation from scratch, follow these steps in order.
 
 ### Step 1: Make Grid
 
@@ -88,7 +88,7 @@ grid.save('grids/my_new_roms_grid.nc')
 The basic grid domain is now ready for use by ROMS.
 
 
-### Steps 2-7: 
+### Steps 2-7:
 
 Coming soon!
 

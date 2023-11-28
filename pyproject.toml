@@ -29,6 +29,10 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.urls]
+Home = "https://github.com/CWorthy-ocean/roms-tools"
+Documentation = "https://github.com/CWorthy-ocean/roms-tools#readme"
+
 [build-system]
 requires = [
     "setuptools>=61.0.0",
@@ -38,6 +42,8 @@ requires = [
 ]
 
 [tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "dirty-tag"
 write_to = "roms_tools/_version.py"
 write_to_template = '''
 # Do not change! Do not track in version control!

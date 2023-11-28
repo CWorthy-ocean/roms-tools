@@ -8,12 +8,10 @@ _Note these tools are for the [Center for Earth Systems Research Group](http://r
 
 ## Installation instructions
 
-For now this package must be installed by clone the source code and installing locally.
+Install via pip
 
 ```bash
-git clone <repo-URL>
-cd roms-tools
-pip install .
+pip install roms-tools
 ```
 
 Check the installation has worked by running the tests (you will need to also install pytest to run these)

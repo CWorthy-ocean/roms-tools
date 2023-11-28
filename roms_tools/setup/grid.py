@@ -7,7 +7,7 @@ import xarray as xr
 
 from typing import Any
 
-from roms_tools.topography import _add_topography_and_mask
+from roms_tools.setup.topography import _add_topography_and_mask
 
 
 RADIUS_OF_EARTH = 6371315.0  # in m

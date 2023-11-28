@@ -23,6 +23,7 @@ dependencies = [
     "xarray >=2022.6.0",
     "numpy",
     "netcdf4",
+    "pooch",
     "matplotlib",
     "cartopy",
     "packaging",

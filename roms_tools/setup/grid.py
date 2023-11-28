@@ -7,6 +7,8 @@ import xarray as xr
 
 from typing import Any
 
+from roms_tools.topography import _add_topography_and_mask
+
 
 RADIUS_OF_EARTH = 6371315.0  # in m
 
@@ -205,8 +207,7 @@ def _make_grid_ds(
         late,
     )
 
-    # TODO topography
-    # ds = _make_topography(ds)
+    ds = _add_topography_and_mask(ds, lon4, lat4)
 
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
 
@@ -554,10 +555,6 @@ def _create_grid_ds(
         attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
     )
 
-    # ds['h'] = ...
-    # TODO hraw comes from topography
-    # ds['hraw'] = xr.Variable(data=hraw, dims=['eta_rho', 'xi_rho'])
-
     ds["f0"] = xr.Variable(
         data=f0,
         dims=["eta_rho", "xi_rho"],
@@ -600,9 +597,6 @@ def _create_grid_ds(
         },
     )
 
-    # TODO this mask is obtained from hraw
-    # ds['mask_rho'] = xr.Variable(data=lat * 180 / np.pi, dims=['eta_rho', 'xi_rho'], attrs={'long_name': "latitude of rho-points", 'units': "degrees North"})
-
     # TODO this 'one' dimension is completely unneccessary as netCDF can store scalars
     ds["tra_lon"] = xr.Variable(
         data=[center_lon],
@@ -636,7 +630,7 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
 
     ds.attrs["Title"] = (
         "ROMS grid. Settings:"
-        f" nx: {nx} ny: {ny} "
+        f" nx: {nx} ny: {ny}"
         f" xsize: {size_x / 1e3} ysize: {size_y / 1e3}"
         f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
     )
@@ -644,7 +638,3 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
 
     return ds
-
-
-def _make_topography(ds):
-    ...

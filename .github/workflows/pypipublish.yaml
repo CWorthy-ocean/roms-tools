@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build-artifacts:
     runs-on: ubuntu-latest
-    if: github.repository == 'CWorthy-ocean/roms_tools'
+    if: github.repository == 'CWorthy-ocean/roms-tools'
     steps:
       - uses: actions/checkout@v4
         with:

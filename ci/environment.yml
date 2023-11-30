@@ -1,0 +1,15 @@
+name: romstools-test
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python>=3.9
+  - numpy
+  - xarray
+  - matplotlib
+  - cartopy
+  - packaging
+  - netcdf4
+  - pytest
+  - flake8
+  - black

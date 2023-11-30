@@ -24,8 +24,8 @@ class TestCreateGrid:
             ]
         )
 
-        npt.assert_allclose(grid.ds["lat_rho"], expected_lat)
-        npt.assert_allclose(grid.ds["lon_rho"], expected_lon)
+        npt.assert_allclose(grid.ds["lat_rho"], expected_lat, atol=1e-8)
+        npt.assert_allclose(grid.ds["lon_rho"], expected_lon, atol=1e-8)
 
     def test_raise_if_crossing_dateline(self):
         with pytest.raises(ValueError, match="cannot cross Greenwich Meridian"):

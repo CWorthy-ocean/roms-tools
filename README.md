@@ -4,16 +4,14 @@
 
 A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla-roms) simulation.
 
-_Note these tools are for the "UCLA" version of ROMS._
+_Note these tools are for the [Center for Earth Systems Research Group](http://research.atmos.ucla.edu/cesr/) at UCLA's version of ROMS._
 
 ## Installation instructions
 
-For now this package must be installed by clone the source code and installing locally.
+Install via pip
 
 ```bash
-git clone <repo-URL>
-cd roms-tools
-pip install .
+pip install roms-tools
 ```
 
 Check the installation has worked by running the tests (you will need to also install pytest to run these)
@@ -53,6 +51,8 @@ To visualize the grid we have just created, use the `.plot` method:
 ```python
 grid.plot()
 ```
+
+![iceland_grid](https://github.com/CWorthy-ocean/roms-tools/assets/35968931/de8c03ab-3c61-4ba5-a9b7-65592fd9280f)
 
 To see the values of the grid variables you can examine the `xarray.Dataset` object returned by the `.ds` property
 

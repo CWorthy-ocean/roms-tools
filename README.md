@@ -19,7 +19,7 @@ Check the installation has worked by running the tests (you will need to also in
 pytest
 ```
 
-Dependencies required are xarray and netcdf4, plus matplotlib and cartopy for visualising grids.
+Dependencies required are xarray, netcdf4, and pooch, plus matplotlib and cartopy for visualising grids.
 
 ROMS-tools should run on any platform that can install the above dependencies.
 

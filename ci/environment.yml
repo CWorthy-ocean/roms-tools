@@ -8,6 +8,7 @@ dependencies:
   - xarray
   - matplotlib
   - cartopy
+  - pooch
   - packaging
   - netcdf4
   - pytest

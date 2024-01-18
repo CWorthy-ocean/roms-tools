@@ -1,20 +1,6 @@
-import pooch
 import xarray as xr
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-
-
-# TODO actually upload etopo.nc somewhere and point to it so it can be fetched here
-FETCHER = pooch.create(
-    # Use the default cache folder for the operating system
-    path=pooch.os_cache("my-project"),
-    base_url="https://www.somewebpage.org/science/data/",
-    # The registry specifies the files that can be fetched
-    registry={
-        "temperature.csv": "sha256:19uheidhlkjdwhoiwuhc0uhcwljchw9ochwochw89dcgw9dcgwc",
-        "gravity-disturbance.nc": "sha256:1upodh2ioduhw9celdjhlfvhksgdwikdgcowjhcwoduchowjg8w",
-    },
-)
 
 
 def _add_topography_and_mask(ds, lon, lat) -> xr.Dataset:

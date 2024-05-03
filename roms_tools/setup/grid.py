@@ -32,9 +32,9 @@ class Grid:
     ny
         Number of grid points in the y-direction
     size_x
-        Domain size in the x-direction (in km?)
+        Domain size in the x-direction (in km)
     size_y
-        Domain size in the y-direction (in km?)
+        Domain size in the y-direction (in km)
     center_lon
         Longitude of grid center
     center_lat
@@ -207,9 +207,9 @@ def _make_grid_ds(
         late,
     )
 
-    ds = _add_topography_and_mask(ds, lon4, lat4)
+    #ds = _add_topography_and_mask(ds, lon4, lat4)
 
-    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
+    #ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
 
     return ds
 

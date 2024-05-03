@@ -14,3 +14,4 @@ dependencies:
   - pytest
   - flake8
   - black
+  - scipy

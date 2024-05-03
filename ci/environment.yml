@@ -15,3 +15,4 @@ dependencies:
   - flake8
   - black
   - scipy
+  - ipykernel # not strictly necessary but this is nice to run notebooks in this env to test

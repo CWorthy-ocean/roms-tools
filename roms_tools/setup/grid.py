@@ -207,7 +207,7 @@ def _make_grid_ds(
         late,
     )
 
-    ds = _add_topography_and_mask(ds, lon4, lat4)
+    #ds = _add_topography_and_mask(ds, lon4, lat4)
 
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
 

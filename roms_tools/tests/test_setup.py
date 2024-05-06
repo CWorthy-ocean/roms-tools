@@ -51,6 +51,7 @@ class TestCreateGrid:
             ]
         )
 
+        # TODO: adapt tolerances according to order of magnitude of respective fields
         npt.assert_allclose(grid.ds["lat_rho"], expected_lat, atol=1e-8)
         npt.assert_allclose(grid.ds["lon_rho"], expected_lon, atol=1e-8)
         npt.assert_allclose(grid.ds["angle"], expected_angle, atol=1e-8)

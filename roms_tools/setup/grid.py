@@ -597,25 +597,18 @@ def _create_grid_ds(
     #    },
     #)
 
-    ds["tra_lon"] = xr.Variable(
-        data=[center_lon],
-        attrs={
-            "long_name": "Longitudinal translation of base grid",
-            "units": "degrees East",
-        },
-    )
-    ds["tra_lat"] = xr.Variable(
-        data=[center_lat],
-        attrs={
-            "long_name": "Latitudinal translation of base grid",
-            "units": "degrees North",
-        },
-    )
-    ds["rotate"] = xr.Variable(
-        data=[rot],
-        attrs={"long_name": "Rotation of base grid", "units": "degrees"},
-    )
-
+    ds["tra_lon"] = center_lon
+    ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
+    ds["tra_lon"].attrs["units"] = "degrees East"
+    
+    ds["tra_lat"] = center_lat
+    ds["tra_lat"].attrs["long_name"] = "Latitudinal translation of base grid"
+    ds["tra_lat"].attrs["units"] = "degrees North"
+    
+    ds["rotate"] = rot
+    ds["rotate"].attrs["long_name"] = "Rotation of base grid"
+    ds["rotate"].attrs["units"] = "degrees"
+    
     # TODO this is never written to
     # ds['xy_flip']
 

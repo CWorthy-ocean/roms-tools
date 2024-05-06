@@ -8,21 +8,38 @@ _Note these tools are for the [Center for Earth Systems Research Group](http://r
 
 ## Installation instructions
 
-Install via pip
+### Install via pip
 
 ```bash
 pip install roms-tools
 ```
+
+### Install from GitHub
+
+ROMS-tools is under active development. To obtain the latest development version, you may clone the source repository and install it:
+```bash
+git clone https://github.com/CWorthy-ocean/roms-tools.git
+cd roms-tools
+pip install -e . --no-deps 
+```
+
+### Run the tests
 
 Check the installation has worked by running the tests (you will need to also install pytest to run these)
 ```bash
 pytest
 ```
 
-Dependencies required are xarray, netcdf4, and pooch, plus matplotlib and cartopy for visualising grids.
+Dependencies required are xarray, scipy, netcdf4, and pooch, plus matplotlib and cartopy for visualising grids.
 
 ROMS-tools should run on any platform that can install the above dependencies.
 
+You can set up a conda environment with all required dependencies as follows:
+```bash
+cd roms-tools
+conda env create -f ci/environment.yml
+conda activate romstools-test
+```
 
 ## Usage instructions
 

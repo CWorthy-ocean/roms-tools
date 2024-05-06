@@ -560,8 +560,8 @@ def _create_grid_ds(
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Coriolis parameter at rho-points", "units": "second-1"},
     )
-    ds["pn"] = xr.Variable(
-        data=pn,
+    ds["pm"] = xr.Variable(
+        data=pm,
         dims=["eta_rho", "xi_rho"],
         attrs={
             "long_name": "Curvilinear coordinate metric in xi-direction",
@@ -569,7 +569,7 @@ def _create_grid_ds(
         },
     )
     ds["pn"] = xr.Variable(
-        data=pm,
+        data=pn,
         dims=["eta_rho", "xi_rho"],
         attrs={
             "long_name": "Curvilinear coordinate metric in eta-direction",
@@ -588,19 +588,17 @@ def _create_grid_ds(
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
 
-    ds["spherical"] = xr.Variable(
-        data=["T"],
-        dims=["one"],
-        attrs={
-            "long_name": "Grid type logical switch",
-            "option_T": "spherical",
-        },
-    )
+    # TODO not sure this logical switch is ever used
+    # ds["spherical"] = xr.Variable(
+    #    data=["T"],
+    #    attrs={
+    #        "long_name": "Grid type logical switch",
+    #        "option_T": "spherical",
+    #    },
+    #)
 
-    # TODO this 'one' dimension is completely unneccessary as netCDF can store scalars
     ds["tra_lon"] = xr.Variable(
         data=[center_lon],
-        dims=["one"],
         attrs={
             "long_name": "Longitudinal translation of base grid",
             "units": "degrees East",
@@ -608,7 +606,6 @@ def _create_grid_ds(
     )
     ds["tra_lat"] = xr.Variable(
         data=[center_lat],
-        dims=["one"],
         attrs={
             "long_name": "Latitudinal translation of base grid",
             "units": "degrees North",
@@ -616,7 +613,6 @@ def _create_grid_ds(
     )
     ds["rotate"] = xr.Variable(
         data=[rot],
-        dims=["one"],
         attrs={"long_name": "Rotation of base grid", "units": "degrees"},
     )
 

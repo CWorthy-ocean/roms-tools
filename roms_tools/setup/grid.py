@@ -13,8 +13,6 @@ from roms_tools.setup.topography import _add_topography_and_mask
 RADIUS_OF_EARTH = 6371315.0  # in m
 
 
-# TODO lat_rho and lon_rho should be coordinate variables
-
 # TODO should we store an xgcm.Grid object instead of an xarray Dataset? Or even subclass xgcm.Grid?
 
 
@@ -191,20 +189,14 @@ def _make_grid_ds(
     ang = _compute_angle(lon4, lonu, latu, lone)
 
     ds = _create_grid_ds(
-        nx,
-        ny,
         lon4,
         lat4,
         pm,
         pn,
         ang,
-        size_x,
-        size_y,
         rot,
         center_lon,
-        center_lat,
-        lone,
-        late,
+        center_lat
     )
 
     #ds = _add_topography_and_mask(ds, lon4, lat4)
@@ -525,35 +517,32 @@ def _compute_angle(lon4, lonu, latu, lone):
 
 
 def _create_grid_ds(
-    nx,
-    ny,
     lon,
     lat,
     pm,
     pn,
     angle,
-    size_x,
-    size_y,
     rot,
     center_lon,
     center_lat,
-    lone,
-    late,
 ):
 
-    # Coriolis frequency
-    f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
-
-    # Create empty xarray.Dataset object to store variables in
-    ds = xr.Dataset()
-
-    # TODO some of these variables are defined but never written to in Easy Grid
+    # Create xarray.Dataset object with lat_rho and lon_rho as coordinates
+    ds = xr.Dataset(
+        coords={
+            "lat_rho": (("eta_rho", "xi_rho"), lat * 180 / np.pi),
+            "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi)
+        }
+    )
 
     ds["angle"] = xr.Variable(
         data=angle,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
     )
+
+    # Coriolis frequency
+    f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
 
     ds["f0"] = xr.Variable(
         data=f0,
@@ -582,21 +571,13 @@ def _create_grid_ds(
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
     )
+    
     ds["lat_rho"] = xr.Variable(
         data=lat * 180 / np.pi,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
-
-    # TODO not sure this logical switch is ever used
-    # ds["spherical"] = xr.Variable(
-    #    data=["T"],
-    #    attrs={
-    #        "long_name": "Grid type logical switch",
-    #        "option_T": "spherical",
-    #    },
-    #)
-
+    
     ds["tra_lon"] = center_lon
     ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
     ds["tra_lon"].attrs["units"] = "degrees East"
@@ -608,9 +589,18 @@ def _create_grid_ds(
     ds["rotate"] = rot
     ds["rotate"].attrs["long_name"] = "Rotation of base grid"
     ds["rotate"].attrs["units"] = "degrees"
-    
+
     # TODO this is never written to
     # ds['xy_flip']
+
+    # TODO same here?
+    # ds["spherical"] = xr.Variable(
+    #    data=["T"],
+    #    attrs={
+    #        "long_name": "Grid type logical switch",
+    #        "option_T": "spherical",
+    #    },
+    #)
 
     return ds
 

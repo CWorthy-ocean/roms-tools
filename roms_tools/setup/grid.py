@@ -165,15 +165,13 @@ def _make_grid_ds(
     rot: float,
 ) -> xr.Dataset:
 
-    _raise_if_nx_or_ny_too_small(nx, ny)
-
     initial_lon_lat_vars = _make_initial_lon_lat_ds(size_x, size_y, nx, ny)
 
     # rotate coordinate system
     rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
     lon2, *_ = rotated_lon_lat_vars
 
-    #_raise_if_crosses_greenwich_meridian(lon2, center_lon)
+    _raise_if_crosses_greenwich_meridian(lon2, center_lon)
 
     # translate coordinate system
     translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
@@ -202,11 +200,6 @@ def _make_grid_ds(
 
     return ds
 
-def _raise_if_nx_or_ny_too_small(nx, ny):
-    # nx and ny must be at least 2; otherwise the iterative way to perform the Mercator projection around the equator may fail
-    if nx < 2 or ny < 2:
-        raise ValueError("nx and ny must be 2 or larger")
-
 def _raise_if_crosses_greenwich_meridian(lon, center_lon):
     # We have to do this before the grid is translated because we don't trust the grid creation routines in that case.
 
@@ -221,92 +214,67 @@ def _raise_if_crosses_greenwich_meridian(lon, center_lon):
 def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
     
     # Mercator projection around the equator
-
+    
+    # initially define the domain to be longer in x-direction (dimension "length")
+    # than in y-direction (dimension "width") because we want to stay away from the 
+    # poles as much as possible when performing the Mercator projection
     if size_y > size_x:
-        domain_length, domain_width = size_x * 1e3, size_y * 1e3  # in m
-        nl, nw = nx, ny
-    else:
         domain_length, domain_width = size_y * 1e3, size_x * 1e3  # in m
         nl, nw = ny, nx
+    else:
+        domain_length, domain_width = size_x * 1e3, size_y * 1e3  # in m
+        nl, nw = nx, ny
 
     domain_length_in_degrees = domain_length / RADIUS_OF_EARTH
     domain_width_in_degrees = domain_width / RADIUS_OF_EARTH
 
     # 1d array describing the longitudes at cell centers
-    longitude_array_1d_in_degrees = (
-        domain_length_in_degrees * np.arange(-0.5, nl + 1.5, 1) / nl
-        - domain_length_in_degrees / 2
+    x = np.arange(-0.5, nl + 1.5, 1)
+    lon_array_1d_in_degrees = (
+        domain_length_in_degrees * x / nl - domain_length_in_degrees / 2
+    )
+    # 1d array describing the longitudes at cell corners (or vorticity points "q")
+    xq = np.arange(-1, nl + 2, 1)
+    lonq_array_1d_in_degrees_q = (
+        domain_length_in_degrees * xq / nl - domain_length_in_degrees / 2
     )
 
-    # 1d array describing the longitudes at cell corners (vorticity points "q")
-    longitude_array_1d_in_degrees_q = (
-        domain_length_in_degrees * np.arange(-1, nl + 2, 1) / nl
-        - domain_length_in_degrees / 2
-    )
+    # convert degrees latitude to y-coordinate using Mercator projection
+    y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
+    y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
 
-    for _ in range(100):
-
-        print(domain_width_in_degrees)
-        # convert degrees latitude to y-coordinate using Mercator projection
-        y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
-        y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
-
-        # linearly space points in y-space
-        y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
-
-        # convert back to longitude using inverse Mercator projection resulting in
-        # 1d array describing the latitudes at cell centers
-        latitude_array_1d_in_degrees = np.arctan(np.sinh(y))
-
-        # find width and height of new grid at the central grid point in degrees
-        width_cen = 0.5 * (
-            latitude_array_1d_in_degrees[int(np.round(nw / 2) + 1)]
-            - latitude_array_1d_in_degrees[int(np.round(nw / 2) - 1)]
-        )
-        length_cen = domain_length_in_degrees / nl
-
-        # scale the domain width in degrees
-        mul = (
-            width_cen / length_cen
-            * domain_length_in_degrees / domain_width_in_degrees
-            * nw / nl
-        )
-        domain_width_in_degrees = domain_width_in_degrees / mul
-
-    # grid at cell centers
-    lon, lat = np.meshgrid(
-        longitude_array_1d_in_degrees, latitude_array_1d_in_degrees
-    )
-
-    # grid at cell corners or vorticity points ("q")
+    # linearly space points in y-space
+    y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
     yq = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
-    latitude_array_1d_in_degrees_q = np.arctan(np.sinh(yq))
-    lonq, latq = np.meshgrid(longitude_array_1d_in_degrees_q, latitude_array_1d_in_degrees_q)
 
+    # inverse Mercator projections
+    lat_array_1d_in_degrees = np.arctan(np.sinh(y))
+    latq_array_1d_in_degrees = np.arctan(np.sinh(yq))
+
+    # 2d grid at cell centers
+    lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
+    # 2d grid at cell corners
+    lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
+    
+    if size_y > size_x:
+        # Rotate grid by 90 degrees because until here the grid has been defined
+        # to be longer in x-direction than in y-direction
+
+        lon, lat = rot_sphere(lon, lat, 90)
+        lonq, latq = rot_sphere(lonq, latq, 90)
+
+        lon = np.transpose(np.flip(lon, 0))
+        lat = np.transpose(np.flip(lat, 1))
+        lonq = np.transpose(np.flip(lonq, 0))
+        latq = np.transpose(np.flip(latq, 1))
+
+
+    # infer longitudes and latitudes at u- and v-points
     lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
     latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
     lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
     latv = 0.5 * (lat[:-1, :] + lat[1:, :])
 
-    if domain_length > domain_width:
-        # Rotate grid 90 degrees so that the width is now longer than the length
-
-        lon, lat = rot_sphere(lon, lat, 90)
-        lonu, latu = rot_sphere(lonu, latu, 90)
-        lonv, latv = rot_sphere(lonv, latv, 90)
-        lonq, latq = rot_sphere(lonq, latq, 90)
-
-        lon = np.transpose(np.flip(lon, 0))
-        lat = np.transpose(np.flip(lat, 0))
-        lonq = np.transpose(np.flip(lonq, 0))
-        latq = np.transpose(np.flip(latq, 1))
-
-        lonu_tmp = np.transpose(np.flip(lonv, 0))
-        latu_tmp = np.transpose(np.flip(latv, 0))
-        lonv = np.transpose(np.flip(lonu, 0))
-        latv = np.transpose(np.flip(latu, 0))
-        lonu = lonu_tmp
-        latu = latu_tmp
 
     # TODO wrap up into temporary container Dataset object?
     return lon, lat, lonu, latu, lonv, latv, lonq, latq

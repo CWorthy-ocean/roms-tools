@@ -307,7 +307,7 @@ def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     lon[lon < -np.pi] = lon[lon < -np.pi] + 2 * np.pi
     lonu[lonu < -np.pi] = lonu[lonu < -np.pi] + 2 * np.pi
     lonv[lonv < -np.pi] = lonv[lonv < -np.pi] + 2 * np.pi
-    lonq[lone < -np.pi] = lonq[lone < -np.pi] + 2 * np.pi
+    lonq[lonq < -np.pi] = lonq[lonq < -np.pi] + 2 * np.pi
 
     return lon, lat, lonu, latu, lonv, latv, lonq, latq
 

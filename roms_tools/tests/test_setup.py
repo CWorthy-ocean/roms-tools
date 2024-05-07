@@ -1,13 +1,12 @@
 import pytest
 import numpy as np
 import numpy.testing as npt
-
 from roms_tools import Grid
 
 
 class TestCreateGrid:
     def test_simple_regression(self):
-        grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0)
+        grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
 
         expected_lat = np.array(
             [
@@ -24,6 +23,7 @@ class TestCreateGrid:
             ]
         )
 
+        # TODO: adapt tolerances according to order of magnitude of respective fields
         npt.assert_allclose(grid.ds["lat_rho"], expected_lat, atol=1e-8)
         npt.assert_allclose(grid.ds["lon_rho"], expected_lon, atol=1e-8)
 

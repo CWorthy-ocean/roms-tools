@@ -45,7 +45,7 @@ class Grid:
     Raises
     ------
     ValueError
-        If you try to create a grid with domain size larger than Earth's circumference
+        If you try to create a grid with domain size larger than 20000 km.
     """
 
     nx: int

@@ -114,9 +114,6 @@ class Grid:
             Whether or not to plot the bathymetry. Default is False.
         """
 
-        # TODO optionally plot topography on top?
-        if bathymetry:
-            raise NotImplementedError()
 
         import cartopy.crs as ccrs
         import matplotlib.pyplot as plt
@@ -125,7 +122,7 @@ class Grid:
         lat_deg = self.ds["lat_rho"].values
 
         # Define projections
-        geodetic = ccrs.Geodetic()
+        proj = ccrs.PlateCarree()
         trans = ccrs.NearsidePerspective(
             central_longitude=np.mean(lon_deg), central_latitude=np.mean(lat_deg)
         )
@@ -137,10 +134,10 @@ class Grid:
         (lo4, la4) = (lon_deg[-1, 0], lat_deg[-1, 0])
 
         # transform coordinates to projected space
-        lo1t, la1t = trans.transform_point(lo1, la1, geodetic)
-        lo2t, la2t = trans.transform_point(lo2, la2, geodetic)
-        lo3t, la3t = trans.transform_point(lo3, la3, geodetic)
-        lo4t, la4t = trans.transform_point(lo4, la4, geodetic)
+        lo1t, la1t = trans.transform_point(lo1, la1, proj)
+        lo2t, la2t = trans.transform_point(lo2, la2, proj)
+        lo3t, la3t = trans.transform_point(lo3, la3, proj)
+        lo4t, la4t = trans.transform_point(lo4, la4, proj)
 
         plt.figure(figsize=(10, 10))
         ax = plt.axes(projection=trans)
@@ -155,7 +152,14 @@ class Grid:
             resolution="50m", linewidth=0.5, color="black"
         )  # add map of coastlines
         ax.gridlines()
-
+        if bathymetry:
+            plt.contourf(
+                    self.ds.lon_rho, self.ds.lat_rho,
+                    self.ds.hraw.where(self.ds.mask_rho),
+                    transform=proj,
+                    levels=15
+            )
+            plt.colorbar(label="Bathymetry [m]")
         plt.show()
 
 
@@ -200,7 +204,7 @@ def _make_grid_ds(
         center_lat
     )
 
-    #ds = _add_topography_and_mask(ds, topography_source)
+    ds = _add_topography_and_mask(ds, topography_source)
 
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source)
 

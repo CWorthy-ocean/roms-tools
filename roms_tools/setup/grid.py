@@ -13,8 +13,6 @@ from roms_tools.setup.topography import _add_topography_and_mask
 RADIUS_OF_EARTH = 6371315.0  # in m
 
 
-# TODO lat_rho and lon_rho should be coordinate variables
-
 # TODO should we store an xgcm.Grid object instead of an xarray Dataset? Or even subclass xgcm.Grid?
 
 
@@ -167,44 +165,33 @@ def _make_grid_ds(
     rot: float,
 ) -> xr.Dataset:
 
-    if size_y > size_x:
-        domain_length, domain_width = size_x * 1e3, size_y * 1e3  # in m
-        nl, nw = nx, ny
-    else:
-        domain_length, domain_width = size_y * 1e3, size_x * 1e3  # in m
-        nl, nw = ny, nx
+    initial_lon_lat_vars = _make_initial_lon_lat_ds(size_x, size_y, nx, ny)
 
-    initial_lon_lat_vars = _make_initial_lon_lat_ds(domain_length, domain_width, nl, nw)
-
+    # rotate coordinate system
     rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
-
     lon2, *_ = rotated_lon_lat_vars
 
     _raise_if_crosses_greenwich_meridian(lon2, center_lon)
 
+    # translate coordinate system
     translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
-
     lon4, lat4, lonu, latu, lonv, latv, lone, late = translated_lon_lat_vars
 
+    # compute 1/dx and 1/dy
     pm, pn = _compute_coordinate_metrics(lon4, lonu, latu, lonv, latv)
 
+    # compute angle of local grid positive x-axis relative to east
     ang = _compute_angle(lon4, lonu, latu, lone)
 
     ds = _create_grid_ds(
-        nx,
-        ny,
         lon4,
         lat4,
         pm,
         pn,
         ang,
-        size_x,
-        size_y,
         rot,
         center_lon,
-        center_lat,
-        lone,
-        late,
+        center_lat
     )
 
     #ds = _add_topography_and_mask(ds, lon4, lat4)
@@ -212,7 +199,6 @@ def _make_grid_ds(
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
 
     return ds
-
 
 def _raise_if_crosses_greenwich_meridian(lon, center_lon):
     # We have to do this before the grid is translated because we don't trust the grid creation routines in that case.
@@ -225,90 +211,72 @@ def _raise_if_crosses_greenwich_meridian(lon, center_lon):
         raise ValueError("Grid cannot cross Greenwich Meridian")
 
 
-def _make_initial_lon_lat_ds(domain_length, domain_width, nl, nw):
+def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
+    
+    # Mercator projection around the equator
+    
+    # initially define the domain to be longer in x-direction (dimension "length")
+    # than in y-direction (dimension "width") to keep grid distortion minimal
+    if size_y > size_x:
+        domain_length, domain_width = size_y * 1e3, size_x * 1e3  # in m
+        nl, nw = ny, nx
+    else:
+        domain_length, domain_width = size_x * 1e3, size_y * 1e3  # in m
+        nl, nw = nx, ny
 
-    domain_length_in_degrees_longitude = domain_length / RADIUS_OF_EARTH
-    domain_width_in_degrees_latitude = domain_width / RADIUS_OF_EARTH
+    domain_length_in_degrees = domain_length / RADIUS_OF_EARTH
+    domain_width_in_degrees = domain_width / RADIUS_OF_EARTH
 
-    longitude_array_1d_in_degrees = (
-        domain_length_in_degrees_longitude * np.arange(-0.5, nl + 1.5, 1) / nl
-        - domain_length_in_degrees_longitude / 2
+    # 1d array describing the longitudes at cell centers
+    x = np.arange(-0.5, nl + 1.5, 1)
+    lon_array_1d_in_degrees = (
+        domain_length_in_degrees * x / nl - domain_length_in_degrees / 2
+    )
+    # 1d array describing the longitudes at cell corners (or vorticity points "q")
+    xq = np.arange(-1, nl + 2, 1)
+    lonq_array_1d_in_degrees_q = (
+        domain_length_in_degrees * xq / nl - domain_length_in_degrees / 2
     )
 
-    # TODO I don't fully understand what this piece of code achieves
-    mul = 1.0
-    for it in range(1, 101):
+    # convert degrees latitude to y-coordinate using Mercator projection
+    y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
+    y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
 
-        # convert degrees latitude to y-coordinate using Mercator projection
-        y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees_latitude / 4))
-        y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees_latitude / 4))
+    # linearly space points in y-space
+    y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
+    yq = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
 
-        # linearly space points in y-space
-        y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
+    # inverse Mercator projections
+    lat_array_1d_in_degrees = np.arctan(np.sinh(y))
+    latq_array_1d_in_degrees = np.arctan(np.sinh(yq))
 
-        # convert back to longitude using inverse Mercator projection
-        # lat1d = 2*np.arctan(np.exp(y)) - np.pi/2
-        latitude_array_1d_in_degrees = np.arctan(np.sinh(y))
+    # 2d grid at cell centers
+    lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
+    # 2d grid at cell corners
+    lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
+    
+    if size_y > size_x:
+        # Rotate grid by 90 degrees because until here the grid has been defined
+        # to be longer in x-direction than in y-direction
 
-        # find width and height of new grid at central grid point in degrees
-        latitude_array_1d_in_degrees_cen = 0.5 * (
-            latitude_array_1d_in_degrees[int(np.round(nw / 2) + 1)]
-            - latitude_array_1d_in_degrees[int(np.round(nw / 2) - 1)]
-        )
-        longitude_array_1d_in_degrees_cen = domain_length_in_degrees_longitude / nl
+        lon, lat = rot_sphere(lon, lat, 90)
+        lonq, latq = rot_sphere(lonq, latq, 90)
 
-        # scale the domain width in degreees latitude somehow?
-        mul = (
-            latitude_array_1d_in_degrees_cen
-            / longitude_array_1d_in_degrees_cen
-            * domain_length_in_degrees_longitude
-            / domain_width_in_degrees_latitude
-            * nw
-            / nl
-        )
-        latitude_array_1d_in_degrees = latitude_array_1d_in_degrees / mul
+        lon = np.transpose(np.flip(lon, 0))
+        lat = np.transpose(np.flip(lat, 0))
+        lonq = np.transpose(np.flip(lonq, 0))
+        latq = np.transpose(np.flip(latq, 0))
 
-    # TODO what does the 'e' suffix mean?
-    lon1de = (
-        domain_length_in_degrees_longitude * np.arange(-1, nl + 2, 1) / nl
-        - domain_length_in_degrees_longitude / 2
-    )
-    ye = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
-    # lat1de = 2 * np.arctan(np.exp(ye)) - np.pi/2
-    lat1de = np.arctan(np.sinh(ye))
-    lat1de = lat1de / mul
 
-    lon1, lat1 = np.meshgrid(
-        longitude_array_1d_in_degrees, latitude_array_1d_in_degrees
-    )
-    lone, late = np.meshgrid(lon1de, lat1de)
-    lonu = 0.5 * (lon1[:, :-1] + lon1[:, 1:])
-    latu = 0.5 * (lat1[:, :-1] + lat1[:, 1:])
-    lonv = 0.5 * (lon1[:-1, :] + lon1[1:, :])
-    latv = 0.5 * (lat1[:-1, :] + lat1[1:, :])
+    # infer longitudes and latitudes at u- and v-points
+    lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
+    latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
+    lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
+    latv = 0.5 * (lat[:-1, :] + lat[1:, :])
 
-    if domain_length > domain_width:
-        # Rotate grid 90 degrees so that the width is now longer than the length
-
-        lon1, lat1 = rot_sphere(lon1, lat1, 90)
-        lonu, latu = rot_sphere(lonu, latu, 90)
-        lonv, latv = rot_sphere(lonv, latv, 90)
-        lone, late = rot_sphere(lone, late, 90)
-
-        lon1 = np.transpose(np.flip(lon1, 0))
-        lat1 = np.transpose(np.flip(lat1, 0))
-        lone = np.transpose(np.flip(lone, 0))
-        late = np.transpose(np.flip(late, 1))
-
-        lonu_tmp = np.transpose(np.flip(lonv, 0))
-        latu_tmp = np.transpose(np.flip(latv, 0))
-        lonv = np.transpose(np.flip(lonu, 0))
-        latv = np.transpose(np.flip(latu, 0))
-        lonu = lonu_tmp
-        latu = latu_tmp
 
     # TODO wrap up into temporary container Dataset object?
-    return lon1, lat1, lonu, latu, lonv, latv, lone, late
+    return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
 
 def _rotate(lon1, lat1, lonu, latu, lonv, latv, lone, late, rot):
@@ -525,35 +493,32 @@ def _compute_angle(lon4, lonu, latu, lone):
 
 
 def _create_grid_ds(
-    nx,
-    ny,
     lon,
     lat,
     pm,
     pn,
     angle,
-    size_x,
-    size_y,
     rot,
     center_lon,
     center_lat,
-    lone,
-    late,
 ):
 
-    # Coriolis frequency
-    f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
-
-    # Create empty xarray.Dataset object to store variables in
-    ds = xr.Dataset()
-
-    # TODO some of these variables are defined but never written to in Easy Grid
+    # Create xarray.Dataset object with lat_rho and lon_rho as coordinates
+    ds = xr.Dataset(
+        coords={
+            "lat_rho": (("eta_rho", "xi_rho"), lat * 180 / np.pi),
+            "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi)
+        }
+    )
 
     ds["angle"] = xr.Variable(
         data=angle,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
     )
+
+    # Coriolis frequency
+    f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
 
     ds["f0"] = xr.Variable(
         data=f0,
@@ -582,21 +547,13 @@ def _create_grid_ds(
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
     )
+    
     ds["lat_rho"] = xr.Variable(
         data=lat * 180 / np.pi,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
-
-    # TODO not sure this logical switch is ever used
-    # ds["spherical"] = xr.Variable(
-    #    data=["T"],
-    #    attrs={
-    #        "long_name": "Grid type logical switch",
-    #        "option_T": "spherical",
-    #    },
-    #)
-
+    
     ds["tra_lon"] = center_lon
     ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
     ds["tra_lon"].attrs["units"] = "degrees East"
@@ -608,9 +565,18 @@ def _create_grid_ds(
     ds["rotate"] = rot
     ds["rotate"].attrs["long_name"] = "Rotation of base grid"
     ds["rotate"].attrs["units"] = "degrees"
-    
+
     # TODO this is never written to
     # ds['xy_flip']
+
+    # TODO same here?
+    # ds["spherical"] = xr.Variable(
+    #    data=["T"],
+    #    attrs={
+    #        "long_name": "Grid type logical switch",
+    #        "option_T": "spherical",
+    #    },
+    #)
 
     return ds
 

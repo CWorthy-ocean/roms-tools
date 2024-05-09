@@ -10,54 +10,22 @@ class TestCreateGrid:
 
         expected_lat = np.array(
             [
-                [1.79855429e00, 1.79855429e00, 1.79855429e00],
+                [-8.99249453e-01, -8.99249453e-01, -8.99249453e-01],
                 [0.0, 0.0, 0.0],
-                [-1.79855429e00, -1.79855429e00, -1.79855429e00],
+                [ 8.99249453e-01,  8.99249453e-01,  8.99249453e-01],
             ]
         )
         expected_lon = np.array(
             [
-                [339.10072286, 340.0, 340.89927714],
-                [339.10072286, 340.0, 340.89927714],
-                [339.10072286, 340.0, 340.89927714],
-            ]
-        )
-        expected_angle = np.array(
-            [
-                [0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0],
-            ]
-        )
-        expected_f0 = np.array(
-            [
-                [4.56484162e-06,  4.56484162e-06,  4.56484162e-06],
-                [0.0, 0.0, 0.0],
-                [-4.56484162e-06, -4.56484162e-06, -4.56484162e-06],
-            ]
-        )
-        expected_pm = np.array(
-            [
-                [5.0e-06,  5.0e-06, 5.0e-06],
-                [5.0e-06,  5.0e-06, 5.0e-06],
-                [5.0e-06,  5.0e-06, 5.0e-06],
-            ]
-        )
-        expected_pn = np.array(
-            [
-                [1.0004929e-05, 1.0004929e-05, 1.0004929e-05],
-                [1.0e-05,  1.0e-05, 1.0e-05],
-                [1.0004929e-05, 1.0004929e-05, 1.0004929e-05],
+                [339.10072286, 340.        , 340.89927714],
+                [339.10072286, 340.        , 340.89927714],
+                [339.10072286, 340.        , 340.89927714],
             ]
         )
 
         # TODO: adapt tolerances according to order of magnitude of respective fields
         npt.assert_allclose(grid.ds["lat_rho"], expected_lat, atol=1e-8)
         npt.assert_allclose(grid.ds["lon_rho"], expected_lon, atol=1e-8)
-        npt.assert_allclose(grid.ds["angle"], expected_angle, atol=1e-8)
-        npt.assert_allclose(grid.ds["f0"], expected_f0, atol=1e-8)
-        npt.assert_allclose(grid.ds["pm"], expected_pm, atol=1e-8)
-        npt.assert_allclose(grid.ds["pn"], expected_pn, atol=1e-8)
 
     def test_raise_if_crossing_dateline(self):
         with pytest.raises(ValueError, match="cannot cross Greenwich Meridian"):

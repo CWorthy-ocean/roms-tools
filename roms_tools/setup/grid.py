@@ -45,7 +45,7 @@ class Grid:
     Raises
     ------
     ValueError
-        If you try to create a grid which crosses the Greenwich Meridian
+        If you try to create a grid with domain size larger than 20000 km.
     """
 
     nx: int
@@ -165,13 +165,14 @@ def _make_grid_ds(
     rot: float,
 ) -> xr.Dataset:
 
+
+    _raise_if_domain_size_too_large(size_x, size_y)
+
     initial_lon_lat_vars = _make_initial_lon_lat_ds(size_x, size_y, nx, ny)
 
     # rotate coordinate system
     rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
     lon, *_ = rotated_lon_lat_vars
-
-    _raise_if_crosses_greenwich_meridian(lon, center_lon)
 
     # translate coordinate system
     translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
@@ -200,15 +201,11 @@ def _make_grid_ds(
 
     return ds
 
-def _raise_if_crosses_greenwich_meridian(lon, center_lon):
-    # We have to do this before the grid is translated because we don't trust the grid creation routines in that case.
+def _raise_if_domain_size_too_large(size_x, size_y):
 
-    # TODO it would be nice to handle this case, but we first need to know what ROMS expects / can handle.
-
-    # TODO what about grids which cross the international dateline?
-
-    if np.min(lon + center_lon) < 0 < np.max(lon + center_lon):
-        raise ValueError("Grid cannot cross Greenwich Meridian")
+    threshold = 20000
+    if size_x > threshold or size_y > threshold:
+        raise ValueError("Domain size has to be smaller than %g km" %threshold)
 
 
 def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):

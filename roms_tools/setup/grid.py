@@ -169,23 +169,23 @@ def _make_grid_ds(
 
     # rotate coordinate system
     rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
-    lon2, *_ = rotated_lon_lat_vars
+    lon, *_ = rotated_lon_lat_vars
 
-    _raise_if_crosses_greenwich_meridian(lon2, center_lon)
+    _raise_if_crosses_greenwich_meridian(lon, center_lon)
 
     # translate coordinate system
     translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
-    lon4, lat4, lonu, latu, lonv, latv, lone, late = translated_lon_lat_vars
+    lon, lat, lonu, latu, lonv, latv, lonq, latq = translated_lon_lat_vars
 
     # compute 1/dx and 1/dy
-    pm, pn = _compute_coordinate_metrics(lon4, lonu, latu, lonv, latv)
+    pm, pn = _compute_coordinate_metrics(lon, lonu, latu, lonv, latv)
 
     # compute angle of local grid positive x-axis relative to east
-    ang = _compute_angle(lon4, lonu, latu, lone)
+    ang = _compute_angle(lon, lonu, latu, lonq)
 
     ds = _create_grid_ds(
-        lon4,
-        lat4,
+        lon,
+        lat,
         pm,
         pn,
         ang,
@@ -194,7 +194,7 @@ def _make_grid_ds(
         center_lat
     )
 
-    #ds = _add_topography_and_mask(ds, lon4, lat4)
+    #ds = _add_topography_and_mask(ds, lon, lat)
 
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
 
@@ -421,12 +421,12 @@ def tra_sphere(lon, lat, tra):
     return (lon, lat)
 
 
-def _compute_coordinate_metrics(lon4, lonu, latu, lonv, latv):
+def _compute_coordinate_metrics(lon, lonu, latu, lonv, latv):
     """Compute the curvilinear coordinate metrics pn and pm, defined as 1/grid spacing"""
 
     # pm = 1/dx
     pmu = gc_dist(lonu[:, :-1], latu[:, :-1], lonu[:, 1:], latu[:, 1:])
-    pm = 0 * lon4
+    pm = 0 * lon
     pm[:, 1:-1] = pmu
     pm[:, 0] = pm[:, 1]
     pm[:, -1] = pm[:, -2]
@@ -434,7 +434,7 @@ def _compute_coordinate_metrics(lon4, lonu, latu, lonv, latv):
 
     # pn = 1/dy
     pnv = gc_dist(lonv[:-1, :], latv[:-1, :], lonv[1:, :], latv[1:, :])
-    pn = 0 * lon4
+    pn = 0 * lon
     pn[1:-1, :] = pnv
     pn[0, :] = pn[1, :]
     pn[-1, :] = pn[-2, :]
@@ -463,7 +463,7 @@ def gc_dist(lon1, lat1, lon2, lat2):
     return dis
 
 
-def _compute_angle(lon4, lonu, latu, lone):
+def _compute_angle(lon, lonu, latu, lonq):
     """Compute angles of local grid positive x-axis relative to east"""
 
     dellat = latu[:, 1:] - latu[:, :-1]
@@ -472,7 +472,7 @@ def _compute_angle(lon4, lonu, latu, lone):
     dellon[dellon < -np.pi] = dellon[dellon < -np.pi] + 2 * np.pi
     dellon = dellon * np.cos(0.5 * (latu[:, 1:] + latu[:, :-1]))
 
-    ang = copy.copy(lon4)
+    ang = copy.copy(lon)
     ang_s = np.arctan(dellat / (dellon + 1e-16))
     ang_s[(dellon < 0) & (dellat < 0)] = ang_s[(dellon < 0) & (dellat < 0)] - np.pi
     ang_s[(dellon < 0) & (dellat >= 0)] = ang_s[(dellon < 0) & (dellat >= 0)] + np.pi
@@ -483,8 +483,8 @@ def _compute_angle(lon4, lonu, latu, lone):
     ang[:, 0] = ang[:, 1]
     ang[:, -1] = ang[:, -2]
 
-    lon4[lon4 < 0] = lon4[lon4 < 0] + 2 * np.pi
-    lone[lone < 0] = lone[lone < 0] + 2 * np.pi
+    lon[lon < 0] = lon[lon < 0] + 2 * np.pi
+    lonq[lonq < 0] = lonq[lonq < 0] + 2 * np.pi
 
     return ang
 

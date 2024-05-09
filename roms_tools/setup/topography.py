@@ -2,6 +2,7 @@ import xarray as xr
 import numpy as np
 import gcm_filters
 from scipy.interpolate import RegularGridInterpolator
+from scipy.ndimage import label
 from roms_tools.setup.datasets import fetch_topo
 
 def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
@@ -21,11 +22,14 @@ def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
     mask.attrs = {"long_name": "Mask at rho-points", "units": "land/water (0/1)"}
     ds["mask_rho"] = mask
 
-    # smooth topography to avoid grid scale instabilities
+    # smooth topography globally with Gaussian kernel to avoid grid scale instabilities
     ds["hsmooth"] = _smooth_topography(ds["hraw"], ds["mask_rho"])
 
-    # fill in lakes with land
+    # fill enclosed basins with land
+    mask = _fill_enclosed_basins(ds["mask_rho"].copy().values)
+    ds["mask_rho_filled"] = xr.DataArray(mask, dims=("eta_rho", "xi_rho"))
 
+    # smooth topography locally where still necessary
     return ds
 
 def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
@@ -69,6 +73,26 @@ def _smooth_topography(hraw, wet_mask) -> xr.DataArray:
     hsmooth = filter.apply(hraw, dims=["eta_rho", "xi_rho"])
 
     return hsmooth
+
+def _fill_enclosed_basins(mask) -> np.ndarray:
+
+    # Label connected regions in the mask
+    reg, nreg = label(mask)
+    # Find the largest region
+    lint = 0
+    lreg = 0
+    for ireg in range(nreg):
+        int_ = np.sum(reg == ireg)
+        if int_ > lint and mask[reg == ireg].sum() > 0:
+            lreg = ireg
+            lint = int_
+
+    # Remove regions other than the largest one
+    for ireg in range(nreg):
+        if ireg != lreg:
+            mask[reg == ireg] = 0
+
+    return mask
 
 
 

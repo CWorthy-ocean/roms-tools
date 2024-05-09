@@ -153,13 +153,13 @@ class Grid:
         )  # add map of coastlines
         ax.gridlines()
         if bathymetry:
-            plt.contourf(
-                    self.ds.lon_rho, self.ds.lat_rho,
+            p = ax.contourf(
+                    lon_deg, lat_deg,
                     self.ds.hraw.where(self.ds.mask_rho),
                     transform=proj,
                     levels=15
             )
-            plt.colorbar(label="Bathymetry [m]")
+            plt.colorbar(p, label="Bathymetry [m]")
         plt.show()
 
 

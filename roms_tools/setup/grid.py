@@ -216,8 +216,7 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
     # Mercator projection around the equator
     
     # initially define the domain to be longer in x-direction (dimension "length")
-    # than in y-direction (dimension "width") because we want to stay away from the 
-    # poles as much as possible when performing the Mercator projection
+    # than in y-direction (dimension "width") to keep grid distortion minimal
     if size_y > size_x:
         domain_length, domain_width = size_y * 1e3, size_x * 1e3  # in m
         nl, nw = ny, nx
@@ -264,9 +263,9 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
         lonq, latq = rot_sphere(lonq, latq, 90)
 
         lon = np.transpose(np.flip(lon, 0))
-        lat = np.transpose(np.flip(lat, 1))
+        lat = np.transpose(np.flip(lat, 0))
         lonq = np.transpose(np.flip(lonq, 0))
-        latq = np.transpose(np.flip(latq, 1))
+        latq = np.transpose(np.flip(latq, 0))
 
 
     # infer longitudes and latitudes at u- and v-points

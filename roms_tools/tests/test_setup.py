@@ -27,15 +27,14 @@ class TestCreateGrid:
         npt.assert_allclose(grid.ds["lat_rho"], expected_lat, atol=1e-8)
         npt.assert_allclose(grid.ds["lon_rho"], expected_lon, atol=1e-8)
 
-    def test_raise_if_crossing_dateline(self):
-        with pytest.raises(ValueError, match="cannot cross Greenwich Meridian"):
-            # test grid centered over London
-            Grid(nx=3, ny=3, size_x=100, size_y=100, center_lon=0, center_lat=51.5)
+    def test_raise_if_domain_too_large(self):
+        with pytest.raises(ValueError, match="Domain size has to be smaller"):
+            Grid(nx=3, ny=3, size_x=30000, size_y=30000, center_lon=0, center_lat=51.5)
 
-        # test Iceland grid which is rotated specifically to avoid Greenwich Meridian
+        # test grid with reasonable domain size
         grid = Grid(
-            nx=100,
-            ny=100,
+            nx=3,
+            ny=3,
             size_x=1800,
             size_y=2400,
             center_lon=-21,

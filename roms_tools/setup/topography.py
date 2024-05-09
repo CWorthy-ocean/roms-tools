@@ -5,16 +5,10 @@ from roms_tools.setup.datasets import fetch_topo
 
 def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
 
-    # TODO should we just get lon and lat from the dataset?
-    # Or refactor to just create the hraw variable to be added?
-
-    # TODO do we need to set h? When does that get set?
-    # ds['h'] = ...
-
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
 
-    hraw = _make_topography(lon, lat, topography_source)
+    hraw = _make_raw_topography(lon, lat, topography_source)
     ds["hraw"] = xr.Variable(
         data=hraw,
         dims=["eta_rho", "xi_rho"],
@@ -22,34 +16,34 @@ def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
     )
 
     # Mask is obtained by finding locations where height is above sea level (i.e. 0)
-    mask = xr.ones_like(ds["hraw"])
-    mask[hraw > 0] = 0
+    mask = xr.where(ds["hraw"] > 0, 0, 1)
     mask.attrs = {"long_name": "Mask at rho-points", "units": "land/water (0/1)"}
     ds["mask_rho"] = mask
 
     return ds
 
-
-def _make_topography(lon, lat, topography_source) -> np.ndarray:
+def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
     """
     Given a grid of (lon, lat) points, fetch the topography file and interpolate height values onto the desired grid.
     """
 
-    ds = fetch_topo(topography_source)
+    topo_ds = fetch_topo(topography_source)
 
-    # TODO rewrite this to not drop into numpy land
-    topo_lon = topo_ds["topo_lon"].data
-    topo_lat = topo_ds["topo_lat"].data
-    d = np.transpose(topo_ds["topo"].data.astype("float64"))
-    topo_lon[topo_lon < 0] = topo_lon[topo_lon < 0] + 360
-    topo_lonm = topo_lon - 360
+    # the following will depend on the topography source
+    if topography_source == "etopo5.nc":
 
-    topo_loncat = np.concatenate((topo_lonm, topo_lon), axis=0)
-    d_loncat = np.concatenate((d, d), axis=0)
+        topo_lon = topo_ds["topo_lon"].copy()
+        # Modify longitude values where necessary
+        topo_lon = xr.where(topo_lon < 0, topo_lon + 360, topo_lon)
+        # Create a new longitude coordinate with modified values
+        topo_lon_minus360 = topo_lon - 360
+        # Concatenate along the longitude axis
+        topo_lon_concatenated = xr.concat([topo_lon_minus360, topo_lon], dim="lon")
+        topo_concatenated = xr.concat([topo_ds["topo"], topo_ds["topo"]], dim="lon")
 
-    interp = RegularGridInterpolator((topo_loncat, topo_lat), d_loncat)
+        interp = RegularGridInterpolator((topo_ds["topo_lat"].values, topo_lon_concatenated.values), topo_concatenated.values)
 
     # Interpolate onto desired domain grid points
-    hraw = interp((lon * 180 / np.pi, lat * 180 / np.pi))
+    hraw = interp((lat, lon))
 
     return hraw

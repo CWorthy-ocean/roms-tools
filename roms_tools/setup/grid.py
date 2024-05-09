@@ -169,23 +169,23 @@ def _make_grid_ds(
 
     # rotate coordinate system
     rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
-    lon2, *_ = rotated_lon_lat_vars
+    lon, *_ = rotated_lon_lat_vars
 
-    _raise_if_crosses_greenwich_meridian(lon2, center_lon)
+    _raise_if_crosses_greenwich_meridian(lon, center_lon)
 
     # translate coordinate system
     translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
-    lon4, lat4, lonu, latu, lonv, latv, lone, late = translated_lon_lat_vars
+    lon, lat, lonu, latu, lonv, latv, lonq, latq = translated_lon_lat_vars
 
     # compute 1/dx and 1/dy
-    pm, pn = _compute_coordinate_metrics(lon4, lonu, latu, lonv, latv)
+    pm, pn = _compute_coordinate_metrics(lon, lonu, latu, lonv, latv)
 
     # compute angle of local grid positive x-axis relative to east
-    ang = _compute_angle(lon4, lonu, latu, lone)
+    ang = _compute_angle(lon, lonu, latu, lonq)
 
     ds = _create_grid_ds(
-        lon4,
-        lat4,
+        lon,
+        lat,
         pm,
         pn,
         ang,
@@ -194,7 +194,7 @@ def _make_grid_ds(
         center_lat
     )
 
-    #ds = _add_topography_and_mask(ds, lon4, lat4)
+    #ds = _add_topography_and_mask(ds, lon, lat)
 
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
 
@@ -279,49 +279,50 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
     return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
 
-def _rotate(lon1, lat1, lonu, latu, lonv, latv, lone, late, rot):
+def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
     """Rotate grid counterclockwise relative to surface of Earth by rot degrees"""
 
-    (lon2, lat2) = rot_sphere(lon1, lat1, rot)
+    (lon, lat) = rot_sphere(lon, lat, rot)
     (lonu, latu) = rot_sphere(lonu, latu, rot)
     (lonv, latv) = rot_sphere(lonv, latv, rot)
-    (lone, late) = rot_sphere(lone, late, rot)
+    (lonq, latq) = rot_sphere(lonq, latq, rot)
 
-    return lon2, lat2, lonu, latu, lonv, latv, lone, late
+    return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
 
-def _translate(lon2, lat2, lonu, latu, lonv, latv, lone, late, tra_lat, tra_lon):
+def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     """Translate grid so that the centre lies at the position (tra_lat, tra_lon)"""
 
-    (lon3, lat3) = tra_sphere(lon2, lat2, tra_lat)
+    (lon, lat) = tra_sphere(lon, lat, tra_lat)
     (lonu, latu) = tra_sphere(lonu, latu, tra_lat)
     (lonv, latv) = tra_sphere(lonv, latv, tra_lat)
-    (lone, late) = tra_sphere(lone, late, tra_lat)
+    (lonq, latq) = tra_sphere(lonq, latq, tra_lat)
 
-    lon4 = lon3 + tra_lon * np.pi / 180
+    lon = lon + tra_lon * np.pi / 180
     lonu = lonu + tra_lon * np.pi / 180
     lonv = lonv + tra_lon * np.pi / 180
-    lone = lone + tra_lon * np.pi / 180
-    lon4[lon4 < -np.pi] = lon4[lon4 < -np.pi] + 2 * np.pi
+    lonq = lonq + tra_lon * np.pi / 180
+
+    lon[lon < -np.pi] = lon[lon < -np.pi] + 2 * np.pi
     lonu[lonu < -np.pi] = lonu[lonu < -np.pi] + 2 * np.pi
     lonv[lonv < -np.pi] = lonv[lonv < -np.pi] + 2 * np.pi
-    lone[lone < -np.pi] = lone[lone < -np.pi] + 2 * np.pi
-    lat4 = lat3
+    lonq[lonq < -np.pi] = lonq[lonq < -np.pi] + 2 * np.pi
 
-    return lon4, lat4, lonu, latu, lonv, latv, lone, late
+    return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
 
-def rot_sphere(lon1, lat1, rot):
+def rot_sphere(lon, lat, rot):
 
-    (n, m) = np.shape(lon1)
+    (n, m) = np.shape(lon)
+    # convert rotation angle from degrees to radians
     rot = rot * np.pi / 180
 
-    # translate into x,y,z
+    # translate into Cartesian coordinates x,y,z
     # conventions:  (lon,lat) = (0,0)  corresponds to (x,y,z) = ( 0,-r, 0)
     #               (lon,lat) = (0,90) corresponds to (x,y,z) = ( 0, 0, r)
-    x1 = np.sin(lon1) * np.cos(lat1)
-    y1 = np.cos(lon1) * np.cos(lat1)
-    z1 = np.sin(lat1)
+    x1 = np.sin(lon) * np.cos(lat)
+    y1 = np.cos(lon) * np.cos(lat)
+    z1 = np.sin(lat)
 
     # We will rotate these points around the small circle defined by
     # the intersection of the sphere and the plane that
@@ -348,38 +349,34 @@ def rot_sphere(lon1, lat1, rot):
     y2 = y1
     z2 = rp1 * np.sin(ap2)
 
-    lon2 = np.pi / 2 * np.ones((n, m))
-    lon2[abs(y2) > 1e-7] = np.arctan(
+    lon = np.pi / 2 * np.ones((n, m))
+    lon[abs(y2) > 1e-7] = np.arctan(
         np.abs(x2[np.abs(y2) > 1e-7] / y2[np.abs(y2) > 1e-7])
     )
-    lon2[y2 < 0] = np.pi - lon2[y2 < 0]
-    lon2[x2 < 0] = -lon2[x2 < 0]
+    lon[y2 < 0] = np.pi - lon[y2 < 0]
+    lon[x2 < 0] = -lon[x2 < 0]
 
     pr2 = np.sqrt(x2**2 + y2**2)
-    lat2 = np.pi / 2 * np.ones((n, m))
-    lat2[np.abs(pr2) > 1e-7] = np.arctan(
+    lat = np.pi / 2 * np.ones((n, m))
+    lat[np.abs(pr2) > 1e-7] = np.arctan(
         np.abs(z2[np.abs(pr2) > 1e-7] / pr2[np.abs(pr2) > 1e-7])
     )
-    lat2[z2 < 0] = -lat2[z2 < 0]
+    lat[z2 < 0] = -lat[z2 < 0]
 
-    return (lon2, lat2)
+    return (lon, lat)
 
 
-def tra_sphere(lon1, lat1, tra):
+def tra_sphere(lon, lat, tra):
 
-    # Rotate sphere around its y-axis
-    # Part of easy grid
-    # (c) 2008, Jeroen Molemaker, UCLA
-
-    (n, m) = np.shape(lon1)
+    (n, m) = np.shape(lon)
     tra = tra * np.pi / 180  # translation in latitude direction
 
     # translate into x,y,z
     # conventions:  (lon,lat) = (0,0)  corresponds to (x,y,z) = ( 0,-r, 0)
     #               (lon,lat) = (0,90) corresponds to (x,y,z) = ( 0, 0, r)
-    x1 = np.sin(lon1) * np.cos(lat1)
-    y1 = np.cos(lon1) * np.cos(lat1)
-    z1 = np.sin(lat1)
+    x1 = np.sin(lon) * np.cos(lat)
+    y1 = np.cos(lon) * np.cos(lat)
+    z1 = np.sin(lat)
 
     # We will rotate these points around the small circle defined by
     # the intersection of the sphere and the plane that
@@ -407,29 +404,29 @@ def tra_sphere(lon1, lat1, tra):
     z2 = rp1 * np.sin(ap2)
 
     ## transformation from (x,y,z) to (lat,lon)
-    lon2 = np.pi / 2 * np.ones((n, m))
-    lon2[np.abs(y2) > 1e-7] = np.arctan(
+    lon = np.pi / 2 * np.ones((n, m))
+    lon[np.abs(y2) > 1e-7] = np.arctan(
         np.abs(x2[np.abs(y2) > 1e-7] / y2[np.abs(y2) > 1e-7])
     )
-    lon2[y2 < 0] = np.pi - lon2[y2 < 0]
-    lon2[x2 < 0] = -lon2[x2 < 0]
+    lon[y2 < 0] = np.pi - lon[y2 < 0]
+    lon[x2 < 0] = -lon[x2 < 0]
 
     pr2 = np.sqrt(x2**2 + y2**2)
-    lat2 = np.pi / (2 * np.ones((n, m)))
-    lat2[np.abs(pr2) > 1e-7] = np.arctan(
+    lat = np.pi / (2 * np.ones((n, m)))
+    lat[np.abs(pr2) > 1e-7] = np.arctan(
         np.abs(z2[np.abs(pr2) > 1e-7] / pr2[np.abs(pr2) > 1e-7])
     )
-    lat2[z2 < 0] = -lat2[z2 < 0]
+    lat[z2 < 0] = -lat[z2 < 0]
 
-    return (lon2, lat2)
+    return (lon, lat)
 
 
-def _compute_coordinate_metrics(lon4, lonu, latu, lonv, latv):
+def _compute_coordinate_metrics(lon, lonu, latu, lonv, latv):
     """Compute the curvilinear coordinate metrics pn and pm, defined as 1/grid spacing"""
 
     # pm = 1/dx
     pmu = gc_dist(lonu[:, :-1], latu[:, :-1], lonu[:, 1:], latu[:, 1:])
-    pm = 0 * lon4
+    pm = 0 * lon
     pm[:, 1:-1] = pmu
     pm[:, 0] = pm[:, 1]
     pm[:, -1] = pm[:, -2]
@@ -437,7 +434,7 @@ def _compute_coordinate_metrics(lon4, lonu, latu, lonv, latv):
 
     # pn = 1/dy
     pnv = gc_dist(lonv[:-1, :], latv[:-1, :], lonv[1:, :], latv[1:, :])
-    pn = 0 * lon4
+    pn = 0 * lon
     pn[1:-1, :] = pnv
     pn[0, :] = pn[1, :]
     pn[-1, :] = pn[-2, :]
@@ -466,7 +463,7 @@ def gc_dist(lon1, lat1, lon2, lat2):
     return dis
 
 
-def _compute_angle(lon4, lonu, latu, lone):
+def _compute_angle(lon, lonu, latu, lonq):
     """Compute angles of local grid positive x-axis relative to east"""
 
     dellat = latu[:, 1:] - latu[:, :-1]
@@ -475,7 +472,7 @@ def _compute_angle(lon4, lonu, latu, lone):
     dellon[dellon < -np.pi] = dellon[dellon < -np.pi] + 2 * np.pi
     dellon = dellon * np.cos(0.5 * (latu[:, 1:] + latu[:, :-1]))
 
-    ang = copy.copy(lon4)
+    ang = copy.copy(lon)
     ang_s = np.arctan(dellat / (dellon + 1e-16))
     ang_s[(dellon < 0) & (dellat < 0)] = ang_s[(dellon < 0) & (dellat < 0)] - np.pi
     ang_s[(dellon < 0) & (dellat >= 0)] = ang_s[(dellon < 0) & (dellat >= 0)] + np.pi
@@ -486,8 +483,8 @@ def _compute_angle(lon4, lonu, latu, lone):
     ang[:, 0] = ang[:, 1]
     ang[:, -1] = ang[:, -2]
 
-    lon4[lon4 < 0] = lon4[lon4 < 0] + 2 * np.pi
-    lone[lone < 0] = lone[lone < 0] + 2 * np.pi
+    lon[lon < 0] = lon[lon < 0] + 2 * np.pi
+    lonq[lonq < 0] = lonq[lonq < 0] + 2 * np.pi
 
     return ang
 

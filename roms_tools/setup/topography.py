@@ -1,9 +1,9 @@
 import xarray as xr
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
+from roms_tools.setup.datasets import fetch_topo
 
-
-def _add_topography_and_mask(ds, lon, lat) -> xr.Dataset:
+def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
 
     # TODO should we just get lon and lat from the dataset?
     # Or refactor to just create the hraw variable to be added?
@@ -11,7 +11,10 @@ def _add_topography_and_mask(ds, lon, lat) -> xr.Dataset:
     # TODO do we need to set h? When does that get set?
     # ds['h'] = ...
 
-    hraw = _make_topography(lon, lat)
+    lon = ds.lon_rho.values
+    lat = ds.lat_rho.values
+
+    hraw = _make_topography(lon, lat, topography_source)
     ds["hraw"] = xr.Variable(
         data=hraw,
         dims=["eta_rho", "xi_rho"],
@@ -27,14 +30,12 @@ def _add_topography_and_mask(ds, lon, lat) -> xr.Dataset:
     return ds
 
 
-def _make_topography(lon, lat) -> np.ndarray:
+def _make_topography(lon, lat, topography_source) -> np.ndarray:
     """
     Given a grid of (lon, lat) points, fetch the topography file and interpolate height values onto the desired grid.
     """
 
-    topo_filepath = FETCHER.fetch(...)
-
-    topo_ds = xr.open_dataset(topo_filepath)
+    ds = fetch_topo(topography_source)
 
     # TODO rewrite this to not drop into numpy land
     topo_lon = topo_ds["topo_lon"].data

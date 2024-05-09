@@ -27,27 +27,29 @@ class Grid:
 
     Parameters
     ----------
-    nx
-        Number of grid points in the x-direction
-    ny
-        Number of grid points in the y-direction
-    size_x
-        Domain size in the x-direction (in km?)
-    size_y
-        Domain size in the y-direction (in km?)
-    center_lon
-        Longitude of grid center
-    center_lat
-        Latitude of grid center
-    rot
-        Rotation of grid x-direction from lines of constant latitude.
-        Measured in degrees, with positive values meaning a counterclockwise rotation.
-        The default is 0, which means that the x-direction of the grid x-direction is aligned with lines of constant latitude.
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float, optional
+        Rotation of grid x-direction from lines of constant latitude, measured in degrees.
+        Positive values represent a counterclockwise rotation.
+        The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    topography_source : str, optional
+        Specifies the data source to use for the topography. Options are "etopo5.nc".
 
     Raises
     ------
     ValueError
-        If you try to create a grid which crosses the Greenwich Meridian
+        If you try to create a grid which crosses the Greenwich Meridian.
     """
 
     nx: int
@@ -57,6 +59,7 @@ class Grid:
     center_lon: float
     center_lat: float
     rot: float = 0
+    topography_source: str = 'etopo5.nc'
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -68,6 +71,7 @@ class Grid:
             center_lon=self.center_lon,
             center_lat=self.center_lat,
             rot=self.rot,
+            topography_source=self.topography_source
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
@@ -165,6 +169,7 @@ def _make_grid_ds(
     center_lon: float,
     center_lat: float,
     rot: float,
+    topography_source: str
 ) -> xr.Dataset:
 
     if size_y > size_x:
@@ -207,9 +212,9 @@ def _make_grid_ds(
         late,
     )
 
-    #ds = _add_topography_and_mask(ds, lon4, lat4)
+    #ds = _add_topography_and_mask(ds, topography_source)
 
-    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
+    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source)
 
     return ds
 
@@ -615,7 +620,7 @@ def _create_grid_ds(
     return ds
 
 
-def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot):
+def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source):
 
     ds.attrs["Title"] = (
         "ROMS grid. Settings:"
@@ -625,5 +630,6 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
     )
     ds.attrs["Date"] = date.today()
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
+    ds.attrs["Topography source"] = "https://github.com/CWorthy-ocean/roms-tools-data/raw/main/" + topography_source
 
     return ds

@@ -42,7 +42,14 @@ class Grid:
         Positive values represent a counterclockwise rotation.
         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
     topography_source : str, optional
-        Specifies the data source to use for the topography. Options are "etopo5.nc".
+        Specifies the data source to use for the topography. Options are "etopo5.nc". The default is "etopo5.nc".
+    smooth_factor: int
+        The smoothing factor used in the global Gaussian smoothing of the topography. The default is 8.
+    hmin: float
+        The minimum ocean depth (in meters). The default is 5.
+    rmax: float
+        The maximum slope parameter (in meters). The default is 0.2.
+
 
     Raises
     ------
@@ -58,6 +65,9 @@ class Grid:
     center_lat: float
     rot: float = 0
     topography_source: str = 'etopo5.nc'
+    smooth_factor: int = 8
+    hmin: float = 5.0
+    rmax: float = 0.2
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -69,7 +79,10 @@ class Grid:
             center_lon=self.center_lon,
             center_lat=self.center_lat,
             rot=self.rot,
-            topography_source=self.topography_source
+            topography_source=self.topography_source,
+            smooth_factor=self.smooth_factor,
+            hmin=self.hmin,
+            rmax=self.rmax
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
@@ -155,7 +168,7 @@ class Grid:
         if bathymetry:
             p = ax.contourf(
                     lon_deg, lat_deg,
-                    self.ds.hraw.where(self.ds.mask_rho),
+                    self.ds.hraw.where(self.ds.mask_rho_filled),
                     transform=proj,
                     levels=15,
                     cmap="YlGnBu"
@@ -172,7 +185,10 @@ def _make_grid_ds(
     center_lon: float,
     center_lat: float,
     rot: float,
-    topography_source: str
+    topography_source: str,
+    smooth_factor: int,
+    hmin: float,
+    rmax: float
 ) -> xr.Dataset:
 
 
@@ -205,9 +221,9 @@ def _make_grid_ds(
         center_lat
     )
 
-    ds = _add_topography_and_mask(ds, topography_source)
+    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax)
 
-    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source)
+    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax)
 
     return ds
 
@@ -585,7 +601,7 @@ def _create_grid_ds(
     return ds
 
 
-def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source):
+def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax):
 
     ds.attrs["Title"] = (
         "ROMS grid. Settings:"
@@ -596,5 +612,6 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
     ds.attrs["Date"] = date.today()
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
     ds.attrs["Topography source"] = "https://github.com/CWorthy-ocean/roms-tools-data/raw/main/" + topography_source
+    ds.attrs["Topography modifications"] = "Global smoothing with factor %i; Minimal depth: %gm; Local smoothing to satisfy r < rmax = %gm" %(smooth_factor, hmin, rmax)
 
     return ds

@@ -5,7 +5,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import label
 from roms_tools.setup.datasets import fetch_topo
 
-def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
+def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax) -> xr.Dataset:
 
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
@@ -23,13 +23,16 @@ def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
     ds["mask_rho"] = mask
 
     # smooth topography globally with Gaussian kernel to avoid grid scale instabilities
-    ds["hsmooth"] = _smooth_topography(ds["hraw"], ds["mask_rho"])
+    ds["hsmooth"] = _smooth_topography_globally(ds["hraw"], ds["mask_rho"], smooth_factor)
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(ds["mask_rho"].copy().values)
     ds["mask_rho_filled"] = xr.DataArray(mask, dims=("eta_rho", "xi_rho"))
+    ds["hsmooth"] = ds["hsmooth"] * ds["mask_rho_filled"]
 
-    # smooth topography locally where still necessary
+    # smooth topography locally to satisfy r < rmax
+    #ds["hfinal"] = _smooth_topography_locally(ds["hsmooth"], hmin, rmax)
+
     return ds
 
 def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
@@ -58,12 +61,12 @@ def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
 
     return hraw
 
-def _smooth_topography(hraw, wet_mask) -> xr.DataArray:
+def _smooth_topography_globally(hraw, wet_mask, factor) -> xr.DataArray:
 
-    # we choose a Gaussian filter kernel with filter scale 8 (corresponding to a Gaussian with standard deviation 8/sqrt(12),
+    # we choose a Gaussian filter kernel (corresponding to a Gaussian with standard deviation factor/sqrt(12),
     # see https://gcm-filters.readthedocs.io/en/latest/theory.html#filter-scale-and-shape)
     filter = gcm_filters.Filter(
-        filter_scale=8,
+        filter_scale=factor,
         dx_min=1,
         filter_shape=gcm_filters.FilterShape.GAUSSIAN,
         grid_type=gcm_filters.GridType.REGULAR_WITH_LAND,
@@ -93,6 +96,7 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
             mask[reg == ireg] = 0
 
     return mask
+
 
 
 

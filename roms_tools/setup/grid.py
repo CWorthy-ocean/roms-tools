@@ -157,7 +157,8 @@ class Grid:
                     lon_deg, lat_deg,
                     self.ds.hraw.where(self.ds.mask_rho),
                     transform=proj,
-                    levels=15
+                    levels=15,
+                    cmap="YlGnBu"
             )
             plt.colorbar(p, label="Bathymetry [m]")
         plt.show()

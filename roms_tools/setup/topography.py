@@ -17,8 +17,8 @@ def _add_topography_and_mask(ds, topography_source) -> xr.Dataset:
         attrs={"long_name": "Working bathymetry at rho-points", "units": "meter"},
     )
 
-    # Mask is obtained by finding locations where height is above sea level (i.e. 0)
-    mask = xr.where(ds["hraw"] > 0, 0, 1)
+    # Mask is obtained by finding locations where water depth is positive
+    mask = xr.where(ds["hraw"] > 0, 1, 0)
     mask.attrs = {"long_name": "Mask at rho-points", "units": "land/water (0/1)"}
     ds["mask_rho"] = mask
 
@@ -49,7 +49,7 @@ def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
         topo_lon_plus360 = topo_lon + 360
         # Concatenate along the longitude axis
         topo_lon_concatenated = xr.concat([topo_lon_minus360, topo_lon, topo_lon_plus360], dim="lon")
-        topo_concatenated = xr.concat([topo_ds["topo"], topo_ds["topo"], topo_ds["topo"]], dim="lon")
+        topo_concatenated = xr.concat([-topo_ds["topo"], -topo_ds["topo"], -topo_ds["topo"]], dim="lon")
 
         interp = RegularGridInterpolator((topo_ds["topo_lat"].values, topo_lon_concatenated.values), topo_concatenated.values)
 

@@ -615,7 +615,7 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
     )
     ds.attrs["Date"] = date.today()
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
-    ds.attrs["Topography source"] = "https://github.com/CWorthy-ocean/roms-tools-data/raw/main/" + topography_source
+    ds.attrs["Topography source"] = topography_source
     ds.attrs["Topography modifications"] = "Global smoothing with factor %i; Minimal depth: %gm; Local smoothing to satisfy r < rmax = %gm" %(smooth_factor, hmin, rmax)
 
     return ds

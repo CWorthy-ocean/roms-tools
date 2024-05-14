@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 import numpy.testing as npt
+from scipy.ndimage import label
 from roms_tools import Grid
 
 
@@ -51,3 +52,21 @@ class TestGridFromFile:
     def test_roundtrip(self):
         """Test that creating a grid, saving it to file, and re-opening it is the same as just creating it."""
         ...
+
+
+class TestTopography:
+    def test_enclosed_regions(self):
+        """Test that there are only two connected regions, one dry and one wet."""
+
+        grid = Grid(
+            nx=100,
+            ny=100,
+            size_x=1800,
+            size_y=2400,
+            center_lon=30,
+            center_lat=61,
+            rot=20,
+        )
+
+        reg, nreg = label(grid.ds.mask_rho_filled)
+        npt.assert_equal(nreg, 2)

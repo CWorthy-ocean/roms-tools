@@ -44,12 +44,13 @@ class Grid:
     topography_source : str, optional
         Specifies the data source to use for the topography. Options are "etopo5.nc". The default is "etopo5.nc".
     smooth_factor: int
-        The smoothing factor used in the global Gaussian smoothing of the topography. The default is 8.
+        The smoothing factor used in the global Gaussian smoothing of the topography. The default is 2.
     hmin: float
         The minimum ocean depth (in meters). The default is 5.
     rmax: float
         The maximum slope parameter (in meters). The default is 0.2.
-
+    iter_max: int
+        The maximum number of local smoothing passes to reach the criterion r < rmax. Default is 500.
 
     Raises
     ------
@@ -65,9 +66,10 @@ class Grid:
     center_lat: float
     rot: float = 0
     topography_source: str = 'etopo5.nc'
-    smooth_factor: int = 8
+    smooth_factor: int = 2
     hmin: float = 5.0
     rmax: float = 0.2
+    iter_max: int = 500
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -82,7 +84,8 @@ class Grid:
             topography_source=self.topography_source,
             smooth_factor=self.smooth_factor,
             hmin=self.hmin,
-            rmax=self.rmax
+            rmax=self.rmax,
+            iter_max=self.iter_max
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
@@ -168,7 +171,7 @@ class Grid:
         if bathymetry:
             p = ax.contourf(
                     lon_deg, lat_deg,
-                    self.ds.hraw.where(self.ds.mask_rho_filled),
+                    self.ds.h.where(self.ds.mask_rho),
                     transform=proj,
                     levels=15,
                     cmap="YlGnBu"
@@ -188,7 +191,8 @@ def _make_grid_ds(
     topography_source: str,
     smooth_factor: int,
     hmin: float,
-    rmax: float
+    rmax: float,
+    iter_max: int
 ) -> xr.Dataset:
 
 
@@ -221,7 +225,7 @@ def _make_grid_ds(
         center_lat
     )
 
-    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax)
+    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax, iter_max)
 
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax)
 

@@ -613,7 +613,6 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
         f" xsize: {size_x / 1e3} ysize: {size_y / 1e3}"
         f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
     )
-    ds.attrs["Date"] = date.today()
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
     ds.attrs["Topography source"] = topography_source
     ds.attrs["Topography modifications"] = "Global smoothing with factor %i; Minimal depth: %gm; Local smoothing to satisfy r < rmax = %gm" %(smooth_factor, hmin, rmax)

@@ -47,7 +47,7 @@ To set up all the input files for a new ROMS simulation from scratch, follow the
 
 ### Step 1: Make Grid and Topography
 
-The first step is choosing the domain size, location, and resolution. Do this by creating an instance of the `Grid` class:
+The first step is choosing the domain size, location, resolution, and topography options. Do this by creating an instance of the `Grid` class:
 
 ```python
 from roms_tools import Grid

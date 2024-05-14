@@ -53,13 +53,18 @@ The first step is choosing the domain size, location, and resolution. Do this by
 from roms_tools import Grid
 
 grid = Grid(
-    nx=100,          # number of points in the x-direction (not including 2 boundary cells on either end)
-    ny=100,          # number of points in the y-direction (not including 2 boundary cells on either end)
-    size_x=1800,     # size of the domain in the x-direction (in km)
-    size_y=2400,     # size of the domain in the y-direction (in km)
-    center_lon=-21,  # longitude of the center of the domain
-    center_lat=61,   # latitude of the center of the domain
-    rot=20,          # rotation of the grid's x-direction from lines of constant longitude, with positive values being a counter-clockwise rotation
+    nx=100,                     # number of points in the x-direction (not including 2 boundary cells on either end)
+    ny=100,                     # number of points in the y-direction (not including 2 boundary cells on either end)
+    size_x=1800,                # size of the domain in the x-direction (in km)
+    size_y=2400,                # size of the domain in the y-direction (in km)
+    center_lon=-21,             # longitude of the center of the domain
+    center_lat=61,              # latitude of the center of the domain
+    rot=20,                     # rotation of the grid's x-direction from lines of constant longitude, with positive values being a counter-clockwise rotation
+    topography_source='etopo5', # data source to use for the topography
+    smooth_factor=2,            # smoothing factor used in the global Gaussian smoothing of the topography, default: 2
+    hmin=5,                     # minimum ocean depth (in m), default: 5
+    rmax=0.2,                   # maximum slope parameter (in m), default: 0.2
+    iter_max=200                # maximum number of local smoothing passes to reach the criterion r < rmax, default: 500
 )
 ```
 

@@ -71,7 +71,7 @@ grid = Grid(
 To visualize the grid we have just created, use the `.plot` method:
 
 ```python
-grid.plot()
+grid.plot(bathymetry=True)
 ```
 
 ![iceland_grid](https://github.com/CWorthy-ocean/roms-tools/assets/35968931/de8c03ab-3c61-4ba5-a9b7-65592fd9280f)

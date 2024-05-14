@@ -83,22 +83,28 @@ grid.ds
 ```
 ```
 <xarray.Dataset>
-Dimensions:    (eta_rho: 3, xi_rho: 3, one: 1)
-Dimensions without coordinates: eta_rho, xi_rho, one
+Dimensions:   (eta_rho: 102, xi_rho: 102)
+Coordinates:
+    lat_rho   (eta_rho, xi_rho) float64 47.84 47.91 47.97 ... 73.51 73.53
+    lon_rho   (eta_rho, xi_rho) float64 333.0 333.3 333.5 ... 352.6 353.2
+Dimensions without coordinates: eta_rho, xi_rho
 Data variables:
-    angle      (eta_rho, xi_rho) float64 0.0 0.0 0.0 -1.46e-16 ... 0.0 0.0 0.0
-    f0         (eta_rho, xi_rho) float64 4.565e-06 4.565e-06 ... -4.565e-06
-    pn         (eta_rho, xi_rho) float64 5e-06 5e-06 5e-06 ... 5e-06 5e-06 5e-06
-    lon_rho    (eta_rho, xi_rho) float64 339.1 340.0 340.9 ... 339.1 340.0 340.9
-    lat_rho    (eta_rho, xi_rho) float64 1.799 1.799 1.799 ... -1.799 -1.799
-    spherical  (one) <U1 'T'
-    tra_lon    (one) int64 -20
-    tra_lat    (one) int64 0
-    rotate     (one) int64 0
+    angle     (eta_rho, xi_rho) float64 0.4177 0.4177 ... 0.1146 0.1146
+    f0        (eta_rho, xi_rho) float64 0.0001078 0.0001079 ... 0.0001395
+    pm        (eta_rho, xi_rho) float64 4.209e-05 4.208e-05 ... 4.209e-05
+    pn        (eta_rho, xi_rho) float64 5.592e-05 5.592e-05 ... 5.592e-05
+    tra_lon   int64 -21
+    tra_lat   int64 61
+    rotate    int64 20
+    hraw      (eta_rho, xi_rho) float64 2.662e+03 2.837e+03 ... 3.19e+03
+    mask_rho  (eta_rho, xi_rho) int64 1 1 1 1 1 1 1 1 1 ... 1 1 1 1 1 1 1 1
+    h         (eta_rho, xi_rho) float64 2.875e+03 2.875e+03 ... 2.972e+03
 Attributes:
-    Title:    ROMS grid. Settings: nx: 1 ny: 1  xsize: 0.1 ysize: 0.1 rotate:...
-    Date:     2023-11-20
-    Type:     ROMS grid produced by roms-tools
+    Title:                     ROMS grid. Settings: nx: 100 ny: 100 xsize: 1....
+    Date:                      2024-05-14
+    Type:                      ROMS grid produced by roms-tools
+    Topography source:         etopo5
+    Topography modifications:  Global smoothing with factor 2; Minimal depth:...
 ```
 
 Once we are happy with our grid, we can save it as a netCDF file via the `.save` method:

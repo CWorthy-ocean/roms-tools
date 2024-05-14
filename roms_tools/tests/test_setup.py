@@ -3,6 +3,7 @@ import numpy as np
 import numpy.testing as npt
 from scipy.ndimage import label
 from roms_tools import Grid
+from roms_tools.setup.topography import _compute_rfactor
 
 
 class TestCreateGrid:
@@ -68,5 +69,37 @@ class TestTopography:
             rot=20,
         )
 
-        reg, nreg = label(grid.ds.mask_rho_filled)
+        reg, nreg = label(grid.ds.mask_rho)
         npt.assert_equal(nreg, 2)
+
+    def test_rmax_criterion(self):
+        with pytest.raises(Warning, match="After final"):
+            grid = Grid(
+                nx=100,
+                ny=100,
+                size_x=1800,
+                size_y=2400,
+                center_lon=30,
+                center_lat=61,
+                rot=20,
+                smooth_factor=4,
+                rmax=0.2,
+                iter_max=100
+            )
+
+
+        grid = Grid(
+            nx=100,
+            ny=100,
+            size_x=1800,
+            size_y=2400,
+            center_lon=30,
+            center_lat=61,
+            rot=20,
+            smooth_factor=4,
+            rmax=0.2,
+            iter_max=200
+        )
+        r_eta, r_xi = _compute_rfactor(grid.ds.h) 
+        rmax0 = np.max([r_eta.max(), r_xi.max()])
+        npt.assert_array_less(rmax0, grid.rmax)

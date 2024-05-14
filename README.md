@@ -74,7 +74,7 @@ To visualize the grid we have just created, use the `.plot` method:
 grid.plot(bathymetry=True)
 ```
 
-![iceland_grid](https://github.com/CWorthy-ocean/roms-tools/assets/35968931/de8c03ab-3c61-4ba5-a9b7-65592fd9280f)
+<img width="786" alt="Screenshot 2024-05-14 at 2 29 03 PM" src="https://github.com/NoraLoose/roms-tools/assets/23617395/6e364b50-d367-49e0-b1b5-f7e1662b1338">
 
 To see the values of the grid variables you can examine the `xarray.Dataset` object returned by the `.ds` property
 

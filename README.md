@@ -45,7 +45,7 @@ conda activate romstools-test
 
 To set up all the input files for a new ROMS simulation from scratch, follow these steps in order.
 
-### Step 1: Make Grid
+### Step 1: Make Grid and Topography
 
 The first step is choosing the domain size, location, and resolution. Do this by creating an instance of the `Grid` class:
 
@@ -110,7 +110,7 @@ grid.save('grids/my_new_roms_grid.nc')
 The basic grid domain is now ready for use by ROMS.
 
 
-### Steps 2-7:
+### More steps:
 
 Coming soon!
 

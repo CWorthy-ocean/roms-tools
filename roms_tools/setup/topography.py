@@ -50,7 +50,7 @@ def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
     topo_ds = fetch_topo(topography_source)
 
     # the following will depend on the topography source
-    if topography_source == "etopo5.nc":
+    if topography_source == "etopo5":
 
         topo_lon = topo_ds["topo_lon"].copy()
         # Modify longitude values where necessary

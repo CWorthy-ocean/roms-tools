@@ -42,7 +42,7 @@ class Grid:
         Positive values represent a counterclockwise rotation.
         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
     topography_source : str, optional
-        Specifies the data source to use for the topography. Options are "etopo5.nc". The default is "etopo5.nc".
+        Specifies the data source to use for the topography. Options are "etopo5". The default is "etopo5".
     smooth_factor: int
         The smoothing factor used in the global Gaussian smoothing of the topography. The default is 2.
     hmin: float
@@ -65,7 +65,7 @@ class Grid:
     center_lon: float
     center_lat: float
     rot: float = 0
-    topography_source: str = 'etopo5.nc'
+    topography_source: str = 'etopo5'
     smooth_factor: int = 2
     hmin: float = 5.0
     rmax: float = 0.2

@@ -11,6 +11,7 @@ def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax, i
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
 
+    # interpolate topography onto desired grid
     hraw = _make_raw_topography(lon, lat, topography_source)
     hraw = xr.Variable(data=hraw, dims=["eta_rho", "xi_rho"])
 

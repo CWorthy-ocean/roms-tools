@@ -73,20 +73,6 @@ class TestTopography:
         npt.assert_equal(nreg, 2)
 
     def test_rmax_criterion(self):
-        with pytest.raises(Warning, match="After final"):
-            grid = Grid(
-                nx=100,
-                ny=100,
-                size_x=1800,
-                size_y=2400,
-                center_lon=30,
-                center_lat=61,
-                rot=20,
-                smooth_factor=4,
-                rmax=0.2,
-                iter_max=100
-            )
-
 
         grid = Grid(
             nx=100,
@@ -98,7 +84,6 @@ class TestTopography:
             rot=20,
             smooth_factor=4,
             rmax=0.2,
-            iter_max=200
         )
         r_eta, r_xi = _compute_rfactor(grid.ds.h) 
         rmax0 = np.max([r_eta.max(), r_xi.max()])

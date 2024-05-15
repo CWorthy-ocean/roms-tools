@@ -5,8 +5,9 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import label
 from roms_tools.setup.datasets import fetch_topo
 import warnings
+from itertools import count
 
-def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax, iter_max) -> xr.Dataset:
+def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax) -> xr.Dataset:
 
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
@@ -35,7 +36,7 @@ def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax, i
     }
 
     # smooth topography locally to satisfy r < rmax
-    ds["h"] = _smooth_topography_locally(ds["hraw"] * ds["mask_rho"], hmin, rmax, iter_max)
+    ds["h"] = _smooth_topography_locally(ds["hraw"] * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
         "long_name": "Final bathymetry at rho-points", 
         "units": "meter",
@@ -108,7 +109,7 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
 
     return mask
 
-def _smooth_topography_locally(h, hmin=5, rmax=0.2, iter_max=500):
+def _smooth_topography_locally(h, hmin=5, rmax=0.2):
     """
     Smoothes topography locally to satisfy r < rmax
     """
@@ -127,7 +128,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2, iter_max=500):
     cf1 = 1.0 / 6
     cf2 = 0.25
 
-    for iter in range(iter_max):
+    for iter in count()
 
         # Compute gradients in domain interior
         
@@ -179,8 +180,6 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2, iter_max=500):
         rmax0 = np.max([r_eta.max(), r_xi.max()])
         if rmax0 < rmax:
             break
-        if iter == iter_max - 1:
-            raise Warning(f'After final (iter_max = {iter_max}) iteration of local topography smoothing, rmax = {rmax0} is not below threshold {rmax}. Please increase iter_max.')
 
 
     return h

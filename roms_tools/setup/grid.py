@@ -49,8 +49,6 @@ class Grid:
         The minimum ocean depth (in meters). The default is 5.
     rmax: float
         The maximum slope parameter (in meters). The default is 0.2.
-    iter_max: int
-        The maximum number of local smoothing passes to reach the criterion r < rmax. Default is 500.
 
     Raises
     ------
@@ -69,7 +67,6 @@ class Grid:
     smooth_factor: int = 2
     hmin: float = 5.0
     rmax: float = 0.2
-    iter_max: int = 500
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -85,7 +82,6 @@ class Grid:
             smooth_factor=self.smooth_factor,
             hmin=self.hmin,
             rmax=self.rmax,
-            iter_max=self.iter_max
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
@@ -192,7 +188,6 @@ def _make_grid_ds(
     smooth_factor: int,
     hmin: float,
     rmax: float,
-    iter_max: int
 ) -> xr.Dataset:
 
 
@@ -225,7 +220,7 @@ def _make_grid_ds(
         center_lat
     )
 
-    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax, iter_max)
+    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax)
 
     ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax)
 

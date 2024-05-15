@@ -64,7 +64,6 @@ grid = Grid(
     smooth_factor=2,            # smoothing factor used in the global Gaussian smoothing of the topography, default: 2
     hmin=5,                     # minimum ocean depth (in m), default: 5
     rmax=0.2,                   # maximum slope parameter (in m), default: 0.2
-    iter_max=200                # maximum number of local smoothing passes to reach the criterion r < rmax, default: 500
 )
 ```
 

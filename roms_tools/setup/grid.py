@@ -130,18 +130,28 @@ class Grid:
         import cartopy.crs as ccrs
         import matplotlib.pyplot as plt
 
+
         lon_deg = self.ds["lon_rho"]
+        lat_deg = self.ds["lat_rho"]
+
+        if bathymetry:
+            # check if North or South pole are in domain
+            if lat_deg.max().values > 89 or lat_deg.min().values < -89:
+                raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
+
         # check if Greenwhich meridian goes through domain
         if np.abs(lon_deg.diff('xi_rho')).max() > 300 or np.abs(lon_deg.diff('eta_rho')).max() > 300:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        lon_deg = lon_deg.values
-        lat_deg = self.ds["lat_rho"].values
 
         # Define projections
         proj = ccrs.PlateCarree()
+
         trans = ccrs.NearsidePerspective(
-            central_longitude=np.mean(lon_deg), central_latitude=np.mean(lat_deg)
+                central_longitude=lon_deg.mean().values, central_latitude=lat_deg.mean().values
         )
+
+        lon_deg = lon_deg.values
+        lat_deg = lat_deg.values
 
         # find corners
         (lo1, la1) = (lon_deg[0, 0], lat_deg[0, 0])

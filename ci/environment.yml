@@ -15,4 +15,5 @@ dependencies:
   - flake8
   - black
   - scipy
-  - ipykernel
+  - gcm_filters
+  - ipykernel # not strictly necessary but this is nice to run notebooks in this env to test

@@ -63,7 +63,7 @@ def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
         topo_lon_concatenated = xr.concat([topo_lon_minus360, topo_lon, topo_lon_plus360], dim="lon")
         topo_concatenated = xr.concat([-topo_ds["topo"], -topo_ds["topo"], -topo_ds["topo"]], dim="lon")
 
-        interp = RegularGridInterpolator((topo_ds["topo_lat"].values, topo_lon_concatenated.values), topo_concatenated.values)
+        interp = RegularGridInterpolator((topo_ds["topo_lat"].values, topo_lon_concatenated.values), topo_concatenated.values, method='nearest')
 
     # Interpolate onto desired domain grid points
     hraw = interp((lat, lon))

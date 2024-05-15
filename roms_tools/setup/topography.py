@@ -128,7 +128,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
     cf1 = 1.0 / 6
     cf2 = 0.25
 
-    for iter in count()
+    for iter in count():
 
         # Compute gradients in domain interior
         

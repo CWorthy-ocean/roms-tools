@@ -130,7 +130,11 @@ class Grid:
         import cartopy.crs as ccrs
         import matplotlib.pyplot as plt
 
-        lon_deg = (self.ds["lon_rho"] - 360).values
+        lon_deg = self.ds["lon_rho"]
+        # check if Greenwhich meridian goes through domain
+        if np.abs(lon_deg.diff('xi_rho')).max() > 300 or np.abs(lon_deg.diff('eta_rho')).max() > 300:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        lon_deg = lon_deg.values
         lat_deg = self.ds["lat_rho"].values
 
         # Define projections

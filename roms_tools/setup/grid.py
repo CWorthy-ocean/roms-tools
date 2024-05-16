@@ -179,11 +179,10 @@ class Grid:
         )  # add map of coastlines
         ax.gridlines()
         if bathymetry:
-            p = ax.contourf(
+            p = ax.pcolormesh(
                     lon_deg, lat_deg,
                     self.ds.h.where(self.ds.mask_rho),
                     transform=proj,
-                    levels=15,
                     cmap="YlGnBu"
             )
             plt.colorbar(p, label="Bathymetry [m]")

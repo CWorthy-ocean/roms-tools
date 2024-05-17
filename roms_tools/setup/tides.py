@@ -1,0 +1,358 @@
+from datetime import datetime
+import xarray as xr
+import numpy as np
+from dataclasses import dataclass, field
+from roms_tools.setup.grid import Grid
+
+def modified_julian_days(year, month, day, hour=0):
+    """
+    Get the date in Modified Julian Days assuming that (year, month, day) is
+    within Gregorian calendar, i.e., after October 15, 1582
+
+    Parameters
+    ----------
+    year : int
+    month : int
+    day : int
+    hour : float
+
+    Returns
+    -------
+    mjd : float
+        Modified Julian Day
+
+    """
+    if month < 3:
+        year -= 1
+        month += 12
+
+    A = year // 100
+    B = A // 4
+    C = 2 - A + B
+    E = int(365.25 * (year + 4716))
+    F = int(30.6001 * (month + 1))
+    jd = C + day + hour / 24 + E + F - 1524.5
+    mjd = jd - 2400000.5
+
+    return mjd
+
+def egbert_correction(date):
+        """
+        Correct phases and amplitudes for real-time runs using parts of the
+        post-processing code from Egbert's & Erofeeva's (OSU) TPXO model.
+
+        Parameters
+        ----------
+        date : datetime.datetime
+            The date for which corrections is to be applied.
+
+        Returns
+        -------
+        pf : xr.DataArray
+            Amplitude scaling factor for each of the 15 tidal constituents.
+        pu : xr.DataArray
+            Phase correction [radians] for each of the 15 tidal constituents.
+        aa : xr.DataArray
+            Astronomical arguments [radians] associated with the corrections.
+        """
+
+        year = date.year
+        month = date.month
+        day = date.day
+        hour = date.hour
+        minute = date.minute
+        second = date.second
+
+        rad = np.pi / 180.0
+        deg = 180.0 / np.pi
+        mjd = modified_julian_days(year, month, day)
+        tstart = mjd + hour / 24 + minute / (60 * 24) + second / (60 * 60 * 24)
+
+        # Determine nodal corrections pu & pf : these expressions are valid for period 1990-2010 (Cartwright 1990).
+        # Reset time origin for astronomical arguments to 4th of May 1860:
+        timetemp = tstart - 51544.4993
+
+        # mean longitude of lunar perigee
+        P = 83.3535 + 0.11140353 * timetemp
+        P = np.mod(P, 360.0)
+        if P < 0:
+            P =+ 360
+        P *= rad
+
+        # mean longitude of ascending lunar node
+        N = 125.0445 - 0.05295377 * timetemp
+        N = np.mod(N, 360.0)
+        if N < 0:
+            N =+ 360
+        N *= rad
+
+        sinn = np.sin(N)
+        cosn = np.cos(N)
+        sin2n = np.sin(2 * N)
+        cos2n = np.cos(2 * N)
+        sin3n = np.sin(3 * N)
+
+        tmp1 = 1.36 * np.cos(P) + 0.267 * np.cos((P - N))
+        tmp2 = 0.64 * np.sin(P) + 0.135 * np.sin((P - N))
+        temp1 = 1.0 - 0.25 * np.cos(2 * P) - 0.11 * np.cos((2 * P - N)) - 0.04 * cosn
+        temp2 = 0.25 * np.sin(2 * P) + 0.11 * np.sin((2 * P - N)) + 0.04 * sinn
+
+        pftmp = np.sqrt((1 - 0.03731 * cosn + 0.00052 * cos2n) ** 2 +
+                        (0.03731 * sinn - 0.00052 * sin2n) ** 2)  # 2N2
+
+        pf = np.zeros(15)
+        pf[0] = pftmp  # M2
+        pf[1] = 1.0  # S2
+        pf[2] = pftmp  # N2
+        pf[3] = np.sqrt((1 + 0.2852 * cosn + 0.0324 * cos2n) ** 2 +
+                        (0.3108 * sinn + 0.0324 * sin2n) ** 2)  # K2
+        pf[4] = np.sqrt((1 + 0.1158 * cosn - 0.0029 * cos2n) ** 2 +
+                        (0.1554 * sinn - 0.0029 * sin2n) ** 2)  # K1
+        pf[5] = np.sqrt((1 + 0.189 * cosn - 0.0058 * cos2n) ** 2 +
+                        (0.189 * sinn - 0.0058 * sin2n) ** 2)  # O1
+        pf[6] = 1.0  # P1
+        pf[7] = np.sqrt((1 + 0.188 * cosn) ** 2 + (0.188 * sinn) ** 2)  # Q1
+        pf[8] = 1.043 + 0.414 * cosn  # Mf
+        pf[9] = 1.0 - 0.130 * cosn  # Mm
+        pf[10] = pftmp ** 2  # M4
+        pf[11] = pftmp ** 2  # Mn4
+        pf[12] = pftmp ** 2  # Ms4
+        pf[13] = pftmp  # 2n2
+        pf[14] = 1.0  # S1
+        pf = xr.DataArray(pf, dims='nc')
+
+        putmp = np.arctan((-0.03731 * sinn + 0.00052 * sin2n) /
+                          (1.0 - 0.03731 * cosn + 0.00052 * cos2n)) * deg  # 2N2
+
+        pu = np.zeros(15)
+        pu[0] = putmp  # M2
+        pu[1] = 0.0  # S2
+        pu[2] = putmp  # N2
+        pu[3] = np.arctan(- (0.3108 * sinn + 0.0324 * sin2n) /
+                          (1.0 + 0.2852 * cosn + 0.0324 * cos2n)) * deg  # K2
+        pu[4] = np.arctan((-0.1554 * sinn + 0.0029 * sin2n) /
+                          (1.0 + 0.1158 * cosn - 0.0029 * cos2n)) * deg  # K1
+        pu[5] = 10.8 * sinn - 1.3 * sin2n + 0.2 * sin3n  # O1
+        pu[6] = 0.0  # P1
+        pu[7] = np.arctan(0.189 * sinn / (1.0 + 0.189 * cosn)) * deg  # Q1
+        pu[8] = -23.7 * sinn + 2.7 * sin2n - 0.4 * sin3n  # Mf
+        pu[9] = 0.0  # Mm
+        pu[10] = putmp * 2.0  # M4
+        pu[11] = putmp * 2.0  # Mn4
+        pu[12] = putmp  # Ms4
+        pu[13] = putmp  # 2n2
+        pu[14] = 0.0  # S1
+        pu = xr.DataArray(pu, dims='nc')
+        # convert from degrees to radians
+        pu = pu * rad
+
+        t0 = modified_julian_days(1992, 1, 1) * 24.0
+
+        aa = xr.DataArray(
+            data = np.array([
+                1.731557546,   # M2
+                0.0,           # S2
+                6.050721243,   # N2
+                3.487600001,   # K2
+                0.173003674,   # K1
+                1.558553872,   # O1
+                6.110181633,   # P1
+                5.877717569,   # Q1
+                1.964021610,   # Mm
+                1.756042456,   # Mf
+                3.463115091,   # M4
+                1.499093481,   # Mn4
+                1.731557546,   # Ms4
+                4.086699633,   # 2n2
+                0.0            # S1
+            ]),
+            dims = 'nc'
+        )
+
+
+        return pf, pu, aa
+
+
+@dataclass(frozen=True, kw_only=True)
+class TPXO:
+
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self):
+        #ds = fetch_tpxo()
+        ds = xr.open_dataset('/glade/derecho/scratch/bachman/ROMS_tools/DATASETS/tpxo9.v2a.nc')
+        # Lon_r is constant along ny, i.e., is only a function of nx
+        ds["nx"] = ds["lon_r"].isel(ny=0)
+        # Lat_r is constant along nx, i.e., is only a function of ny
+        ds["ny"] = ds["lat_r"].isel(nx=0)
+                
+        object.__setattr__(self, "ds", ds)
+
+
+    def get_corrected_tides(self, model_reference_date, alan_factor):
+        # Get equilibrium tides
+        tpc = self.compute_equilibrium_tide(self.ds["lon_r"], self.ds["lat_r"])
+        # Correct for SAL
+        tsc = alan_factor * (self.ds['sal_Re'] + 1j * self.ds['sal_Im'])
+        tpc = tpc - tsc
+
+        # Elevations and transports
+        thc = self.ds["h_Re"] + 1j * self.ds["h_Im"]
+        tuc = self.ds["u_Re"] + 1j * self.ds["u_Im"]
+        tvc = self.ds["v_Re"] + 1j * self.ds["v_Im"]
+
+        # Apply correction for phases and amplitudes
+        pf, pu, aa = egbert_correction(model_reference_date)
+        tpxo_reference_date = datetime(1992, 1, 1)
+        dt = (model_reference_date - tpxo_reference_date)
+
+        thc = pf * thc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
+        tuc = pf * tuc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
+        tvc = pf * tvc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
+        tpc = pf * tpc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
+
+        tides = {"ssh": thc, "u": tuc, "v": tvc, "pot": tpc, "omega": self.ds["omega"]}
+
+        return tides
+
+    @staticmethod
+    def compute_equilibrium_tide(lon, lat):
+        # Amplitudes and elasticity factors for 15 tidal constituents
+        A = xr.DataArray(
+            data = np.array([
+                0.242334,  # M2
+                0.112743,  # S2
+                0.046397,  # N2
+                0.030684,  # K2
+                0.141565,  # K1
+                0.100661,  # O1
+                0.046848,  # P1
+                0.019273,  # Q1
+                0.042041,  # Mf
+                0.022191,  # Mm
+                0.0,       # M4
+                0.0,       # Mn4
+                0.0,       # Ms4
+                0.006141,  # 2n2
+                0.000764   # S1
+            ]),
+            dims = 'nc'
+        )
+        B = xr.DataArray(
+            data = np.array([
+                0.693,  # M2
+                0.693,  # S2
+                0.693,  # N2
+                0.693,  # K2
+                0.736,  # K1
+                0.695,  # O1
+                0.706,  # P1
+                0.695,  # Q1
+                0.693,  # Mf
+                0.693,  # Mm
+                0.693,  # M4
+                0.693,  # Mn4
+                0.693,  # Ms4
+                0.693,  # 2n2
+                0.693   # S1
+            ]),
+            dims = 'nc'
+        )
+    
+        # types: 2 = semidiurnal, 1 = diurnal, 0 = long-term
+        ityp = xr.DataArray(data=np.array([2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 2, 1]), dims='nc')
+    
+        d2r = np.pi / 180
+        coslat2 = np.cos(d2r * lat) ** 2
+        sin2lat = np.sin(2 * d2r * lat)
+    
+        p_amp = (
+            xr.where(ityp == 2, 1, 0) *  A * B * coslat2                  # semidiurnal
+            + xr.where(ityp == 1, 1, 0) *  A * B * sin2lat                # diurnal
+            + xr.where(ityp == 0, 1, 0) *  A * B * (0.5 - 1.5 * coslat2)  # long-term
+        )
+        p_pha = (
+            xr.where(ityp == 2, 1, 0) *  (-2 * lon * d2r)                 # semidiurnal
+            + xr.where(ityp == 1, 1, 0) *  (-lon * d2r)                   # diurnal
+            + xr.where(ityp == 0, 1, 0) *  xr.zeros_like(lon)             # long-term
+        )
+    
+        tpc = p_amp * np.exp(-1j * p_pha)
+    
+        return tpc
+
+
+@dataclass(frozen=True, kw_only=True)
+class TidalForcing:
+    grid: Grid
+    nc: int = 10
+    model_reference_date: datetime = datetime(2000, 1, 1)
+    source: str = "tpxo"
+    alan_factor: float = 2.0
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self):
+        if self.source == "tpxo":
+            tpxo = TPXO()
+
+            tides = tpxo.get_corrected_tides(self.model_reference_date, self.alan_factor)
+            # rename dimension and select desired number of constituents
+            for k in tides.keys():
+                tides[k] = tides[k].rename({"nc": "ntides"})
+                tides[k] = tides[k].isel(ntides=slice(None, self.nc))
+
+            # interpolate onto desired grid
+            ssh_tide = tides["ssh"].interp(nx=self.grid.ds.lon_rho, ny=self.grid.ds.lat_rho).drop_vars(["nx", "ny"])
+            pot_tide = tides["pot"].interp(nx=self.grid.ds.lon_rho, ny=self.grid.ds.lat_rho).drop_vars(["nx", "ny"])
+            u = tides["u"].interp(nx=self.grid.ds.lon_rho, ny=self.grid.ds.lat_rho).drop_vars(["nx", "ny"])
+            v = tides["v"].interp(nx=self.grid.ds.lon_rho, ny=self.grid.ds.lat_rho).drop_vars(["nx", "ny"])
+
+        # Rotate to grid orientation
+        u_tide = u * np.cos(self.grid.ds.angle) + v * np.sin(self.grid.ds.angle)
+        v_tide = v * np.cos(self.grid.ds.angle) - u * np.sin(self.grid.ds.angle)
+
+        # Convert to barotropic velocity
+        u_tide = u_tide / self.grid.ds.h
+        v_tide = v_tide / self.grid.ds.h
+
+        # Interpolate from rho- to velocity points
+        u_tide = (u_tide + u_tide.shift(xi_rho=1)).isel(xi_rho=slice(1, None)).drop_vars(["lat_rho", "lon_rho"])
+        u_tide = u_tide.swap_dims({"xi_rho": "xi_u"})
+        v_tide = (v_tide + v_tide.shift(eta_rho=1)).isel(eta_rho=slice(1, None)).drop_vars(["lat_rho", "lon_rho"])
+        v_tide = v_tide.swap_dims({"eta_rho": "eta_v"})
+
+        # save in new dataset
+        ds = xr.Dataset()
+
+        ds["omega"] = tides["omega"]
+
+        ds["ssh_Re"] = ssh_tide.real
+        ds["ssh_Im"] = ssh_tide.imag
+        ds["ssh_Re"].attrs["long_name"] = "Tidal elevation, real part"
+        ds["ssh_Im"].attrs["long_name"] = "Tidal elevation, complex part"
+        ds["ssh_Re"].attrs["units"] = "m"
+        ds["ssh_Im"].attrs["units"] = "m"
+
+        ds["pot_Re"] = pot_tide.real
+        ds["pot_Im"] = pot_tide.imag
+        ds["pot_Re"].attrs["long_name"] = "Tidal potential, real part"
+        ds["pot_Im"].attrs["long_name"] = "Tidal potential, complex part"
+        ds["pot_Re"].attrs["units"] = "m"
+        ds["pot_Im"].attrs["units"] = "m"
+
+        ds["u_Re"] = u_tide.real
+        ds["u_Im"] = u_tide.imag
+        ds["u_Re"].attrs["long_name"] = "Tidal velocity in x-direction, real part"
+        ds["u_Im"].attrs["long_name"] = "Tidal velocity in x-direction, complex part"
+        ds["u_Re"].attrs["units"] = "m/s"
+        ds["u_Im"].attrs["units"] = "m/s"
+
+        ds["v_Re"] = v_tide.real
+        ds["v_Im"] = v_tide.imag
+        ds["v_Re"].attrs["long_name"] = "Tidal velocity in y-direction, real part"
+        ds["v_Im"].attrs["long_name"] = "Tidal velocity in y-direction, complex part"
+        ds["v_Re"].attrs["units"] = "m/s"
+        ds["v_Im"].attrs["units"] = "m/s"
+
+        object.__setattr__(self, "ds", ds)
+

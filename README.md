@@ -81,29 +81,32 @@ To see the values of the grid variables you can examine the `xarray.Dataset` obj
 grid.ds
 ```
 ```
-<xarray.Dataset>
+<xarray.Dataset> Size: 749kB
 Dimensions:   (eta_rho: 102, xi_rho: 102)
 Coordinates:
-    lat_rho   (eta_rho, xi_rho) float64 47.84 47.91 47.97 ... 73.51 73.53
-    lon_rho   (eta_rho, xi_rho) float64 333.0 333.3 333.5 ... 352.6 353.2
+    lat_rho   (eta_rho, xi_rho) float64 83kB 47.84 47.91 47.97 ... 73.51 73.53
+    lon_rho   (eta_rho, xi_rho) float64 83kB 333.0 333.3 333.5 ... 352.6 353.2
 Dimensions without coordinates: eta_rho, xi_rho
 Data variables:
-    angle     (eta_rho, xi_rho) float64 0.4177 0.4177 ... 0.1146 0.1146
-    f0        (eta_rho, xi_rho) float64 0.0001078 0.0001079 ... 0.0001395
-    pm        (eta_rho, xi_rho) float64 4.209e-05 4.208e-05 ... 4.209e-05
-    pn        (eta_rho, xi_rho) float64 5.592e-05 5.592e-05 ... 5.592e-05
-    tra_lon   int64 -21
-    tra_lat   int64 61
-    rotate    int64 20
-    hraw      (eta_rho, xi_rho) float64 2.662e+03 2.837e+03 ... 3.19e+03
-    mask_rho  (eta_rho, xi_rho) int64 1 1 1 1 1 1 1 1 1 ... 1 1 1 1 1 1 1 1
-    h         (eta_rho, xi_rho) float64 2.875e+03 2.875e+03 ... 2.972e+03
+    angle     (eta_rho, xi_rho) float64 83kB 0.4177 0.4177 ... 0.1146 0.1146
+    f         (eta_rho, xi_rho) float64 83kB 0.0001078 0.0001079 ... 0.0001395
+    pm        (eta_rho, xi_rho) float64 83kB 4.209e-05 4.208e-05 ... 4.209e-05
+    pn        (eta_rho, xi_rho) float64 83kB 5.592e-05 5.592e-05 ... 5.592e-05
+    tra_lon   int64 8B -21
+    tra_lat   int64 8B 61
+    rotate    int64 8B 20
+    hraw      (eta_rho, xi_rho) float64 83kB 2.662e+03 2.837e+03 ... 3.19e+03
+    mask_rho  (eta_rho, xi_rho) int64 83kB 1 1 1 1 1 1 1 1 1 ... 1 1 1 1 1 1 1 1
+    h         (eta_rho, xi_rho) float64 83kB 2.875e+03 2.875e+03 ... 2.972e+03
 Attributes:
-    Title:                     ROMS grid. Settings: nx: 100 ny: 100 xsize: 1....
-    Date:                      2024-05-14
-    Type:                      ROMS grid produced by roms-tools
-    Topography source:         etopo5
-    Topography modifications:  Global smoothing with factor 2; Minimal depth:...
+    Type:               ROMS grid produced by roms-tools
+    size_x:             1800
+    size_y:             2400
+    topography_source:  etopo5
+    smooth_factor:      2
+    hmin:               5
+    rmax:               0.2
+
 ```
 
 Once we are happy with our grid, we can save it as a netCDF file via the `.save` method:
@@ -114,6 +117,13 @@ grid.save('grids/my_new_roms_grid.nc')
 
 The basic grid domain is now ready for use by ROMS.
 
+We can also populate a new instance of Grid with data from an existing file:
+
+```python
+grid2 = Grid.from_file('grids/my_new_roms_grid.nc')
+```
+
+`grid` and `grid2` are identical!
 
 ### More steps:
 

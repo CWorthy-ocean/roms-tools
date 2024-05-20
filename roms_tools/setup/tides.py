@@ -466,3 +466,105 @@ class TidalForcing:
 
         object.__setattr__(self, "ds", ds)
 
+    def plot(self, field, nc=0) -> None:
+        """
+        Plot the specified tidal forcing field for a given tidal constituent.
+    
+        Parameters
+        ----------
+        field : str
+            The tidal forcing field to plot. Options include:
+            - "ssh_Re": Real part of tidal elevation.
+            - "ssh_Im": Imaginary part of tidal elevation.
+            - "pot_Re": Real part of tidal potential.
+            - "pot_Im": Imaginary part of tidal potential.
+            - "u_Re": Real part of tidal velocity in the x-direction.
+            - "u_Im": Imaginary part of tidal velocity in the x-direction.
+            - "v_Re": Real part of tidal velocity in the y-direction.
+            - "v_Im": Imaginary part of tidal velocity in the y-direction.
+        nc : int, optional
+            The index of the tidal constituent to plot. Default is 0, which corresponds 
+            to the first constituent.
+    
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+    
+        Raises
+        ------
+        ValueError
+            If the specified field is not one of the valid options.
+    
+        Notes
+        -----
+        The `cartopy` and `matplotlib` libraries are required to use this method. Ensure 
+        these libraries are installed in your environment.
+    
+        Examples
+        --------
+        >>> tidal_forcing = TidalForcing(grid)
+        >>> tidal_forcing.plot("ssh_Re", nc=0)
+        """
+
+        import cartopy.crs as ccrs
+        import matplotlib.pyplot as plt
+
+
+        lon_deg = self.grid.ds["lon_rho"]
+        lat_deg = self.grid.ds["lat_rho"]
+
+        # check if North or South pole are in domain
+        if lat_deg.max().values > 89 or lat_deg.min().values < -89:
+            raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
+
+        # check if Greenwhich meridian goes through domain
+        if np.abs(lon_deg.diff('xi_rho')).max() > 300 or np.abs(lon_deg.diff('eta_rho')).max() > 300:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+
+        # Define projections
+        proj = ccrs.PlateCarree()
+
+        trans = ccrs.NearsidePerspective(
+                central_longitude=lon_deg.mean().values, central_latitude=lat_deg.mean().values
+        )
+
+        lon_deg = lon_deg.values
+        lat_deg = lat_deg.values
+
+        # find corners
+        (lo1, la1) = (lon_deg[0, 0], lat_deg[0, 0])
+        (lo2, la2) = (lon_deg[0, -1], lat_deg[0, -1])
+        (lo3, la3) = (lon_deg[-1, -1], lat_deg[-1, -1])
+        (lo4, la4) = (lon_deg[-1, 0], lat_deg[-1, 0])
+
+        # transform coordinates to projected space
+        lo1t, la1t = trans.transform_point(lo1, la1, proj)
+        lo2t, la2t = trans.transform_point(lo2, la2, proj)
+        lo3t, la3t = trans.transform_point(lo3, la3, proj)
+        lo4t, la4t = trans.transform_point(lo4, la4, proj)
+
+        plt.figure(figsize=(10, 10))
+        ax = plt.axes(projection=trans)
+
+        ax.plot(
+            [lo1t, lo2t, lo3t, lo4t, lo1t],
+            [la1t, la2t, la3t, la4t, la1t],
+            "ro-",
+        )
+
+        ax.coastlines(
+            resolution="50m", linewidth=0.5, color="black"
+        )  # add map of coastlines
+        ax.gridlines()
+
+        vmax = max(self.ds[field].isel(ntides=nc).max(), -self.ds[field].isel(ntides=nc).min())
+        p = ax.pcolormesh(
+                    lon_deg, lat_deg,
+                    self.ds[field].isel(ntides=nc),
+                    transform=proj,
+                    vmax=vmax, vmin=-vmax,
+                    cmap="RdBu_r"
+            )
+        plt.colorbar(p, label="%s [%s]" %(self.ds[field].long_name, self.ds[field].units))
+        plt.show()

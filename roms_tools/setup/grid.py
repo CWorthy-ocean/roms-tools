@@ -552,7 +552,7 @@ def _create_grid_ds(
     # Coriolis frequency
     f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
 
-    ds["f0"] = xr.Variable(
+    ds["f"] = xr.Variable(
         data=f0,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Coriolis parameter at rho-points", "units": "second-1"},

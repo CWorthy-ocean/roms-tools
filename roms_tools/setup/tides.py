@@ -6,22 +6,48 @@ from roms_tools.setup.grid import Grid
 
 def modified_julian_days(year, month, day, hour=0):
     """
-    Get the date in Modified Julian Days assuming that (year, month, day) is
-    within Gregorian calendar, i.e., after October 15, 1582
+    Calculate the Modified Julian Day (MJD) for a given date and time.
+
+    The Modified Julian Day (MJD) is a modified Julian day count starting from
+    November 17, 1858 AD. It is commonly used in astronomy and geodesy.
 
     Parameters
     ----------
     year : int
+        The year.
     month : int
+        The month (1-12).
     day : int
-    hour : float
+        The day of the month.
+    hour : float, optional
+        The hour of the day as a fractional number (0 to 23.999...). Default is 0.
 
     Returns
     -------
     mjd : float
-        Modified Julian Day
+        The Modified Julian Day (MJD) corresponding to the input date and time.
 
+    Notes
+    -----
+    The algorithm assumes that the input date (year, month, day) is within the
+    Gregorian calendar, i.e., after October 15, 1582. Negative MJD values are
+    allowed for dates before November 17, 1858.
+
+    References
+    ----------
+    - Wikipedia article on Julian Day: https://en.wikipedia.org/wiki/Julian_day
+    - Wikipedia article on Modified Julian Day: https://en.wikipedia.org/wiki/Modified_Julian_day
+
+    Examples
+    --------
+    >>> modified_julian_days(2024, 5, 20, 12)
+    58814.0
+    >>> modified_julian_days(1858, 11, 17)
+    0.0
+    >>> modified_julian_days(1582, 10, 4)
+    -141428.5
     """
+
     if month < 3:
         year -= 1
         month += 12
@@ -44,7 +70,7 @@ def egbert_correction(date):
         Parameters
         ----------
         date : datetime.datetime
-            The date for which corrections is to be applied.
+            The date and time for which corrections are to be applied.
 
         Returns
         -------
@@ -54,6 +80,12 @@ def egbert_correction(date):
             Phase correction [radians] for each of the 15 tidal constituents.
         aa : xr.DataArray
             Astronomical arguments [radians] associated with the corrections.
+
+        References
+        ----------
+        - Egbert, G.D., and S.Y. Erofeeva. "Efficient inverse modeling of barotropic ocean
+          tides." Journal of Atmospheric and Oceanic Technology 19, no. 2 (2002): 183-204.
+
         """
 
         year = date.year
@@ -175,6 +207,31 @@ def egbert_correction(date):
 
 @dataclass(frozen=True, kw_only=True)
 class TPXO:
+    """
+    Represents TPXO tidal atlas.
+
+    Parameters
+    ----------
+    ds : xr.Dataset, optional
+        The xarray Dataset containing TPXO tidal model data.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing TPXO tidal model data.
+
+    Notes
+    -----
+    This class provides a convenient interface to work with TPXO tidal atlas.
+
+    Examples
+    --------
+    >>> tpxo = TPXO()
+    >>> tpxo.load_data("tpxo_data.nc")
+    >>> print(tpxo.ds)
+    <xarray.Dataset>
+    Dimensions:  ...
+    """
 
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -189,11 +246,11 @@ class TPXO:
         object.__setattr__(self, "ds", ds)
 
 
-    def get_corrected_tides(self, model_reference_date, alan_factor):
+    def get_corrected_tides(self, model_reference_date, allan_factor):
         # Get equilibrium tides
         tpc = self.compute_equilibrium_tide(self.ds["lon_r"], self.ds["lat_r"])
         # Correct for SAL
-        tsc = alan_factor * (self.ds['sal_Re'] + 1j * self.ds['sal_Im'])
+        tsc = allan_factor * (self.ds['sal_Re'] + 1j * self.ds['sal_Im'])
         tpc = tpc - tsc
 
         # Elevations and transports
@@ -204,12 +261,12 @@ class TPXO:
         # Apply correction for phases and amplitudes
         pf, pu, aa = egbert_correction(model_reference_date)
         tpxo_reference_date = datetime(1992, 1, 1)
-        dt = (model_reference_date - tpxo_reference_date)
+        dt = (model_reference_date - tpxo_reference_date).days * 3600 * 24
 
-        thc = pf * thc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
-        tuc = pf * tuc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
-        tvc = pf * tvc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
-        tpc = pf * tpc * np.exp(1j * (self.ds["omega"] * dt.days + pu + aa))
+        thc = pf * thc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
+        tuc = pf * tuc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
+        tvc = pf * tvc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
+        tpc = pf * tpc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
 
         tides = {"ssh": thc, "u": tuc, "v": tvc, "pot": tpc, "omega": self.ds["omega"]}
 
@@ -284,18 +341,52 @@ class TPXO:
 
 @dataclass(frozen=True, kw_only=True)
 class TidalForcing:
+    """
+    Represents tidal forcing data used in ocean modeling.
+
+    Parameters
+    ----------
+    grid : Grid
+        The grid object representing the ROMS grid associated with the tidal forcing data.
+    nc : int, optional
+        Number of constituents to consider. Maximum number is 14. Default is 10.
+    model_reference_date : datetime, optional
+        The reference date for the tidal model. Default is datetime(2000, 1, 1).
+    source : str, optional
+        The source of the tidal data. Default is "tpxo".
+    allan_factor : float, optional
+        The Allan factor used in tidal model computation. Default is 2.0.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the tidal forcing data.
+
+    Notes
+    -----
+    This class represents tidal forcing data used in ocean modeling. It provides
+    functionality to load and process tidal data for use in numerical simulations.
+    The tidal forcing data is loaded from a TPXO dataset and processed to generate
+    tidal elevation, tidal potential, and tidal velocity fields.
+
+    Examples
+    --------
+    >>> grid = Grid(...)
+    >>> tidal_forcing = TidalForcing(grid)
+    >>> print(tidal_forcing.ds)
+    """
     grid: Grid
     nc: int = 10
     model_reference_date: datetime = datetime(2000, 1, 1)
     source: str = "tpxo"
-    alan_factor: float = 2.0
+    allan_factor: float = 2.0
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
         if self.source == "tpxo":
             tpxo = TPXO()
 
-            tides = tpxo.get_corrected_tides(self.model_reference_date, self.alan_factor)
+            tides = tpxo.get_corrected_tides(self.model_reference_date, self.allan_factor)
             # rename dimension and select desired number of constituents
             for k in tides.keys():
                 tides[k] = tides[k].rename({"nc": "ntides"})

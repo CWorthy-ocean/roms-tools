@@ -272,6 +272,7 @@ class TPXO:
 
         return tides
 
+
     @staticmethod
     def compute_equilibrium_tide(lon, lat):
         # Amplitudes and elasticity factors for 15 tidal constituents
@@ -338,6 +339,19 @@ class TPXO:
     
         return tpc
 
+    @staticmethod
+    def concatenate_across_dateline(field):
+        lon = field['nx']
+        # tpxo atlas has minimum longitude 0.167 and maximum longitude 360.0
+        # we therefore only need to concatenate on the lower end
+        lon_minus360 = lon - 360
+        # Concatenate along the longitude axis
+        lon_concatenated = xr.concat([lon_minus360, lon], dim="nx")
+        field_concatenated = xr.concat([field, field], dim="nx")
+        field_concatenated["nx"] = lon_concatenated
+
+        return field_concatenated
+
 
 @dataclass(frozen=True, kw_only=True)
 class TidalForcing:
@@ -387,10 +401,15 @@ class TidalForcing:
             tpxo = TPXO()
 
             tides = tpxo.get_corrected_tides(self.model_reference_date, self.allan_factor)
+
             # rename dimension and select desired number of constituents
             for k in tides.keys():
                 tides[k] = tides[k].rename({"nc": "ntides"})
                 tides[k] = tides[k].isel(ntides=slice(None, self.nc))
+            
+            # make sure interpolation works across dateline
+            for key in ["ssh", "pot", "u", "v"]:
+                tides[key] = tpxo.concatenate_across_dateline(tides[key])
 
             # interpolate onto desired grid
             ssh_tide = tides["ssh"].interp(nx=self.grid.ds.lon_rho, ny=self.grid.ds.lat_rho).drop_vars(["nx", "ny"])

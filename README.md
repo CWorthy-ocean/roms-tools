@@ -73,7 +73,7 @@ To visualize the grid we have just created, use the `.plot` method:
 grid.plot(bathymetry=True)
 ```
 
-<img width="786" alt="Screenshot 2024-05-14 at 2 29 03 PM" src="https://github.com/NoraLoose/roms-tools/assets/23617395/6e364b50-d367-49e0-b1b5-f7e1662b1338">
+![Screenshot 2024-05-20 at 10 34 05 AM](https://github.com/NoraLoose/roms-tools/assets/23617395/4c0411fd-8195-4fcf-9837-9ec32f7ff23b)
 
 To see the values of the grid variables you can examine the `xarray.Dataset` object returned by the `.ds` property
 

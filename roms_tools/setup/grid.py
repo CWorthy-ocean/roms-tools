@@ -97,18 +97,52 @@ class Grid:
         """
         self.ds.to_netcdf(filepath)
 
-    def from_file(self, filepath: str) -> "Grid":
+
+    @classmethod
+    def from_file(cls, filepath: str) -> "Grid":
         """
-        Open an existing grid from a file.
+        Create a Grid instance from an existing file.
 
         Parameters
         ----------
-        filepath
+        filepath : str
+            Path to the file containing the grid information.
+
+        Returns
+        -------
+        Grid
+            A new instance of Grid populated with data from the file.
         """
-        # TODO set other parameters that were saved into the file, because every parameter we need gets saved.
-        # TODO actually we will need to deduce size_x and size_y from the file, that's annoying.
-        self.ds = xr.open_dataset(filepath)
-        raise NotImplementedError()
+        # Load the dataset from the file
+        ds = xr.open_dataset(filepath)
+
+        # Create a new Grid instance without calling __init__ and __post_init__
+        grid = cls.__new__(cls)
+
+        # Set the dataset for the grid instance
+        object.__setattr__(grid, "ds", ds)
+
+        # Manually set the remaining attributes by extracting parameters from dataset
+        object.__setattr__(grid, 'nx', ds.sizes['xi_rho'] - 2)
+        object.__setattr__(grid, 'ny', ds.sizes['eta_rho'] - 2)
+        object.__setattr__(grid, 'center_lon', ds['tra_lon'].values.item())
+        object.__setattr__(grid, 'center_lat', ds['tra_lat'].values.item())
+        object.__setattr__(grid, 'rot', ds['rotate'].values.item())
+
+        for attr in ['size_x', 'size_y', 'topography_source', 'smooth_factor', 'hmin', 'rmax']:
+            if attr in ds.attrs:
+                object.__setattr__(grid, attr, ds.attrs[attr])
+
+        return grid
+
+    # override __repr__ method to only print attributes that are actually set
+    def __repr__(self) -> str:
+        cls = self.__class__
+        cls_name = cls.__name__
+        # Create a dictionary of attribute names and values, filtering out those that are not set and 'ds'
+        attr_dict = {k: v for k, v in self.__dict__.items() if k != 'ds' and v is not None}
+        attr_str = ', '.join(f"{k}={v!r}" for k, v in attr_dict.items())
+        return f"{cls_name}({attr_str})"
 
     def to_xgcm() -> Any:
         # TODO we could convert the dataset to an xgcm.Grid object and return here?
@@ -552,7 +586,7 @@ def _create_grid_ds(
     # Coriolis frequency
     f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
 
-    ds["f0"] = xr.Variable(
+    ds["f"] = xr.Variable(
         data=f0,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Coriolis parameter at rho-points", "units": "second-1"},
@@ -598,31 +632,17 @@ def _create_grid_ds(
     ds["rotate"].attrs["long_name"] = "Rotation of base grid"
     ds["rotate"].attrs["units"] = "degrees"
 
-    # TODO this is never written to
-    # ds['xy_flip']
-
-    # TODO same here?
-    # ds["spherical"] = xr.Variable(
-    #    data=["T"],
-    #    attrs={
-    #        "long_name": "Grid type logical switch",
-    #        "option_T": "spherical",
-    #    },
-    #)
-
     return ds
 
 
 def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax):
 
-    ds.attrs["Title"] = (
-        "ROMS grid. Settings:"
-        f" nx: {nx} ny: {ny}"
-        f" xsize: {size_x / 1e3} ysize: {size_y / 1e3}"
-        f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
-    )
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
-    ds.attrs["Topography source"] = topography_source
-    ds.attrs["Topography modifications"] = "Global smoothing with factor %i; Minimal depth: %gm; Local smoothing to satisfy r < rmax = %gm" %(smooth_factor, hmin, rmax)
+    ds.attrs["size_x"] = size_x
+    ds.attrs["size_y"] = size_y
+    ds.attrs["topography_source"] = topography_source
+    ds.attrs["smooth_factor"] = smooth_factor
+    ds.attrs["hmin"] = hmin
+    ds.attrs["rmax"] = rmax
 
     return ds

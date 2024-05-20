@@ -4,7 +4,8 @@ import numpy.testing as npt
 from scipy.ndimage import label
 from roms_tools import Grid
 from roms_tools.setup.topography import _compute_rfactor
-
+import os
+import tempfile
 
 class TestCreateGrid:
     def test_simple_regression(self):
@@ -47,12 +48,41 @@ class TestCreateGrid:
 
 
 class TestGridFromFile:
-    def test_equal_to_from_init(self):
-        ...
 
     def test_roundtrip(self):
         """Test that creating a grid, saving it to file, and re-opening it is the same as just creating it."""
-        ...
+        
+        # Initialize a Grid object using the initializer
+        grid_init = Grid(
+            nx=10,
+            ny=15,
+            size_x=100.0,
+            size_y=150.0,
+            center_lon=0.0,
+            center_lat=0.0,
+            rot=0.0,
+            topography_source='etopo5',
+            smooth_factor=2,
+            hmin=5.0,
+            rmax=0.2
+        )
+
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+            filepath = tmpfile.name
+
+        try:
+            # Save the grid to a file
+            grid_init.save(filepath)
+
+            # Load the grid from the file
+            grid_from_file = Grid.from_file(filepath)
+
+            # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+            assert grid_init == grid_from_file
+
+        finally:
+            os.remove(filepath)
 
 
 class TestTopography:

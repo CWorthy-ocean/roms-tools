@@ -147,10 +147,6 @@ The tidal forcing is held by the `xarray.Dataset` object that is returned by the
 tidal_forcing.ds
 ```
 
-
-```python
-grid.plot(bathymetry=True)
-```
 ```
 <xarray.Dataset> Size: 7MB
 Dimensions:  (ntides: 10, eta_rho: 102, xi_rho: 102, xi_u: 101, eta_v: 101)

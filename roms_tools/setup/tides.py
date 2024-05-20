@@ -550,7 +550,7 @@ class TidalForcing:
         ax.plot(
             [lo1t, lo2t, lo3t, lo4t, lo1t],
             [la1t, la2t, la3t, la4t, la1t],
-            "ro-",
+            "go-",
         )
 
         ax.coastlines(

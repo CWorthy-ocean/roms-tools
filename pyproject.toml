@@ -26,7 +26,8 @@ dependencies = [
     "matplotlib",
     "cartopy",
     "packaging",
-    "scipy"
+    "scipy",
+    "gcm_filters"
 ]
 dynamic = ["version"]
 

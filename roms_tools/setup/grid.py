@@ -25,22 +25,30 @@ class Grid:
 
     Parameters
     ----------
-    nx
-        Number of grid points in the x-direction
-    ny
-        Number of grid points in the y-direction
-    size_x
-        Domain size in the x-direction (in km?)
-    size_y
-        Domain size in the y-direction (in km?)
-    center_lon
-        Longitude of grid center
-    center_lat
-        Latitude of grid center
-    rot
-        Rotation of grid x-direction from lines of constant latitude.
-        Measured in degrees, with positive values meaning a counterclockwise rotation.
-        The default is 0, which means that the x-direction of the grid x-direction is aligned with lines of constant latitude.
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float, optional
+        Rotation of grid x-direction from lines of constant latitude, measured in degrees.
+        Positive values represent a counterclockwise rotation.
+        The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    topography_source : str, optional
+        Specifies the data source to use for the topography. Options are "etopo5". The default is "etopo5".
+    smooth_factor: int
+        The smoothing factor used in the global Gaussian smoothing of the topography. The default is 2.
+    hmin: float
+        The minimum ocean depth (in meters). The default is 5.
+    rmax: float
+        The maximum slope parameter (in meters). The default is 0.2.
 
     Raises
     ------
@@ -55,6 +63,10 @@ class Grid:
     center_lon: float
     center_lat: float
     rot: float = 0
+    topography_source: str = 'etopo5'
+    smooth_factor: int = 2
+    hmin: float = 5.0
+    rmax: float = 0.2
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -66,6 +78,10 @@ class Grid:
             center_lon=self.center_lon,
             center_lat=self.center_lat,
             rot=self.rot,
+            topography_source=self.topography_source,
+            smooth_factor=self.smooth_factor,
+            hmin=self.hmin,
+            rmax=self.rmax,
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
@@ -110,21 +126,32 @@ class Grid:
             Whether or not to plot the bathymetry. Default is False.
         """
 
-        # TODO optionally plot topography on top?
-        if bathymetry:
-            raise NotImplementedError()
 
         import cartopy.crs as ccrs
         import matplotlib.pyplot as plt
 
-        lon_deg = (self.ds["lon_rho"] - 360).values
-        lat_deg = self.ds["lat_rho"].values
+
+        lon_deg = self.ds["lon_rho"]
+        lat_deg = self.ds["lat_rho"]
+
+        if bathymetry:
+            # check if North or South pole are in domain
+            if lat_deg.max().values > 89 or lat_deg.min().values < -89:
+                raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
+
+        # check if Greenwhich meridian goes through domain
+        if np.abs(lon_deg.diff('xi_rho')).max() > 300 or np.abs(lon_deg.diff('eta_rho')).max() > 300:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         # Define projections
-        geodetic = ccrs.Geodetic()
+        proj = ccrs.PlateCarree()
+
         trans = ccrs.NearsidePerspective(
-            central_longitude=np.mean(lon_deg), central_latitude=np.mean(lat_deg)
+                central_longitude=lon_deg.mean().values, central_latitude=lat_deg.mean().values
         )
+
+        lon_deg = lon_deg.values
+        lat_deg = lat_deg.values
 
         # find corners
         (lo1, la1) = (lon_deg[0, 0], lat_deg[0, 0])
@@ -133,10 +160,10 @@ class Grid:
         (lo4, la4) = (lon_deg[-1, 0], lat_deg[-1, 0])
 
         # transform coordinates to projected space
-        lo1t, la1t = trans.transform_point(lo1, la1, geodetic)
-        lo2t, la2t = trans.transform_point(lo2, la2, geodetic)
-        lo3t, la3t = trans.transform_point(lo3, la3, geodetic)
-        lo4t, la4t = trans.transform_point(lo4, la4, geodetic)
+        lo1t, la1t = trans.transform_point(lo1, la1, proj)
+        lo2t, la2t = trans.transform_point(lo2, la2, proj)
+        lo3t, la3t = trans.transform_point(lo3, la3, proj)
+        lo4t, la4t = trans.transform_point(lo4, la4, proj)
 
         plt.figure(figsize=(10, 10))
         ax = plt.axes(projection=trans)
@@ -151,7 +178,14 @@ class Grid:
             resolution="50m", linewidth=0.5, color="black"
         )  # add map of coastlines
         ax.gridlines()
-
+        if bathymetry:
+            p = ax.pcolormesh(
+                    lon_deg, lat_deg,
+                    self.ds.h.where(self.ds.mask_rho),
+                    transform=proj,
+                    cmap="YlGnBu"
+            )
+            plt.colorbar(p, label="Bathymetry [m]")
         plt.show()
 
 
@@ -163,6 +197,10 @@ def _make_grid_ds(
     center_lon: float,
     center_lat: float,
     rot: float,
+    topography_source: str,
+    smooth_factor: int,
+    hmin: float,
+    rmax: float,
 ) -> xr.Dataset:
 
 
@@ -195,9 +233,9 @@ def _make_grid_ds(
         center_lat
     )
 
-    #ds = _add_topography_and_mask(ds, lon, lat)
+    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax)
 
-    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot)
+    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax)
 
     return ds
 
@@ -514,7 +552,7 @@ def _create_grid_ds(
     # Coriolis frequency
     f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
 
-    ds["f0"] = xr.Variable(
+    ds["f"] = xr.Variable(
         data=f0,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Coriolis parameter at rho-points", "units": "second-1"},
@@ -575,7 +613,7 @@ def _create_grid_ds(
     return ds
 
 
-def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot):
+def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax):
 
     ds.attrs["Title"] = (
         "ROMS grid. Settings:"
@@ -583,7 +621,8 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
         f" xsize: {size_x / 1e3} ysize: {size_y / 1e3}"
         f" rotate: {rot} Lon: {center_lon} Lat: {center_lat}"
     )
-    ds.attrs["Date"] = date.today()
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
+    ds.attrs["Topography source"] = topography_source
+    ds.attrs["Topography modifications"] = "Global smoothing with factor %i; Minimal depth: %gm; Local smoothing to satisfy r < rmax = %gm" %(smooth_factor, hmin, rmax)
 
     return ds

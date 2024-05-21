@@ -2,10 +2,13 @@ import pytest
 import numpy as np
 import numpy.testing as npt
 from scipy.ndimage import label
-from roms_tools import Grid
+from roms_tools import Grid, TidalForcing
 from roms_tools.setup.topography import _compute_rfactor
+from roms_tools.setup.tides import TPXO
 import os
 import tempfile
+import hashlib
+import unittest
 
 class TestCreateGrid:
     def test_simple_regression(self):
@@ -135,3 +138,22 @@ class TestTopography:
 
         assert np.less_equal(grid.hmin, grid.ds.h.min())
 
+class TestTPXO():
+
+    def test_load_data_file_not_found(self):
+        # Test loading data from a non-existing file
+        with pytest.raises(FileNotFoundError):
+            TPXO.load_data("non_existing_file.nc")
+
+    def test_load_data_checksum_mismatch(self):
+        # Create a temporary file for testing
+        filename = "test_tidal_data.nc"
+        with open(filename, "wb") as file:
+            # Write some data to the file
+            file.write(b"test data")
+        # Test loading data with incorrect checksum
+        with open(filename, "wb") as file:
+            with pytest.raises(ValueError):
+                TPXO.load_data(filename)
+        # Remove temporary file
+        os.remove(filename)

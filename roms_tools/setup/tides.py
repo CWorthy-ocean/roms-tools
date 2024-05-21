@@ -664,3 +664,15 @@ class TidalForcing:
             )
         plt.colorbar(p, label="%s [%s]" %(self.ds[field].long_name, self.ds[field].units))
         plt.show()
+
+
+    def save(self, filepath: str) -> None:
+        """
+        Save the tidal forcing information to a netCDF4 file.
+
+        Parameters
+        ----------
+        filepath
+        """
+        self.ds.to_netcdf(filepath)
+

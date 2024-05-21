@@ -3,6 +3,8 @@ import xarray as xr
 import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
+import os
+import hashlib
 
 def modified_julian_days(year, month, day, hour=0):
     """
@@ -212,8 +214,8 @@ class TPXO:
 
     Parameters
     ----------
-    ds : xr.Dataset, optional
-        The xarray Dataset containing TPXO tidal model data.
+    filename : str
+        The path to the TPXO dataset.
 
     Attributes
     ----------
@@ -233,18 +235,18 @@ class TPXO:
     Dimensions:  ...
     """
 
+    filename: str = '/glade/derecho/scratch/bachman/ROMS_tools/DATASETS/tpxo9.v2a.nc'
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        #ds = fetch_tpxo()
-        ds = xr.open_dataset('/glade/derecho/scratch/bachman/ROMS_tools/DATASETS/tpxo9.v2a.nc')
+
+        ds = self.load_data(self.filename)
         # Lon_r is constant along ny, i.e., is only a function of nx
         ds["nx"] = ds["lon_r"].isel(ny=0)
         # Lat_r is constant along nx, i.e., is only a function of ny
         ds["ny"] = ds["lat_r"].isel(nx=0)
                 
         object.__setattr__(self, "ds", ds)
-
 
     def get_corrected_tides(self, model_reference_date, allan_factor):
         # Get equilibrium tides
@@ -271,10 +273,84 @@ class TPXO:
         tides = {"ssh": thc, "u": tuc, "v": tvc, "pot": tpc, "omega": self.ds["omega"]}
 
         return tides
+    
+    @staticmethod
+    def load_data(filename):
+        """
+        Load tidal forcing data from the specified file.
+
+        Parameters
+        ----------
+        filename : str
+            The path to the tidal dataset file.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The loaded xarray Dataset containing the tidal forcing data.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the specified file does not exist.
+        ValueError
+            If the file checksum does not match the expected value.
+
+        Notes
+        -----
+        This method performs basic file existence and checksum checks to ensure the integrity of the loaded dataset.
+
+        Examples
+        --------
+        >>> data = TidalForcing.load_data("tidal_data.nc")
+        """
+        # Check if the file exists
+        if not os.path.exists(filename):
+            raise FileNotFoundError(f"File '{filename}' not found.")
+
+        # Calculate the checksum of the file
+        expected_checksum = "306956d8769737ba39040118d8d08f467187fe453e02a5651305621d095bce6e"
+        with open(filename, "rb") as file:
+            actual_checksum = hashlib.sha256(file.read()).hexdigest()
+
+        # Compare the checksums
+        if actual_checksum != expected_checksum:
+            raise ValueError("Checksum mismatch. The file may be corrupted or tampered with.")
+
+        # Load the dataset
+        ds = xr.open_dataset(filename)
+
+        return ds
 
 
     @staticmethod
     def compute_equilibrium_tide(lon, lat):
+        """
+        Compute equilibrium tide for given longitudes and latitudes.
+
+        Parameters
+        ----------
+        lon : xr.DataArray
+            Longitudes in degrees.
+        lat : xr.DataArray
+            Latitudes in degrees.
+
+        Returns
+        -------
+        tpc : xr.DataArray
+            Equilibrium tide complex amplitude.
+
+        Notes
+        -----
+        This method computes the equilibrium tide complex amplitude for given longitudes
+        and latitudes. It considers 15 tidal constituents and their corresponding
+        amplitudes and elasticity factors. The types of tides are classified as follows:
+            - 2: semidiurnal
+            - 1: diurnal
+            - 0: long-term
+
+        """
+
         # Amplitudes and elasticity factors for 15 tidal constituents
         A = xr.DataArray(
             data = np.array([
@@ -341,11 +417,28 @@ class TPXO:
 
     @staticmethod
     def concatenate_across_dateline(field):
+        """
+        Concatenate a field across the dateline for TPXO atlas.
+
+        Parameters
+        ----------
+        field : xr.DataArray
+            The field to be concatenated across the dateline.
+
+        Returns
+        -------
+        field_concatenated : xr.DataArray
+            The field concatenated across the dateline.
+
+        Notes
+        -----
+        The TPXO atlas has a minimum longitude of 0.167 and a maximum longitude of 360.0.
+        This method concatenates the field along the dateline on the lower end, considering 
+        the discontinuity in longitudes.
+
+        """
         lon = field['nx']
-        # tpxo atlas has minimum longitude 0.167 and maximum longitude 360.0
-        # we therefore only need to concatenate on the lower end
         lon_minus360 = lon - 360
-        # Concatenate along the longitude axis
         lon_concatenated = xr.concat([lon_minus360, lon], dim="nx")
         field_concatenated = xr.concat([field, field], dim="nx")
         field_concatenated["nx"] = lon_concatenated
@@ -362,6 +455,8 @@ class TidalForcing:
     ----------
     grid : Grid
         The grid object representing the ROMS grid associated with the tidal forcing data.
+    filename: str
+        The path to the native tidal dataset.
     nc : int, optional
         Number of constituents to consider. Maximum number is 14. Default is 10.
     model_reference_date : datetime, optional
@@ -390,6 +485,7 @@ class TidalForcing:
     >>> print(tidal_forcing.ds)
     """
     grid: Grid
+    filename: str
     nc: int = 10
     model_reference_date: datetime = datetime(2000, 1, 1)
     source: str = "tpxo"
@@ -398,7 +494,7 @@ class TidalForcing:
 
     def __post_init__(self):
         if self.source == "tpxo":
-            tpxo = TPXO()
+            tpxo = TPXO(filename=self.filename)
 
             tides = tpxo.get_corrected_tides(self.model_reference_date, self.allan_factor)
 

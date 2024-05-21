@@ -174,6 +174,11 @@ tidal_forcing.plot("ssh_Re", nc=0)
 ```
 ![Screenshot 2024-05-20 at 5 02 25 PM](https://github.com/NoraLoose/roms-tools/assets/23617395/f0e35759-c6a1-4c19-a683-cb7e272aa910)
 
+We can save our tidal forcing data as a netCDF file via the `.save` method:
+
+```python
+grid.save('forcings/my_tidal_forcing.nc')
+```
 
 ### More steps:
 

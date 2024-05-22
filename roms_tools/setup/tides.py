@@ -235,7 +235,7 @@ class TPXO:
     Dimensions:  ...
     """
 
-    filename: str = '/glade/derecho/scratch/bachman/ROMS_tools/DATASETS/tpxo9.v2a.nc'
+    filename: str
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):

@@ -117,13 +117,68 @@ grid.save('grids/my_new_roms_grid.nc')
 
 The basic grid domain is now ready for use by ROMS.
 
-We can also populate a new instance of Grid with data from an existing file:
+We can also create a grid from an existing file:
 
 ```python
-grid2 = Grid.from_file('grids/my_new_roms_grid.nc')
+the_same_grid = Grid.from_file('grids/my_new_roms_grid.nc')
 ```
 
-`grid` and `grid2` are identical!
+`grid` and `the_same_grid` are identical!
+
+### Step 2: Make Tidal Forcing
+
+Once we have created a grid in Step 1, we can make the tidal forcing for this grid. 
+
+```python
+from roms_tools import TidalForcing
+from datetime import datetime
+
+tidal_forcing = TidalForcing(
+    grid=grid,                                 # The grid object representing the ROMS grid associated with the tidal forcing data
+    source="tpxo",                             # The source of the tidal data. Default is "tpxo".
+    filename="tpxo_atlas.nc",                  # The path to the native tidal (e.g., TPXO) dataset file.
+    nc=10,                                     # Number of constituents to consider. Maximum number is 14. Default is 10.
+    model_reference_date=datetime(2000, 1, 1)  # The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
+    allan_factor=2.0                           # The Allan factor used in tidal model computation. Default is 2.0.
+)
+```
+The tidal forcing is held by the `xarray.Dataset` object that is returned by the `.ds` property
+
+```python
+tidal_forcing.ds
+```
+
+```
+<xarray.Dataset> Size: 7MB
+Dimensions:  (ntides: 10, eta_rho: 102, xi_rho: 102, xi_u: 101, eta_v: 101)
+Coordinates:
+    lat_rho  (eta_rho, xi_rho) float64 83kB 47.84 47.91 47.97 ... 73.51 73.53
+    lon_rho  (eta_rho, xi_rho) float64 83kB 354.0 354.3 354.5 ... 13.64 14.21
+Dimensions without coordinates: ntides, eta_rho, xi_rho, xi_u, eta_v
+Data variables:
+    omega    (ntides) float64 80B 0.0001405 0.0001454 ... 2.639e-06 5.323e-06
+    ssh_Re   (ntides, eta_rho, xi_rho) float64 832kB 1.329 1.394 ... -0.01962
+    ssh_Im   (ntides, eta_rho, xi_rho) float64 832kB 0.7651 0.7742 ... -0.01428
+    pot_Re   (ntides, eta_rho, xi_rho) float64 832kB 0.05112 ... -0.0005051
+    pot_Im   (ntides, eta_rho, xi_rho) float64 832kB 0.1091 0.1075 ... 0.003186
+    u_Re     (ntides, eta_rho, xi_u) float64 824kB 0.2155 0.1961 ... 0.0003719
+    u_Im     (ntides, eta_rho, xi_u) float64 824kB 0.716 0.6522 ... 0.0001938
+    v_Re     (ntides, eta_v, xi_rho) float64 824kB -0.5712 ... -0.0003684
+    v_Im     (ntides, eta_v, xi_rho) float64 824kB 0.828 0.7922 ... 0.0001878
+```
+
+To visualize any of the tidal forcing components, use the `.plot` method:
+
+```python
+tidal_forcing.plot("ssh_Re", nc=0)
+```
+![Screenshot 2024-05-20 at 5 02 25 PM](https://github.com/NoraLoose/roms-tools/assets/23617395/f0e35759-c6a1-4c19-a683-cb7e272aa910)
+
+We can save our tidal forcing data as a netCDF file via the `.save` method:
+
+```python
+grid.save('forcings/my_tidal_forcing.nc')
+```
 
 ### More steps:
 

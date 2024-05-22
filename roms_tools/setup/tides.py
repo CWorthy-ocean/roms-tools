@@ -300,9 +300,6 @@ class TPXO:
         -----
         This method performs basic file existence and checksum checks to ensure the integrity of the loaded dataset.
 
-        Examples
-        --------
-        >>> data = TidalForcing.load_data("tidal_data.nc")
         """
         # Check if the file exists
         if not os.path.exists(filename):

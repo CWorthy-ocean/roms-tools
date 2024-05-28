@@ -519,9 +519,9 @@ class TidalForcing:
         v_tide = v_tide / self.grid.ds.h
 
         # Interpolate from rho- to velocity points
-        u_tide = (u_tide + u_tide.shift(xi_rho=1)).isel(xi_rho=slice(1, None)).drop_vars(["lat_rho", "lon_rho"])
+        u_tide = (u_tide + u_tide.shift(xi_rho=1)).isel(xi_rho=slice(1, None))
         u_tide = u_tide.swap_dims({"xi_rho": "xi_u"})
-        v_tide = (v_tide + v_tide.shift(eta_rho=1)).isel(eta_rho=slice(1, None)).drop_vars(["lat_rho", "lon_rho"])
+        v_tide = (v_tide + v_tide.shift(eta_rho=1)).isel(eta_rho=slice(1, None))
         v_tide = v_tide.swap_dims({"eta_rho": "eta_v"})
 
         # save in new dataset

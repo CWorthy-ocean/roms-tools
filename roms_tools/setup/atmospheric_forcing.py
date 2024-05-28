@@ -5,6 +5,7 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import glob
 import numpy as np
+from typing import Optional
 
 
 def concatenate_across_dateline(field, end):
@@ -125,6 +126,7 @@ class ERA5:
 
         return ds
 
+    @staticmethod
     def correct_shortwave_radiation(filename, swr, grid):
         """
         Apply shortwave radiation correction.
@@ -143,6 +145,12 @@ class ERA5:
         swr_corrected : xr.DataArray
             Corrected shortwave radiation values.
     
+        Raises
+        ------
+        ValueError
+            - If the correction dataset dimensions do not match expectations (time, longitude, latitude).
+            - If the temporal dimension of the correction dataset does not have length 12, assuming monthly climatology.
+
         Notes
         -----
         This function corrects shortwave radiation values using correction data provided in the dataset located
@@ -157,9 +165,26 @@ class ERA5:
     
         # Open and load the correction dataset
         ds_correction = xr.open_dataset(filename)
-    
+        
+        # Check if required dimensions are present
+        required_dims = {"time", "longitude", "latitude"}
+        if not required_dims.issubset(ds_correction.dims):
+            raise ValueError(f"The dataset must contain the dimensions: {required_dims}")
+
+        # Check if the time dimension has length 12
+        if "time" in ds_correction.dims and len(ds_correction["time"]) != 12:
+            raise ValueError("The length of the 'time' dimension must be 12 for monthly climatology.")
+
         # Spatial interpolation
-        corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='upper')  # correction dataset has longitudes from 0 to 359.75
+        lon_min = ds_correction.longitude.min().values
+        lon_max = ds_correction.longitude.max().values
+        if lon_min > 0.0 and lon_max < 365.0:
+            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='both')
+        elif lon_min > 0.0:
+            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='lower')
+        else:
+            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='upper')
+
         corr_factor = corr_factor.interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='nearest').drop_vars(["longitude", "latitude"])
         
         # Temporal interpolation
@@ -195,6 +220,8 @@ class AtmosphericForcing:
         Reference date for the model. Default is January 1, 2000.
     source : str, optional
         Source of the atmospheric forcing data. Default is "era5".
+    filename: str
+        Path to the atmospheric forcing data file on native grid. Can contain wildcards.
     swr_correction : SWRCorrection
         Shortwave radiation correction configuration.
     rivers : Rivers, optional
@@ -212,6 +239,8 @@ class AtmosphericForcing:
         Reference date for the model.
     source : str
         Source of the atmospheric forcing data.
+    filename : str
+        Path to the atmospheric forcing data file. Can contain wildcards.
     swr_correction : SWRCorrection
         Shortwave radiation correction configuration.
     rivers : Rivers
@@ -229,10 +258,8 @@ class AtmosphericForcing:
     >>> grid_info = Grid(...)
     >>> start_time = datetime(2000, 1, 1)
     >>> end_time = datetime(2000, 1, 2)
-    >>> swr_correction = AtmosphericForcing.SWRCorrection(apply_swr_correction=True, source="corev2", filename="correction_data.nc")
-    >>> atm_forcing = AtmosphericForcing(grid=grid_info, start_time=start_time, end_time=end_time, swr_correction=swr_correction)
-    >>> print(atm_forcing.source)
-    era5
+    >>> swr_correction = AtmosphericForcing.SWRCorrection(filename="correction_data.nc")
+    >>> atm_forcing = AtmosphericForcing(grid=grid_info, start_time=start_time, end_time=end_time, source='era5', filename='atmospheric_data_*.nc', swr_correction=swr_correction)
     """
 
     grid: Grid
@@ -240,8 +267,9 @@ class AtmosphericForcing:
     end_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
     source: str = "era5"
-    swr_correction: 'SWRCorrection' = field(init=False, repr=False)
-    rivers: 'Rivers' = field(init=False, repr=False)
+    filename: str
+    swr_correction: Optional['SWRCorrection'] = None
+    rivers: Optional['Rivers'] = None
     ds: xr.Dataset = field(init=False, repr=False)
 
     @dataclass(frozen=True, kw_only=True)
@@ -253,19 +281,16 @@ class AtmosphericForcing:
         ----------
         apply : bool, optional
             Flag to apply shortwave radiation correction. Default is False.
-        source : str, optional
-            Source of the correction data. Default is "corev2".
         filename : str, optional
             Filename of the correction data.
         """
 
         apply: bool = False
-        source: str = "era5_to_corev2"
         filename: str = ""
 
         def __post_init__(self):
-            if self.apply and not self.source:
-                raise ValueError("Either 'apply_swr_correction' or 'source' must be provided.")
+            if not self.filename:
+                raise ValueError("The 'filename' must be provided.")
 
 
     @dataclass(frozen=True, kw_only=True)
@@ -283,26 +308,31 @@ class AtmosphericForcing:
 
         apply: bool = False
         filename: str = ""
+ 
+        def __post_init__(self):
+            if not self.filename:
+                raise ValueError("The 'filename' must be provided.")
 
     def __post_init__(self):
         if self.source == "era5":
-            era5 = ERA5(self.filename, self.start_time, self.end_time)
+            era5 = ERA5(filename=self.filename, start_time=self.start_time, end_time=self.end_time)
             
             # interpolate onto desired grid
-            u10 = era5.ds["u10"].interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='nearest').drop_vars(["longitude", "latitude"])
-            v10 = era5.ds["v10"].interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='nearest').drop_vars(["longitude", "latitude"])
-            swr = era5.ds["ssr"].interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
-            lwr = era5.ds["strd"].interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
-            t2m = era5.ds["t2m"].interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
-            d2m = era5.ds["d2m"].interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
-            rain = era5.ds["tp"].interp(longitude=grid.ds.lon_rho, latitude=grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
+            u10 = era5.ds["u10"].interp(longitude=self.grid.ds.lon_rho, latitude=self.grid.ds.lat_rho, method='nearest').drop_vars(["longitude", "latitude"])
+            v10 = era5.ds["v10"].interp(longitude=self.grid.ds.lon_rho, latitude=self.grid.ds.lat_rho, method='nearest').drop_vars(["longitude", "latitude"])
+            swr = era5.ds["ssr"].interp(longitude=self.grid.ds.lon_rho, latitude=self.grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
+            lwr = era5.ds["strd"].interp(longitude=self.grid.ds.lon_rho, latitude=self.grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
+            t2m = era5.ds["t2m"].interp(longitude=self.grid.ds.lon_rho, latitude=self.grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
+            d2m = era5.ds["d2m"].interp(longitude=self.grid.ds.lon_rho, latitude=self.grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
+            rain = era5.ds["tp"].interp(longitude=self.grid.ds.lon_rho, latitude=self.grid.ds.lat_rho, method='linear').drop_vars(["longitude", "latitude"])
             
             # translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
             swr = swr / 3600  # from J/m^2 to W/m^2
             lwr = lwr / 3600  # from J/m^2 to W/m^2
             rain = rain * 100 * 24  # from m to cm/day
             # correct shortwave radiation
-            swr = era5.correct_shortwave_radiation(swr, grid)
+            if self.swr_correction:
+                swr = era5.correct_shortwave_radiation(self.swr_correction.filename, swr, self.grid)
 
             # convert from K to C
             t2m = t2m - 273.15
@@ -316,8 +346,8 @@ class AtmosphericForcing:
             cff = cff * qair
             qair = 0.62197 *(cff /(patm-0.378*cff))
     
-        if self.rivers:
-            NotImplementedError
+        if self.rivers and self.rivers.apply:
+            NotImplementedError("River forcing is not implemented yet.")
             # rain = rain + rivers
 
         # save in new dataset
@@ -356,6 +386,19 @@ class AtmosphericForcing:
         # translate to days since model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
         ds["time"] = (ds["time"] - model_reference_date).astype('float64') / 3600 / 24 * 1e-9
-        ds["time"].attrs["long_name"] = "time since {np.datetime_as_string(model_reference_date, unit='D')}"
+        ds["time"].attrs["long_name"] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
 
         object.__setattr__(self, "ds", ds)
+
+
+    def save(self, filepath: str) -> None:
+        """
+        Save the atmospheric forcing information to a netCDF4 file.
+
+        Parameters
+        ----------
+        filepath
+        """
+        self.ds.to_netcdf(filepath)
+
+

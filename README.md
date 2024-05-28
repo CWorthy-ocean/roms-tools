@@ -138,7 +138,7 @@ tidal_forcing = TidalForcing(
     source="tpxo",                             # The source of the tidal data. Default is "tpxo".
     filename="tpxo_atlas.nc",                  # The path to the native tidal (e.g., TPXO) dataset file.
     nc=10,                                     # Number of constituents to consider. Maximum number is 14. Default is 10.
-    model_reference_date=datetime(2000, 1, 1)  # The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
+    model_reference_date=datetime(2000, 1, 1), # The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
     allan_factor=2.0                           # The Allan factor used in tidal model computation. Default is 2.0.
 )
 ```

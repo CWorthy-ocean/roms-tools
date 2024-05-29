@@ -222,6 +222,39 @@ class Grid:
             plt.colorbar(p, label="Bathymetry [m]")
         plt.show()
 
+    def coarsen(self):
+        """
+        Update the grid by adding grid variables that are coarsened versions of the original
+        fine-resoluion grid variables. The coarsening is by a factor of two.
+
+        The specific variables being coarsened are:
+        - `lon_rho` -> `lon_coarse`: Longitude at rho points.
+        - `lat_rho` -> `lat_coarse`: Latitude at rho points.
+        - `h` -> `h_coarse`: Bathymetry (depth).
+        - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
+        - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
+
+        Returns
+        -------
+        None
+
+        Modifies
+        --------
+        self.ds : xr.Dataset
+            The dataset attribute of the Grid instance is updated with the new coarser variables.
+        """
+        d = {
+            "lon_rho": "lon_coarse",
+            "lat_rho": "lat_coarse",
+            "h": "h_coarse",
+            "angle": "angle_coarse",
+            "mask_rho": "mask_coarse"
+        }
+
+        for fine_var, coarse_var in d.items():
+            self.ds[coarse_var] = _f2c(self.ds[fine_var])
+
+        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"]>0.5, 1, 0)
 
 def _make_grid_ds(
     nx: int,
@@ -646,3 +679,56 @@ def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot
     ds.attrs["rmax"] = rmax
 
     return ds
+
+def _f2c(f):
+    """
+    Coarsen input xarray DataArray f in both x- and y-direction.
+
+    Parameters
+    ----------
+    f : xarray.DataArray
+        Input DataArray with dimensions (nxp, nyp).
+
+    Returns
+    -------
+    fc : xarray.DataArray
+        Output DataArray with modified dimensions and values.
+    """
+
+    fc = _f2c_xdir(f)
+    fc = fc.transpose()
+    fc = _f2c_xdir(fc)
+    fc = fc.transpose()
+    fc = fc.rename({"eta_rho": "eta_coarse", "xi_rho": "xi_coarse"})
+
+    return fc
+
+def _f2c_xdir(f):
+    """
+    Coarsen input xarray DataArray f in x-direction.
+
+    Parameters
+    ----------
+    f : xarray.DataArray
+        Input DataArray with dimensions (nxp, nyp).
+
+    Returns
+    -------
+    fc : xarray.DataArray
+        Output DataArray with modified dimensions and values.
+    """
+    nxp, nyp = f.shape
+    nxcp = (nxp - 2) // 2 + 2
+
+    fc = xr.DataArray(np.zeros((nxcp, nyp)), dims=f.dims)
+
+    # Calculate the interior values
+    fc[1:-1, :] = 0.5 * (f[1:-2:2, :] + f[2:-1:2, :])
+
+    # Calculate the first row
+    fc[0, :] = f[0, :] + 0.5 * (f[0, :] - f[1, :])
+
+    # Calculate the last row
+    fc[-1, :] = f[-1, :] + 0.5 * (f[-1, :] - f[-2, :])
+
+    return fc

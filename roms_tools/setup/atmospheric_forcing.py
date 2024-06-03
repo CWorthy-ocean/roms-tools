@@ -9,7 +9,6 @@ from typing import Optional
 from scipy.sparse import spdiags, coo_matrix
 from scipy.sparse.linalg import spsolve
 
-
 def concatenate_across_dateline(field, end):
     """
     Concatenates a field across the dateline based on the specified end.
@@ -400,10 +399,6 @@ class AtmosphericForcing:
 
         ds.attrs["Title"] = "ROMS bulk surface forcing file produced by roms-tools"
         
-        # translate to days since model reference date
-        model_reference_date = np.datetime64(self.model_reference_date)
-        ds["time"] = (ds["time"] - model_reference_date).astype('float64') / 3600 / 24 * 1e-9
-        ds["time"].attrs["long_name"] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
 
 
         ds = ds.assign_coords({"lon": lon, "lat": lat})
@@ -541,6 +536,31 @@ class AtmosphericForcing:
         ----------
         filepath
         """
-        self.ds.to_netcdf(filepath)
+
+        datasets = []
+        filenames = []
+
+        gb = self.ds.groupby("time.year")
+
+        for year, group_ds in gb:
+            sub_gb = group_ds.groupby("time.month")
+
+            for month, ds in sub_gb:
+                
+                datasets.append(ds)    
+                
+                year_month_str = f"{year}{month:02}"
+                filename = "%s.%s.nc" %(filepath, year_month_str)
+                filenames.append(filename)
+
+        
+        for ds, filename in zip(datasets, filenames):
+
+            # translate to days since model reference date
+            model_reference_date = np.datetime64(self.model_reference_date)
+            ds["time"] = (ds["time"] - model_reference_date).astype('float64') / 3600 / 24 * 1e-9
+            ds["time"].attrs["long_name"] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
+
+            ds.to_netcdf(filename)
 
 

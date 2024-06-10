@@ -21,13 +21,12 @@ forcings, initial conditions, and more!
    :maxdepth: 1
    :caption: Examples
 
-   Creating a grid <example_esn_usage>
+   Creating a grid <grid>
 
 .. toctree::
    :maxdepth: 1
    :caption: Community
 
-   contributing
    support
 
 .. toctree::

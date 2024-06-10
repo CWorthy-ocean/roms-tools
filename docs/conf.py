@@ -21,9 +21,9 @@ extensions = [
         "sphinxcontrib.bibtex",
         ]
 
-numpydoc_show_class_members = False
-napolean_google_docstring = True
-napolean_numpy_docstring = False
+numpydoc_show_class_members = True
+napolean_google_docstring = False
+napolean_numpy_docstring = True
 
 templates_path = ['_templates']
 exclude_patterns = []

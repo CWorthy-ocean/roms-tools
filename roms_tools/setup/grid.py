@@ -347,7 +347,15 @@ class Grid:
         }
 
         for fine_var, coarse_var in d.items():
-            self.ds[coarse_var] = _f2c(self.ds[fine_var])
+            fine_field = self.ds[fine_var]
+            if self.straddle and fine_var == "lon_rho":
+                fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
+            
+            coarse_field = _f2c(fine_field)
+            if fine_var == "lon_rho":
+                coarse_field = xr.where(coarse_field < 0, coarse_field + 360, coarse_field)
+
+            self.ds[coarse_var] = coarse_field
 
         self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"]>0.5, 1, 0)
 

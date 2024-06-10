@@ -5,77 +5,115 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime, timedelta
 import glob
 import numpy as np
-from typing import Optional
+from typing import Optional, Dict, Union
 from scipy.sparse import spdiags, coo_matrix
 from scipy.sparse.linalg import spsolve
 from roms_tools.setup.fill import lateral_fill
 
-def concatenate_across_dateline(field, end):
+def choose_subdomain(ds, dim_names, latitude_range, longitude_range) -> xr.Dataset:
     """
-    Concatenates a field across the dateline based on the specified end.
+    Choose a subdomain from the given xarray Dataset based on latitude and longitude ranges,
+    including one extra grid point beyond the specified ranges.
 
     Parameters
     ----------
-    field : xr.DataArray
-        Input field to be concatenated.
-    end : {'upper', 'lower', 'both'}
-        Specifies which end of the dateline to concatenate the field.
-        - 'upper': Concatenate on the upper end.
-        - 'lower': Concatenate on the lower end.
-        - 'both': Concatenate on both ends.
+    ds : xr.Dataset
+        The xarray Dataset containing the data.
+    dim_names : dict
+        A dictionary containing the dimension names for latitude and longitude.
+    latitude_range : tuple
+        A tuple specifying the minimum and maximum latitude values of the subdomain.
+    longitude_range : tuple
+        A tuple specifying the minimum and maximum longitude values of the subdomain.
 
     Returns
     -------
-    field_concatenated : xr.DataArray
-        Concatenated field along the longitude axis.
+    xr.Dataset
+        The subset of the original dataset representing the chosen subdomain.
+
+    Raises
+    ------
+    ValueError
+        If the specified subdomain is not fully contained within the dataset.
     """
-    lon = field['longitude']
 
-    if end == 'upper':
-        lon_plus360 = lon + 360
-        lon_concatenated = xr.concat([lon, lon_plus360], dim="longitude")
-        field_concatenated = xr.concat([field, field], dim="longitude")
-    elif end == 'lower':
-        lon_minus360 = lon - 360
-        lon_concatenated = xr.concat([lon_minus360, lon], dim="longitude")
-        field_concatenated = xr.concat([field, field], dim="longitude")
-    elif end == 'both':
-        lon_minus360 = lon - 360
-        lon_plus360 = lon + 360
-        lon_concatenated = xr.concat([lon_minus360, lon, lon_plus360], dim="longitude")
-        field_concatenated = xr.concat([field, field, field], dim="longitude")
+    lat_min, lat_max = latitude_range
+    lon_min, lon_max = longitude_range
 
-    field_concatenated["longitude"] = lon_concatenated
+    # Get latitude and longitude values
+    lats = ds[dim_names["latitude"]]
+    lons = ds[dim_names["longitude"]]
 
-    return field_concatenated
+    # Find indices for the specified ranges
+    lat_indices = np.where((lats >= lat_min) & (lats <= lat_max))[0]
+    lon_indices = np.where((lons >= lon_min) & (lons <= lon_max))[0]
 
+    if lat_indices.size == 0 or lon_indices.size == 0:
+        raise ValueError("The specified ranges do not overlap with the dataset.")
 
+    # Extend the range by two grid point on each side to interpolate safely
+    lat_min_index = lat_indices[0] - 2
+    lat_max_index = min(len(lats) - 1, lat_indices[-1] + 2)
+    lon_min_index = max(0, lon_indices[0] - 2)
+    lon_max_index = min(len(lons) - 1, lon_indices[-1] + 2)
+    
+    if lat_indices[0] - 2 < 0:
+        ValueError
+
+    # Select the subdomain based on the extended indices
+    subdomain = ds.isel(
+        **{
+            dim_names["latitude"]: slice(lat_min_index, lat_max_index + 1),
+            dim_names["longitude"]: slice(lon_min_index, lon_max_index + 1)
+        }
+    )
+
+    # Check if the selected subdomain fully contains the specified ranges
+    dataset_lat_min = subdomain[dim_names["latitude"]].min().values
+    dataset_lat_max = subdomain[dim_names["latitude"]].max().values
+    dataset_lon_min = subdomain[dim_names["longitude"]].min().values
+    dataset_lon_max = subdomain[dim_names["longitude"]].max().values
+
+    if (lat_min < dataset_lat_min or lat_max > dataset_lat_max or
+            lon_min < dataset_lon_min or lon_max > dataset_lon_max):
+        raise ValueError(
+            f"The specified subdomain is not fully contained within the dataset.\n"
+            f"Dataset latitude range: ({dataset_lat_min}, {dataset_lat_max})\n"
+            f"Dataset longitude range: ({dataset_lon_min}, {dataset_lon_max})\n"
+            f"Specified latitude range: ({lat_min}, {lat_max})\n"
+            f"Specified longitude range: ({lon_min}, {lon_max})"
+        )
+    
+    return subdomain
 
 @dataclass(frozen=True, kw_only=True)
-class ERA5:
+class ForcingDataset:
     """
-    Represents ERA5 data.
+    Represents forcing data on original grid.
 
     Parameters
     ----------
     filename : str
-        The path to the ERA5 files.
+        The path to the data files. Can contain wildcards.
     start_time: datetime
+        The start time for selecting relevant data.
     end_time: datetime
+        The end time for selecting relevant data.
     chunks : dict, optional
         Dictionary specifying chunk sizes for dask.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
 
     Attributes
     ----------
     ds : xr.Dataset
-        The xarray Dataset containing ERA5 data.
-
+        The xarray Dataset containing the forcing data on its original grid.
 
     Examples
     --------
-    >>> era5 = ERA5()
-    >>> era5.load_data("era5_data.nc")
-    >>> print(era5.ds)
+    >>> dataset = ForcingDataset(filename="data.nc", start_time=datetime(2022, 1, 1), end_time=datetime(2022, 12, 31))
+    >>> dataset.load_data()
+    >>> print(dataset.ds)
     <xarray.Dataset>
     Dimensions:  ...
     """
@@ -83,267 +121,321 @@ class ERA5:
     filename: str
     start_time: datetime
     end_time: datetime
-    chunks: dict = field(default_factory=lambda: {"time": 1})
+    chunks: Dict[str, Union[int, Dict[str, int]]] = field(default_factory=lambda: {"time": 1})
+    #chunks: dict = field(default_factory=lambda: {"time": 1})
+    dim_names: Dict[str, str] = field(default_factory=lambda: {"longitude": "lon", "latitude": "lat", "time": "time"})
 
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
 
-        ds = self.load_data(self.filename, chunks=self.chunks)
-
-        # select relevant times
-        times = (np.datetime64(self.start_time) < ds.time) & (ds.time < np.datetime64(self.end_time))
+        ds = self.load_data()
+        
+        # Select relevant times
+        times = (np.datetime64(self.start_time) < ds[self.dim_names["time"]]) & (ds[self.dim_names["time"]] < np.datetime64(self.end_time))
         ds = ds.where(times, drop=True)
 
-        ds['longitude'] = xr.where(ds.longitude <= 0, ds.longitude + 360, ds.longitude)
-        
+        # Make sure that latitude is ascending
+        diff = np.diff(ds[self.dim_names["latitude"]])
+        if np.all(diff < 0):
+            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
+
         object.__setattr__(self, "ds", ds)
 
 
-    @staticmethod
-    def load_data(filename, chunks):
+    def load_data(self) -> xr.Dataset:
         """
-        Load tidal forcing data from the specified file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the tidal dataset file.
+        Load dataset from the specified file.
 
         Returns
         -------
         ds : xr.Dataset
-            The loaded xarray Dataset containing the tidal forcing data.
+            The loaded xarray Dataset containing the forcing data.
 
         Raises
         ------
         FileNotFoundError
             If the specified file does not exist.
-
         """
         # Check if the file exists
-
-        # Check if any file matching the wildcard pattern exists
-        matching_files = glob.glob(filename)
+        matching_files = glob.glob(self.filename)
         if not matching_files:
-            raise FileNotFoundError(f"No files found matching the pattern '{filename}'.")
+            raise FileNotFoundError(f"No files found matching the pattern '{self.filename}'.")
 
         # Load the dataset
         with dask.config.set(**{'array.slicing.split_large_chunks': False}):
-            ds = xr.open_mfdataset(filename, combine='nested', concat_dim='time', chunks=chunks)
+            ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], chunks=self.chunks)
 
         return ds
 
+    def select_subdomain(self, latitude_range, longitude_range):
+        ds = choose_subdomain(self.ds, self.dim_names, latitude_range, longitude_range)
+        object.__setattr__(self, "ds", ds)
+
+
+#@dataclass(frozen=True, kw_only=True)
+#class SWRCorrection:
+#    """
+#    Configuration for shortwave radiation correction.
+#
+#    Parameters
+#    ----------
+#    filename : str
+#        Filename of the correction data.
+#    varname : str
+#        Variable identifier for the correction.
+#    temporal_resolution : str, optional
+#        Temporal resolution of the correction data. Default is "climatology".
+#    spatial_coverage : str, optional
+#        Spatial coverage of the correction data. Default is "global".
+#
+#    Attributes
+#    ----------
+#    filename : str
+#        Filename of the correction data.
+#    varname : str
+#        Variable identifier for the correction.
+#    temporal_resolution : str
+#        Temporal resolution of the correction data.
+#    spatial_coverage : str
+#        Spatial coverage of the correction data.
+#    da : xr.DataArray
+#        The loaded xarray DataArray containing the correction data.
+#
+#    Examples
+#    --------
+#    config = SWRCorrection(filename="correction_data.nc", varname="swr", temporal_resolution="climatology", spatial_coverage="global")
+#    print(config.var)
+#    <xarray.DataArray 'swr' (time: 12, lat: 180, lon: 360)>
+#    array([[[...]]])
+#
+#    """
+#
+#    filename: str
+#    temporal_resolution: str = "climatology"
+#    spatial_coverage: str = "global"
+#    da: xr.DataArray = field(init=False, repr=False)
+#
+#    def __post_init__(self):
+#        if self.temporal_resolution != "climatology":
+#            raise NotImplementedError(f"temporal_resolution must be 'climatology', got {self.temporal_resolution}")
+#        if self.spatial_coverage != "global":
+#            raise NotImplementedError(f"spatial_coverage must be 'global', got {self.spatial_coverage}")
+#
+#        da = self.load_data(self.filename)
+#        object.__setattr__(self, "da", da)
+#
+#    @staticmethod
+#    def load_data(filename, varname):
+#        """
+#        Load data from the specified file.
+#
+#        Parameters
+#        ----------
+#        filename : str
+#            The path to the correction dataset.
+#        varname : str
+#            The variable identifier for the correction.
+#
+#        Returns
+#        -------
+#        da : xr.DataArray
+#            The loaded xarray DataArray containing the correction data.
+#
+#        Raises
+#        ------
+#        FileNotFoundError
+#            If the specified file does not exist.
+#
+#        """
+#        # Check if the file exists
+#
+#        # Check if any file matching the wildcard pattern exists
+#        matching_files = glob.glob(filename)
+#        if not matching_files:
+#            raise FileNotFoundError(f"No files found matching the pattern '{filename}'.")
+#
+#        # Load the dataset
+#        ds = xr.open_dataset(filename)
+#        da = ds[varname]
+#        lon = ds[lonname]
+#        lat = ds[latname]
+#
+#        return da, lon, lat
+#    
+#    def interpolate_spatially(self, coords):
+#        """
+#        Interpolate correction in space.
+#    
+#        Parameters
+#        ----------
+#        coords : dict
+#            A dictionary specifying the spatial target coordinates for interpolation, e.g., 
+#            {"latitude": lat_values, "longitude": lon_values}.
+#
+#
+#        Returns
+#        -------
+#        swr_corrected : xr.DataArray
+#            Corrected shortwave radiation values.
+#    
+#        Raises
+#        ------
+#        ValueError
+#            - If the correction dataset dimensions do not match expectations (time, longitude, latitude).
+#            - If the temporal dimension of the correction dataset does not have length 12, assuming monthly climatology.
+#
+#        Notes
+#        -----
+#        This function performs both spatial and temporal interpolation to align the correction
+#        data with the input radiation data grid and time points, respectively. The corrected radiation values are
+#        then obtained by multiplying the input radiation data with the interpolated correction factors.
+#    
+#        Examples
+#        --------
+#        >>> corrected_swr = correct_shortwave_radiation("correction_data.nc", swr_data, lon, lat)
+#        """
+#
+#        dims = list(coords.keys())
+#
+#        # Spatial interpolation
+#        lon_min = self.lon.min().values
+#        lon_max = self.lon.max().values
+#        if lon_min > 0.0 and lon_max < 365.0:
+#            da = concatenate_across_dateline(self.da, end='both')
+#        elif lon_min > 0.0:
+#            da = concatenate_across_dateline(self.da, end='lower')
+#        else:
+#            da = concatenate_across_dateline(self.da, end='upper')
+#        # set land values to nan
+#        # field = field.where(mask)
+#        # propagate ocean values into land interior before interpolation
+#        #field = lateral_fill(field, 1-mask, dims)
+#        # interpolate
+#
+#        da_interpolated = da.interp(**coords, method='nearest').drop_vars(dims)
+#        
+#    
+#        return da_interpolated
+#
+#
+#    def interpolate_spatially(self, coords):
+#        """
+#        Interpolate correction in space. This method assumes that the correction dataset contains a
+#        climatology with 12 time entries and global spatial coverage.
+#    
+#        Parameters
+#        ----------
+#        coords : dict
+#            A dictionary specifying the spatial target coordinates for interpolation, e.g., 
+#            {"time": time_values, "longitude": lon_values, "latitude": lat_values}.
+#
+#
+#        Returns
+#        -------
+#        swr_corrected : xr.DataArray
+#            Corrected shortwave radiation values.
+#    
+#        Raises
+#        ------
+#        ValueError
+#            - If the correction dataset dimensions do not match expectations (time, longitude, latitude).
+#            - If the temporal dimension of the correction dataset does not have length 12, assuming monthly climatology.
+#
+#        Notes
+#        -----
+#        This function performs both spatial and temporal interpolation to align the correction
+#        data with the input radiation data grid and time points, respectively. The corrected radiation values are
+#        then obtained by multiplying the input radiation data with the interpolated correction factors.
+#    
+#        Examples
+#        --------
+#        >>> corrected_swr = correct_shortwave_radiation("correction_data.nc", swr_data, lon, lat)
+#        """
+#
+#        dims = list(coords.keys())
+#
+#        # Spatial interpolation
+#        lon_min = ds_correction.longitude.min().values
+#        lon_max = ds_correction.longitude.max().values
+#        if lon_min > 0.0 and lon_max < 365.0:
+#            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='both')
+#        elif lon_min > 0.0:
+#            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='lower')
+#        else:
+#            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='upper')
+#
+#        corr_factor = corr_factor.interp(longitude=lon, latitude=lat, method='nearest').drop_vars(["longitude", "latitude"])
+#        
+#        # Temporal interpolation
+#        corr_factor["time"] = corr_factor.time.dt.days
+#        swr["day_of_year"] = swr.time.dt.dayofyear
+#        # Concatenate across the beginning and end of the year
+#        time = xr.concat([corr_factor.time[-1] - 365.25, corr_factor.time, 365.25 + corr_factor.time[0]], dim="time")
+#        corr_factor = xr.concat([corr_factor.isel(time=-1), corr_factor, corr_factor.isel(time=0)], dim="time")
+#        corr_factor["time"] = time
+#        # Interpolate correction data to ERA5 times
+#        corr_factor = corr_factor.interp(time=swr.day_of_year, method='linear')    
+#        
+#        # Apply correction
+#        swr_corrected = swr * corr_factor
+#    
+#        return swr_corrected
+#    def concatenate_across_dateline(field, end):
+#        """
+#        Concatenates a field across the dateline based on the specified end.
+#    
+#        Parameters
+#        ----------
+#        field : xr.DataArray
+#            Input field to be concatenated.
+#        end : {'upper', 'lower', 'both'}
+#            Specifies which end of the dateline to concatenate the field.
+#            - 'upper': Concatenate on the upper end.
+#            - 'lower': Concatenate on the lower end.
+#            - 'both': Concatenate on both ends.
+#    
+#        Returns
+#        -------
+#        field_concatenated : xr.DataArray
+#            Concatenated field along the longitude axis.
+#        """
+#        lon = field['longitude']
+#    
+#        if end == 'upper':
+#            lon_plus360 = lon + 360
+#            lon_concatenated = xr.concat([lon, lon_plus360], dim="longitude")
+#            field_concatenated = xr.concat([field, field], dim="longitude")
+#        elif end == 'lower':
+#            lon_minus360 = lon - 360
+#            lon_concatenated = xr.concat([lon_minus360, lon], dim="longitude")
+#            field_concatenated = xr.concat([field, field], dim="longitude")
+#        elif end == 'both':
+#            lon_minus360 = lon - 360
+#            lon_plus360 = lon + 360
+#            lon_concatenated = xr.concat([lon_minus360, lon, lon_plus360], dim="longitude")
+#            field_concatenated = xr.concat([field, field, field], dim="longitude")
+#    
+#        field_concatenated["longitude"] = lon_concatenated
+#    
+#        return field_concatenated
 
 @dataclass(frozen=True, kw_only=True)
-class SWRCorrection:
+class Rivers:
     """
-    Configuration for shortwave radiation correction.
+    Configuration for river forcing.
 
     Parameters
     ----------
-    filename : str
-        Filename of the correction data.
-    varname : str
-        Variable identifier for the correction.
-    temporal_resolution : str, optional
-        Temporal resolution of the correction data. Default is "climatology".
-    spatial_coverage : str, optional
-        Spatial coverage of the correction data. Default is "global".
-
-    Attributes
-    ----------
-    filename : str
-        Filename of the correction data.
-    varname : str
-        Variable identifier for the correction.
-    temporal_resolution : str
-        Temporal resolution of the correction data.
-    spatial_coverage : str
-        Spatial coverage of the correction data.
-    da : xr.DataArray
-        The loaded xarray DataArray containing the correction data.
-
-    Examples
-    --------
-    config = SWRCorrection(filename="correction_data.nc", varname="swr", temporal_resolution="climatology", spatial_coverage="global")
-    print(config.var)
-    <xarray.DataArray 'swr' (time: 12, lat: 180, lon: 360)>
-    array([[[...]]])
-
+    filename : str, optional
+        Filename of the river forcing data.
     """
 
-    filename: str
-    temporal_resolution: str = "climatology"
-    spatial_coverage: str = "global"
-    da: xr.DataArray = field(init=False, repr=False)
+    filename: str = ""
 
     def __post_init__(self):
-        if self.temporal_resolution != "climatology":
-            raise NotImplementedError(f"temporal_resolution must be 'climatology', got {self.temporal_resolution}")
-        if self.spatial_coverage != "global":
-            raise NotImplementedError(f"spatial_coverage must be 'global', got {self.spatial_coverage}")
-
-        da = self.load_data(self.filename)
-        object.__setattr__(self, "da", da)
-
-    @staticmethod
-    def load_data(filename, varname):
-        """
-        Load data from the specified file.
-
-        Parameters
-        ----------
-        filename : str
-            The path to the correction dataset.
-        varname : str
-            The variable identifier for the correction.
-
-        Returns
-        -------
-        da : xr.DataArray
-            The loaded xarray DataArray containing the correction data.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified file does not exist.
-
-        """
-        # Check if the file exists
-
-        # Check if any file matching the wildcard pattern exists
-        matching_files = glob.glob(filename)
-        if not matching_files:
-            raise FileNotFoundError(f"No files found matching the pattern '{filename}'.")
-
-        # Load the dataset
-        ds = xr.open_dataset(filename)
-        da = ds[varname]
-        lon = ds[lonname]
-        lat = ds[latname]
-
-        return da, lon, lat
-    
-    def interpolate_spatially(self, coords):
-        """
-        Interpolate correction in space.
-    
-        Parameters
-        ----------
-        coords : dict
-            A dictionary specifying the spatial target coordinates for interpolation, e.g., 
-            {"latitude": lat_values, "longitude": lon_values}.
-
-
-        Returns
-        -------
-        swr_corrected : xr.DataArray
-            Corrected shortwave radiation values.
-    
-        Raises
-        ------
-        ValueError
-            - If the correction dataset dimensions do not match expectations (time, longitude, latitude).
-            - If the temporal dimension of the correction dataset does not have length 12, assuming monthly climatology.
-
-        Notes
-        -----
-        This function performs both spatial and temporal interpolation to align the correction
-        data with the input radiation data grid and time points, respectively. The corrected radiation values are
-        then obtained by multiplying the input radiation data with the interpolated correction factors.
-    
-        Examples
-        --------
-        >>> corrected_swr = correct_shortwave_radiation("correction_data.nc", swr_data, lon, lat)
-        """
-
-        dims = list(coords.keys())
-
-        # Spatial interpolation
-        lon_min = self.lon.min().values
-        lon_max = self.lon.max().values
-        if lon_min > 0.0 and lon_max < 365.0:
-            da = concatenate_across_dateline(self.da, end='both')
-        elif lon_min > 0.0:
-            da = concatenate_across_dateline(self.da, end='lower')
-        else:
-            da = concatenate_across_dateline(self.da, end='upper')
-        # set land values to nan
-        # field = field.where(mask)
-        # propagate ocean values into land interior before interpolation
-        #field = lateral_fill(field, 1-mask, dims)
-        # interpolate
-
-        da_interpolated = da.interp(**coords, method='nearest').drop_vars(dims)
-        
-    
-        return da_interpolated
-
-
-    def interpolate_spatially(self, coords):
-        """
-        Interpolate correction in space. This method assumes that the correction dataset contains a
-        climatology with 12 time entries and global spatial coverage.
-    
-        Parameters
-        ----------
-        coords : dict
-            A dictionary specifying the spatial target coordinates for interpolation, e.g., 
-            {"time": time_values, "longitude": lon_values, "latitude": lat_values}.
-
-
-        Returns
-        -------
-        swr_corrected : xr.DataArray
-            Corrected shortwave radiation values.
-    
-        Raises
-        ------
-        ValueError
-            - If the correction dataset dimensions do not match expectations (time, longitude, latitude).
-            - If the temporal dimension of the correction dataset does not have length 12, assuming monthly climatology.
-
-        Notes
-        -----
-        This function performs both spatial and temporal interpolation to align the correction
-        data with the input radiation data grid and time points, respectively. The corrected radiation values are
-        then obtained by multiplying the input radiation data with the interpolated correction factors.
-    
-        Examples
-        --------
-        >>> corrected_swr = correct_shortwave_radiation("correction_data.nc", swr_data, lon, lat)
-        """
-
-        dims = list(coords.keys())
-
-        # Spatial interpolation
-        lon_min = ds_correction.longitude.min().values
-        lon_max = ds_correction.longitude.max().values
-        if lon_min > 0.0 and lon_max < 365.0:
-            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='both')
-        elif lon_min > 0.0:
-            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='lower')
-        else:
-            corr_factor = concatenate_across_dateline(ds_correction["ssr_corr"], end='upper')
-
-        corr_factor = corr_factor.interp(longitude=lon, latitude=lat, method='nearest').drop_vars(["longitude", "latitude"])
-        
-        # Temporal interpolation
-        corr_factor["time"] = corr_factor.time.dt.days
-        swr["day_of_year"] = swr.time.dt.dayofyear
-        # Concatenate across the beginning and end of the year
-        time = xr.concat([corr_factor.time[-1] - 365.25, corr_factor.time, 365.25 + corr_factor.time[0]], dim="time")
-        corr_factor = xr.concat([corr_factor.isel(time=-1), corr_factor, corr_factor.isel(time=0)], dim="time")
-        corr_factor["time"] = time
-        # Interpolate correction data to ERA5 times
-        corr_factor = corr_factor.interp(time=swr.day_of_year, method='linear')    
-        
-        # Apply correction
-        swr_corrected = swr * corr_factor
-    
-        return swr_corrected
-
+        if not self.filename:
+            raise ValueError("The 'filename' must be provided.")
 
 @dataclass(frozen=True, kw_only=True)
 class AtmosphericForcing:
@@ -419,29 +511,11 @@ class AtmosphericForcing:
     rivers: Optional['Rivers'] = None
     ds: xr.Dataset = field(init=False, repr=False)
 
-
-    @dataclass(frozen=True, kw_only=True)
-    class Rivers:
-        """
-        Configuration for river forcing.
-
-        Parameters
-        ----------
-        filename : str, optional
-            Filename of the river forcing data.
-        """
-
-        filename: str = ""
- 
-        def __post_init__(self):
-            if not self.filename:
-                raise ValueError("The 'filename' must be provided.")
-
     def __post_init__(self):
-
+        
         if self.use_coarse_grid:
             if 'lon_coarse' not in self.grid.ds:
-                Warning('Grid has not been coarsened yet. Execute grid.coarsen() first.')
+                raise ValueError('Grid has not been coarsened yet. Execute grid.coarsen() first.')
 
             lon = self.grid.ds.lon_coarse
             lat = self.grid.ds.lat_coarse
@@ -450,34 +524,53 @@ class AtmosphericForcing:
             lon = self.grid.ds.lon_rho
             lat = self.grid.ds.lat_rho
             angle = self.grid.ds.angle
-
+        
         if self.source == "era5":
-            era5 = ERA5(filename=self.filename, start_time=self.start_time, end_time=self.end_time)
+            dims = {"longitude": "longitude", "latitude": "latitude", "time": "time"}
 
-            # interpolate onto desired grid
-            mask = xr.where(era5.ds["sst"].isel(time=0).isnull(), 0, 1)
-            coords={"latitude": lat, "longitude": lon}
+        data = ForcingDataset(filename=self.filename, start_time=self.start_time, end_time=self.end_time, dim_names=dims)
 
-            u10 = self.interpolate(era5.ds["u10"], mask, coords=coords, method='nearest')
-            v10 = self.interpolate(era5.ds["v10"], mask, coords=coords, method='nearest')
-            swr = self.interpolate(era5.ds["ssr"], mask, coords=coords, method='linear')
-            lwr = self.interpolate(era5.ds["strd"], mask, coords=coords, method='linear')
-            t2m = self.interpolate(era5.ds["t2m"], mask, coords=coords, method='linear')
-            d2m = self.interpolate(era5.ds["d2m"], mask, coords=coords, method='linear')
-            rain = self.interpolate(era5.ds["tp"], mask, coords=coords, method='linear')
+        
+        if self.grid.straddle:
+            lon = xr.where(lon > 180, lon - 360, lon)
+            data.ds[dims['longitude']] = xr.where(data.ds[dims['longitude']] > 180, data.ds[dims['longitude']] - 360, data.ds[dims['longitude']])
+        else:
+            lon = xr.where(lon < 0, lon + 360, lon)
+            data.ds[dims['longitude']] = xr.where(data.ds[dims['longitude']] < 0, data.ds[dims['longitude']] + 360, data.ds[dims['longitude']])
+
+        data.select_subdomain(latitude_range=[lat.min().values, lat.max().values], longitude_range=[lon.min().values, lon.max().values])
+
+        # interpolate onto desired grid
+        if self.source == "era5":
+            mask = xr.where(data.ds["sst"].isel(time=0).isnull(), 0, 1)
+            varnames = {
+                "u10": "u10",
+                "v10": "v10",
+                "swr": "ssr",
+                "lwr": "strd",
+                "t2m": "t2m",
+                "d2m": "d2m",
+                "rain": "tp"
+            }
+
+        coords={dims["latitude"]: lat, dims["longitude"]: lon}
+
+        u10 = self.interpolate(data.ds[varnames["u10"]], mask, coords=coords, method='nearest')
+        v10 = self.interpolate(data.ds[varnames["v10"]], mask, coords=coords, method='nearest')
+        swr = self.interpolate(data.ds[varnames["swr"]], mask, coords=coords, method='linear')
+        lwr = self.interpolate(data.ds[varnames["lwr"]], mask, coords=coords, method='linear')
+        t2m = self.interpolate(data.ds[varnames["t2m"]], mask, coords=coords, method='linear')
+        d2m = self.interpolate(data.ds[varnames["d2m"]], mask, coords=coords, method='linear')
+        rain = self.interpolate(data.ds[varnames["rain"]], mask, coords=coords, method='linear')
             
+        if self.source == "era5":
             # translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
             swr = swr / 3600  # from J/m^2 to W/m^2
             lwr = lwr / 3600  # from J/m^2 to W/m^2
             rain = rain * 100 * 24  # from m to cm/day
-            # correct shortwave radiation
-            if self.swr_correction:
-                swr = era5.correct_shortwave_radiation(self.swr_correction.filename, swr, lon, lat)
-
             # convert from K to C
             t2m = t2m - 273.15
             d2m = d2m - 273.15
-
             # relative humidity fraction
             qair = np.exp((17.625*d2m)/(243.04+d2m)) / np.exp((17.625*t2m)/(243.04+t2m))
             # convert relative to absolute humidity assuming constant pressure
@@ -485,7 +578,11 @@ class AtmosphericForcing:
             cff=(1.0007+3.46e-6*patm)*6.1121 *np.exp(17.502*t2m/(240.97+t2m))
             cff = cff * qair
             qair = 0.62197 *(cff /(patm-0.378*cff))
-    
+            
+        # correct shortwave radiation
+        if self.swr_correction:
+            swr = era5.correct_shortwave_radiation(self.swr_correction.filename, swr, lon, lat)
+
         if self.rivers:
             NotImplementedError("River forcing is not implemented yet.")
             # rain = rain + rivers
@@ -523,75 +620,48 @@ class AtmosphericForcing:
 
         ds.attrs["Title"] = "ROMS bulk surface forcing file produced by roms-tools"
         
-
-
         ds = ds.assign_coords({"lon": lon, "lat": lat})
         if self.use_coarse_grid:
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
         object.__setattr__(self, "ds", ds)
     
-    def check_domain(self, ds):
-        """
-        Check whether the data contains the specified subdomain.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to check for the subdomain.
-
-        Raises
-        ------
-        ValueError
-            If the specified subdomain is not fully contained within the dataset.
-        """
-
-        # Check if the longitude range is within the dataset
-        lon_within = (ds.longitude.min() <= self.lon_min) and (ds.longitude.max() >= self.lon_max)
-        if not lon_within:
-            ValueError(f"Longitude range [{self.min_lon}, {self.max_lon}] is not fully contained within the dataset range [{ds.longitude.min().values}, {ds.longitude.max().values}].")
-
-        # Check if the latitude range is within the dataset
-        lat_within = (ds.latitude.min() <= self.min_lat) and (ds.latitude.max() >= self.max_lat)
-        if not lat_within:
-            ValueError(f"Latitude range [{self.min_lat}, {self.max_lat}] is not fully contained within the dataset range [{ds.latitude.min().values}, {ds.latitude.max().values}].")
-
 
     @staticmethod
     def interpolate(field, mask, coords, method='linear'):
-    """
-    Interpolate a field using specified coordinates and a given method.
+        """
+        Interpolate a field using specified coordinates and a given method.
 
-    Parameters
-    ----------
-    field : xr.DataArray
-        The data array to be interpolated.
-    
-    mask : xr.DataArray
-        A data array with same spatial dimensions as `field`, where `1` indicates wet (ocean)
-        points and `0` indicates land points.
-    
-    coords : dict
-        A dictionary specifying the target coordinates for interpolation. The keys 
-        should match the dimensions of `field` (e.g., {"longitude": lon_values, "latitude": lat_values}).
-    
-    method : str, optional, default='linear'
-        The interpolation method to use. Valid options are those supported by 
-        `xarray.DataArray.interp`.
+        Parameters
+        ----------
+        field : xr.DataArray
+            The data array to be interpolated.
+        
+        mask : xr.DataArray
+            A data array with same spatial dimensions as `field`, where `1` indicates wet (ocean)
+            points and `0` indicates land points.
+        
+        coords : dict
+            A dictionary specifying the target coordinates for interpolation. The keys 
+            should match the dimensions of `field` (e.g., {"longitude": lon_values, "latitude": lat_values}).
+        
+        method : str, optional, default='linear'
+            The interpolation method to use. Valid options are those supported by 
+            `xarray.DataArray.interp`.
 
-    Returns
-    -------
-    xr.DataArray
-        The interpolated data array.
+        Returns
+        -------
+        xr.DataArray
+            The interpolated data array.
 
-    Notes
-    -----
-    This method first sets land values to NaN based on the provided mask. It then uses the
-    `lateral_fill` function to propagate ocean values. These two steps serve the purpose to
-    avoid interpolation across the land-ocean boundary. Finally, it performs interpolation 
-    over the specified coordinates.
+        Notes
+        -----
+        This method first sets land values to NaN based on the provided mask. It then uses the
+        `lateral_fill` function to propagate ocean values. These two steps serve the purpose to
+        avoid interpolation across the land-ocean boundary. Finally, it performs interpolation 
+        over the specified coordinates.
 
-    """
+        """
 
         dims = list(coords.keys())
 
@@ -654,10 +724,9 @@ class AtmosphericForcing:
 
         # check if North or South pole are in domain
         if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-            raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
+            raise NotImplementedError("Plotting the atmospheric forcing is not implemented for the case that the domain contains the North or South pole.")
 
-        # check if Greenwhich meridian goes through domain
-        if np.abs(lon_deg.diff('xi_rho')).max() > 300 or np.abs(lon_deg.diff('eta_rho')).max() > 300:
+        if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         # Define projections

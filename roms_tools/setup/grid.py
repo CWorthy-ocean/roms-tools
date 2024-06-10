@@ -41,14 +41,50 @@ class Grid:
         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
         Positive values represent a counterclockwise rotation.
         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
-    topography_source : str, optional
-        Specifies the data source to use for the topography. Options are "etopo5". The default is "etopo5".
-    smooth_factor: int
-        The smoothing factor used in the global Gaussian smoothing of the topography. The default is 2.
-    hmin: float
-        The minimum ocean depth (in meters). The default is 5.
-    rmax: float
-        The maximum slope parameter (in meters). The default is 0.2.
+   topography_source : str, optional
+       Specifies the data source to use for the topography. Options are 
+       "etopo5". The default is "etopo5".
+   smooth_factor : float, optional
+       The smoothing factor used in the global Gaussian smoothing of the
+       topography. Smaller values result in less smoothing, while larger
+       values produce more smoothing. The default is 8.
+   hmin : float, optional
+       The minimum ocean depth (in meters). The default is 5.
+   rmax : float, optional
+       The maximum slope parameter (in meters). This parameter controls 
+       the local smoothing of the topography. Smaller values result in 
+       smoother topography, while larger values preserve more detail. 
+       The default is 0.2.
+
+    Attributes
+    ----------
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float
+        Rotation of grid x-direction from lines of constant latitude.
+    topography_source : str
+        Data source used for the topography.
+    smooth_factor : int
+        Smoothing factor used in the global Gaussian smoothing of the topography.
+    hmin : float
+        Minimum ocean depth (in meters).
+    rmax : float
+        Maximum slope parameter (in meters).
+    ds : xr.Dataset
+        The xarray Dataset containing the grid data.
+    straddle : bool
+        Indicates if the Greenwich meridian (0° longitude) intersects the domain.
+        `True` if it does, `False` otherwise.
 
     Raises
     ------
@@ -64,10 +100,11 @@ class Grid:
     center_lat: float
     rot: float = 0
     topography_source: str = 'etopo5'
-    smooth_factor: int = 2
+    smooth_factor: int = 8
     hmin: float = 5.0
     rmax: float = 0.2
     ds: xr.Dataset = field(init=False, repr=False)
+    straddle: bool = field(init=False, repr=False)
 
     def __post_init__(self):
         ds = _make_grid_ds(
@@ -77,14 +114,52 @@ class Grid:
             size_y=self.size_y,
             center_lon=self.center_lon,
             center_lat=self.center_lat,
-            rot=self.rot,
-            topography_source=self.topography_source,
-            smooth_factor=self.smooth_factor,
-            hmin=self.hmin,
-            rmax=self.rmax,
+            rot=self.rot
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
+        object.__setattr__(self, "ds", ds)
+    
+        # Update self.ds with topography and mask information
+        self.add_topography_and_mask(topography_source=self.topography_source, smooth_factor=self.smooth_factor, hmin=self.hmin, rmax=self.rmax)
+ 
+        # Check if the Greenwich meridian goes through the domain.
+        self._straddle()
+
+    def add_topography_and_mask(self, topography_source="etopo5", smooth_factor=8, hmin=5.0, rmax=0.2) -> None:
+        """
+        Add topography and mask to the grid dataset.
+    
+        This method processes the topography data and generates a land/sea mask.
+        It applies several steps, including interpolating topography, smoothing 
+        the topography globally and locally, and filling in enclosed basins. The 
+        processed topography and mask are added to the grid's dataset as new variables.
+
+        Parameters
+        ----------
+        topography_source : str, optional
+            Specifies the data source to use for the topography. Options are 
+            "etopo5". The default is "etopo5".
+        smooth_factor : float, optional
+            The smoothing factor used in the global Gaussian smoothing of the
+            topography. Smaller values result in less smoothing, while larger
+            values produce more smoothing. The default is 8.
+        hmin : float, optional
+            The minimum ocean depth (in meters). The default is 5.
+        rmax : float, optional
+            The maximum slope parameter (in meters). This parameter controls 
+            the local smoothing of the topography. Smaller values result in 
+            smoother topography, while larger values preserve more detail. 
+            The default is 0.2.
+    
+        Returns
+        -------
+        None
+            This method modifies the dataset in place and does not return a value.
+        """
+
+        ds = _add_topography_and_mask(self.ds, topography_source, smooth_factor, hmin, rmax)
+        # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
 
     def save(self, filepath: str) -> None:
@@ -121,6 +196,9 @@ class Grid:
 
         # Set the dataset for the grid instance
         object.__setattr__(grid, "ds", ds)
+        
+        # Check if the Greenwich meridian goes through the domain.
+        grid._straddle()
 
         # Manually set the remaining attributes by extracting parameters from dataset
         object.__setattr__(grid, 'nx', ds.sizes['xi_rho'] - 2)
@@ -148,6 +226,24 @@ class Grid:
         # TODO we could convert the dataset to an xgcm.Grid object and return here?
         raise NotImplementedError()
 
+    def _straddle(self) -> None:
+        """
+        Check if the Greenwich meridian goes through the domain.
+    
+        This method sets the `straddle` attribute to `True` if the Greenwich meridian 
+        (0° longitude) intersects the domain defined by `lon_rho`. Otherwise, it sets
+        the `straddle` attribute to `False`.
+    
+        The check is based on whether the longitudinal differences between adjacent 
+        points exceed 300 degrees, indicating a potential wraparound of longitude.
+        """
+
+        if np.abs(self.ds.lon_rho.diff('xi_rho')).max() > 300 or np.abs(self.ds.lon_rho.diff('eta_rho')).max() > 300:
+            object.__setattr__(self, "straddle", True)
+        else:
+            object.__setattr__(self, "straddle", False)
+
+
     def plot(self, bathymetry: bool = False) -> None:
         """
         Plot the grid.
@@ -173,8 +269,7 @@ class Grid:
             if lat_deg.max().values > 89 or lat_deg.min().values < -89:
                 raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
 
-        # check if Greenwhich meridian goes through domain
-        if np.abs(lon_deg.diff('xi_rho')).max() > 300 or np.abs(lon_deg.diff('eta_rho')).max() > 300:
+        if self.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         # Define projections
@@ -264,10 +359,6 @@ def _make_grid_ds(
     center_lon: float,
     center_lat: float,
     rot: float,
-    topography_source: str,
-    smooth_factor: int,
-    hmin: float,
-    rmax: float,
 ) -> xr.Dataset:
 
 
@@ -300,9 +391,7 @@ def _make_grid_ds(
         center_lat
     )
 
-    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax)
-
-    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax)
+    ds = _add_global_metadata(ds, size_x, size_y)
 
     return ds
 
@@ -668,15 +757,11 @@ def _create_grid_ds(
     return ds
 
 
-def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax):
+def _add_global_metadata(ds, size_x, size_y):
 
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
     ds.attrs["size_x"] = size_x
     ds.attrs["size_y"] = size_y
-    ds.attrs["topography_source"] = topography_source
-    ds.attrs["smooth_factor"] = smooth_factor
-    ds.attrs["hmin"] = hmin
-    ds.attrs["rmax"] = rmax
 
     return ds
 

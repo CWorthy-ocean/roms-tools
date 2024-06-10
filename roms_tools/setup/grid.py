@@ -41,14 +41,20 @@ class Grid:
         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
         Positive values represent a counterclockwise rotation.
         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
-    topography_source : str, optional
-        Specifies the data source to use for the topography. Options are "etopo5". The default is "etopo5".
-    smooth_factor: int
-        The smoothing factor used in the global Gaussian smoothing of the topography. The default is 2.
-    hmin: float
-        The minimum ocean depth (in meters). The default is 5.
-    rmax: float
-        The maximum slope parameter (in meters). The default is 0.2.
+   topography_source : str, optional
+       Specifies the data source to use for the topography. Options are 
+       "etopo5". The default is "etopo5".
+   smooth_factor : float, optional
+       The smoothing factor used in the global Gaussian smoothing of the
+       topography. Smaller values result in less smoothing, while larger
+       values produce more smoothing. The default is 8.
+   hmin : float, optional
+       The minimum ocean depth (in meters). The default is 5.
+   rmax : float, optional
+       The maximum slope parameter (in meters). This parameter controls 
+       the local smoothing of the topography. Smaller values result in 
+       smoother topography, while larger values preserve more detail. 
+       The default is 0.2.
 
     Attributes
     ----------
@@ -94,10 +100,11 @@ class Grid:
     center_lat: float
     rot: float = 0
     topography_source: str = 'etopo5'
-    smooth_factor: int = 2
+    smooth_factor: int = 8
     hmin: float = 5.0
     rmax: float = 0.2
     ds: xr.Dataset = field(init=False, repr=False)
+    straddle: bool = field(init=False, repr=False)
 
     def __post_init__(self):
         ds = _make_grid_ds(
@@ -107,18 +114,53 @@ class Grid:
             size_y=self.size_y,
             center_lon=self.center_lon,
             center_lat=self.center_lat,
-            rot=self.rot,
-            topography_source=self.topography_source,
-            smooth_factor=self.smooth_factor,
-            hmin=self.hmin,
-            rmax=self.rmax,
+            rot=self.rot
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
         object.__setattr__(self, "ds", ds)
+    
+        # Update self.ds with topography and mask information
+        self.add_topography_and_mask(topography_source=self.topography_source, smooth_factor=self.smooth_factor, hmin=self.hmin, rmax=self.rmax)
  
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
+
+    def add_topography_and_mask(self, topography_source="etopo5", smooth_factor=8, hmin=5.0, rmax=0.2) -> None:
+        """
+        Add topography and mask to the grid dataset.
+    
+        This method processes the topography data and generates a land/sea mask.
+        It applies several steps, including interpolating topography, smoothing 
+        the topography globally and locally, and filling in enclosed basins. The 
+        processed topography and mask are added to the grid's dataset as new variables.
+
+        Parameters
+        ----------
+        topography_source : str, optional
+            Specifies the data source to use for the topography. Options are 
+            "etopo5". The default is "etopo5".
+        smooth_factor : float, optional
+            The smoothing factor used in the global Gaussian smoothing of the
+            topography. Smaller values result in less smoothing, while larger
+            values produce more smoothing. The default is 8.
+        hmin : float, optional
+            The minimum ocean depth (in meters). The default is 5.
+        rmax : float, optional
+            The maximum slope parameter (in meters). This parameter controls 
+            the local smoothing of the topography. Smaller values result in 
+            smoother topography, while larger values preserve more detail. 
+            The default is 0.2.
+    
+        Returns
+        -------
+        None
+            This method modifies the dataset in place and does not return a value.
+        """
+
+        ds = _add_topography_and_mask(self.ds, topography_source, smooth_factor, hmin, rmax)
+        # Assign the updated dataset back to the frozen dataclass
+        object.__setattr__(self, "ds", ds)
 
     def save(self, filepath: str) -> None:
         """
@@ -156,7 +198,7 @@ class Grid:
         object.__setattr__(grid, "ds", ds)
         
         # Check if the Greenwich meridian goes through the domain.
-        self._straddle()
+        grid._straddle()
 
         # Manually set the remaining attributes by extracting parameters from dataset
         object.__setattr__(grid, 'nx', ds.sizes['xi_rho'] - 2)
@@ -317,10 +359,6 @@ def _make_grid_ds(
     center_lon: float,
     center_lat: float,
     rot: float,
-    topography_source: str,
-    smooth_factor: int,
-    hmin: float,
-    rmax: float,
 ) -> xr.Dataset:
 
 
@@ -353,9 +391,7 @@ def _make_grid_ds(
         center_lat
     )
 
-    ds = _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax)
-
-    ds = _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax)
+    ds = _add_global_metadata(ds, size_x, size_y)
 
     return ds
 
@@ -721,15 +757,11 @@ def _create_grid_ds(
     return ds
 
 
-def _add_global_metadata(ds, nx, ny, size_x, size_y, center_lon, center_lat, rot, topography_source, smooth_factor, hmin, rmax):
+def _add_global_metadata(ds, size_x, size_y):
 
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
     ds.attrs["size_x"] = size_x
     ds.attrs["size_y"] = size_y
-    ds.attrs["topography_source"] = topography_source
-    ds.attrs["smooth_factor"] = smooth_factor
-    ds.attrs["hmin"] = hmin
-    ds.attrs["rmax"] = rmax
 
     return ds
 

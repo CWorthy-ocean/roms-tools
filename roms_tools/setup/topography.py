@@ -42,6 +42,8 @@ def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax) -
         "units": "meter",
     }
 
+    ds = _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax)
+
     return ds
 
 def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
@@ -193,3 +195,13 @@ def _compute_rfactor(h):
     r_xi = np.abs(h.diff("xi_rho")) / (h + h.shift(xi_rho=1)).isel(xi_rho=slice(1, None))
     
     return r_eta, r_xi
+
+def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
+
+    ds.attrs["topography_source"] = topography_source
+    ds.attrs["smooth_factor"] = smooth_factor
+    ds.attrs["hmin"] = hmin
+    ds.attrs["rmax"] = rmax
+
+    return ds
+

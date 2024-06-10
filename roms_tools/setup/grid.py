@@ -50,6 +50,36 @@ class Grid:
     rmax: float
         The maximum slope parameter (in meters). The default is 0.2.
 
+    Attributes
+    ----------
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float
+        Rotation of grid x-direction from lines of constant latitude.
+    topography_source : str
+        Data source used for the topography.
+    smooth_factor : int
+        Smoothing factor used in the global Gaussian smoothing of the topography.
+    hmin : float
+        Minimum ocean depth (in meters).
+    rmax : float
+        Maximum slope parameter (in meters).
+    ds : xr.Dataset
+        The xarray Dataset containing the grid data.
+    straddle : bool
+        Indicates if the Greenwich meridian (0° longitude) intersects the domain.
+        `True` if it does, `False` otherwise.
+
     Raises
     ------
     ValueError
@@ -86,6 +116,9 @@ class Grid:
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
         object.__setattr__(self, "ds", ds)
+ 
+        # Check if the Greenwich meridian goes through the domain.
+        self._straddle()
 
     def save(self, filepath: str) -> None:
         """
@@ -121,6 +154,9 @@ class Grid:
 
         # Set the dataset for the grid instance
         object.__setattr__(grid, "ds", ds)
+        
+        # Check if the Greenwich meridian goes through the domain.
+        self._straddle()
 
         # Manually set the remaining attributes by extracting parameters from dataset
         object.__setattr__(grid, 'nx', ds.sizes['xi_rho'] - 2)
@@ -148,6 +184,24 @@ class Grid:
         # TODO we could convert the dataset to an xgcm.Grid object and return here?
         raise NotImplementedError()
 
+    def _straddle(self) -> None:
+        """
+        Check if the Greenwich meridian goes through the domain.
+    
+        This method sets the `straddle` attribute to `True` if the Greenwich meridian 
+        (0° longitude) intersects the domain defined by `lon_rho`. Otherwise, it sets
+        the `straddle` attribute to `False`.
+    
+        The check is based on whether the longitudinal differences between adjacent 
+        points exceed 300 degrees, indicating a potential wraparound of longitude.
+        """
+
+        if np.abs(self.ds.lon_rho.diff('xi_rho')).max() > 300 or np.abs(self.ds.lon_rho.diff('eta_rho')).max() > 300:
+            object.__setattr__(self, "straddle", True)
+        else:
+            object.__setattr__(self, "straddle", False)
+
+
     def plot(self, bathymetry: bool = False) -> None:
         """
         Plot the grid.
@@ -173,8 +227,7 @@ class Grid:
             if lat_deg.max().values > 89 or lat_deg.min().values < -89:
                 raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
 
-        # check if Greenwhich meridian goes through domain
-        if np.abs(lon_deg.diff('xi_rho')).max() > 300 or np.abs(lon_deg.diff('eta_rho')).max() > 300:
+        if self.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         # Define projections

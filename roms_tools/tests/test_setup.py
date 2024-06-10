@@ -49,6 +49,29 @@ class TestCreateGrid:
         )
         assert isinstance(grid, Grid)
 
+    def test_grid_straddle_crosses_meridian(self):
+        grid = Grid(
+            nx=3,
+            ny=3,
+            size_x=100,
+            size_y=100,
+            center_lon=0,
+            center_lat=61,
+            rot=20,
+        )
+        assert grid.straddle == True
+
+        grid = Grid(
+            nx=3,
+            ny=3,
+            size_x=100,
+            size_y=100,
+            center_lon=180,
+            center_lat=61,
+            rot=20,
+        )
+        assert grid.straddle == False
+
 
 class TestGridFromFile:
 

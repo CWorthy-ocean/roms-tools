@@ -48,7 +48,7 @@ bibtex_bibfiles = ['references.bib']
 bibtex_reference_style = "author_year"
 
 html_theme_options = {
-    "repository_url": "https://github.com/timothyas/xesn",
+    "repository_url": "https://github.com/CWorthy-ocean/roms-tools",
     "use_repository_button": True,
 }
 

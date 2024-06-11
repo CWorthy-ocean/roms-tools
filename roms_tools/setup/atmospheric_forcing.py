@@ -10,81 +10,6 @@ from scipy.sparse import spdiags, coo_matrix
 from scipy.sparse.linalg import spsolve
 from roms_tools.setup.fill import lateral_fill
 
-def choose_subdomain(ds, dim_names, latitude_range, longitude_range) -> xr.Dataset:
-    """
-    Choose a subdomain from the given xarray Dataset based on latitude and longitude ranges,
-    including one extra grid point beyond the specified ranges.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the data.
-    dim_names : dict
-        A dictionary containing the dimension names for latitude and longitude.
-    latitude_range : tuple
-        A tuple specifying the minimum and maximum latitude values of the subdomain.
-    longitude_range : tuple
-        A tuple specifying the minimum and maximum longitude values of the subdomain.
-
-    Returns
-    -------
-    xr.Dataset
-        The subset of the original dataset representing the chosen subdomain.
-
-    Raises
-    ------
-    ValueError
-        If the specified subdomain is not fully contained within the dataset.
-    """
-
-    lat_min, lat_max = latitude_range
-    lon_min, lon_max = longitude_range
-
-    # Get latitude and longitude values
-    lats = ds[dim_names["latitude"]]
-    lons = ds[dim_names["longitude"]]
-
-    # Find indices for the specified ranges
-    lat_indices = np.where((lats >= lat_min) & (lats <= lat_max))[0]
-    lon_indices = np.where((lons >= lon_min) & (lons <= lon_max))[0]
-
-    if lat_indices.size == 0 or lon_indices.size == 0:
-        raise ValueError("The specified ranges do not overlap with the dataset.")
-
-    # Extend the range by two grid point on each side to interpolate safely
-    lat_min_index = lat_indices[0] - 2
-    lat_max_index = min(len(lats) - 1, lat_indices[-1] + 2)
-    lon_min_index = max(0, lon_indices[0] - 2)
-    lon_max_index = min(len(lons) - 1, lon_indices[-1] + 2)
-    
-    if lat_indices[0] - 2 < 0:
-        ValueError
-
-    # Select the subdomain based on the extended indices
-    subdomain = ds.isel(
-        **{
-            dim_names["latitude"]: slice(lat_min_index, lat_max_index + 1),
-            dim_names["longitude"]: slice(lon_min_index, lon_max_index + 1)
-        }
-    )
-
-    # Check if the selected subdomain fully contains the specified ranges
-    dataset_lat_min = subdomain[dim_names["latitude"]].min().values
-    dataset_lat_max = subdomain[dim_names["latitude"]].max().values
-    dataset_lon_min = subdomain[dim_names["longitude"]].min().values
-    dataset_lon_max = subdomain[dim_names["longitude"]].max().values
-
-    if (lat_min < dataset_lat_min or lat_max > dataset_lat_max or
-            lon_min < dataset_lon_min or lon_max > dataset_lon_max):
-        raise ValueError(
-            f"The specified subdomain is not fully contained within the dataset.\n"
-            f"Dataset latitude range: ({dataset_lat_min}, {dataset_lat_max})\n"
-            f"Dataset longitude range: ({dataset_lon_min}, {dataset_lon_max})\n"
-            f"Specified latitude range: ({lat_min}, {lat_max})\n"
-            f"Specified longitude range: ({lon_min}, {lon_max})"
-        )
-    
-    return subdomain
 
 @dataclass(frozen=True, kw_only=True)
 class ForcingDataset:
@@ -167,11 +92,6 @@ class ForcingDataset:
             ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], chunks=self.chunks)
 
         return ds
-
-    def select_subdomain(self, latitude_range, longitude_range):
-        ds = choose_subdomain(self.ds, self.dim_names, latitude_range, longitude_range)
-        object.__setattr__(self, "ds", ds)
-
 
 #@dataclass(frozen=True, kw_only=True)
 #class SWRCorrection:
@@ -419,6 +339,81 @@ class ForcingDataset:
 #        field_concatenated["longitude"] = lon_concatenated
 #    
 #        return field_concatenated
+#    def choose_subdomain(ds, dim_names, latitude_range, longitude_range) -> xr.Dataset:
+#        """
+#        Choose a subdomain from the given xarray Dataset based on latitude and longitude ranges,
+#        including one extra grid point beyond the specified ranges.
+#    
+#        Parameters
+#        ----------
+#        ds : xr.Dataset
+#            The xarray Dataset containing the data.
+#        dim_names : dict
+#            A dictionary containing the dimension names for latitude and longitude.
+#        latitude_range : tuple
+#            A tuple specifying the minimum and maximum latitude values of the subdomain.
+#        longitude_range : tuple
+#            A tuple specifying the minimum and maximum longitude values of the subdomain.
+#    
+#        Returns
+#        -------
+#        xr.Dataset
+#            The subset of the original dataset representing the chosen subdomain.
+#    
+#        Raises
+#        ------
+#        ValueError
+#            If the specified subdomain is not fully contained within the dataset.
+#        """
+#    
+#        lat_min, lat_max = latitude_range
+#        lon_min, lon_max = longitude_range
+#    
+#        # Get latitude and longitude values
+#        lats = ds[dim_names["latitude"]]
+#        lons = ds[dim_names["longitude"]]
+#    
+#        # Find indices for the specified ranges
+#        lat_indices = np.where((lats >= lat_min) & (lats <= lat_max))[0]
+#        lon_indices = np.where((lons >= lon_min) & (lons <= lon_max))[0]
+#    
+#        if lat_indices.size == 0 or lon_indices.size == 0:
+#            raise ValueError("The specified ranges do not overlap with the dataset.")
+#    
+#        # Extend the range by two grid point on each side to interpolate safely
+#        lat_min_index = lat_indices[0] - 2
+#        lat_max_index = min(len(lats) - 1, lat_indices[-1] + 2)
+#        lon_min_index = max(0, lon_indices[0] - 2)
+#        lon_max_index = min(len(lons) - 1, lon_indices[-1] + 2)
+#        
+#        if lat_indices[0] - 2 < 0:
+#            ValueError
+#    
+#        # Select the subdomain based on the extended indices
+#        subdomain = ds.isel(
+#            **{
+#                dim_names["latitude"]: slice(lat_min_index, lat_max_index + 1),
+#                dim_names["longitude"]: slice(lon_min_index, lon_max_index + 1)
+#            }
+#        )
+#    
+#        # Check if the selected subdomain fully contains the specified ranges
+#        dataset_lat_min = subdomain[dim_names["latitude"]].min().values
+#        dataset_lat_max = subdomain[dim_names["latitude"]].max().values
+#        dataset_lon_min = subdomain[dim_names["longitude"]].min().values
+#        dataset_lon_max = subdomain[dim_names["longitude"]].max().values
+#    
+#        if (lat_min < dataset_lat_min or lat_max > dataset_lat_max or
+#                lon_min < dataset_lon_min or lon_max > dataset_lon_max):
+#            raise ValueError(
+#                f"The specified subdomain is not fully contained within the dataset.\n"
+#                f"Dataset latitude range: ({dataset_lat_min}, {dataset_lat_max})\n"
+#                f"Dataset longitude range: ({dataset_lon_min}, {dataset_lon_max})\n"
+#                f"Specified latitude range: ({lat_min}, {lat_max})\n"
+#                f"Specified longitude range: ({lon_min}, {lon_max})"
+#            )
+#        
+#        return subdomain
 
 @dataclass(frozen=True, kw_only=True)
 class Rivers:
@@ -530,15 +525,14 @@ class AtmosphericForcing:
 
         data = ForcingDataset(filename=self.filename, start_time=self.start_time, end_time=self.end_time, dim_names=dims)
 
-        
-        if self.grid.straddle:
-            lon = xr.where(lon > 180, lon - 360, lon)
-            data.ds[dims['longitude']] = xr.where(data.ds[dims['longitude']] > 180, data.ds[dims['longitude']] - 360, data.ds[dims['longitude']])
-        else:
+        # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
+        lon = xr.where(lon > 180, lon - 360, lon)
+        data.ds[dims['longitude']] = xr.where(data.ds[dims['longitude']] > 180, data.ds[dims['longitude']] - 360, data.ds[dims['longitude']])
+        if not self.grid.straddle and abs(lon).min() > 5:
             lon = xr.where(lon < 0, lon + 360, lon)
             data.ds[dims['longitude']] = xr.where(data.ds[dims['longitude']] < 0, data.ds[dims['longitude']] + 360, data.ds[dims['longitude']])
 
-        data.select_subdomain(latitude_range=[lat.min().values, lat.max().values], longitude_range=[lon.min().values, lon.max().values])
+        #data.check_domain([lat.min().values, lat.max().values], [lon.min().values, lon.max().values])
 
         # interpolate onto desired grid
         if self.source == "era5":
@@ -621,11 +615,14 @@ class AtmosphericForcing:
         ds.attrs["Title"] = "ROMS bulk surface forcing file produced by roms-tools"
         
         ds = ds.assign_coords({"lon": lon, "lat": lat})
+        if dims["time"] != "time":
+            ds = ds.rename({dims["time"]: "time"})
         if self.use_coarse_grid:
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
         object.__setattr__(self, "ds", ds)
     
+        self.nan_check(time=0)
 
     @staticmethod
     def interpolate(field, mask, coords, method='linear'):
@@ -674,6 +671,27 @@ class AtmosphericForcing:
 
         return field_interpolated
 
+    def nan_check(self, time=0) -> None:
+        """
+        Checks for NaN values in all variables of the dataset at a specified time step.
+
+        Parameters:
+        time (int): The time step at which to check for NaN values. Default is 0.
+
+        Raises:
+        ValueError: If any variable contains NaN values at the specified time step.
+
+        """
+        for var in self.ds.data_vars:
+            if self.ds[var].isel(time=time).isnull().any().values:
+                raise ValueError(
+                f"NaN values found in interpolated variable '{var}' at time step {time}. This is likely "
+                "due to the ROMS grid (including a safety margin) not being fully contained within the "
+                "dataset's longitude/latitude range. Please ensure that your dataset convers the entire "
+                "area required by the ROMS grid."
+                )
+
+        
 
     def plot(self, field, time=0) -> None:
         """

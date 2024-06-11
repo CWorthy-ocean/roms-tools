@@ -88,7 +88,7 @@ def _lateral_fill_np_array(var, isvalid_mask, tol=1.0e-4, rc=1.8, max_iter=10000
 
     fillmask = np.isnan(var)  # Fill all NaNs
     keepNaNs = ~isvalid_mask & np.isnan(var)
-    _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter)
+    var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter)
     var[keepNaNs] = np.nan  # Replace NaNs in areas not designated for filling
 
     return var
@@ -153,7 +153,7 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
     # Note: this will happen for shortwave downward radiation at night time
     if np.max(np.fabs(var)) == 0.0:
         var = np.zeros_like(var)
-        return
+        return var
 
     # Compute a zonal mean to use as a first guess
     zoncnt = np.zeros(nlat)
@@ -255,5 +255,5 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
         res_max = np.max(np.fabs(res)) / np.max(np.fabs(var))
         iter_cnt += 1
 
-
+    return var
 

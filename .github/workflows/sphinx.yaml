@@ -14,12 +14,12 @@ jobs:
         uses: mamba-org/setup-micromamba@v1
         with:
           cache-downloads: true
-	   cache-environment: true
+	  cache-environment: true
           micromamba-version: 'latest'
           environment-file: ci/environment.yml
           create-args: python=${{ matrix.python-version }}
       - name: Install roms-tools
-	 shell: micromamba-shell {0}
+	shell: micromamba-shell {0}
         run: |
            python -V
            python -c "import setuptools; print(setuptools.__version__)"

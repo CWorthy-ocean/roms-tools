@@ -11,19 +11,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/provision-with-micromamba@main
         with:
           cache-downloads: true
-	  cache-environment: true
           micromamba-version: 'latest'
           environment-file: ci/environment.yml
-          create-args: python=${{ matrix.python-version }}
+          extra-specs: |
+            python=${{ matrix.python-version }}
       - name: Install roms-tools
-	shell: micromamba-shell {0}
         run: |
-           python -V
-           python -c "import setuptools; print(setuptools.__version__)"
-           python -m pip install -e . --no-deps
+           python -m pip install -e . --no-deps --force-reinstall
       - name: Build Docs
         shell: bash -l {0}
         run: |

@@ -33,7 +33,7 @@ dynamic = ["version"]
 
 [project.urls]
 Home = "https://github.com/CWorthy-ocean/roms-tools"
-Documentation = "https://github.com/CWorthy-ocean/roms-tools#readme"
+Documentation = "https://roms-tools.readthedocs.io/en/latest/"
 
 [build-system]
 requires = [

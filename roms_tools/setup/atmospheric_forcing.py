@@ -9,7 +9,7 @@ from typing import Optional, Dict, Union
 from scipy.sparse import spdiags, coo_matrix
 from scipy.sparse.linalg import spsolve
 from roms_tools.setup.fill import lateral_fill
-
+import warnings
 
 @dataclass(frozen=True, kw_only=True)
 class ForcingDataset:
@@ -92,6 +92,44 @@ class ForcingDataset:
             ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], chunks=self.chunks)
 
         return ds
+
+
+    def handle_longitudes(self, straddle: bool) -> None:
+        """
+        Handles the conversion of longitude values in the dataset from one range to another.
+    
+        Parameters:
+        straddle (bool): If True, target longitudes are in range [-180, 180].
+                         If False, target longitudes are in range [0, 360].
+    
+        Raises:
+        ValueError: If the conversion results in discontinuous longitudes.
+        """
+        lon = self.ds[self.dim_names['longitude']]
+    
+        if lon.min().values < 0 and not straddle:
+            # Convert from [-180, 180] to [0, 360]
+            self.ds[self.dim_names['longitude']] = xr.where(lon < 0, lon + 360, lon)
+            warnings.warn(
+                "Longitude values in the forcing dataset have been converted from the range [-180, 180] to [0, 360]. "
+                "If there are any missing data within the ROMS domain, the nan_check function might not detect these gaps "
+                "correctly, and this could affect the interpolation results. Ensure that the ROMS grid is fully contained "
+                "within the dataset's longitude range to avoid potential issues."
+            )
+    
+        if lon.max().values > 180 and straddle:
+            # Convert from [0, 360] to [-180, 180]
+            self.ds[self.dim_names['longitude']] = xr.where(lon > 180, lon - 360, lon)
+            warnings.warn(
+                "Longitude values in the forcing dataset have been converted from the range [0, 360] to [-180, 180]. "
+                "If there are any missing data within the ROMS domain, the nan_check function might not detect these gaps "
+                "correctly, and this could affect the interpolation results. Ensure that the ROMS grid is fully contained "
+                "within the dataset's longitude range to avoid potential issues."
+            )
+    
+        # TODO: check whether conversion led to discontinuous longitudes, then we probably want to pick one of the two patches; otherwise
+        # interpolation might not lead to NaNs if data is missing; it will rather grab longitude data from really far away
+
 
 #@dataclass(frozen=True, kw_only=True)
 #class SWRCorrection:
@@ -527,12 +565,12 @@ class AtmosphericForcing:
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
-        data.ds[dims['longitude']] = xr.where(data.ds[dims['longitude']] > 180, data.ds[dims['longitude']] - 360, data.ds[dims['longitude']])
+        straddle = True
         if not self.grid.straddle and abs(lon).min() > 5:
             lon = xr.where(lon < 0, lon + 360, lon)
-            data.ds[dims['longitude']] = xr.where(data.ds[dims['longitude']] < 0, data.ds[dims['longitude']] + 360, data.ds[dims['longitude']])
+            straddle = False
 
-        #data.check_domain([lat.min().values, lat.max().values], [lon.min().values, lon.max().values])
+        data.handle_longitudes(straddle)
 
         # interpolate onto desired grid
         if self.source == "era5":
@@ -686,9 +724,9 @@ class AtmosphericForcing:
             if self.ds[var].isel(time=time).isnull().any().values:
                 raise ValueError(
                 f"NaN values found in interpolated variable '{var}' at time step {time}. This is likely "
-                "due to the ROMS grid (including a safety margin) not being fully contained within the "
-                "dataset's longitude/latitude range. Please ensure that your dataset convers the entire "
-                "area required by the ROMS grid."
+                "due to the fact that the ROMS grid (including a safety margin for interpolation) is not "
+                "fully contained within the dataset's longitude/latitude range. Please ensure that the "
+                "dataset convers the entire area required by the ROMS grid."
                 )
 
         

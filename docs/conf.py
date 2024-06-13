@@ -6,6 +6,10 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
+import os
+import sys
+sys.path.insert(0, os.path.abspath("../"))
+
 project = 'roms-tools'
 copyright = '2024, roms-tools developers'
 author = 'roms-tools developers'

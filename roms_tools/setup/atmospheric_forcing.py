@@ -24,9 +24,6 @@ class ForcingDataset:
         The start time for selecting relevant data.
     end_time: datetime
         The end time for selecting relevant data.
-    time_chunk_size: int, optional
-        Number of time slices to include in each dask chunk along the time dimension.
-        Default is 1, meaning each chunk contains one time slice.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
 
@@ -89,7 +86,7 @@ class ForcingDataset:
 
         # Load the dataset
         with dask.config.set(**{'array.slicing.split_large_chunks': False}):
-            ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], chunks={self.dim_names["time"]: self.time_chunk_size})
+            ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], chunks={self.dim_names["time"]: 1})
 
         return ds
 
@@ -433,7 +430,7 @@ class AtmosphericForcing:
         if self.source == "era5":
             dims = {"longitude": "longitude", "latitude": "latitude", "time": "time"}
 
-        data = ForcingDataset(filename=self.filename, start_time=self.start_time, end_time=self.end_time, dim_names=dims, time_chunk_size=self.time_chunk_size)
+        data = ForcingDataset(filename=self.filename, start_time=self.start_time, end_time=self.end_time, dim_names=dims)
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
@@ -614,9 +611,8 @@ class AtmosphericForcing:
 
         """
 
-        test_ds = self.ds.chunk({"time": 1}).isel(time=time)
         for var in test_ds.data_vars:
-            if test_ds[var].isnull().any().values:
+            if self.ds[var].isel(time=time).isnull().any().values:
                 raise ValueError(
                 f"NaN values found in interpolated variable '{var}' at time step {time}. This is likely "
                 "due to the fact that the ROMS grid (including a safety margin for interpolation) is not "
@@ -717,7 +713,7 @@ class AtmosphericForcing:
         ax.gridlines()
 
 
-        field = self.ds.chunk({"time": 1})[varname].isel(time=time).compute()
+        field = self.ds[varname].isel(time=time).compute()
         if varname in ["uwnd", "vwnd"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
@@ -754,7 +750,8 @@ class AtmosphericForcing:
         filenames = []
         writes = []
 
-        gb = self.ds.groupby("time.year")
+        # rechunk and group
+        gb = self.ds.chunk({"time": self.time_chunk_size}).groupby("time.year")
 
         for year, group_ds in gb:
             sub_gb = group_ds.groupby("time.month")

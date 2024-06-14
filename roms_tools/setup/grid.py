@@ -7,7 +7,7 @@ import xarray as xr
 
 from typing import Any
 
-from roms_tools.setup.topography import _add_topography_and_mask
+from roms_tools.setup.topography import _add_topography_and_mask, _compute_rfactor
 
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -161,6 +161,46 @@ class Grid:
         ds = _add_topography_and_mask(self.ds, topography_source, smooth_factor, hmin, rmax)
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
+
+    def compute_topography_laplacian(self):
+        """
+        Compute the Laplacian of the 'h' field in the provided grid dataset.
+    
+        Adds:
+        xarray.DataArray: The Laplacian of the 'h' field as a new variable in the dataset self.ds.
+        """
+        
+        # Extract the 'h' field and grid spacing variables
+        h = self.ds.h
+        pm = self.ds.pm  # Reciprocal of grid spacing in x-direction
+        pn = self.ds.pn  # Reciprocal of grid spacing in y-direction
+    
+        # Compute second derivatives using finite differences
+        d2h_dx2 = (h.shift(xi_rho=-1, fill_value=0) - 2 * h + h.shift(xi_rho=1, fill_value=0)) * pm**2
+        d2h_dy2 = (h.shift(eta_rho=-1, fill_value=0) - 2 * h + h.shift(eta_rho=1, fill_value=0)) * pn**2
+    
+        # Compute the Laplacian by summing second derivatives
+        laplacian_h = d2h_dx2 + d2h_dy2
+    
+        # Add the Laplacian as a new variable in the dataset
+        grid.ds['h_laplacian'] = laplacian_h
+    
+    def compute_topography_rfactor(self):
+        """
+        Compute the Laplacian of the 'h' field in the provided grid dataset.
+    
+        Adds:
+        xarray.DataArray: The Laplacian of the 'h' field as a new variable in the dataset self.ds.
+        """
+        
+        # Extract the 'h' field and grid spacing variables
+        h = self.ds.h
+    
+        r_eta, r_xi = _compute_rfactor(h)
+
+        # Add the slope factor as a new variable in the dataset
+        grid.ds['h_rfactor_eta'] = r_eta
+        grid.ds['h_rfactor_xi'] = r_xi
 
     def save(self, filepath: str) -> None:
         """
@@ -382,7 +422,13 @@ def _make_grid_ds(
 
     ds = _create_grid_ds(
         lon,
+        lonu,
+        lonv,
+        lonq,
         lat,
+        latu,
+        latv,
+        latq,
         pm,
         pn,
         ang,
@@ -450,8 +496,8 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
         # Rotate grid by 90 degrees because until here the grid has been defined
         # to be longer in x-direction than in y-direction
 
-        lon, lat = rot_sphere(lon, lat, 90)
-        lonq, latq = rot_sphere(lonq, latq, 90)
+        lon, lat = _rot_sphere(lon, lat, 90)
+        lonq, latq = _rot_sphere(lonq, latq, 90)
 
         lon = np.transpose(np.flip(lon, 0))
         lat = np.transpose(np.flip(lat, 0))
@@ -473,10 +519,10 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
 def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
     """Rotate grid counterclockwise relative to surface of Earth by rot degrees"""
 
-    (lon, lat) = rot_sphere(lon, lat, rot)
-    (lonu, latu) = rot_sphere(lonu, latu, rot)
-    (lonv, latv) = rot_sphere(lonv, latv, rot)
-    (lonq, latq) = rot_sphere(lonq, latq, rot)
+    (lon, lat) = _rot_sphere(lon, lat, rot)
+    (lonu, latu) = _rot_sphere(lonu, latu, rot)
+    (lonv, latv) = _rot_sphere(lonv, latv, rot)
+    (lonq, latq) = _rot_sphere(lonq, latq, rot)
 
     return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
@@ -484,10 +530,10 @@ def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
 def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     """Translate grid so that the centre lies at the position (tra_lat, tra_lon)"""
 
-    (lon, lat) = tra_sphere(lon, lat, tra_lat)
-    (lonu, latu) = tra_sphere(lonu, latu, tra_lat)
-    (lonv, latv) = tra_sphere(lonv, latv, tra_lat)
-    (lonq, latq) = tra_sphere(lonq, latq, tra_lat)
+    (lon, lat) = _tra_sphere(lon, lat, tra_lat)
+    (lonu, latu) = _tra_sphere(lonu, latu, tra_lat)
+    (lonv, latv) = _tra_sphere(lonv, latv, tra_lat)
+    (lonq, latq) = _tra_sphere(lonq, latq, tra_lat)
 
     lon = lon + tra_lon * np.pi / 180
     lonu = lonu + tra_lon * np.pi / 180
@@ -502,7 +548,7 @@ def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
 
-def rot_sphere(lon, lat, rot):
+def _rot_sphere(lon, lat, rot):
 
     (n, m) = np.shape(lon)
     # convert rotation angle from degrees to radians
@@ -557,7 +603,7 @@ def rot_sphere(lon, lat, rot):
     return (lon, lat)
 
 
-def tra_sphere(lon, lat, tra):
+def _tra_sphere(lon, lat, tra):
 
     (n, m) = np.shape(lon)
     tra = tra * np.pi / 180  # translation in latitude direction
@@ -682,7 +728,13 @@ def _compute_angle(lon, lonu, latu, lonq):
 
 def _create_grid_ds(
     lon,
+    lonu,
+    lonv,
+    lonq,
     lat,
+    latu,
+    latv,
+    latq,
     pm,
     pn,
     angle,
@@ -695,7 +747,13 @@ def _create_grid_ds(
     ds = xr.Dataset(
         coords={
             "lat_rho": (("eta_rho", "xi_rho"), lat * 180 / np.pi),
-            "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi)
+            "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi),
+            "lat_u": (("eta_rho", "xi_u"), lat_u * 180 / np.pi),
+            "lon_u": (("eta_rho", "xi_u"), lon_u * 180 / np.pi),
+            "lat_v": (("eta_v", "xi_rho"), lat_v * 180 / np.pi),
+            "lon_v": (("eta_v", "xi_rho"), lon_v * 180 / np.pi),
+            "lat_q": (("eta_v", "xi_u"), lat_q * 180 / np.pi),
+            "lon_q": (("eta_v", "xi_u"), lon_q * 180 / np.pi)
         }
     )
 

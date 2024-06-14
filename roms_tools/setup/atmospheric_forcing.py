@@ -94,44 +94,87 @@ class ForcingDataset:
         return ds
 
 
-    def handle_longitudes(self, straddle: bool) -> None:
+    def choose_subdomain(self, latitude_range, longitude_range, margin, straddle):
         """
-        Handles the conversion of longitude values in the dataset from one range to another.
+        Selects a subdomain from the given xarray Dataset based on latitude and longitude ranges,
+        extending the selection by the specified margin. Handles the conversion of longitude values
+        in the dataset from one range to another.
     
-        Parameters:
-        straddle (bool): If True, target longitudes are in range [-180, 180].
-                         If False, target longitudes are in range [0, 360].
+        Parameters
+        ----------
+        latitude_range : tuple
+            A tuple (lat_min, lat_max) specifying the minimum and maximum latitude values of the subdomain.
+        longitude_range : tuple
+            A tuple (lon_min, lon_max) specifying the minimum and maximum longitude values of the subdomain.
+        margin : float
+            Margin in degrees to extend beyond the specified latitude and longitude ranges when selecting the subdomain.
+        straddle : bool
+            If True, target longitudes are expected in the range [-180, 180].
+            If False, target longitudes are expected in the range [0, 360].
+    
+        Returns
+        -------
+        xr.Dataset
+            The subset of the original dataset representing the chosen subdomain, including an extended area
+            to cover one extra grid point beyond the specified ranges.
     
         Raises
         ------
-        ValueError: If the conversion results in discontinuous longitudes.
+        ValueError
+            If the selected latitude or longitude range does not intersect with the dataset.
         """
-
+        lat_min, lat_max = latitude_range
+        lon_min, lon_max = longitude_range
+    
         lon = self.ds[self.dim_names['longitude']]
     
-        if lon.min().values < 0 and not straddle:
-            # Convert from [-180, 180] to [0, 360]
-            self.ds[self.dim_names['longitude']] = xr.where(lon < 0, lon + 360, lon)
-            warnings.warn(
-                "Longitude values in the forcing dataset have been converted from the range [-180, 180] to [0, 360]. "
-                "If there are any missing data within the ROMS domain, the nan_check function might not detect these gaps "
-                "correctly, and this could affect the interpolation results. Ensure that the ROMS grid is fully contained "
-                "within the dataset's longitude range to avoid potential issues."
-            )
+        # Adjust longitude range if needed to match the expected range
+        if not straddle:
+            if lon.min() < -180:
+                if lon_max + margin > 0:
+                    lon_min -= 360
+                    lon_max -= 360
+            elif lon.min() < 0:
+                if lon_max + margin > 180:
+                    lon_min -= 360
+                    lon_max -= 360
     
-        if lon.max().values > 180 and straddle:
-            # Convert from [0, 360] to [-180, 180]
-            self.ds[self.dim_names['longitude']] = xr.where(lon > 180, lon - 360, lon)
-            warnings.warn(
-                "Longitude values in the forcing dataset have been converted from the range [0, 360] to [-180, 180]. "
-                "If there are any missing data within the ROMS domain, the nan_check function might not detect these gaps "
-                "correctly, and this could affect the interpolation results. Ensure that the ROMS grid is fully contained "
-                "within the dataset's longitude range to avoid potential issues."
-            )
+        if straddle:
+            if lon.max() > 360:
+                if lon_min - margin < 180:
+                    lon_min += 360
+                    lon_max += 360
+            elif lon.max() > 180:
+                if lon_min - margin < 0:
+                    lon_min += 360
+                    lon_max += 360
     
-        # TODO: check whether conversion led to discontinuous longitudes, then we probably want to pick one of the two patches; otherwise
-        # interpolation might not lead to NaNs if data is missing; it will rather grab longitude data from really far away
-
+        # Select the subdomain
+        subdomain = self.ds.sel(
+            **{
+                self.dim_names["latitude"]: slice(lat_min - margin, lat_max + margin),
+                self.dim_names["longitude"]: slice(lon_min - margin, lon_max + margin)
+            }
+        )
+    
+        # Check if the selected subdomain has zero dimensions in latitude or longitude
+        if subdomain[self.dim_names["latitude"]].size == 0:
+            raise ValueError("Selected latitude range does not intersect with dataset.")
+    
+        if subdomain[self.dim_names["longitude"]].size == 0:
+            raise ValueError("Selected longitude range does not intersect with dataset.")
+    
+        # Adjust longitudes to expected range if needed
+        lon = subdomain[self.dim_names['longitude']]
+        if straddle:
+            subdomain[self.dim_names['longitude']] = xr.where(lon > 180, lon - 360, lon)
+        else:
+            subdomain[self.dim_names['longitude']] = xr.where(lon < 0, lon + 360, lon)
+    
+        # Set the modified subdomain to the object attribute
+        object.__setattr__(self, "ds", subdomain)
+    
+    
 
 @dataclass(frozen=True, kw_only=True)
 class SWRCorrection:
@@ -454,7 +497,13 @@ class AtmosphericForcing:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
-       data.handle_longitudes(straddle)
+
+        # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
+        # Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2.
+        # Discontinuous longitudes can lead to artifacts in the interpolation process. Specifically, if there is a data gap,
+        # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
+        # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
+        data.choose_subdomain(latitude_range=[lat.min().values, lat.max().values], longitude_range=[lon.min().values, lon.max().values], margin=3, straddle=straddle)
 
         # interpolate onto desired grid
         if self.source == "era5":

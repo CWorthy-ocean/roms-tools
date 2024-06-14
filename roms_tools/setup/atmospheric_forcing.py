@@ -10,6 +10,8 @@ from scipy.sparse import spdiags, coo_matrix
 from scipy.sparse.linalg import spsolve
 from roms_tools.setup.fill import lateral_fill
 import warnings
+import calendar
+
 
 @dataclass(frozen=True, kw_only=True)
 class ForcingDataset:
@@ -44,7 +46,6 @@ class ForcingDataset:
     filename: str
     start_time: datetime
     end_time: datetime
-    time_chunk_size: int = 1
     dim_names: Dict[str, str] = field(default_factory=lambda: {"longitude": "lon", "latitude": "lat", "time": "time"})
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -79,6 +80,7 @@ class ForcingDataset:
         FileNotFoundError
             If the specified file does not exist.
         """
+
         # Check if the file exists
         matching_files = glob.glob(self.filename)
         if not matching_files:
@@ -86,6 +88,7 @@ class ForcingDataset:
 
         # Load the dataset
         with dask.config.set(**{'array.slicing.split_large_chunks': False}):
+            # initially, we wawnt time chunk size of 1 to enable quick .nan_check() and .plot() methods for AtmosphericForcing 
             ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], chunks={self.dim_names["time"]: 1})
 
         return ds
@@ -99,9 +102,11 @@ class ForcingDataset:
         straddle (bool): If True, target longitudes are in range [-180, 180].
                          If False, target longitudes are in range [0, 360].
     
-        Raises:
+        Raises
+        ------
         ValueError: If the conversion results in discontinuous longitudes.
         """
+
         lon = self.ds[self.dim_names['longitude']]
     
         if lon.min().values < 0 and not straddle:
@@ -141,31 +146,28 @@ class SWRCorrection:
         Variable identifier for the correction.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+        Default is {"longitude": "lon", "latitude": "lat", "time": "time"}.
     temporal_resolution : str, optional
         Temporal resolution of the correction data. Default is "climatology".
 
     Attributes
     ----------
-    filename : str
-        Filename of the correction data.
-    varname : str
-        Variable identifier for the correction.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    temporal_resolution : str
-        Temporal resolution of the correction data.
     ds : xr.Dataset
         The loaded xarray Dataset containing the correction data.
     
     Examples
     --------
-    >>> swr_correction = SWRCorrection(filename="correction_data.nc", varname="corr", dim_names={"time": "time", "latitude": "latitude", "longitude": "longitude"}, temporal_resolution="climatology")
-
+    >>> swr_correction = SWRCorrection(
+    ...     filename="correction_data.nc",
+    ...     varname="corr",
+    ...     dim_names={"time": "time", "latitude": "latitude", "longitude": "longitude"},
+    ...     temporal_resolution="climatology"
+    ... )
     """
 
     filename: str
     varname: str
-    dim_names: Dict[str, str] = field(default_factory=lambda: {"longitude": "lon", "latitude": "lat", "time": "time"})
+    dim_names: Dict[str, str] = field(default_factory=lambda: {"longitude": "longitude", "latitude": "latitutde", "time": "time"})
     temporal_resolution: str = "climatology"
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -174,10 +176,8 @@ class SWRCorrection:
             raise NotImplementedError(f"temporal_resolution must be 'climatology', got {self.temporal_resolution}")
 
         ds = self.load_data()
-        # Make sure that latitude is ascending
-        diff = np.diff(ds[self.dim_names["latitude"]])
-        if np.all(diff < 0):
-            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
+        self.check_dataset(ds)
+        ds = self.ensure_latitude_ascending(ds)
 
         object.__setattr__(self, "ds", ds)
 
@@ -208,15 +208,60 @@ class SWRCorrection:
 
         return ds
 
+    def check_dataset(self, ds: xr.Dataset) -> None:
+        """
+        Check if the dataset contains the specified variable and dimensions.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to check.
+
+        Raises
+        ------
+        ValueError
+            If the dataset does not contain the specified variable or dimensions.
+        """
+        if self.varname not in ds:
+            raise ValueError(f"The dataset does not contain the variable '{self.varname}'.")
+
+        for dim in self.dim_names.values():
+            if dim not in ds.dims:
+                raise ValueError(f"The dataset does not contain the dimension '{dim}'.")
+
+    def ensure_latitude_ascending(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Ensure that the latitude dimension is in ascending order.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to check.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with latitude in ascending order.
+        """
+        # Make sure that latitude is ascending
+        lat_diff = np.diff(ds[self.dim_names["latitude"]])
+        if np.all(lat_diff < 0):
+            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
+
+        return ds
+
     def handle_longitudes(self, straddle: bool) -> None:
         """
         Handles the conversion of longitude values in the dataset from one range to another.
 
-        Parameters:
-        straddle (bool): If True, target longitudes are in range [-180, 180].
-                         If False, target longitudes are in range [0, 360].
+        Parameters
+        ----------
+        straddle : bool
+            If True, target longitudes are in range [-180, 180].
+            If False, target longitudes are in range [0, 360].
 
-        Raises:
+        Raises
+        ------
         ValueError: If the conversion results in discontinuous longitudes.
         """
         lon = self.ds[self.dim_names['longitude']]
@@ -249,6 +294,7 @@ class SWRCorrection:
         ValueError
             If the specified subdomain is not fully contained within the dataset.
         """
+
         # Select the subdomain based on the specified latitude and longitude ranges
         subdomain = self.ds.sel(**coords)
 
@@ -342,9 +388,6 @@ class AtmosphericForcing:
         Start time of the desired forcing data.
     end_time : datetime
         End time of the desired forcing data.
-    time_chunk_size : int, optional
-        Number of time slices to include in each chunk along the time dimension.
-        Default is 1, meaning each chunk contains one time slice.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     source : str, optional
@@ -355,35 +398,9 @@ class AtmosphericForcing:
         Shortwave radiation correction configuration.
     rivers : Rivers, optional
         River forcing configuration.
-    include_nan_check: bool, optional
-        Whether to check for NaNs in the first time slice of all interpolated forcing
-        fields. Setting to True will result in longer setup times because the first dask 
-        time chunk is computed. Otherwise, computations are lazy until the plot or save
-        methods are called. Default is True.
 
     Attributes
     ----------
-    grid : Grid
-        Object representing the grid information.
-    use_coarse_grid: bool
-        Whether to interpolate to coarsened grid. Default is False.
-    start_time : datetime
-        Start time of the desired forcing data.
-    end_time : datetime
-        End time of the desired forcing data.
-    time_chunk_size : int, optional
-        Number of time slices to include in each chunk along the time dimension.
-        Default is 1, meaning each chunk contains one time slice.
-    model_reference_date : datetime, optional
-        Reference date for the model. Default is January 1, 2000.
-    source : str, optional
-        Source of the atmospheric forcing data. Default is "era5".
-    filename: str
-        Path to the atmospheric forcing source data file. Can contain wildcards.
-    swr_correction : SWRCorrection
-        Shortwave radiation correction configuration.
-    rivers : Rivers, optional
-        River forcing configuration.
     ds : xr.Dataset
         Xarray Dataset containing the atmospheric forcing data.
 
@@ -404,13 +421,11 @@ class AtmosphericForcing:
     use_coarse_grid: bool = False
     start_time: datetime
     end_time: datetime
-    time_chunk_size: int = 1
     model_reference_date: datetime = datetime(2000, 1, 1)
     source: str = "era5"
     filename: str
     swr_correction: Optional['SWRCorrection'] = None
     rivers: Optional['Rivers'] = None
-    include_nan_check: bool = True
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -439,7 +454,7 @@ class AtmosphericForcing:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
-        data.handle_longitudes(straddle)
+       data.handle_longitudes(straddle)
 
         # interpolate onto desired grid
         if self.source == "era5":
@@ -549,8 +564,7 @@ class AtmosphericForcing:
 
         object.__setattr__(self, "ds", ds)
     
-        if self.include_nan_check:
-            self.nan_check(time=0)
+        self.nan_check(time=0)
 
     @staticmethod
     def interpolate(field, mask, coords, method='linear'):
@@ -603,15 +617,19 @@ class AtmosphericForcing:
         """
         Checks for NaN values in all variables of the dataset at a specified time step.
 
-        Parameters:
-        time (int): The time step at which to check for NaN values. Default is 0.
+        Parameters
+        ----------
+        time : int
+            The time step at which to check for NaN values. Default is 0.
 
-        Raises:
-        ValueError: If any variable contains NaN values at the specified time step.
+        Raises
+        ------
+        ValueError
+            If any variable contains NaN values at the specified time step.
 
         """
 
-        for var in test_ds.data_vars:
+        for var in self.ds.data_vars:
             if self.ds[var].isel(time=time).isnull().any().values:
                 raise ValueError(
                 f"NaN values found in interpolated variable '{var}' at time step {time}. This is likely "
@@ -651,10 +669,6 @@ class AtmosphericForcing:
         ValueError
             If the specified varname is not one of the valid options.
     
-        Notes
-        -----
-        The `cartopy` and `matplotlib` libraries are required to use this method. Ensure 
-        these libraries are installed in your environment.
     
         Examples
         --------
@@ -737,44 +751,78 @@ class AtmosphericForcing:
         plt.show()
 
 
-    def save(self, filepath: str) -> None:
+
+    def save(self, filepath: str, time_chunk_size: int = 1) -> None:
         """
-        Save the atmospheric forcing information to a netCDF4 file.
+        Save the interpolated atmospheric forcing fields to netCDF4 files.
+
+        This method groups the dataset by year and month, chunks the data by the specified
+        time chunk size, and saves each chunked subset to a separate netCDF4 file named
+        according to the year, month, and day range if not a complete month of data is included.
 
         Parameters
         ----------
-        filepath
+        filepath : str
+            The base path and filename for the output files. The files will be named with
+            the format "filepath.YYYYMM.nc" if a full month of data is included, or
+            "filepath.YYYYMMDD-DD.nc" otherwise.
+        time_chunk_size : int, optional
+            Number of time slices to include in each chunk along the time dimension. Default is 1,
+            meaning each chunk contains one time slice.
+
+        Returns
+        -------
+        None
         """
 
         datasets = []
         filenames = []
         writes = []
 
-        # rechunk and group
-        gb = self.ds.chunk({"time": self.time_chunk_size}).groupby("time.year")
+        # Group dataset by year
+        gb = self.ds.groupby("time.year")
 
         for year, group_ds in gb:
+            # Further group each yearly group by month
             sub_gb = group_ds.groupby("time.month")
 
             for month, ds in sub_gb:
-                
-                datasets.append(ds)    
-                
-                year_month_str = f"{year}{month:02}"
-                filename = "%s.%s.nc" %(filepath, year_month_str)
+                # Chunk the dataset by the specified time chunk size
+                ds = ds.chunk({"time": time_chunk_size})
+                datasets.append(ds)
+
+                # Determine the number of days in the month
+                num_days_in_month = calendar.monthrange(year, month)[1]
+                first_day = ds.time.dt.day.values[0]
+                last_day = ds.time.dt.day.values[-1]
+
+                # Create filename based on whether the dataset contains a full month
+                if len(ds.time) == num_days_in_month and first_day == 1 and last_day == num_days_in_month:
+                    # Full month format: "filepath.YYYYMM.nc"
+                    year_month_str = f"{year}{month:02}"
+                    filename = f"{filepath}.{year_month_str}.nc"
+                else:
+                    # Partial month format: "filepath.YYYYMMDD-DD.nc"
+                    year_month_day_str = f"{year}{month:02}{first_day:02}-{last_day:02}"
+                    filename = f"{filepath}.{year_month_day_str}.nc"
+
                 filenames.append(filename)
 
-        
         for ds, filename in zip(datasets, filenames):
 
-            # translate to days since model reference date
+            # Translate the time coordinate to days since the model reference date
             model_reference_date = np.datetime64(self.model_reference_date)
+
+            # Preserve the original time coordinate for readability
+            ds["Time"] = ds["time"]
+
+            # Convert the time coordinate to the format expected by ROMS (days since model reference date)
             ds["time"] = (ds["time"] - model_reference_date).astype('float64') / 3600 / 24 * 1e-9
             ds["time"].attrs["long_name"] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
 
+            # Prepare the dataset for writing to a netCDF file without immediately computing
             write = ds.to_netcdf(filename, compute=False)
             writes.append(write)
 
+        # Perform the actual write operations in parallel
         dask.compute(*writes)
-
-

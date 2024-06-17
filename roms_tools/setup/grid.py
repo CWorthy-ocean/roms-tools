@@ -162,7 +162,7 @@ class Grid:
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
 
-    def compute_topography_laplacian(self):
+    def compute_bathymetry_laplacian(self):
         """
         Compute the Laplacian of the 'h' field in the provided grid dataset.
     
@@ -176,8 +176,8 @@ class Grid:
         pn = self.ds.pn  # Reciprocal of grid spacing in y-direction
     
         # Compute second derivatives using finite differences
-        d2h_dx2 = (h.shift(xi_rho=-1, fill_value=0) - 2 * h + h.shift(xi_rho=1, fill_value=0)) * pm**2
-        d2h_dy2 = (h.shift(eta_rho=-1, fill_value=0) - 2 * h + h.shift(eta_rho=1, fill_value=0)) * pn**2
+        d2h_dx2 = (h.shift(xi_rho=-1) - 2 * h + h.shift(xi_rho=1)) * pm**2
+        d2h_dy2 = (h.shift(eta_rho=-1) - 2 * h + h.shift(eta_rho=1)) * pn**2
     
         # Compute the Laplacian by summing second derivatives
         laplacian_h = d2h_dx2 + d2h_dy2
@@ -186,24 +186,6 @@ class Grid:
         self.ds['h_laplacian'] = laplacian_h
         self.ds["h_laplacian"].attrs["long_name"] = "Laplacian of final bathymetry"
         self.ds["h_laplacian"].attrs["units"] = "1/m"
-
-    
-    def compute_topography_rfactor(self):
-        """
-        Compute the Laplacian of the 'h' field in the provided grid dataset.
-    
-        Adds:
-        xarray.DataArray: The Laplacian of the 'h' field as a new variable in the dataset self.ds.
-        """
-        
-        # Extract the 'h' field and grid spacing variables
-        h = self.ds.h
-    
-        r_eta, r_xi = _compute_rfactor(h)
-
-        # Add the slope factor as a new variable in the dataset
-        grid.ds['h_rfactor_eta'] = r_eta
-        grid.ds['h_rfactor_xi'] = r_xi
 
     def save(self, filepath: str) -> None:
         """
@@ -287,26 +269,20 @@ class Grid:
             object.__setattr__(self, "straddle", False)
 
 
-    def plot(self, topography: bool = False, topography_laplacian: bool = False) -> None:
+    def plot(self, bathymetry: bool = False) -> None:
         """
         Plot the grid.
     
         Parameters
         ----------
-        topography : bool
-            Whether or not to plot the topography. Default is False.
-        topography_laplacian : bool
-            Whether or not to plot the laplacian of the topography. Default is False.
+        bathymetry : bool
+            Whether or not to plot the bathymetry. Default is False.
         """
-        if topography:
-            _plot(self.ds, field=self.ds.h.where(self.ds.mask_rho), straddle=self.straddle, cmap="YlGnBu")
-        elif topography_laplacian:
-            if 'h_laplacian' in self.ds:
-                _plot(self.ds, field=self.ds.h_laplacian.where(self.ds.mask_rho), straddle=self.straddle, c='g')
-            else:
-                raise ValueError("'h_laplacian' not found in dataset. Execute '.compute_topography_laplacian()' first.")
+        if bathymetry:
+            kwargs = {"cmap": "YlGnBu"}
+            fig = _plot(self.ds, field=self.ds.h.where(self.ds.mask_rho), straddle=self.straddle, kwargs=kwargs)
         else:
-            _plot(self.ds, straddle=self.straddle)
+            fig = _plot(self.ds, straddle=self.straddle)
     
 
     def coarsen(self):

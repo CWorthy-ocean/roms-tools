@@ -2,7 +2,7 @@ import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import xarray as xr
 
-def _plot(grid_ds, field=None, straddle=False, cmap="RdBu_r", c='red'):
+def _plot(grid_ds, field=None, straddle=False, c='red', kwargs={}):
 
     lon_deg = grid_ds["lon_rho"]
     lat_deg = grid_ds["lat_rho"]
@@ -53,9 +53,8 @@ def _plot(grid_ds, field=None, straddle=False, cmap="RdBu_r", c='red'):
 
     if field is not None:
         p = ax.pcolormesh(
-                lon_deg, lat_deg, field, transform=proj, cmap=cmap
+                lon_deg, lat_deg, field, transform=proj, **kwargs
         )
         plt.colorbar(p, label=f"{field.long_name} [{field.units}]")
         
-    plt.show()
-
+    return fig

@@ -45,7 +45,7 @@ class Grid:
        Specifies the data source to use for the topography. Options are 
        "etopo5". The default is "etopo5".
    smooth_factor : float, optional
-       The smoothing factor used in the global Gaussian smoothing of the
+       The smoothing factor used in the domain-wide Gaussian smoothing of the
        topography. Smaller values result in less smoothing, while larger
        values produce more smoothing. The default is 8.
    hmin : float, optional
@@ -75,7 +75,7 @@ class Grid:
     topography_source : str
         Data source used for the topography.
     smooth_factor : int
-        Smoothing factor used in the global Gaussian smoothing of the topography.
+        Smoothing factor used in the domain-wide Gaussian smoothing of the topography.
     hmin : float
         Minimum ocean depth (in meters).
     rmax : float
@@ -132,7 +132,7 @@ class Grid:
     
         This method processes the topography data and generates a land/sea mask.
         It applies several steps, including interpolating topography, smoothing 
-        the topography globally and locally, and filling in enclosed basins. The 
+        the topography over the entire domain and locally, and filling in enclosed basins. The 
         processed topography and mask are added to the grid's dataset as new variables.
 
         Parameters
@@ -141,7 +141,7 @@ class Grid:
             Specifies the data source to use for the topography. Options are 
             "etopo5". The default is "etopo5".
         smooth_factor : float, optional
-            The smoothing factor used in the global Gaussian smoothing of the
+            The smoothing factor used in the domain-wide Gaussian smoothing of the
             topography. Smaller values result in less smoothing, while larger
             values produce more smoothing. The default is 8.
         hmin : float, optional

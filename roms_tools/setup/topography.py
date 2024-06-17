@@ -19,7 +19,7 @@ def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax) -
     # Mask is obtained by finding locations where ocean depth is positive 
     mask = xr.where(hraw > 0, 1, 0)
 
-    # smooth topography globally with Gaussian kernel to avoid grid scale instabilities
+    # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
     ds["hraw"] = _smooth_topography_globally(hraw, mask, smooth_factor)
     ds["hraw"].attrs = {
         "long_name": "Working bathymetry at rho-points", 

@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to roms-tools's documentation!
-======================================
+Welcome to the roms-tools documentation!
+========================================
 
 **roms-tools** is a python package for creating the input files that are necessary
 to run a ROMS simulation. This includes creating a grid, tidal and atmospheric
@@ -23,6 +23,7 @@ forcings, initial conditions, and more!
    :caption: Examples
 
    Creating a grid <grid>
+   Creating tidal forcing <tides>
 
 .. toctree::
    :maxdepth: 1

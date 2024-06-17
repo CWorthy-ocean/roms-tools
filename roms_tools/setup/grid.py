@@ -8,7 +8,7 @@ import xarray as xr
 from typing import Any
 
 from roms_tools.setup.topography import _add_topography_and_mask, _compute_rfactor
-
+from roms_tools.setup.plot import _plot
 
 RADIUS_OF_EARTH = 6371315.0  # in m
 
@@ -183,7 +183,10 @@ class Grid:
         laplacian_h = d2h_dx2 + d2h_dy2
     
         # Add the Laplacian as a new variable in the dataset
-        grid.ds['h_laplacian'] = laplacian_h
+        self.ds['h_laplacian'] = laplacian_h
+        self.ds["h_laplacian"].attrs["long_name"] = "Laplacian of final bathymetry"
+        self.ds["h_laplacian"].attrs["units"] = "1/m"
+
     
     def compute_topography_rfactor(self):
         """
@@ -284,78 +287,27 @@ class Grid:
             object.__setattr__(self, "straddle", False)
 
 
-    def plot(self, bathymetry: bool = False) -> None:
+    def plot(self, topography: bool = False, topography_laplacian: bool = False) -> None:
         """
         Plot the grid.
-
-        Requires cartopy and matplotlib.
-
+    
         Parameters
         ----------
-        bathymetry: bool
-            Whether or not to plot the bathymetry. Default is False.
+        topography : bool
+            Whether or not to plot the topography. Default is False.
+        topography_laplacian : bool
+            Whether or not to plot the laplacian of the topography. Default is False.
         """
-
-
-        import cartopy.crs as ccrs
-        import matplotlib.pyplot as plt
-
-
-        lon_deg = self.ds["lon_rho"]
-        lat_deg = self.ds["lat_rho"]
-
-        if bathymetry:
-            # check if North or South pole are in domain
-            if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-                raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
-
-        if self.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
-        # Define projections
-        proj = ccrs.PlateCarree()
-
-        trans = ccrs.NearsidePerspective(
-                central_longitude=lon_deg.mean().values, central_latitude=lat_deg.mean().values
-        )
-
-        lon_deg = lon_deg.values
-        lat_deg = lat_deg.values
-
-        # find corners
-        (lo1, la1) = (lon_deg[0, 0], lat_deg[0, 0])
-        (lo2, la2) = (lon_deg[0, -1], lat_deg[0, -1])
-        (lo3, la3) = (lon_deg[-1, -1], lat_deg[-1, -1])
-        (lo4, la4) = (lon_deg[-1, 0], lat_deg[-1, 0])
-
-        # transform coordinates to projected space
-        lo1t, la1t = trans.transform_point(lo1, la1, proj)
-        lo2t, la2t = trans.transform_point(lo2, la2, proj)
-        lo3t, la3t = trans.transform_point(lo3, la3, proj)
-        lo4t, la4t = trans.transform_point(lo4, la4, proj)
-
-        plt.figure(figsize=(10, 10))
-        ax = plt.axes(projection=trans)
-
-        ax.plot(
-            [lo1t, lo2t, lo3t, lo4t, lo1t],
-            [la1t, la2t, la3t, la4t, la1t],
-            "ro-",
-        )
-
-        ax.coastlines(
-            resolution="50m", linewidth=0.5, color="black"
-        )  # add map of coastlines
-        ax.gridlines()
-        if bathymetry:
-            p = ax.pcolormesh(
-                    lon_deg, lat_deg,
-                    self.ds.h.where(self.ds.mask_rho),
-                    transform=proj,
-                    cmap="YlGnBu"
-            )
-            plt.colorbar(p, label="Bathymetry [m]")
-        plt.show()
+        if topography:
+            _plot(self.ds, field=self.ds.h.where(self.ds.mask_rho), straddle=self.straddle, cmap="YlGnBu")
+        elif topography_laplacian:
+            if 'h_laplacian' in self.ds:
+                _plot(self.ds, field=self.ds.h_laplacian.where(self.ds.mask_rho), straddle=self.straddle, c='g')
+            else:
+                raise ValueError("'h_laplacian' not found in dataset. Execute '.compute_topography_laplacian()' first.")
+        else:
+            _plot(self.ds, straddle=self.straddle)
+    
 
     def coarsen(self):
         """
@@ -422,13 +374,7 @@ def _make_grid_ds(
 
     ds = _create_grid_ds(
         lon,
-        lonu,
-        lonv,
-        lonq,
         lat,
-        latu,
-        latv,
-        latq,
         pm,
         pn,
         ang,
@@ -728,13 +674,7 @@ def _compute_angle(lon, lonu, latu, lonq):
 
 def _create_grid_ds(
     lon,
-    lonu,
-    lonv,
-    lonq,
     lat,
-    latu,
-    latv,
-    latq,
     pm,
     pn,
     angle,
@@ -748,12 +688,6 @@ def _create_grid_ds(
         coords={
             "lat_rho": (("eta_rho", "xi_rho"), lat * 180 / np.pi),
             "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi),
-            "lat_u": (("eta_rho", "xi_u"), lat_u * 180 / np.pi),
-            "lon_u": (("eta_rho", "xi_u"), lon_u * 180 / np.pi),
-            "lat_v": (("eta_v", "xi_rho"), lat_v * 180 / np.pi),
-            "lon_v": (("eta_v", "xi_rho"), lon_v * 180 / np.pi),
-            "lat_q": (("eta_v", "xi_u"), lat_q * 180 / np.pi),
-            "lon_q": (("eta_v", "xi_u"), lon_q * 180 / np.pi)
         }
     )
 

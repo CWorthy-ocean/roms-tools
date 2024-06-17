@@ -127,7 +127,6 @@ class ForcingDataset:
         lon_min, lon_max = longitude_range
     
         lon = self.ds[self.dim_names['longitude']]
-    
         # Adjust longitude range if needed to match the expected range
         if not straddle:
             if lon.min() < -180:
@@ -351,8 +350,6 @@ class SWRCorrection:
                 "The correction dataset does not contain all specified longitude values."
             )
 
-        object.__setattr__(self, "ds", subdomain)
-
         return subdomain
 
     def interpolate_temporally(self, field, time):
@@ -503,7 +500,7 @@ class AtmosphericForcing:
         # Discontinuous longitudes can lead to artifacts in the interpolation process. Specifically, if there is a data gap,
         # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
         # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
-        data.choose_subdomain(latitude_range=[lat.min().values, lat.max().values], longitude_range=[lon.min().values, lon.max().values], margin=3, straddle=straddle)
+        data.choose_subdomain(latitude_range=[lat.min().values, lat.max().values], longitude_range=[lon.min().values, lon.max().values], margin=2, straddle=straddle)
 
         # interpolate onto desired grid
         if self.source == "era5":
@@ -519,7 +516,6 @@ class AtmosphericForcing:
             }
 
         coords={dims["latitude"]: lat, dims["longitude"]: lon}
-
         u10 = self.interpolate(data.ds[varnames["u10"]], mask, coords=coords, method='linear')
         v10 = self.interpolate(data.ds[varnames["v10"]], mask, coords=coords, method='linear')
         swr = self.interpolate(data.ds[varnames["swr"]], mask, coords=coords, method='linear')
@@ -553,10 +549,10 @@ class AtmosphericForcing:
                 self.swr_correction.dim_names["latitude"]: data.ds[data.dim_names["latitude"]], 
                 self.swr_correction.dim_names["longitude"]: data.ds[data.dim_names["longitude"]]
             }
-            self.swr_correction.choose_subdomain(coords_correction)
+            subdomain = self.swr_correction.choose_subdomain(coords_correction)
             
             # spatial interpolation
-            corr_factor = self.swr_correction.ds[self.swr_correction.varname]
+            corr_factor = subdomain[self.swr_correction.varname]
             coords_correction = {
                 self.swr_correction.dim_names["latitude"]: lat, 
                 self.swr_correction.dim_names["longitude"]: lon
@@ -610,10 +606,13 @@ class AtmosphericForcing:
             ds = ds.rename({dims["time"]: "time"})
         if self.use_coarse_grid:
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
+            mask_roms = self.grid.ds["mask_coarse"].rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
+        else:
+            mask_roms = self.grid.ds["mask_rho"]
 
         object.__setattr__(self, "ds", ds)
     
-        self.nan_check(time=0)
+        self.nan_check(mask_roms, time=0)
 
     @staticmethod
     def interpolate(field, mask, coords, method='linear'):
@@ -662,12 +661,14 @@ class AtmosphericForcing:
 
         return field_interpolated
 
-    def nan_check(self, time=0) -> None:
+    def nan_check(self, mask, time=0) -> None:
         """
-        Checks for NaN values in all variables of the dataset at a specified time step.
+        Checks for NaN values at wet points in all variables of the dataset at a specified time step.
 
         Parameters
         ----------
+        mask : array-like
+            A boolean mask indicating the wet points in the dataset.
         time : int
             The time step at which to check for NaN values. Default is 0.
 
@@ -679,15 +680,14 @@ class AtmosphericForcing:
         """
 
         for var in self.ds.data_vars:
-            if self.ds[var].isel(time=time).isnull().any().values:
+            da = xr.where(mask==1, self.ds[var].isel(time=time), 0)
+            if da.isnull().any().values:
                 raise ValueError(
-                f"NaN values found in interpolated variable '{var}' at time step {time}. This is likely "
-                "due to the fact that the ROMS grid (including a safety margin for interpolation) is not "
-                "fully contained within the dataset's longitude/latitude range. Please ensure that the "
-                "dataset convers the entire area required by the ROMS grid."
+                    f"NaN values found in the variable '{var}' at time step {time} over the ocean. This likely "
+                    "occurs because the ROMS grid, including a small safety margin for interpolation, is not "
+                    "fully contained within the dataset's longitude/latitude range. Please ensure that the "
+                    "dataset covers the entire area required by the ROMS grid."
                 )
-
-        
 
     def plot(self, varname, time=0) -> None:
         """
@@ -796,7 +796,8 @@ class AtmosphericForcing:
                     vmax=vmax, vmin=vmin,
                     cmap=cmap
             )
-        plt.colorbar(p, label="%s [%s]" %(field.long_name, field.units))
+        plt.colorbar(p, label=field.units)
+        ax.set_title("%s at time %s" %(field.long_name, np.datetime_as_string(field.time, unit='s')))
         plt.show()
 
 
@@ -844,9 +845,9 @@ class AtmosphericForcing:
                 num_days_in_month = calendar.monthrange(year, month)[1]
                 first_day = ds.time.dt.day.values[0]
                 last_day = ds.time.dt.day.values[-1]
-
+                
                 # Create filename based on whether the dataset contains a full month
-                if len(ds.time) == num_days_in_month and first_day == 1 and last_day == num_days_in_month:
+                if first_day == 1 and last_day == num_days_in_month:
                     # Full month format: "filepath.YYYYMM.nc"
                     year_month_str = f"{year}{month:02}"
                     filename = f"{filepath}.{year_month_str}.nc"
@@ -854,8 +855,11 @@ class AtmosphericForcing:
                     # Partial month format: "filepath.YYYYMMDD-DD.nc"
                     year_month_day_str = f"{year}{month:02}{first_day:02}-{last_day:02}"
                     filename = f"{filepath}.{year_month_day_str}.nc"
-
                 filenames.append(filename)
+        
+        print("Saving the following files:")
+        for filename in filenames:
+            print(filename)
 
         for ds, filename in zip(datasets, filenames):
 

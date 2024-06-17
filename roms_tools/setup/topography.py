@@ -14,7 +14,7 @@ def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax) -
 
     # interpolate topography onto desired grid
     hraw = _make_raw_topography(lon, lat, topography_source)
-    hraw = xr.Variable(data=hraw, dims=["eta_rho", "xi_rho"])
+    hraw = xr.DataArray(data=hraw, dims=["eta_rho", "xi_rho"])
 
     # Mask is obtained by finding locations where ocean depth is positive 
     mask = xr.where(hraw > 0, 1, 0)
@@ -74,6 +74,11 @@ def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
 
 def _smooth_topography_globally(hraw, wet_mask, factor) -> xr.DataArray:
 
+    # since GCM-Filters assumes periodic domain, we extend the domain by one grid cell in each dimension
+    # and set that margin to land
+    margin_mask = xr.concat([wet_mask, 0 * wet_mask.isel(eta_rho=-1)], dim="eta_rho")
+    margin_mask = xr.concat([margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho")
+    
     # we choose a Gaussian filter kernel corresponding to a Gaussian with standard deviation factor/sqrt(12);
     # this standard deviation matches the standard deviation of a boxcar kernel with total width equal to factor.
     filter = gcm_filters.Filter(
@@ -81,10 +86,13 @@ def _smooth_topography_globally(hraw, wet_mask, factor) -> xr.DataArray:
         dx_min=1,
         filter_shape=gcm_filters.FilterShape.GAUSSIAN,
         grid_type=gcm_filters.GridType.REGULAR_WITH_LAND,
-        grid_vars={'wet_mask': wet_mask}
-    
+        grid_vars={'wet_mask': margin_mask}
     )
-    hsmooth = filter.apply(hraw, dims=["eta_rho", "xi_rho"])
+    hraw_extended = xr.concat([hraw, hraw.isel(eta_rho=-1)], dim="eta_rho")
+    hraw_extended = xr.concat([hraw_extended, hraw_extended.isel(xi_rho=-1)], dim="xi_rho")
+    
+    hsmooth = filter.apply(hraw_extended, dims=["eta_rho", "xi_rho"])
+    hsmooth = hsmooth.isel(eta_rho=slice(None, -1), xi_rho=slice(None, -1))
 
     return hsmooth
 
@@ -195,6 +203,7 @@ def _compute_rfactor(h):
     r_xi = np.abs(h.diff("xi_rho")) / (h + h.shift(xi_rho=1)).isel(xi_rho=slice(1, None))
     
     return r_eta, r_xi
+
 
 def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
 

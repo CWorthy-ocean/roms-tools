@@ -7,8 +7,8 @@ import xarray as xr
 
 from typing import Any
 
-from roms_tools.setup.topography import _add_topography_and_mask
-
+from roms_tools.setup.topography import _add_topography_and_mask, _compute_rfactor
+from roms_tools.setup.plot import _plot
 
 RADIUS_OF_EARTH = 6371315.0  # in m
 
@@ -45,7 +45,7 @@ class Grid:
        Specifies the data source to use for the topography. Options are 
        "etopo5". The default is "etopo5".
    smooth_factor : float, optional
-       The smoothing factor used in the global Gaussian smoothing of the
+       The smoothing factor used in the domain-wide Gaussian smoothing of the
        topography. Smaller values result in less smoothing, while larger
        values produce more smoothing. The default is 8.
    hmin : float, optional
@@ -75,7 +75,7 @@ class Grid:
     topography_source : str
         Data source used for the topography.
     smooth_factor : int
-        Smoothing factor used in the global Gaussian smoothing of the topography.
+        Smoothing factor used in the domain-wide Gaussian smoothing of the topography.
     hmin : float
         Minimum ocean depth (in meters).
     rmax : float
@@ -132,7 +132,7 @@ class Grid:
     
         This method processes the topography data and generates a land/sea mask.
         It applies several steps, including interpolating topography, smoothing 
-        the topography globally and locally, and filling in enclosed basins. The 
+        the topography over the entire domain and locally, and filling in enclosed basins. The 
         processed topography and mask are added to the grid's dataset as new variables.
 
         Parameters
@@ -141,7 +141,7 @@ class Grid:
             Specifies the data source to use for the topography. Options are 
             "etopo5". The default is "etopo5".
         smooth_factor : float, optional
-            The smoothing factor used in the global Gaussian smoothing of the
+            The smoothing factor used in the domain-wide Gaussian smoothing of the
             topography. Smaller values result in less smoothing, while larger
             values produce more smoothing. The default is 8.
         hmin : float, optional
@@ -161,6 +161,31 @@ class Grid:
         ds = _add_topography_and_mask(self.ds, topography_source, smooth_factor, hmin, rmax)
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
+
+    def compute_bathymetry_laplacian(self):
+        """
+        Compute the Laplacian of the 'h' field in the provided grid dataset.
+    
+        Adds:
+        xarray.DataArray: The Laplacian of the 'h' field as a new variable in the dataset self.ds.
+        """
+        
+        # Extract the 'h' field and grid spacing variables
+        h = self.ds.h
+        pm = self.ds.pm  # Reciprocal of grid spacing in x-direction
+        pn = self.ds.pn  # Reciprocal of grid spacing in y-direction
+    
+        # Compute second derivatives using finite differences
+        d2h_dx2 = (h.shift(xi_rho=-1) - 2 * h + h.shift(xi_rho=1)) * pm**2
+        d2h_dy2 = (h.shift(eta_rho=-1) - 2 * h + h.shift(eta_rho=1)) * pn**2
+    
+        # Compute the Laplacian by summing second derivatives
+        laplacian_h = d2h_dx2 + d2h_dy2
+    
+        # Add the Laplacian as a new variable in the dataset
+        self.ds['h_laplacian'] = laplacian_h
+        self.ds["h_laplacian"].attrs["long_name"] = "Laplacian of final bathymetry"
+        self.ds["h_laplacian"].attrs["units"] = "1/m"
 
     def save(self, filepath: str) -> None:
         """
@@ -247,75 +272,25 @@ class Grid:
     def plot(self, bathymetry: bool = False) -> None:
         """
         Plot the grid.
-
-        Requires cartopy and matplotlib.
-
+    
         Parameters
         ----------
-        bathymetry: bool
+        bathymetry : bool
             Whether or not to plot the bathymetry. Default is False.
+        
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+        
         """
 
-
-        import cartopy.crs as ccrs
-        import matplotlib.pyplot as plt
-
-
-        lon_deg = self.ds["lon_rho"]
-        lat_deg = self.ds["lat_rho"]
-
         if bathymetry:
-            # check if North or South pole are in domain
-            if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-                raise NotImplementedError("Plotting the bathymetry is not implemented for the case that the domain contains the North or South pole. Please set bathymetry to False.")
-
-        if self.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
-        # Define projections
-        proj = ccrs.PlateCarree()
-
-        trans = ccrs.NearsidePerspective(
-                central_longitude=lon_deg.mean().values, central_latitude=lat_deg.mean().values
-        )
-
-        lon_deg = lon_deg.values
-        lat_deg = lat_deg.values
-
-        # find corners
-        (lo1, la1) = (lon_deg[0, 0], lat_deg[0, 0])
-        (lo2, la2) = (lon_deg[0, -1], lat_deg[0, -1])
-        (lo3, la3) = (lon_deg[-1, -1], lat_deg[-1, -1])
-        (lo4, la4) = (lon_deg[-1, 0], lat_deg[-1, 0])
-
-        # transform coordinates to projected space
-        lo1t, la1t = trans.transform_point(lo1, la1, proj)
-        lo2t, la2t = trans.transform_point(lo2, la2, proj)
-        lo3t, la3t = trans.transform_point(lo3, la3, proj)
-        lo4t, la4t = trans.transform_point(lo4, la4, proj)
-
-        plt.figure(figsize=(10, 10))
-        ax = plt.axes(projection=trans)
-
-        ax.plot(
-            [lo1t, lo2t, lo3t, lo4t, lo1t],
-            [la1t, la2t, la3t, la4t, la1t],
-            "ro-",
-        )
-
-        ax.coastlines(
-            resolution="50m", linewidth=0.5, color="black"
-        )  # add map of coastlines
-        ax.gridlines()
-        if bathymetry:
-            p = ax.pcolormesh(
-                    lon_deg, lat_deg,
-                    self.ds.h.where(self.ds.mask_rho),
-                    transform=proj,
-                    cmap="YlGnBu"
-            )
-            plt.colorbar(p, label="Bathymetry [m]")
-        plt.show()
+            kwargs = {"cmap": "YlGnBu"}
+            fig = _plot(self.ds, field=self.ds.h.where(self.ds.mask_rho), straddle=self.straddle, kwargs=kwargs)
+        else:
+            fig = _plot(self.ds, straddle=self.straddle)
+    
 
     def coarsen(self):
         """
@@ -458,8 +433,8 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
         # Rotate grid by 90 degrees because until here the grid has been defined
         # to be longer in x-direction than in y-direction
 
-        lon, lat = rot_sphere(lon, lat, 90)
-        lonq, latq = rot_sphere(lonq, latq, 90)
+        lon, lat = _rot_sphere(lon, lat, 90)
+        lonq, latq = _rot_sphere(lonq, latq, 90)
 
         lon = np.transpose(np.flip(lon, 0))
         lat = np.transpose(np.flip(lat, 0))
@@ -481,10 +456,10 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
 def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
     """Rotate grid counterclockwise relative to surface of Earth by rot degrees"""
 
-    (lon, lat) = rot_sphere(lon, lat, rot)
-    (lonu, latu) = rot_sphere(lonu, latu, rot)
-    (lonv, latv) = rot_sphere(lonv, latv, rot)
-    (lonq, latq) = rot_sphere(lonq, latq, rot)
+    (lon, lat) = _rot_sphere(lon, lat, rot)
+    (lonu, latu) = _rot_sphere(lonu, latu, rot)
+    (lonv, latv) = _rot_sphere(lonv, latv, rot)
+    (lonq, latq) = _rot_sphere(lonq, latq, rot)
 
     return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
@@ -492,10 +467,10 @@ def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
 def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     """Translate grid so that the centre lies at the position (tra_lat, tra_lon)"""
 
-    (lon, lat) = tra_sphere(lon, lat, tra_lat)
-    (lonu, latu) = tra_sphere(lonu, latu, tra_lat)
-    (lonv, latv) = tra_sphere(lonv, latv, tra_lat)
-    (lonq, latq) = tra_sphere(lonq, latq, tra_lat)
+    (lon, lat) = _tra_sphere(lon, lat, tra_lat)
+    (lonu, latu) = _tra_sphere(lonu, latu, tra_lat)
+    (lonv, latv) = _tra_sphere(lonv, latv, tra_lat)
+    (lonq, latq) = _tra_sphere(lonq, latq, tra_lat)
 
     lon = lon + tra_lon * np.pi / 180
     lonu = lonu + tra_lon * np.pi / 180
@@ -510,7 +485,7 @@ def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     return lon, lat, lonu, latu, lonv, latv, lonq, latq
 
 
-def rot_sphere(lon, lat, rot):
+def _rot_sphere(lon, lat, rot):
 
     (n, m) = np.shape(lon)
     # convert rotation angle from degrees to radians
@@ -565,7 +540,7 @@ def rot_sphere(lon, lat, rot):
     return (lon, lat)
 
 
-def tra_sphere(lon, lat, tra):
+def _tra_sphere(lon, lat, tra):
 
     (n, m) = np.shape(lon)
     tra = tra * np.pi / 180  # translation in latitude direction
@@ -703,7 +678,7 @@ def _create_grid_ds(
     ds = xr.Dataset(
         coords={
             "lat_rho": (("eta_rho", "xi_rho"), lat * 180 / np.pi),
-            "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi)
+            "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi),
         }
     )
 

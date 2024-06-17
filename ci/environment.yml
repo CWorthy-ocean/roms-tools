@@ -5,16 +5,23 @@ channels:
 dependencies:
   - python>=3.9
   - numpy
-  - xarray
+  - scipy
   - matplotlib
   - cartopy
+  - xarray
+  - netcdf4
   - pooch
   - packaging
-  - netcdf4
   - numba
+  - gcm_filters
+  # testing
   - pytest
   - flake8
   - black
-  - scipy
-  - gcm_filters
-  - ipykernel # not strictly necessary but this is nice to run notebooks in this env to test
+  # docs
+  - sphinx
+  - nbsphinx
+  - sphinx-book-theme
+  - sphinxcontrib-bibtex
+  # for running jupyter notebooks
+  - ipykernel

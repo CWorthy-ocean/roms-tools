@@ -3,6 +3,7 @@ name = "roms-tools"
 description = "Tools for running and analysing UCLA-ROMS simulations"
 readme = "README.md"
 authors = [
+    {name = "Nora Loose", email = "nora.loose@gmail.com"},
     {name = "Thomas Nicholas", email = "tom@cworthy.org"}
 ]
 license = {text = "Apache-2"}
@@ -29,11 +30,12 @@ dependencies = [
     "scipy",
     "gcm_filters"
 ]
+
 dynamic = ["version"]
 
 [project.urls]
 Home = "https://github.com/CWorthy-ocean/roms-tools"
-Documentation = "https://github.com/CWorthy-ocean/roms-tools#readme"
+Documentation = "https://roms-tools.readthedocs.io/en/latest/"
 
 [build-system]
 requires = [

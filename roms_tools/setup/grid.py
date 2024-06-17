@@ -277,7 +277,14 @@ class Grid:
         ----------
         bathymetry : bool
             Whether or not to plot the bathymetry. Default is False.
+        
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+        
         """
+
         if bathymetry:
             kwargs = {"cmap": "YlGnBu"}
             fig = _plot(self.ds, field=self.ds.h.where(self.ds.mask_rho), straddle=self.straddle, kwargs=kwargs)

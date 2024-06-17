@@ -16,6 +16,7 @@ forcings, initial conditions, and more!
    :caption: Getting Started
 
    installation
+   methods
 
 .. toctree::
    :maxdepth: 1

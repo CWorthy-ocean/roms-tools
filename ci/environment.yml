@@ -1,4 +1,4 @@
-name: romstools-test
+name: romstools
 channels:
   - conda-forge
   - nodefaults
@@ -12,6 +12,7 @@ dependencies:
   - netcdf4
   - pooch
   - packaging
+  - numba
   - gcm_filters
   # testing
   - pytest

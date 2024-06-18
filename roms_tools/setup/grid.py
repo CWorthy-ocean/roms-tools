@@ -247,9 +247,9 @@ class Grid:
         attr_str = ', '.join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
-    def to_xgcm() -> Any:
-        # TODO we could convert the dataset to an xgcm.Grid object and return here?
-        raise NotImplementedError()
+    #def to_xgcm() -> Any:
+    #    # TODO we could convert the dataset to an xgcm.Grid object and return here?
+    #    raise NotImplementedError()
 
     def _straddle(self) -> None:
         """

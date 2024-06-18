@@ -24,6 +24,7 @@ forcings, initial conditions, and more!
 
    Creating a grid <grid>
    Creating tidal forcing <tides>
+   Creating atmospheric forcing <atmospheric_forcing>
 
 .. toctree::
    :maxdepth: 1

@@ -2,12 +2,27 @@ import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import xarray as xr
 
-def _plot(grid_ds, field=None, straddle=False, c='red', kwargs={}):
-
-    lon_deg = grid_ds["lon_rho"]
-    lat_deg = grid_ds["lat_rho"]
+def _plot(grid_ds, field=None, depth_contours=False, straddle=False, c='red', kwargs={}):
 
     if field is not None:
+
+        field = field.squeeze()
+        
+        if all(dim in field.dims for dim in ['eta_rho', 'xi_rho']):
+            field = field.where(grid_ds.mask_rho)
+            lon_deg = grid_ds["lon_rho"]
+            lat_deg = grid_ds["lat_rho"]
+        elif all(dim in field.dims for dim in ['eta_rho', 'xi_u']):
+            field = field.where(grid_ds.mask_u)
+            lon_deg = grid_ds["lon_u"]
+            lat_deg = grid_ds["lat_u"]
+        elif all(dim in field.dims for dim in ['eta_v', 'xi_rho']):
+            field = field.where(grid_ds.mask_v)
+            lon_deg = grid_ds["lon_v"]
+            lat_deg = grid_ds["lat_v"]
+        else:
+            ValueError("provided field does not have two horizontal dimension")
+        
         # check if North or South pole are in domain
         if lat_deg.max().values > 89 or lat_deg.min().values < -89:
             raise NotImplementedError("Plotting is not implemented for the case that the domain contains the North or South pole.")
@@ -19,9 +34,10 @@ def _plot(grid_ds, field=None, straddle=False, c='red', kwargs={}):
     proj = ccrs.PlateCarree()
 
     trans = ccrs.NearsidePerspective(
-            central_longitude=lon_deg.mean().values, 
+            central_longitude=lon_deg.mean().values,
             central_latitude=lat_deg.mean().values
     )
+
 
     lon_deg = lon_deg.values
     lat_deg = lat_deg.values
@@ -51,10 +67,18 @@ def _plot(grid_ds, field=None, straddle=False, c='red', kwargs={}):
     )  # add map of coastlines
     ax.gridlines()
 
+        
     if field is not None:
         p = ax.pcolormesh(
                 lon_deg, lat_deg, field, transform=proj, **kwargs
         )
         plt.colorbar(p, label=f"{field.long_name} [{field.units}]")
+
+    if depth_contours:
+        ax.contour(
+                lon_deg, lat_deg, field.depth, transform=proj, colors='k'
+                )
         
     return fig
+
+

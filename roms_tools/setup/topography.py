@@ -4,6 +4,7 @@ import gcm_filters
 from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import label
 from roms_tools.setup.datasets import fetch_topo
+from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 import warnings
 from itertools import count
 
@@ -34,6 +35,8 @@ def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax) -
             "long_name": "Mask at rho-points", 
             "units": "land/water (0/1)"
     }
+
+    ds = _add_velocity_masks(ds)
 
     # smooth topography locally to satisfy r < rmax
     ds["h"] = _smooth_topography_locally(ds["hraw"] * ds["mask_rho"], hmin, rmax)
@@ -211,6 +214,23 @@ def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
     ds.attrs["smooth_factor"] = smooth_factor
     ds.attrs["hmin"] = hmin
     ds.attrs["rmax"] = rmax
+
+    return ds
+
+def _add_velocity_masks(ds):
+
+    # add u- and v-masks
+    ds["mask_u"] = interpolate_from_rho_to_u(ds["mask_rho"], method='multiplicative')
+    ds["mask_v"] = interpolate_from_rho_to_v(ds["mask_rho"], method='multiplicative')
+    
+    ds["mask_u"].attrs = {
+            "long_name": "Mask at u-points", 
+            "units": "land/water (0/1)"
+    }
+    ds["mask_v"].attrs = {
+            "long_name": "Mask at v-points", 
+            "units": "land/water (0/1)"
+    }
 
     return ds
 

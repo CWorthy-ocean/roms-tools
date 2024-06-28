@@ -7,8 +7,9 @@ import xarray as xr
 
 from typing import Any
 
-from roms_tools.setup.topography import _add_topography_and_mask, _compute_rfactor
+from roms_tools.setup.topography import _add_topography_and_mask, _compute_rfactor, _add_velocity_masks
 from roms_tools.setup.plot import _plot
+from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 RADIUS_OF_EARTH = 6371315.0  # in m
 
@@ -216,12 +217,19 @@ class Grid:
         # Load the dataset from the file
         ds = xr.open_dataset(filepath)
 
+        if not all(mask in ds for mask in ["mask_u", "mask_v"]):
+            ds = _add_velocity_masks(ds)
+        if not all(coord in ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
+            ds = _add_lat_lon_at_velocity_points(ds)
+
         # Create a new Grid instance without calling __init__ and __post_init__
         grid = cls.__new__(cls)
 
         # Set the dataset for the grid instance
         object.__setattr__(grid, "ds", ds)
         
+            
+
         # Check if the Greenwich meridian goes through the domain.
         grid._straddle()
 
@@ -704,6 +712,18 @@ def _create_grid_ds(
             "units": "meter-1",
         },
     )
+    
+    ds["tra_lon"] = center_lon
+    ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
+    ds["tra_lon"].attrs["units"] = "degrees East"
+    
+    ds["tra_lat"] = center_lat
+    ds["tra_lat"].attrs["long_name"] = "Latitudinal translation of base grid"
+    ds["tra_lat"].attrs["units"] = "degrees North"
+    
+    ds["rotate"] = rot
+    ds["rotate"].attrs["long_name"] = "Rotation of base grid"
+    ds["rotate"].attrs["units"] = "degrees"
 
     ds["lon_rho"] = xr.Variable(
         data=lon * 180 / np.pi,
@@ -717,17 +737,7 @@ def _create_grid_ds(
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
     
-    ds["tra_lon"] = center_lon
-    ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
-    ds["tra_lon"].attrs["units"] = "degrees East"
-    
-    ds["tra_lat"] = center_lat
-    ds["tra_lat"].attrs["long_name"] = "Latitudinal translation of base grid"
-    ds["tra_lat"].attrs["units"] = "degrees North"
-    
-    ds["rotate"] = rot
-    ds["rotate"].attrs["long_name"] = "Rotation of base grid"
-    ds["rotate"].attrs["units"] = "degrees"
+    ds = _add_lat_lon_at_velocity_points(ds)
 
     return ds
 
@@ -792,3 +802,20 @@ def _f2c_xdir(f):
     fc[-1, :] = f[-1, :] + 0.5 * (f[-1, :] - f[-2, :])
 
     return fc
+
+
+def _add_lat_lon_at_velocity_points(ds):
+
+    lat_u = interpolate_from_rho_to_u(ds["lat_rho"])
+    lon_u = interpolate_from_rho_to_u(ds["lon_rho"])
+    lat_v = interpolate_from_rho_to_v(ds["lat_rho"])
+    lon_v = interpolate_from_rho_to_v(ds["lon_rho"])
+
+    lat_u.attrs = {"long_name": "latitude of u-points", "units": "degrees North"}
+    lon_u.attrs = {"long_name": "longitude of u-points", "units": "degrees East"}
+    lat_v.attrs = {"long_name": "latitude of v-points", "units": "degrees North"}
+    lon_v.attrs = {"long_name": "longitude of v-points", "units": "degrees East"}
+
+    ds = ds.assign_coords({"lat_u": lat_u, "lon_u": lon_u, "lat_v": lat_v, "lon_v": lon_v})
+
+    return ds

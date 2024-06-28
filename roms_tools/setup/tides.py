@@ -4,6 +4,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
+from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 import os
 import hashlib
 
@@ -520,10 +521,8 @@ class TidalForcing:
         v_tide = v_tide / self.grid.ds.h
 
         # Interpolate from rho- to velocity points
-        u_tide = (u_tide + u_tide.shift(xi_rho=1)).isel(xi_rho=slice(1, None)).drop_vars(["lat_rho", "lon_rho"])
-        u_tide = u_tide.swap_dims({"xi_rho": "xi_u"})
-        v_tide = (v_tide + v_tide.shift(eta_rho=1)).isel(eta_rho=slice(1, None)).drop_vars(["lat_rho", "lon_rho"])
-        v_tide = v_tide.swap_dims({"eta_rho": "eta_v"})
+        u_tide = interpolate_from_rho_u(u_tide)
+        v_tide = interpolate_from_rho_v(u_tide)
 
         # save in new dataset
         ds = xr.Dataset()

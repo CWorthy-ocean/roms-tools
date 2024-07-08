@@ -17,6 +17,7 @@ dependencies:
   - pytest
   - flake8
   - black
+  - pre-commit
   # docs
   - sphinx
   - nbsphinx

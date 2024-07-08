@@ -217,13 +217,13 @@ class SWRCorrection:
         if self.temporal_resolution != "climatology":
             raise NotImplementedError(f"temporal_resolution must be 'climatology', got {self.temporal_resolution}")
 
-        ds = self.load_data()
-        self.check_dataset(ds)
-        ds = self.ensure_latitude_ascending(ds)
+        ds = self._load_data()
+        self._check_dataset(ds)
+        ds = self._ensure_latitude_ascending(ds)
 
         object.__setattr__(self, "ds", ds)
 
-    def load_data(self):
+    def _load_data(self):
         """
         Load data from the specified file.
 
@@ -250,7 +250,7 @@ class SWRCorrection:
 
         return ds
 
-    def check_dataset(self, ds: xr.Dataset) -> None:
+    def _check_dataset(self, ds: xr.Dataset) -> None:
         """
         Check if the dataset contains the specified variable and dimensions.
 
@@ -271,7 +271,7 @@ class SWRCorrection:
             if dim not in ds.dims:
                 raise ValueError(f"The dataset does not contain the dimension '{dim}'.")
 
-    def ensure_latitude_ascending(self, ds: xr.Dataset) -> xr.Dataset:
+    def _ensure_latitude_ascending(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Ensure that the latitude dimension is in ascending order.
 
@@ -292,7 +292,7 @@ class SWRCorrection:
 
         return ds
 
-    def handle_longitudes(self, straddle: bool) -> None:
+    def _handle_longitudes(self, straddle: bool) -> None:
         """
         Handles the conversion of longitude values in the dataset from one range to another.
 
@@ -317,7 +317,7 @@ class SWRCorrection:
             # Convert from [0, 360] to [-180, 180]
             self.ds[self.dim_names['longitude']] = xr.where(lon > 180, lon - 360, lon)
 
-    def choose_subdomain(self, coords) -> xr.Dataset:
+    def _choose_subdomain(self, coords) -> xr.Dataset:
         """
         Selects a subdomain from the dataset based on the specified latitude and longitude ranges.
 
@@ -352,7 +352,7 @@ class SWRCorrection:
 
         return subdomain
 
-    def interpolate_temporally(self, field, time):
+    def _interpolate_temporally(self, field, time):
         """
         Interpolates the given field temporally based on the specified time points.
     
@@ -516,13 +516,13 @@ class AtmosphericForcing:
             }
 
         coords={dims["latitude"]: lat, dims["longitude"]: lon}
-        u10 = self.interpolate(data.ds[varnames["u10"]], mask, coords=coords, method='linear')
-        v10 = self.interpolate(data.ds[varnames["v10"]], mask, coords=coords, method='linear')
-        swr = self.interpolate(data.ds[varnames["swr"]], mask, coords=coords, method='linear')
-        lwr = self.interpolate(data.ds[varnames["lwr"]], mask, coords=coords, method='linear')
-        t2m = self.interpolate(data.ds[varnames["t2m"]], mask, coords=coords, method='linear')
-        d2m = self.interpolate(data.ds[varnames["d2m"]], mask, coords=coords, method='linear')
-        rain = self.interpolate(data.ds[varnames["rain"]], mask, coords=coords, method='linear')
+        u10 = self._interpolate(data.ds[varnames["u10"]], mask, coords=coords, method='linear')
+        v10 = self._interpolate(data.ds[varnames["v10"]], mask, coords=coords, method='linear')
+        swr = self._interpolate(data.ds[varnames["swr"]], mask, coords=coords, method='linear')
+        lwr = self._interpolate(data.ds[varnames["lwr"]], mask, coords=coords, method='linear')
+        t2m = self._interpolate(data.ds[varnames["t2m"]], mask, coords=coords, method='linear')
+        d2m = self._interpolate(data.ds[varnames["d2m"]], mask, coords=coords, method='linear')
+        rain = self._interpolate(data.ds[varnames["rain"]], mask, coords=coords, method='linear')
             
         if self.source == "era5":
             # translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
@@ -544,12 +544,12 @@ class AtmosphericForcing:
         if self.swr_correction:
 
             # choose same subdomain as forcing data so that we can use same mask
-            self.swr_correction.handle_longitudes(straddle=straddle)
+            self.swr_correction._handle_longitudes(straddle=straddle)
             coords_correction = {
                 self.swr_correction.dim_names["latitude"]: data.ds[data.dim_names["latitude"]], 
                 self.swr_correction.dim_names["longitude"]: data.ds[data.dim_names["longitude"]]
             }
-            subdomain = self.swr_correction.choose_subdomain(coords_correction)
+            subdomain = self.swr_correction._choose_subdomain(coords_correction)
             
             # spatial interpolation
             corr_factor = subdomain[self.swr_correction.varname]
@@ -557,10 +557,10 @@ class AtmosphericForcing:
                 self.swr_correction.dim_names["latitude"]: lat, 
                 self.swr_correction.dim_names["longitude"]: lon
             }
-            corr_factor = self.interpolate(corr_factor, mask, coords=coords_correction, method='linear')
+            corr_factor = self._interpolate(corr_factor, mask, coords=coords_correction, method='linear')
 
             # temporal interpolation
-            corr_factor = self.swr_correction.interpolate_temporally(corr_factor, time=swr.time)
+            corr_factor = self.swr_correction._interpolate_temporally(corr_factor, time=swr.time)
 
             swr = corr_factor * swr
 
@@ -615,7 +615,7 @@ class AtmosphericForcing:
         self.nan_check(mask_roms, time=0)
 
     @staticmethod
-    def interpolate(field, mask, coords, method='linear'):
+    def _interpolate(field, mask, coords, method='linear'):
         """
         Interpolate a field using specified coordinates and a given method.
 

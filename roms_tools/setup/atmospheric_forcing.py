@@ -89,7 +89,7 @@ class ForcingDataset:
         # Load the dataset
         with dask.config.set(**{'array.slicing.split_large_chunks': False}):
             # initially, we wawnt time chunk size of 1 to enable quick .nan_check() and .plot() methods for AtmosphericForcing 
-            ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], chunks={self.dim_names["time"]: 1})
+            ds = xr.open_mfdataset(self.filename, combine='nested', concat_dim=self.dim_names["time"], coords='minimal', compat='override', chunks={self.dim_names["time"]: 1})
 
         return ds
 

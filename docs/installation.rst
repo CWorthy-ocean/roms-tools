@@ -38,6 +38,3 @@ You can set up a conda environment with all required dependencies as follows::
     cd roms-tools
     conda env create -f ci/environment.yml
     conda activate romstools-test
-
-
-

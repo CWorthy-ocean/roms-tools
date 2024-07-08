@@ -17,4 +17,3 @@ Tidal Forcing
    :toctree: generated/
 
    roms_tools.TidalForcing
-

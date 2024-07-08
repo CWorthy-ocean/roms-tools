@@ -38,6 +38,3 @@ forcings, initial conditions, and more!
 
    references
    api
-
-
-

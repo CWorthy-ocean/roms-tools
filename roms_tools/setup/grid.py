@@ -1,13 +1,12 @@
 import copy
 from dataclasses import dataclass, field
-from datetime import date
 
 import numpy as np
 import xarray as xr
 
 from typing import Any
 
-from roms_tools.setup.topography import _add_topography_and_mask, _compute_rfactor
+from roms_tools.setup.topography import _add_topography_and_mask
 from roms_tools.setup.plot import _plot
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -19,77 +18,77 @@ RADIUS_OF_EARTH = 6371315.0  # in m
 @dataclass(frozen=True, kw_only=True)
 class Grid:
     """
-    A single ROMS grid.
+     A single ROMS grid.
 
-    Used for creating, plotting, and then saving a new ROMS domain grid.
+     Used for creating, plotting, and then saving a new ROMS domain grid.
 
-    Parameters
-    ----------
-    nx : int
-        Number of grid points in the x-direction.
-    ny : int
-        Number of grid points in the y-direction.
-    size_x : float
-        Domain size in the x-direction (in kilometers).
-    size_y : float
-        Domain size in the y-direction (in kilometers).
-    center_lon : float
-        Longitude of grid center.
-    center_lat : float
-        Latitude of grid center.
-    rot : float, optional
-        Rotation of grid x-direction from lines of constant latitude, measured in degrees.
-        Positive values represent a counterclockwise rotation.
-        The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
-   topography_source : str, optional
-       Specifies the data source to use for the topography. Options are 
-       "etopo5". The default is "etopo5".
-   smooth_factor : float, optional
-       The smoothing factor used in the domain-wide Gaussian smoothing of the
-       topography. Smaller values result in less smoothing, while larger
-       values produce more smoothing. The default is 8.
-   hmin : float, optional
-       The minimum ocean depth (in meters). The default is 5.
-   rmax : float, optional
-       The maximum slope parameter (in meters). This parameter controls 
-       the local smoothing of the topography. Smaller values result in 
-       smoother topography, while larger values preserve more detail. 
-       The default is 0.2.
+     Parameters
+     ----------
+     nx : int
+         Number of grid points in the x-direction.
+     ny : int
+         Number of grid points in the y-direction.
+     size_x : float
+         Domain size in the x-direction (in kilometers).
+     size_y : float
+         Domain size in the y-direction (in kilometers).
+     center_lon : float
+         Longitude of grid center.
+     center_lat : float
+         Latitude of grid center.
+     rot : float, optional
+         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
+         Positive values represent a counterclockwise rotation.
+         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    topography_source : str, optional
+        Specifies the data source to use for the topography. Options are
+        "etopo5". The default is "etopo5".
+    smooth_factor : float, optional
+        The smoothing factor used in the domain-wide Gaussian smoothing of the
+        topography. Smaller values result in less smoothing, while larger
+        values produce more smoothing. The default is 8.
+    hmin : float, optional
+        The minimum ocean depth (in meters). The default is 5.
+    rmax : float, optional
+        The maximum slope parameter (in meters). This parameter controls
+        the local smoothing of the topography. Smaller values result in
+        smoother topography, while larger values preserve more detail.
+        The default is 0.2.
 
-    Attributes
-    ----------
-    nx : int
-        Number of grid points in the x-direction.
-    ny : int
-        Number of grid points in the y-direction.
-    size_x : float
-        Domain size in the x-direction (in kilometers).
-    size_y : float
-        Domain size in the y-direction (in kilometers).
-    center_lon : float
-        Longitude of grid center.
-    center_lat : float
-        Latitude of grid center.
-    rot : float
-        Rotation of grid x-direction from lines of constant latitude.
-    topography_source : str
-        Data source used for the topography.
-    smooth_factor : int
-        Smoothing factor used in the domain-wide Gaussian smoothing of the topography.
-    hmin : float
-        Minimum ocean depth (in meters).
-    rmax : float
-        Maximum slope parameter (in meters).
-    ds : xr.Dataset
-        The xarray Dataset containing the grid data.
-    straddle : bool
-        Indicates if the Greenwich meridian (0° longitude) intersects the domain.
-        `True` if it does, `False` otherwise.
+     Attributes
+     ----------
+     nx : int
+         Number of grid points in the x-direction.
+     ny : int
+         Number of grid points in the y-direction.
+     size_x : float
+         Domain size in the x-direction (in kilometers).
+     size_y : float
+         Domain size in the y-direction (in kilometers).
+     center_lon : float
+         Longitude of grid center.
+     center_lat : float
+         Latitude of grid center.
+     rot : float
+         Rotation of grid x-direction from lines of constant latitude.
+     topography_source : str
+         Data source used for the topography.
+     smooth_factor : int
+         Smoothing factor used in the domain-wide Gaussian smoothing of the topography.
+     hmin : float
+         Minimum ocean depth (in meters).
+     rmax : float
+         Maximum slope parameter (in meters).
+     ds : xr.Dataset
+         The xarray Dataset containing the grid data.
+     straddle : bool
+         Indicates if the Greenwich meridian (0° longitude) intersects the domain.
+         `True` if it does, `False` otherwise.
 
-    Raises
-    ------
-    ValueError
-        If you try to create a grid with domain size larger than 20000 km.
+     Raises
+     ------
+     ValueError
+         If you try to create a grid with domain size larger than 20000 km.
     """
 
     nx: int
@@ -99,7 +98,7 @@ class Grid:
     center_lon: float
     center_lat: float
     rot: float = 0
-    topography_source: str = 'etopo5'
+    topography_source: str = "etopo5"
     smooth_factor: int = 8
     hmin: float = 5.0
     rmax: float = 0.2
@@ -114,31 +113,38 @@ class Grid:
             size_y=self.size_y,
             center_lon=self.center_lon,
             center_lat=self.center_lat,
-            rot=self.rot
+            rot=self.rot,
         )
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
         object.__setattr__(self, "ds", ds)
-    
+
         # Update self.ds with topography and mask information
-        self.add_topography_and_mask(topography_source=self.topography_source, smooth_factor=self.smooth_factor, hmin=self.hmin, rmax=self.rmax)
- 
+        self.add_topography_and_mask(
+            topography_source=self.topography_source,
+            smooth_factor=self.smooth_factor,
+            hmin=self.hmin,
+            rmax=self.rmax,
+        )
+
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
-    def add_topography_and_mask(self, topography_source="etopo5", smooth_factor=8, hmin=5.0, rmax=0.2) -> None:
+    def add_topography_and_mask(
+        self, topography_source="etopo5", smooth_factor=8, hmin=5.0, rmax=0.2
+    ) -> None:
         """
         Add topography and mask to the grid dataset.
-    
+
         This method processes the topography data and generates a land/sea mask.
-        It applies several steps, including interpolating topography, smoothing 
-        the topography over the entire domain and locally, and filling in enclosed basins. The 
+        It applies several steps, including interpolating topography, smoothing
+        the topography over the entire domain and locally, and filling in enclosed basins. The
         processed topography and mask are added to the grid's dataset as new variables.
 
         Parameters
         ----------
         topography_source : str, optional
-            Specifies the data source to use for the topography. Options are 
+            Specifies the data source to use for the topography. Options are
             "etopo5". The default is "etopo5".
         smooth_factor : float, optional
             The smoothing factor used in the domain-wide Gaussian smoothing of the
@@ -147,43 +153,45 @@ class Grid:
         hmin : float, optional
             The minimum ocean depth (in meters). The default is 5.
         rmax : float, optional
-            The maximum slope parameter (in meters). This parameter controls 
-            the local smoothing of the topography. Smaller values result in 
-            smoother topography, while larger values preserve more detail. 
+            The maximum slope parameter (in meters). This parameter controls
+            the local smoothing of the topography. Smaller values result in
+            smoother topography, while larger values preserve more detail.
             The default is 0.2.
-    
+
         Returns
         -------
         None
             This method modifies the dataset in place and does not return a value.
         """
 
-        ds = _add_topography_and_mask(self.ds, topography_source, smooth_factor, hmin, rmax)
+        ds = _add_topography_and_mask(
+            self.ds, topography_source, smooth_factor, hmin, rmax
+        )
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
 
     def compute_bathymetry_laplacian(self):
         """
         Compute the Laplacian of the 'h' field in the provided grid dataset.
-    
+
         Adds:
         xarray.DataArray: The Laplacian of the 'h' field as a new variable in the dataset self.ds.
         """
-        
+
         # Extract the 'h' field and grid spacing variables
         h = self.ds.h
         pm = self.ds.pm  # Reciprocal of grid spacing in x-direction
         pn = self.ds.pn  # Reciprocal of grid spacing in y-direction
-    
+
         # Compute second derivatives using finite differences
         d2h_dx2 = (h.shift(xi_rho=-1) - 2 * h + h.shift(xi_rho=1)) * pm**2
         d2h_dy2 = (h.shift(eta_rho=-1) - 2 * h + h.shift(eta_rho=1)) * pn**2
-    
+
         # Compute the Laplacian by summing second derivatives
         laplacian_h = d2h_dx2 + d2h_dy2
-    
+
         # Add the Laplacian as a new variable in the dataset
-        self.ds['h_laplacian'] = laplacian_h
+        self.ds["h_laplacian"] = laplacian_h
         self.ds["h_laplacian"].attrs["long_name"] = "Laplacian of final bathymetry"
         self.ds["h_laplacian"].attrs["units"] = "1/m"
 
@@ -196,7 +204,6 @@ class Grid:
         filepath
         """
         self.ds.to_netcdf(filepath)
-
 
     @classmethod
     def from_file(cls, filepath: str) -> "Grid":
@@ -221,18 +228,25 @@ class Grid:
 
         # Set the dataset for the grid instance
         object.__setattr__(grid, "ds", ds)
-        
+
         # Check if the Greenwich meridian goes through the domain.
         grid._straddle()
 
         # Manually set the remaining attributes by extracting parameters from dataset
-        object.__setattr__(grid, 'nx', ds.sizes['xi_rho'] - 2)
-        object.__setattr__(grid, 'ny', ds.sizes['eta_rho'] - 2)
-        object.__setattr__(grid, 'center_lon', ds['tra_lon'].values.item())
-        object.__setattr__(grid, 'center_lat', ds['tra_lat'].values.item())
-        object.__setattr__(grid, 'rot', ds['rotate'].values.item())
+        object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
+        object.__setattr__(grid, "ny", ds.sizes["eta_rho"] - 2)
+        object.__setattr__(grid, "center_lon", ds["tra_lon"].values.item())
+        object.__setattr__(grid, "center_lat", ds["tra_lat"].values.item())
+        object.__setattr__(grid, "rot", ds["rotate"].values.item())
 
-        for attr in ['size_x', 'size_y', 'topography_source', 'smooth_factor', 'hmin', 'rmax']:
+        for attr in [
+            "size_x",
+            "size_y",
+            "topography_source",
+            "smooth_factor",
+            "hmin",
+            "rmax",
+        ]:
             if attr in ds.attrs:
                 object.__setattr__(grid, attr, ds.attrs[attr])
 
@@ -243,8 +257,10 @@ class Grid:
         cls = self.__class__
         cls_name = cls.__name__
         # Create a dictionary of attribute names and values, filtering out those that are not set and 'ds'
-        attr_dict = {k: v for k, v in self.__dict__.items() if k != 'ds' and v is not None}
-        attr_str = ', '.join(f"{k}={v!r}" for k, v in attr_dict.items())
+        attr_dict = {
+            k: v for k, v in self.__dict__.items() if k != "ds" and v is not None
+        }
+        attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
     #def to_xgcm() -> Any:
@@ -254,43 +270,49 @@ class Grid:
     def _straddle(self) -> None:
         """
         Check if the Greenwich meridian goes through the domain.
-    
-        This method sets the `straddle` attribute to `True` if the Greenwich meridian 
+
+        This method sets the `straddle` attribute to `True` if the Greenwich meridian
         (0° longitude) intersects the domain defined by `lon_rho`. Otherwise, it sets
         the `straddle` attribute to `False`.
-    
-        The check is based on whether the longitudinal differences between adjacent 
+
+        The check is based on whether the longitudinal differences between adjacent
         points exceed 300 degrees, indicating a potential wraparound of longitude.
         """
 
-        if np.abs(self.ds.lon_rho.diff('xi_rho')).max() > 300 or np.abs(self.ds.lon_rho.diff('eta_rho')).max() > 300:
+        if (
+            np.abs(self.ds.lon_rho.diff("xi_rho")).max() > 300
+            or np.abs(self.ds.lon_rho.diff("eta_rho")).max() > 300
+        ):
             object.__setattr__(self, "straddle", True)
         else:
             object.__setattr__(self, "straddle", False)
 
-
     def plot(self, bathymetry: bool = False) -> None:
         """
         Plot the grid.
-    
+
         Parameters
         ----------
         bathymetry : bool
             Whether or not to plot the bathymetry. Default is False.
-        
+
         Returns
         -------
         None
             This method does not return any value. It generates and displays a plot.
-        
+
         """
 
         if bathymetry:
             kwargs = {"cmap": "YlGnBu"}
-            fig = _plot(self.ds, field=self.ds.h.where(self.ds.mask_rho), straddle=self.straddle, kwargs=kwargs)
+            _plot(
+                self.ds,
+                field=self.ds.h.where(self.ds.mask_rho),
+                straddle=self.straddle,
+                kwargs=kwargs,
+            )
         else:
-            fig = _plot(self.ds, straddle=self.straddle)
-    
+            _plot(self.ds, straddle=self.straddle)
 
     def coarsen(self):
         """
@@ -318,7 +340,7 @@ class Grid:
             "lat_rho": "lat_coarse",
             "h": "h_coarse",
             "angle": "angle_coarse",
-            "mask_rho": "mask_coarse"
+            "mask_rho": "mask_coarse",
         }
 
         for fine_var, coarse_var in d.items():
@@ -332,7 +354,8 @@ class Grid:
 
             self.ds[coarse_var] = coarse_field
 
-        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"]>0.5, 1, 0)
+        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0)
+
 
 def _make_grid_ds(
     nx: int,
@@ -343,8 +366,6 @@ def _make_grid_ds(
     center_lat: float,
     rot: float,
 ) -> xr.Dataset:
-
-
     _raise_if_domain_size_too_large(size_x, size_y)
 
     initial_lon_lat_vars = _make_initial_lon_lat_ds(size_x, size_y, nx, ny)
@@ -363,32 +384,22 @@ def _make_grid_ds(
     # compute angle of local grid positive x-axis relative to east
     ang = _compute_angle(lon, lonu, latu, lonq)
 
-    ds = _create_grid_ds(
-        lon,
-        lat,
-        pm,
-        pn,
-        ang,
-        rot,
-        center_lon,
-        center_lat
-    )
+    ds = _create_grid_ds(lon, lat, pm, pn, ang, rot, center_lon, center_lat)
 
     ds = _add_global_metadata(ds, size_x, size_y)
 
     return ds
 
-def _raise_if_domain_size_too_large(size_x, size_y):
 
+def _raise_if_domain_size_too_large(size_x, size_y):
     threshold = 20000
     if size_x > threshold or size_y > threshold:
-        raise ValueError("Domain size has to be smaller than %g km" %threshold)
+        raise ValueError("Domain size has to be smaller than %g km" % threshold)
 
 
 def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
-    
     # Mercator projection around the equator
-    
+
     # initially define the domain to be longer in x-direction (dimension "length")
     # than in y-direction (dimension "width") to keep grid distortion minimal
     if size_y > size_x:
@@ -428,7 +439,7 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
     lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
     # 2d grid at cell corners
     lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
-    
+
     if size_y > size_x:
         # Rotate grid by 90 degrees because until here the grid has been defined
         # to be longer in x-direction than in y-direction
@@ -441,13 +452,11 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
         lonq = np.transpose(np.flip(lonq, 0))
         latq = np.transpose(np.flip(latq, 0))
 
-
     # infer longitudes and latitudes at u- and v-points
     lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
     latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
     lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
     latv = 0.5 * (lat[:-1, :] + lat[1:, :])
-
 
     # TODO wrap up into temporary container Dataset object?
     return lon, lat, lonu, latu, lonv, latv, lonq, latq
@@ -486,7 +495,6 @@ def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
 
 
 def _rot_sphere(lon, lat, rot):
-
     (n, m) = np.shape(lon)
     # convert rotation angle from degrees to radians
     rot = rot * np.pi / 180
@@ -541,7 +549,6 @@ def _rot_sphere(lon, lat, rot):
 
 
 def _tra_sphere(lon, lat, tra):
-
     (n, m) = np.shape(lon)
     tra = tra * np.pi / 180  # translation in latitude direction
 
@@ -618,7 +625,6 @@ def _compute_coordinate_metrics(lon, lonu, latu, lonv, latv):
 
 
 def gc_dist(lon1, lat1, lon2, lat2):
-
     # Distance between 2 points along a great circle
     # lat and lon in radians!!
     # 2008, Jeroen Molemaker, UCLA
@@ -673,7 +679,6 @@ def _create_grid_ds(
     center_lon,
     center_lat,
 ):
-
     # Create xarray.Dataset object with lat_rho and lon_rho as coordinates
     ds = xr.Dataset(
         coords={
@@ -718,21 +723,21 @@ def _create_grid_ds(
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
     )
-    
+
     ds["lat_rho"] = xr.Variable(
         data=lat * 180 / np.pi,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
-    
+
     ds["tra_lon"] = center_lon
     ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
     ds["tra_lon"].attrs["units"] = "degrees East"
-    
+
     ds["tra_lat"] = center_lat
     ds["tra_lat"].attrs["long_name"] = "Latitudinal translation of base grid"
     ds["tra_lat"].attrs["units"] = "degrees North"
-    
+
     ds["rotate"] = rot
     ds["rotate"].attrs["long_name"] = "Rotation of base grid"
     ds["rotate"].attrs["units"] = "degrees"
@@ -741,12 +746,12 @@ def _create_grid_ds(
 
 
 def _add_global_metadata(ds, size_x, size_y):
-
     ds.attrs["Type"] = "ROMS grid produced by roms-tools"
     ds.attrs["size_x"] = size_x
     ds.attrs["size_y"] = size_y
 
     return ds
+
 
 def _f2c(f):
     """
@@ -770,6 +775,7 @@ def _f2c(f):
     fc = fc.rename({"eta_rho": "eta_coarse", "xi_rho": "xi_coarse"})
 
     return fc
+
 
 def _f2c_xdir(f):
     """

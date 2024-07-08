@@ -20,7 +20,7 @@ ROMS-tools is under active development. To obtain the latest development version
 ```bash
 git clone https://github.com/CWorthy-ocean/roms-tools.git
 cd roms-tools
-pip install -e . --no-deps 
+pip install -e . --no-deps
 ```
 
 ### Run the tests
@@ -127,7 +127,7 @@ the_same_grid = Grid.from_file('grids/my_new_roms_grid.nc')
 
 ### Step 2: Make Tidal Forcing
 
-Once we have created a grid in Step 1, we can make the tidal forcing for this grid. 
+Once we have created a grid in Step 1, we can make the tidal forcing for this grid.
 
 ```python
 from roms_tools import TidalForcing

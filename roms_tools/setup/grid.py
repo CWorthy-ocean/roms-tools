@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 import numpy as np
 import xarray as xr
 
-from typing import Any
 
 from roms_tools.setup.topography import _add_topography_and_mask
 from roms_tools.setup.plot import _plot
@@ -263,7 +262,7 @@ class Grid:
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
-    #def to_xgcm() -> Any:
+    # def to_xgcm() -> Any:
     #    # TODO we could convert the dataset to an xgcm.Grid object and return here?
     #    raise NotImplementedError()
 
@@ -347,10 +346,12 @@ class Grid:
             fine_field = self.ds[fine_var]
             if self.straddle and fine_var == "lon_rho":
                 fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
-            
+
             coarse_field = _f2c(fine_field)
             if fine_var == "lon_rho":
-                coarse_field = xr.where(coarse_field < 0, coarse_field + 360, coarse_field)
+                coarse_field = xr.where(
+                    coarse_field < 0, coarse_field + 360, coarse_field
+                )
 
             self.ds[coarse_var] = coarse_field
 

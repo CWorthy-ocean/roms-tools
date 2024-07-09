@@ -41,6 +41,7 @@ Running the tests
 
 You can check the functionality of the ROMS-Tools code by running the test suite::
 
+    conda activate romstools-test
     cd roms-tools
     pytest
 
@@ -49,7 +50,11 @@ Contributing code
 =================
 
 If you have written new code, you can run the tests as described in the previous step. You will likely have to iterate here several times until all tests pass.
-The next step is to make sure that the code is formatted properly. You can run all the linters with::
+The next step is to make sure that the code is formatted properly. Activate the environment::
+    
+    conda activate romstools-test
+
+You can now run all the linters with::
 
     pre-commit run --all-files
 

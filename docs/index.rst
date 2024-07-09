@@ -3,10 +3,10 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to the roms-tools documentation!
+Welcome to the ROMS-Tools documentation!
 ========================================
 
-**roms-tools** is a python package for creating the input files that are necessary
+**ROMS-Tools** is a python package for creating the input files that are necessary
 to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation.
 This includes creating a grid, tidal, boundary, and atmospheric forcings, initial conditions, and more!
 This python package is strongly inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.

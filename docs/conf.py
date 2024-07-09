@@ -11,9 +11,9 @@ import sys
 
 sys.path.insert(0, os.path.abspath("../"))
 
-project = "roms-tools"
-copyright = "2024, roms-tools developers"
-author = "roms-tools developers"
+project = "ROMS-Tools"
+copyright = "2024, ROMS-Tools developers"
+author = "ROMS-Tools developers"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

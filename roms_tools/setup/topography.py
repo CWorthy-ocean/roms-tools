@@ -18,7 +18,7 @@ def _add_topography_and_mask(ds, topography_source, smooth_factor, hmin, rmax) -
     hraw = xr.DataArray(data=hraw, dims=["eta_rho", "xi_rho"])
 
     # Mask is obtained by finding locations where ocean depth is positive 
-    mask = xr.where(hraw > 0, 1, 0)
+    mask = xr.where(hraw > 0, 1.0, 0.0)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
     ds["hraw"] = _smooth_topography_globally(hraw, mask, smooth_factor)

@@ -295,7 +295,7 @@ class Grid:
 
         if bathymetry:
             kwargs = {"cmap": "YlGnBu"}
-            fig = _plot(self.ds, field=self.ds.h.where(self.ds.mask_rho), straddle=self.straddle, kwargs=kwargs)
+            fig = _plot(self.ds, field=self.ds.h, straddle=self.straddle, kwargs=kwargs)
         else:
             fig = _plot(self.ds, straddle=self.straddle)
     

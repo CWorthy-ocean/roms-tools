@@ -9,6 +9,8 @@ from roms_tools.setup.datasets import Dataset
 from roms_tools.setup.vertical_coordinate import compute_depth, sigma_stretch
 from roms_tools.setup.fill import fill_and_interpolate, determine_fillvalue, interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.utils import nan_check
+from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
+import matplotlib.pyplot as plt
 
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions:
@@ -138,8 +140,8 @@ class InitialConditions:
         v = interpolate_from_rho_to_v(v_rot)
 
         # 3d masks for ROMS domain
-        umask = self.grid.ds.mask_u.expand_dims({'s_r': self.N})
-        vmask = self.grid.ds.mask_v.expand_dims({'s_r': self.N})
+        umask = self.grid.ds.mask_u.expand_dims({'s_rho': self.N})
+        vmask = self.grid.ds.mask_v.expand_dims({'s_rho': self.N})
 
         u = u * umask
         v = v * vmask
@@ -149,13 +151,13 @@ class InitialConditions:
         zw = compute_depth(h*0, h, self.hc, cs_w, sigma_w)
         # thicknesses
         dz = zw.diff(dim='s_w')
-        dz = dz.rename({"s_w": "s_r"})
+        dz = dz.rename({"s_w": "s_rho"})
         # thicknesses at u- and v-points
         dzu = interpolate_from_rho_to_u(dz)
         dzv = interpolate_from_rho_to_v(dz)
 
-        ubar = (dzu * u).sum(dim="s_r") / dzu.sum(dim="s_r")
-        vbar = (dzv * v).sum(dim="s_r")/ dzv.sum(dim="s_r")
+        ubar = (dzu * u).sum(dim="s_rho") / dzu.sum(dim="s_rho")
+        vbar = (dzv * v).sum(dim="s_rho")/ dzv.sum(dim="s_rho")
 
         # save in new dataset
         ds = xr.Dataset()
@@ -179,6 +181,11 @@ class InitialConditions:
         ds["v"] =  v.astype(np.float32)
         ds["v"].attrs["long_name"] = "v-flux component"
         ds["v"].attrs["units"] = "m/s"
+        
+        # initialize vertical velocity to zero
+        ds['w'] = xr.zeros_like(zw.expand_dims(time=ds['time'])).astype(np.float32)
+        ds["w"].attrs["long_name"] = "w-flux component"
+        ds["w"].attrs["units"] = "m/s"
 
         ds["ubar"] = ubar.transpose('time', 'eta_rho', 'xi_u').astype(np.float32)
         ds["ubar"].attrs["long_name"] = "vertically integrated u-flux component"
@@ -188,21 +195,26 @@ class InitialConditions:
         ds["vbar"].attrs["long_name"] = "vertically integrated v-flux component"
         ds["vbar"].attrs["units"] = "m/s"
 
-        # initialize vertical velocity to zero
-        ds['w'] = xr.zeros_like(zw.expand_dims(time=ds['time']))
 
         depth = -zr
-        depth.attrs["long_name"] = "Depth"
+        depth.attrs["long_name"] = "Layer depth at rho-points"
         depth.attrs["units"] = "m"
-        ds = ds.assign_coords({"depth": depth})
+        ds = ds.assign_coords({"depth_rho": depth})
+        
+        depth_u = interpolate_from_rho_to_u(depth)
+        depth_u.attrs["long_name"] = "Layer depth at u-points"
+        depth_u.attrs["units"] = "m"
+        ds = ds.assign_coords({"depth_u": depth_u})
+        
+        depth_v = interpolate_from_rho_to_v(depth)
+        depth_v.attrs["long_name"] = "Layer depth at v-points"
+        depth_v.attrs["units"] = "m"
+        ds = ds.assign_coords({"depth_v": depth_v})
 
         ds.attrs["Title"] = "ROMS initial file produced by roms-tools"
 
         if dims["time"] != "time":
             ds = ds.rename({dims["time"]: "time"})
-
-        # Preserve the original time coordinate for readability
-        ds = ds.assign_coords({"Time": ds["time"]})
 
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
@@ -212,41 +224,137 @@ class InitialConditions:
         ocean_time.attrs["long_name"] = "time since initialization"
         ds = ds.assign_coords({"ocean_time": ocean_time})
 
-        ds["tstart"] = 1.0
-        ds["tstart"].attrs["long_name"] = "Start processing day"
-        ds["tstart"].attrs["units"] = "day"
+        ds = ds.drop_vars(["eta_rho", "xi_rho"])
 
-        ds["tend"] = 1.0
-        ds["tend"].attrs["long_name"] = "End processing day"
-        ds["tend"].attrs["units"] = "day"
-
-        ds["theta_s"] = self.theta_s
+        ds["theta_s"] = np.float32(self.theta_s)
         ds["theta_s"].attrs["long_name"] = "S-coordinate surface control parameter"
         ds["theta_s"].attrs["units"] = "nondimensional"
 
-        ds["theta_b"] = self.theta_b
+        ds["theta_b"] = np.float32(self.theta_b)
         ds["theta_b"].attrs["long_name"] = "S-coordinate bottom control parameter"
         ds["theta_b"].attrs["units"] = "nondimensional"
 
-        ds["Tcline"] = self.hc
+        ds["Tcline"] = np.float32(self.hc)
         ds["Tcline"].attrs["long_name"] = "S-coordinate surface/bottom layer width"
         ds["Tcline"].attrs["units"] = "m"
 
-        ds["hc"] = self.hc
+        ds["hc"] = np.float32(self.hc)
         ds["hc"].attrs["long_name"] = "S-coordinate parameter critical depth"
         ds["hc"].attrs["units"] = "m"
 
-        ds["sc_r"] = sigma_r
+        ds["sc_r"] = sigma_r.astype(np.float32)
         ds["sc_r"].attrs["long_name"] = "S-coordinate at rho-point"
         ds["sc_r"].attrs["units"] = "-"
 
-        ds["Cs_r"] = cs_r
+        ds["Cs_r"] = cs_r.astype(np.float32)
         ds["Cs_r"].attrs["long_name"] = "S-coordinate stretching curves at RHO-points"
         ds["Cs_r"].attrs["units"] = "-"
 
         object.__setattr__(self, "ds", ds)
 
         nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
+
+
+
+    def plot(self, varname, s_rho=None, eta=None, xi=None, depth_contours=False, layer_contours=False) -> None:
+        """
+        Plot the initial conditions field for a given eta-, xi-, or s_rho-slice.
+
+        Parameters
+        ----------
+        varname : str
+            The name of the initial conditions field to plot. Options include:
+            - "temp": Potential temperature.
+            - "salt": Salinity.
+            - "zeta": Free surface.
+            - "u": u-flux component.
+            - "v": v-flux component.
+            - "w": w-flux component.
+            - "ubar": Vertically integrated u-flux component.
+            - "vbar": Vertically integrated v-flux component.
+            - "depth": Depth of layer.
+        s_rho : int, optional
+            The index of the vertical layer to plot. Default is None.
+        eta : int, optional
+            The eta-index to plot. Default is None.
+        xi : int, optional
+            The xi-index to plot. Default is None.
+        depth_contours : bool, optional
+            Whether to include depth contours in the plot. Default is False.
+
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+
+        Raises
+        ------
+        ValueError
+            If the specified varname is not one of the valid options.
+            If field is 3D and none of s_rho, eta, xi are specified.
+            If field is 2D and both eta and xi are specified.
+        """
+
+        if len(self.ds[varname].squeeze().dims) == 3 and not any([s_rho is not None, eta is not None, xi is not None]):
+            raise ValueError("For 3D fields, at least one of s_rho, eta, or xi must be specified.")
+
+        if len(self.ds[varname].squeeze().dims) == 2 and all([eta is not None, xi is not None]):
+            raise ValueError("For 2D fields, specify either eta or xi, not both.")
+        
+        self.ds[varname].load()
+        field = self.ds[varname].squeeze()
+            
+        # slice the field as desired
+        title = ""
+        if s_rho is not None:
+            title = title + f"s_rho = {field.s_rho[s_rho].item()}"
+            field = field.isel(s_rho=s_rho)
+        else:
+            depth_contours = False
+
+        if eta is not None:
+            if "eta_rho" in field.dims:
+                title = title + f"eta_rho = {field.eta_rho[eta].item()} "
+                field = field.isel(eta_rho=eta)
+            elif "eta_v" in field.dims:
+                title = title + f"eta_v = {field.eta_v[eta].item()} "
+                field = field.isel(eta_v=eta)
+            else:
+                raise ValueError(f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}].")
+        if xi is not None:
+            if "xi_rho" in field.dims:
+                title = title + f"xi_rho = {field.xi_rho[xi].item()} "
+                field = field.isel(xi_rho=xi)
+            elif "xi_u" in field.dims:
+                title = title + f"xi_u = {field.xi_u[xi].item()} "
+                field = field.isel(xi_u=xi)
+            else:
+                raise ValueError(f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}].")
+
+        # chose colorbar
+        if varname in ["u", "v", "w", "ubar", "vbar", "zeta"]:
+             vmax = max(field.max().values, -field.min().values)
+             vmin = -vmax
+             cmap = plt.cm.get_cmap("RdBu_r")
+        else:
+            vmax = field.max().values
+            vmin = field.min().values
+            cmap = plt.cm.get_cmap("YlOrRd")
+        cmap.set_bad(color='gray')
+        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+        if eta is None and xi is None:
+            fig = _plot(self.grid.ds, field=field, straddle=self.grid.straddle, depth_contours=depth_contours, title=title, kwargs=kwargs, c='g')
+        else:
+                
+            if len(field.dims) == 2:
+                _section_plot(field, layer_contours=layer_contours, title=title, kwargs=kwargs)
+            else:
+                if "s_rho" in field.dims:
+                    _profile_plot(field, title=title)
+                else:
+                    _line_plot(field, title=title)
+
 
 
 

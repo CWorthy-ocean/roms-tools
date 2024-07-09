@@ -64,7 +64,7 @@ def sigma_stretch(theta_s, theta_b, N, type):
         k = xr.DataArray(np.arange(N + 1), dims='s_w')
         sigma = (k - N) / N
     elif type == 'r':
-        k = xr.DataArray(np.arange(1, N + 1), dims='s_r')
+        k = xr.DataArray(np.arange(1, N + 1), dims='s_rho')
         sigma = (k - N - 0.5) / N
     else:
         raise ValueError("Type must be either 'w' for vertical velocity points or 'r' for rho-points.")

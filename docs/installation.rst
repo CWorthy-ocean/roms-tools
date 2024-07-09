@@ -4,7 +4,7 @@ Installation
 Installation from pip
 =====================
 
-roms-tools can be installed using pip::
+ROMS-Tools can be installed using pip::
 
     pip install roms-tools
 
@@ -39,7 +39,7 @@ This conda environment is useful for any of the following steps:
 Running the tests
 =================
 
-You can check the functionality of the roms-tools code by running the test suite::
+You can check the functionality of the ROMS-Tools code by running the test suite::
 
     cd roms-tools
     pytest

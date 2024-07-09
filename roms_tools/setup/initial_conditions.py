@@ -405,11 +405,11 @@ class InitialConditions:
         if varname in ["u", "v", "w", "ubar", "vbar", "zeta"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
-            cmap = plt.cm.get_cmap("RdBu_r")
+            cmap = plt.colormaps.get_cmap("RdBu_r")
         else:
             vmax = field.max().values
             vmin = field.min().values
-            cmap = plt.cm.get_cmap("YlOrRd")
+            cmap = plt.colormaps.get_cmap("YlOrRd")
         cmap.set_bad(color="gray")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 

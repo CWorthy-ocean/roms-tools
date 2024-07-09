@@ -31,7 +31,9 @@ def _plot(grid_ds, field=None, depth_contours=False, straddle=False, c='red', ti
         
         # check if North or South pole are in domain
         if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-            raise NotImplementedError("Plotting is not implemented for the case that the domain contains the North or South pole.")
+            raise NotImplementedError(
+                "Plotting is not implemented for the case that the domain contains the North or South pole."
+            )
 
     if straddle:
         lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
@@ -53,19 +55,20 @@ def _plot(grid_ds, field=None, depth_contours=False, straddle=False, c='red', ti
         (lon_deg[0, 0], lat_deg[0, 0]),
         (lon_deg[0, -1], lat_deg[0, -1]),
         (lon_deg[-1, -1], lat_deg[-1, -1]),
-        (lon_deg[-1, 0], lat_deg[-1, 0])
+        (lon_deg[-1, 0], lat_deg[-1, 0]),
     ]
 
     # transform coordinates to projected space
     transformed_corners = [trans.transform_point(lo, la, proj) for lo, la in corners]
     transformed_lons, transformed_lats = zip(*transformed_corners)
 
-    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={'projection': trans})
+    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
     ax.plot(
         list(transformed_lons) + [transformed_lons[0]],
         list(transformed_lats) + [transformed_lats[0]],
-        "o-", c=c
+        "o-",
+        c=c,
     )
 
     ax.coastlines(
@@ -75,9 +78,7 @@ def _plot(grid_ds, field=None, depth_contours=False, straddle=False, c='red', ti
     ax.set_title(title)
         
     if field is not None:
-        p = ax.pcolormesh(
-                lon_deg, lat_deg, field, transform=proj, **kwargs
-        )
+        p = ax.pcolormesh(lon_deg, lat_deg, field, transform=proj, **kwargs)
         plt.colorbar(p, label=f"{field.long_name} [{field.units}]")
 
     if depth_contours:

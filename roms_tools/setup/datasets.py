@@ -26,9 +26,7 @@ def fetch_topo(topography_source) -> xr.Dataset:
     Load the global topography data as an xarray Dataset.
     """
     # Mapping from user-specified topography options to corresponding filenames in the registry
-    topo_dict = {
-        "etopo5": "etopo5.nc"
-    }
+    topo_dict = {"etopo5": "etopo5.nc"}
 
     # The file will be downloaded automatically the first time this is run
     # returns the file path to the downloaded file. Afterwards, Pooch finds

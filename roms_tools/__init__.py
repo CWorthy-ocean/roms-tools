@@ -10,3 +10,5 @@ except ImportError:  # pragma: no cover
 
 from roms_tools.setup.grid import Grid  # noqa: F401
 from roms_tools.setup.tides import TidalForcing  # noqa: F401
+from roms_tools.setup.atmospheric_forcing import AtmosphericForcing  # noqa: F401
+from roms_tools.setup.atmospheric_forcing import SWRCorrection  # noqa: F401

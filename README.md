@@ -33,7 +33,7 @@ Before running the tests you can install and activate the following conda enviro
 ```bash
 cd roms-tools
 conda env create -f ci/environment.yml
-conda activate romstools-test
+conda activate romstools
 ```
 
 Check the installation of `ROMS-Tools` has worked by running the test suite

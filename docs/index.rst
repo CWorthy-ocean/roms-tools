@@ -25,6 +25,7 @@ This python package is strongly inspired by the `UCLA MATLAB tools <https://gith
 
    Creating a grid <grid>
    Creating tidal forcing <tides>
+   Creating atmospheric forcing <atmospheric_forcing>
 
 .. toctree::
    :maxdepth: 1

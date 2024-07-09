@@ -2,7 +2,8 @@ import numpy as np
 import xarray as xr
 from numba import jit
 
-def lateral_fill(var, land_mask, dims=['latitude', 'longitude']):
+
+def lateral_fill(var, land_mask, dims=["latitude", "longitude"]):
     """
     Perform lateral fill on an xarray DataArray using a land mask.
 
@@ -28,12 +29,13 @@ def lateral_fill(var, land_mask, dims=['latitude', 'longitude']):
     """
     var_filled = xr.apply_ufunc(
         _lateral_fill_np_array,
-        var, land_mask,
+        var,
+        land_mask,
         input_core_dims=[dims, dims],
         output_core_dims=[dims],
-        dask='parallelized',
+        dask="parallelized",
         output_dtypes=[var.dtype],
-        vectorize=True
+        vectorize=True,
     )
 
     return var_filled
@@ -46,32 +48,32 @@ def _lateral_fill_np_array(var, isvalid_mask, tol=1.0e-4, rc=1.8, max_iter=10000
     Parameters
     ----------
     var : numpy.array
-        Two-dimensional array on which to fill NaNs.Only NaNs where `isvalid_mask` is 
+        Two-dimensional array on which to fill NaNs.Only NaNs where `isvalid_mask` is
         True will be filled.
-    
+
     isvalid_mask : numpy.array, boolean
-        Valid values mask: `True` where data should be filled. Must have same shape 
+        Valid values mask: `True` where data should be filled. Must have same shape
         as `var`.
 
     tol : float, optional, default=1.0e-4
-        Convergence criteria: stop filling when the value change is less than 
+        Convergence criteria: stop filling when the value change is less than
         or equal to `tol * var`, i.e., `delta <= tol * np.abs(var[j, i])`.
-    
+
     rc : float, optional, default=1.8
         Over-relaxation coefficient to use in the Successive Over-Relaxation (SOR)
         fill algorithm. Larger arrays (or extent of region to be filled if not global)
-        typically converge faster with larger coefficients. For completely 
-        land-filling a 1-degree grid (360x180), a coefficient in the range 1.85-1.9 
+        typically converge faster with larger coefficients. For completely
+        land-filling a 1-degree grid (360x180), a coefficient in the range 1.85-1.9
         is near optimal. Valid bounds are (1.0, 2.0).
 
     max_iter : int, optional, default=10000
-        Maximum number of iterations to perform before giving up if the tolerance 
+        Maximum number of iterations to perform before giving up if the tolerance
         is not reached.
 
     Returns
     -------
     var : numpy.array
-        Array with NaNs filled by iterative smoothing, except for the regions 
+        Array with NaNs filled by iterative smoothing, except for the regions
         specified by `isvalid_mask` where NaNs are preserved.
 
 
@@ -97,30 +99,30 @@ def _lateral_fill_np_array(var, isvalid_mask, tol=1.0e-4, rc=1.8, max_iter=10000
 @jit(nopython=True, parallel=True)
 def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
     """
-    Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR) 
+    Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR)
     solution of the Laplace Equation.
 
     Parameters
     ----------
     nlat : int
         Number of latitude points in the array.
-    
+
     nlon : int
         Number of longitude points in the array.
-    
+
     var : numpy.array
         Two-dimensional array on which to fill NaNs.
-    
+
     fillmask : numpy.array, boolean
         Mask indicating positions to be filled: `True` where data should be filled.
-    
+
     tol : float
-        Convergence criterion: the iterative process stops when the maximum residual change 
+        Convergence criterion: the iterative process stops when the maximum residual change
         is less than or equal to `tol`.
-    
+
     rc : float
         Over-relaxation coefficient used in the SOR algorithm. Must be between 1.0 and 2.0.
-    
+
     max_iter : int
         Maximum number of iterations allowed before the process is terminated.
 
@@ -128,15 +130,15 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
     -------
     None
         The input array `var` is modified in-place with the NaN values filled.
-    
+
     Notes
     -----
     This function performs the following steps:
     1. Computes a zonal mean to use as an initial guess for the fill.
     2. Replaces missing values in the input array with the computed zonal average.
-    3. Iteratively fills the missing values using the SOR algorithm until the specified 
+    3. Iteratively fills the missing values using the SOR algorithm until the specified
        tolerance `tol` is reached or the maximum number of iterations `max_iter` is exceeded.
-    
+
     Example
     -------
     >>> nlat, nlon = 180, 360
@@ -147,7 +149,6 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
     >>> max_iter = 10000
     >>> _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter)
     """
-
 
     # If field consists only of zeros, fill NaNs in with zeros and all done
     # Note: this will happen for shortwave downward radiation at night time
@@ -193,12 +194,16 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
 
             for i in range(1, nlon - 1):
                 if fillmask[j, i]:
-                    im1 = (i - 1)
-                    ip1 = (i + 1)
+                    im1 = i - 1
+                    ip1 = i + 1
 
                     # this is SOR
                     res[j, i] = (
-                        var[j, ip1] + var[j, im1] + var[jm1, i] + var[jp1, i] - 4.0 * var[j, i]
+                        var[j, ip1]
+                        + var[j, im1]
+                        + var[jm1, i]
+                        + var[jp1, i]
+                        - 4.0 * var[j, i]
                     )
                     var[j, i] = var[j, i] + rc * 0.25 * res[j, i]
 
@@ -209,12 +214,11 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
 
                 for i in range(1, nlon - 1):
                     if fillmask[j, i]:
-                        im1 = (i - 1)
-                        ip1 = (i + 1)
+                        im1 = i - 1
+                        ip1 = i + 1
 
                         res[j, i] = var[j, ip1] + var[j, im1] - 2.0 * var[j, i]
                         var[j, i] = var[j, i] + rc * 0.5 * res[j, i]
-
 
         # do 1D smooth in the vertical on left and right column
         for i in [0, nlon - 1]:
@@ -226,8 +230,6 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
 
                     res[j, i] = var[jp1, i] + var[jm1, i] - 2.0 * var[j, i]
                     var[j, i] = var[j, i] + rc * 0.5 * res[j, i]
-
-
 
         # four corners
         for j in [0, nlat - 1]:
@@ -247,13 +249,15 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
                     im1 = i - 1
 
                 res[j, i] = (
-                    var[j, ip1] + var[j, im1] + var[jm1, i] + var[jp1, i] - 4.0 * var[j, i]
+                    var[j, ip1]
+                    + var[j, im1]
+                    + var[jm1, i]
+                    + var[jp1, i]
+                    - 4.0 * var[j, i]
                 )
                 var[j, i] = var[j, i] + rc * 0.25 * res[j, i]
-
 
         res_max = np.max(np.fabs(res)) / np.max(np.fabs(var))
         iter_cnt += 1
 
     return var
-

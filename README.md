@@ -1,5 +1,8 @@
 # ROMS-Tools
 
+[![Documentation Status](https://readthedocs.org/projects/roms-tools/badge/?version=latest)](https://roms-tools.readthedocs.io/en/latest/?badge=latest)
+[![PyPI version](https://badge.fury.io/py/roms-tools.svg)](https://badge.fury.io/py/roms-tools)
+
 ## Overview
 
 A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla-roms) simulation.

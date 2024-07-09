@@ -19,7 +19,7 @@ def _add_topography_and_mask(
     hraw = _make_raw_topography(lon, lat, topography_source)
     hraw = xr.DataArray(data=hraw, dims=["eta_rho", "xi_rho"])
 
-    # Mask is obtained by finding locations where ocean depth is positive 
+    # Mask is obtained by finding locations where ocean depth is positive
     mask = xr.where(hraw > 0, 1.0, 0.0)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
@@ -244,20 +244,14 @@ def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
 
     return ds
 
+
 def _add_velocity_masks(ds):
 
     # add u- and v-masks
-    ds["mask_u"] = interpolate_from_rho_to_u(ds["mask_rho"], method='multiplicative')
-    ds["mask_v"] = interpolate_from_rho_to_v(ds["mask_rho"], method='multiplicative')
-    
-    ds["mask_u"].attrs = {
-            "long_name": "Mask at u-points", 
-            "units": "land/water (0/1)"
-    }
-    ds["mask_v"].attrs = {
-            "long_name": "Mask at v-points", 
-            "units": "land/water (0/1)"
-    }
+    ds["mask_u"] = interpolate_from_rho_to_u(ds["mask_rho"], method="multiplicative")
+    ds["mask_v"] = interpolate_from_rho_to_v(ds["mask_rho"], method="multiplicative")
+
+    ds["mask_u"].attrs = {"long_name": "Mask at u-points", "units": "land/water (0/1)"}
+    ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
 
     return ds
-

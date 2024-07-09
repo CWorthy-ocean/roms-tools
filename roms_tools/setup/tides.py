@@ -564,8 +564,8 @@ class TidalForcing:
         v_tide = v_tide / self.grid.ds.h
 
         # Interpolate from rho- to velocity points
-        u_tide = interpolate_from_rho_u(u_tide)
-        v_tide = interpolate_from_rho_v(u_tide)
+        u_tide = interpolate_from_rho_to_u(u_tide)
+        v_tide = interpolate_from_rho_to_v(u_tide)
 
         # save in new dataset
         ds = xr.Dataset()

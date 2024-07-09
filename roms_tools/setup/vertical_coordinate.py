@@ -1,6 +1,7 @@
 import numpy as np
 import xarray as xr
 
+
 def compute_cs(sigma, theta_s, theta_b):
     """
     Compute the S-coordinate stretching curves.
@@ -60,14 +61,16 @@ def sigma_stretch(theta_s, theta_b, N, type):
     ValueError
         If the type is not 'w' or 'r'.
     """
-    if type == 'w':
-        k = xr.DataArray(np.arange(N + 1), dims='s_w')
+    if type == "w":
+        k = xr.DataArray(np.arange(N + 1), dims="s_w")
         sigma = (k - N) / N
-    elif type == 'r':
-        k = xr.DataArray(np.arange(1, N + 1), dims='s_rho')
+    elif type == "r":
+        k = xr.DataArray(np.arange(1, N + 1), dims="s_rho")
         sigma = (k - N - 0.5) / N
     else:
-        raise ValueError("Type must be either 'w' for vertical velocity points or 'r' for rho-points.")
+        raise ValueError(
+            "Type must be either 'w' for vertical velocity points or 'r' for rho-points."
+        )
 
     cs = compute_cs(sigma, theta_s, theta_b)
 

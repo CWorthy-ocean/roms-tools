@@ -6,7 +6,7 @@ import xarray as xr
 
 from typing import Any
 
-from roms_tools.setup.topography import _add_topography_and_mask, _compute_rfactor, _add_velocity_masks
+from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot
 from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
@@ -311,7 +311,7 @@ class Grid:
 
         if bathymetry:
             kwargs = {"cmap": "YlGnBu"}
-            
+
             _plot(
                 self.ds,
                 field=self.ds.h.where(self.ds.mask_rho),
@@ -716,15 +716,15 @@ def _create_grid_ds(
             "units": "meter-1",
         },
     )
-    
+
     ds["tra_lon"] = center_lon
     ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
     ds["tra_lon"].attrs["units"] = "degrees East"
-    
+
     ds["tra_lat"] = center_lat
     ds["tra_lat"].attrs["long_name"] = "Latitudinal translation of base grid"
     ds["tra_lat"].attrs["units"] = "degrees North"
-    
+
     ds["rotate"] = rot
     ds["rotate"].attrs["long_name"] = "Rotation of base grid"
     ds["rotate"].attrs["units"] = "degrees"
@@ -740,7 +740,7 @@ def _create_grid_ds(
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
-    
+
     ds = _add_lat_lon_at_velocity_points(ds)
 
     return ds
@@ -821,6 +821,8 @@ def _add_lat_lon_at_velocity_points(ds):
     lat_v.attrs = {"long_name": "latitude of v-points", "units": "degrees North"}
     lon_v.attrs = {"long_name": "longitude of v-points", "units": "degrees East"}
 
-    ds = ds.assign_coords({"lat_u": lat_u, "lon_u": lon_u, "lat_v": lat_v, "lon_v": lon_v})
+    ds = ds.assign_coords(
+        {"lat_u": lat_u, "lon_u": lon_u, "lat_v": lat_v, "lon_v": lon_v}
+    )
 
     return ds

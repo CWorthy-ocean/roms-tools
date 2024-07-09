@@ -1,5 +1,6 @@
 import xarray as xr
 
+
 def nan_check(field, mask) -> None:
     """
     Checks for NaN values at wet points in the field.
@@ -13,7 +14,7 @@ def nan_check(field, mask) -> None:
         The data array to be checked for NaN values. This is typically an xarray.DataArray or numpy array.
 
     mask : array-like
-        A boolean mask or data array with the same shape as `field`. The wet points (usually ocean points) 
+        A boolean mask or data array with the same shape as `field`. The wet points (usually ocean points)
         are indicated by `1` or `True`, and land points by `0` or `False`.
 
     Raises
@@ -23,10 +24,10 @@ def nan_check(field, mask) -> None:
         The error message will explain the potential cause and suggest ensuring the dataset's coverage.
 
     """
-    
+
     # Replace values in field with 0 where mask is not 1
     da = xr.where(mask == 1, field, 0)
-    
+
     # Check if any NaN values exist in the modified field
     if da.isnull().any().values:
         raise ValueError(
@@ -34,4 +35,3 @@ def nan_check(field, mask) -> None:
             "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
             "dataset covers the entire area required by the ROMS grid."
         )
-

@@ -1,16 +1,20 @@
 import xarray as xr
-import dask
 import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from datetime import datetime
-from typing import Optional, Dict, Union
 from roms_tools.setup.datasets import Dataset
 from roms_tools.setup.vertical_coordinate import compute_depth, sigma_stretch
-from roms_tools.setup.fill import fill_and_interpolate, determine_fillvalue, interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.fill import (
+    fill_and_interpolate,
+    determine_fillvalue,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+)
 from roms_tools.setup.utils import nan_check
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
+
 
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions:
@@ -53,7 +57,14 @@ class InitialConditions:
     >>> grid_info = Grid(...)
     >>> start_time = datetime(2000, 1, 1)
     >>> end_time = datetime(2000, 1, 2)
-    >>> atm_forcing = AtmosphericForcing(grid=grid_info, start_time=start_time, end_time=end_time, source='era5', filename='atmospheric_data_*.nc', swr_correction=swr_correction)
+    >>> atm_forcing = AtmosphericForcing(
+    ...     grid=grid_info,
+    ...     start_time=start_time,
+    ...     end_time=end_time,
+    ...     source="era5",
+    ...     filename="atmospheric_data_*.nc",
+    ...     swr_correction=swr_correction,
+    ... )
     """
 
     grid: Grid
@@ -75,7 +86,12 @@ class InitialConditions:
         h = self.grid.ds.h
 
         if self.source == "glorys":
-            dims = {"longitude": "longitude", "latitude": "latitude", "depth": "depth", "time": "time"}
+            dims = {
+                "longitude": "longitude",
+                "latitude": "latitude",
+                "depth": "depth",
+                "time": "time",
+            }
 
         data = Dataset(filename=self.filename, start_time=self.ini_time, dim_names=dims)
 
@@ -92,7 +108,12 @@ class InitialConditions:
         # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
         # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
         # Note that no error is thrown if the data does not have the full safety margin available, as long as interpolation does not give any NaNs over the ocean.
-        data.choose_subdomain(latitude_range=[lat.min().values, lat.max().values], longitude_range=[lon.min().values, lon.max().values], margin=2, straddle=straddle)
+        data.choose_subdomain(
+            latitude_range=[lat.min().values, lat.max().values],
+            longitude_range=[lon.min().values, lon.max().values],
+            margin=2,
+            straddle=straddle,
+        )
 
         data.convert_to_negative_depth()
 
@@ -103,33 +124,65 @@ class InitialConditions:
                 "salt": "so",
                 "u": "uo",
                 "v": "vo",
-                "ssh": "zos"
+                "ssh": "zos",
             }
 
-        fill_dims=[dims["latitude"], dims["longitude"]]
+        fill_dims = [dims["latitude"], dims["longitude"]]
 
         # 2d interpolation
         mask = xr.where(data.ds[varnames["ssh"]].isel(time=0).isnull(), 0, 1)
-        coords={dims["latitude"]: lat, dims["longitude"]: lon}
+        coords = {dims["latitude"]: lat, dims["longitude"]: lon}
 
-        ssh = fill_and_interpolate(data.ds[varnames["ssh"]], mask, fill_dims=fill_dims, coords=coords, method='linear')
+        ssh = fill_and_interpolate(
+            data.ds[varnames["ssh"]],
+            mask,
+            fill_dims=fill_dims,
+            coords=coords,
+            method="linear",
+        )
 
         # 3d interpolation
-        cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, 'r')
-        zr = compute_depth(h*0, h, self.hc, cs_r, sigma_r)
+        cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, "r")
+        zr = compute_depth(h * 0, h, self.hc, cs_r, sigma_r)
 
         mask = xr.where(data.ds[varnames["temp"]].isel(time=0).isnull(), 0, 1)
-        coords={dims["latitude"]: lat, dims["longitude"]: lon, dims["depth"]: zr}
+        coords = {dims["latitude"]: lat, dims["longitude"]: lon, dims["depth"]: zr}
 
         # the following computes a fill value to be used if an entire horizontal slice consists of NaNs (often the case
         # for the deepest levels); otherwise NaNs are filled in by horizontal diffusion from non-NaN regions
         fillvalue_temp = determine_fillvalue(data.ds[varnames["temp"]], dims)
         fillvalue_salt = determine_fillvalue(data.ds[varnames["salt"]], dims)
 
-        temp = fill_and_interpolate(data.ds[varnames["temp"]], mask, fill_dims=fill_dims, coords=coords, method='linear', fillvalue=fillvalue_temp)
-        salt = fill_and_interpolate(data.ds[varnames["salt"]], mask, fill_dims=fill_dims, coords=coords, method='linear', fillvalue=fillvalue_salt)
-        u = fill_and_interpolate(data.ds[varnames["u"]], mask, fill_dims=fill_dims, coords=coords, method='linear')  # use default fill value of 0
-        v = fill_and_interpolate(data.ds[varnames["v"]], mask, fill_dims=fill_dims, coords=coords, method='linear')  # use default fill value of 0
+        temp = fill_and_interpolate(
+            data.ds[varnames["temp"]],
+            mask,
+            fill_dims=fill_dims,
+            coords=coords,
+            method="linear",
+            fillvalue=fillvalue_temp,
+        )
+        salt = fill_and_interpolate(
+            data.ds[varnames["salt"]],
+            mask,
+            fill_dims=fill_dims,
+            coords=coords,
+            method="linear",
+            fillvalue=fillvalue_salt,
+        )
+        u = fill_and_interpolate(
+            data.ds[varnames["u"]],
+            mask,
+            fill_dims=fill_dims,
+            coords=coords,
+            method="linear",
+        )  # use default fill value of 0
+        v = fill_and_interpolate(
+            data.ds[varnames["v"]],
+            mask,
+            fill_dims=fill_dims,
+            coords=coords,
+            method="linear",
+        )  # use default fill value of 0
 
         # rotate to grid orientation
         u_rot = u * np.cos(angle) + v * np.sin(angle)
@@ -140,37 +193,37 @@ class InitialConditions:
         v = interpolate_from_rho_to_v(v_rot)
 
         # 3d masks for ROMS domain
-        umask = self.grid.ds.mask_u.expand_dims({'s_rho': self.N})
-        vmask = self.grid.ds.mask_v.expand_dims({'s_rho': self.N})
+        umask = self.grid.ds.mask_u.expand_dims({"s_rho": self.N})
+        vmask = self.grid.ds.mask_v.expand_dims({"s_rho": self.N})
 
         u = u * umask
         v = v * vmask
 
         # Compute barotropic velocity
-        cs_w, sigma_w = sigma_stretch(self.theta_s, self.theta_b,self. N, 'w')
-        zw = compute_depth(h*0, h, self.hc, cs_w, sigma_w)
+        cs_w, sigma_w = sigma_stretch(self.theta_s, self.theta_b, self.N, "w")
+        zw = compute_depth(h * 0, h, self.hc, cs_w, sigma_w)
         # thicknesses
-        dz = zw.diff(dim='s_w')
+        dz = zw.diff(dim="s_w")
         dz = dz.rename({"s_w": "s_rho"})
         # thicknesses at u- and v-points
         dzu = interpolate_from_rho_to_u(dz)
         dzv = interpolate_from_rho_to_v(dz)
 
         ubar = (dzu * u).sum(dim="s_rho") / dzu.sum(dim="s_rho")
-        vbar = (dzv * v).sum(dim="s_rho")/ dzv.sum(dim="s_rho")
+        vbar = (dzv * v).sum(dim="s_rho") / dzv.sum(dim="s_rho")
 
         # save in new dataset
         ds = xr.Dataset()
 
-        ds["temp"] =  temp.astype(np.float32)
+        ds["temp"] = temp.astype(np.float32)
         ds["temp"].attrs["long_name"] = "Potential temperature"
         ds["temp"].attrs["units"] = "Celsius"
 
-        ds["salt"] =  salt.astype(np.float32)
+        ds["salt"] = salt.astype(np.float32)
         ds["salt"].attrs["long_name"] = "Salinity"
         ds["salt"].attrs["units"] = "PSU"
 
-        ds["zeta"] =  ssh.astype(np.float32)
+        ds["zeta"] = ssh.astype(np.float32)
         ds["zeta"].attrs["long_name"] = "Free surface"
         ds["zeta"].attrs["units"] = "m"
 
@@ -178,34 +231,33 @@ class InitialConditions:
         ds["u"].attrs["long_name"] = "u-flux component"
         ds["u"].attrs["units"] = "m/s"
 
-        ds["v"] =  v.astype(np.float32)
+        ds["v"] = v.astype(np.float32)
         ds["v"].attrs["long_name"] = "v-flux component"
         ds["v"].attrs["units"] = "m/s"
-        
+
         # initialize vertical velocity to zero
-        ds['w'] = xr.zeros_like(zw.expand_dims(time=ds['time'])).astype(np.float32)
+        ds["w"] = xr.zeros_like(zw.expand_dims(time=ds["time"])).astype(np.float32)
         ds["w"].attrs["long_name"] = "w-flux component"
         ds["w"].attrs["units"] = "m/s"
 
-        ds["ubar"] = ubar.transpose('time', 'eta_rho', 'xi_u').astype(np.float32)
+        ds["ubar"] = ubar.transpose("time", "eta_rho", "xi_u").astype(np.float32)
         ds["ubar"].attrs["long_name"] = "vertically integrated u-flux component"
         ds["ubar"].attrs["units"] = "m/s"
 
-        ds["vbar"] =  vbar.transpose('time', 'eta_v', 'xi_rho').astype(np.float32)
+        ds["vbar"] = vbar.transpose("time", "eta_v", "xi_rho").astype(np.float32)
         ds["vbar"].attrs["long_name"] = "vertically integrated v-flux component"
         ds["vbar"].attrs["units"] = "m/s"
-
 
         depth = -zr
         depth.attrs["long_name"] = "Layer depth at rho-points"
         depth.attrs["units"] = "m"
         ds = ds.assign_coords({"depth_rho": depth})
-        
+
         depth_u = interpolate_from_rho_to_u(depth)
         depth_u.attrs["long_name"] = "Layer depth at u-points"
         depth_u.attrs["units"] = "m"
         ds = ds.assign_coords({"depth_u": depth_u})
-        
+
         depth_v = interpolate_from_rho_to_v(depth)
         depth_v.attrs["long_name"] = "Layer depth at v-points"
         depth_v.attrs["units"] = "m"
@@ -220,7 +272,9 @@ class InitialConditions:
         model_reference_date = np.datetime64(self.model_reference_date)
 
         # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-        ocean_time = (ds["time"] - model_reference_date).astype('float64') / 3600 / 24 * 1e-9
+        ocean_time = (
+            (ds["time"] - model_reference_date).astype("float64") / 3600 / 24 * 1e-9
+        )
         ocean_time.attrs["long_name"] = "time since initialization"
         ds = ds.assign_coords({"ocean_time": ocean_time})
 
@@ -254,9 +308,15 @@ class InitialConditions:
 
         nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
 
-
-
-    def plot(self, varname, s_rho=None, eta=None, xi=None, depth_contours=False, layer_contours=False) -> None:
+    def plot(
+        self,
+        varname,
+        s_rho=None,
+        eta=None,
+        xi=None,
+        depth_contours=False,
+        layer_contours=False,
+    ) -> None:
         """
         Plot the initial conditions field for a given eta-, xi-, or s_rho-slice.
 
@@ -295,15 +355,21 @@ class InitialConditions:
             If field is 2D and both eta and xi are specified.
         """
 
-        if len(self.ds[varname].squeeze().dims) == 3 and not any([s_rho is not None, eta is not None, xi is not None]):
-            raise ValueError("For 3D fields, at least one of s_rho, eta, or xi must be specified.")
+        if len(self.ds[varname].squeeze().dims) == 3 and not any(
+            [s_rho is not None, eta is not None, xi is not None]
+        ):
+            raise ValueError(
+                "For 3D fields, at least one of s_rho, eta, or xi must be specified."
+            )
 
-        if len(self.ds[varname].squeeze().dims) == 2 and all([eta is not None, xi is not None]):
+        if len(self.ds[varname].squeeze().dims) == 2 and all(
+            [eta is not None, xi is not None]
+        ):
             raise ValueError("For 2D fields, specify either eta or xi, not both.")
-        
+
         self.ds[varname].load()
         field = self.ds[varname].squeeze()
-            
+
         # slice the field as desired
         title = ""
         if s_rho is not None:
@@ -320,7 +386,9 @@ class InitialConditions:
                 title = title + f"eta_v = {field.eta_v[eta].item()} "
                 field = field.isel(eta_v=eta)
             else:
-                raise ValueError(f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}].")
+                raise ValueError(
+                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
+                )
         if xi is not None:
             if "xi_rho" in field.dims:
                 title = title + f"xi_rho = {field.xi_rho[xi].item()} "
@@ -329,32 +397,40 @@ class InitialConditions:
                 title = title + f"xi_u = {field.xi_u[xi].item()} "
                 field = field.isel(xi_u=xi)
             else:
-                raise ValueError(f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}].")
+                raise ValueError(
+                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
+                )
 
         # chose colorbar
         if varname in ["u", "v", "w", "ubar", "vbar", "zeta"]:
-             vmax = max(field.max().values, -field.min().values)
-             vmin = -vmax
-             cmap = plt.cm.get_cmap("RdBu_r")
+            vmax = max(field.max().values, -field.min().values)
+            vmin = -vmax
+            cmap = plt.cm.get_cmap("RdBu_r")
         else:
             vmax = field.max().values
             vmin = field.min().values
             cmap = plt.cm.get_cmap("YlOrRd")
-        cmap.set_bad(color='gray')
+        cmap.set_bad(color="gray")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
         if eta is None and xi is None:
-            fig = _plot(self.grid.ds, field=field, straddle=self.grid.straddle, depth_contours=depth_contours, title=title, kwargs=kwargs, c='g')
+            _plot(
+                self.grid.ds,
+                field=field,
+                straddle=self.grid.straddle,
+                depth_contours=depth_contours,
+                title=title,
+                kwargs=kwargs,
+                c="g",
+            )
         else:
-                
+
             if len(field.dims) == 2:
-                _section_plot(field, layer_contours=layer_contours, title=title, kwargs=kwargs)
+                _section_plot(
+                    field, layer_contours=layer_contours, title=title, kwargs=kwargs
+                )
             else:
                 if "s_rho" in field.dims:
                     _profile_plot(field, title=title)
                 else:
                     _line_plot(field, title=title)
-
-
-
-

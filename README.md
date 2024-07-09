@@ -23,9 +23,9 @@ pip install -e .
 ```
 
 
-### Conda environment
+### Run the tests
 
-You can install and activate the following conda environment:
+Before running the tests you can install and activate the following conda environment:
 
 ```bash
 cd roms-tools
@@ -33,16 +33,14 @@ conda env create -f ci/environment.yml
 conda activate romstools-test
 ```
 
-### Run the tests
-
-Check the installation has worked by running the test suite
+Check the installation of `ROMS-Tools` has worked by running the test suite
 ```bash
 pytest
 ```
 
 ## Getting Started
 
-To learn how to use `roms-tools`, check out the [documentation](https://roms-tools.readthedocs.io/en/latest/).
+To learn how to use `ROMS-Tools`, check out the [documentation](https://roms-tools.readthedocs.io/en/latest/).
 
 ## Feedback and contributions
 

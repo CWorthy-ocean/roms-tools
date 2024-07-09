@@ -1,4 +1,4 @@
-# ROMS-tools
+# ROMS-Tools
 
 ## Overview
 

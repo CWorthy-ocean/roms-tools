@@ -272,9 +272,7 @@ class InitialConditions:
         model_reference_date = np.datetime64(self.model_reference_date)
 
         # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-        ocean_time = (
-            (ds["time"] - model_reference_date).astype("float64") * 1e-9
-        )
+        ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
         ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
         ds["ocean_time"].attrs[
             "long_name"
@@ -439,7 +437,6 @@ class InitialConditions:
                 else:
                     _line_plot(field, title=title)
 
-
     def save(self, filepath: str) -> None:
         """
         Save the initial conditions information to a netCDF4 file.
@@ -449,4 +446,3 @@ class InitialConditions:
         filepath
         """
         self.ds.to_netcdf(filepath)
-

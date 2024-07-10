@@ -1,6 +1,7 @@
 import numpy as np
 import xarray as xr
 
+
 def compute_cs(sigma, theta_s, theta_b):
     """
     Compute the S-coordinate stretching curves according to Shchepetkin and McWilliams (2009).

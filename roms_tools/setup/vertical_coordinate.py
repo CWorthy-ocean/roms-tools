@@ -1,10 +1,9 @@
 import numpy as np
 import xarray as xr
 
-
 def compute_cs(sigma, theta_s, theta_b):
     """
-    Compute the S-coordinate stretching curves.
+    Compute the S-coordinate stretching curves according to Shchepetkin and McWilliams (2009).
 
     Parameters
     ----------
@@ -23,10 +22,12 @@ def compute_cs(sigma, theta_s, theta_b):
     Raises
     ------
     ValueError
-        If theta_s or theta_b are less than or equal to zero.
+        If theta_s or theta_b are not within the valid range.
     """
-    if theta_s <= 0 or theta_b <= 0:
-        raise ValueError("theta_s and theta_b must be greater than zero.")
+    if not (0 < theta_s <= 10):
+        raise ValueError("theta_s must be between 0 and 10.")
+    if not (0 < theta_b <= 4):
+        raise ValueError("theta_b must be between 0 and 4.")
 
     C = (1 - np.cosh(theta_s * sigma)) / (np.cosh(theta_s) - 1)
     C = (np.exp(theta_b * C) - 1) / (1 - np.exp(-theta_b))

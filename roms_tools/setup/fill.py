@@ -13,7 +13,7 @@ def fill_and_interpolate(
     ----------
     field : xr.DataArray
         The data array to be interpolated. This array typically contains oceanographic or atmospheric data
-        with dimensions including latitude, longitude, and depth.
+        with dimensions including latitude and longitude.
 
     mask : xr.DataArray
         A data array with the same spatial dimensions as `field`, where `1` indicates wet (ocean) points

@@ -6,8 +6,9 @@ from datetime import datetime
 import glob
 import numpy as np
 from typing import Optional, Dict
-from roms_tools.setup.fill import lateral_fill
+from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.utils import nan_check
 import calendar
 
 
@@ -408,26 +409,30 @@ class AtmosphericForcing:
             }
 
         coords = {dims["latitude"]: lat, dims["longitude"]: lon}
-        u10 = self._interpolate(
-            data.ds[varnames["u10"]], mask, coords=coords, method="linear"
+        u10 = fill_and_interpolate(
+            data.ds[varnames["u10"]], mask, list(coords.keys()), coords, method="linear"
         )
-        v10 = self._interpolate(
-            data.ds[varnames["v10"]], mask, coords=coords, method="linear"
+        v10 = fill_and_interpolate(
+            data.ds[varnames["v10"]], mask, list(coords.keys()), coords, method="linear"
         )
-        swr = self._interpolate(
-            data.ds[varnames["swr"]], mask, coords=coords, method="linear"
+        swr = fill_and_interpolate(
+            data.ds[varnames["swr"]], mask, list(coords.keys()), coords, method="linear"
         )
-        lwr = self._interpolate(
-            data.ds[varnames["lwr"]], mask, coords=coords, method="linear"
+        lwr = fill_and_interpolate(
+            data.ds[varnames["lwr"]], mask, list(coords.keys()), coords, method="linear"
         )
-        t2m = self._interpolate(
-            data.ds[varnames["t2m"]], mask, coords=coords, method="linear"
+        t2m = fill_and_interpolate(
+            data.ds[varnames["t2m"]], mask, list(coords.keys()), coords, method="linear"
         )
-        d2m = self._interpolate(
-            data.ds[varnames["d2m"]], mask, coords=coords, method="linear"
+        d2m = fill_and_interpolate(
+            data.ds[varnames["d2m"]], mask, list(coords.keys()), coords, method="linear"
         )
-        rain = self._interpolate(
-            data.ds[varnames["rain"]], mask, coords=coords, method="linear"
+        rain = fill_and_interpolate(
+            data.ds[varnames["rain"]],
+            mask,
+            list(coords.keys()),
+            coords,
+            method="linear",
         )
 
         if self.source == "era5":
@@ -473,8 +478,12 @@ class AtmosphericForcing:
                 self.swr_correction.dim_names["latitude"]: lat,
                 self.swr_correction.dim_names["longitude"]: lon,
             }
-            corr_factor = self._interpolate(
-                corr_factor, mask, coords=coords_correction, method="linear"
+            corr_factor = fill_and_interpolate(
+                corr_factor,
+                mask,
+                list(coords_correction.keys()),
+                coords_correction,
+                method="linear",
             )
 
             # temporal interpolation
@@ -538,82 +547,8 @@ class AtmosphericForcing:
 
         object.__setattr__(self, "ds", ds)
 
-        self.nan_check(mask_roms, time=0)
-
-    @staticmethod
-    def _interpolate(field, mask, coords, method="linear"):
-        """
-        Interpolate a field using specified coordinates and a given method.
-
-        Parameters
-        ----------
-        field : xr.DataArray
-            The data array to be interpolated.
-
-        mask : xr.DataArray
-            A data array with same spatial dimensions as `field`, where `1` indicates wet (ocean)
-            points and `0` indicates land points.
-
-        coords : dict
-            A dictionary specifying the target coordinates for interpolation. The keys
-            should match the dimensions of `field` (e.g., {"longitude": lon_values, "latitude": lat_values}).
-
-        method : str, optional, default='linear'
-            The interpolation method to use. Valid options are those supported by
-            `xarray.DataArray.interp`.
-
-        Returns
-        -------
-        xr.DataArray
-            The interpolated data array.
-
-        Notes
-        -----
-        This method first sets land values to NaN based on the provided mask. It then uses the
-        `lateral_fill` function to propagate ocean values. These two steps serve the purpose to
-        avoid interpolation across the land-ocean boundary. Finally, it performs interpolation
-        over the specified coordinates.
-
-        """
-
-        dims = list(coords.keys())
-
-        # set land values to nan
-        field = field.where(mask)
-        # propagate ocean values into land interior before interpolation
-        field = lateral_fill(field, 1 - mask, dims)
-        # interpolate
-        field_interpolated = field.interp(**coords, method=method).drop_vars(dims)
-
-        return field_interpolated
-
-    def nan_check(self, mask, time=0) -> None:
-        """
-        Checks for NaN values at wet points in all variables of the dataset at a specified time step.
-
-        Parameters
-        ----------
-        mask : array-like
-            A boolean mask indicating the wet points in the dataset.
-        time : int
-            The time step at which to check for NaN values. Default is 0.
-
-        Raises
-        ------
-        ValueError
-            If any variable contains NaN values at the specified time step.
-
-        """
-
         for var in self.ds.data_vars:
-            da = xr.where(mask == 1, self.ds[var].isel(time=time), 0)
-            if da.isnull().any().values:
-                raise ValueError(
-                    f"NaN values found in the variable '{var}' at time step {time} over the ocean. This likely "
-                    "occurs because the ROMS grid, including a small safety margin for interpolation, is not "
-                    "fully contained within the dataset's longitude/latitude range. Please ensure that the "
-                    "dataset covers the entire area required by the ROMS grid."
-                )
+            nan_check(self.ds[var].isel(time=0), mask_roms)
 
     def plot(self, varname, time=0) -> None:
         """

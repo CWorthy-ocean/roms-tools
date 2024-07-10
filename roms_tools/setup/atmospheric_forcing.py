@@ -975,7 +975,7 @@ class AtmosphericForcing:
             model_reference_date = np.datetime64(self.model_reference_date)
 
             # Preserve the original time coordinate for readability
-            ds["Time"] = ds["time"]
+            ds.assign_coords({"absolute_time": ds["time"]})
 
             # Convert the time coordinate to the format expected by ROMS (days since model reference date)
             ds["time"] = (
@@ -984,6 +984,9 @@ class AtmosphericForcing:
             ds["time"].attrs[
                 "long_name"
             ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
+            ds["time"].attrs[
+                "units"
+            ] = "days"
 
             # Prepare the dataset for writing to a netCDF file without immediately computing
             write = ds.to_netcdf(filename, compute=False)

@@ -273,9 +273,14 @@ class InitialConditions:
 
         # Convert the time coordinate to the format expected by ROMS (days since model reference date)
         ocean_time = (
-            (ds["time"] - model_reference_date).astype("float64") / 3600 / 24 * 1e-9
+            (ds["time"] - model_reference_date).astype("float64") * 1e-9
         )
-        ocean_time.attrs["long_name"] = "time since initialization"
+        ocean_time.attrs[
+            "long_name"
+        ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
+        ocean_time.attrs[
+            "units"
+        ] = "seconds"
         ds = ds.assign_coords({"ocean_time": ocean_time})
 
         ds = ds.drop_vars(["eta_rho", "xi_rho"])

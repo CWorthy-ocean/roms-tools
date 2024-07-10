@@ -142,17 +142,27 @@ class Dataset:
 
         # Load the dataset
         with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-            # initially, we want time chunk size of 1 to enable quick execution of .nan_check() and .plot() methods for AtmosphericForcing
+            # Define the default chunk sizes
+            chunks = {
+                self.dim_names["time"]: 1,
+                self.dim_names["latitude"]: -1,
+                self.dim_names["longitude"]: -1,
+            }
+
+            # Check if "depth" is in self.dim_names and if it exists in the dataset
+            if (
+                "depth" in self.dim_names
+                and self.dim_names["depth"] in xr.open_dataset(self.filename).dims
+            ):
+                chunks[self.dim_names["depth"]] = 1
+
             ds = xr.open_mfdataset(
                 self.filename,
                 combine="nested",
                 concat_dim=self.dim_names["time"],
-                chunks={
-                    self.dim_names["time"]: 1,
-                    self.dim_names["latitude"]: -1,
-                    self.dim_names["longitude"]: -1,
-                    self.dim_names["depth"]: 1,
-                },
+                coords="minimal",
+                compat="override",
+                chunks=chunks,
             )
 
         return ds

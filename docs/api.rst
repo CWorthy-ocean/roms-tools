@@ -17,3 +17,14 @@ Tidal Forcing
    :toctree: generated/
 
    roms_tools.TidalForcing
+
+Atmospheric Forcing
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.AtmosphericForcing
+   roms_tools.SWRCorrection
+
+=======

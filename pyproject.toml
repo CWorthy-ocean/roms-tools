@@ -28,7 +28,8 @@ dependencies = [
     "cartopy",
     "packaging",
     "scipy",
-    "gcm_filters"
+    "gcm_filters",
+    "numba"
 ]
 
 dynamic = ["version"]

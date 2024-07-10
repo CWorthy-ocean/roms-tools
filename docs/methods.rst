@@ -1,6 +1,8 @@
 Methodology
 ===========
 
+The ROMS-Tools methodology closely follows the methods employed in the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
+
 Grid
 #####
 
@@ -81,3 +83,14 @@ After the four steps are completed, the following variables are added to ``grid.
 - ``hraw``: the topography field after step 2
 - ``mask_rho``: the wet mask after step 3, obtained by finding the locations where ``hraw > 0`` and then filling in the enclosed basins
 - ``h``: the final bathymetry after step 4
+
+Tidal Forcing
+##############
+
+Coming soon...
+
+
+Atmospheric Forcing
+####################
+
+Coming soon...

@@ -141,6 +141,9 @@ def determine_fillvalue(field, dims):
 
 
 def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
+=======
+def lateral_fill(var, land_mask, dims=["latitude", "longitude"]):
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     """
     Perform lateral fill on an xarray DataArray using a land mask.
 
@@ -157,9 +160,12 @@ def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
     dims : list of str, optional, default=['latitude', 'longitude']
         Dimensions along which to perform the fill. The default is ['latitude', 'longitude'].
 
+<<<<<<< HEAD
     fillvalue : float, optional, default=0.0
         Value to use if an entire data slice along the dims contains only NaNs.
 
+=======
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     Returns
     -------
     var_filled : xarray.DataArray
@@ -167,27 +173,42 @@ def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
         specified by `land_mask` where NaNs are preserved.
 
     """
+<<<<<<< HEAD
 
     var_filled = xr.apply_ufunc(
         _lateral_fill_np_array,
         # var, land_mask, fillvalue,
         # input_core_dims=[dims, dims, []],
+=======
+    var_filled = xr.apply_ufunc(
+        _lateral_fill_np_array,
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
         var,
         land_mask,
         input_core_dims=[dims, dims],
         output_core_dims=[dims],
+<<<<<<< HEAD
         output_dtypes=[var.dtype],
         dask="parallelized",
         vectorize=True,
         kwargs={"fillvalue": fillvalue},
+=======
+        dask="parallelized",
+        output_dtypes=[var.dtype],
+        vectorize=True,
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     )
 
     return var_filled
 
 
+<<<<<<< HEAD
 def _lateral_fill_np_array(
     var, isvalid_mask, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000
 ):
+=======
+def _lateral_fill_np_array(var, isvalid_mask, tol=1.0e-4, rc=1.8, max_iter=10000):
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     """
     Perform lateral fill on a numpy array.
 
@@ -201,9 +222,12 @@ def _lateral_fill_np_array(
         Valid values mask: `True` where data should be filled. Must have same shape
         as `var`.
 
+<<<<<<< HEAD
     fillvalue: float
         Value to use if the full field `var` contains only  NaNs. Default is 0.0.
 
+=======
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     tol : float, optional, default=1.0e-4
         Convergence criteria: stop filling when the value change is less than
         or equal to `tol * var`, i.e., `delta <= tol * np.abs(var[j, i])`.
@@ -239,14 +263,22 @@ def _lateral_fill_np_array(
 
     fillmask = np.isnan(var)  # Fill all NaNs
     keepNaNs = ~isvalid_mask & np.isnan(var)
+<<<<<<< HEAD
     var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue)
+=======
+    var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter)
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     var[keepNaNs] = np.nan  # Replace NaNs in areas not designated for filling
 
     return var
 
 
 @jit(nopython=True, parallel=True)
+<<<<<<< HEAD
 def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=0.0):
+=======
+def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     """
     Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR)
     solution of the Laplace Equation.
@@ -275,9 +307,12 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=
     max_iter : int
         Maximum number of iterations allowed before the process is terminated.
 
+<<<<<<< HEAD
     fillvalue: float
         Value to use if the full field is NaNs. Default is 0.0.
 
+=======
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
     Returns
     -------
     None
@@ -307,10 +342,13 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=
     if np.max(np.fabs(var)) == 0.0:
         var = np.zeros_like(var)
         return var
+<<<<<<< HEAD
     # If field consists only of NaNs, fill NaNs with fill value
     if np.isnan(var).all():
         var = fillvalue * np.ones_like(var)
         return var
+=======
+>>>>>>> 9908bdedcd2aadf014049fac7a68fcc99d73f35f
 
     # Compute a zonal mean to use as a first guess
     zoncnt = np.zeros(nlat)

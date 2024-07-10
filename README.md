@@ -1,5 +1,8 @@
 # ROMS-Tools
 
+[![Documentation Status](https://readthedocs.org/projects/roms-tools/badge/?version=latest)](https://roms-tools.readthedocs.io/en/latest/?badge=latest)
+[![PyPI version](https://badge.fury.io/py/roms-tools.svg)](https://badge.fury.io/py/roms-tools)
+
 ## Overview
 
 A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla-roms) simulation.
@@ -30,7 +33,7 @@ Before running the tests you can install and activate the following conda enviro
 ```bash
 cd roms-tools
 conda env create -f ci/environment.yml
-conda activate romstools-test
+conda activate romstools
 ```
 
 Check the installation of `ROMS-Tools` has worked by running the test suite

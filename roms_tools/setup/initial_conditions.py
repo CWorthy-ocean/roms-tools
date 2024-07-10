@@ -309,6 +309,7 @@ class InitialConditions:
 
         object.__setattr__(self, "ds", ds)
 
+        ds["zeta"].load()
         nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
 
     def plot(
@@ -437,3 +438,15 @@ class InitialConditions:
                     _profile_plot(field, title=title)
                 else:
                     _line_plot(field, title=title)
+
+
+    def save(self, filepath: str) -> None:
+        """
+        Save the initial conditions information to a netCDF4 file.
+
+        Parameters
+        ----------
+        filepath
+        """
+        self.ds.to_netcdf(filepath)
+

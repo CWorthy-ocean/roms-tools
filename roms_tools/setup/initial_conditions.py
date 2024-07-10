@@ -26,19 +26,19 @@ class InitialConditions:
     grid : Grid
         Object representing the grid information.
     ini_time : datetime
-        Time of the desired initialization data.
+        Desired initialization time.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     source : str, optional
         Source of the initial condition data. Default is "glorys".
     filename: str
-        Path to the atmospheric forcing source data file. Can contain wildcards.
+        Path to the source data file. Can contain wildcards.
     N : int
         The number of vertical levels.
     theta_s : float
-        The surface control parameter.
+        The surface control parameter. Must satisfy 0 < theta_s <= 10.
     theta_b : float
-        The bottom control parameter.
+        The bottom control parameter. Must satisfy 0 < theta_b <= 4.
     hc : float
         The critical depth.
 
@@ -251,14 +251,14 @@ class InitialConditions:
         depth = -zr
         depth.attrs["long_name"] = "Layer depth at rho-points"
         depth.attrs["units"] = "m"
-        ds = ds.assign_coords({"depth_rho": depth})
+        ds = ds.assign_coords({"depth_rho": depth.astype(np.float32)})
 
-        depth_u = interpolate_from_rho_to_u(depth)
+        depth_u = interpolate_from_rho_to_u(depth).astype(np.float32)
         depth_u.attrs["long_name"] = "Layer depth at u-points"
         depth_u.attrs["units"] = "m"
         ds = ds.assign_coords({"depth_u": depth_u})
 
-        depth_v = interpolate_from_rho_to_v(depth)
+        depth_v = interpolate_from_rho_to_v(depth).astype(np.float32)
         depth_v.attrs["long_name"] = "Layer depth at v-points"
         depth_v.attrs["units"] = "m"
         ds = ds.assign_coords({"depth_v": depth_v})
@@ -275,13 +275,11 @@ class InitialConditions:
         ocean_time = (
             (ds["time"] - model_reference_date).astype("float64") * 1e-9
         )
-        ocean_time.attrs[
+        ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
+        ds["ocean_time"].attrs[
             "long_name"
         ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
-        ocean_time.attrs[
-            "units"
-        ] = "seconds"
-        ds = ds.assign_coords({"ocean_time": ocean_time})
+        ds["ocean_time"].attrs["units"] = "seconds"
 
         ds = ds.drop_vars(["eta_rho", "xi_rho"])
 

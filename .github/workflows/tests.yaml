@@ -43,9 +43,8 @@ jobs:
 
       - name: Running Tests
         run: |
-	  python - V
-          coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_setup.py
-
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_setup.py
 
       - name: Get coverage report
         run: |
@@ -57,5 +56,3 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: unittests # optional
-
-

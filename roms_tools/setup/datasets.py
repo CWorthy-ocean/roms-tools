@@ -96,7 +96,7 @@ class Dataset:
         else:
             end_time = self.end_time
 
-        times = (np.datetime64(self.start_time) < ds[time_dim]) & (
+        times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
             ds[time_dim] < np.datetime64(end_time)
         )
         ds = ds.where(times, drop=True)
@@ -149,13 +149,6 @@ class Dataset:
                 self.dim_names["longitude"]: -1,
             }
 
-            # Check if "depth" is in self.dim_names and if it exists in the dataset
-            if (
-                "depth" in self.dim_names
-                and self.dim_names["depth"] in xr.open_dataset(self.filename).dims
-            ):
-                chunks[self.dim_names["depth"]] = -1
-
             ds = xr.open_mfdataset(
                 self.filename,
                 combine="nested",
@@ -164,6 +157,9 @@ class Dataset:
                 compat="override",
                 chunks=chunks,
             )
+
+            if self.dim_names["depth"] in ds.dims:
+                ds = ds.chunk({self.dim_names["depth"]: - 1})
 
         return ds
 

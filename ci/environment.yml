@@ -19,6 +19,7 @@ dependencies:
   - flake8
   - black
   - pre-commit
+  - coverage
   # docs
   - sphinx
   - nbsphinx

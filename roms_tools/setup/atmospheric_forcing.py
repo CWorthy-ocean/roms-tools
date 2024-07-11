@@ -6,186 +6,12 @@ from datetime import datetime
 import glob
 import numpy as np
 from typing import Optional, Dict
-from roms_tools.setup.fill import lateral_fill
+from roms_tools.setup.fill import fill_and_interpolate
+from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.utils import nan_check
+from roms_tools.setup.plot import _plot
 import calendar
-
-
-@dataclass(frozen=True, kw_only=True)
-class ForcingDataset:
-    """
-    Represents forcing data on original grid.
-
-    Parameters
-    ----------
-    filename : str
-        The path to the data files. Can contain wildcards.
-    start_time: datetime
-        The start time for selecting relevant data.
-    end_time: datetime
-        The end time for selecting relevant data.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the forcing data on its original grid.
-
-    Examples
-    --------
-    >>> dataset = ForcingDataset(
-    ...     filename="data.nc",
-    ...     start_time=datetime(2022, 1, 1),
-    ...     end_time=datetime(2022, 12, 31),
-    ... )
-    >>> dataset.load_data()
-    >>> print(dataset.ds)
-    <xarray.Dataset>
-    Dimensions:  ...
-    """
-
-    filename: str
-    start_time: datetime
-    end_time: datetime
-    dim_names: Dict[str, str] = field(
-        default_factory=lambda: {"longitude": "lon", "latitude": "lat", "time": "time"}
-    )
-
-    ds: xr.Dataset = field(init=False, repr=False)
-
-    def __post_init__(self):
-
-        ds = self.load_data()
-
-        # Select relevant times
-        times = (np.datetime64(self.start_time) < ds[self.dim_names["time"]]) & (
-            ds[self.dim_names["time"]] < np.datetime64(self.end_time)
-        )
-        ds = ds.where(times, drop=True)
-
-        # Make sure that latitude is ascending
-        diff = np.diff(ds[self.dim_names["latitude"]])
-        if np.all(diff < 0):
-            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
-
-        object.__setattr__(self, "ds", ds)
-
-    def load_data(self) -> xr.Dataset:
-        """
-        Load dataset from the specified file.
-
-        Returns
-        -------
-        ds : xr.Dataset
-            The loaded xarray Dataset containing the forcing data.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified file does not exist.
-        """
-
-        # Check if the file exists
-        matching_files = glob.glob(self.filename)
-        if not matching_files:
-            raise FileNotFoundError(
-                f"No files found matching the pattern '{self.filename}'."
-            )
-
-        # Load the dataset
-        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-            # initially, we wawnt time chunk size of 1 to enable quick .nan_check() and .plot() methods for AtmosphericForcing
-            ds = xr.open_mfdataset(
-                self.filename,
-                combine="nested",
-                concat_dim=self.dim_names["time"],
-                coords="minimal",
-                compat="override",
-                chunks={self.dim_names["time"]: 1},
-            )
-
-        return ds
-
-    def choose_subdomain(self, latitude_range, longitude_range, margin, straddle):
-        """
-        Selects a subdomain from the given xarray Dataset based on latitude and longitude ranges,
-        extending the selection by the specified margin. Handles the conversion of longitude values
-        in the dataset from one range to another.
-
-        Parameters
-        ----------
-        latitude_range : tuple
-            A tuple (lat_min, lat_max) specifying the minimum and maximum latitude values of the subdomain.
-        longitude_range : tuple
-            A tuple (lon_min, lon_max) specifying the minimum and maximum longitude values of the subdomain.
-        margin : float
-            Margin in degrees to extend beyond the specified latitude and longitude ranges when selecting the subdomain.
-        straddle : bool
-            If True, target longitudes are expected in the range [-180, 180].
-            If False, target longitudes are expected in the range [0, 360].
-
-        Returns
-        -------
-        xr.Dataset
-            The subset of the original dataset representing the chosen subdomain, including an extended area
-            to cover one extra grid point beyond the specified ranges.
-
-        Raises
-        ------
-        ValueError
-            If the selected latitude or longitude range does not intersect with the dataset.
-        """
-        lat_min, lat_max = latitude_range
-        lon_min, lon_max = longitude_range
-
-        lon = self.ds[self.dim_names["longitude"]]
-        # Adjust longitude range if needed to match the expected range
-        if not straddle:
-            if lon.min() < -180:
-                if lon_max + margin > 0:
-                    lon_min -= 360
-                    lon_max -= 360
-            elif lon.min() < 0:
-                if lon_max + margin > 180:
-                    lon_min -= 360
-                    lon_max -= 360
-
-        if straddle:
-            if lon.max() > 360:
-                if lon_min - margin < 180:
-                    lon_min += 360
-                    lon_max += 360
-            elif lon.max() > 180:
-                if lon_min - margin < 0:
-                    lon_min += 360
-                    lon_max += 360
-
-        # Select the subdomain
-        subdomain = self.ds.sel(
-            **{
-                self.dim_names["latitude"]: slice(lat_min - margin, lat_max + margin),
-                self.dim_names["longitude"]: slice(lon_min - margin, lon_max + margin),
-            }
-        )
-
-        # Check if the selected subdomain has zero dimensions in latitude or longitude
-        if subdomain[self.dim_names["latitude"]].size == 0:
-            raise ValueError("Selected latitude range does not intersect with dataset.")
-
-        if subdomain[self.dim_names["longitude"]].size == 0:
-            raise ValueError(
-                "Selected longitude range does not intersect with dataset."
-            )
-
-        # Adjust longitudes to expected range if needed
-        lon = subdomain[self.dim_names["longitude"]]
-        if straddle:
-            subdomain[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
-        else:
-            subdomain[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
-
-        # Set the modified subdomain to the object attribute
-        object.__setattr__(self, "ds", subdomain)
+import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -545,7 +371,7 @@ class AtmosphericForcing:
         if self.source == "era5":
             dims = {"longitude": "longitude", "latitude": "latitude", "time": "time"}
 
-        data = ForcingDataset(
+        data = Dataset(
             filename=self.filename,
             start_time=self.start_time,
             end_time=self.end_time,
@@ -585,26 +411,30 @@ class AtmosphericForcing:
             }
 
         coords = {dims["latitude"]: lat, dims["longitude"]: lon}
-        u10 = self._interpolate(
-            data.ds[varnames["u10"]], mask, coords=coords, method="linear"
+        u10 = fill_and_interpolate(
+            data.ds[varnames["u10"]], mask, list(coords.keys()), coords, method="linear"
         )
-        v10 = self._interpolate(
-            data.ds[varnames["v10"]], mask, coords=coords, method="linear"
+        v10 = fill_and_interpolate(
+            data.ds[varnames["v10"]], mask, list(coords.keys()), coords, method="linear"
         )
-        swr = self._interpolate(
-            data.ds[varnames["swr"]], mask, coords=coords, method="linear"
+        swr = fill_and_interpolate(
+            data.ds[varnames["swr"]], mask, list(coords.keys()), coords, method="linear"
         )
-        lwr = self._interpolate(
-            data.ds[varnames["lwr"]], mask, coords=coords, method="linear"
+        lwr = fill_and_interpolate(
+            data.ds[varnames["lwr"]], mask, list(coords.keys()), coords, method="linear"
         )
-        t2m = self._interpolate(
-            data.ds[varnames["t2m"]], mask, coords=coords, method="linear"
+        t2m = fill_and_interpolate(
+            data.ds[varnames["t2m"]], mask, list(coords.keys()), coords, method="linear"
         )
-        d2m = self._interpolate(
-            data.ds[varnames["d2m"]], mask, coords=coords, method="linear"
+        d2m = fill_and_interpolate(
+            data.ds[varnames["d2m"]], mask, list(coords.keys()), coords, method="linear"
         )
-        rain = self._interpolate(
-            data.ds[varnames["rain"]], mask, coords=coords, method="linear"
+        rain = fill_and_interpolate(
+            data.ds[varnames["rain"]],
+            mask,
+            list(coords.keys()),
+            coords,
+            method="linear",
         )
 
         if self.source == "era5":
@@ -650,8 +480,12 @@ class AtmosphericForcing:
                 self.swr_correction.dim_names["latitude"]: lat,
                 self.swr_correction.dim_names["longitude"]: lon,
             }
-            corr_factor = self._interpolate(
-                corr_factor, mask, coords=coords_correction, method="linear"
+            corr_factor = fill_and_interpolate(
+                corr_factor,
+                mask,
+                list(coords_correction.keys()),
+                coords_correction,
+                method="linear",
             )
 
             # temporal interpolation
@@ -715,82 +549,8 @@ class AtmosphericForcing:
 
         object.__setattr__(self, "ds", ds)
 
-        self.nan_check(mask_roms, time=0)
-
-    @staticmethod
-    def _interpolate(field, mask, coords, method="linear"):
-        """
-        Interpolate a field using specified coordinates and a given method.
-
-        Parameters
-        ----------
-        field : xr.DataArray
-            The data array to be interpolated.
-
-        mask : xr.DataArray
-            A data array with same spatial dimensions as `field`, where `1` indicates wet (ocean)
-            points and `0` indicates land points.
-
-        coords : dict
-            A dictionary specifying the target coordinates for interpolation. The keys
-            should match the dimensions of `field` (e.g., {"longitude": lon_values, "latitude": lat_values}).
-
-        method : str, optional, default='linear'
-            The interpolation method to use. Valid options are those supported by
-            `xarray.DataArray.interp`.
-
-        Returns
-        -------
-        xr.DataArray
-            The interpolated data array.
-
-        Notes
-        -----
-        This method first sets land values to NaN based on the provided mask. It then uses the
-        `lateral_fill` function to propagate ocean values. These two steps serve the purpose to
-        avoid interpolation across the land-ocean boundary. Finally, it performs interpolation
-        over the specified coordinates.
-
-        """
-
-        dims = list(coords.keys())
-
-        # set land values to nan
-        field = field.where(mask)
-        # propagate ocean values into land interior before interpolation
-        field = lateral_fill(field, 1 - mask, dims)
-        # interpolate
-        field_interpolated = field.interp(**coords, method=method).drop_vars(dims)
-
-        return field_interpolated
-
-    def nan_check(self, mask, time=0) -> None:
-        """
-        Checks for NaN values at wet points in all variables of the dataset at a specified time step.
-
-        Parameters
-        ----------
-        mask : array-like
-            A boolean mask indicating the wet points in the dataset.
-        time : int
-            The time step at which to check for NaN values. Default is 0.
-
-        Raises
-        ------
-        ValueError
-            If any variable contains NaN values at the specified time step.
-
-        """
-
         for var in self.ds.data_vars:
-            da = xr.where(mask == 1, self.ds[var].isel(time=time), 0)
-            if da.isnull().any().values:
-                raise ValueError(
-                    f"NaN values found in the variable '{var}' at time step {time} over the ocean. This likely "
-                    "occurs because the ROMS grid, including a small safety margin for interpolation, is not "
-                    "fully contained within the dataset's longitude/latitude range. Please ensure that the "
-                    "dataset covers the entire area required by the ROMS grid."
-                )
+            nan_check(self.ds[var].isel(time=0), mask_roms)
 
     def plot(self, varname, time=0) -> None:
         """
@@ -835,80 +595,38 @@ class AtmosphericForcing:
         >>> atm_forcing.plot("uwnd", time=0)
         """
 
-        import cartopy.crs as ccrs
-        import matplotlib.pyplot as plt
-
-        lon_deg = self.ds.lon
-        lat_deg = self.ds.lat
-
-        # check if North or South pole are in domain
-        if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-            raise NotImplementedError(
-                "Plotting the atmospheric forcing is not implemented for the case that the domain contains the North or South pole."
-            )
-
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
-        # Define projections
-        proj = ccrs.PlateCarree()
-
-        trans = ccrs.NearsidePerspective(
-            central_longitude=lon_deg.mean().values,
-            central_latitude=lat_deg.mean().values,
-        )
-
-        lon_deg = lon_deg.values
-        lat_deg = lat_deg.values
-
-        # find corners
-        (lo1, la1) = (lon_deg[0, 0], lat_deg[0, 0])
-        (lo2, la2) = (lon_deg[0, -1], lat_deg[0, -1])
-        (lo3, la3) = (lon_deg[-1, -1], lat_deg[-1, -1])
-        (lo4, la4) = (lon_deg[-1, 0], lat_deg[-1, 0])
-
-        # transform coordinates to projected space
-        lo1t, la1t = trans.transform_point(lo1, la1, proj)
-        lo2t, la2t = trans.transform_point(lo2, la2, proj)
-        lo3t, la3t = trans.transform_point(lo3, la3, proj)
-        lo4t, la4t = trans.transform_point(lo4, la4, proj)
-
-        plt.figure(figsize=(10, 10))
-        ax = plt.axes(projection=trans)
-
-        ax.plot(
-            [lo1t, lo2t, lo3t, lo4t, lo1t],
-            [la1t, la2t, la3t, la4t, la1t],
-            "go-",
-        )
-
-        ax.coastlines(
-            resolution="50m", linewidth=0.5, color="black"
-        )  # add map of coastlines
-        ax.gridlines()
-
         field = self.ds[varname].isel(time=time).compute()
+
+        title = "%s at time %s" % (
+            field.long_name,
+            np.datetime_as_string(field.time, unit="s"),
+        )
+
+        # choose colorbar
         if varname in ["uwnd", "vwnd"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
-            cmap = "RdBu_r"
+            cmap = plt.colormaps.get_cmap("RdBu_r")
         else:
             vmax = field.max().values
             vmin = field.min().values
             if varname in ["swrad", "lwrad", "Tair", "qair"]:
-                cmap = "YlOrRd"
+                cmap = plt.colormaps.get_cmap("YlOrRd")
             else:
-                cmap = "YlGnBu"
+                cmap = plt.colormaps.get_cmap("YlGnBu")
+        cmap.set_bad(color="gray")
 
-        p = ax.pcolormesh(
-            lon_deg, lat_deg, field, transform=proj, vmax=vmax, vmin=vmin, cmap=cmap
+        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+        _plot(
+            self.grid.ds,
+            field=field,
+            straddle=self.grid.straddle,
+            coarse_grid=self.use_coarse_grid,
+            title=title,
+            kwargs=kwargs,
+            c="g",
         )
-        plt.colorbar(p, label=field.units)
-        ax.set_title(
-            "%s at time %s"
-            % (field.long_name, np.datetime_as_string(field.time, unit="s"))
-        )
-        plt.show()
 
     def save(self, filepath: str, time_chunk_size: int = 1) -> None:
         """
@@ -975,7 +693,7 @@ class AtmosphericForcing:
             model_reference_date = np.datetime64(self.model_reference_date)
 
             # Preserve the original time coordinate for readability
-            ds["Time"] = ds["time"]
+            ds.assign_coords({"absolute_time": ds["time"]})
 
             # Convert the time coordinate to the format expected by ROMS (days since model reference date)
             ds["time"] = (
@@ -984,6 +702,7 @@ class AtmosphericForcing:
             ds["time"].attrs[
                 "long_name"
             ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
+            ds["time"].attrs["units"] = "days"
 
             # Prepare the dataset for writing to a netCDF file without immediately computing
             write = ds.to_netcdf(filename, compute=False)

@@ -132,7 +132,7 @@ class InitialConditions:
         coords = {dims["latitude"]: lat, dims["longitude"]: lon}
 
         ssh = fill_and_interpolate(
-            data.ds[varnames["ssh"]],
+            data.ds[varnames["ssh"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -155,7 +155,7 @@ class InitialConditions:
         coords = {dims["latitude"]: lat, dims["longitude"]: lon, dims["depth"]: zr}
 
         temp = fill_and_interpolate(
-            data.ds[varnames["temp"]],
+            data.ds[varnames["temp"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -163,7 +163,7 @@ class InitialConditions:
         )
 
         salt = fill_and_interpolate(
-            data.ds[varnames["salt"]],
+            data.ds[varnames["salt"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -171,7 +171,7 @@ class InitialConditions:
         )
 
         u = fill_and_interpolate(
-            data.ds[varnames["u"]],
+            data.ds[varnames["u"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -179,7 +179,7 @@ class InitialConditions:
         )
 
         v = fill_and_interpolate(
-            data.ds[varnames["v"]],
+            data.ds[varnames["v"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,

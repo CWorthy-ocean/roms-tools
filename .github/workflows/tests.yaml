@@ -44,7 +44,7 @@ jobs:
       - name: Running Tests
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_setup.py
+           coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_datasets.py roms_tools/tests/test_grid.py roms_tools/tests/test_topography.py roms_tools/tests/test_tides.py roms_tools/tests/test_atmospheric_forcing.py roms_tools/tests/test_initial_conditions.py
 
       - name: Get coverage report
         run: |

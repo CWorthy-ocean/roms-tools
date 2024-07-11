@@ -1,7 +1,7 @@
 import pytest
-from roms_tools import Grid
 from roms_tools.setup.tides import TPXO
 import os
+
 
 class TestTPXO:
     def test_load_data_file_not_found(self):
@@ -21,5 +21,3 @@ class TestTPXO:
                 TPXO.load_data(filename)
         # Remove temporary file
         os.remove(filename)
-
-

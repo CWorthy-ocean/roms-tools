@@ -1,9 +1,9 @@
 from roms_tools import Grid
 from roms_tools.setup.topography import _compute_rfactor
 import numpy as np
-import numpy as np
 import numpy.testing as npt
 from scipy.ndimage import label
+
 
 class TestTopography:
     def test_enclosed_regions(self):
@@ -53,5 +53,3 @@ class TestTopography:
         )
 
         assert np.less_equal(grid.hmin, grid.ds.h.min())
-
-

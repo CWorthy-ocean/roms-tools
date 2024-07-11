@@ -1,0 +1,5 @@
+[tool.coverage.run]
+omit = [
+    "roms_tools/tests/*",
+    "**/__init__.py",
+]

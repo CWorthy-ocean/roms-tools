@@ -375,19 +375,19 @@ class InitialConditions:
         field = self.ds[varname].squeeze()
 
         # slice the field as desired
-        title = ""
+        title = field.long_name
         if s_rho is not None:
-            title = title + f"s_rho = {field.s_rho[s_rho].item()}"
+            title = title + f", s_rho = {field.s_rho[s_rho].item()}"
             field = field.isel(s_rho=s_rho)
         else:
             depth_contours = False
 
         if eta is not None:
             if "eta_rho" in field.dims:
-                title = title + f"eta_rho = {field.eta_rho[eta].item()} "
+                title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
             elif "eta_v" in field.dims:
-                title = title + f"eta_v = {field.eta_v[eta].item()} "
+                title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
             else:
                 raise ValueError(
@@ -395,10 +395,10 @@ class InitialConditions:
                 )
         if xi is not None:
             if "xi_rho" in field.dims:
-                title = title + f"xi_rho = {field.xi_rho[xi].item()} "
+                title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
             elif "xi_u" in field.dims:
-                title = title + f"xi_u = {field.xi_u[xi].item()} "
+                title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
             else:
                 raise ValueError(

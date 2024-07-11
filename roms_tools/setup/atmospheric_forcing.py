@@ -9,7 +9,9 @@ from typing import Optional, Dict
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.datasets import Dataset
 from roms_tools.setup.utils import nan_check
+from roms_tools.setup.plot import _plot
 import calendar
+import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -593,80 +595,38 @@ class AtmosphericForcing:
         >>> atm_forcing.plot("uwnd", time=0)
         """
 
-        import cartopy.crs as ccrs
-        import matplotlib.pyplot as plt
-
-        lon_deg = self.ds.lon
-        lat_deg = self.ds.lat
-
-        # check if North or South pole are in domain
-        if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-            raise NotImplementedError(
-                "Plotting the atmospheric forcing is not implemented for the case that the domain contains the North or South pole."
-            )
-
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
-        # Define projections
-        proj = ccrs.PlateCarree()
-
-        trans = ccrs.NearsidePerspective(
-            central_longitude=lon_deg.mean().values,
-            central_latitude=lat_deg.mean().values,
-        )
-
-        lon_deg = lon_deg.values
-        lat_deg = lat_deg.values
-
-        # find corners
-        (lo1, la1) = (lon_deg[0, 0], lat_deg[0, 0])
-        (lo2, la2) = (lon_deg[0, -1], lat_deg[0, -1])
-        (lo3, la3) = (lon_deg[-1, -1], lat_deg[-1, -1])
-        (lo4, la4) = (lon_deg[-1, 0], lat_deg[-1, 0])
-
-        # transform coordinates to projected space
-        lo1t, la1t = trans.transform_point(lo1, la1, proj)
-        lo2t, la2t = trans.transform_point(lo2, la2, proj)
-        lo3t, la3t = trans.transform_point(lo3, la3, proj)
-        lo4t, la4t = trans.transform_point(lo4, la4, proj)
-
-        plt.figure(figsize=(10, 10))
-        ax = plt.axes(projection=trans)
-
-        ax.plot(
-            [lo1t, lo2t, lo3t, lo4t, lo1t],
-            [la1t, la2t, la3t, la4t, la1t],
-            "go-",
-        )
-
-        ax.coastlines(
-            resolution="50m", linewidth=0.5, color="black"
-        )  # add map of coastlines
-        ax.gridlines()
-
         field = self.ds[varname].isel(time=time).compute()
+
+        title = "%s at time %s" % (
+            field.long_name,
+            np.datetime_as_string(field.time, unit="s"),
+        )
+
+        # choose colorbar
         if varname in ["uwnd", "vwnd"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
-            cmap = "RdBu_r"
+            cmap = plt.colormaps.get_cmap("RdBu_r")
         else:
             vmax = field.max().values
             vmin = field.min().values
             if varname in ["swrad", "lwrad", "Tair", "qair"]:
-                cmap = "YlOrRd"
+                cmap = plt.colormaps.get_cmap("YlOrRd")
             else:
-                cmap = "YlGnBu"
+                cmap = plt.colormaps.get_cmap("YlGnBu")
+        cmap.set_bad(color="gray")
 
-        p = ax.pcolormesh(
-            lon_deg, lat_deg, field, transform=proj, vmax=vmax, vmin=vmin, cmap=cmap
+        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+        _plot(
+            self.grid.ds,
+            field=field,
+            straddle=self.grid.straddle,
+            coarse_grid=self.use_coarse_grid,
+            title=title,
+            kwargs=kwargs,
+            c="g",
         )
-        plt.colorbar(p, label=field.units)
-        ax.set_title(
-            "%s at time %s"
-            % (field.long_name, np.datetime_as_string(field.time, unit="s"))
-        )
-        plt.show()
 
     def save(self, filepath: str, time_chunk_size: int = 1) -> None:
         """

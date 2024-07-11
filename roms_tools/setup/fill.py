@@ -513,3 +513,30 @@ def interpolate_from_rho_to_v(field, method="additive"):
     field_interpolated = field_interpolated.swap_dims({"eta_rho": "eta_v"})
 
     return field_interpolated
+
+
+def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
+    """
+    Extrapolate the deepest non-NaN values to the bottom along a specified dimension.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The input data array containing NaN values that need to be filled. This array
+        should have at least one dimension named by `dim`.
+    dim : str
+        The name of the dimension along which to perform the interpolation and extrapolation.
+        Typically, this would be a vertical dimension such as 'depth' or 's_rho'.
+
+    Returns
+    -------
+    field_interpolated : xr.DataArray
+        A new data array with NaN values along the specified dimension filled by nearest
+        neighbor interpolation and extrapolation to the bottom. The original data array is not modified.
+
+    """
+    field_interpolated = field.interpolate_na(
+        dim=dim, method="nearest", fill_value="extrapolate"
+    )
+
+    return field_interpolated

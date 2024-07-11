@@ -7,9 +7,9 @@ from roms_tools.setup.datasets import Dataset
 from roms_tools.setup.vertical_coordinate import compute_depth, sigma_stretch
 from roms_tools.setup.fill import (
     fill_and_interpolate,
-    determine_fillvalue,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    extrapolate_deepest_to_bottom,
 )
 from roms_tools.setup.utils import nan_check
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
@@ -115,8 +115,6 @@ class InitialConditions:
             straddle=straddle,
         )
 
-        data.convert_to_negative_depth()
-
         # interpolate onto desired grid
         if self.source == "glorys":
             varnames = {
@@ -145,13 +143,16 @@ class InitialConditions:
         cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, "r")
         zr = compute_depth(h * 0, h, self.hc, cs_r, sigma_r)
 
+        # extrapolate deepest value all the way to bottom ("flooding")
+        for var in ["temp", "salt", "u", "v"]:
+            data.ds[varnames[var]] = extrapolate_deepest_to_bottom(
+                data.ds[varnames[var]], dims["depth"]
+            )
+
+        data.convert_to_negative_depth()
+
         mask = xr.where(data.ds[varnames["temp"]].isel(time=0).isnull(), 0, 1)
         coords = {dims["latitude"]: lat, dims["longitude"]: lon, dims["depth"]: zr}
-
-        # the following computes a fill value to be used if an entire horizontal slice consists of NaNs (often the case
-        # for the deepest levels); otherwise NaNs are filled in by horizontal diffusion from non-NaN regions
-        fillvalue_temp = determine_fillvalue(data.ds[varnames["temp"]], dims)
-        fillvalue_salt = determine_fillvalue(data.ds[varnames["salt"]], dims)
 
         temp = fill_and_interpolate(
             data.ds[varnames["temp"]],
@@ -159,30 +160,31 @@ class InitialConditions:
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-            fillvalue=fillvalue_temp,
         )
+
         salt = fill_and_interpolate(
             data.ds[varnames["salt"]],
             mask,
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-            fillvalue=fillvalue_salt,
         )
+
         u = fill_and_interpolate(
             data.ds[varnames["u"]],
             mask,
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-        )  # use default fill value of 0
+        )
+
         v = fill_and_interpolate(
             data.ds[varnames["v"]],
             mask,
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-        )  # use default fill value of 0
+        )
 
         # rotate to grid orientation
         u_rot = u * np.cos(angle) + v * np.sin(angle)

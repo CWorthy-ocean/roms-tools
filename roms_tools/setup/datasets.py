@@ -154,7 +154,7 @@ class Dataset:
                 "depth" in self.dim_names
                 and self.dim_names["depth"] in xr.open_dataset(self.filename).dims
             ):
-                chunks[self.dim_names["depth"]] = 1
+                chunks[self.dim_names["depth"]] = -1
 
             ds = xr.open_mfdataset(
                 self.filename,

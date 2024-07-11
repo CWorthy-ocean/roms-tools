@@ -43,9 +43,16 @@ jobs:
 
       - name: Running Tests
         run: |
-          python -m pytest --verbose
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_setup.py
+
+      - name: Get coverage report
+        run: |
+          coverage report -m ; coverage xml
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests # optional

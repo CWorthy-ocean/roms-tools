@@ -202,7 +202,7 @@ class Dataset:
                 chunks=chunks,
             )
 
-            if self.dim_names["depth"] in ds.dims:
+            if "depth" in self.dim_names.keys() and self.dim_names["depth"] in ds.dims:
                 ds = ds.chunk({self.dim_names["depth"]: -1})
 
         return ds

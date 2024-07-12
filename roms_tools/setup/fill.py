@@ -2,54 +2,58 @@ import numpy as np
 import xarray as xr
 from numba import jit
 
-
 def fill_and_interpolate(
-    field, mask, fill_dims, coords, method="linear", fillvalue=0.0
+    field, mask, fill_dims, coords, method="linear", fillvalue_fill=0.0, fillvalue_interp=np.nan
 ):
     """
-    Propagate ocean values into land and interpolate using specified coordinates and a given method.
+    Propagates ocean values into land areas and interpolates the data to specified coordinates using a given method.
 
     Parameters
     ----------
     field : xr.DataArray
-        The data array to be interpolated. This array typically contains oceanographic or atmospheric data
-        with dimensions including latitude and longitude.
+        The data array to be interpolated, typically containing oceanographic or atmospheric data
+        with dimensions such as latitude and longitude.
 
     mask : xr.DataArray
-        A data array with the same spatial dimensions as `field`, where `1` indicates wet (ocean) points
+        A data array with the same spatial dimensions as `field`, where `1` indicates ocean points
         and `0` indicates land points. This mask is used to identify land and ocean areas in the dataset.
 
     fill_dims : list of str
-        A list specifying the dimensions along which to perform the lateral fill. Typically, this would be
-        the horizontal dimensions such as latitude and longitude, e.g., ["latitude", "longitude"].
+        List specifying the dimensions along which to perform the lateral fill, typically the horizontal
+        dimensions such as latitude and longitude, e.g., ["latitude", "longitude"].
 
     coords : dict
-        A dictionary specifying the target coordinates for interpolation. The keys should match the dimensions
-        of `field` (e.g., {"longitude": lon_values, "latitude": lat_values, "depth": depth_values}). This
-        dictionary provides the new coordinates onto which the data array will be interpolated.
-
+        Dictionary specifying the target coordinates for interpolation. The keys should match the dimensions
+        of `field` (e.g., {"longitude": lon_values, "latitude": lat_values, "depth": depth_values}).
+        This dictionary provides the new coordinates onto which the data array will be interpolated.
+        
     method : str, optional, default='linear'
         The interpolation method to use. Valid options are those supported by `xarray.DataArray.interp`,
         such as 'linear' or 'nearest'.
 
-    fillvalue : float, optional, default=0.0
-        Value to use if an entire data slice along the fill_dims contains only NaNs.
+    fillvalue_fill : float, optional, default=0.0
+        Value to use in the fill step if an entire data slice along the fill dimensions contains only NaNs.
+    
+    fillvalue_interp : float, optional, default=np.nan
+        Value to use in the interpolation step. `np.nan` means that no extrapolation is applied.
+        `None` means that extrapolation is applied, which often makes sense when interpolating in the
+        vertical direction to avoid NaNs at the surface if the lowest depth is greater than zero.
 
     Returns
-    -------
+    ------- 
     xr.DataArray
         The interpolated data array. This array has the same dimensions as the input `field` but with values
         interpolated to the new coordinates specified in `coords`.
-
+            
     Notes
     -----
     This method performs the following steps:
     1. Sets land values to NaN based on the provided mask to ensure that interpolation does not cross
        the land-ocean boundary.
-    2. Uses the `lateral_fill` function to propagate ocean values into land interior, which helps to fill
+    2. Uses the `lateral_fill` function to propagate ocean values into the land interior, helping to fill
        gaps in the dataset.
     3. Interpolates the filled data array over the specified coordinates using the selected interpolation method.
-
+            
     Example
     -------
     >>> import xarray as xr
@@ -71,25 +75,16 @@ def fill_and_interpolate(
     if not all(dim in field.dims for dim in coords.keys()):
         raise ValueError("All keys in coords must match dimensions of field")
     if method not in ["linear", "nearest"]:
-        raise ValueError(
-            "Unsupported interpolation method. Choose from 'linear', 'nearest'"
-        )
+        raise ValueError("Unsupported interpolation method. Choose from 'linear', 'nearest'")
 
     # Set land values to NaN
     field = field.where(mask)
 
     # Propagate ocean values into land interior before interpolation
-    field = lateral_fill(field, 1 - mask, fill_dims, fillvalue)
+    field = lateral_fill(field, 1 - mask, fill_dims, fillvalue_fill)
 
-    # Interpolate
-    if len(field.squeeze().dims) == 2:
-        # don't extrapolate if we deal with only 2d interpolation in horizontal direction because we want to identify missing data with nan_check
-        fill_value = np.nan
-    else:
-        # but do extrapolate with we deal with 3d interpolation in horizontal + vertical direction because we want to extrapolate in depth
-        fill_value = None
     field_interpolated = field.interp(
-        coords, method=method, kwargs={"fill_value": fill_value}
+        coords, method=method, kwargs={"fill_value": fillvalue_interp}
     ).drop_vars(list(coords.keys()))
 
     return field_interpolated

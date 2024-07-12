@@ -7,34 +7,78 @@ import numpy as np
 from typing import Dict, Optional
 import dask
 
-
-FRANK = pooch.create(
+# Create a Pooch object to manage the global topography data
+pup_data = pooch.create(
     # Use the default cache folder for the operating system
     path=pooch.os_cache("roms-tools"),
     base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
-    # If this is a development version, get the data from the "main" branch
     # The registry specifies the files that can be fetched
     registry={
         "etopo5.nc": "sha256:23600e422d59bbf7c3666090166a0d468c8ee16092f4f14e32c4e928fbcd627b",
     },
 )
 
+# Create a Pooch object to manage the test data
+pup_test_data = pooch.create(
+    # Use the default cache folder for the operating system
+    path=pooch.os_cache("roms-tools"),
+    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
+    # The registry specifies the files that can be fetched
+    registry={
+        "GLORYS_test_data.nc": "648f88ec29c433bcf65f257c1fb9497bd3d5d3880640186336b10ed54f7129d2",
+        "ERA5_regional_test_data.nc": "bd12ce3b562fbea2a80a3b79ba74c724294043c28dc98ae092ad816d74eac794",
+        "ERA5_global_test_data.nc": "8ed177ab64c02caf509b9fb121cf6713f286cc603b1f302f15f3f4eb0c21dc4f",
+    },
+)
 
-def fetch_topo(topography_source) -> xr.Dataset:
+
+def fetch_topo(topography_source: str) -> xr.Dataset:
     """
     Load the global topography data as an xarray Dataset.
+
+    Parameters
+    ----------
+    topography_source : str
+        The source of the topography data to be loaded. Available options:
+        - "etopo5"
+
+    Returns
+    -------
+    xr.Dataset
+        The global topography data as an xarray Dataset.
     """
     # Mapping from user-specified topography options to corresponding filenames in the registry
     topo_dict = {"etopo5": "etopo5.nc"}
 
-    # The file will be downloaded automatically the first time this is run
-    # returns the file path to the downloaded file. Afterwards, Pooch finds
-    # it in the local cache and doesn't repeat the download.
-    fname = FRANK.fetch(topo_dict[topography_source])
-    # The "fetch" method returns the full path to the downloaded data file.
-    # All we need to do now is load it with our standard Python tools.
+    # Fetch the file using Pooch, downloading if necessary
+    fname = pup_data.fetch(topo_dict[topography_source])
+
+    # Load the dataset using xarray and return it
     ds = xr.open_dataset(fname)
     return ds
+
+
+def download_test_data(filename: str) -> str:
+    """
+    Download the test data file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the test data file to be downloaded. Available options:
+        - "GLORYS_test_data.nc"
+        - "ERA5_regional_test_data.nc"
+        - "ERA5_global_test_data.nc"
+
+    Returns
+    -------
+    str
+        The path to the downloaded test data file.
+    """
+    # Fetch the file using Pooch, downloading if necessary
+    fname = pup_test_data.fetch(filename)
+
+    return fname
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -96,7 +140,7 @@ class Dataset:
         else:
             end_time = self.end_time
 
-        times = (np.datetime64(self.start_time) < ds[time_dim]) & (
+        times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
             ds[time_dim] < np.datetime64(end_time)
         )
         ds = ds.where(times, drop=True)
@@ -149,13 +193,6 @@ class Dataset:
                 self.dim_names["longitude"]: -1,
             }
 
-            # Check if "depth" is in self.dim_names and if it exists in the dataset
-            if (
-                "depth" in self.dim_names
-                and self.dim_names["depth"] in xr.open_dataset(self.filename).dims
-            ):
-                chunks[self.dim_names["depth"]] = -1
-
             ds = xr.open_mfdataset(
                 self.filename,
                 combine="nested",
@@ -164,6 +201,9 @@ class Dataset:
                 compat="override",
                 chunks=chunks,
             )
+
+            if "depth" in self.dim_names.keys() and self.dim_names["depth"] in ds.dims:
+                ds = ds.chunk({self.dim_names["depth"]: -1})
 
         return ds
 

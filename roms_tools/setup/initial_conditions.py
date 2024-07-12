@@ -132,7 +132,7 @@ class InitialConditions:
         coords = {dims["latitude"]: lat, dims["longitude"]: lon}
 
         ssh = fill_and_interpolate(
-            data.ds[varnames["ssh"]],
+            data.ds[varnames["ssh"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -154,36 +154,43 @@ class InitialConditions:
         mask = xr.where(data.ds[varnames["temp"]].isel(time=0).isnull(), 0, 1)
         coords = {dims["latitude"]: lat, dims["longitude"]: lon, dims["depth"]: zr}
 
+        # setting fillvalue_interp to None means that we allow extrapolation in the
+        # interpolation step to avoid NaNs at the surface if the lowest depth in original
+        # data is greater than zero
         temp = fill_and_interpolate(
-            data.ds[varnames["temp"]],
+            data.ds[varnames["temp"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
+            fillvalue_interp=None,
         )
 
         salt = fill_and_interpolate(
-            data.ds[varnames["salt"]],
+            data.ds[varnames["salt"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
+            fillvalue_interp=None,
         )
 
         u = fill_and_interpolate(
-            data.ds[varnames["u"]],
+            data.ds[varnames["u"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
+            fillvalue_interp=None,
         )
 
         v = fill_and_interpolate(
-            data.ds[varnames["v"]],
+            data.ds[varnames["v"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
+            fillvalue_interp=None,
         )
 
         # rotate to grid orientation

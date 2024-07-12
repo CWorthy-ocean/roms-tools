@@ -1,6 +1,7 @@
 import pytest
 from datetime import datetime
-from roms_tools.setup.atmospheric_forcing import AtmosphericForcing
+from roms_tools import Grid, AtmosphericForcing
+from roms_tools.setup.datasets import download_test_data
 
 @pytest.fixture
 def grid_that_straddles_dateline():
@@ -131,11 +132,21 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
     
     return grid
 
-def test_initialization(mock_grid, mock_swrcorrection, mock_rivers, tmp_path):
-    start_time = datetime(2020, 2, 1)
+@pytest.mark.parametrize("grid_fixture", [
+    "grid_that_straddles_dateline",
+    "grid_that_lies_east_of_dateline_less_than_five_degrees_away",
+    "grid_that_lies_east_of_dateline_more_than_five_degrees_away",
+    "grid_that_lies_west_of_dateline_less_than_five_degrees_away",
+    "grid_that_lies_west_of_dateline_more_than_five_degrees_away"
+    ])
+
+def test_successful_initialization_with_regional_data(grid_fixture, request):
+    start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
     fname = download_test_data("ERA5_regional_test_data.nc")
+    
+    grid = request.getfixturevalue(grid_fixture)
 
     # Instantiate AtmosphericForcing object
     atm_forcing = AtmosphericForcing(
@@ -147,4 +158,28 @@ def test_initialization(mock_grid, mock_swrcorrection, mock_rivers, tmp_path):
     )
 
     assert atm_forcing.ds is not None
+
+@pytest.mark.parametrize("grid_fixture", [
+    "grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
+    "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data"
+    ])
+
+def test_unsuccessful_initialization_with_regional_data(grid_fixture, request):
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_regional_test_data.nc")
+    
+    grid = request.getfixturevalue(grid_fixture)
+
+    # Instantiate AtmosphericForcing object
+    with pytest.raises(ValueError, match="NaN values found"):
+
+        atm_forcing = AtmosphericForcing(
+            grid=grid,
+            start_time=start_time,
+            end_time=end_time,
+            source="era5",
+            filename=fname
+        )
 

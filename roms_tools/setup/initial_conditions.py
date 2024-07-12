@@ -163,7 +163,7 @@ class InitialConditions:
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-            fillvalue_interp=None
+            fillvalue_interp=None,
         )
 
         salt = fill_and_interpolate(
@@ -172,7 +172,7 @@ class InitialConditions:
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-            fillvalue_interp=None
+            fillvalue_interp=None,
         )
 
         u = fill_and_interpolate(
@@ -181,7 +181,7 @@ class InitialConditions:
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-            fillvalue_interp=None
+            fillvalue_interp=None,
         )
 
         v = fill_and_interpolate(
@@ -190,7 +190,7 @@ class InitialConditions:
             fill_dims=fill_dims,
             coords=coords,
             method="linear",
-            fillvalue_interp=None
+            fillvalue_interp=None,
         )
 
         # rotate to grid orientation

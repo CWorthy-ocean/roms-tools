@@ -2,8 +2,15 @@ import numpy as np
 import xarray as xr
 from numba import jit
 
+
 def fill_and_interpolate(
-    field, mask, fill_dims, coords, method="linear", fillvalue_fill=0.0, fillvalue_interp=np.nan
+    field,
+    mask,
+    fill_dims,
+    coords,
+    method="linear",
+    fillvalue_fill=0.0,
+    fillvalue_interp=np.nan,
 ):
     """
     Propagates ocean values into land areas and interpolates the data to specified coordinates using a given method.
@@ -26,25 +33,25 @@ def fill_and_interpolate(
         Dictionary specifying the target coordinates for interpolation. The keys should match the dimensions
         of `field` (e.g., {"longitude": lon_values, "latitude": lat_values, "depth": depth_values}).
         This dictionary provides the new coordinates onto which the data array will be interpolated.
-        
+
     method : str, optional, default='linear'
         The interpolation method to use. Valid options are those supported by `xarray.DataArray.interp`,
         such as 'linear' or 'nearest'.
 
     fillvalue_fill : float, optional, default=0.0
         Value to use in the fill step if an entire data slice along the fill dimensions contains only NaNs.
-    
+
     fillvalue_interp : float, optional, default=np.nan
         Value to use in the interpolation step. `np.nan` means that no extrapolation is applied.
         `None` means that extrapolation is applied, which often makes sense when interpolating in the
         vertical direction to avoid NaNs at the surface if the lowest depth is greater than zero.
 
     Returns
-    ------- 
+    -------
     xr.DataArray
         The interpolated data array. This array has the same dimensions as the input `field` but with values
         interpolated to the new coordinates specified in `coords`.
-            
+
     Notes
     -----
     This method performs the following steps:
@@ -53,7 +60,7 @@ def fill_and_interpolate(
     2. Uses the `lateral_fill` function to propagate ocean values into the land interior, helping to fill
        gaps in the dataset.
     3. Interpolates the filled data array over the specified coordinates using the selected interpolation method.
-            
+
     Example
     -------
     >>> import xarray as xr
@@ -75,7 +82,9 @@ def fill_and_interpolate(
     if not all(dim in field.dims for dim in coords.keys()):
         raise ValueError("All keys in coords must match dimensions of field")
     if method not in ["linear", "nearest"]:
-        raise ValueError("Unsupported interpolation method. Choose from 'linear', 'nearest'")
+        raise ValueError(
+            "Unsupported interpolation method. Choose from 'linear', 'nearest'"
+        )
 
     # Set land values to NaN
     field = field.where(mask)

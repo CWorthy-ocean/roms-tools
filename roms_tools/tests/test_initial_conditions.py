@@ -76,7 +76,6 @@ def test_plot_method(initial_conditions):
 def test_save_method(initial_conditions, tmp_path):
     """
     Test the save method of the InitialConditions object.
-    Note that this utilizes the tmp_path fixture provided by pytest.
     """
     filepath = tmp_path / "initial_conditions.nc"
     initial_conditions.save(filepath)

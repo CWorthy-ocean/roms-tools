@@ -1,7 +1,13 @@
 import pytest
 from datetime import datetime
-from roms_tools import Grid, AtmosphericForcing
+from roms_tools import Grid, AtmosphericForcing, SWRCorrection
 from roms_tools.setup.datasets import download_test_data
+import xarray as xr
+import tempfile
+import os
+import pooch
+import numpy as np
+import pandas as pd
 
 @pytest.fixture
 def grid_that_straddles_dateline():
@@ -69,7 +75,7 @@ def grid_that_lies_east_of_dateline_less_than_five_degrees_away():
         ny=5,          
         size_x=500,    
         size_y=2000,   
-        center_lon=20, 
+        center_lon=10, 
         center_lat=61, 
         rot=0,         
     )
@@ -148,7 +154,6 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
     
     grid = request.getfixturevalue(grid_fixture)
 
-    # Instantiate AtmosphericForcing object
     atm_forcing = AtmosphericForcing(
         grid=grid,
         start_time=start_time,
@@ -158,6 +163,31 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
     )
 
     assert atm_forcing.ds is not None
+    
+    grid.coarsen()
+
+    atm_forcing = AtmosphericForcing(
+        grid=grid,
+        use_coarse_grid=True,
+        start_time=start_time,
+        end_time=end_time,
+        source="era5",
+        filename=fname
+    )
+
+    assert isinstance(atm_forcing.ds, xr.Dataset)
+    assert "uwnd" in atm_forcing.ds
+    assert "vwnd" in atm_forcing.ds
+    assert "swrad" in atm_forcing.ds
+    assert "lwrad" in atm_forcing.ds
+    assert "Tair" in atm_forcing.ds
+    assert "qair" in atm_forcing.ds
+    assert "rain" in atm_forcing.ds
+
+    assert atm_forcing.start_time == start_time
+    assert atm_forcing.end_time == end_time
+    assert atm_forcing.filename == fname
+    assert atm_forcing.source == "era5"
 
 @pytest.mark.parametrize("grid_fixture", [
     "grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
@@ -172,7 +202,6 @@ def test_unsuccessful_initialization_with_regional_data(grid_fixture, request):
     
     grid = request.getfixturevalue(grid_fixture)
 
-    # Instantiate AtmosphericForcing object
     with pytest.raises(ValueError, match="NaN values found"):
 
         atm_forcing = AtmosphericForcing(
@@ -182,4 +211,178 @@ def test_unsuccessful_initialization_with_regional_data(grid_fixture, request):
             source="era5",
             filename=fname
         )
+    
+    grid.coarsen()
+
+    with pytest.raises(ValueError, match="NaN values found"):
+        atm_forcing = AtmosphericForcing(
+            grid=grid,
+            use_coarse_grid=True,
+            start_time=start_time,
+            end_time=end_time,
+            source="era5",
+            filename=fname
+        )
+
+@pytest.mark.parametrize("grid_fixture", [
+    "grid_that_straddles_dateline",
+    "grid_that_lies_east_of_dateline_less_than_five_degrees_away",
+    "grid_that_lies_east_of_dateline_more_than_five_degrees_away",
+    "grid_that_lies_west_of_dateline_less_than_five_degrees_away",
+    "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
+    "grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
+    "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data"
+    ])
+
+def test_successful_initialization_with_global_data(grid_fixture, request):
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_global_test_data.nc")
+    
+    grid = request.getfixturevalue(grid_fixture)
+
+    atm_forcing = AtmosphericForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source="era5",
+        filename=fname
+    )
+
+    assert atm_forcing.ds is not None
+    
+    grid.coarsen()
+
+    atm_forcing = AtmosphericForcing(
+        grid=grid,
+        use_coarse_grid=True,
+        start_time=start_time,
+        end_time=end_time,
+        source="era5",
+        filename=fname
+    )
+
+    assert isinstance(atm_forcing.ds, xr.Dataset)
+    assert "uwnd" in atm_forcing.ds
+    assert "vwnd" in atm_forcing.ds
+    assert "swrad" in atm_forcing.ds
+    assert "lwrad" in atm_forcing.ds
+    assert "Tair" in atm_forcing.ds
+    assert "qair" in atm_forcing.ds
+    assert "rain" in atm_forcing.ds
+
+    assert atm_forcing.start_time == start_time
+    assert atm_forcing.end_time == end_time
+    assert atm_forcing.filename == fname
+    assert atm_forcing.source == "era5"
+
+@pytest.fixture
+def atmospheric_forcing(grid_that_straddles_dateline):
+    """
+    Fixture for creating a AtmosphericForcing object.
+    """
+    
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_global_test_data.nc")
+    
+    return AtmosphericForcing(
+        grid=grid_that_straddles_dateline,
+        start_time=start_time,
+        end_time=end_time,
+        source="era5",
+        filename=fname
+    )
+
+
+def test_plot_method(atmospheric_forcing):
+    """
+    Test the plot method of the AtmosphericForcing object.
+    """
+    atmospheric_forcing.plot(varname="uwnd", time=0)
+
+def test_save_method(atmospheric_forcing, tmp_path):
+    """
+    Test the save method of the AtmosphericForcing object.
+    """
+        
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
+    atmospheric_forcing.save(filepath)
+    extended_filepath = filepath + ".20200201-01.nc"
+
+    try:
+        assert os.path.exists(extended_filepath)
+    finally:
+        os.remove(extended_filepath)
+
+
+
+# SWRCorrection checks
+
+@pytest.fixture
+def swr_correction():
+
+    correction_filename = pooch.retrieve(
+        url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/SSR_correction.nc",
+        known_hash="a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
+    )
+    correction_filename
+
+    return SWRCorrection(
+        filename=correction_filename,
+        varname="ssr_corr",
+        dim_names={"time": "time", "latitude": "latitude", "longitude": "longitude"},
+        temporal_resolution="climatology",
+    )
+
+
+def test_check_dataset(swr_correction):
+
+    ds = swr_correction.ds.copy()
+    ds = ds.drop_vars("ssr_corr")
+    with pytest.raises(ValueError):
+        swr_correction._check_dataset(ds)
+    
+    ds = swr_correction.ds.copy()
+    ds = ds.rename({"latitude": "lat", "longitude": "long"})
+    with pytest.raises(ValueError):
+        swr_correction._check_dataset(ds)
+
+
+def test_ensure_latitude_ascending(swr_correction):
+
+    ds = swr_correction.ds.copy()
+
+    ds["latitude"] = ds["latitude"][::-1]
+    ds = swr_correction._ensure_latitude_ascending(ds)
+    assert np.all(np.diff(ds["latitude"]) > 0)
+
+def test_handle_longitudes(swr_correction):
+    swr_correction.ds["longitude"] = ((swr_correction.ds["longitude"] + 180) % 360) - 180  # Convert to [-180, 180]
+    swr_correction._handle_longitudes(straddle=False)
+    assert np.all((swr_correction.ds["longitude"] >= 0) & (swr_correction.ds["longitude"] <= 360))
+
+def test_choose_subdomain(swr_correction):
+    lats = swr_correction.ds.latitude[10:20]
+    lons = swr_correction.ds.longitude[10:20]
+    coords = {
+        "latitude": lats,
+        "longitude": lons
+    }
+    subdomain = swr_correction._choose_subdomain(coords)
+    assert (subdomain["latitude"] == lats).all()
+    assert (subdomain["longitude"] == lons).all()
+
+def test_interpolate_temporally(swr_correction):
+    field = swr_correction.ds["ssr_corr"]
+    
+    fname = download_test_data("ERA5_regional_test_data.nc")
+    era5_times = xr.open_dataset(fname).time
+    interpolated_field = swr_correction._interpolate_temporally(field, era5_times)
+    assert len(interpolated_field.time) == len(era5_times)
 

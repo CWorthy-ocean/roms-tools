@@ -8,90 +8,96 @@ import os
 
 
 @pytest.fixture
-def mock_dataset():
-    """
-    Fixture to provide a mock Dataset object with relevant mock data.
-    """
-    # Mock dataset with time, latitude, and longitude dimensions
-    mock_data = xr.Dataset(
-        {
-            "time": (
-                "time",
-                [
-                    np.datetime64("2022-01-01T00:00:00"),
-                    np.datetime64("2022-02-01T00:00:00"),
-                    np.datetime64("2022-03-01T00:00:00"),
-                    np.datetime64("2022-04-01T00:00:00"),
-                ],
-            ),
-            "latitude": ("latitude", np.linspace(-90, 90, 180)),
-            "longitude": ("longitude", np.linspace(-180, 180, 360)),
-            "depth": ("depth", np.linspace(0.5, 4000, 10)),
-        }
+def global_dataset():
+    lon = np.linspace(0, 359, 360)
+    lat = np.linspace(-90, 90, 180)
+    depth = np.linspace(0, 2000, 10)
+    time = [
+        np.datetime64("2022-01-01T00:00:00"),
+        np.datetime64("2022-02-01T00:00:00"),
+        np.datetime64("2022-03-01T00:00:00"),
+        np.datetime64("2022-04-01T00:00:00"),
+    ]
+    data = np.random.rand(4, 10, 180, 360)
+    ds = xr.Dataset(
+        {"var": (["time", "depth", "latitude", "longitude"], data)},
+        coords={
+            "time": (["time"], time),
+            "depth": (["depth"], depth),
+            "latitude": (["latitude"], lat),
+            "longitude": (["longitude"], lon),
+        },
     )
-
-    return mock_data
+    return ds
 
 
 @pytest.fixture
-def mock_dataset_with_noon_times():
-    """
-    Fixture to provide a mock Dataset object with different time values.
-    """
-    mock_data = xr.Dataset(
-        {
-            "time": (
-                "time",
-                [
-                    np.datetime64("2022-01-01T12:00:00"),
-                    np.datetime64("2022-02-01T12:00:00"),
-                    np.datetime64("2022-03-01T12:00:00"),
-                    np.datetime64("2022-04-01T12:00:00"),
-                ],
-            ),
-            "latitude": ("latitude", np.linspace(-90, 90, 180)),
-            "longitude": ("longitude", np.linspace(-180, 180, 360)),
-        }
+def global_dataset_with_noon_times():
+    lon = np.linspace(0, 359, 360)
+    lat = np.linspace(-90, 90, 180)
+    time = [
+        np.datetime64("2022-01-01T12:00:00"),
+        np.datetime64("2022-02-01T12:00:00"),
+        np.datetime64("2022-03-01T12:00:00"),
+        np.datetime64("2022-04-01T12:00:00"),
+    ]
+    data = np.random.rand(4, 180, 360)
+    ds = xr.Dataset(
+        {"var": (["time", "latitude", "longitude"], data)},
+        coords={
+            "time": (["time"], time),
+            "latitude": (["latitude"], lat),
+            "longitude": (["longitude"], lon),
+        },
     )
-
-    return mock_data
+    return ds
 
 
 @pytest.fixture
-def mock_dataset_with_multiple_times_per_day():
-    """
-    Fixture to provide a mock Dataset object with different time values.
-    """
-    mock_data = xr.Dataset(
-        {
-            "time": (
-                "time",
-                [
-                    np.datetime64("2022-01-01T00:00:00"),
-                    np.datetime64("2022-01-01T12:00:00"),
-                    np.datetime64("2022-02-01T00:00:00"),
-                    np.datetime64("2022-02-01T12:00:00"),
-                    np.datetime64("2022-03-01T00:00:00"),
-                    np.datetime64("2022-03-01T12:00:00"),
-                    np.datetime64("2022-04-01T00:00:00"),
-                    np.datetime64("2022-04-01T12:00:00"),
-                ],
-            ),
-            "latitude": ("latitude", np.linspace(-90, 90, 180)),
-            "longitude": ("longitude", np.linspace(-180, 180, 360)),
-        }
+def global_dataset_with_multiple_times_per_day():
+    lon = np.linspace(0, 359, 360)
+    lat = np.linspace(-90, 90, 180)
+    time = [
+        np.datetime64("2022-01-01T00:00:00"),
+        np.datetime64("2022-01-01T12:00:00"),
+        np.datetime64("2022-02-01T00:00:00"),
+        np.datetime64("2022-02-01T12:00:00"),
+        np.datetime64("2022-03-01T00:00:00"),
+        np.datetime64("2022-03-01T12:00:00"),
+        np.datetime64("2022-04-01T00:00:00"),
+        np.datetime64("2022-04-01T12:00:00"),
+    ]
+    data = np.random.rand(8, 180, 360)
+    ds = xr.Dataset(
+        {"var": (["time", "latitude", "longitude"], data)},
+        coords={
+            "time": (["time"], time),
+            "latitude": (["latitude"], lat),
+            "longitude": (["longitude"], lon),
+        },
     )
+    return ds
 
-    return mock_data
+
+@pytest.fixture
+def non_global_dataset():
+    lon = np.linspace(0, 180, 181)
+    lat = np.linspace(-90, 90, 180)
+    data = np.random.rand(180, 181)
+    ds = xr.Dataset(
+        {"var": (["latitude", "longitude"], data)},
+        coords={"latitude": (["latitude"], lat), "longitude": (["longitude"], lon)},
+    )
+    return ds
 
 
 @pytest.mark.parametrize(
-    "mock_data_fixture, expected_time_values",
+    "data_fixture, expected_time_values",
     [
-        ("mock_dataset", [np.datetime64("2022-02-01T00:00:00")]),
-        ("mock_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
+        ("global_dataset", [np.datetime64("2022-02-01T00:00:00")]),
+        ("global_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
         (
-            "mock_dataset_with_multiple_times_per_day",
+            "global_dataset_with_multiple_times_per_day",
             [
                 np.datetime64("2022-02-01T00:00:00"),
                 np.datetime64("2022-02-01T12:00:00"),
@@ -99,23 +105,28 @@ def mock_dataset_with_multiple_times_per_day():
         ),
     ],
 )
-def test_select_times(mock_data_fixture, expected_time_values, request):
+def test_select_times(data_fixture, expected_time_values, request):
     """
-    Test selecting times with different mock datasets.
+    Test selecting times with different datasets.
     """
     start_time = datetime(2022, 2, 1)
     end_time = datetime(2022, 3, 1)
 
     # Get the fixture dynamically based on the parameter
-    mock_dataset = request.getfixturevalue(mock_data_fixture)
+    dataset = request.getfixturevalue(data_fixture)
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
-        mock_dataset.to_netcdf(filepath)
+        dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        dataset = Dataset(filename=filepath, start_time=start_time, end_time=end_time)
+        dataset = Dataset(
+            filename=filepath,
+            var_names=["var"],
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         assert dataset.ds is not None
         assert len(dataset.ds.time) == len(expected_time_values)
@@ -126,28 +137,28 @@ def test_select_times(mock_data_fixture, expected_time_values, request):
 
 
 @pytest.mark.parametrize(
-    "mock_data_fixture, expected_time_values",
+    "data_fixture, expected_time_values",
     [
-        ("mock_dataset", [np.datetime64("2022-02-01T00:00:00")]),
-        ("mock_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
+        ("global_dataset", [np.datetime64("2022-02-01T00:00:00")]),
+        ("global_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
     ],
 )
-def test_select_times_no_end_time(mock_data_fixture, expected_time_values, request):
+def test_select_times_no_end_time(data_fixture, expected_time_values, request):
     """
     Test selecting times with only start_time specified.
     """
     start_time = datetime(2022, 2, 1)
 
     # Get the fixture dynamically based on the parameter
-    mock_dataset = request.getfixturevalue(mock_data_fixture)
+    dataset = request.getfixturevalue(data_fixture)
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
-        mock_dataset.to_netcdf(filepath)
+        dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        dataset = Dataset(filename=filepath, start_time=start_time)
+        dataset = Dataset(filename=filepath, var_names=["var"], start_time=start_time)
 
         assert dataset.ds is not None
         assert len(dataset.ds.time) == len(expected_time_values)
@@ -157,7 +168,7 @@ def test_select_times_no_end_time(mock_data_fixture, expected_time_values, reque
         os.remove(filepath)
 
 
-def test_multiple_matching_times(mock_dataset_with_multiple_times_per_day):
+def test_multiple_matching_times(global_dataset_with_multiple_times_per_day):
     """
     Test handling when multiple matching times are found when end_time is not specified.
     """
@@ -166,19 +177,19 @@ def test_multiple_matching_times(mock_dataset_with_multiple_times_per_day):
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
-        mock_dataset_with_multiple_times_per_day.to_netcdf(filepath)
+        global_dataset_with_multiple_times_per_day.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
         with pytest.raises(
             ValueError,
             match="There must be exactly one time matching the start_time. Found 2 matching times.",
         ):
-            Dataset(filename=filepath, start_time=start_time)
+            Dataset(filename=filepath, var_names=["var"], start_time=start_time)
     finally:
         os.remove(filepath)
 
 
-def test_no_matching_times(mock_dataset):
+def test_no_matching_times(global_dataset):
     """
     Test handling when no matching times are found.
     """
@@ -188,16 +199,21 @@ def test_no_matching_times(mock_dataset):
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
-        mock_dataset.to_netcdf(filepath)
+        global_dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
         with pytest.raises(ValueError, match="No matching times found."):
-            Dataset(filename=filepath, start_time=start_time, end_time=end_time)
+            Dataset(
+                filename=filepath,
+                var_names=["var"],
+                start_time=start_time,
+                end_time=end_time,
+            )
     finally:
         os.remove(filepath)
 
 
-def test_reverse_latitude_choose_subdomain_negative_depth(mock_dataset):
+def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
     """
     Test reversing latitude when it is not ascending, the choose_subdomain method, and the convert_to_negative_depth method of the Dataset class.
     """
@@ -206,11 +222,21 @@ def test_reverse_latitude_choose_subdomain_negative_depth(mock_dataset):
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
-        mock_dataset["latitude"] = mock_dataset["latitude"][::-1]
-        mock_dataset.to_netcdf(filepath)
+        global_dataset["latitude"] = global_dataset["latitude"][::-1]
+        global_dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        dataset = Dataset(filename=filepath, start_time=start_time)
+        dataset = Dataset(
+            filename=filepath,
+            var_names=["var"],
+            dim_names={
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "time": "time",
+                "depth": "depth",
+            },
+            start_time=start_time,
+        )
 
         assert np.all(np.diff(dataset.ds["latitude"]) > 0)
 
@@ -225,7 +251,17 @@ def test_reverse_latitude_choose_subdomain_negative_depth(mock_dataset):
         assert -11 <= dataset.ds["longitude"].max() <= 11
 
         # test choosing subdomain for domain that does not straddle the dateline
-        dataset = Dataset(filename=filepath, start_time=start_time)
+        dataset = Dataset(
+            filename=filepath,
+            var_names=["var"],
+            dim_names={
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "time": "time",
+                "depth": "depth",
+            },
+            start_time=start_time,
+        )
         dataset.choose_subdomain(
             latitude_range=(-10, 10), longitude_range=(10, 20), margin=1, straddle=False
         )
@@ -237,7 +273,34 @@ def test_reverse_latitude_choose_subdomain_negative_depth(mock_dataset):
 
         dataset.convert_to_negative_depth()
 
-        assert (dataset.ds["depth"] < 0).all()
+        assert (dataset.ds["depth"] <= 0).all()
 
+    finally:
+        os.remove(filepath)
+
+
+def test_check_if_global_with_global_dataset(global_dataset):
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+        global_dataset.to_netcdf(filepath)
+    try:
+        dataset = Dataset(filename=filepath, var_names=["var"])
+        is_global = dataset.check_if_global(dataset.ds)
+        assert is_global
+    finally:
+        os.remove(filepath)
+
+
+def test_check_if_global_with_non_global_dataset(non_global_dataset):
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+        non_global_dataset.to_netcdf(filepath)
+    try:
+        dataset = Dataset(filename=filepath, var_names=["var"])
+        is_global = dataset.check_if_global(dataset.ds)
+
+        assert not is_global
     finally:
         os.remove(filepath)

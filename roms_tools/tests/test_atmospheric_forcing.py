@@ -144,6 +144,25 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
     return grid
 
 
+@pytest.fixture
+def grid_that_straddles_180_degree_meridian():
+    """
+    Fixture for creating a domain that straddles 180 degree meridian. This is a good test grid for the global ERA5 data, which comes on an [-180, 180] longitude grid.
+    """
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    return grid
+
+
 @pytest.mark.parametrize(
     "grid_fixture",
     [
@@ -205,7 +224,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
     ],
 )
-def test_unsuccessful_initialization_with_regional_data(grid_fixture, request):
+def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
@@ -236,6 +255,41 @@ def test_unsuccessful_initialization_with_regional_data(grid_fixture, request):
         )
 
 
+def test_no_longitude_intersection_initialization_with_regional_data(
+    grid_that_straddles_180_degree_meridian,
+):
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_regional_test_data.nc")
+
+    with pytest.raises(
+        ValueError, match="Selected longitude range does not intersect with dataset"
+    ):
+
+        AtmosphericForcing(
+            grid=grid_that_straddles_180_degree_meridian,
+            start_time=start_time,
+            end_time=end_time,
+            source="era5",
+            filename=fname,
+        )
+
+    grid_that_straddles_180_degree_meridian.coarsen()
+
+    with pytest.raises(
+        ValueError, match="Selected longitude range does not intersect with dataset"
+    ):
+        AtmosphericForcing(
+            grid=grid_that_straddles_180_degree_meridian,
+            use_coarse_grid=True,
+            start_time=start_time,
+            end_time=end_time,
+            source="era5",
+            filename=fname,
+        )
+
+
 @pytest.mark.parametrize(
     "grid_fixture",
     [
@@ -246,6 +300,7 @@ def test_unsuccessful_initialization_with_regional_data(grid_fixture, request):
         "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
         "grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
         "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
+        "grid_that_straddles_180_degree_meridian",
     ],
 )
 def test_successful_initialization_with_global_data(grid_fixture, request):
@@ -264,7 +319,14 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
         filename=fname,
     )
 
-    assert atm_forcing.ds is not None
+    assert isinstance(atm_forcing.ds, xr.Dataset)
+    assert "uwnd" in atm_forcing.ds
+    assert "vwnd" in atm_forcing.ds
+    assert "swrad" in atm_forcing.ds
+    assert "lwrad" in atm_forcing.ds
+    assert "Tair" in atm_forcing.ds
+    assert "qair" in atm_forcing.ds
+    assert "rain" in atm_forcing.ds
 
     grid.coarsen()
 

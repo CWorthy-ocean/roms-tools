@@ -370,11 +370,22 @@ class AtmosphericForcing:
 
         if self.source == "era5":
             dims = {"longitude": "longitude", "latitude": "latitude", "time": "time"}
+            varnames = {
+                "u10": "u10",
+                "v10": "v10",
+                "swr": "ssr",
+                "lwr": "strd",
+                "t2m": "t2m",
+                "d2m": "d2m",
+                "rain": "tp",
+                "mask": "sst"
+            }
 
         data = Dataset(
             filename=self.filename,
             start_time=self.start_time,
             end_time=self.end_time,
+            var_names=varnames.values(),
             dim_names=dims,
         )
 
@@ -385,9 +396,12 @@ class AtmosphericForcing:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
+        # The following consists of two steps:
         # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
-        # Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2.
-        # Discontinuous longitudes can lead to artifacts in the interpolation process. Specifically, if there is a data gap,
+        # We perform these two steps for two reasons:
+        # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
+        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes 
+        # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
         # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
         # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
         data.choose_subdomain(
@@ -398,44 +412,27 @@ class AtmosphericForcing:
         )
 
         # interpolate onto desired grid
-        if self.source == "era5":
-            mask = xr.where(data.ds["sst"].isel(time=0).isnull(), 0, 1)
-            varnames = {
-                "u10": "u10",
-                "v10": "v10",
-                "swr": "ssr",
-                "lwr": "strd",
-                "t2m": "t2m",
-                "d2m": "d2m",
-                "rain": "tp",
-            }
-
         coords = {dims["latitude"]: lat, dims["longitude"]: lon}
-        u10 = fill_and_interpolate(
-            data.ds[varnames["u10"]], mask, list(coords.keys()), coords, method="linear"
-        )
-        v10 = fill_and_interpolate(
-            data.ds[varnames["v10"]], mask, list(coords.keys()), coords, method="linear"
-        )
-        swr = fill_and_interpolate(
-            data.ds[varnames["swr"]], mask, list(coords.keys()), coords, method="linear"
-        )
-        lwr = fill_and_interpolate(
-            data.ds[varnames["lwr"]], mask, list(coords.keys()), coords, method="linear"
-        )
-        t2m = fill_and_interpolate(
-            data.ds[varnames["t2m"]], mask, list(coords.keys()), coords, method="linear"
-        )
-        d2m = fill_and_interpolate(
-            data.ds[varnames["d2m"]], mask, list(coords.keys()), coords, method="linear"
-        )
-        rain = fill_and_interpolate(
-            data.ds[varnames["rain"]],
-            mask,
-            list(coords.keys()),
-            coords,
-            method="linear",
-        )
+        
+        data_vars = {}
+
+        mask = xr.where(data.ds[varnames["mask"]].isel(time=0).isnull(), 0, 1)
+
+        # Fill and interpolate each variable
+        for var in varnames.keys():
+            if var != "mask":
+                data_vars[var] = fill_and_interpolate(
+                    data.ds[varnames[var]], mask, list(coords.keys()), coords, method="linear"
+                )
+        
+        # Access the interpolated variables using data_vars dictionary
+        u10 = data_vars["u10"]
+        v10 = data_vars["v10"]
+        swr = data_vars["swr"]
+        lwr = data_vars["lwr"]
+        t2m = data_vars["t2m"]
+        d2m = data_vars["d2m"]
+        rain = data_vars["rain"]
 
         if self.source == "era5":
             # translate radiation to fluxes. ERA5 stores values integrated over 1 hour.

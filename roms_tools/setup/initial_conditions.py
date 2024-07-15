@@ -93,7 +93,14 @@ class InitialConditions:
                 "time": "time",
             }
 
-        data = Dataset(filename=self.filename, start_time=self.ini_time, dim_names=dims)
+            varnames = {
+                "temp": "thetao",
+                "salt": "so",
+                "u": "uo",
+                "v": "vo",
+                "ssh": "zos",
+            }
+        data = Dataset(filename=self.filename, start_time=self.ini_time, var_names=varnames.values(), dim_names=dims)
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
@@ -102,12 +109,14 @@ class InitialConditions:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
+        # The following consists of two steps:
         # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
-        # Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2.
-        # Discontinuous longitudes can lead to artifacts in the interpolation process. Specifically, if there is a data gap,
+        # We perform these two steps for two reasons:
+        # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
+        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes 
+        # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
         # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
         # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
-        # Note that no error is thrown if the data does not have the full safety margin available, as long as interpolation does not give any NaNs over the ocean.
         data.choose_subdomain(
             latitude_range=[lat.min().values, lat.max().values],
             longitude_range=[lon.min().values, lon.max().values],
@@ -116,15 +125,6 @@ class InitialConditions:
         )
 
         # interpolate onto desired grid
-        if self.source == "glorys":
-            varnames = {
-                "temp": "thetao",
-                "salt": "so",
-                "u": "uo",
-                "v": "vo",
-                "ssh": "zos",
-            }
-
         fill_dims = [dims["latitude"], dims["longitude"]]
 
         # 2d interpolation
@@ -142,7 +142,7 @@ class InitialConditions:
         # 3d interpolation
         cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, "r")
         zr = compute_depth(h * 0, h, self.hc, cs_r, sigma_r)
-
+        
         # extrapolate deepest value all the way to bottom ("flooding")
         for var in ["temp", "salt", "u", "v"]:
             data.ds[varnames[var]] = extrapolate_deepest_to_bottom(
@@ -157,45 +157,20 @@ class InitialConditions:
         # setting fillvalue_interp to None means that we allow extrapolation in the
         # interpolation step to avoid NaNs at the surface if the lowest depth in original
         # data is greater than zero
-        temp = fill_and_interpolate(
-            data.ds[varnames["temp"]].astype(np.float64),
-            mask,
-            fill_dims=fill_dims,
-            coords=coords,
-            method="linear",
-            fillvalue_interp=None,
-        )
-
-        salt = fill_and_interpolate(
-            data.ds[varnames["salt"]].astype(np.float64),
-            mask,
-            fill_dims=fill_dims,
-            coords=coords,
-            method="linear",
-            fillvalue_interp=None,
-        )
-
-        u = fill_and_interpolate(
-            data.ds[varnames["u"]].astype(np.float64),
-            mask,
-            fill_dims=fill_dims,
-            coords=coords,
-            method="linear",
-            fillvalue_interp=None,
-        )
-
-        v = fill_and_interpolate(
-            data.ds[varnames["v"]].astype(np.float64),
-            mask,
-            fill_dims=fill_dims,
-            coords=coords,
-            method="linear",
-            fillvalue_interp=None,
-        )
-
+        data_vars = {}
+        for var in ["temp", "salt", "u", "v"]:
+            data_vars[var] = fill_and_interpolate(
+                data.ds[varnames[var]].astype(np.float64), 
+                mask, 
+                fill_dims=fill_dims,
+                coords=coords,
+                method="linear",
+                fillvalue_interp=None,
+                )
+        
         # rotate to grid orientation
-        u_rot = u * np.cos(angle) + v * np.sin(angle)
-        v_rot = v * np.cos(angle) - u * np.sin(angle)
+        u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
+        v_rot = data_vars["v"] * np.cos(angle) - data_vars["u"] * np.sin(angle)
 
         # interpolate to u- and v-points
         u = interpolate_from_rho_to_u(u_rot)
@@ -224,11 +199,11 @@ class InitialConditions:
         # save in new dataset
         ds = xr.Dataset()
 
-        ds["temp"] = temp.astype(np.float32)
+        ds["temp"] = data_vars["temp"].astype(np.float32)
         ds["temp"].attrs["long_name"] = "Potential temperature"
         ds["temp"].attrs["units"] = "Celsius"
 
-        ds["salt"] = salt.astype(np.float32)
+        ds["salt"] = data_vars["salt"].astype(np.float32)
         ds["salt"].attrs["long_name"] = "Salinity"
         ds["salt"].attrs["units"] = "PSU"
 

@@ -100,7 +100,12 @@ class InitialConditions:
                 "v": "vo",
                 "ssh": "zos",
             }
-        data = Dataset(filename=self.filename, start_time=self.ini_time, var_names=varnames.values(), dim_names=dims)
+        data = Dataset(
+            filename=self.filename,
+            start_time=self.ini_time,
+            var_names=varnames.values(),
+            dim_names=dims,
+        )
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
@@ -113,7 +118,7 @@ class InitialConditions:
         # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
         # We perform these two steps for two reasons:
         # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
-        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes 
+        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes
         # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
         # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
         # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
@@ -142,7 +147,7 @@ class InitialConditions:
         # 3d interpolation
         cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, "r")
         zr = compute_depth(h * 0, h, self.hc, cs_r, sigma_r)
-        
+
         # extrapolate deepest value all the way to bottom ("flooding")
         for var in ["temp", "salt", "u", "v"]:
             data.ds[varnames[var]] = extrapolate_deepest_to_bottom(
@@ -160,14 +165,14 @@ class InitialConditions:
         data_vars = {}
         for var in ["temp", "salt", "u", "v"]:
             data_vars[var] = fill_and_interpolate(
-                data.ds[varnames[var]].astype(np.float64), 
-                mask, 
+                data.ds[varnames[var]].astype(np.float64),
+                mask,
                 fill_dims=fill_dims,
                 coords=coords,
                 method="linear",
                 fillvalue_interp=None,
-                )
-        
+            )
+
         # rotate to grid orientation
         u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
         v_rot = data_vars["v"] * np.cos(angle) - data_vars["u"] * np.sin(angle)

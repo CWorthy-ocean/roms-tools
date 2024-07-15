@@ -13,66 +13,68 @@ def global_dataset():
     lat = np.linspace(-90, 90, 180)
     depth = np.linspace(0, 2000, 10)
     time = [
-                    np.datetime64("2022-01-01T00:00:00"),
-                    np.datetime64("2022-02-01T00:00:00"),
-                    np.datetime64("2022-03-01T00:00:00"),
-                    np.datetime64("2022-04-01T00:00:00"),
-            ]
+        np.datetime64("2022-01-01T00:00:00"),
+        np.datetime64("2022-02-01T00:00:00"),
+        np.datetime64("2022-03-01T00:00:00"),
+        np.datetime64("2022-04-01T00:00:00"),
+    ]
     data = np.random.rand(4, 10, 180, 360)
     ds = xr.Dataset(
         {"var": (["time", "depth", "latitude", "longitude"], data)},
         coords={
-            "time":  (["time"], time),
+            "time": (["time"], time),
             "depth": (["depth"], depth),
             "latitude": (["latitude"], lat),
-            "longitude": (["longitude"], lon)
-        }
+            "longitude": (["longitude"], lon),
+        },
     )
     return ds
+
 
 @pytest.fixture
 def global_dataset_with_noon_times():
     lon = np.linspace(0, 359, 360)
     lat = np.linspace(-90, 90, 180)
     time = [
-                    np.datetime64("2022-01-01T12:00:00"),
-                    np.datetime64("2022-02-01T12:00:00"),
-                    np.datetime64("2022-03-01T12:00:00"),
-                    np.datetime64("2022-04-01T12:00:00"),
-            ]
+        np.datetime64("2022-01-01T12:00:00"),
+        np.datetime64("2022-02-01T12:00:00"),
+        np.datetime64("2022-03-01T12:00:00"),
+        np.datetime64("2022-04-01T12:00:00"),
+    ]
     data = np.random.rand(4, 180, 360)
     ds = xr.Dataset(
         {"var": (["time", "latitude", "longitude"], data)},
         coords={
-            "time":  (["time"], time),
+            "time": (["time"], time),
             "latitude": (["latitude"], lat),
-            "longitude": (["longitude"], lon)
-        }
+            "longitude": (["longitude"], lon),
+        },
     )
     return ds
+
 
 @pytest.fixture
 def global_dataset_with_multiple_times_per_day():
     lon = np.linspace(0, 359, 360)
     lat = np.linspace(-90, 90, 180)
     time = [
-                    np.datetime64("2022-01-01T00:00:00"),
-                    np.datetime64("2022-01-01T12:00:00"),
-                    np.datetime64("2022-02-01T00:00:00"),
-                    np.datetime64("2022-02-01T12:00:00"),
-                    np.datetime64("2022-03-01T00:00:00"),
-                    np.datetime64("2022-03-01T12:00:00"),
-                    np.datetime64("2022-04-01T00:00:00"),
-                    np.datetime64("2022-04-01T12:00:00"),
-            ]
+        np.datetime64("2022-01-01T00:00:00"),
+        np.datetime64("2022-01-01T12:00:00"),
+        np.datetime64("2022-02-01T00:00:00"),
+        np.datetime64("2022-02-01T12:00:00"),
+        np.datetime64("2022-03-01T00:00:00"),
+        np.datetime64("2022-03-01T12:00:00"),
+        np.datetime64("2022-04-01T00:00:00"),
+        np.datetime64("2022-04-01T12:00:00"),
+    ]
     data = np.random.rand(8, 180, 360)
     ds = xr.Dataset(
         {"var": (["time", "latitude", "longitude"], data)},
         coords={
-            "time":  (["time"], time),
+            "time": (["time"], time),
             "latitude": (["latitude"], lat),
-            "longitude": (["longitude"], lon)
-        }
+            "longitude": (["longitude"], lon),
+        },
     )
     return ds
 
@@ -84,10 +86,7 @@ def non_global_dataset():
     data = np.random.rand(180, 181)
     ds = xr.Dataset(
         {"var": (["latitude", "longitude"], data)},
-        coords={
-            "latitude": (["latitude"], lat),
-            "longitude": (["longitude"], lon)
-        }
+        coords={"latitude": (["latitude"], lat), "longitude": (["longitude"], lon)},
     )
     return ds
 
@@ -122,7 +121,12 @@ def test_select_times(data_fixture, expected_time_values, request):
         dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        dataset = Dataset(filename=filepath, var_names=["var"], start_time=start_time, end_time=end_time)
+        dataset = Dataset(
+            filename=filepath,
+            var_names=["var"],
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         assert dataset.ds is not None
         assert len(dataset.ds.time) == len(expected_time_values)
@@ -199,7 +203,12 @@ def test_no_matching_times(global_dataset):
     try:
         # Instantiate Dataset object using the temporary file
         with pytest.raises(ValueError, match="No matching times found."):
-            Dataset(filename=filepath, var_names=["var"], start_time=start_time, end_time=end_time)
+            Dataset(
+                filename=filepath,
+                var_names=["var"],
+                start_time=start_time,
+                end_time=end_time,
+            )
     finally:
         os.remove(filepath)
 
@@ -217,7 +226,17 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
         global_dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        dataset = Dataset(filename=filepath, var_names=["var"], dim_names = {"latitude": "latitude", "longitude": "longitude", "time": "time", "depth": "depth"}, start_time=start_time)
+        dataset = Dataset(
+            filename=filepath,
+            var_names=["var"],
+            dim_names={
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "time": "time",
+                "depth": "depth",
+            },
+            start_time=start_time,
+        )
 
         assert np.all(np.diff(dataset.ds["latitude"]) > 0)
 
@@ -232,7 +251,17 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
         assert -11 <= dataset.ds["longitude"].max() <= 11
 
         # test choosing subdomain for domain that does not straddle the dateline
-        dataset = Dataset(filename=filepath, var_names=["var"], dim_names = {"latitude": "latitude", "longitude": "longitude", "time": "time", "depth": "depth"}, start_time=start_time)
+        dataset = Dataset(
+            filename=filepath,
+            var_names=["var"],
+            dim_names={
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "time": "time",
+                "depth": "depth",
+            },
+            start_time=start_time,
+        )
         dataset.choose_subdomain(
             latitude_range=(-10, 10), longitude_range=(10, 20), margin=1, straddle=False
         )
@@ -250,7 +279,6 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
         os.remove(filepath)
 
 
-
 def test_check_if_global_with_global_dataset(global_dataset):
 
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
@@ -263,16 +291,16 @@ def test_check_if_global_with_global_dataset(global_dataset):
     finally:
         os.remove(filepath)
 
+
 def test_check_if_global_with_non_global_dataset(non_global_dataset):
-    
+
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
         non_global_dataset.to_netcdf(filepath)
     try:
         dataset = Dataset(filename=filepath, var_names=["var"])
         is_global = dataset.check_if_global(dataset.ds)
-    
+
         assert not is_global
     finally:
         os.remove(filepath)
-

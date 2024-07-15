@@ -4,12 +4,11 @@ import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
-from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v, fill_and_interpolate
+from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.datasets import Dataset
-import os
-import hashlib
-from typing import Dict, Optional, List
+from typing import Dict, List
 import matplotlib.pyplot as plt
+
 
 @dataclass(frozen=True, kw_only=True)
 class TPXO(Dataset):
@@ -35,30 +34,49 @@ class TPXO(Dataset):
 
     filename: str
     var_names: List[str] = field(
-        default_factory=lambda: ["h_Re", "h_Im", "sal_Re", "sal_Im", "u_Re", "u_Im", "v_Re", "v_Im"]
+        default_factory=lambda: [
+            "h_Re",
+            "h_Im",
+            "sal_Re",
+            "sal_Im",
+            "u_Re",
+            "u_Im",
+            "v_Re",
+            "v_Im",
+        ]
     )
     dim_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "longitude": "ny",
-            "latitude": "nx",
-            "ntides": "nc"
-        }
+        default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
     )
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
         # Perform any necessary dataset initialization or modifications here
         ds = super().load_data()
-        
+
         # Clean up dataset
-        ds = ds.assign_coords({
-            "omega": ds["omega"],
-            "nx": ds["lon_r"].isel(ny=0),  # lon_r is constant along ny, i.e., is only a function of nx
-            "ny": ds["lat_r"].isel(nx=0)  # lat_r is constant along nx, i.e., is only a function of ny
-        })
+        ds = ds.assign_coords(
+            {
+                "omega": ds["omega"],
+                "nx": ds["lon_r"].isel(
+                    ny=0
+                ),  # lon_r is constant along ny, i.e., is only a function of nx
+                "ny": ds["lat_r"].isel(
+                    nx=0
+                ),  # lat_r is constant along nx, i.e., is only a function of ny
+            }
+        )
         ds = ds.rename({"nx": "longitude", "ny": "latitude"})
 
-        object.__setattr__(self, "dim_names", {"latitude": "latitude", "longitude": "longitude", "ntides": self.dim_names["ntides"]})
+        object.__setattr__(
+            self,
+            "dim_names",
+            {
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "ntides": self.dim_names["ntides"],
+            },
+        )
         # Select relevant fields
         ds = super().select_relevant_fields(ds)
 
@@ -85,11 +103,15 @@ class TPXO(Dataset):
             If the number of constituents in the dataset is less than `ntides`.
         """
         if len(self.ds[self.dim_names["ntides"]]) < ntides:
-            raise ValueError(f"The dataset contains fewer than {ntides} tidal constituents.")
+            raise ValueError(
+                f"The dataset contains fewer than {ntides} tidal constituents."
+            )
 
     def get_corrected_tides(self, model_reference_date, allan_factor):
         # Get equilibrium tides
-        tpc = compute_equilibrium_tide(self.ds["longitude"], self.ds["latitude"]).isel(nc=self.ds.nc)
+        tpc = compute_equilibrium_tide(self.ds["longitude"], self.ds["latitude"]).isel(
+            nc=self.ds.nc
+        )
         # Correct for SAL
         tsc = allan_factor * (self.ds["sal_Re"] + 1j * self.ds["sal_Im"])
         tpc = tpc - tsc
@@ -114,12 +136,11 @@ class TPXO(Dataset):
         tpc = pf * tpc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
 
         tides = {"ssh": thc, "u": tuc, "v": tvc, "pot": tpc, "omega": self.ds["omega"]}
-            
+
         for k in tides.keys():
             tides[k] = tides[k].rename({"nc": "ntides"})
 
         return tides
-
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -172,7 +193,7 @@ class TidalForcing:
     def __post_init__(self):
         if self.source == "tpxo":
             data = TPXO(filename=self.filename)
- 
+
         data.check_number_constituents(self.ntides)
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = self.grid.ds.lon_rho
@@ -184,12 +205,12 @@ class TidalForcing:
         if not self.grid.straddle and abs(lon).min() > 5:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
-        
+
         # The following consists of two steps:
         # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
         # We perform these two steps for two reasons:
         # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
-        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes 
+        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes
         # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
         # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
         # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
@@ -200,26 +221,21 @@ class TidalForcing:
             straddle=straddle,
         )
 
-        tides = data.get_corrected_tides(
-            self.model_reference_date, self.allan_factor
-        )
-        
+        tides = data.get_corrected_tides(self.model_reference_date, self.allan_factor)
+
         # select desired number of constituents
         for k in tides.keys():
             tides[k] = tides[k].isel(ntides=slice(None, self.ntides))
-        
 
         # interpolate onto desired grid
         coords = {"latitude": lat, "longitude": lon}
-        #mask = xr.where(data.ds.depth>0, 1, 0)
+        # mask = xr.where(data.ds.depth>0, 1, 0)
 
         varnames = ["ssh", "pot", "u", "v"]
         data_vars = {}
 
         for var in varnames:
-            data_vars[var] = (
-                tides[var].interp(**coords).drop_vars(list(coords.keys()))
-            )
+            data_vars[var] = tides[var].interp(**coords).drop_vars(list(coords.keys()))
 
         # Rotate to grid orientation
         u_tide = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
@@ -236,7 +252,7 @@ class TidalForcing:
         # save in new dataset
         ds = xr.Dataset()
 
-        #ds["omega"] = tides["omega"]
+        # ds["omega"] = tides["omega"]
 
         ds["ssh_Re"] = data_vars["ssh"].real
         ds["ssh_Im"] = data_vars["ssh"].imag
@@ -308,18 +324,13 @@ class TidalForcing:
         >>> tidal_forcing = TidalForcing(grid)
         >>> tidal_forcing.plot("ssh_Re", nc=0)
         """
-        
-        field = self.ds[varname].isel(ntides=ntides).compute()
-        
-        title = "%s, ntides = %i" % (
-            field.long_name,
-            self.ds[varname].ntides[ntides]
-        )
 
-        vmax = max(
-            field.max(), -field.min()
-        )
-        vmin = - vmax
+        field = self.ds[varname].isel(ntides=ntides).compute()
+
+        title = "%s, ntides = %i" % (field.long_name, self.ds[varname].ntides[ntides])
+
+        vmax = max(field.max(), -field.min())
+        vmin = -vmax
         cmap = plt.colormaps.get_cmap("RdBu_r")
         cmap.set_bad(color="gray")
 
@@ -331,6 +342,7 @@ class TidalForcing:
             straddle=self.grid.straddle,
             c="g",
             kwargs=kwargs,
+            title=title,
         )
 
     def save(self, filepath: str) -> None:
@@ -558,7 +570,8 @@ def egbert_correction(date):
     )
 
     return pf, pu, aa
-    
+
+
 def compute_equilibrium_tide(lon, lat):
     """
     Compute equilibrium tide for given longitudes and latitudes.
@@ -655,5 +668,3 @@ def compute_equilibrium_tide(lon, lat):
     tpc = p_amp * np.exp(-1j * p_pha)
 
     return tpc
-
-

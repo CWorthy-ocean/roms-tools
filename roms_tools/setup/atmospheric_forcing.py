@@ -378,7 +378,7 @@ class AtmosphericForcing:
                 "t2m": "t2m",
                 "d2m": "d2m",
                 "rain": "tp",
-                "mask": "sst"
+                "mask": "sst",
             }
 
         data = Dataset(
@@ -400,7 +400,7 @@ class AtmosphericForcing:
         # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
         # We perform these two steps for two reasons:
         # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
-        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes 
+        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes
         # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
         # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
         # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
@@ -413,7 +413,7 @@ class AtmosphericForcing:
 
         # interpolate onto desired grid
         coords = {dims["latitude"]: lat, dims["longitude"]: lon}
-        
+
         data_vars = {}
 
         mask = xr.where(data.ds[varnames["mask"]].isel(time=0).isnull(), 0, 1)
@@ -422,9 +422,13 @@ class AtmosphericForcing:
         for var in varnames.keys():
             if var != "mask":
                 data_vars[var] = fill_and_interpolate(
-                    data.ds[varnames[var]], mask, list(coords.keys()), coords, method="linear"
+                    data.ds[varnames[var]],
+                    mask,
+                    list(coords.keys()),
+                    coords,
+                    method="linear",
                 )
-        
+
         # Access the interpolated variables using data_vars dictionary
         u10 = data_vars["u10"]
         v10 = data_vars["v10"]

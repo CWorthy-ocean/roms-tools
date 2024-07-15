@@ -143,6 +143,7 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
 
     return grid
 
+
 @pytest.fixture
 def grid_that_straddles_180_degree_meridian():
     """
@@ -253,13 +254,18 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
             filename=fname,
         )
 
-def test_no_longitude_intersection_initialization_with_regional_data(grid_that_straddles_180_degree_meridian):
+
+def test_no_longitude_intersection_initialization_with_regional_data(
+    grid_that_straddles_180_degree_meridian,
+):
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
     fname = download_test_data("ERA5_regional_test_data.nc")
 
-    with pytest.raises(ValueError, match="Selected longitude range does not intersect with dataset"):
+    with pytest.raises(
+        ValueError, match="Selected longitude range does not intersect with dataset"
+    ):
 
         AtmosphericForcing(
             grid=grid_that_straddles_180_degree_meridian,
@@ -271,7 +277,9 @@ def test_no_longitude_intersection_initialization_with_regional_data(grid_that_s
 
     grid_that_straddles_180_degree_meridian.coarsen()
 
-    with pytest.raises(ValueError, match="Selected longitude range does not intersect with dataset"):
+    with pytest.raises(
+        ValueError, match="Selected longitude range does not intersect with dataset"
+    ):
         AtmosphericForcing(
             grid=grid_that_straddles_180_degree_meridian,
             use_coarse_grid=True,
@@ -280,6 +288,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(grid_that_s
             source="era5",
             filename=fname,
         )
+
 
 @pytest.mark.parametrize(
     "grid_fixture",
@@ -291,7 +300,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(grid_that_s
         "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
         "grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
         "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
-        "grid_that_straddles_180_degree_meridian"
+        "grid_that_straddles_180_degree_meridian",
     ],
 )
 def test_successful_initialization_with_global_data(grid_fixture, request):

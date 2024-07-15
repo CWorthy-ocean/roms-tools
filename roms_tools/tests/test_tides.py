@@ -1,7 +1,5 @@
 import pytest
 from roms_tools import Grid, TidalForcing
-from roms_tools.setup.tides import TPXO
-import os
 import xarray as xr
 from roms_tools.setup.datasets import download_test_data
 
@@ -13,6 +11,7 @@ def grid_that_lies_within_bounds_of_regional_tpxo_data():
     )
 
     return grid
+
 
 @pytest.fixture
 def grid_that_straddles_dateline():
@@ -30,6 +29,7 @@ def grid_that_straddles_dateline():
     )
 
     return grid
+
 
 @pytest.fixture
 def grid_that_straddles_180_degree_meridian():
@@ -49,27 +49,22 @@ def grid_that_straddles_180_degree_meridian():
 
     return grid
 
+
 @pytest.mark.parametrize(
     "grid_fixture",
     [
         "grid_that_lies_within_bounds_of_regional_tpxo_data",
         "grid_that_straddles_dateline",
-        "grid_that_straddles_180_degree_meridian"
+        "grid_that_straddles_180_degree_meridian",
     ],
 )
-
 def test_successful_initialization_with_global_data(grid_fixture, request):
 
     fname = download_test_data("TPXO_global_test_data.nc")
 
     grid = request.getfixturevalue(grid_fixture)
 
-    tidal_forcing = TidalForcing(
-        grid=grid,
-        filename=fname,
-        source="tpxo",
-        ntides=2
-    )
+    tidal_forcing = TidalForcing(grid=grid, filename=fname, source="tpxo", ntides=2)
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
     assert "omega" in tidal_forcing.ds
@@ -87,7 +82,9 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
     assert tidal_forcing.ntides == 2
 
 
-def test_successful_initialization_with_regional_data(grid_that_lies_within_bounds_of_regional_tpxo_data):
+def test_successful_initialization_with_regional_data(
+    grid_that_lies_within_bounds_of_regional_tpxo_data,
+):
 
     fname = download_test_data("TPXO_regional_test_data.nc")
 
@@ -95,7 +92,7 @@ def test_successful_initialization_with_regional_data(grid_that_lies_within_boun
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
         filename=fname,
         source="tpxo",
-        ntides=10
+        ntides=10,
     )
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
@@ -113,39 +110,28 @@ def test_successful_initialization_with_regional_data(grid_that_lies_within_boun
     assert tidal_forcing.source == "tpxo"
     assert tidal_forcing.ntides == 10
 
+
 @pytest.mark.parametrize(
     "grid_fixture",
-    [
-        "grid_that_straddles_dateline",
-        "grid_that_straddles_180_degree_meridian"
-    ],
+    ["grid_that_straddles_dateline", "grid_that_straddles_180_degree_meridian"],
 )
 def test_unsuccessful_initialization_with_regional_data(grid_fixture, request):
-    
+
     fname = download_test_data("TPXO_regional_test_data.nc")
 
     grid = request.getfixturevalue(grid_fixture)
 
-    with pytest.raises(ValueError, match="Selected longitude range does not intersect with dataset"):
-        TidalForcing(
-            grid=grid,
-            filename=fname,
-            source="tpxo",
-            ntides=10
-        )
+    with pytest.raises(
+        ValueError, match="Selected longitude range does not intersect with dataset"
+    ):
+        TidalForcing(grid=grid, filename=fname, source="tpxo", ntides=10)
 
 
 def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
-    
+
     fname = download_test_data("TPXO_global_test_data.nc")
 
     with pytest.raises(ValueError, match="The dataset contains fewer"):
         TidalForcing(
-            grid=grid_that_straddles_dateline,
-            filename=fname,
-            source="tpxo",
-            ntides=10
+            grid=grid_that_straddles_dateline, filename=fname, source="tpxo", ntides=10
         )
-
-
-

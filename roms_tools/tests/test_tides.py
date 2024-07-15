@@ -1,4 +1,6 @@
 import pytest
+import tempfile
+import os
 from roms_tools import Grid, TidalForcing
 import xarray as xr
 from roms_tools.setup.datasets import download_test_data
@@ -135,3 +137,42 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
         TidalForcing(
             grid=grid_that_straddles_dateline, filename=fname, source="tpxo", ntides=10
         )
+
+
+@pytest.fixture
+def tidal_forcing(
+    grid_that_lies_within_bounds_of_regional_tpxo_data,
+):
+
+    fname = download_test_data("TPXO_regional_test_data.nc")
+
+    return TidalForcing(
+        grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
+        filename=fname,
+        source="tpxo",
+        ntides=10,
+    )
+
+
+def test_plot_method(tidal_forcing):
+    """
+    Test the plot method of the TidalForcing object.
+    """
+    tidal_forcing.plot(varname="ssh_Re", ntides=0)
+
+
+def test_save_method(tidal_forcing, tmp_path):
+    """
+    Test the save method of the TidalForcing object.
+    """
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
+    tidal_forcing.save(filepath)
+
+    try:
+        assert os.path.exists(filepath)
+    finally:
+        os.remove(filepath)

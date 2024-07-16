@@ -4,8 +4,13 @@ import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
-from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.fill import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    fill_and_interpolate,
+)
 from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.utils import nan_check
 from typing import Dict, List
 import matplotlib.pyplot as plt
 
@@ -43,6 +48,7 @@ class TPXO(Dataset):
             "u_Im",
             "v_Re",
             "v_Im",
+            "depth",
         ]
     )
     dim_names: Dict[str, str] = field(
@@ -135,7 +141,17 @@ class TPXO(Dataset):
         tvc = pf * tvc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
         tpc = pf * tpc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
 
-        tides = {"ssh_Re": thc.real, "ssh_Im": thc.imag, "u_Re": tuc.real, "u_Im": tuc.imag, "v_Re": tvc.real, "v_Im": tvc.imag, "pot_Re": tpc.real, "pot_Im": tpc.imag, "omega": self.ds["omega"]}
+        tides = {
+            "ssh_Re": thc.real,
+            "ssh_Im": thc.imag,
+            "u_Re": tuc.real,
+            "u_Im": tuc.imag,
+            "v_Re": tvc.real,
+            "v_Im": tvc.imag,
+            "pot_Re": tpc.real,
+            "pot_Im": tpc.imag,
+            "omega": self.ds["omega"],
+        }
 
         for k in tides.keys():
             tides[k] = tides[k].rename({"nc": "ntides"})
@@ -229,13 +245,28 @@ class TidalForcing:
 
         # interpolate onto desired grid
         coords = {"latitude": lat, "longitude": lon}
-        # mask = xr.where(data.ds.depth>0, 1, 0)
+        mask = xr.where(data.ds.depth > 0, 1, 0)
 
-        varnames = ["ssh_Re", "ssh_Im", "pot_Re", "pot_Im", "u_Re", "u_Im", "v_Re", "v_Im"]
+        varnames = [
+            "ssh_Re",
+            "ssh_Im",
+            "pot_Re",
+            "pot_Im",
+            "u_Re",
+            "u_Im",
+            "v_Re",
+            "v_Im",
+        ]
         data_vars = {}
 
         for var in varnames:
-            data_vars[var] = tides[var].interp(**coords).drop_vars(list(coords.keys()))
+            data_vars[var] = fill_and_interpolate(
+                tides[var],
+                mask,
+                list(coords.keys()),
+                coords,
+                method="linear",
+            )
 
         # Rotate to grid orientation
         u_Re = data_vars["u_Re"] * np.cos(angle) + data_vars["v_Re"] * np.sin(angle)
@@ -293,6 +324,9 @@ class TidalForcing:
         ds.attrs["allan_factor"] = self.allan_factor
 
         object.__setattr__(self, "ds", ds)
+
+        for var in self.ds.data_vars:
+            nan_check(self.ds[var].isel(ntides=0), self.grid.ds.mask_rho)
 
     def plot(self, varname, ntides=0) -> None:
         """

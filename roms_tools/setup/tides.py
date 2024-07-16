@@ -4,7 +4,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
-from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.datasets import Dataset
 from typing import Dict, List
 import matplotlib.pyplot as plt

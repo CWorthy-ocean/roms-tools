@@ -5,13 +5,13 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 from roms_tools.setup.datasets import Dataset
 from roms_tools.setup.vertical_coordinate import compute_depth, sigma_stretch
-from roms_tools.setup.fill import (
-    fill_and_interpolate,
+from roms_tools.setup.fill import fill_and_interpolate
+from roms_tools.setup.utils import (
+    nan_check,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     extrapolate_deepest_to_bottom,
 )
-from roms_tools.setup.utils import nan_check
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 
@@ -51,20 +51,6 @@ class InitialConditions:
     -----
     This class represents atmospheric forcing data used in ocean modeling. It provides a convenient
     interface to work with forcing data including shortwave radiation correction and river forcing.
-
-    Examples
-    --------
-    >>> grid_info = Grid(...)
-    >>> start_time = datetime(2000, 1, 1)
-    >>> end_time = datetime(2000, 1, 2)
-    >>> atm_forcing = AtmosphericForcing(
-    ...     grid=grid_info,
-    ...     start_time=start_time,
-    ...     end_time=end_time,
-    ...     source="era5",
-    ...     filename="atmospheric_data_*.nc",
-    ...     swr_correction=swr_correction,
-    ... )
     """
 
     grid: Grid

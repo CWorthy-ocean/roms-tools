@@ -4,8 +4,13 @@ import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
-from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.fill import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    fill_and_interpolate,
+)
 from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.utils import nan_check
 from typing import Dict, List
 import matplotlib.pyplot as plt
 
@@ -43,6 +48,7 @@ class TPXO(Dataset):
             "u_Im",
             "v_Re",
             "v_Im",
+            "depth",
         ]
     )
     dim_names: Dict[str, str] = field(
@@ -135,7 +141,17 @@ class TPXO(Dataset):
         tvc = pf * tvc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
         tpc = pf * tpc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
 
-        tides = {"ssh": thc, "u": tuc, "v": tvc, "pot": tpc, "omega": self.ds["omega"]}
+        tides = {
+            "ssh_Re": thc.real,
+            "ssh_Im": thc.imag,
+            "u_Re": tuc.real,
+            "u_Im": tuc.imag,
+            "v_Re": tvc.real,
+            "v_Im": tvc.imag,
+            "pot_Re": tpc.real,
+            "pot_Im": tpc.imag,
+            "omega": self.ds["omega"],
+        }
 
         for k in tides.keys():
             tides[k] = tides[k].rename({"nc": "ntides"})
@@ -229,54 +245,75 @@ class TidalForcing:
 
         # interpolate onto desired grid
         coords = {"latitude": lat, "longitude": lon}
-        # mask = xr.where(data.ds.depth>0, 1, 0)
+        mask = xr.where(data.ds.depth > 0, 1, 0)
 
-        varnames = ["ssh", "pot", "u", "v"]
+        varnames = [
+            "ssh_Re",
+            "ssh_Im",
+            "pot_Re",
+            "pot_Im",
+            "u_Re",
+            "u_Im",
+            "v_Re",
+            "v_Im",
+        ]
         data_vars = {}
 
         for var in varnames:
-            data_vars[var] = tides[var].interp(**coords).drop_vars(list(coords.keys()))
+            data_vars[var] = fill_and_interpolate(
+                tides[var],
+                mask,
+                list(coords.keys()),
+                coords,
+                method="linear",
+            )
 
         # Rotate to grid orientation
-        u_tide = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
-        v_tide = data_vars["v"] * np.cos(angle) - data_vars["u"] * np.sin(angle)
+        u_Re = data_vars["u_Re"] * np.cos(angle) + data_vars["v_Re"] * np.sin(angle)
+        v_Re = data_vars["v_Re"] * np.cos(angle) - data_vars["u_Re"] * np.sin(angle)
+        u_Im = data_vars["u_Im"] * np.cos(angle) + data_vars["v_Im"] * np.sin(angle)
+        v_Im = data_vars["v_Im"] * np.cos(angle) - data_vars["u_Im"] * np.sin(angle)
 
         # Convert to barotropic velocity
-        u_tide = u_tide / self.grid.ds.h
-        v_tide = v_tide / self.grid.ds.h
+        u_Re = u_Re / self.grid.ds.h
+        v_Re = v_Re / self.grid.ds.h
+        u_Im = u_Im / self.grid.ds.h
+        v_Im = v_Im / self.grid.ds.h
 
         # Interpolate from rho- to velocity points
-        u_tide = interpolate_from_rho_to_u(u_tide)
-        v_tide = interpolate_from_rho_to_v(u_tide)
+        u_Re = interpolate_from_rho_to_u(u_Re)
+        v_Re = interpolate_from_rho_to_v(v_Re)
+        u_Im = interpolate_from_rho_to_u(u_Im)
+        v_Im = interpolate_from_rho_to_v(v_Im)
 
         # save in new dataset
         ds = xr.Dataset()
 
         # ds["omega"] = tides["omega"]
 
-        ds["ssh_Re"] = data_vars["ssh"].real
-        ds["ssh_Im"] = data_vars["ssh"].imag
+        ds["ssh_Re"] = data_vars["ssh_Re"].astype(np.float32)
+        ds["ssh_Im"] = data_vars["ssh_Im"].astype(np.float32)
         ds["ssh_Re"].attrs["long_name"] = "Tidal elevation, real part"
         ds["ssh_Im"].attrs["long_name"] = "Tidal elevation, complex part"
         ds["ssh_Re"].attrs["units"] = "m"
         ds["ssh_Im"].attrs["units"] = "m"
 
-        ds["pot_Re"] = data_vars["pot"].real
-        ds["pot_Im"] = data_vars["pot"].imag
+        ds["pot_Re"] = data_vars["pot_Re"].astype(np.float32)
+        ds["pot_Im"] = data_vars["pot_Im"].astype(np.float32)
         ds["pot_Re"].attrs["long_name"] = "Tidal potential, real part"
         ds["pot_Im"].attrs["long_name"] = "Tidal potential, complex part"
         ds["pot_Re"].attrs["units"] = "m"
         ds["pot_Im"].attrs["units"] = "m"
 
-        ds["u_Re"] = u_tide.real
-        ds["u_Im"] = u_tide.imag
+        ds["u_Re"] = u_Re.astype(np.float32)
+        ds["u_Im"] = u_Im.astype(np.float32)
         ds["u_Re"].attrs["long_name"] = "Tidal velocity in x-direction, real part"
         ds["u_Im"].attrs["long_name"] = "Tidal velocity in x-direction, complex part"
         ds["u_Re"].attrs["units"] = "m/s"
         ds["u_Im"].attrs["units"] = "m/s"
 
-        ds["v_Re"] = v_tide.real
-        ds["v_Im"] = v_tide.imag
+        ds["v_Re"] = v_Re.astype(np.float32)
+        ds["v_Im"] = v_Im.astype(np.float32)
         ds["v_Re"].attrs["long_name"] = "Tidal velocity in y-direction, real part"
         ds["v_Im"].attrs["long_name"] = "Tidal velocity in y-direction, complex part"
         ds["v_Re"].attrs["units"] = "m/s"
@@ -287,6 +324,9 @@ class TidalForcing:
         ds.attrs["allan_factor"] = self.allan_factor
 
         object.__setattr__(self, "ds", ds)
+
+        for var in ["ssh_Re", "u_Re", "v_Im"]:
+            nan_check(self.ds[var].isel(ntides=0), self.grid.ds.mask_rho)
 
     def plot(self, varname, ntides=0) -> None:
         """

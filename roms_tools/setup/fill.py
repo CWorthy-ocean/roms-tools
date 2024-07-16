@@ -3,7 +3,148 @@ import xarray as xr
 from numba import jit
 
 
-def lateral_fill(var, land_mask, dims=["latitude", "longitude"]):
+def fill_and_interpolate(
+    field,
+    mask,
+    fill_dims,
+    coords,
+    method="linear",
+    fillvalue_fill=0.0,
+    fillvalue_interp=np.nan,
+):
+    """
+    Propagates ocean values into land areas and interpolates the data to specified coordinates using a given method.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The data array to be interpolated, typically containing oceanographic or atmospheric data
+        with dimensions such as latitude and longitude.
+
+    mask : xr.DataArray
+        A data array with the same spatial dimensions as `field`, where `1` indicates ocean points
+        and `0` indicates land points. This mask is used to identify land and ocean areas in the dataset.
+
+    fill_dims : list of str
+        List specifying the dimensions along which to perform the lateral fill, typically the horizontal
+        dimensions such as latitude and longitude, e.g., ["latitude", "longitude"].
+
+    coords : dict
+        Dictionary specifying the target coordinates for interpolation. The keys should match the dimensions
+        of `field` (e.g., {"longitude": lon_values, "latitude": lat_values, "depth": depth_values}).
+        This dictionary provides the new coordinates onto which the data array will be interpolated.
+
+    method : str, optional, default='linear'
+        The interpolation method to use. Valid options are those supported by `xarray.DataArray.interp`,
+        such as 'linear' or 'nearest'.
+
+    fillvalue_fill : float, optional, default=0.0
+        Value to use in the fill step if an entire data slice along the fill dimensions contains only NaNs.
+
+    fillvalue_interp : float, optional, default=np.nan
+        Value to use in the interpolation step. `np.nan` means that no extrapolation is applied.
+        `None` means that extrapolation is applied, which often makes sense when interpolating in the
+        vertical direction to avoid NaNs at the surface if the lowest depth is greater than zero.
+
+    Returns
+    -------
+    xr.DataArray
+        The interpolated data array. This array has the same dimensions as the input `field` but with values
+        interpolated to the new coordinates specified in `coords`.
+
+    Notes
+    -----
+    This method performs the following steps:
+    1. Sets land values to NaN based on the provided mask to ensure that interpolation does not cross
+       the land-ocean boundary.
+    2. Uses the `lateral_fill` function to propagate ocean values into the land interior, helping to fill
+       gaps in the dataset.
+    3. Interpolates the filled data array over the specified coordinates using the selected interpolation method.
+
+    Example
+    -------
+    >>> import xarray as xr
+    >>> field = xr.DataArray(...)
+    >>> mask = xr.DataArray(...)
+    >>> fill_dims = ["latitude", "longitude"]
+    >>> coords = {"latitude": new_lat_values, "longitude": new_lon_values}
+    >>> interpolated_field = fill_and_interpolate(
+    ...     field, mask, fill_dims, coords, method="linear"
+    ... )
+    >>> print(interpolated_field)
+    """
+    if not isinstance(field, xr.DataArray):
+        raise TypeError("field must be an xarray.DataArray")
+    if not isinstance(mask, xr.DataArray):
+        raise TypeError("mask must be an xarray.DataArray")
+    if not isinstance(coords, dict):
+        raise TypeError("coords must be a dictionary")
+    if not all(dim in field.dims for dim in coords.keys()):
+        raise ValueError("All keys in coords must match dimensions of field")
+    if method not in ["linear", "nearest"]:
+        raise ValueError(
+            "Unsupported interpolation method. Choose from 'linear', 'nearest'"
+        )
+
+    # Set land values to NaN
+    field = field.where(mask)
+
+    # Propagate ocean values into land interior before interpolation
+    field = lateral_fill(field, 1 - mask, fill_dims, fillvalue_fill)
+
+    field_interpolated = field.interp(
+        coords, method=method, kwargs={"fill_value": fillvalue_interp}
+    ).drop_vars(list(coords.keys()))
+
+    return field_interpolated
+
+
+def determine_fillvalue(field, dims):
+    """
+    Determine fill value by computing the spatial mean for each horizontal slice and selecting the
+    spatial mean for the deepest slice that is not NaN.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The data array for which fill values are to be determined. This array is typically
+        three-dimensional (3D) or four-dimensional (4D), with dimensions including latitude,
+        longitude, and depth.
+
+    dims : dict
+        A dictionary specifying the names of the dimensions for latitude, longitude, and depth.
+        Example: {"latitude": "lat", "longitude": "lon", "depth": "depth"}
+
+    Returns
+    -------
+    fill_value : float
+        The fill value derived from the deepest non-NaN horizontal slice of the spatial mean.
+
+    Notes
+    -----
+    This function is particularly useful for handling the bottom levels of the data array,
+    where entire horizontal slices might be NaNs due to missing data. By computing the
+    spatial mean and selecting the deepest non-NaN slice, this function provides a fill
+    value that is representative of the bottom layer of the data.
+    """
+    # Compute spatial mean in the horizontal (latitude and longitude)
+    horizontal_mean = field.mean(
+        dim=[dims["latitude"], dims["longitude"]], skipna=True
+    ).dropna(dims["depth"])
+
+    # Find the depth index with the maximum absolute depth value (this will work whether depth is positive or negative)
+    index = np.abs(horizontal_mean[dims["depth"]]).argmax()
+
+    # Extract the corresponding fill value
+    fillvalue = horizontal_mean.isel({dims["depth"]: index}).data.squeeze().compute()
+
+    if type(fillvalue) == np.ndarray:
+        fillvalue = fillvalue.item()
+
+    return fillvalue
+
+
+def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
     """
     Perform lateral fill on an xarray DataArray using a land mask.
 
@@ -20,6 +161,9 @@ def lateral_fill(var, land_mask, dims=["latitude", "longitude"]):
     dims : list of str, optional, default=['latitude', 'longitude']
         Dimensions along which to perform the fill. The default is ['latitude', 'longitude'].
 
+    fillvalue : float, optional, default=0.0
+        Value to use if an entire data slice along the dims contains only NaNs.
+
     Returns
     -------
     var_filled : xarray.DataArray
@@ -27,21 +171,25 @@ def lateral_fill(var, land_mask, dims=["latitude", "longitude"]):
         specified by `land_mask` where NaNs are preserved.
 
     """
+
     var_filled = xr.apply_ufunc(
         _lateral_fill_np_array,
         var,
         land_mask,
         input_core_dims=[dims, dims],
         output_core_dims=[dims],
-        dask="parallelized",
         output_dtypes=[var.dtype],
+        dask="parallelized",
         vectorize=True,
+        kwargs={"fillvalue": fillvalue},
     )
 
     return var_filled
 
 
-def _lateral_fill_np_array(var, isvalid_mask, tol=1.0e-4, rc=1.8, max_iter=10000):
+def _lateral_fill_np_array(
+    var, isvalid_mask, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000
+):
     """
     Perform lateral fill on a numpy array.
 
@@ -54,6 +202,9 @@ def _lateral_fill_np_array(var, isvalid_mask, tol=1.0e-4, rc=1.8, max_iter=10000
     isvalid_mask : numpy.array, boolean
         Valid values mask: `True` where data should be filled. Must have same shape
         as `var`.
+
+    fillvalue: float
+        Value to use if the full field `var` contains only  NaNs. Default is 0.0.
 
     tol : float, optional, default=1.0e-4
         Convergence criteria: stop filling when the value change is less than
@@ -90,14 +241,14 @@ def _lateral_fill_np_array(var, isvalid_mask, tol=1.0e-4, rc=1.8, max_iter=10000
 
     fillmask = np.isnan(var)  # Fill all NaNs
     keepNaNs = ~isvalid_mask & np.isnan(var)
-    var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter)
+    var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue)
     var[keepNaNs] = np.nan  # Replace NaNs in areas not designated for filling
 
     return var
 
 
 @jit(nopython=True, parallel=True)
-def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
+def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=0.0):
     """
     Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR)
     solution of the Laplace Equation.
@@ -125,6 +276,9 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
 
     max_iter : int
         Maximum number of iterations allowed before the process is terminated.
+
+    fillvalue: float
+        Value to use if the full field is NaNs. Default is 0.0.
 
     Returns
     -------
@@ -154,6 +308,10 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
     # Note: this will happen for shortwave downward radiation at night time
     if np.max(np.fabs(var)) == 0.0:
         var = np.zeros_like(var)
+        return var
+    # If field consists only of NaNs, fill NaNs with fill value
+    if np.isnan(var).all():
+        var = fillvalue * np.ones_like(var)
         return var
 
     # Compute a zonal mean to use as a first guess
@@ -261,3 +419,128 @@ def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter):
         iter_cnt += 1
 
     return var
+
+
+def interpolate_from_rho_to_u(field, method="additive"):
+
+    """
+    Interpolates the given field from rho points to u points.
+
+    This function performs an interpolation from the rho grid (cell centers) to the u grid
+    (cell edges in the xi direction). Depending on the chosen method, it either averages
+    (additive) or multiplies (multiplicative) the field values between adjacent rho points
+    along the xi dimension. It also handles the removal of unnecessary coordinate variables
+    and updates the dimensions accordingly.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The input data array on the rho grid to be interpolated. It is assumed to have a dimension
+        named "xi_rho".
+
+    method : str, optional, default='additive'
+        The method to use for interpolation. Options are:
+        - 'additive': Average the field values between adjacent rho points.
+        - 'multiplicative': Multiply the field values between adjacent rho points. Appropriate for
+          binary masks.
+
+    Returns
+    -------
+    field_interpolated : xr.DataArray
+        The interpolated data array on the u grid with the dimension "xi_u".
+    """
+
+    if method == "additive":
+        field_interpolated = 0.5 * (field + field.shift(xi_rho=1)).isel(
+            xi_rho=slice(1, None)
+        )
+    elif method == "multiplicative":
+        field_interpolated = (field * field.shift(xi_rho=1)).isel(xi_rho=slice(1, None))
+    else:
+        raise NotImplementedError(f"Unsupported method '{method}' specified.")
+
+    if "lat_rho" in field_interpolated.coords:
+        field_interpolated.drop_vars(["lat_rho"])
+    if "lon_rho" in field_interpolated.coords:
+        field_interpolated.drop_vars(["lon_rho"])
+
+    field_interpolated = field_interpolated.swap_dims({"xi_rho": "xi_u"})
+
+    return field_interpolated
+
+
+def interpolate_from_rho_to_v(field, method="additive"):
+
+    """
+    Interpolates the given field from rho points to v points.
+
+    This function performs an interpolation from the rho grid (cell centers) to the v grid
+    (cell edges in the eta direction). Depending on the chosen method, it either averages
+    (additive) or multiplies (multiplicative) the field values between adjacent rho points
+    along the eta dimension. It also handles the removal of unnecessary coordinate variables
+    and updates the dimensions accordingly.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The input data array on the rho grid to be interpolated. It is assumed to have a dimension
+        named "eta_rho".
+
+    method : str, optional, default='additive'
+        The method to use for interpolation. Options are:
+        - 'additive': Average the field values between adjacent rho points.
+        - 'multiplicative': Multiply the field values between adjacent rho points. Appropriate for
+          binary masks.
+
+    Returns
+    -------
+    field_interpolated : xr.DataArray
+        The interpolated data array on the v grid with the dimension "eta_v".
+    """
+
+    if method == "additive":
+        field_interpolated = 0.5 * (field + field.shift(eta_rho=1)).isel(
+            eta_rho=slice(1, None)
+        )
+    elif method == "multiplicative":
+        field_interpolated = (field * field.shift(eta_rho=1)).isel(
+            eta_rho=slice(1, None)
+        )
+    else:
+        raise NotImplementedError(f"Unsupported method '{method}' specified.")
+
+    if "lat_rho" in field_interpolated.coords:
+        field_interpolated.drop_vars(["lat_rho"])
+    if "lon_rho" in field_interpolated.coords:
+        field_interpolated.drop_vars(["lon_rho"])
+
+    field_interpolated = field_interpolated.swap_dims({"eta_rho": "eta_v"})
+
+    return field_interpolated
+
+
+def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
+    """
+    Extrapolate the deepest non-NaN values to the bottom along a specified dimension.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The input data array containing NaN values that need to be filled. This array
+        should have at least one dimension named by `dim`.
+    dim : str
+        The name of the dimension along which to perform the interpolation and extrapolation.
+        Typically, this would be a vertical dimension such as 'depth' or 's_rho'.
+
+    Returns
+    -------
+    field_interpolated : xr.DataArray
+        A new data array with NaN values along the specified dimension filled by nearest
+        neighbor interpolation and extrapolation to the bottom. The original data array is not modified.
+
+    """
+    field_interpolated = field.interpolate_na(
+        dim=dim, method="nearest", fill_value="extrapolate"
+    )
+
+    return field_interpolated

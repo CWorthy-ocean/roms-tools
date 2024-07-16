@@ -1,5 +1,6 @@
 # ROMS-Tools
 
+[![codecov](https://codecov.io/gh/CWorthy-ocean/roms-tools/graph/badge.svg?token=5S1oNu39xE)](https://codecov.io/gh/CWorthy-ocean/roms-tools)
 [![Documentation Status](https://readthedocs.org/projects/roms-tools/badge/?version=latest)](https://roms-tools.readthedocs.io/en/latest/?badge=latest)
 [![PyPI version](https://badge.fury.io/py/roms-tools.svg)](https://badge.fury.io/py/roms-tools)
 

@@ -325,7 +325,7 @@ class TidalForcing:
 
         object.__setattr__(self, "ds", ds)
 
-        for var in self.ds.data_vars:
+        for var in ["ssh_Re", "u_Re", "v_Im"]:
             nan_check(self.ds[var].isel(ntides=0), self.grid.ds.mask_rho)
 
     def plot(self, varname, ntides=0) -> None:

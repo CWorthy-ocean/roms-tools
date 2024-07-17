@@ -2,9 +2,9 @@ import xarray as xr
 import numpy as np
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
+from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
 from roms_tools.setup.datasets import Dataset
-from roms_tools.setup.vertical_coordinate import compute_depth, sigma_stretch
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.utils import (
     nan_check,
@@ -25,6 +25,8 @@ class InitialConditions:
     ----------
     grid : Grid
         Object representing the grid information.
+    vertical_coordinate: VerticalCoordinate
+        Object representing the vertical coordinate information
     ini_time : datetime
         Desired initialization time.
     model_reference_date : datetime, optional
@@ -33,14 +35,6 @@ class InitialConditions:
         Source of the initial condition data. Default is "glorys".
     filename: str
         Path to the source data file. Can contain wildcards.
-    N : int
-        The number of vertical levels.
-    theta_s : float
-        The surface control parameter. Must satisfy 0 < theta_s <= 10.
-    theta_b : float
-        The bottom control parameter. Must satisfy 0 < theta_b <= 4.
-    hc : float
-        The critical depth.
 
     Attributes
     ----------
@@ -54,14 +48,11 @@ class InitialConditions:
     """
 
     grid: Grid
+    vertical_coordinate: VerticalCoordinate
     ini_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
     source: str = "glorys"
     filename: str
-    N: int
-    theta_s: float
-    theta_b: float
-    hc: float
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -69,7 +60,6 @@ class InitialConditions:
         lon = self.grid.ds.lon_rho
         lat = self.grid.ds.lat_rho
         angle = self.grid.ds.angle
-        h = self.grid.ds.h
 
         if self.source == "glorys":
             dims = {
@@ -131,8 +121,6 @@ class InitialConditions:
         )
 
         # 3d interpolation
-        cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, "r")
-        zr = compute_depth(h * 0, h, self.hc, cs_r, sigma_r)
 
         # extrapolate deepest value all the way to bottom ("flooding")
         for var in ["temp", "salt", "u", "v"]:
@@ -140,10 +128,12 @@ class InitialConditions:
                 data.ds[varnames[var]], dims["depth"]
             )
 
-        data.convert_to_negative_depth()
-
         mask = xr.where(data.ds[varnames["temp"]].isel(time=0).isnull(), 0, 1)
-        coords = {dims["latitude"]: lat, dims["longitude"]: lon, dims["depth"]: zr}
+        coords = {
+            dims["latitude"]: lat,
+            dims["longitude"]: lon,
+            dims["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
+        }
 
         # setting fillvalue_interp to None means that we allow extrapolation in the
         # interpolation step to avoid NaNs at the surface if the lowest depth in original
@@ -168,17 +158,15 @@ class InitialConditions:
         v = interpolate_from_rho_to_v(v_rot)
 
         # 3d masks for ROMS domain
-        umask = self.grid.ds.mask_u.expand_dims({"s_rho": self.N})
-        vmask = self.grid.ds.mask_v.expand_dims({"s_rho": self.N})
+        umask = self.grid.ds.mask_u.expand_dims({"s_rho": u.s_rho})
+        vmask = self.grid.ds.mask_v.expand_dims({"s_rho": v.s_rho})
 
         u = u * umask
         v = v * vmask
 
         # Compute barotropic velocity
-        cs_w, sigma_w = sigma_stretch(self.theta_s, self.theta_b, self.N, "w")
-        zw = compute_depth(h * 0, h, self.hc, cs_w, sigma_w)
         # thicknesses
-        dz = zw.diff(dim="s_w")
+        dz = -self.vertical_coordinate.ds["interface_depth_rho"].diff(dim="s_w")
         dz = dz.rename({"s_w": "s_rho"})
         # thicknesses at u- and v-points
         dzu = interpolate_from_rho_to_u(dz)
@@ -211,32 +199,30 @@ class InitialConditions:
         ds["v"].attrs["units"] = "m/s"
 
         # initialize vertical velocity to zero
-        ds["w"] = xr.zeros_like(zw.expand_dims(time=ds["time"])).astype(np.float32)
+        ds["w"] = xr.zeros_like(
+            self.vertical_coordinate.ds["interface_depth_rho"].expand_dims(
+                time=ds[dims["time"]]
+            )
+        ).astype(np.float32)
         ds["w"].attrs["long_name"] = "w-flux component"
         ds["w"].attrs["units"] = "m/s"
 
-        ds["ubar"] = ubar.transpose("time", "eta_rho", "xi_u").astype(np.float32)
+        ds["ubar"] = ubar.transpose(dims["time"], "eta_rho", "xi_u").astype(np.float32)
         ds["ubar"].attrs["long_name"] = "vertically integrated u-flux component"
         ds["ubar"].attrs["units"] = "m/s"
 
-        ds["vbar"] = vbar.transpose("time", "eta_v", "xi_rho").astype(np.float32)
+        ds["vbar"] = vbar.transpose(dims["time"], "eta_v", "xi_rho").astype(np.float32)
         ds["vbar"].attrs["long_name"] = "vertically integrated v-flux component"
         ds["vbar"].attrs["units"] = "m/s"
 
-        depth = -zr
-        depth.attrs["long_name"] = "Layer depth at rho-points"
-        depth.attrs["units"] = "m"
-        ds = ds.assign_coords({"depth_rho": depth.astype(np.float32)})
-
-        depth_u = interpolate_from_rho_to_u(depth).astype(np.float32)
-        depth_u.attrs["long_name"] = "Layer depth at u-points"
-        depth_u.attrs["units"] = "m"
-        ds = ds.assign_coords({"depth_u": depth_u})
-
-        depth_v = interpolate_from_rho_to_v(depth).astype(np.float32)
-        depth_v.attrs["long_name"] = "Layer depth at v-points"
-        depth_v.attrs["units"] = "m"
-        ds = ds.assign_coords({"depth_v": depth_v})
+        ds = ds.assign_coords(
+            {
+                "layer_depth_u": self.vertical_coordinate.ds["layer_depth_u"],
+                "layer_depth_v": self.vertical_coordinate.ds["layer_depth_v"],
+                "interface_depth_u": self.vertical_coordinate.ds["interface_depth_u"],
+                "interface_depth_v": self.vertical_coordinate.ds["interface_depth_v"],
+            }
+        )
 
         ds.attrs["Title"] = "ROMS initial file produced by roms-tools"
 
@@ -254,31 +240,14 @@ class InitialConditions:
         ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
         ds["ocean_time"].attrs["units"] = "seconds"
 
-        ds = ds.drop_vars(["eta_rho", "xi_rho"])
+        ds["theta_s"] = self.vertical_coordinate.ds["theta_s"]
+        ds["theta_b"] = self.vertical_coordinate.ds["theta_b"]
+        ds["Tcline"] = self.vertical_coordinate.ds["Tcline"]
+        ds["hc"] = self.vertical_coordinate.ds["hc"]
+        ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
+        ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
 
-        ds["theta_s"] = np.float32(self.theta_s)
-        ds["theta_s"].attrs["long_name"] = "S-coordinate surface control parameter"
-        ds["theta_s"].attrs["units"] = "nondimensional"
-
-        ds["theta_b"] = np.float32(self.theta_b)
-        ds["theta_b"].attrs["long_name"] = "S-coordinate bottom control parameter"
-        ds["theta_b"].attrs["units"] = "nondimensional"
-
-        ds["Tcline"] = np.float32(self.hc)
-        ds["Tcline"].attrs["long_name"] = "S-coordinate surface/bottom layer width"
-        ds["Tcline"].attrs["units"] = "m"
-
-        ds["hc"] = np.float32(self.hc)
-        ds["hc"].attrs["long_name"] = "S-coordinate parameter critical depth"
-        ds["hc"].attrs["units"] = "m"
-
-        ds["sc_r"] = sigma_r.astype(np.float32)
-        ds["sc_r"].attrs["long_name"] = "S-coordinate at rho-point"
-        ds["sc_r"].attrs["units"] = "-"
-
-        ds["Cs_r"] = cs_r.astype(np.float32)
-        ds["Cs_r"].attrs["long_name"] = "S-coordinate stretching curves at RHO-points"
-        ds["Cs_r"].attrs["units"] = "-"
+        ds = ds.drop_vars(["s_rho"])
 
         object.__setattr__(self, "ds", ds)
 
@@ -288,7 +257,7 @@ class InitialConditions:
     def plot(
         self,
         varname,
-        s_rho=None,
+        s=None,
         eta=None,
         xi=None,
         depth_contours=False,
@@ -310,7 +279,7 @@ class InitialConditions:
             - "ubar": Vertically integrated u-flux component.
             - "vbar": Vertically integrated v-flux component.
             - "depth": Depth of layer.
-        s_rho : int, optional
+        s : int, optional
             The index of the vertical layer to plot. Default is None.
         eta : int, optional
             The eta-index to plot. Default is None.
@@ -333,10 +302,10 @@ class InitialConditions:
         """
 
         if len(self.ds[varname].squeeze().dims) == 3 and not any(
-            [s_rho is not None, eta is not None, xi is not None]
+            [s is not None, eta is not None, xi is not None]
         ):
             raise ValueError(
-                "For 3D fields, at least one of s_rho, eta, or xi must be specified."
+                "For 3D fields, at least one of s, eta, or xi must be specified."
             )
 
         if len(self.ds[varname].squeeze().dims) == 2 and all(
@@ -347,11 +316,18 @@ class InitialConditions:
         self.ds[varname].load()
         field = self.ds[varname].squeeze()
 
+        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
+            interface_depth = self.ds.interface_depth_rho
+        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
+            interface_depth = self.ds.interface_depth_u
+        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
+            interface_depth = self.ds.interface_depth_v
+
         # slice the field as desired
         title = field.long_name
-        if s_rho is not None:
-            title = title + f", s_rho = {field.s_rho[s_rho].item()}"
-            field = field.isel(s_rho=s_rho)
+        if s is not None:
+            title = title + f", s_rho = {field.s_rho[s].item()}"
+            field = field.isel(s_rho=s)
         else:
             depth_contours = False
 
@@ -359,9 +335,11 @@ class InitialConditions:
             if "eta_rho" in field.dims:
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
+                interface_depth = interface_depth.isel(eta_rho=eta)
             elif "eta_v" in field.dims:
                 title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
+                interface_depth = interface_depth.isel(eta_v=eta)
             else:
                 raise ValueError(
                     f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
@@ -370,9 +348,11 @@ class InitialConditions:
             if "xi_rho" in field.dims:
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
+                interface_depth = interface_depth.isel(xi_rho=xi)
             elif "xi_u" in field.dims:
                 title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
+                interface_depth = interface_depth.isel(xi_u=xi)
             else:
                 raise ValueError(
                     f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
@@ -401,10 +381,19 @@ class InitialConditions:
                 c="g",
             )
         else:
+            if not layer_contours:
+                interface_depth = None
+            else:
+                # restrict number of layer_contours to 10 for the sake of plot clearity
+                nr_layers = len(interface_depth["s_w"])
+                selected_layers = np.linspace(
+                    0, nr_layers - 1, min(nr_layers, 10), dtype=int
+                )
+                interface_depth = interface_depth.isel(s_w=selected_layers)
 
             if len(field.dims) == 2:
                 _section_plot(
-                    field, layer_contours=layer_contours, title=title, kwargs=kwargs
+                    field, interface_depth=interface_depth, title=title, kwargs=kwargs
                 )
             else:
                 if "s_rho" in field.dims:

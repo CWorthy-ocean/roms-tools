@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from roms_tools import InitialConditions, Grid
+from roms_tools import InitialConditions, Grid, VerticalCoordinate
 import xarray as xr
 import numpy as np
 from roms_tools.setup.datasets import download_test_data
@@ -9,7 +9,7 @@ from roms_tools.setup.datasets import download_test_data
 @pytest.fixture
 def example_grid():
     """
-    Fixture for creating a dummy Grid object.
+    Fixture for creating a Grid object.
     """
     grid = Grid(
         nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10
@@ -19,7 +19,23 @@ def example_grid():
 
 
 @pytest.fixture
-def initial_conditions(example_grid):
+def example_vertical_coordinate(example_grid):
+    """
+    Fixture for creating a VerticalCoordinate object.
+    """
+    vertical_coordinate = VerticalCoordinate(
+        grid=example_grid,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    return vertical_coordinate
+
+
+@pytest.fixture
+def initial_conditions(example_grid, example_vertical_coordinate):
     """
     Fixture for creating a dummy InitialConditions object.
     """
@@ -28,12 +44,9 @@ def initial_conditions(example_grid):
 
     return InitialConditions(
         grid=example_grid,
+        vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         filename=fname,
-        N=3,
-        theta_s=5.0,
-        theta_b=2.0,
-        hc=250.0,
     )
 
 
@@ -43,10 +56,6 @@ def test_initial_conditions_creation(initial_conditions):
     """
     assert initial_conditions.ini_time == datetime(2021, 6, 29)
     assert initial_conditions.filename == download_test_data("GLORYS_test_data.nc")
-    assert initial_conditions.N == 3
-    assert initial_conditions.theta_s == 5.0
-    assert initial_conditions.theta_b == 2.0
-    assert initial_conditions.hc == 250.0
     assert initial_conditions.source == "glorys"
 
 
@@ -223,45 +232,13 @@ def test_initial_conditions_data_consistency_plot_save(initial_conditions, tmp_p
     assert np.allclose(initial_conditions.ds["ubar"].values, expected_ubar)
     assert np.allclose(initial_conditions.ds["vbar"].values, expected_vbar)
 
-    initial_conditions.plot(varname="temp", s_rho=0)
+    initial_conditions.plot(varname="temp", s=0)
     initial_conditions.plot(varname="temp", eta=0)
     initial_conditions.plot(varname="temp", xi=0)
-    initial_conditions.plot(varname="temp", s_rho=0, xi=0)
+    initial_conditions.plot(varname="temp", s=0, xi=0)
     initial_conditions.plot(varname="temp", eta=0, xi=0)
     initial_conditions.plot(varname="zeta")
 
     filepath = tmp_path / "initial_conditions.nc"
     initial_conditions.save(filepath)
     assert filepath.exists()
-
-
-def test_invalid_theta_s_value(example_grid):
-    """
-    Test the validation of the theta_s value.
-    """
-    with pytest.raises(ValueError):
-        InitialConditions(
-            grid=example_grid,
-            ini_time=datetime(2021, 6, 29),
-            filename=download_test_data("GLORYS_test_data.nc"),
-            N=5,
-            theta_s=11.0,  # Invalid value, should be 0 < theta_s <= 10
-            theta_b=2.0,
-            hc=250.0,
-        )
-
-
-def test_invalid_theta_b_value(example_grid):
-    """
-    Test the validation of the theta_b value.
-    """
-    with pytest.raises(ValueError):
-        InitialConditions(
-            grid=example_grid,
-            ini_time=datetime(2021, 6, 29),
-            filename=download_test_data("GLORYS_test_data.nc"),
-            N=5,
-            theta_s=5.0,
-            theta_b=5.0,  # Invalid value, should be 0 < theta_b <= 4
-            hc=250.0,
-        )

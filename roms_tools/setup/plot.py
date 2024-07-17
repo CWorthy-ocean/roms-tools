@@ -1,7 +1,6 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import xarray as xr
-import numpy as np
 
 
 def _plot(
@@ -98,11 +97,20 @@ def _plot(
 
     if depth_contours:
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            depth = field.depth_rho
+            if "layer_depth_rho" in field.coords:
+                depth = field.layer_depth_rho
+            else:
+                depth = field.interface_depth_rho
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            depth = field.depth_u
+            if "layer_depth_u" in field.coords:
+                depth = field.layer_depth_u
+            else:
+                depth = field.interface_depth_u
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            depth = field.depth_v
+            if "layer_depth_v" in field.coords:
+                depth = field.layer_depth_v
+            else:
+                depth = field.interface_depth_v
 
         cs = ax.contour(lon_deg, lat_deg, depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=10)
@@ -110,7 +118,7 @@ def _plot(
     return fig
 
 
-def _section_plot(field, layer_contours=False, title="", kwargs={}):
+def _section_plot(field, interface_depth=None, title="", kwargs={}):
 
     fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
@@ -122,7 +130,14 @@ def _section_plot(field, layer_contours=False, title="", kwargs={}):
             "None of the expected dimensions (eta_rho, xi_rho, eta_v, xi_u) found in field.dims"
         )
 
-    depths_to_check = ["depth_rho", "depth_u", "depth_v"]
+    depths_to_check = [
+        "layer_depth_rho",
+        "layer_depth_u",
+        "layer_depth_v",
+        "interface_depth_rho",
+        "interface_depth_u",
+        "interface_depth_v",
+    ]
     try:
         depth_label = next(
             depth_label
@@ -131,28 +146,33 @@ def _section_plot(field, layer_contours=False, title="", kwargs={}):
         )
     except StopIteration:
         raise ValueError(
-            "None of the expected coordinates (depth_rho, depth_u, depth_v) found in field.coords"
+            "None of the expected coordinates (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v) found in field.coords"
         )
 
     more_kwargs = {"x": xdim, "y": depth_label, "yincrease": False}
     field.plot(**kwargs, **more_kwargs, ax=ax)
+
+    if interface_depth is not None:
+        layer_key = "s_rho" if "s_rho" in interface_depth else "s_w"
+
+        for i in range(len(interface_depth[layer_key])):
+            ax.plot(
+                interface_depth[xdim], interface_depth.isel({layer_key: i}), color="k"
+            )
+
     ax.set_title(title)
-
-    if layer_contours:
-        nr_layers = len(field.s_rho)
-        # Restrict the number of layers to 10 for readability
-        if nr_layers > 10:
-            selected_layers = np.linspace(0, nr_layers - 1, 10, dtype=int)
-        else:
-            selected_layers = range(nr_layers)
-
-        for i in selected_layers:
-            ax.plot(field[xdim], field[depth_label].isel(s_rho=i), color="k")
 
 
 def _profile_plot(field, title=""):
 
-    depths_to_check = ["depth_rho", "depth_u", "depth_v"]
+    depths_to_check = [
+        "layer_depth_rho",
+        "layer_depth_u",
+        "layer_depth_v",
+        "interface_depth_rho",
+        "interface_depth_u",
+        "interface_depth_v",
+    ]
     try:
         depth_label = next(
             depth_label
@@ -161,7 +181,7 @@ def _profile_plot(field, title=""):
         )
     except StopIteration:
         raise ValueError(
-            "None of the expected coordinates (depth_rho, depth_u, depth_v) found in field.coords"
+            "None of the expected coordinates (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v) found in field.coords"
         )
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 7))

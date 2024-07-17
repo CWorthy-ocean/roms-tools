@@ -7,7 +7,7 @@ import xarray as xr
 
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot
-from roms_tools.setup.fill import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 RADIUS_OF_EARTH = 6371315.0  # in m
 

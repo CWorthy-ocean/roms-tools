@@ -13,9 +13,6 @@ jobs:
   test:
     name: ${{ matrix.python-version }}-build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -23,30 +20,32 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/provision-with-micromamba@main
+        uses: mamba-org/setup-micromamba@v1
         with:
           cache-downloads: true
+          cache-environment: true
           micromamba-version: 'latest'
           environment-file: ci/environment.yml
-          extra-specs: |
+          create-args: |
             python=${{ matrix.python-version }}
 
       - name: Conda info
         run: conda info
 
       - name: Install roms-tools
+        shell: micromamba-shell {0}
         run: |
+           python - V
            python -m pip install -e . --no-deps --force-reinstall
 
-      - name: Conda list
-        run: conda list
-
       - name: Running Tests
+        shell: bash -l {0}
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_datasets.py roms_tools/tests/test_grid.py roms_tools/tests/test_topography.py roms_tools/tests/test_tides.py roms_tools/tests/test_atmospheric_forcing.py roms_tools/tests/test_initial_conditions.py
 
       - name: Get coverage report
+        shell: bash -l {0}
         run: |
           coverage report -m ; coverage xml
 

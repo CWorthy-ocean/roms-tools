@@ -278,7 +278,6 @@ class InitialConditions:
             - "w": w-flux component.
             - "ubar": Vertically integrated u-flux component.
             - "vbar": Vertically integrated v-flux component.
-            - "depth": Depth of layer.
         s : int, optional
             The index of the vertical layer to plot. Default is None.
         eta : int, optional

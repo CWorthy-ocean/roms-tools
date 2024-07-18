@@ -14,3 +14,4 @@ from roms_tools.setup.atmospheric_forcing import AtmosphericForcing  # noqa: F40
 from roms_tools.setup.atmospheric_forcing import SWRCorrection  # noqa: F401
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate  # noqa: F401
 from roms_tools.setup.initial_conditions import InitialConditions  # noqa: F401
+from roms_tools.setup.boundary_forcing import BoundaryForcing  # noqa: F401

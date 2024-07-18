@@ -198,6 +198,7 @@ class Dataset:
                     coords="minimal",
                     compat="override",
                     chunks=chunks,
+                    engine="netcdf4",
                 )
             else:
                 ds = xr.open_dataset(
@@ -353,7 +354,9 @@ class Dataset:
 
         return ds_concatenated
 
-    def choose_subdomain(self, latitude_range, longitude_range, margin, straddle):
+    def choose_subdomain(
+        self, latitude_range, longitude_range, margin, straddle, return_subdomain=False
+    ):
         """
         Selects a subdomain from the given xarray Dataset based on latitude and longitude ranges,
         extending the selection by the specified margin. Handles the conversion of longitude values
@@ -370,12 +373,16 @@ class Dataset:
         straddle : bool
             If True, target longitudes are expected in the range [-180, 180].
             If False, target longitudes are expected in the range [0, 360].
+        return_subdomain : bool, optional
+            If True, returns the subset of the original dataset. If False, assigns it to self.ds.
+            Default is False.
 
         Returns
         -------
         xr.Dataset
             The subset of the original dataset representing the chosen subdomain, including an extended area
-            to cover one extra grid point beyond the specified ranges.
+            to cover one extra grid point beyond the specified ranges if return_subdomain is True.
+            Otherwise, returns None.
 
         Raises
         ------
@@ -431,8 +438,10 @@ class Dataset:
         else:
             subdomain[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
 
-        # Set the modified subdomain to the object attribute
-        object.__setattr__(self, "ds", subdomain)
+        if return_subdomain:
+            return subdomain
+        else:
+            object.__setattr__(self, "ds", subdomain)
 
     def convert_to_negative_depth(self):
         """

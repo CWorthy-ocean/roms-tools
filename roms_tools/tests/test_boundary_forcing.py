@@ -47,7 +47,7 @@ def boundary_forcing(example_grid, example_vertical_coordinate):
         vertical_coordinate=example_vertical_coordinate,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source='glorys',
+        source="glorys",
         filename=fname,
     )
 
@@ -83,92 +83,151 @@ def test_boundary_forcing_data_consistency_plot_save(boundary_forcing, tmp_path)
     boundary_forcing.ds.load()
 
     # Define the expected data
-    expected_zeta_south = np.array([[-0.30468762, -0.29416865, -0.30391693, -0.32985148]],
-      dtype=np.float32)
-    expected_zeta_east = np.array([[-0.32985148, -0.36176518, -0.40663475, -0.40699923]],
-      dtype=np.float32)
-    expected_zeta_north = np.array([[-0.5534979 , -0.5270749 , -0.45107934, -0.40699923]],
-      dtype=np.float32)
-    expected_zeta_west = np.array([[-0.30468762, -0.34336275, -0.3699948 , -0.5534979 ]],
-      dtype=np.float32)
+    expected_zeta_south = np.array(
+        [[-0.30468762, -0.29416865, -0.30391693, -0.32985148]], dtype=np.float32
+    )
+    expected_zeta_east = np.array(
+        [[-0.32985148, -0.36176518, -0.40663475, -0.40699923]], dtype=np.float32
+    )
+    expected_zeta_north = np.array(
+        [[-0.5534979, -0.5270749, -0.45107934, -0.40699923]], dtype=np.float32
+    )
+    expected_zeta_west = np.array(
+        [[-0.30468762, -0.34336275, -0.3699948, -0.5534979]], dtype=np.float32
+    )
 
-    expected_temp_south = np.array([[[16.84414 , 16.905312, 16.967817],
-        [18.088203, 18.121834, 18.315424],
-        [18.431192, 18.496748, 18.718002],
-        [19.294329, 19.30358 , 19.439777]]], dtype=np.float32)
-    expected_temp_east = np.array([[[19.294329, 19.30358 , 19.439777],
-        [18.633307, 18.637077, 18.667465],
-        [ 8.710737, 11.25943 , 13.111585],
-        [ 9.20282 , 10.667074, 11.752404]]], dtype=np.float32)
-    expected_temp_north = np.array([[[10.233599, 10.546486, 10.671082],
-        [10.147332, 10.502733, 10.68275 ],
-        [10.458557, 11.209945, 11.377164],
-        [ 9.20282 , 10.667074, 11.752404]]], dtype=np.float32)
-    expected_temp_west = np.array([[[16.84414 , 16.905312, 16.967817],
-        [12.639833, 13.479691, 14.426711],
-        [11.027701, 11.650267, 12.200586],
-        [10.233599, 10.546486, 10.671082]]], dtype=np.float32)
+    expected_temp_south = np.array(
+        [
+            [
+                [16.84414, 16.905312, 16.967817],
+                [18.088203, 18.121834, 18.315424],
+                [18.431192, 18.496748, 18.718002],
+                [19.294329, 19.30358, 19.439777],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    expected_temp_east = np.array(
+        [
+            [
+                [19.294329, 19.30358, 19.439777],
+                [18.633307, 18.637077, 18.667465],
+                [8.710737, 11.25943, 13.111585],
+                [9.20282, 10.667074, 11.752404],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    expected_temp_north = np.array(
+        [
+            [
+                [10.233599, 10.546486, 10.671082],
+                [10.147332, 10.502733, 10.68275],
+                [10.458557, 11.209945, 11.377164],
+                [9.20282, 10.667074, 11.752404],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    expected_temp_west = np.array(
+        [
+            [
+                [16.84414, 16.905312, 16.967817],
+                [12.639833, 13.479691, 14.426711],
+                [11.027701, 11.650267, 12.200586],
+                [10.233599, 10.546486, 10.671082],
+            ]
+        ],
+        dtype=np.float32,
+    )
 
-    expected_u_south = np.array([[[-0., -0., -0.],
-        [-0., -0., -0.],
-        [ 0., -0., -0.]]], dtype=np.float32)
-    expected_u_east = np.array([[[ 0.        , -0.        , -0.        ],
-        [-0.        , -0.        , -0.        ],
-        [ 0.06979556,  0.06167743, -0.02247071],
-        [ 0.0211786 ,  0.03679834,  0.0274788 ]]], dtype=np.float32)
-    expected_u_north = np.array([[[0.04268532, 0.03889201, 0.03351666],
-        [0.04645353, 0.04914769, 0.03673013],
-        [0.0211786 , 0.03679834, 0.0274788 ]]], dtype=np.float32)
-    expected_u_west = np.array([[[-0.        , -0.        , -0.        ],
-        [ 0.        , -0.        , -0.        ],
-        [ 0.        ,  0.        , -0.        ],
-        [ 0.04268532,  0.03889201,  0.03351666]]], dtype=np.float32)
+    expected_u_south = np.array(
+        [[[-0.0, -0.0, -0.0], [-0.0, -0.0, -0.0], [0.0, -0.0, -0.0]]], dtype=np.float32
+    )
+    expected_u_east = np.array(
+        [
+            [
+                [0.0, -0.0, -0.0],
+                [-0.0, -0.0, -0.0],
+                [0.06979556, 0.06167743, -0.02247071],
+                [0.0211786, 0.03679834, 0.0274788],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    expected_u_north = np.array(
+        [
+            [
+                [0.04268532, 0.03889201, 0.03351666],
+                [0.04645353, 0.04914769, 0.03673013],
+                [0.0211786, 0.03679834, 0.0274788],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    expected_u_west = np.array(
+        [
+            [
+                [-0.0, -0.0, -0.0],
+                [0.0, -0.0, -0.0],
+                [0.0, 0.0, -0.0],
+                [0.04268532, 0.03889201, 0.03351666],
+            ]
+        ],
+        dtype=np.float32,
+    )
 
-    expected_v_south = np.array([[[ 0.,  0.,  0.],
-        [ 0.,  0., -0.],
-        [-0., -0., -0.],
-        [-0., -0., -0.]]], dtype=np.float32)
-    expected_v_east = np.array([[[-0.        , -0.        , -0.        ],
-        [-0.        , -0.        , -0.        ],
-        [-0.06720348, -0.08354441, -0.13835917]]], dtype=np.float32)
-    expected_v_north = np.array([[[-0.00951457, -0.00576979, -0.02147919],
-        [-0.        , -0.        , -0.        ],
-        [ 0.01915873,  0.02625698,  0.01757628],
-        [-0.06720348, -0.08354441, -0.13835917]]], dtype=np.float32)
-    expected_v_west = np.array([[[ 0.        ,  0.        ,  0.        ],
-        [-0.        , -0.        , -0.        ],
-        [-0.00951457, -0.00576979, -0.02147919]]], dtype=np.float32)
+    expected_v_south = np.array(
+        [[[0.0, 0.0, 0.0], [0.0, 0.0, -0.0], [-0.0, -0.0, -0.0], [-0.0, -0.0, -0.0]]],
+        dtype=np.float32,
+    )
+    expected_v_east = np.array(
+        [
+            [
+                [-0.0, -0.0, -0.0],
+                [-0.0, -0.0, -0.0],
+                [-0.06720348, -0.08354441, -0.13835917],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    expected_v_north = np.array(
+        [
+            [
+                [-0.00951457, -0.00576979, -0.02147919],
+                [-0.0, -0.0, -0.0],
+                [0.01915873, 0.02625698, 0.01757628],
+                [-0.06720348, -0.08354441, -0.13835917],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    expected_v_west = np.array(
+        [
+            [
+                [0.0, 0.0, 0.0],
+                [-0.0, -0.0, -0.0],
+                [-0.00951457, -0.00576979, -0.02147919],
+            ]
+        ],
+        dtype=np.float32,
+    )
 
-    expected_ubar_south = np.array([[0.],
-       [0.],
-       [0.]], dtype=np.float32)
-    expected_ubar_east = np.array([[0.        ],
-       [0.        ],
-       [0.04028399],
-       [0.02812303]], dtype=np.float32)
-    expected_ubar_north = np.array([[0.03866891],
-       [0.04446249],
-       [0.02812303]], dtype=np.float32)
-    expected_ubar_west = np.array([[0.        ],
-       [0.        ],
-       [0.        ],
-       [0.03866891]], dtype=np.float32)
+    expected_ubar_south = np.array([[0.0], [0.0], [0.0]], dtype=np.float32)
+    expected_ubar_east = np.array(
+        [[0.0], [0.0], [0.04028399], [0.02812303]], dtype=np.float32
+    )
+    expected_ubar_north = np.array(
+        [[0.03866891], [0.04446249], [0.02812303]], dtype=np.float32
+    )
+    expected_ubar_west = np.array([[0.0], [0.0], [0.0], [0.03866891]], dtype=np.float32)
 
-    expected_vbar_south = np.array([[0.],
-       [0.],
-       [0.],
-       [0.]], dtype=np.float32)
-    expected_vbar_east = np.array([[ 0.        ],
-       [ 0.        ],
-       [-0.09326097]], dtype=np.float32)
-    expected_vbar_north = np.array([[-0.01189703],
-       [ 0.        ],
-       [ 0.02102064],
-       [-0.09326097]], dtype=np.float32)
-    expected_vbar_west = np.array([[ 0.        ],
-       [ 0.        ],
-       [-0.01189703]], dtype=np.float32)
-
+    expected_vbar_south = np.array([[0.0], [0.0], [0.0], [0.0]], dtype=np.float32)
+    expected_vbar_east = np.array([[0.0], [0.0], [-0.09326097]], dtype=np.float32)
+    expected_vbar_north = np.array(
+        [[-0.01189703], [0.0], [0.02102064], [-0.09326097]], dtype=np.float32
+    )
+    expected_vbar_west = np.array([[0.0], [0.0], [-0.01189703]], dtype=np.float32)
 
     # Check the values in the dataset
     assert np.allclose(boundary_forcing.ds["zeta_south"].values, expected_zeta_south)

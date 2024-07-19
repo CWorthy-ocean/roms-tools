@@ -410,7 +410,6 @@ class BoundaryForcing:
         ds["bry_time"].attrs[
             "long_name"
         ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
-        ds["bry_time"].attrs["units"] = "nanoseconds"
 
         ds["theta_s"] = self.vertical_coordinate.ds["theta_s"]
         ds["theta_b"] = self.vertical_coordinate.ds["theta_b"]

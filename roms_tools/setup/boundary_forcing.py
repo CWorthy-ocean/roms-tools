@@ -37,7 +37,7 @@ class BoundaryForcing:
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     source : str, optional
-        Source of the initial condition data. Default is "glorys".
+        Source of the boundary forcing data. Default is "glorys".
     filename: str
         Path to the source data file. Can contain wildcards.
 
@@ -433,22 +433,25 @@ class BoundaryForcing:
         layer_contours=False,
     ) -> None:
         """
-        Plot the initial conditions field for a given eta-, xi-, or s_rho-slice.
+        Plot the boundary forcing field for a given time-slice.
 
         Parameters
         ----------
         varname : str
             The name of the initial conditions field to plot. Options include:
-            - "temp": Potential temperature.
-            - "salt": Salinity.
-            - "zeta": Free surface.
-            - "u": u-flux component.
-            - "v": v-flux component.
-            - "w": w-flux component.
-            - "ubar": Vertically integrated u-flux component.
-            - "vbar": Vertically integrated v-flux component.
-        depth_contours : bool, optional
-            Whether to include depth contours in the plot. Default is False.
+            - "temp_{direction}": Potential temperature.
+            - "salt_{direction}": Salinity.
+            - "zeta_{direction}": Sea surface height.
+            - "u_{direction}": u-flux component.
+            - "v_{direction}": v-flux component.
+            - "ubar_{direction}": Vertically integrated u-flux component.
+            - "vbar_{direction}": Vertically integrated v-flux component.
+            where {direction} can be one of ["south", "east", "north", "west"].
+        time : int, optional
+            The time index to plot. Default is 0.
+        layer_contours : bool, optional
+            Whether to include layer contours in the plot. This can help visualize the depth levels
+            of the field. Default is False.
 
         Returns
         -------
@@ -459,8 +462,6 @@ class BoundaryForcing:
         ------
         ValueError
             If the specified varname is not one of the valid options.
-            If field is 3D and none of s_rho, eta, xi are specified.
-            If field is 2D and both eta and xi are specified.
         """
 
         field = self.ds[varname].isel(time=time).load()
@@ -520,7 +521,7 @@ class BoundaryForcing:
 
     def save(self, filepath: str) -> None:
         """
-        Save the initial conditions information to a netCDF4 file.
+        Save the boundary forcing information to a netCDF4 file.
 
         Parameters
         ----------

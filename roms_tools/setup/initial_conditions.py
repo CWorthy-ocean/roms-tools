@@ -39,12 +39,8 @@ class InitialConditions:
     Attributes
     ----------
     ds : xr.Dataset
-        Xarray Dataset containing the atmospheric forcing data.
+        Xarray Dataset containing the initial condition data.
 
-    Notes
-    -----
-    This class represents atmospheric forcing data used in ocean modeling. It provides a convenient
-    interface to work with forcing data including shortwave radiation correction and river forcing.
     """
 
     grid: Grid

@@ -562,9 +562,8 @@ class AtmosphericForcing:
 
         for var in ds.data_vars:
             nan_check(ds[var].isel(time=0), mask_roms)
-        
+
         object.__setattr__(self, "ds", ds)
-            
 
     def plot(self, varname, time=0) -> None:
         """
@@ -609,12 +608,11 @@ class AtmosphericForcing:
         >>> atm_forcing.plot("uwnd", time=0)
         """
 
-
         title = "%s at time %s" % (
             self.ds[varname].long_name,
             np.datetime_as_string(self.ds["absolute_time"].isel(time=time), unit="s"),
         )
-        
+
         field = self.ds[varname].isel(time=time).compute()
 
         # choose colorbar

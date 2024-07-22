@@ -14,6 +14,8 @@ from roms_tools.setup.utils import (
     extrapolate_deepest_to_bottom,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
+import calendar
+import dask
 import matplotlib.pyplot as plt
 
 
@@ -519,12 +521,71 @@ class BoundaryForcing:
         else:
             _line_plot(field, title=title)
 
-    def save(self, filepath: str) -> None:
+    def save(self, filepath: str, time_chunk_size: int = 1) -> None:
         """
-        Save the boundary forcing information to a netCDF4 file.
+        Save the interpolated boundary forcing fields to netCDF4 files.
+
+        This method groups the dataset by year and month, chunks the data by the specified
+        time chunk size, and saves each chunked subset to a separate netCDF4 file named
+        according to the year, month, and day range if not a complete month of data is included.
 
         Parameters
         ----------
-        filepath
+        filepath : str
+            The base path and filename for the output files. The files will be named with
+            the format "filepath.YYYYMM.nc" if a full month of data is included, or
+            "filepath.YYYYMMDD-DD.nc" otherwise.
+        time_chunk_size : int, optional
+            Number of time slices to include in each chunk along the time dimension. Default is 1,
+            meaning each chunk contains one time slice.
+
+        Returns
+        -------
+        None
         """
+        datasets = []
+        filenames = []
+        writes = []
+
+        # Group dataset by year
+        gb = self.ds.groupby("time.year")
+
+        for year, group_ds in gb:
+            # Further group each yearly group by month
+            sub_gb = group_ds.groupby("time.month")
+
+            for month, ds in sub_gb:
+                # Chunk the dataset by the specified time chunk size
+                ds = ds.chunk({"time": time_chunk_size})
+                datasets.append(ds)
+
+                # Determine the number of days in the month
+                num_days_in_month = calendar.monthrange(year, month)[1]
+                first_day = ds.time.dt.day.values[0]
+                last_day = ds.time.dt.day.values[-1]
+
+                # Create filename based on whether the dataset contains a full month
+                if first_day == 1 and last_day == num_days_in_month:
+                    # Full month format: "filepath.YYYYMM.nc"
+                    year_month_str = f"{year}{month:02}"
+                    filename = f"{filepath}.{year_month_str}.nc"
+                else:
+                    # Partial month format: "filepath.YYYYMMDD-DD.nc"
+                    year_month_day_str = f"{year}{month:02}{first_day:02}-{last_day:02}"
+                    filename = f"{filepath}.{year_month_day_str}.nc"
+                filenames.append(filename)
+
+        print("Saving the following files:")
+        for filename in filenames:
+            print(filename)
+
+        for ds, filename in zip(datasets, filenames):
+
+            # Prepare the dataset for writing to a netCDF file without immediately computing
+            write = ds.to_netcdf(filename, compute=False)
+            writes.append(write)
+
+        # Perform the actual write operations in parallel
+        dask.compute(*writes)
+
         self.ds.to_netcdf(filepath)

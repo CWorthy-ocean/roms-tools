@@ -28,6 +28,7 @@ This python package is strongly inspired by the `UCLA MATLAB tools <https://gith
    Creating atmospheric forcing <atmospheric_forcing>
    Creating a vertical coordinate <vertical_coordinate>
    Creating initial conditions <initial_conditions>
+   Creating boundary forcing <boundary_forcing>
 
 .. toctree::
    :maxdepth: 1

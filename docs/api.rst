@@ -43,4 +43,12 @@ Initial Conditions
 
    roms_tools.InitialConditions
 
+Boundary Forcing
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.BoundaryForcing
+
 =======

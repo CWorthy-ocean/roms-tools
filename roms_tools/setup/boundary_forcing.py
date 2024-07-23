@@ -107,6 +107,9 @@ class BoundaryForcing:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
+        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
+        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
+        # would not be detected by the nan_check function.
         data.choose_subdomain(
             latitude_range=[lat.min().values, lat.max().values],
             longitude_range=[lon.min().values, lon.max().values],

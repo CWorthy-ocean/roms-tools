@@ -42,7 +42,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_datasets.py roms_tools/tests/test_grid.py roms_tools/tests/test_topography.py roms_tools/tests/test_tides.py roms_tools/tests/test_atmospheric_forcing.py roms_tools/tests/test_initial_conditions.py
+           coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/test_datasets.py roms_tools/tests/test_grid.py roms_tools/tests/test_topography.py roms_tools/tests/test_tides.py roms_tools/tests/test_atmospheric_forcing.py roms_tools/tests/test_initial_conditions.py roms_tools/tests/test_vertical_coordinate.py roms_tools/tests/test_boundary_forcing.py 
 
       - name: Get coverage report
         shell: bash -l {0}

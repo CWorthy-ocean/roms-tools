@@ -122,12 +122,16 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}):
 
     fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
-    dims_to_check = ["eta_rho", "xi_rho", "eta_v", "xi_u"]
+    dims_to_check = ["eta_rho", "eta_u", "eta_v", "xi_rho", "xi_u", "xi_v"]
     try:
-        xdim = next(dim for dim in dims_to_check if dim in field.dims)
+        xdim = next(
+            dim
+            for dim in field.dims
+            if any(dim.startswith(prefix) for prefix in dims_to_check)
+        )
     except StopIteration:
         raise ValueError(
-            "None of the expected dimensions (eta_rho, xi_rho, eta_v, xi_u) found in field.dims"
+            "None of the dimensions found in field.dims starts with (eta_rho, eta_u, eta_v, xi_rho, xi_u, xi_v)"
         )
 
     depths_to_check = [
@@ -141,12 +145,12 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}):
     try:
         depth_label = next(
             depth_label
-            for depth_label in depths_to_check
-            if depth_label in field.coords
+            for depth_label in field.coords
+            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
         )
     except StopIteration:
         raise ValueError(
-            "None of the expected coordinates (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v) found in field.coords"
+            "None of the coordinates found in field.coords starts with (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v)"
         )
 
     more_kwargs = {"x": xdim, "y": depth_label, "yincrease": False}

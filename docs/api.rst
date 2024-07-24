@@ -10,6 +10,14 @@ Grid
 
    roms_tools.Grid
 
+Vertical Coordinate
+------------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.VerticalCoordinate
+
 Tidal Forcing
 ------------------
 
@@ -26,5 +34,21 @@ Atmospheric Forcing
 
    roms_tools.AtmosphericForcing
    roms_tools.SWRCorrection
+
+Initial Conditions
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.InitialConditions
+
+Boundary Forcing
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.BoundaryForcing
 
 =======

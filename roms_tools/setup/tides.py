@@ -184,13 +184,6 @@ class TidalForcing:
     ds : xr.Dataset
         The xarray Dataset containing the tidal forcing data.
 
-    Notes
-    -----
-    This class represents tidal forcing data used in ocean modeling. It provides
-    functionality to load and process tidal data for use in numerical simulations.
-    The tidal forcing data is loaded from a TPXO dataset and processed to generate
-    tidal elevation, tidal potential, and tidal velocity fields.
-
     Examples
     --------
     >>> grid = Grid(...)

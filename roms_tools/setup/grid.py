@@ -208,15 +208,6 @@ class Grid:
         """
         self.ds.to_netcdf(filepath)
 
-    def _to_dict(self):
-        """
-        Convert instance variables to a dictionary, excluding 'ds' and 'straddle'.
-        """
-        data = asdict(self)
-        data.pop("ds", None)
-        data.pop("straddle", None)
-        return data
-
     def to_yaml(self, filepath):
         """
         Export the parameters of the class to a YAML file, including the version of roms-tools.
@@ -226,7 +217,9 @@ class Grid:
         filepath : str
             The path to the YAML file where the parameters will be saved.
         """
-        data = self._to_dict()
+        data = asdict(self)
+        data.pop("ds", None)
+        data.pop("straddle", None)
 
         # Include the version of roms-tools
         try:

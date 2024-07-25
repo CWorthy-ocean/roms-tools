@@ -7,9 +7,7 @@ import tempfile
 
 
 def test_simple_regression():
-    grid = Grid(
-        nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
-    )
+    grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
 
     expected_lat = np.array(
         [
@@ -30,6 +28,7 @@ def test_simple_regression():
     npt.assert_allclose(grid.ds["lat_rho"], expected_lat, atol=1e-8)
     npt.assert_allclose(grid.ds["lon_rho"], expected_lon, atol=1e-8)
 
+
 def test_raise_if_domain_too_large():
     with pytest.raises(ValueError, match="Domain size has to be smaller"):
         Grid(nx=3, ny=3, size_x=30000, size_y=30000, center_lon=0, center_lat=51.5)
@@ -45,6 +44,7 @@ def test_raise_if_domain_too_large():
         rot=20,
     )
     assert isinstance(grid, Grid)
+
 
 def test_grid_straddle_crosses_meridian():
     grid = Grid(
@@ -138,5 +138,3 @@ def test_roundtrip_yaml():
 
     finally:
         os.remove(filepath)
-
-

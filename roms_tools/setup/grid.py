@@ -208,7 +208,7 @@ class Grid:
         """
         self.ds.to_netcdf(filepath)
 
-    def to_yaml(self, filepath):
+    def to_yaml(self, filepath: str) -> None:
         """
         Export the parameters of the class to a YAML file, including the version of roms-tools.
 
@@ -306,39 +306,41 @@ class Grid:
         Grid
             An instance of the Grid class.
         """
+        # Read the entire file content
         with open(filepath, "r") as file:
-            documents = yaml.safe_load_all(file)
+            file_content = file.read()
 
-            header_data = None
-            grid_data = None
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
 
-            # Iterate over documents to find the header and grid configuration
-            for doc in documents:
-                if "roms_tools_version" in doc:
-                    header_data = doc
-                elif "Grid" in doc:
-                    grid_data = doc["Grid"]
+        header_data = None
+        grid_data = None
 
-            if grid_data is None:
-                raise ValueError("No Grid configuration found in the YAML file.")
+        # Iterate over documents to find the header and grid configuration
+        for doc in documents:
+            if "roms_tools_version" in doc:
+                header_data = doc
+            elif "Grid" in doc:
+                grid_data = doc["Grid"]
 
-            if header_data is None:
-                raise ValueError("Version of ROMS-Tools not found in the YAML file.")
-            else:
-                # Check the roms_tools_version
-                roms_tools_version_header = header_data.get("roms_tools_version")
-                # Get current version of roms-tools
-                try:
-                    roms_tools_version_current = importlib.metadata.version(
-                        "roms-tools"
-                    )
-                except importlib.metadata.PackageNotFoundError:
-                    roms_tools_version_current = "unknown"
+        if header_data is None:
+            raise ValueError("Version of ROMS-Tools not found in the YAML file.")
+        else:
+            # Check the roms_tools_version
+            roms_tools_version_header = header_data.get("roms_tools_version")
+            # Get current version of roms-tools
+            try:
+                roms_tools_version_current = importlib.metadata.version("roms-tools")
+            except importlib.metadata.PackageNotFoundError:
+                roms_tools_version_current = "unknown"
 
-                if roms_tools_version_header != roms_tools_version_current:
-                    warnings.warn(
-                        f"Current roms-tools version ({roms_tools_version_current}) does not match the version in the YAML header ({roms_tools_version_header})."
-                    )
+            if roms_tools_version_header != roms_tools_version_current:
+                warnings.warn(
+                    f"Current roms-tools version ({roms_tools_version_current}) does not match the version in the YAML header ({roms_tools_version_header})."
+                )
+
+        if grid_data is None:
+            raise ValueError("No Grid configuration found in the YAML file.")
 
         return cls(**grid_data)
 

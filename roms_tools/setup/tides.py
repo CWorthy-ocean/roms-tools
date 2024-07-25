@@ -1,7 +1,10 @@
 from datetime import datetime
 import xarray as xr
 import numpy as np
-from dataclasses import dataclass, field
+import yaml
+import importlib.metadata
+
+from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
 from roms_tools.setup.fill import fill_and_interpolate
@@ -175,7 +178,7 @@ class TidalForcing:
     model_reference_date : datetime, optional
         The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
     source : str, optional
-        The source of the tidal data. Default is "tpxo".
+        The source of the tidal data. Default is "TPXO".
     allan_factor : float, optional
         The Allan factor used in tidal model computation. Default is 2.0.
 
@@ -195,12 +198,12 @@ class TidalForcing:
     filename: str
     ntides: int = 10
     model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "tpxo"
+    source: str = "TPXO"
     allan_factor: float = 2.0
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        if self.source == "tpxo":
+        if self.source == "TPXO":
             data = TPXO(filename=self.filename)
 
         data.check_number_constituents(self.ntides)
@@ -387,6 +390,97 @@ class TidalForcing:
         filepath
         """
         self.ds.to_netcdf(filepath)
+
+    def to_yaml(self, filepath: str) -> None:
+        """
+        Export the parameters of the class to a YAML file, including the version of roms-tools.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file where the parameters will be saved.
+        """
+        grid_data = asdict(self.grid)
+        grid_data.pop("ds", None)  # Exclude non-serializable fields
+        grid_data.pop("straddle", None)
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        # Create header
+        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+        # Extract grid data
+        grid_yaml_data = {"Grid": grid_data}
+
+        # Extract tidal forcing data
+        tidal_forcing_data = {
+            "TidalForcing": {
+                "filename": self.filename,
+                "ntides": self.ntides,
+                "model_reference_date": self.model_reference_date.isoformat(),
+                "source": self.source,
+                "allan_factor": self.allan_factor,
+            }
+        }
+
+        # Combine both sections
+        yaml_data = {**grid_yaml_data, **tidal_forcing_data}
+
+        with open(filepath, "w") as file:
+            # Write header
+            file.write(header)
+            # Write YAML data
+            yaml.dump(yaml_data, file, default_flow_style=False)
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "TidalForcing":
+        """
+        Create an instance of the TidalForcing class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        TidalForcing
+            An instance of the TidalForcing class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        tidal_forcing_data = None
+
+        # Process the YAML documents
+        for doc in documents:
+            if "TidalForcing" in doc:
+                tidal_forcing_data = doc["TidalForcing"]
+                break
+
+        if tidal_forcing_data is None:
+            raise ValueError("No TidalForcing configuration found in the YAML file.")
+
+        # Convert the model_reference_date from string to datetime
+        tidal_forcing_params = tidal_forcing_data
+        tidal_forcing_params["model_reference_date"] = datetime.fromisoformat(
+            tidal_forcing_params["model_reference_date"]
+        )
+
+        # Create Grid instance from the YAML file
+        grid_filepath = filepath  # Use the same file path
+        grid = Grid.from_yaml(grid_filepath)
+
+        # Create and return an instance of TidalForcing
+        return cls(grid=grid, **tidal_forcing_params)
 
 
 def modified_julian_days(year, month, day, hour=0):

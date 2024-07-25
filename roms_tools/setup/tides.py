@@ -315,6 +315,15 @@ class TidalForcing:
         ds["v_Re"].attrs["units"] = "m/s"
         ds["v_Im"].attrs["units"] = "m/s"
 
+        ds.attrs["title"] = "ROMS tidal forcing created by ROMS-Tools"
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        ds.attrs["roms_tools_version"] = roms_tools_version
+
         ds.attrs["source"] = self.source
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["allan_factor"] = self.allan_factor

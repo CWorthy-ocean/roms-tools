@@ -29,7 +29,7 @@ pip install -e .
 
 ### Run the tests
 
-Before running the tests you can install and activate the following conda environment:
+Before running the tests, you can install and activate the following conda environment:
 
 ```bash
 cd roms-tools

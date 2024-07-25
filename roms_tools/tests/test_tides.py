@@ -325,7 +325,6 @@ def test_roundtrip_yaml(tidal_forcing):
 
         tidal_forcing_from_file = TidalForcing.from_yaml(filepath)
 
-        # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
         assert tidal_forcing == tidal_forcing_from_file
 
     finally:

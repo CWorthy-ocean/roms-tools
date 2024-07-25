@@ -1485,10 +1485,8 @@ def test_atmospheric_forcing_data_consistency_plot_save(
         "corrected_atmospheric_forcing",
     ],
 )
-
-
 def test_roundtrip_yaml(atm_forcing_fixture, request):
-    """Test that creating a TidalForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+    """Test that creating an AtmosphericForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
     atm_forcing = request.getfixturevalue(atm_forcing_fixture)
 
@@ -1505,6 +1503,7 @@ def test_roundtrip_yaml(atm_forcing_fixture, request):
 
     finally:
         os.remove(filepath)
+
 
 # SWRCorrection unit checks
 

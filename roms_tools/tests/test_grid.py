@@ -84,7 +84,7 @@ class TestGridFromFile:
             center_lon=0.0,
             center_lat=0.0,
             rot=0.0,
-            topography_source="etopo5",
+            topography_source="ETOPO5",
             smooth_factor=2,
             hmin=5.0,
             rmax=0.2,

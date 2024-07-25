@@ -281,3 +281,21 @@ def test_roundtrip(vertical_coordinate):
 
     finally:
         os.remove(filepath)
+
+
+def test_roundtrip_yaml(vertical_coordinate):
+    """Test that creating a VerticalCoordinate object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
+    try:
+        vertical_coordinate.to_yaml(filepath)
+
+        vertical_coordinate_from_file = VerticalCoordinate.from_yaml(filepath)
+
+        assert vertical_coordinate == vertical_coordinate_from_file
+
+    finally:
+        os.remove(filepath)

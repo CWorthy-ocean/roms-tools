@@ -1478,6 +1478,34 @@ def test_atmospheric_forcing_data_consistency_plot_save(
         os.remove(extended_filepath)
 
 
+@pytest.mark.parametrize(
+    "atm_forcing_fixture",
+    [
+        "atmospheric_forcing",
+        "corrected_atmospheric_forcing",
+    ],
+)
+
+
+def test_roundtrip_yaml(atm_forcing_fixture, request):
+    """Test that creating a TidalForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+
+    atm_forcing = request.getfixturevalue(atm_forcing_fixture)
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
+    try:
+        atm_forcing.to_yaml(filepath)
+
+        atm_forcing_from_file = AtmosphericForcing.from_yaml(filepath)
+
+        assert atm_forcing == atm_forcing_from_file
+
+    finally:
+        os.remove(filepath)
+
 # SWRCorrection unit checks
 
 

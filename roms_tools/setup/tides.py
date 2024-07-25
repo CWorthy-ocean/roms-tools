@@ -205,6 +205,8 @@ class TidalForcing:
     def __post_init__(self):
         if self.source == "TPXO":
             data = TPXO(filename=self.filename)
+        else:
+            raise ValueError('Only "TPXO" is a valid option for source.')
 
         data.check_number_constituents(self.ntides)
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
@@ -485,8 +487,7 @@ class TidalForcing:
         )
 
         # Create Grid instance from the YAML file
-        grid_filepath = filepath  # Use the same file path
-        grid = Grid.from_yaml(grid_filepath)
+        grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of TidalForcing
         return cls(grid=grid, **tidal_forcing_params)

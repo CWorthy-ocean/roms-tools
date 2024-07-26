@@ -3,6 +3,9 @@ from datetime import datetime
 from roms_tools import BoundaryForcing, Grid, VerticalCoordinate
 import xarray as xr
 import numpy as np
+import tempfile
+import os
+import textwrap
 from roms_tools.setup.datasets import download_test_data
 
 
@@ -75,7 +78,7 @@ def test_boundary_forcing_ds_attribute(boundary_forcing):
         assert f"zeta_{direction}" in boundary_forcing.ds
 
 
-def test_boundary_forcing_data_consistency_plot_save(boundary_forcing, tmp_path):
+def test_boundary_forcing_data_consistency_plot_save(boundary_forcing):
     """
     Test that the data within the BoundaryForcing object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
@@ -264,6 +267,66 @@ def test_boundary_forcing_data_consistency_plot_save(boundary_forcing, tmp_path)
     boundary_forcing.plot(varname="zeta_north")
     boundary_forcing.plot(varname="zeta_west")
 
-    filepath = tmp_path / "boundary_forcing.nc"
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
     boundary_forcing.save(filepath)
-    assert filepath.exists()
+    extended_filepath = filepath + ".20210629-29.nc"
+
+    try:
+        assert os.path.exists(extended_filepath)
+    finally:
+        os.remove(extended_filepath)
+
+
+def test_roundtrip_yaml(boundary_forcing):
+    """Test that creating a BoundaryForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
+    try:
+        boundary_forcing.to_yaml(filepath)
+
+        boundary_forcing_from_file = BoundaryForcing.from_yaml(filepath)
+
+        assert boundary_forcing == boundary_forcing_from_file
+
+    finally:
+        os.remove(filepath)
+
+
+def test_from_yaml_missing_boundary_forcing():
+    yaml_content = textwrap.dedent(
+        """\
+    ---
+    roms_tools_version: 0.0.0
+    ---
+    Grid:
+      nx: 100
+      ny: 100
+      size_x: 1800
+      size_y: 2400
+      center_lon: -10
+      center_lat: 61
+      rot: -20
+      topography_source: ETOPO5
+      smooth_factor: 8
+      hmin: 5.0
+      rmax: 0.2
+    """
+    )
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        yaml_filepath = tmp_file.name
+        tmp_file.write(yaml_content.encode())
+
+    try:
+        with pytest.raises(
+            ValueError, match="No BoundaryForcing configuration found in the YAML file."
+        ):
+            BoundaryForcing.from_yaml(yaml_filepath)
+    finally:
+        os.remove(yaml_filepath)

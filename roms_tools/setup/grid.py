@@ -318,6 +318,8 @@ class Grid:
 
         # Iterate over documents to find the header and grid configuration
         for doc in documents:
+            if doc is None:
+                continue
             if "roms_tools_version" in doc:
                 header_data = doc
             elif "Grid" in doc:
@@ -336,7 +338,8 @@ class Grid:
 
             if roms_tools_version_header != roms_tools_version_current:
                 warnings.warn(
-                    f"Current roms-tools version ({roms_tools_version_current}) does not match the version in the YAML header ({roms_tools_version_header})."
+                    f"Current roms-tools version ({roms_tools_version_current}) does not match the version in the YAML header ({roms_tools_version_header}).",
+                    UserWarning,
                 )
 
         if grid_data is None:

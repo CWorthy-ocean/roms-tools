@@ -299,6 +299,8 @@ class SWRCorrection:
 
         # Iterate over documents to find the header and grid configuration
         for doc in documents:
+            if doc is None:
+                continue
             if "SWRCorrection" in doc:
                 swr_correction_data = doc["SWRCorrection"]
                 break
@@ -352,6 +354,8 @@ class Rivers:
 
         # Iterate over documents to find the header and grid configuration
         for doc in documents:
+            if doc is None:
+                continue
             if "Rivers" in doc:
                 rivers_data = doc
                 break
@@ -889,6 +893,8 @@ class AtmosphericForcing:
 
         # Process the YAML documents
         for doc in documents:
+            if doc is None:
+                continue
             if "AtmosphericForcing" in doc:
                 atmospheric_forcing_data = doc["AtmosphericForcing"]
             if "SWRCorrection" in doc:

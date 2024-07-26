@@ -358,6 +358,8 @@ class VerticalCoordinate:
 
         # Process the YAML documents
         for doc in documents:
+            if doc is None:
+                continue
             if "VerticalCoordinate" in doc:
                 vertical_coordinate_data = doc["VerticalCoordinate"]
                 break

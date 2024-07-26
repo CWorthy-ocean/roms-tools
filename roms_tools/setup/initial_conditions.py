@@ -499,6 +499,8 @@ class InitialConditions:
 
         # Process the YAML documents
         for doc in documents:
+            if doc is None:
+                continue
             if "InitialConditions" in doc:
                 initial_conditions_data = doc["InitialConditions"]
                 break

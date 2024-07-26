@@ -684,6 +684,8 @@ class BoundaryForcing:
 
         # Process the YAML documents
         for doc in documents:
+            if doc is None:
+                continue
             if "BoundaryForcing" in doc:
                 boundary_forcing_data = doc["BoundaryForcing"]
                 break

@@ -473,6 +473,8 @@ class TidalForcing:
 
         # Process the YAML documents
         for doc in documents:
+            if doc is None:
+                continue
             if "TidalForcing" in doc:
                 tidal_forcing_data = doc["TidalForcing"]
                 break

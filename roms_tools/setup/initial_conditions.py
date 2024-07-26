@@ -485,7 +485,7 @@ class InitialConditions:
 
         Returns
         -------
-        InitialConditions 
+        InitialConditions
             An instance of the InitialConditions class.
         """
         # Read the entire file content
@@ -522,7 +522,5 @@ class InitialConditions:
         return cls(
             grid=grid,
             vertical_coordinate=vertical_coordinate,
-            **initial_conditions_data
+            **initial_conditions_data,
         )
-
-

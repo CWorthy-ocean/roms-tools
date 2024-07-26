@@ -1,6 +1,8 @@
 import xarray as xr
 import numpy as np
-from dataclasses import dataclass, field
+import yaml
+import importlib.metadata
+from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
@@ -32,7 +34,7 @@ class InitialConditions:
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     source : str, optional
-        Source of the initial condition data. Default is "glorys".
+        Source of the initial condition data. Default is "GLORYS".
     filename: str
         Path to the source data file. Can contain wildcards.
 
@@ -47,17 +49,16 @@ class InitialConditions:
     vertical_coordinate: VerticalCoordinate
     ini_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "glorys"
+    source: str = "GLORYS"
     filename: str
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
 
-        lon = self.grid.ds.lon_rho
-        lat = self.grid.ds.lat_rho
-        angle = self.grid.ds.angle
-
-        if self.source == "glorys":
+        # Check that the source is "GLORYS"
+        if self.source != "GLORYS":
+            raise ValueError('Only "GLORYS" is a valid option for source.')
+        if self.source == "GLORYS":
             dims = {
                 "longitude": "longitude",
                 "latitude": "latitude",
@@ -72,12 +73,17 @@ class InitialConditions:
                 "v": "vo",
                 "ssh": "zos",
             }
+
         data = Dataset(
             filename=self.filename,
             start_time=self.ini_time,
             var_names=varnames.values(),
             dim_names=dims,
         )
+
+        lon = self.grid.ds.lon_rho
+        lat = self.grid.ds.lat_rho
+        angle = self.grid.ds.angle
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
@@ -220,7 +226,16 @@ class InitialConditions:
             }
         )
 
-        ds.attrs["Title"] = "ROMS initial file produced by roms-tools"
+        ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+        ds.attrs["roms_tools_version"] = roms_tools_version
+        ds.attrs["ini_time"] = str(self.ini_time)
+        ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["source"] = self.source
 
         if dims["time"] != "time":
             ds = ds.rename({dims["time"]: "time"})
@@ -405,3 +420,109 @@ class InitialConditions:
         filepath
         """
         self.ds.to_netcdf(filepath)
+
+    def to_yaml(self, filepath: str) -> None:
+        """
+        Export the parameters of the class to a YAML file, including the version of roms-tools.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file where the parameters will be saved.
+        """
+        # Serialize Grid data
+        grid_data = asdict(self.grid)
+        grid_data.pop("ds", None)  # Exclude non-serializable fields
+        grid_data.pop("straddle", None)
+
+        # Serialize VerticalCoordinate data
+        vertical_coordinate_data = asdict(self.vertical_coordinate)
+        vertical_coordinate_data.pop("ds", None)  # Exclude non-serializable fields
+        vertical_coordinate_data.pop("grid", None)  # Exclude non-serializable fields
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        # Create header
+        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+        grid_yaml_data = {"Grid": grid_data}
+        vertical_coordinate_yaml_data = {"VerticalCoordinate": vertical_coordinate_data}
+
+        initial_conditions_data = {
+            "InitialConditions": {
+                "filename": self.filename,
+                "ini_time": self.ini_time.isoformat(),
+                "model_reference_date": self.model_reference_date.isoformat(),
+                "source": self.source,
+            }
+        }
+
+        yaml_data = {
+            **grid_yaml_data,
+            **vertical_coordinate_yaml_data,
+            **initial_conditions_data,
+        }
+
+        with open(filepath, "w") as file:
+            # Write header
+            file.write(header)
+            # Write YAML data
+            yaml.dump(yaml_data, file, default_flow_style=False)
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "InitialConditions":
+        """
+        Create an instance of the InitialConditions class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        InitialConditions 
+            An instance of the InitialConditions class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        initial_conditions_data = None
+
+        # Process the YAML documents
+        for doc in documents:
+            if "InitialConditions" in doc:
+                initial_conditions_data = doc["InitialConditions"]
+                break
+
+        if initial_conditions_data is None:
+            raise ValueError(
+                "No InitialConditions configuration found in the YAML file."
+            )
+
+        # Convert from string to datetime
+        for date_string in ["model_reference_date", "ini_time"]:
+            initial_conditions_data[date_string] = datetime.fromisoformat(
+                initial_conditions_data[date_string]
+            )
+
+        # Create VerticalCoordinate instance from the YAML file
+        vertical_coordinate = VerticalCoordinate.from_yaml(filepath)
+        grid = vertical_coordinate.grid
+
+        # Create and return an instance of InitialConditions
+        return cls(
+            grid=grid,
+            vertical_coordinate=vertical_coordinate,
+            **initial_conditions_data
+        )
+
+

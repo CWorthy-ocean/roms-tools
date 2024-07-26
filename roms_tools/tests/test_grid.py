@@ -4,6 +4,8 @@ import numpy.testing as npt
 from roms_tools import Grid
 import os
 import tempfile
+import importlib.metadata
+import textwrap
 
 
 def test_simple_regression():
@@ -138,3 +140,87 @@ def test_roundtrip_yaml():
 
     finally:
         os.remove(filepath)
+
+
+def test_from_yaml_missing_version():
+
+    yaml_content = textwrap.dedent(
+        """\
+    Grid:
+      nx: 100
+      ny: 100
+      size_x: 1800
+      size_y: 2400
+      center_lon: -10
+      center_lat: 61
+      rot: -20
+      topography_source: ETOPO5
+      smooth_factor: 8
+      hmin: 5.0
+      rmax: 0.2
+    """
+    )
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        yaml_filepath = tmp_file.name
+        tmp_file.write(yaml_content.encode())
+
+    try:
+        with pytest.raises(
+            ValueError, match="Version of ROMS-Tools not found in the YAML file."
+        ):
+            Grid.from_yaml(yaml_filepath)
+    finally:
+        os.remove(yaml_filepath)
+
+
+def test_from_yaml_missing_grid():
+    roms_tools_version = importlib.metadata.version("roms-tools")
+
+    yaml_content = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        yaml_filepath = tmp_file.name
+        tmp_file.write(yaml_content.encode())
+
+    try:
+        with pytest.raises(
+            ValueError, match="No Grid configuration found in the YAML file."
+        ):
+            Grid.from_yaml(yaml_filepath)
+    finally:
+        os.remove(yaml_filepath)
+
+
+def test_from_yaml_version_mismatch():
+    yaml_content = textwrap.dedent(
+        """\
+    ---
+    roms_tools_version: 0.0.0
+    ---
+    Grid:
+      nx: 100
+      ny: 100
+      size_x: 1800
+      size_y: 2400
+      center_lon: -10
+      center_lat: 61
+      rot: -20
+      topography_source: ETOPO5
+      smooth_factor: 8
+      hmin: 5.0
+      rmax: 0.2
+    """
+    )
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        yaml_filepath = tmp_file.name
+        tmp_file.write(yaml_content.encode())
+
+    try:
+        with pytest.warns(
+            UserWarning,
+            match="Current roms-tools version.*does not match the version in the YAML header.*",
+        ):
+            Grid.from_yaml(yaml_filepath)
+    finally:
+        os.remove(yaml_filepath)

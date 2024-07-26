@@ -3,6 +3,7 @@ import numpy as np
 import tempfile
 import os
 from roms_tools import Grid, VerticalCoordinate
+import textwrap
 
 
 @pytest.fixture
@@ -299,3 +300,38 @@ def test_roundtrip_yaml(vertical_coordinate):
 
     finally:
         os.remove(filepath)
+
+
+def test_from_yaml_missing_vertical_coordinate():
+    yaml_content = textwrap.dedent(
+        """\
+    ---
+    roms_tools_version: 0.0.0
+    ---
+    Grid:
+      nx: 100
+      ny: 100
+      size_x: 1800
+      size_y: 2400
+      center_lon: -10
+      center_lat: 61
+      rot: -20
+      topography_source: ETOPO5
+      smooth_factor: 8
+      hmin: 5.0
+      rmax: 0.2
+    """
+    )
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        yaml_filepath = tmp_file.name
+        tmp_file.write(yaml_content.encode())
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match="No VerticalCoordinate configuration found in the YAML file.",
+        ):
+            VerticalCoordinate.from_yaml(yaml_filepath)
+    finally:
+        os.remove(yaml_filepath)

@@ -1,7 +1,9 @@
 import xarray as xr
 import numpy as np
+import yaml
+import importlib.metadata
 from typing import Dict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
@@ -400,8 +402,7 @@ class BoundaryForcing:
                     ]
                 )
 
-        ds.attrs["Title"] = "ROMS boundary forcing file produced by roms-tools"
-
+        # deal with time dimension
         if dims["time"] != "time":
             ds = ds.rename({dims["time"]: "time"})
 
@@ -422,6 +423,18 @@ class BoundaryForcing:
         ds["hc"] = self.vertical_coordinate.ds["hc"]
         ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
         ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
+
+        ds.attrs["title"] = "ROMS boundary forcing file created by ROMS-Tools"
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+        ds.attrs["roms_tools_version"] = roms_tools_version
+        ds.attrs["start_time"] = str(self.start_time)
+        ds.attrs["end_time"] = str(self.end_time)
+        ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["source"] = self.source
 
         object.__setattr__(self, "ds", ds)
 
@@ -591,4 +604,108 @@ class BoundaryForcing:
         # Perform the actual write operations in parallel
         dask.compute(*writes)
 
-        self.ds.to_netcdf(filepath)
+    def to_yaml(self, filepath: str) -> None:
+        """
+        Export the parameters of the class to a YAML file, including the version of roms-tools.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file where the parameters will be saved.
+        """
+        # Serialize Grid data
+        grid_data = asdict(self.grid)
+        grid_data.pop("ds", None)  # Exclude non-serializable fields
+        grid_data.pop("straddle", None)
+
+        # Serialize VerticalCoordinate data
+        vertical_coordinate_data = asdict(self.vertical_coordinate)
+        vertical_coordinate_data.pop("ds", None)  # Exclude non-serializable fields
+        vertical_coordinate_data.pop("grid", None)  # Exclude non-serializable fields
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        # Create header
+        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+        grid_yaml_data = {"Grid": grid_data}
+        vertical_coordinate_yaml_data = {"VerticalCoordinate": vertical_coordinate_data}
+
+        boundary_forcing_data = {
+            "BoundaryForcing": {
+                "filename": self.filename,
+                "start_time": self.start_time.isoformat(),
+                "end_time": self.end_time.isoformat(),
+                "model_reference_date": self.model_reference_date.isoformat(),
+                "source": self.source,
+                "boundaries": self.boundaries,
+            }
+        }
+
+        yaml_data = {
+            **grid_yaml_data,
+            **vertical_coordinate_yaml_data,
+            **boundary_forcing_data,
+        }
+
+        with open(filepath, "w") as file:
+            # Write header
+            file.write(header)
+            # Write YAML data
+            yaml.dump(yaml_data, file, default_flow_style=False)
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "BoundaryForcing":
+        """
+        Create an instance of the BoundaryForcing class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        BoundaryForcing
+            An instance of the BoundaryForcing class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        boundary_forcing_data = None
+
+        # Process the YAML documents
+        for doc in documents:
+            if doc is None:
+                continue
+            if "BoundaryForcing" in doc:
+                boundary_forcing_data = doc["BoundaryForcing"]
+                break
+
+        if boundary_forcing_data is None:
+            raise ValueError("No BoundaryForcing configuration found in the YAML file.")
+
+        # Convert from string to datetime
+        for date_string in ["model_reference_date", "start_time", "end_time"]:
+            boundary_forcing_data[date_string] = datetime.fromisoformat(
+                boundary_forcing_data[date_string]
+            )
+
+        # Create VerticalCoordinate instance from the YAML file
+        vertical_coordinate = VerticalCoordinate.from_yaml(filepath)
+        grid = vertical_coordinate.grid
+
+        # Create and return an instance of InitialConditions
+        return cls(
+            grid=grid,
+            vertical_coordinate=vertical_coordinate,
+            **boundary_forcing_data,
+        )

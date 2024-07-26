@@ -1,6 +1,8 @@
 import xarray as xr
 import dask
-from dataclasses import dataclass, field
+import yaml
+import importlib.metadata
+from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 import glob
@@ -271,6 +273,43 @@ class SWRCorrection:
 
         return field_interpolated
 
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "SWRCorrection":
+        """
+        Create an instance of the class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        Grid
+            An instance of the Grid class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        swr_correction_data = None
+
+        # Iterate over documents to find the header and grid configuration
+        for doc in documents:
+            if doc is None:
+                continue
+            if "SWRCorrection" in doc:
+                swr_correction_data = doc["SWRCorrection"]
+                break
+
+        if swr_correction_data is None:
+            raise ValueError("No SWRCorrection configuration found in the YAML file.")
+
+        return cls(**swr_correction_data)
+
 
 @dataclass(frozen=True, kw_only=True)
 class Rivers:
@@ -288,6 +327,43 @@ class Rivers:
     def __post_init__(self):
         if not self.filename:
             raise ValueError("The 'filename' must be provided.")
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "Rivers":
+        """
+        Create an instance of the class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        Grid
+            An instance of the Grid class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        rivers_data = None
+
+        # Iterate over documents to find the header and grid configuration
+        for doc in documents:
+            if doc is None:
+                continue
+            if "Rivers" in doc:
+                rivers_data = doc
+                break
+
+        if rivers_data is None:
+            raise ValueError("No Rivers configuration found in the YAML file.")
+
+        return cls(**rivers_data)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -308,7 +384,7 @@ class AtmosphericForcing:
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     source : str, optional
-        Source of the atmospheric forcing data. Default is "era5".
+        Source of the atmospheric forcing data. Default is "ERA5".
     filename: str
         Path to the atmospheric forcing source data file. Can contain wildcards.
     swr_correction : SWRCorrection
@@ -331,7 +407,7 @@ class AtmosphericForcing:
     ...     grid=grid_info,
     ...     start_time=start_time,
     ...     end_time=end_time,
-    ...     source="era5",
+    ...     source="ERA5",
     ...     filename="atmospheric_data_*.nc",
     ...     swr_correction=swr_correction,
     ... )
@@ -342,7 +418,7 @@ class AtmosphericForcing:
     start_time: datetime
     end_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "era5"
+    source: str = "ERA5"
     filename: str
     swr_correction: Optional["SWRCorrection"] = None
     rivers: Optional["Rivers"] = None
@@ -350,21 +426,10 @@ class AtmosphericForcing:
 
     def __post_init__(self):
 
-        if self.use_coarse_grid:
-            if "lon_coarse" not in self.grid.ds:
-                raise ValueError(
-                    "Grid has not been coarsened yet. Execute grid.coarsen() first."
-                )
-
-            lon = self.grid.ds.lon_coarse
-            lat = self.grid.ds.lat_coarse
-            angle = self.grid.ds.angle_coarse
-        else:
-            lon = self.grid.ds.lon_rho
-            lat = self.grid.ds.lat_rho
-            angle = self.grid.ds.angle
-
-        if self.source == "era5":
+        # Check that the source is "ERA5"
+        if self.source != "ERA5":
+            raise ValueError('Only "ERA5" is a valid option for source.')
+        if self.source == "ERA5":
             dims = {"longitude": "longitude", "latitude": "latitude", "time": "time"}
             varnames = {
                 "u10": "u10",
@@ -384,6 +449,20 @@ class AtmosphericForcing:
             var_names=varnames.values(),
             dim_names=dims,
         )
+
+        if self.use_coarse_grid:
+            if "lon_coarse" not in self.grid.ds:
+                raise ValueError(
+                    "Grid has not been coarsened yet. Execute grid.coarsen() first."
+                )
+
+            lon = self.grid.ds.lon_coarse
+            lat = self.grid.ds.lat_coarse
+            angle = self.grid.ds.angle_coarse
+        else:
+            lon = self.grid.ds.lon_rho
+            lat = self.grid.ds.lat_rho
+            angle = self.grid.ds.angle
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
@@ -434,7 +513,7 @@ class AtmosphericForcing:
         d2m = data_vars["d2m"]
         rain = data_vars["rain"]
 
-        if self.source == "era5":
+        if self.source == "ERA5":
             # translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
             swr = swr / 3600  # from J/m^2 to W/m^2
             lwr = lwr / 3600  # from J/m^2 to W/m^2
@@ -531,7 +610,20 @@ class AtmosphericForcing:
         ds["rain"].attrs["long_name"] = "Total precipitation"
         ds["rain"].attrs["units"] = "cm/day"
 
-        ds.attrs["Title"] = "ROMS bulk surface forcing file produced by roms-tools"
+        ds.attrs["title"] = "ROMS atmospheric forcing file created by ROMS-Tools"
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+        ds.attrs["roms_tools_version"] = roms_tools_version
+        ds.attrs["start_time"] = str(self.start_time)
+        ds.attrs["end_time"] = str(self.end_time)
+        ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["source"] = self.source
+        ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
+        ds.attrs["swr_correction"] = str(self.swr_correction is not None)
+        ds.attrs["rivers"] = str(self.rivers is not None)
 
         ds = ds.assign_coords({"lon": lon, "lat": lat})
         if self.use_coarse_grid:
@@ -601,7 +693,7 @@ class AtmosphericForcing:
         ...     grid=grid_info,
         ...     start_time=start_time,
         ...     end_time=end_time,
-        ...     source="era5",
+        ...     source="ERA5",
         ...     filename="atmospheric_data_*.nc",
         ...     swr_correction=swr_correction,
         ... )
@@ -708,3 +800,136 @@ class AtmosphericForcing:
 
         # Perform the actual write operations in parallel
         dask.persist(*writes)
+
+    def to_yaml(self, filepath: str) -> None:
+        """
+        Export the parameters of the class to a YAML file, including the version of roms-tools.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file where the parameters will be saved.
+        """
+        # Serialize Grid data
+        grid_data = asdict(self.grid)
+        grid_data.pop("ds", None)  # Exclude non-serializable fields
+        grid_data.pop("straddle", None)
+
+        if self.swr_correction:
+            swr_correction_data = asdict(self.swr_correction)
+            swr_correction_data.pop("ds", None)
+        else:
+            swr_correction_data = None
+
+        rivers_data = asdict(self.rivers) if self.rivers else None
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        # Create header
+        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+        # Create YAML data for Grid and optional attributes
+        grid_yaml_data = {"Grid": grid_data}
+        swr_correction_yaml_data = (
+            {"SWRCorrection": swr_correction_data} if swr_correction_data else {}
+        )
+        rivers_yaml_data = {"Rivers": rivers_data} if rivers_data else {}
+
+        # Combine all sections
+        atmospheric_forcing_data = {
+            "AtmosphericForcing": {
+                "filename": self.filename,
+                "start_time": self.start_time.isoformat(),
+                "end_time": self.end_time.isoformat(),
+                "model_reference_date": self.model_reference_date.isoformat(),
+                "source": self.source,
+                "use_coarse_grid": self.use_coarse_grid,
+            }
+        }
+
+        # Merge YAML data while excluding empty sections
+        yaml_data = {
+            **grid_yaml_data,
+            **swr_correction_yaml_data,
+            **rivers_yaml_data,
+            **atmospheric_forcing_data,
+        }
+
+        with open(filepath, "w") as file:
+            # Write header
+            file.write(header)
+            # Write YAML data
+            yaml.dump(yaml_data, file, default_flow_style=False)
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "AtmosphericForcing":
+        """
+        Create an instance of the AtmosphericForcing class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        AtmosphericForcing
+            An instance of the AtmosphericForcing class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        swr_correction_data = None
+        rivers_data = None
+        atmospheric_forcing_data = None
+
+        # Process the YAML documents
+        for doc in documents:
+            if doc is None:
+                continue
+            if "AtmosphericForcing" in doc:
+                atmospheric_forcing_data = doc["AtmosphericForcing"]
+            if "SWRCorrection" in doc:
+                swr_correction_data = doc["SWRCorrection"]
+            if "Rivers" in doc:
+                rivers_data = doc["Rivers"]
+
+        if atmospheric_forcing_data is None:
+            raise ValueError(
+                "No AtmosphericForcing configuration found in the YAML file."
+            )
+
+        # Convert from string to datetime
+        for date_string in ["model_reference_date", "start_time", "end_time"]:
+            atmospheric_forcing_data[date_string] = datetime.fromisoformat(
+                atmospheric_forcing_data[date_string]
+            )
+
+        # Create Grid instance from the YAML file
+        grid = Grid.from_yaml(filepath)
+
+        if swr_correction_data is not None:
+            swr_correction = SWRCorrection.from_yaml(filepath)
+        else:
+            swr_correction = None
+
+        if rivers_data is not None:
+            rivers = Rivers.from_yaml(filepath)
+        else:
+            rivers = None
+
+        # Create and return an instance of AtmosphericForcing
+        return cls(
+            grid=grid,
+            swr_correction=swr_correction,
+            rivers=rivers,
+            **atmospheric_forcing_data,
+        )

@@ -42,7 +42,7 @@ def fetch_topo(topography_source: str) -> xr.Dataset:
     ----------
     topography_source : str
         The source of the topography data to be loaded. Available options:
-        - "etopo5"
+        - "ETOPO5"
 
     Returns
     -------
@@ -50,7 +50,7 @@ def fetch_topo(topography_source: str) -> xr.Dataset:
         The global topography data as an xarray Dataset.
     """
     # Mapping from user-specified topography options to corresponding filenames in the registry
-    topo_dict = {"etopo5": "etopo5.nc"}
+    topo_dict = {"ETOPO5": "etopo5.nc"}
 
     # Fetch the file using Pooch, downloading if necessary
     fname = pup_data.fetch(topo_dict[topography_source])

@@ -1,6 +1,8 @@
 import numpy as np
 import xarray as xr
-from dataclasses import dataclass, field
+import yaml
+import importlib.metadata
+from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
@@ -109,7 +111,13 @@ class VerticalCoordinate:
 
         ds = ds.drop_vars(["eta_rho", "xi_rho"])
 
-        ds.attrs["Title"] = "ROMS vertical coordinate produced by roms-tools"
+        ds.attrs["title"] = "ROMS vertical coordinate file created by ROMS-Tools"
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+        ds.attrs["roms_tools_version"] = roms_tools_version
 
         object.__setattr__(self, "ds", ds)
 
@@ -244,6 +252,53 @@ class VerticalCoordinate:
         """
         self.ds.to_netcdf(filepath)
 
+    def to_yaml(self, filepath: str) -> None:
+        """
+        Export the parameters of the class to a YAML file, including the version of roms-tools.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file where the parameters will be saved.
+        """
+        # Serialize Grid data
+        grid_data = asdict(self.grid)
+        grid_data.pop("ds", None)  # Exclude non-serializable fields
+        grid_data.pop("straddle", None)
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        # Create header
+        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+        grid_yaml_data = {"Grid": grid_data}
+
+        # Combine all sections
+        vertical_coordinate_data = {
+            "VerticalCoordinate": {
+                "N": self.N,
+                "theta_s": self.theta_s,
+                "theta_b": self.theta_b,
+                "hc": self.hc,
+            }
+        }
+
+        # Merge YAML data while excluding empty sections
+        yaml_data = {
+            **grid_yaml_data,
+            **vertical_coordinate_data,
+        }
+
+        with open(filepath, "w") as file:
+            # Write header
+            file.write(header)
+            # Write YAML data
+            yaml.dump(yaml_data, file, default_flow_style=False)
+
     @classmethod
     def from_file(cls, filepath: str) -> "VerticalCoordinate":
         """
@@ -276,6 +331,52 @@ class VerticalCoordinate:
         object.__setattr__(vertical_coordinate, "grid", None)
 
         return vertical_coordinate
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "VerticalCoordinate":
+        """
+        Create an instance of the VerticalCoordinate class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        VerticalCoordinate
+            An instance of the VerticalCoordinate class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        vertical_coordinate_data = None
+
+        # Process the YAML documents
+        for doc in documents:
+            if doc is None:
+                continue
+            if "VerticalCoordinate" in doc:
+                vertical_coordinate_data = doc["VerticalCoordinate"]
+                break
+
+        if vertical_coordinate_data is None:
+            raise ValueError(
+                "No VerticalCoordinate configuration found in the YAML file."
+            )
+
+        # Create Grid instance from the YAML file
+        grid = Grid.from_yaml(filepath)
+
+        # Create and return an instance of TidalForcing
+        return cls(
+            grid=grid,
+            **vertical_coordinate_data,
+        )
 
 
 def compute_cs(sigma, theta_s, theta_b):

@@ -1,13 +1,16 @@
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 import numpy as np
 import xarray as xr
-
+import yaml
+import importlib.metadata
 
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+
+import warnings
 
 RADIUS_OF_EARTH = 6371315.0  # in m
 
@@ -42,7 +45,7 @@ class Grid:
          The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
     topography_source : str, optional
         Specifies the data source to use for the topography. Options are
-        "etopo5". The default is "etopo5".
+        "ETOPO5". The default is "ETOPO5".
     smooth_factor : float, optional
         The smoothing factor used in the domain-wide Gaussian smoothing of the
         topography. Smaller values result in less smoothing, while larger
@@ -98,7 +101,7 @@ class Grid:
     center_lon: float
     center_lat: float
     rot: float = 0
-    topography_source: str = "etopo5"
+    topography_source: str = "ETOPO5"
     smooth_factor: int = 8
     hmin: float = 5.0
     rmax: float = 0.2
@@ -131,7 +134,7 @@ class Grid:
         self._straddle()
 
     def add_topography_and_mask(
-        self, topography_source="etopo5", smooth_factor=8, hmin=5.0, rmax=0.2
+        self, topography_source="ETOPO5", smooth_factor=8, hmin=5.0, rmax=0.2
     ) -> None:
         """
         Add topography and mask to the grid dataset.
@@ -145,7 +148,7 @@ class Grid:
         ----------
         topography_source : str, optional
             Specifies the data source to use for the topography. Options are
-            "etopo5". The default is "etopo5".
+            "ETOPO5". The default is "ETOPO5".
         smooth_factor : float, optional
             The smoothing factor used in the domain-wide Gaussian smoothing of the
             topography. Smaller values result in less smoothing, while larger
@@ -205,6 +208,37 @@ class Grid:
         """
         self.ds.to_netcdf(filepath)
 
+    def to_yaml(self, filepath: str) -> None:
+        """
+        Export the parameters of the class to a YAML file, including the version of roms-tools.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file where the parameters will be saved.
+        """
+        data = asdict(self)
+        data.pop("ds", None)
+        data.pop("straddle", None)
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        # Create header
+        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+        # Use the class name as the top-level key
+        yaml_data = {self.__class__.__name__: data}
+
+        with open(filepath, "w") as file:
+            # Write header
+            file.write(header)
+            # Write YAML data
+            yaml.dump(yaml_data, file, default_flow_style=False)
+
     @classmethod
     def from_file(cls, filepath: str) -> "Grid":
         """
@@ -256,6 +290,62 @@ class Grid:
                 object.__setattr__(grid, attr, ds.attrs[attr])
 
         return grid
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "Grid":
+        """
+        Create an instance of the class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : str
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        Grid
+            An instance of the Grid class.
+        """
+        # Read the entire file content
+        with open(filepath, "r") as file:
+            file_content = file.read()
+
+        # Split the content into YAML documents
+        documents = list(yaml.safe_load_all(file_content))
+
+        header_data = None
+        grid_data = None
+
+        # Iterate over documents to find the header and grid configuration
+        for doc in documents:
+            if doc is None:
+                continue
+            if "roms_tools_version" in doc:
+                header_data = doc
+            elif "Grid" in doc:
+                grid_data = doc["Grid"]
+
+        if header_data is None:
+            raise ValueError("Version of ROMS-Tools not found in the YAML file.")
+        else:
+            # Check the roms_tools_version
+            roms_tools_version_header = header_data.get("roms_tools_version")
+            # Get current version of roms-tools
+            try:
+                roms_tools_version_current = importlib.metadata.version("roms-tools")
+            except importlib.metadata.PackageNotFoundError:
+                roms_tools_version_current = "unknown"
+
+            if roms_tools_version_header != roms_tools_version_current:
+                warnings.warn(
+                    f"Current roms-tools version ({roms_tools_version_current}) does not match the version in the YAML header ({roms_tools_version_header}).",
+                    UserWarning,
+                )
+
+        if grid_data is None:
+            raise ValueError("No Grid configuration found in the YAML file.")
+
+        return cls(**grid_data)
 
     # override __repr__ method to only print attributes that are actually set
     def __repr__(self) -> str:
@@ -756,7 +846,15 @@ def _create_grid_ds(
 
 
 def _add_global_metadata(ds, size_x, size_y):
-    ds.attrs["Type"] = "ROMS grid produced by roms-tools"
+    ds.attrs["title"] = "ROMS grid created by ROMS-Tools"
+
+    # Include the version of roms-tools
+    try:
+        roms_tools_version = importlib.metadata.version("roms-tools")
+    except importlib.metadata.PackageNotFoundError:
+        roms_tools_version = "unknown"
+
+    ds.attrs["roms_tools_version"] = roms_tools_version
     ds.attrs["size_x"] = size_x
     ds.attrs["size_y"] = size_y
 

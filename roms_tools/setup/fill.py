@@ -99,51 +99,6 @@ def fill_and_interpolate(
     return field_interpolated
 
 
-def determine_fillvalue(field, dims):
-    """
-    Determine fill value by computing the spatial mean for each horizontal slice and selecting the
-    spatial mean for the deepest slice that is not NaN.
-
-    Parameters
-    ----------
-    field : xr.DataArray
-        The data array for which fill values are to be determined. This array is typically
-        three-dimensional (3D) or four-dimensional (4D), with dimensions including latitude,
-        longitude, and depth.
-
-    dims : dict
-        A dictionary specifying the names of the dimensions for latitude, longitude, and depth.
-        Example: {"latitude": "lat", "longitude": "lon", "depth": "depth"}
-
-    Returns
-    -------
-    fill_value : float
-        The fill value derived from the deepest non-NaN horizontal slice of the spatial mean.
-
-    Notes
-    -----
-    This function is particularly useful for handling the bottom levels of the data array,
-    where entire horizontal slices might be NaNs due to missing data. By computing the
-    spatial mean and selecting the deepest non-NaN slice, this function provides a fill
-    value that is representative of the bottom layer of the data.
-    """
-    # Compute spatial mean in the horizontal (latitude and longitude)
-    horizontal_mean = field.mean(
-        dim=[dims["latitude"], dims["longitude"]], skipna=True
-    ).dropna(dims["depth"])
-
-    # Find the depth index with the maximum absolute depth value (this will work whether depth is positive or negative)
-    index = np.abs(horizontal_mean[dims["depth"]]).argmax()
-
-    # Extract the corresponding fill value
-    fillvalue = horizontal_mean.isel({dims["depth"]: index}).data.squeeze().compute()
-
-    if type(fillvalue) == np.ndarray:
-        fillvalue = fillvalue.item()
-
-    return fillvalue
-
-
 def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
     """
     Perform lateral fill on an xarray DataArray using a land mask.

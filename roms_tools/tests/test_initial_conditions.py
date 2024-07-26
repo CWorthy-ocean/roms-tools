@@ -3,6 +3,9 @@ from datetime import datetime
 from roms_tools import InitialConditions, Grid, VerticalCoordinate
 import xarray as xr
 import numpy as np
+import tempfile
+import os
+import textwrap
 from roms_tools.setup.datasets import download_test_data
 
 
@@ -56,7 +59,7 @@ def test_initial_conditions_creation(initial_conditions):
     """
     assert initial_conditions.ini_time == datetime(2021, 6, 29)
     assert initial_conditions.filename == download_test_data("GLORYS_test_data.nc")
-    assert initial_conditions.source == "glorys"
+    assert initial_conditions.source == "GLORYS"
 
 
 def test_initial_conditions_ds_attribute(initial_conditions):
@@ -242,3 +245,56 @@ def test_initial_conditions_data_consistency_plot_save(initial_conditions, tmp_p
     filepath = tmp_path / "initial_conditions.nc"
     initial_conditions.save(filepath)
     assert filepath.exists()
+
+
+def test_roundtrip_yaml(initial_conditions):
+    """Test that creating an InitialConditions object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
+    try:
+        initial_conditions.to_yaml(filepath)
+
+        initial_conditions_from_file = InitialConditions.from_yaml(filepath)
+
+        assert initial_conditions == initial_conditions_from_file
+
+    finally:
+        os.remove(filepath)
+
+
+def test_from_yaml_missing_initial_conditions():
+    yaml_content = textwrap.dedent(
+        """\
+    ---
+    roms_tools_version: 0.0.0
+    ---
+    Grid:
+      nx: 100
+      ny: 100
+      size_x: 1800
+      size_y: 2400
+      center_lon: -10
+      center_lat: 61
+      rot: -20
+      topography_source: ETOPO5
+      smooth_factor: 8
+      hmin: 5.0
+      rmax: 0.2
+    """
+    )
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        yaml_filepath = tmp_file.name
+        tmp_file.write(yaml_content.encode())
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match="No InitialConditions configuration found in the YAML file.",
+        ):
+            InitialConditions.from_yaml(yaml_filepath)
+    finally:
+        os.remove(yaml_filepath)

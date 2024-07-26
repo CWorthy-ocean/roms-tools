@@ -5,6 +5,7 @@ from roms_tools import Grid, TidalForcing
 import xarray as xr
 import numpy as np
 from roms_tools.setup.datasets import download_test_data
+import textwrap
 
 
 @pytest.fixture
@@ -75,7 +76,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    tidal_forcing = TidalForcing(grid=grid, filename=fname, source="tpxo", ntides=2)
+    tidal_forcing = TidalForcing(grid=grid, filename=fname, source="TPXO", ntides=2)
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
     assert "omega" in tidal_forcing.ds
@@ -89,7 +90,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
     assert "v_Im" in tidal_forcing.ds
 
     assert tidal_forcing.filename == fname
-    assert tidal_forcing.source == "tpxo"
+    assert tidal_forcing.source == "TPXO"
     assert tidal_forcing.ntides == 2
 
 
@@ -102,7 +103,7 @@ def test_successful_initialization_with_regional_data(
     tidal_forcing = TidalForcing(
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
         filename=fname,
-        source="tpxo",
+        source="TPXO",
         ntides=10,
     )
 
@@ -118,7 +119,7 @@ def test_successful_initialization_with_regional_data(
     assert "v_Im" in tidal_forcing.ds
 
     assert tidal_forcing.filename == fname
-    assert tidal_forcing.source == "tpxo"
+    assert tidal_forcing.source == "TPXO"
     assert tidal_forcing.ntides == 10
 
 
@@ -132,7 +133,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
         TidalForcing(
             grid=grid_that_is_out_of_bounds_of_regional_tpxo_data,
             filename=fname,
-            source="tpxo",
+            source="TPXO",
             ntides=10,
         )
 
@@ -152,7 +153,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
     with pytest.raises(
         ValueError, match="Selected longitude range does not intersect with dataset"
     ):
-        TidalForcing(grid=grid, filename=fname, source="tpxo", ntides=10)
+        TidalForcing(grid=grid, filename=fname, source="TPXO", ntides=10)
 
 
 def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
@@ -161,7 +162,7 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
 
     with pytest.raises(ValueError, match="The dataset contains fewer"):
         TidalForcing(
-            grid=grid_that_straddles_dateline, filename=fname, source="tpxo", ntides=10
+            grid=grid_that_straddles_dateline, filename=fname, source="TPXO", ntides=10
         )
 
 
@@ -175,7 +176,7 @@ def tidal_forcing(
     return TidalForcing(
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
         filename=fname,
-        source="tpxo",
+        source="TPXO",
         ntides=1,
     )
 
@@ -311,3 +312,55 @@ def test_tidal_forcing_data_consistency_plot_save(tidal_forcing, tmp_path):
         assert os.path.exists(filepath)
     finally:
         os.remove(filepath)
+
+
+def test_roundtrip_yaml(tidal_forcing):
+    """Test that creating a TidalForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+
+    try:
+        tidal_forcing.to_yaml(filepath)
+
+        tidal_forcing_from_file = TidalForcing.from_yaml(filepath)
+
+        assert tidal_forcing == tidal_forcing_from_file
+
+    finally:
+        os.remove(filepath)
+
+
+def test_from_yaml_missing_tidal_forcing():
+    yaml_content = textwrap.dedent(
+        """\
+    ---
+    roms_tools_version: 0.0.0
+    ---
+    Grid:
+      nx: 100
+      ny: 100
+      size_x: 1800
+      size_y: 2400
+      center_lon: -10
+      center_lat: 61
+      rot: -20
+      topography_source: ETOPO5
+      smooth_factor: 8
+      hmin: 5.0
+      rmax: 0.2
+    """
+    )
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        yaml_filepath = tmp_file.name
+        tmp_file.write(yaml_content.encode())
+
+    try:
+        with pytest.raises(
+            ValueError, match="No TidalForcing configuration found in the YAML file."
+        ):
+            TidalForcing.from_yaml(yaml_filepath)
+    finally:
+        os.remove(yaml_filepath)

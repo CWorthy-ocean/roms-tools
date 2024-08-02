@@ -6,7 +6,7 @@ import numpy as np
 import tempfile
 import os
 import textwrap
-from roms_tools.setup.datasets import download_test_data
+from roms_tools.setup.download import download_test_data
 
 
 @pytest.fixture

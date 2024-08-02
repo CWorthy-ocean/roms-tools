@@ -4,7 +4,7 @@ import os
 from roms_tools import Grid, TidalForcing
 import xarray as xr
 import numpy as np
-from roms_tools.setup.datasets import download_test_data
+from roms_tools.setup.download import download_test_data
 import textwrap
 
 

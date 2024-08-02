@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 from roms_tools import Grid, AtmosphericForcing, SWRCorrection
-from roms_tools.setup.datasets import download_test_data
+from roms_tools.setup.download import download_test_data
 import xarray as xr
 import tempfile
 import os

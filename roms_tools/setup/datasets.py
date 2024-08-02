@@ -389,6 +389,118 @@ class Dataset:
         if (depth >= 0).all():
             self.ds[self.dim_names["depth"]] = -depth
 
+@dataclass(frozen=True, kw_only=True)
+class TPXODataset(Dataset):
+    """
+    Represents tidal data on the original grid from the TPXO dataset.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the TPXO dataset file.
+    var_names : Dict[str, str], optional
+        Dictionary of variable names required in the dataset. Defaults to:
+        {
+            "h_Re": "h_Re",
+            "h_Im": "h_Im",
+            "sal_Re": "sal_Re",
+            "sal_Im": "sal_Im",
+            "u_Re": "u_Re",
+            "u_Im": "u_Im",
+            "v_Re": "v_Re",
+            "v_Im": "v_Im",
+            "depth": "depth"
+        }
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset. Defaults to:
+        {"longitude": "ny", "latitude": "nx", "ntides": "nc"}.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
+    reference_date : datetime
+        The reference date for the TPXO data. Default is datetime(1992, 1, 1).
+    """
+
+    filename: str
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "ssh_Re": "h_Re",
+            "ssh_Im": "h_Im",
+            "sal_Re": "sal_Re",
+            "sal_Im": "sal_Im",
+            "u_Re": "u_Re",
+            "u_Im": "u_Im",
+            "v_Re": "v_Re",
+            "v_Im": "v_Im",
+            "depth": "depth",
+            }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
+    )
+    ds: xr.Dataset = field(init=False, repr=False)
+    reference_date: datetime = datetime(1992, 1, 1)
+
+    def __post_init__(self):
+        # Perform any necessary dataset initialization or modifications here
+        ds = super().load_data()
+
+        # Clean up dataset
+        ds = ds.assign_coords(
+            {
+                "omega": ds["omega"],
+                "nx": ds["lon_r"].isel(
+                    ny=0
+                ),  # lon_r is constant along ny, i.e., is only a function of nx
+                "ny": ds["lat_r"].isel(
+                    nx=0
+                ),  # lat_r is constant along nx, i.e., is only a function of ny
+            }
+        )
+        ds = ds.rename({"nx": "longitude", "ny": "latitude"})
+
+        object.__setattr__(
+            self,
+            "dim_names",
+            {
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "ntides": self.dim_names["ntides"],
+            },
+        )
+        # Select relevant fields
+        ds = super().select_relevant_fields(ds)
+
+        # Check whether the data covers the entire globe
+        is_global = self.check_if_global(ds)
+
+        if is_global:
+            ds = self.concatenate_longitudes(ds)
+
+        object.__setattr__(self, "ds", ds)
+
+    def check_number_constituents(self, ntides: int):
+        """
+        Checks if the number of constituents in the dataset is at least `ntides`.
+
+        Parameters
+        ----------
+        ntides : int
+            The required number of tidal constituents.
+
+        Raises
+        ------
+        ValueError
+            If the number of constituents in the dataset is less than `ntides`.
+        """
+        if len(self.ds[self.dim_names["ntides"]]) < ntides:
+            raise ValueError(
+                f"The dataset contains fewer than {ntides} tidal constituents."
+            )
+
+
 
 @dataclass(frozen=True, kw_only=True)
 class GLORYSDataset(Dataset):

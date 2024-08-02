@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
 from roms_tools.setup.fill import fill_and_interpolate
-from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.datasets import TPXODataset
 from roms_tools.setup.utils import (
     nan_check,
     interpolate_from_rho_to_u,
@@ -17,149 +17,6 @@ from roms_tools.setup.utils import (
 from typing import Dict, List
 import matplotlib.pyplot as plt
 
-
-@dataclass(frozen=True, kw_only=True)
-class TPXO(Dataset):
-    """
-    Represents tidal data on original grid.
-
-    Parameters
-    ----------
-    filename : str
-        The path to the TPXO dataset.
-    var_names : List[str], optional
-        List of variable names that are required in the dataset. Defaults to
-        ["h_Re", "h_Im", "sal_Re", "sal_Im", "u_Re", "u_Im", "v_Re", "v_Im"].
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset. Defaults to
-        {"longitude": "ny", "latitude": "nx"}.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing TPXO tidal model data.
-    """
-
-    filename: str
-    var_names: List[str] = field(
-        default_factory=lambda: [
-            "h_Re",
-            "h_Im",
-            "sal_Re",
-            "sal_Im",
-            "u_Re",
-            "u_Im",
-            "v_Re",
-            "v_Im",
-            "depth",
-        ]
-    )
-    dim_names: Dict[str, str] = field(
-        default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
-    )
-    ds: xr.Dataset = field(init=False, repr=False)
-
-    def __post_init__(self):
-        # Perform any necessary dataset initialization or modifications here
-        ds = super().load_data()
-
-        # Clean up dataset
-        ds = ds.assign_coords(
-            {
-                "omega": ds["omega"],
-                "nx": ds["lon_r"].isel(
-                    ny=0
-                ),  # lon_r is constant along ny, i.e., is only a function of nx
-                "ny": ds["lat_r"].isel(
-                    nx=0
-                ),  # lat_r is constant along nx, i.e., is only a function of ny
-            }
-        )
-        ds = ds.rename({"nx": "longitude", "ny": "latitude"})
-
-        object.__setattr__(
-            self,
-            "dim_names",
-            {
-                "latitude": "latitude",
-                "longitude": "longitude",
-                "ntides": self.dim_names["ntides"],
-            },
-        )
-        # Select relevant fields
-        ds = super().select_relevant_fields(ds)
-
-        # Check whether the data covers the entire globe
-        is_global = self.check_if_global(ds)
-
-        if is_global:
-            ds = self.concatenate_longitudes(ds)
-
-        object.__setattr__(self, "ds", ds)
-
-    def check_number_constituents(self, ntides: int):
-        """
-        Checks if the number of constituents in the dataset is at least `ntides`.
-
-        Parameters
-        ----------
-        ntides : int
-            The required number of tidal constituents.
-
-        Raises
-        ------
-        ValueError
-            If the number of constituents in the dataset is less than `ntides`.
-        """
-        if len(self.ds[self.dim_names["ntides"]]) < ntides:
-            raise ValueError(
-                f"The dataset contains fewer than {ntides} tidal constituents."
-            )
-
-    def get_corrected_tides(self, model_reference_date, allan_factor):
-        # Get equilibrium tides
-        tpc = compute_equilibrium_tide(self.ds["longitude"], self.ds["latitude"]).isel(
-            nc=self.ds.nc
-        )
-        # Correct for SAL
-        tsc = allan_factor * (self.ds["sal_Re"] + 1j * self.ds["sal_Im"])
-        tpc = tpc - tsc
-
-        # Elevations and transports
-        thc = self.ds["h_Re"] + 1j * self.ds["h_Im"]
-        tuc = self.ds["u_Re"] + 1j * self.ds["u_Im"]
-        tvc = self.ds["v_Re"] + 1j * self.ds["v_Im"]
-
-        # Apply correction for phases and amplitudes
-        pf, pu, aa = egbert_correction(model_reference_date)
-        pf = pf.isel(nc=self.ds.nc)
-        pu = pu.isel(nc=self.ds.nc)
-        aa = aa.isel(nc=self.ds.nc)
-
-        tpxo_reference_date = datetime(1992, 1, 1)
-        dt = (model_reference_date - tpxo_reference_date).days * 3600 * 24
-
-        thc = pf * thc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
-        tuc = pf * tuc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
-        tvc = pf * tvc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
-        tpc = pf * tpc * np.exp(1j * (self.ds["omega"] * dt + pu + aa))
-
-        tides = {
-            "ssh_Re": thc.real,
-            "ssh_Im": thc.imag,
-            "u_Re": tuc.real,
-            "u_Im": tuc.imag,
-            "v_Re": tvc.real,
-            "v_Im": tvc.imag,
-            "pot_Re": tpc.real,
-            "pot_Im": tpc.imag,
-            "omega": self.ds["omega"],
-        }
-
-        for k in tides.keys():
-            tides[k] = tides[k].rename({"nc": "ntides"})
-
-        return tides
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -204,7 +61,7 @@ class TidalForcing:
 
     def __post_init__(self):
         if self.source == "TPXO":
-            data = TPXO(filename=self.filename)
+            data = TPXODataset(filename=self.filename)
         else:
             raise ValueError('Only "TPXO" is a valid option for source.')
 
@@ -220,14 +77,9 @@ class TidalForcing:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
-        # The following consists of two steps:
-        # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
-        # We perform these two steps for two reasons:
-        # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
-        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes
-        # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
-        # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
-        # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
+        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
+        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
+        # would not be detected by the nan_check function.
         data.choose_subdomain(
             latitude_range=[lat.min().values, lat.max().values],
             longitude_range=[lon.min().values, lon.max().values],
@@ -235,7 +87,7 @@ class TidalForcing:
             straddle=straddle,
         )
 
-        tides = data.get_corrected_tides(self.model_reference_date, self.allan_factor)
+        tides = self._get_corrected_tides(data)
 
         # select desired number of constituents
         for k in tides.keys():
@@ -494,6 +346,57 @@ class TidalForcing:
         # Create and return an instance of TidalForcing
         return cls(grid=grid, **tidal_forcing_params)
 
+    def _get_corrected_tides(self, data):
+
+        # Get equilibrium tides
+        tpc = compute_equilibrium_tide(data.ds[data.dim_names["longitude"]], data.ds[data.dim_names["latitude"]])
+        tpc = tpc.isel(
+                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
+        )
+        # Correct for SAL
+        tsc = self.allan_factor * (data.ds[data.var_names["sal_Re"]] + 1j * data.ds[data.var_names["sal_Im"]])
+        tpc = tpc - tsc
+
+        # Elevations and transports
+        thc = data.ds[data.var_names["ssh_Re"]] + 1j * data.ds[data.var_names["ssh_Im"]]
+        tuc = data.ds[data.var_names["u_Re"]] + 1j * data.ds[data.var_names["u_Im"]]
+        tvc = data.ds[data.var_names["v_Re"]] + 1j * data.ds[data.var_names["v_Im"]]
+
+        # Apply correction for phases and amplitudes
+        pf, pu, aa = egbert_correction(self.model_reference_date)
+        pf = pf.isel(
+                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
+                )
+        pu = pu.isel(
+                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
+                )
+        aa = aa.isel(
+                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
+                )
+
+        dt = (self.model_reference_date - data.reference_date).days * 3600 * 24
+
+        thc = pf * thc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
+        tuc = pf * tuc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
+        tvc = pf * tvc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
+        tpc = pf * tpc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
+
+        tides = {
+            "ssh_Re": thc.real,
+            "ssh_Im": thc.imag,
+            "u_Re": tuc.real,
+            "u_Im": tuc.imag,
+            "v_Re": tvc.real,
+            "v_Im": tvc.imag,
+            "pot_Re": tpc.real,
+            "pot_Im": tpc.imag,
+            "omega": data.ds["omega"],
+        }
+
+        for k in tides.keys():
+            tides[k] = tides[k].rename({data.dim_names["ntides"]: "ntides"})
+
+        return tides
 
 def modified_julian_days(year, month, day, hour=0):
     """

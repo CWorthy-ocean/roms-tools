@@ -1,12 +1,5 @@
 import pooch
 import xarray as xr
-from dataclasses import dataclass, field
-import glob
-from datetime import datetime, timedelta
-import numpy as np
-from typing import Dict, Optional, List
-import dask
-import warnings
 
 # Create a Pooch object to manage the global topography data
 pup_data = pooch.create(

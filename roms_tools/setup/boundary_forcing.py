@@ -88,7 +88,6 @@ class BoundaryForcing:
         lat = self.grid.ds.lat_rho
         angle = self.grid.ds.angle
 
-
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
         straddle = True

@@ -158,7 +158,9 @@ def test_select_times_no_end_time(data_fixture, expected_time_values, request):
         dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        dataset = Dataset(filename=filepath, var_names={"var": "var"}, start_time=start_time)
+        dataset = Dataset(
+            filename=filepath, var_names={"var": "var"}, start_time=start_time
+        )
 
         assert dataset.ds is not None
         assert len(dataset.ds.time) == len(expected_time_values)

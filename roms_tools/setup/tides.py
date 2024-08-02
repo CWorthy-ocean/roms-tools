@@ -14,9 +14,7 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
 )
-from typing import Dict, List
 import matplotlib.pyplot as plt
-
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -349,12 +347,14 @@ class TidalForcing:
     def _get_corrected_tides(self, data):
 
         # Get equilibrium tides
-        tpc = compute_equilibrium_tide(data.ds[data.dim_names["longitude"]], data.ds[data.dim_names["latitude"]])
-        tpc = tpc.isel(
-                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
+        tpc = compute_equilibrium_tide(
+            data.ds[data.dim_names["longitude"]], data.ds[data.dim_names["latitude"]]
         )
+        tpc = tpc.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
         # Correct for SAL
-        tsc = self.allan_factor * (data.ds[data.var_names["sal_Re"]] + 1j * data.ds[data.var_names["sal_Im"]])
+        tsc = self.allan_factor * (
+            data.ds[data.var_names["sal_Re"]] + 1j * data.ds[data.var_names["sal_Im"]]
+        )
         tpc = tpc - tsc
 
         # Elevations and transports
@@ -364,15 +364,9 @@ class TidalForcing:
 
         # Apply correction for phases and amplitudes
         pf, pu, aa = egbert_correction(self.model_reference_date)
-        pf = pf.isel(
-                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
-                )
-        pu = pu.isel(
-                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
-                )
-        aa = aa.isel(
-                **{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]}
-                )
+        pf = pf.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
+        pu = pu.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
+        aa = aa.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
 
         dt = (self.model_reference_date - data.reference_date).days * 3600 * 24
 
@@ -397,6 +391,7 @@ class TidalForcing:
             tides[k] = tides[k].rename({data.dim_names["ntides"]: "ntides"})
 
         return tides
+
 
 def modified_julian_days(year, month, day, hour=0):
     """

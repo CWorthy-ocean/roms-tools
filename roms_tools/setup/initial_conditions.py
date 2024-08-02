@@ -66,10 +66,7 @@ class InitialConditions:
     def __post_init__(self):
 
         if self.source == "GLORYS":
-            data = GLORYSDataset(
-                filename=self.filename,
-                start_time=self.ini_time
-            )
+            data = GLORYSDataset(filename=self.filename, start_time=self.ini_time)
         else:
             raise ValueError('Only "GLORYS" is a valid option for source.')
 
@@ -82,10 +79,11 @@ class InitialConditions:
                     start_time=self.ini_time,
                 )
             else:
-                raise ValueError('Only "CESM_REGRIDDED" is a valid option for bgc_source.')
+                raise ValueError(
+                    'Only "CESM_REGRIDDED" is a valid option for bgc_source.'
+                )
         else:
             object.__setattr__(self, "bgc", False)
-
 
         lon = self.grid.ds.lon_rho
         lat = self.grid.ds.lat_rho
@@ -161,19 +159,26 @@ class InitialConditions:
 
         # do the same for the BGC variables if present
         if self.bgc:
-            fill_dims = [bgc_data.dim_names["latitude"], bgc_data.dim_names["longitude"]]
+            fill_dims = [
+                bgc_data.dim_names["latitude"],
+                bgc_data.dim_names["longitude"],
+            ]
 
             for var in bgc_data.var_names.values():
                 bgc_data.ds[var] = extrapolate_deepest_to_bottom(
                     bgc_data.ds[var], bgc_data.dim_names["depth"]
                 )
-            mask = xr.where(bgc_data.ds[bgc_data.var_names["PO4"]].isel(time=0).isnull(), 0, 1)
+            mask = xr.where(
+                bgc_data.ds[bgc_data.var_names["PO4"]].isel(time=0).isnull(), 0, 1
+            )
             coords = {
                 bgc_data.dim_names["latitude"]: lat,
                 bgc_data.dim_names["longitude"]: lon,
-                bgc_data.dim_names["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
+                bgc_data.dim_names["depth"]: self.vertical_coordinate.ds[
+                    "layer_depth_rho"
+                ],
             }
-            for var in bgc_varnames.keys():
+            for var in bgc_data.var_names.keys():
                 data_vars[var] = fill_and_interpolate(
                     bgc_data.ds[bgc_data.var_names[var]].astype(np.float64),
                     mask,
@@ -241,11 +246,15 @@ class InitialConditions:
         ds["w"].attrs["long_name"] = "w-flux component"
         ds["w"].attrs["units"] = "m/s"
 
-        ds["ubar"] = ubar.transpose(data.dim_names["time"], "eta_rho", "xi_u").astype(np.float32)
+        ds["ubar"] = ubar.transpose(data.dim_names["time"], "eta_rho", "xi_u").astype(
+            np.float32
+        )
         ds["ubar"].attrs["long_name"] = "vertically integrated u-flux component"
         ds["ubar"].attrs["units"] = "m/s"
 
-        ds["vbar"] = vbar.transpose(data.dim_names["time"], "eta_v", "xi_rho").astype(np.float32)
+        ds["vbar"] = vbar.transpose(data.dim_names["time"], "eta_v", "xi_rho").astype(
+            np.float32
+        )
         ds["vbar"].attrs["long_name"] = "vertically integrated v-flux component"
         ds["vbar"].attrs["units"] = "m/s"
 
@@ -253,23 +262,23 @@ class InitialConditions:
             ds["PO4"] = data_vars["PO4"].astype(np.float32)
             ds["PO4"].attrs["long_name"] = "Dissolved Inorganic Phosphate"
             ds["PO4"].attrs["units"] = "mmol/m^3"
-            
+
             ds["NO3"] = data_vars["NO3"].astype(np.float32)
             ds["NO3"].attrs["long_name"] = "Dissolved Inorganic Nitrate"
             ds["NO3"].attrs["units"] = "mmol/m^3"
-            
+
             ds["SiO3"] = data_vars["SiO3"].astype(np.float32)
             ds["SiO3"].attrs["long_name"] = "Dissolved Inorganic Silicate"
             ds["SiO3"].attrs["units"] = "mmol/m^3"
-            
+
             ds["NH4"] = data_vars["NH4"].astype(np.float32)
             ds["NH4"].attrs["long_name"] = "Dissolved Ammonia"
             ds["NH4"].attrs["units"] = "mmol/m^3"
-            
+
             ds["Fe"] = data_vars["Fe"].astype(np.float32)
             ds["Fe"].attrs["long_name"] = "Dissolved Inorganic Iron"
             ds["Fe"].attrs["units"] = "mmol/m^3"
-            
+
             ds["Lig"] = data_vars["Lig"].astype(np.float32)
             ds["Lig"].attrs["long_name"] = "Iron Binding Ligand"
             ds["Lig"].attrs["units"] = "mmol/m^3"
@@ -277,107 +286,109 @@ class InitialConditions:
             ds["O2"] = data_vars["O2"].astype(np.float32)
             ds["O2"].attrs["long_name"] = "Dissolved Oxygen"
             ds["O2"].attrs["units"] = "mmol/m^3"
-            
+
             ds["DIC"] = data_vars["DIC"].astype(np.float32)
             ds["DIC"].attrs["long_name"] = "Dissolved Inorganic Carbon"
             ds["DIC"].attrs["units"] = "mmol/m^3"
-            
+
             ds["DIC_ALT_CO2"] = data_vars["DIC_ALT_CO2"].astype(np.float32)
-            ds["DIC_ALT_CO2"].attrs["long_name"] = "Dissolved Inorganic Carbon, Alternative CO2"
+            ds["DIC_ALT_CO2"].attrs[
+                "long_name"
+            ] = "Dissolved Inorganic Carbon, Alternative CO2"
             ds["DIC_ALT_CO2"].attrs["units"] = "mmol/m^3"
-            
+
             ds["ALK"] = data_vars["ALK"].astype(np.float32)
             ds["ALK"].attrs["long_name"] = "Alkalinity"
             ds["ALK"].attrs["units"] = "meq/m^3"
-            
+
             ds["ALK_ALT_CO2"] = data_vars["ALK_ALT_CO2"].astype(np.float32)
             ds["ALK_ALT_CO2"].attrs["long_name"] = "Alkalinity, Alternative CO2"
             ds["ALK_ALT_CO2"].attrs["units"] = "meq/m^3"
-            
+
             ds["DOC"] = data_vars["DOC"].astype(np.float32)
             ds["DOC"].attrs["long_name"] = "Dissolved Organic Carbon"
             ds["DOC"].attrs["units"] = "mmol/m^3"
-            
+
             ds["DON"] = data_vars["DON"].astype(np.float32)
             ds["DON"].attrs["long_name"] = "Dissolved Organic Nitrogen"
             ds["DON"].attrs["units"] = "mmol/m^3"
-            
+
             ds["DOP"] = data_vars["DOP"].astype(np.float32)
             ds["DOP"].attrs["long_name"] = "Dissolved Organic Phosphorus"
             ds["DOP"].attrs["units"] = "mmol/m^3"
-            
+
             ds["DOPr"] = data_vars["DOPr"].astype(np.float32)
             ds["DOPr"].attrs["long_name"] = "Refractory Dissolved Organic Phosphorus"
             ds["DOPr"].attrs["units"] = "mmol/m^3"
-            
+
             ds["DONr"] = data_vars["DONr"].astype(np.float32)
             ds["DONr"].attrs["long_name"] = "Refractory Dissolved Organic Nitrogen"
             ds["DONr"].attrs["units"] = "mmol/m^3"
-            
+
             ds["DOCr"] = data_vars["DOCr"].astype(np.float32)
             ds["DOCr"].attrs["long_name"] = "Refractory Dissolved Organic Carbon"
             ds["DOCr"].attrs["units"] = "mmol/m^3"
-            
+
             ds["zooC"] = data_vars["zooC"].astype(np.float32)
             ds["zooC"].attrs["long_name"] = "Zooplankton Carbon"
             ds["zooC"].attrs["units"] = "mmol/m^3"
-            
+
             ds["spChl"] = data_vars["spChl"].astype(np.float32)
             ds["spChl"].attrs["long_name"] = "Small Phytoplankton Chlorophyll"
             ds["spChl"].attrs["units"] = "mg/m^3"
-            
+
             ds["spC"] = data_vars["spC"].astype(np.float32)
             ds["spC"].attrs["long_name"] = "Small Phytoplankton Carbon"
             ds["spC"].attrs["units"] = "mmol/m^3"
-            
+
             ds["spC"] = data_vars["spC"].astype(np.float32)
             ds["spC"].attrs["long_name"] = "Small Phytoplankton Carbon"
             ds["spC"].attrs["units"] = "mmol/m^3"
-            
+
             ds["spP"] = data_vars["spP"].astype(np.float32)
             ds["spP"].attrs["long_name"] = "Small Phytoplankton Phosphorous"
             ds["spP"].attrs["units"] = "mmol/m^3"
-            
+
             ds["spFe"] = data_vars["spFe"].astype(np.float32)
             ds["spFe"].attrs["long_name"] = "Small Phytoplankton Iron"
             ds["spFe"].attrs["units"] = "mmol/m^3"
-            
+
             ds["spCaCO3"] = data_vars["spCaCO3"].astype(np.float32)
             ds["spCaCO3"].attrs["long_name"] = "Small Phytoplankton CaCO3"
             ds["spCaCO3"].attrs["units"] = "mmol/m^3"
-            
+
             ds["diatChl"] = data_vars["diatChl"].astype(np.float32)
             ds["diatChl"].attrs["long_name"] = "Diatom Chlorophyll"
             ds["diatChl"].attrs["units"] = "mg/m^3"
-            
+
             ds["diatC"] = data_vars["diatC"].astype(np.float32)
             ds["diatC"].attrs["long_name"] = "Diatom Carbon"
             ds["diatC"].attrs["units"] = "mmol/m^3"
-            
+
             ds["diatP"] = data_vars["diatP"].astype(np.float32)
             ds["diatP"].attrs["long_name"] = "Diatom Phosphorus"
             ds["diatP"].attrs["units"] = "mmol/m^3"
-            
+
             ds["diatFe"] = data_vars["diatFe"].astype(np.float32)
             ds["diatFe"].attrs["long_name"] = "Diatom Iron"
             ds["diatFe"].attrs["units"] = "mmol/m^3"
-            
+
             ds["diatSi"] = data_vars["diatSi"].astype(np.float32)
             ds["diatSi"].attrs["long_name"] = "Diatom Silicate"
             ds["diatSi"].attrs["units"] = "mmol/m^3"
-            
+
             ds["diazChl"] = data_vars["diazChl"].astype(np.float32)
             ds["diazChl"].attrs["long_name"] = "Diazotroph Chlorophyll"
             ds["diazChl"].attrs["units"] = "mg/m^3"
-            
+
             ds["diazC"] = data_vars["diazC"].astype(np.float32)
             ds["diazC"].attrs["long_name"] = "Diazotroph Carbon"
             ds["diazC"].attrs["units"] = "mmol/m^3"
-            
+
             ds["diazP"] = data_vars["diazP"].astype(np.float32)
             ds["diazP"].attrs["long_name"] = "Diazotroph Phosphorus"
             ds["diazP"].attrs["units"] = "mmol/m^3"
-            
+
             ds["diazFe"] = data_vars["diazFe"].astype(np.float32)
             ds["diazFe"].attrs["long_name"] = "Diazotroph Iron"
             ds["diazFe"].attrs["units"] = "mmol/m^3"

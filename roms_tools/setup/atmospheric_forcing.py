@@ -432,6 +432,7 @@ class AtmosphericForcing:
                 start_time=self.start_time,
                 end_time=self.end_time,
             )
+            data.post_process()
         else:
             raise ValueError('Only "ERA5" is a valid option for source.')
 
@@ -474,46 +475,14 @@ class AtmosphericForcing:
         mask = xr.where(data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1)
 
         # Fill and interpolate each variable
-        for var in data.var_names.keys():
-            if var != "mask":
-                data_vars[var] = fill_and_interpolate(
-                    data.ds[data.var_names[var]],
-                    mask,
-                    list(coords.keys()),
-                    coords,
-                    method="linear",
-                )
-
-        # Access the interpolated variables using data_vars dictionary
-        u10 = data_vars["u10"]
-        v10 = data_vars["v10"]
-        swr = data_vars["swr"]
-        lwr = data_vars["lwr"]
-        t2m = data_vars["t2m"]
-        d2m = data_vars["d2m"]
-        rain = data_vars["rain"]
-
-        if self.source == "ERA5":
-            # translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
-            swr = swr / 3600  # from J/m^2 to W/m^2
-            lwr = lwr / 3600  # from J/m^2 to W/m^2
-            rain = rain * 100 * 24  # from m to cm/day
-            # convert from K to C
-            t2m = t2m - 273.15
-            d2m = d2m - 273.15
-            # relative humidity fraction
-            qair = np.exp((17.625 * d2m) / (243.04 + d2m)) / np.exp(
-                (17.625 * t2m) / (243.04 + t2m)
+        for var in ["u10", "v10", "swr", "lwr", "t2m", "qair", "rain"]:
+            data_vars[var] = fill_and_interpolate(
+                data.ds[data.var_names[var]],
+                mask,
+                list(coords.keys()),
+                coords,
+                method="linear",
             )
-            # convert relative to absolute humidity assuming constant pressure
-            patm = 1010.0
-            cff = (
-                (1.0007 + 3.46e-6 * patm)
-                * 6.1121
-                * np.exp(17.502 * t2m / (240.97 + t2m))
-            )
-            cff = cff * qair
-            qair = 0.62197 * (cff / (patm - 0.378 * cff))
 
         # correct shortwave radiation
         if self.swr_correction:
@@ -546,10 +515,9 @@ class AtmosphericForcing:
 
             # temporal interpolation
             corr_factor = self.swr_correction._interpolate_temporally(
-                corr_factor, time=swr.time
+                corr_factor, time=data_vars["swr"].time
             )
-
-            swr = corr_factor * swr
+            data_vars["swr"] = data_vars["swr"] * corr_factor
 
         if self.rivers:
             NotImplementedError("River forcing is not implemented yet.")
@@ -558,35 +526,39 @@ class AtmosphericForcing:
         # save in new dataset
         ds = xr.Dataset()
 
-        ds["uwnd"] = (u10 * np.cos(angle) + v10 * np.sin(angle)).astype(
+        ds["uwnd"] = (
+            data_vars["u10"] * np.cos(angle) + data_vars["v10"] * np.sin(angle)
+        ).astype(
             np.float32
         )  # rotate to grid orientation
         ds["uwnd"].attrs["long_name"] = "10 meter wind in x-direction"
         ds["uwnd"].attrs["units"] = "m/s"
 
-        ds["vwnd"] = (v10 * np.cos(angle) - u10 * np.sin(angle)).astype(
+        ds["vwnd"] = (
+            data_vars["v10"] * np.cos(angle) - data_vars["u10"] * np.sin(angle)
+        ).astype(
             np.float32
         )  # rotate to grid orientation
         ds["vwnd"].attrs["long_name"] = "10 meter wind in y-direction"
         ds["vwnd"].attrs["units"] = "m/s"
 
-        ds["swrad"] = swr.astype(np.float32)
+        ds["swrad"] = data_vars["swr"].astype(np.float32)
         ds["swrad"].attrs["long_name"] = "Downward short-wave (solar) radiation"
         ds["swrad"].attrs["units"] = "W/m^2"
 
-        ds["lwrad"] = lwr.astype(np.float32)
+        ds["lwrad"] = data_vars["lwr"].astype(np.float32)
         ds["lwrad"].attrs["long_name"] = "Downward long-wave (thermal) radiation"
         ds["lwrad"].attrs["units"] = "W/m^2"
 
-        ds["Tair"] = t2m.astype(np.float32)
+        ds["Tair"] = data_vars["t2m"].astype(np.float32)
         ds["Tair"].attrs["long_name"] = "Air temperature at 2m"
         ds["Tair"].attrs["units"] = "degrees C"
 
-        ds["qair"] = qair.astype(np.float32)
+        ds["qair"] = data_vars["qair"].astype(np.float32)
         ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
         ds["qair"].attrs["units"] = "kg/kg"
 
-        ds["rain"] = rain.astype(np.float32)
+        ds["rain"] = data_vars["rain"].astype(np.float32)
         ds["rain"].attrs["long_name"] = "Total precipitation"
         ds["rain"].attrs["units"] = "cm/day"
 

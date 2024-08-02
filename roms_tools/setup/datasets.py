@@ -1,10 +1,9 @@
-import pooch
 import xarray as xr
 from dataclasses import dataclass, field
 import glob
 from datetime import datetime, timedelta
 import numpy as np
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 import dask
 import warnings
 
@@ -155,7 +154,9 @@ class Dataset:
             If `ds` does not contain all variables listed in `self.var_names`.
 
         """
-        missing_vars = [var for var in self.var_names.values() if var not in ds.data_vars]
+        missing_vars = [
+            var for var in self.var_names.values() if var not in ds.data_vars
+        ]
         if missing_vars:
             raise ValueError(
                 f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
@@ -189,7 +190,7 @@ class Dataset:
         """
 
         time_dim = self.dim_names["time"]
-        
+
         if time_dim in ds.dims:
             if time_dim in ds.coords or time_dim in ds.data_vars:
                 if not self.end_time:
@@ -203,7 +204,9 @@ class Dataset:
                 ds = ds.where(times, drop=True)
 
             else:
-                warnings.warn(f"Dataset at {self.filename} does not contain any time information.")
+                warnings.warn(
+                    f"Dataset at {self.filename} does not contain any time information."
+                )
             if not ds.sizes[time_dim]:
                 raise ValueError("No matching times found.")
             if not self.end_time:
@@ -213,8 +216,9 @@ class Dataset:
                         f"There must be exactly one time matching the start_time. Found {found_times} matching times."
                     )
         else:
-            warnings.warn(f"Time dimension '{time_dim}' not found in dataset. Assuming the file consists of a single time slice.")
-
+            warnings.warn(
+                f"Time dimension '{time_dim}' not found in dataset. Assuming the file consists of a single time slice."
+            )
 
         return ds
 
@@ -389,6 +393,7 @@ class Dataset:
         if (depth >= 0).all():
             self.ds[self.dim_names["depth"]] = -depth
 
+
 @dataclass(frozen=True, kw_only=True)
 class TPXODataset(Dataset):
     """
@@ -435,7 +440,7 @@ class TPXODataset(Dataset):
             "v_Re": "v_Re",
             "v_Im": "v_Im",
             "depth": "depth",
-            }
+        }
     )
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
@@ -501,7 +506,6 @@ class TPXODataset(Dataset):
             )
 
 
-
 @dataclass(frozen=True, kw_only=True)
 class GLORYSDataset(Dataset):
     """
@@ -527,20 +531,24 @@ class GLORYSDataset(Dataset):
         The xarray Dataset containing the GLORYS data on its original grid.
     """
 
-    var_names: Dict[str, str] = field(default_factory=lambda: {
-        "temp": "thetao",
-        "salt": "so",
-        "u": "uo",
-        "v": "vo",
-        "ssh": "zos",
-    })
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "temp": "thetao",
+            "salt": "so",
+            "u": "uo",
+            "v": "vo",
+            "ssh": "zos",
+        }
+    )
 
-    dim_names: Dict[str, str] = field(default_factory=lambda: {
-        "longitude": "longitude",
-        "latitude": "latitude",
-        "depth": "depth",
-        "time": "time",
-    })
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "depth": "depth",
+            "time": "time",
+        }
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -568,48 +576,51 @@ class CESMBGCDataset(Dataset):
         The xarray Dataset containing the GLORYS data on its original grid.
     """
 
-    var_names: Dict[str, str] = field(default_factory=lambda: {
-        "PO4": "PO4",
-        "NO3": "NO3",
-        "SiO3": "SiO3", 
-        'NH4': 'NH4', 
-        'Fe': 'Fe', 
-        'Lig': 'Lig', 
-        'O2': 'O2', 
-        'DIC': 'DIC', 
-        'DIC_ALT_CO2': 'DIC_ALT_CO2', 
-        'ALK': 'ALK', 
-        'ALK_ALT_CO2': 'ALK_ALT_CO2',
-        'DOC': 'DOC', 
-        'DON': 'DON', 
-        'DOP': 'DOP', 
-        'DOPr': 'DOPr', 
-        'DONr': 'DONr', 
-        'DOCr': 'DOCr', 
-        'spChl': 'spChl', 
-        'spC': 'spC', 
-        'spP': 'spP', 
-        'spFe': 'spFe',
-        'diatChl': 'diatChl', 
-        'diatC': 'diatC', 
-        'diatP': 'diatP', 
-        'diatFe': 'diatFe', 
-        'diatSi': 'diatSi', 
-        'diazChl': 'diazChl', 
-        'diazC': 'diazC', 
-        'diazP': 'diazP', 
-        'diazFe': 'diazFe',
-        'spCaCO3': 'spCaCO3', 
-        'zooC': 'zooC'
-    })
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "SiO3",
+            "NH4": "NH4",
+            "Fe": "Fe",
+            "Lig": "Lig",
+            "O2": "O2",
+            "DIC": "DIC",
+            "DIC_ALT_CO2": "DIC_ALT_CO2",
+            "ALK": "ALK",
+            "ALK_ALT_CO2": "ALK_ALT_CO2",
+            "DOC": "DOC",
+            "DON": "DON",
+            "DOP": "DOP",
+            "DOPr": "DOPr",
+            "DONr": "DONr",
+            "DOCr": "DOCr",
+            "spChl": "spChl",
+            "spC": "spC",
+            "spP": "spP",
+            "spFe": "spFe",
+            "diatChl": "diatChl",
+            "diatC": "diatC",
+            "diatP": "diatP",
+            "diatFe": "diatFe",
+            "diatSi": "diatSi",
+            "diazChl": "diazChl",
+            "diazC": "diazC",
+            "diazP": "diazP",
+            "diazFe": "diazFe",
+            "spCaCO3": "spCaCO3",
+            "zooC": "zooC",
+        }
+    )
 
-    dim_names: Dict[str, str] = field(default_factory=lambda: {
-        "longitude": "lon",
-        "latitude": "lat",
-        "depth": "z_t",
-        "time": "time",
-    })
-
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "z_t",
+            "time": "time",
+        }
+    )
 
     #   bgc_units = {
     #       "PO4": "mmol/m3",
@@ -671,20 +682,70 @@ class ERA5Dataset(Dataset):
         The xarray Dataset containing the GLORYS data on its original grid.
     """
 
-    var_names: Dict[str, str] = field(default_factory=lambda: {
-        "u10": "u10",
-        "v10": "v10",
-        "swr": "ssr",
-        "lwr": "strd",
-        "t2m": "t2m",
-        "d2m": "d2m",
-        "rain": "tp",
-        "mask": "sst",
-    })
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "u10": "u10",
+            "v10": "v10",
+            "swr": "ssr",
+            "lwr": "strd",
+            "t2m": "t2m",
+            "d2m": "d2m",
+            "rain": "tp",
+            "mask": "sst",
+        }
+    )
 
-    dim_names: Dict[str, str] = field(default_factory=lambda: {
-        "longitude": "longitude",
-        "latitude": "latitude",
-        "time": "time",
-    })
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "time": "time",
+        }
+    )
 
+    def post_process(self):
+        """
+        Processes and converts ERA5 data values as follows:
+        - Convert radiation values from J/m^2 to W/m^2.
+        - Convert rainfall from meters to cm/day.
+        - Convert temperature from Kelvin to Celsius.
+        - Compute relative humidity if not present, convert to absolute humidity.
+        """
+        # Translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
+        # Convert radiation from J/m^2 to W/m^2
+        self.ds[self.var_names["swr"]] /= 3600
+        self.ds[self.var_names["lwr"]] /= 3600
+
+        # Convert rainfall from m to cm/day
+        self.ds[self.var_names["rain"]] *= 100 * 24
+
+        # Convert temperature from Kelvin to Celsius
+        self.ds[self.var_names["t2m"]] -= 273.15
+        self.ds[self.var_names["d2m"]] -= 273.15
+
+        # Compute relative humidity if not present
+        if "qair" not in self.ds.data_vars:
+            qair = np.exp(
+                (17.625 * self.ds[self.var_names["d2m"]])
+                / (243.04 + self.ds[self.var_names["d2m"]])
+            ) / np.exp(
+                (17.625 * self.ds[self.var_names["t2m"]])
+                / (243.04 + self.ds[self.var_names["t2m"]])
+            )
+            # Convert relative to absolute humidity
+            patm = 1010.0
+            cff = (
+                (1.0007 + 3.46e-6 * patm)
+                * 6.1121
+                * np.exp(
+                    17.502
+                    * self.ds[self.var_names["t2m"]]
+                    / (240.97 + self.ds[self.var_names["t2m"]])
+                )
+            )
+            cff = cff * qair
+            self.ds["qair"] = 0.62197 * (cff / (patm - 0.378 * cff))
+
+            # Update var_names dictionary
+            var_names = {**self.var_names, "qair": "qair"}
+            object.__setattr__(self, "var_names", var_names)

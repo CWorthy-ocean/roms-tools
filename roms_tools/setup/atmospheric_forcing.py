@@ -9,7 +9,7 @@ import glob
 import numpy as np
 from typing import Optional, Dict
 from roms_tools.setup.fill import fill_and_interpolate
-from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.datasets import ERA5Dataset
 from roms_tools.setup.utils import nan_check
 from roms_tools.setup.plot import _plot
 import calendar
@@ -426,29 +426,14 @@ class AtmosphericForcing:
 
     def __post_init__(self):
 
-        # Check that the source is "ERA5"
-        if self.source != "ERA5":
-            raise ValueError('Only "ERA5" is a valid option for source.')
         if self.source == "ERA5":
-            dims = {"longitude": "longitude", "latitude": "latitude", "time": "time"}
-            varnames = {
-                "u10": "u10",
-                "v10": "v10",
-                "swr": "ssr",
-                "lwr": "strd",
-                "t2m": "t2m",
-                "d2m": "d2m",
-                "rain": "tp",
-                "mask": "sst",
-            }
-
-        data = Dataset(
-            filename=self.filename,
-            start_time=self.start_time,
-            end_time=self.end_time,
-            var_names=varnames.values(),
-            dim_names=dims,
-        )
+            data = ERA5Dataset(
+                filename=self.filename,
+                start_time=self.start_time,
+                end_time=self.end_time,
+            )
+        else:
+            raise ValueError('Only "ERA5" is a valid option for source.')
 
         if self.use_coarse_grid:
             if "lon_coarse" not in self.grid.ds:
@@ -487,17 +472,17 @@ class AtmosphericForcing:
         )
 
         # interpolate onto desired grid
-        coords = {dims["latitude"]: lat, dims["longitude"]: lon}
+        coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
 
         data_vars = {}
 
-        mask = xr.where(data.ds[varnames["mask"]].isel(time=0).isnull(), 0, 1)
+        mask = xr.where(data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1)
 
         # Fill and interpolate each variable
-        for var in varnames.keys():
+        for var in data.var_names.keys():
             if var != "mask":
                 data_vars[var] = fill_and_interpolate(
-                    data.ds[varnames[var]],
+                    data.ds[data.var_names[var]],
                     mask,
                     list(coords.keys()),
                     coords,
@@ -634,8 +619,8 @@ class AtmosphericForcing:
         else:
             mask_roms = self.grid.ds["mask_rho"]
 
-        if dims["time"] != "time":
-            ds = ds.rename({dims["time"]: "time"})
+        if data.dim_names["time"] != "time":
+            ds = ds.rename({data.dim_names["time"]: "time"})
 
         # Preserve the original time coordinate for readability
         ds = ds.assign_coords({"absolute_time": ds["time"]})

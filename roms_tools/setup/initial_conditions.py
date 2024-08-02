@@ -3,10 +3,11 @@ import numpy as np
 import yaml
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
+from typing import Optional
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
-from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.utils import (
     nan_check,
@@ -37,11 +38,17 @@ class InitialConditions:
         Source of the initial condition data. Default is "GLORYS".
     filename: str
         Path to the source data file. Can contain wildcards.
+    bgc_source : Optional[str], optional
+        Source of the biogeochemical (BGC) initial condition data. Default is None.
+    bgc_filename : Optional[str], optional
+        Path to the BGC data file. Can contain wildcards. Default is None.
 
     Attributes
     ----------
     ds : xr.Dataset
         Xarray Dataset containing the initial condition data.
+    bgc : bool
+        Indicates whether biogeochemical data is included.
 
     """
 
@@ -51,35 +58,34 @@ class InitialConditions:
     model_reference_date: datetime = datetime(2000, 1, 1)
     source: str = "GLORYS"
     filename: str
+    bgc_source: Optional[str] = None
+    bgc_filename: Optional[str] = None
+    bgc: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
 
-        # Check that the source is "GLORYS"
-        if self.source != "GLORYS":
-            raise ValueError('Only "GLORYS" is a valid option for source.')
         if self.source == "GLORYS":
-            dims = {
-                "longitude": "longitude",
-                "latitude": "latitude",
-                "depth": "depth",
-                "time": "time",
-            }
+            data = GLORYSDataset(
+                filename=self.filename,
+                start_time=self.ini_time
+            )
+        else:
+            raise ValueError('Only "GLORYS" is a valid option for source.')
 
-            varnames = {
-                "temp": "thetao",
-                "salt": "so",
-                "u": "uo",
-                "v": "vo",
-                "ssh": "zos",
-            }
+        if self.bgc_source is not None:
+            object.__setattr__(self, "bgc", True)
+            if self.bgc_source == "CESM_REGRIDDED":
 
-        data = Dataset(
-            filename=self.filename,
-            start_time=self.ini_time,
-            var_names=varnames.values(),
-            dim_names=dims,
-        )
+                bgc_data = CESMBGCDataset(
+                    filename=self.bgc_filename,
+                    start_time=self.ini_time,
+                )
+            else:
+                raise ValueError('Only "CESM_REGRIDDED" is a valid option for bgc_source.')
+        else:
+            object.__setattr__(self, "bgc", False)
+
 
         lon = self.grid.ds.lon_rho
         lat = self.grid.ds.lat_rho
@@ -92,30 +98,32 @@ class InitialConditions:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
-        # The following consists of two steps:
-        # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
-        # We perform these two steps for two reasons:
-        # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
-        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes
-        # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
-        # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
-        # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
+        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
+        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
+        # would not be detected by the nan_check function.
         data.choose_subdomain(
             latitude_range=[lat.min().values, lat.max().values],
             longitude_range=[lon.min().values, lon.max().values],
             margin=2,
             straddle=straddle,
         )
+        if self.bgc:
+            bgc_data.choose_subdomain(
+                latitude_range=[lat.min().values, lat.max().values],
+                longitude_range=[lon.min().values, lon.max().values],
+                margin=2,
+                straddle=straddle,
+            )
 
         # interpolate onto desired grid
-        fill_dims = [dims["latitude"], dims["longitude"]]
+        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
 
         # 2d interpolation
-        mask = xr.where(data.ds[varnames["ssh"]].isel(time=0).isnull(), 0, 1)
-        coords = {dims["latitude"]: lat, dims["longitude"]: lon}
+        mask = xr.where(data.ds[data.var_names["ssh"]].isel(time=0).isnull(), 0, 1)
+        coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
 
         ssh = fill_and_interpolate(
-            data.ds[varnames["ssh"]].astype(np.float64),
+            data.ds[data.var_names["ssh"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -126,24 +134,24 @@ class InitialConditions:
 
         # extrapolate deepest value all the way to bottom ("flooding")
         for var in ["temp", "salt", "u", "v"]:
-            data.ds[varnames[var]] = extrapolate_deepest_to_bottom(
-                data.ds[varnames[var]], dims["depth"]
+            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+                data.ds[data.var_names[var]], data.dim_names["depth"]
             )
-
-        mask = xr.where(data.ds[varnames["temp"]].isel(time=0).isnull(), 0, 1)
+        mask = xr.where(data.ds[data.var_names["temp"]].isel(time=0).isnull(), 0, 1)
         coords = {
-            dims["latitude"]: lat,
-            dims["longitude"]: lon,
-            dims["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
+            data.dim_names["latitude"]: lat,
+            data.dim_names["longitude"]: lon,
+            data.dim_names["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
         }
 
         # setting fillvalue_interp to None means that we allow extrapolation in the
         # interpolation step to avoid NaNs at the surface if the lowest depth in original
         # data is greater than zero
         data_vars = {}
+
         for var in ["temp", "salt", "u", "v"]:
             data_vars[var] = fill_and_interpolate(
-                data.ds[varnames[var]].astype(np.float64),
+                data.ds[data.var_names[var]].astype(np.float64),
                 mask,
                 fill_dims=fill_dims,
                 coords=coords,
@@ -151,7 +159,31 @@ class InitialConditions:
                 fillvalue_interp=None,
             )
 
-        # rotate to grid orientation
+        # do the same for the BGC variables if present
+        if self.bgc:
+            fill_dims = [bgc_data.dim_names["latitude"], bgc_data.dim_names["longitude"]]
+
+            for var in bgc_data.var_names.values():
+                bgc_data.ds[var] = extrapolate_deepest_to_bottom(
+                    bgc_data.ds[var], bgc_data.dim_names["depth"]
+                )
+            mask = xr.where(bgc_data.ds[bgc_data.var_names["PO4"]].isel(time=0).isnull(), 0, 1)
+            coords = {
+                bgc_data.dim_names["latitude"]: lat,
+                bgc_data.dim_names["longitude"]: lon,
+                bgc_data.dim_names["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
+            }
+            for var in bgc_varnames.keys():
+                data_vars[var] = fill_and_interpolate(
+                    bgc_data.ds[bgc_data.var_names[var]].astype(np.float64),
+                    mask,
+                    fill_dims=fill_dims,
+                    coords=coords,
+                    method="linear",
+                    fillvalue_interp=None,
+                )
+
+        # rotate velocities to grid orientation
         u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
         v_rot = data_vars["v"] * np.cos(angle) - data_vars["u"] * np.sin(angle)
 
@@ -203,19 +235,152 @@ class InitialConditions:
         # initialize vertical velocity to zero
         ds["w"] = xr.zeros_like(
             self.vertical_coordinate.ds["interface_depth_rho"].expand_dims(
-                time=ds[dims["time"]]
+                time=ds[data.dim_names["time"]]
             )
         ).astype(np.float32)
         ds["w"].attrs["long_name"] = "w-flux component"
         ds["w"].attrs["units"] = "m/s"
 
-        ds["ubar"] = ubar.transpose(dims["time"], "eta_rho", "xi_u").astype(np.float32)
+        ds["ubar"] = ubar.transpose(data.dim_names["time"], "eta_rho", "xi_u").astype(np.float32)
         ds["ubar"].attrs["long_name"] = "vertically integrated u-flux component"
         ds["ubar"].attrs["units"] = "m/s"
 
-        ds["vbar"] = vbar.transpose(dims["time"], "eta_v", "xi_rho").astype(np.float32)
+        ds["vbar"] = vbar.transpose(data.dim_names["time"], "eta_v", "xi_rho").astype(np.float32)
         ds["vbar"].attrs["long_name"] = "vertically integrated v-flux component"
         ds["vbar"].attrs["units"] = "m/s"
+
+        if self.bgc:
+            ds["PO4"] = data_vars["PO4"].astype(np.float32)
+            ds["PO4"].attrs["long_name"] = "Dissolved Inorganic Phosphate"
+            ds["PO4"].attrs["units"] = "mmol/m^3"
+            
+            ds["NO3"] = data_vars["NO3"].astype(np.float32)
+            ds["NO3"].attrs["long_name"] = "Dissolved Inorganic Nitrate"
+            ds["NO3"].attrs["units"] = "mmol/m^3"
+            
+            ds["SiO3"] = data_vars["SiO3"].astype(np.float32)
+            ds["SiO3"].attrs["long_name"] = "Dissolved Inorganic Silicate"
+            ds["SiO3"].attrs["units"] = "mmol/m^3"
+            
+            ds["NH4"] = data_vars["NH4"].astype(np.float32)
+            ds["NH4"].attrs["long_name"] = "Dissolved Ammonia"
+            ds["NH4"].attrs["units"] = "mmol/m^3"
+            
+            ds["Fe"] = data_vars["Fe"].astype(np.float32)
+            ds["Fe"].attrs["long_name"] = "Dissolved Inorganic Iron"
+            ds["Fe"].attrs["units"] = "mmol/m^3"
+            
+            ds["Lig"] = data_vars["Lig"].astype(np.float32)
+            ds["Lig"].attrs["long_name"] = "Iron Binding Ligand"
+            ds["Lig"].attrs["units"] = "mmol/m^3"
+
+            ds["O2"] = data_vars["O2"].astype(np.float32)
+            ds["O2"].attrs["long_name"] = "Dissolved Oxygen"
+            ds["O2"].attrs["units"] = "mmol/m^3"
+            
+            ds["DIC"] = data_vars["DIC"].astype(np.float32)
+            ds["DIC"].attrs["long_name"] = "Dissolved Inorganic Carbon"
+            ds["DIC"].attrs["units"] = "mmol/m^3"
+            
+            ds["DIC_ALT_CO2"] = data_vars["DIC_ALT_CO2"].astype(np.float32)
+            ds["DIC_ALT_CO2"].attrs["long_name"] = "Dissolved Inorganic Carbon, Alternative CO2"
+            ds["DIC_ALT_CO2"].attrs["units"] = "mmol/m^3"
+            
+            ds["ALK"] = data_vars["ALK"].astype(np.float32)
+            ds["ALK"].attrs["long_name"] = "Alkalinity"
+            ds["ALK"].attrs["units"] = "meq/m^3"
+            
+            ds["ALK_ALT_CO2"] = data_vars["ALK_ALT_CO2"].astype(np.float32)
+            ds["ALK_ALT_CO2"].attrs["long_name"] = "Alkalinity, Alternative CO2"
+            ds["ALK_ALT_CO2"].attrs["units"] = "meq/m^3"
+            
+            ds["DOC"] = data_vars["DOC"].astype(np.float32)
+            ds["DOC"].attrs["long_name"] = "Dissolved Organic Carbon"
+            ds["DOC"].attrs["units"] = "mmol/m^3"
+            
+            ds["DON"] = data_vars["DON"].astype(np.float32)
+            ds["DON"].attrs["long_name"] = "Dissolved Organic Nitrogen"
+            ds["DON"].attrs["units"] = "mmol/m^3"
+            
+            ds["DOP"] = data_vars["DOP"].astype(np.float32)
+            ds["DOP"].attrs["long_name"] = "Dissolved Organic Phosphorus"
+            ds["DOP"].attrs["units"] = "mmol/m^3"
+            
+            ds["DOPr"] = data_vars["DOPr"].astype(np.float32)
+            ds["DOPr"].attrs["long_name"] = "Refractory Dissolved Organic Phosphorus"
+            ds["DOPr"].attrs["units"] = "mmol/m^3"
+            
+            ds["DONr"] = data_vars["DONr"].astype(np.float32)
+            ds["DONr"].attrs["long_name"] = "Refractory Dissolved Organic Nitrogen"
+            ds["DONr"].attrs["units"] = "mmol/m^3"
+            
+            ds["DOCr"] = data_vars["DOCr"].astype(np.float32)
+            ds["DOCr"].attrs["long_name"] = "Refractory Dissolved Organic Carbon"
+            ds["DOCr"].attrs["units"] = "mmol/m^3"
+            
+            ds["zooC"] = data_vars["zooC"].astype(np.float32)
+            ds["zooC"].attrs["long_name"] = "Zooplankton Carbon"
+            ds["zooC"].attrs["units"] = "mmol/m^3"
+            
+            ds["spChl"] = data_vars["spChl"].astype(np.float32)
+            ds["spChl"].attrs["long_name"] = "Small Phytoplankton Chlorophyll"
+            ds["spChl"].attrs["units"] = "mg/m^3"
+            
+            ds["spC"] = data_vars["spC"].astype(np.float32)
+            ds["spC"].attrs["long_name"] = "Small Phytoplankton Carbon"
+            ds["spC"].attrs["units"] = "mmol/m^3"
+            
+            ds["spC"] = data_vars["spC"].astype(np.float32)
+            ds["spC"].attrs["long_name"] = "Small Phytoplankton Carbon"
+            ds["spC"].attrs["units"] = "mmol/m^3"
+            
+            ds["spP"] = data_vars["spP"].astype(np.float32)
+            ds["spP"].attrs["long_name"] = "Small Phytoplankton Phosphorous"
+            ds["spP"].attrs["units"] = "mmol/m^3"
+            
+            ds["spFe"] = data_vars["spFe"].astype(np.float32)
+            ds["spFe"].attrs["long_name"] = "Small Phytoplankton Iron"
+            ds["spFe"].attrs["units"] = "mmol/m^3"
+            
+            ds["spCaCO3"] = data_vars["spCaCO3"].astype(np.float32)
+            ds["spCaCO3"].attrs["long_name"] = "Small Phytoplankton CaCO3"
+            ds["spCaCO3"].attrs["units"] = "mmol/m^3"
+            
+            ds["diatChl"] = data_vars["diatChl"].astype(np.float32)
+            ds["diatChl"].attrs["long_name"] = "Diatom Chlorophyll"
+            ds["diatChl"].attrs["units"] = "mg/m^3"
+            
+            ds["diatC"] = data_vars["diatC"].astype(np.float32)
+            ds["diatC"].attrs["long_name"] = "Diatom Carbon"
+            ds["diatC"].attrs["units"] = "mmol/m^3"
+            
+            ds["diatP"] = data_vars["diatP"].astype(np.float32)
+            ds["diatP"].attrs["long_name"] = "Diatom Phosphorus"
+            ds["diatP"].attrs["units"] = "mmol/m^3"
+            
+            ds["diatFe"] = data_vars["diatFe"].astype(np.float32)
+            ds["diatFe"].attrs["long_name"] = "Diatom Iron"
+            ds["diatFe"].attrs["units"] = "mmol/m^3"
+            
+            ds["diatSi"] = data_vars["diatSi"].astype(np.float32)
+            ds["diatSi"].attrs["long_name"] = "Diatom Silicate"
+            ds["diatSi"].attrs["units"] = "mmol/m^3"
+            
+            ds["diazChl"] = data_vars["diazChl"].astype(np.float32)
+            ds["diazChl"].attrs["long_name"] = "Diazotroph Chlorophyll"
+            ds["diazChl"].attrs["units"] = "mg/m^3"
+            
+            ds["diazC"] = data_vars["diazC"].astype(np.float32)
+            ds["diazC"].attrs["long_name"] = "Diazotroph Carbon"
+            ds["diazC"].attrs["units"] = "mmol/m^3"
+            
+            ds["diazP"] = data_vars["diazP"].astype(np.float32)
+            ds["diazP"].attrs["long_name"] = "Diazotroph Phosphorus"
+            ds["diazP"].attrs["units"] = "mmol/m^3"
+            
+            ds["diazFe"] = data_vars["diazFe"].astype(np.float32)
+            ds["diazFe"].attrs["long_name"] = "Diazotroph Iron"
+            ds["diazFe"].attrs["units"] = "mmol/m^3"
 
         ds = ds.assign_coords(
             {
@@ -237,8 +402,8 @@ class InitialConditions:
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["source"] = self.source
 
-        if dims["time"] != "time":
-            ds = ds.rename({dims["time"]: "time"})
+        if data.dim_names["time"] != "time":
+            ds = ds.rename({data.dim_names["time"]: "time"})
 
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)

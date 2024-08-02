@@ -3,7 +3,7 @@ import numpy as np
 import gcm_filters
 from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import label
-from roms_tools.setup.datasets import fetch_topo
+from roms_tools.setup.download import fetch_topo
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 import warnings
 from itertools import count

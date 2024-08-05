@@ -553,8 +553,8 @@ class AtmosphericForcing:
         ds.attrs["swr_correction"] = str(self.swr_correction is not None)
         ds.attrs["rivers"] = str(self.rivers is not None)
 
-        ds = ds.assign_coords({"lon": lon, "lat": lat})
         if self.use_coarse_grid:
+            ds = ds.assign_coords({"lon": lon, "lat": lat})
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
             mask_roms = self.grid.ds["mask_coarse"].rename(
                 {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}

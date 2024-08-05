@@ -160,3 +160,48 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
     )
 
     return field_interpolated
+
+
+def interpolate_from_climatology(field, time_dim_name, time):
+    """
+    Interpolates the given field temporally based on the specified time points.
+
+    Parameters
+    ----------
+    field : xarray.DataArray
+        The field data to be interpolated.
+    time : xarray.DataArray or pandas.DatetimeIndex
+        The target time points for interpolation.
+
+    Returns
+    -------
+    xr.DataArray
+        The field values interpolated to the specified time points.
+
+
+    """
+    field["time"] = field[time_dim_name].dt.days
+    day_of_year = time.dt.dayofyear
+
+    # Concatenate across the beginning and end of the year
+    time_concat = xr.concat(
+        [
+            field["time"][-1] - 365.25,
+            field["time"],
+            365.25 + field["time"][0],
+        ],
+        dim="time",
+    )
+    field_concat = xr.concat(
+        [
+            field.isel(time=-1),
+            field,
+            field.isel(time=0),
+        ],
+        dim="time",
+    )
+    field_concat["time"] = time_concat
+    # Interpolate to specified times
+    field_interpolated = field_concat.interp(time=day_of_year, method="linear")
+
+    return field_interpolated

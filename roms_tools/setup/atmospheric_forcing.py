@@ -10,7 +10,7 @@ import numpy as np
 from typing import Optional, Dict
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.datasets import ERA5Dataset
-from roms_tools.setup.utils import nan_check
+from roms_tools.setup.utils import nan_check, interpolate_from_climatology
 from roms_tools.setup.plot import _plot
 import calendar
 import matplotlib.pyplot as plt
@@ -247,31 +247,7 @@ class SWRCorrection:
                 f"temporal_resolution must be 'climatology', got {self.temporal_resolution}"
             )
         else:
-            field[self.dim_names["time"]] = field[self.dim_names["time"]].dt.days
-            day_of_year = time.dt.dayofyear
-
-            # Concatenate across the beginning and end of the year
-            time_concat = xr.concat(
-                [
-                    field[self.dim_names["time"]][-1] - 365.25,
-                    field[self.dim_names["time"]],
-                    365.25 + field[self.dim_names["time"]][0],
-                ],
-                dim=self.dim_names["time"],
-            )
-            field_concat = xr.concat(
-                [
-                    field.isel({self.dim_names["time"]: -1}),
-                    field,
-                    field.isel({self.dim_names["time"]: 0}),
-                ],
-                dim=self.dim_names["time"],
-            )
-            field_concat["time"] = time_concat
-            # Interpolate to specified times
-            field_interpolated = field_concat.interp(time=day_of_year, method="linear")
-
-        return field_interpolated
+            return interpolate_from_climatology(field, self.dim_names["time"], time)
 
     @classmethod
     def from_yaml(cls, filepath: str) -> "SWRCorrection":

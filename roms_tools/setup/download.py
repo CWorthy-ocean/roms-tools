@@ -24,6 +24,8 @@ pup_test_data = pooch.create(
         "ERA5_global_test_data.nc": "8ed177ab64c02caf509b9fb121cf6713f286cc603b1f302f15f3f4eb0c21dc4f",
         "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",
         "TPXO_regional_test_data.nc": "11739245e2286d9c9d342dce5221e6435d2072b50028bef2e86a30287b3b4032",
+        "CESM_regional_test_data_one_time_slice.nc": "43b578ecc067c85f95d6b97ed7b9dc8da7846f07c95331c6ba7f4a3161036a17",
+        "CESM_regional_test_data_climatology.nc": "986a200029d9478fd43e6e4a8bc43e8a8f4407554893c59b5fcc2e86fd203272",
     },
 )
 
@@ -65,6 +67,10 @@ def download_test_data(filename: str) -> str:
         - "GLORYS_test_data.nc"
         - "ERA5_regional_test_data.nc"
         - "ERA5_global_test_data.nc"
+        - "TPXO_global_test_data.nc"
+        - "TPXO_regional_test_data.nc"
+        - "CESM_regional_test_data_one_time_slice.nc"
+        - "CESM_regional_test_data_climatology.nc"
 
     Returns
     -------

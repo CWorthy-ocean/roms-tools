@@ -732,7 +732,7 @@ class CESMBGCDataset(Dataset):
                 for var in self.var_names:
                     if "z_t_150m" in self.ds[var].dims:
                         self.ds[var] = self.ds[var].rename({"z_t_150m": "z_t"})
-
+                        self.ds[var] = self.ds[var].chunk({"z_t": -1})
             # Convert depth from cm to m
             ds = self.ds.assign_coords({"depth": self.ds["z_t"] / 100})
             ds["depth"].attrs["long_name"] = "Depth"

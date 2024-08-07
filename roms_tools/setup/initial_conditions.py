@@ -18,6 +18,7 @@ from roms_tools.setup.utils import (
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 
+
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions:
     """
@@ -56,7 +57,7 @@ class InitialConditions:
     ...     vertical_coordinate=vertical_coordinate,
     ...     ini_time=datetime(2022, 1, 1),
     ...     physics_source={"name": "GLORYS", "filename": "physics_data.nc"},
-    ...     bgc_source={"name": "CESM_REGRIDDED", "filename": "bgc_data.nc"}
+    ...     bgc_source={"name": "CESM_REGRIDDED", "filename": "bgc_data.nc"},
     ... )
     """
 
@@ -75,25 +76,49 @@ class InitialConditions:
         if "filename" not in self.physics_source.keys():
             raise ValueError("`physics_source` must include a 'filename'.")
         # set self.physics_source["climatology"] to False if not provided
-        object.__setattr__(self, "physics_source", {**self.physics_source, "climatology": self.physics_source.get("climatology", False)})
+        object.__setattr__(
+            self,
+            "physics_source",
+            {
+                **self.physics_source,
+                "climatology": self.physics_source.get("climatology", False),
+            },
+        )
         if self.physics_source["name"] == "GLORYS":
-            data = GLORYSDataset(filename=self.physics_source["filename"], start_time=self.ini_time, climatology=self.physics_source["climatology"])
+            data = GLORYSDataset(
+                filename=self.physics_source["filename"],
+                start_time=self.ini_time,
+                climatology=self.physics_source["climatology"],
+            )
         else:
-            raise ValueError('Only "GLORYS" is a valid option for physics_source["name"].')
+            raise ValueError(
+                'Only "GLORYS" is a valid option for physics_source["name"].'
+            )
         if self.bgc_source is not None:
             if "name" not in self.bgc_source.keys():
-                raise ValueError("`bgc_source` must include a 'name' if it is provided.")
+                raise ValueError(
+                    "`bgc_source` must include a 'name' if it is provided."
+                )
             if "filename" not in self.bgc_source.keys():
-                raise ValueError("`bgc_source` must include a 'filename' if it is provided.")
+                raise ValueError(
+                    "`bgc_source` must include a 'filename' if it is provided."
+                )
             # set self.physics_source["climatology"] to False if not provided
-            object.__setattr__(self, "bgc_source", {**self.bgc_source, "climatology": self.bgc_source.get("climatology", False)})
+            object.__setattr__(
+                self,
+                "bgc_source",
+                {
+                    **self.bgc_source,
+                    "climatology": self.bgc_source.get("climatology", False),
+                },
+            )
 
             if self.bgc_source["name"] == "CESM_REGRIDDED":
 
                 bgc_data = CESMBGCDataset(
                     filename=self.bgc_source["filename"],
                     start_time=self.ini_time,
-                    climatology=self.bgc_source["climatology"]
+                    climatology=self.bgc_source["climatology"],
                 )
                 bgc_data.post_process()
             else:
@@ -206,11 +231,14 @@ class InitialConditions:
                     fillvalue_interp=None,
                 )
                 if bgc_data.dim_names["time"] != "time":
-                    data_vars[var] = data_vars[var].rename({bgc_data.dim_names["time"]: "time"})
+                    data_vars[var] = data_vars[var].rename(
+                        {bgc_data.dim_names["time"]: "time"}
+                    )
                 if self.bgc_source["climatology"]:
                     # make sure time coordinate coincides, otherwise BGC variables are written into .ds as NaNs
-                    data_vars[var] = data_vars[var].assign_coords({"time": data_vars["temp"]["time"]})
-
+                    data_vars[var] = data_vars[var].assign_coords(
+                        {"time": data_vars["temp"]["time"]}
+                    )
 
         # rotate velocities to grid orientation
         u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
@@ -439,7 +467,6 @@ class InitialConditions:
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
 
-
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
 
@@ -489,6 +516,38 @@ class InitialConditions:
             - "w": w-flux component.
             - "ubar": Vertically integrated u-flux component.
             - "vbar": Vertically integrated v-flux component.
+            - "PO4": Dissolved Inorganic Phosphate (mmol/m³).
+            - "NO3": Dissolved Inorganic Nitrate (mmol/m³).
+            - "SiO3": Dissolved Inorganic Silicate (mmol/m³).
+            - "NH4": Dissolved Ammonia (mmol/m³).
+            - "Fe": Dissolved Inorganic Iron (mmol/m³).
+            - "Lig": Iron Binding Ligand (mmol/m³).
+            - "O2": Dissolved Oxygen (mmol/m³).
+            - "DIC": Dissolved Inorganic Carbon (mmol/m³).
+            - "DIC_ALT_CO2": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³).
+            - "ALK": Alkalinity (meq/m³).
+            - "ALK_ALT_CO2": Alkalinity, Alternative CO2 (meq/m³).
+            - "DOC": Dissolved Organic Carbon (mmol/m³).
+            - "DON": Dissolved Organic Nitrogen (mmol/m³).
+            - "DOP": Dissolved Organic Phosphorus (mmol/m³).
+            - "DOPr": Refractory Dissolved Organic Phosphorus (mmol/m³).
+            - "DONr": Refractory Dissolved Organic Nitrogen (mmol/m³).
+            - "DOCr": Refractory Dissolved Organic Carbon (mmol/m³).
+            - "zooC": Zooplankton Carbon (mmol/m³).
+            - "spChl": Small Phytoplankton Chlorophyll (mg/m³).
+            - "spC": Small Phytoplankton Carbon (mmol/m³).
+            - "spP": Small Phytoplankton Phosphorous (mmol/m³).
+            - "spFe": Small Phytoplankton Iron (mmol/m³).
+            - "spCaCO3": Small Phytoplankton CaCO3 (mmol/m³).
+            - "diatChl": Diatom Chlorophyll (mg/m³).
+            - "diatC": Diatom Carbon (mmol/m³).
+            - "diatP": Diatom Phosphorus (mmol/m³).
+            - "diatFe": Diatom Iron (mmol/m³).
+            - "diatSi": Diatom Silicate (mmol/m³).
+            - "diazChl": Diazotroph Chlorophyll (mg/m³).
+            - "diazC": Diazotroph Carbon (mmol/m³).
+            - "diazP": Diazotroph Phosphorus (mmol/m³).
+            - "diazFe": Diazotroph Iron (mmol/m³).
         s : int, optional
             The index of the vertical layer to plot. Default is None.
         eta : int, optional
@@ -506,9 +565,9 @@ class InitialConditions:
         Raises
         ------
         ValueError
-            If the specified varname is not one of the valid options.
-            If field is 3D and none of s_rho, eta, xi are specified.
-            If field is 2D and both eta and xi are specified.
+            If the specified `varname` is not one of the valid options.
+            If the field specified by `varname` is 3D and none of `s`, `eta`, or `xi` are specified.
+            If the field specified by `varname` is 2D and both `eta` and `xi` are specified.
         """
 
         if len(self.ds[varname].squeeze().dims) == 3 and not any(

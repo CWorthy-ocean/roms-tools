@@ -53,25 +53,68 @@ def initial_conditions(example_grid, example_vertical_coordinate):
     )
 
 
-def test_initial_conditions_creation(initial_conditions):
+@pytest.fixture
+def initial_conditions_with_bgc(example_grid, example_vertical_coordinate):
+    """
+    Fixture for creating a dummy InitialConditions object.
+    """
+
+    fname = download_test_data("GLORYS_test_data.nc")
+    fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")
+
+    return InitialConditions(
+        grid=example_grid,
+        vertical_coordinate=example_vertical_coordinate,
+        ini_time=datetime(2021, 6, 29),
+        filename=fname,
+        bgc_filename=fname_bgc,
+    )
+
+
+@pytest.fixture
+def initial_conditions_with_bgc_from_climatology(
+    example_grid, example_vertical_coordinate
+):
+    """
+    Fixture for creating a dummy InitialConditions object.
+    """
+
+    fname = download_test_data("GLORYS_test_data.nc")
+    fname_bgc = download_test_data("CESM_regional_test_data_climatology.nc")
+
+    return InitialConditions(
+        grid=example_grid,
+        vertical_coordinate=example_vertical_coordinate,
+        ini_time=datetime(2021, 6, 29),
+        filename=fname,
+        bgc_filename=fname_bgc,
+    )
+
+
+@pytest.mark.parametrize(
+    "ic_fixture",
+    [
+        "initial_conditions",
+        "initial_conditions_with_bgc",
+        "initial_conditions_with_bgc_from_climatology",
+    ],
+)
+def test_initial_conditions_creation(ic_fixture, request):
     """
     Test the creation of the InitialConditions object.
     """
-    assert initial_conditions.ini_time == datetime(2021, 6, 29)
-    assert initial_conditions.filename == download_test_data("GLORYS_test_data.nc")
-    assert initial_conditions.source == "GLORYS"
 
+    ic = request.getfixturevalue(ic_fixture)
 
-def test_initial_conditions_ds_attribute(initial_conditions):
-    """
-    Test the ds attribute of the InitialConditions object.
-    """
-    assert isinstance(initial_conditions.ds, xr.Dataset)
-    assert "temp" in initial_conditions.ds
-    assert "salt" in initial_conditions.ds
-    assert "u" in initial_conditions.ds
-    assert "v" in initial_conditions.ds
-    assert "zeta" in initial_conditions.ds
+    assert ic.ini_time == datetime(2021, 6, 29)
+    assert ic.filename == download_test_data("GLORYS_test_data.nc")
+    assert ic.source == "GLORYS"
+    assert isinstance(ic.ds, xr.Dataset)
+    assert "temp" in ic.ds
+    assert "salt" in ic.ds
+    assert "u" in ic.ds
+    assert "v" in ic.ds
+    assert "zeta" in ic.ds
 
 
 def test_initial_conditions_data_consistency_plot_save(initial_conditions, tmp_path):

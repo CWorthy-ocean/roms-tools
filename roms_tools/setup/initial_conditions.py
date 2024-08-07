@@ -78,6 +78,7 @@ class InitialConditions:
                     filename=self.bgc_filename,
                     start_time=self.ini_time,
                 )
+                bgc_data.post_process()
             else:
                 raise ValueError(
                     'Only "CESM_REGRIDDED" is a valid option for bgc_source.'
@@ -552,7 +553,10 @@ class InitialConditions:
         else:
             vmax = field.max().values
             vmin = field.min().values
-            cmap = plt.colormaps.get_cmap("YlOrRd")
+            if varname in ["temp", "salt"]:
+                cmap = plt.colormaps.get_cmap("YlOrRd")
+            else:
+                cmap = plt.colormaps.get_cmap("YlGn")
         cmap.set_bad(color="gray")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 

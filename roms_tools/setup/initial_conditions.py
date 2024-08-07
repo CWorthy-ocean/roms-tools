@@ -172,6 +172,8 @@ class InitialConditions:
                 method="linear",
                 fillvalue_interp=None,
             )
+            if data.dim_names["time"] != "time":
+                data_vars[var] = data_vars[var].rename({data.dim_names["time"]: "time"})
 
         # do the same for the BGC variables if present
         if self.bgc_source is not None:
@@ -203,6 +205,12 @@ class InitialConditions:
                     method="linear",
                     fillvalue_interp=None,
                 )
+                if bgc_data.dim_names["time"] != "time":
+                    data_vars[var] = data_vars[var].rename({bgc_data.dim_names["time"]: "time"})
+                if self.bgc_source["climatology"]:
+                    # make sure time coordinate coincides, otherwise BGC variables are written into .ds as NaNs
+                    data_vars[var] = data_vars[var].assign_coords({"time": data_vars["temp"]["time"]})
+
 
         # rotate velocities to grid orientation
         u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
@@ -431,8 +439,6 @@ class InitialConditions:
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
 
-        if data.dim_names["time"] != "time":
-            ds = ds.rename({data.dim_names["time"]: "time"})
 
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)

@@ -76,7 +76,9 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    tidal_forcing = TidalForcing(grid=grid, filename=fname, source="TPXO", ntides=2)
+    tidal_forcing = TidalForcing(
+        grid=grid, source={"name": "TPXO", "filename": fname}, ntides=2
+    )
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
     assert "omega" in tidal_forcing.ds
@@ -89,8 +91,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
     assert "v_Re" in tidal_forcing.ds
     assert "v_Im" in tidal_forcing.ds
 
-    assert tidal_forcing.filename == fname
-    assert tidal_forcing.source == "TPXO"
+    assert tidal_forcing.source == {"name": "TPXO", "filename": fname}
     assert tidal_forcing.ntides == 2
 
 
@@ -102,8 +103,7 @@ def test_successful_initialization_with_regional_data(
 
     tidal_forcing = TidalForcing(
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
-        filename=fname,
-        source="TPXO",
+        source={"name": "TPXO", "filename": fname},
         ntides=10,
     )
 
@@ -118,8 +118,7 @@ def test_successful_initialization_with_regional_data(
     assert "v_Re" in tidal_forcing.ds
     assert "v_Im" in tidal_forcing.ds
 
-    assert tidal_forcing.filename == fname
-    assert tidal_forcing.source == "TPXO"
+    assert tidal_forcing.source == {"name": "TPXO", "filename": fname}
     assert tidal_forcing.ntides == 10
 
 
@@ -132,8 +131,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
     with pytest.raises(ValueError, match="NaN values found"):
         TidalForcing(
             grid=grid_that_is_out_of_bounds_of_regional_tpxo_data,
-            filename=fname,
-            source="TPXO",
+            source={"name": "TPXO", "filename": fname},
             ntides=10,
         )
 
@@ -153,7 +151,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
     with pytest.raises(
         ValueError, match="Selected longitude range does not intersect with dataset"
     ):
-        TidalForcing(grid=grid, filename=fname, source="TPXO", ntides=10)
+        TidalForcing(grid=grid, source={"name": "TPXO", "filename": fname}, ntides=10)
 
 
 def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
@@ -162,7 +160,9 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
 
     with pytest.raises(ValueError, match="The dataset contains fewer"):
         TidalForcing(
-            grid=grid_that_straddles_dateline, filename=fname, source="TPXO", ntides=10
+            grid=grid_that_straddles_dateline,
+            source={"name": "TPXO", "filename": fname},
+            ntides=10,
         )
 
 
@@ -175,8 +175,7 @@ def tidal_forcing(
 
     return TidalForcing(
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
-        filename=fname,
-        source="TPXO",
+        source={"name": "TPXO", "filename": fname},
         ntides=1,
     )
 

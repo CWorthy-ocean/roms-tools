@@ -3,6 +3,7 @@ import xarray as xr
 import numpy as np
 import yaml
 import importlib.metadata
+from typing import Dict, Union
 
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
@@ -26,16 +27,16 @@ class TidalForcing:
     ----------
     grid : Grid
         The grid object representing the ROMS grid associated with the tidal forcing data.
-    filename: str
-        The path to the native tidal dataset.
+    source : Dict[str, Union[str, None]]
+        Dictionary specifying the source of the tidal data:
+        - "name" (str): Name of the data source (e.g., "TPXO").
+        - "filename" (str): Path to the tidal data file. Can contain wildcards.
     ntides : int, optional
         Number of constituents to consider. Maximum number is 14. Default is 10.
-    model_reference_date : datetime, optional
-        The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
-    source : str, optional
-        The source of the tidal data. Default is "TPXO".
     allan_factor : float, optional
         The Allan factor used in tidal model computation. Default is 2.0.
+    model_reference_date : datetime, optional
+        The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
 
     Attributes
     ----------
@@ -44,27 +45,31 @@ class TidalForcing:
 
     Examples
     --------
-    >>> grid = Grid(...)
-    >>> tidal_forcing = TidalForcing(grid)
-    >>> print(tidal_forcing.ds)
+    >>> tidal_forcing = TidalForcing(
+    ...     grid=grid, source={"name": "TPXO", "filename": "tpxo_data.nc"}
+    ... )
     """
 
     grid: Grid
-    filename: str
+    source: Dict[str, Union[str, None]]
     ntides: int = 10
-    model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "TPXO"
     allan_factor: float = 2.0
+    model_reference_date: datetime = datetime(2000, 1, 1)
+
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        if self.source == "TPXO":
-            data = TPXODataset(filename=self.filename)
+        if "name" not in self.source.keys():
+            raise ValueError("`source` must include a 'name'.")
+        if "filename" not in self.source.keys():
+            raise ValueError("`source` must include a 'filename'.")
+        if self.source["name"] == "TPXO":
+            data = TPXODataset(filename=self.source["filename"])
         else:
-            raise ValueError('Only "TPXO" is a valid option for source.')
+            raise ValueError('Only "TPXO" is a valid option for source["name"].')
 
         data.check_number_constituents(self.ntides)
-        # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
+        # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in longitude away from Greenwich meridian
         lon = self.grid.ds.lon_rho
         lat = self.grid.ds.lat_rho
         angle = self.grid.ds.angle
@@ -176,7 +181,7 @@ class TidalForcing:
 
         ds.attrs["roms_tools_version"] = roms_tools_version
 
-        ds.attrs["source"] = self.source
+        ds.attrs["source"] = self.source["name"]
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["allan_factor"] = self.allan_factor
 
@@ -280,10 +285,9 @@ class TidalForcing:
         # Extract tidal forcing data
         tidal_forcing_data = {
             "TidalForcing": {
-                "filename": self.filename,
+                "source": self.source,
                 "ntides": self.ntides,
                 "model_reference_date": self.model_reference_date.isoformat(),
-                "source": self.source,
                 "allan_factor": self.allan_factor,
             }
         }

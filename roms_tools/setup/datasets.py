@@ -6,6 +6,7 @@ import numpy as np
 from typing import Dict, Optional
 import dask
 import warnings
+from roms_tools.setup.utils import interpolate_from_climatology
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -31,6 +32,8 @@ class Dataset:
     ----------
     ds : xr.Dataset
         The xarray Dataset containing the forcing data on its original grid.
+    climatology : bool
+        Indicates whether the dataset is climatological. Set to `True` if relevant.
 
     Examples
     --------
@@ -58,11 +61,23 @@ class Dataset:
     )
 
     ds: xr.Dataset = field(init=False, repr=False)
+    climatology: bool = field(init=False, default=False)
 
     def __post_init__(self):
+        """
+        Post-initialization processing:
+        1. Loads the dataset from the specified filename.
+        2. Applies time filtering based on start_time and end_time if provided.
+        3. Selects relevant fields as specified by var_names.
+        4. Ensures latitude values are in ascending order.
+        5. Checks if the dataset covers the entire globe and adjusts if necessary.
+        6. Sets the climatology attribute based on whether the dataset is climatological.
+        """
+
         ds = self.load_data()
 
         # Select relevant times
+        object.__setattr__(self, "climatology", False)
         if self.start_time is not None:
             if "time" in self.dim_names:
                 ds = self.select_relevant_times(ds)
@@ -169,7 +184,6 @@ class Dataset:
         return ds
 
     def select_relevant_times(self, ds) -> xr.Dataset:
-
         """
         Selects and returns the subset of the dataset corresponding to the specified time range.
 
@@ -187,12 +201,56 @@ class Dataset:
         xr.Dataset
             A dataset containing only the data points within the specified time range.
 
+        Notes
+        -----
+        If the dataset has a 'month' dimension, it assumes the data is climatological and performs
+        interpolation or sets the climatology flag accordingly. If the time dimension is 'month',
+        the method calculates the time as a cumulative sum of days in each month, converts it to
+        `timedelta64[ns]`, and updates the dataset's time coordinates.
+
+        If `self.end_time` is not provided and only a single time slice is required, interpolation
+        from climatology is applied. For datasets covering full climatology, the climatology flag is set
+        to True, and no additional filtering is performed.
+
+        Raises
+        ------
+        ValueError
+            If no matching times are found or if the number of matching times does not meet expectations.
+
+        Warns
+        -----
+        Warning
+            If no time information is found in the dataset.
         """
 
         time_dim = self.dim_names["time"]
+        if time_dim in ds.coords or time_dim in ds.data_vars:
+            if time_dim == "month":
+                # Define the days in each month and convert to timedelta
+                increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
+                days = np.cumsum(increments)
+                timedelta_ns = np.array(days, dtype="timedelta64[D]").astype(
+                    "timedelta64[ns]"
+                )
+                time = xr.DataArray(timedelta_ns, dims=["month"])
+                ds = ds.assign_coords({"time": time})
+                ds = ds.swap_dims({"month": "time"})
 
-        if time_dim in ds.dims:
-            if time_dim in ds.coords or time_dim in ds.data_vars:
+                # Update dimension names
+                updated_dim_names = self.dim_names.copy()
+                updated_dim_names["time"] = "time"
+                object.__setattr__(self, "dim_names", updated_dim_names)
+
+                if not self.end_time:
+                    # Interpolate from climatology for initial conditions
+                    ds = interpolate_from_climatology(
+                        ds, self.dim_names["time"], self.start_time
+                    )
+                else:
+                    # Set climatology flag for full climatology datasets
+                    object.__setattr__(self, "climatology", True)
+                    pass
+            else:
                 if not self.end_time:
                     end_time = self.start_time + timedelta(days=1)
                 else:
@@ -202,23 +260,20 @@ class Dataset:
                     ds[time_dim] < np.datetime64(end_time)
                 )
                 ds = ds.where(times, drop=True)
-
-            else:
-                warnings.warn(
-                    f"Dataset at {self.filename} does not contain any time information."
-                )
-            if not ds.sizes[time_dim]:
-                raise ValueError("No matching times found.")
-            if not self.end_time:
-                if ds.sizes[time_dim] != 1:
-                    found_times = ds.sizes[time_dim]
-                    raise ValueError(
-                        f"There must be exactly one time matching the start_time. Found {found_times} matching times."
-                    )
         else:
             warnings.warn(
-                f"Time dimension '{time_dim}' not found in dataset. Assuming the file consists of a single time slice."
+                f"Dataset at {self.filename} does not contain any time information."
             )
+
+        if not ds.sizes[time_dim]:
+            raise ValueError("No matching times found.")
+
+        if not self.end_time:
+            if ds.sizes[time_dim] != 1:
+                found_times = ds.sizes[time_dim]
+                raise ValueError(
+                    f"There must be exactly one time matching the start_time. Found {found_times} matching times."
+                )
 
         return ds
 
@@ -621,40 +676,81 @@ class CESMBGCDataset(Dataset):
             "time": "time",
         }
     )
+    # overwrite load_data method from parent class
+    def load_data(self) -> xr.Dataset:
+        """
+        Load dataset from the specified file.
 
-    #   bgc_units = {
-    #       "PO4": "mmol/m3",
-    #       "NO3": "mmol/m3",
-    #       "SiO3": "mmol/m3",
-    #       'NH4': 'mmol/m3',
-    #       'Fe': 'umol/m3',
-    #       'Lig': 'umol/m3',
-    #       'O2': 'umol/kg',
-    #       'DIC': 'umol/kg',
-    #       'DIC_ALT_CO2': 'umol/kg',
-    #       'ALK': 'umol/kg',
-    #       'ALK_ALT_CO2': 'umol/kg',
-    #       'DOC': 'umol/kg',
-    #       'DON': 'umol/kg',
-    #       'DOP': 'umol/kg',
-    #       'DOPr': 'umol/kg',
-    #       'DONr': 'umol/kg',
-    #       'DOCr': 'umol/kg',
-    #       'spChl': 'mg/m3',
-    #       'spC': 'mg/m3',
-    #       'spP': 'umol/m3',
-    #       'spFe': 'umol/m3',
-    #       'diatChl': 'mg/m3',
-    #       'diatC': 'mg/m3',
-    #       'diatP': 'umol/m3',
-    #       'diatFe': 'umol/m3',
-    #       'diatSi': 'umol/m3',
-    #       'diazChl': 'mg/m3',
-    #       'diazC': 'mg/m3',
-    #       'diazP': 'umol/m3',
-    #       'diazFe': 'umol/m3',
-    #       'spCaCO3': 'umol/m3',
-    #       'zooC': 'mg/m3'
+        Returns
+        -------
+        ds : xr.Dataset
+            The loaded xarray Dataset containing the forcing data.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the specified file does not exist.
+        """
+
+        # Check if the file exists
+        matching_files = glob.glob(self.filename)
+        if not matching_files:
+            raise FileNotFoundError(
+                f"No files found matching the pattern '{self.filename}'."
+            )
+
+        # Load the dataset
+        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+            # Define the chunk sizes
+            chunks = {
+                self.dim_names["latitude"]: -1,
+                self.dim_names["longitude"]: -1,
+            }
+
+            ds = xr.open_mfdataset(
+                self.filename,
+                combine="nested",
+                coords="minimal",
+                compat="override",
+                chunks=chunks,
+                engine="netcdf4",
+            )
+
+            if "time" not in ds.dims:
+                if "month" in ds.dims:
+                    self.dim_names["time"] = "month"
+                else:
+                    ds = ds.expand_dims({"time": 1})
+
+        return ds
+
+    def post_process(self):
+        """
+        Processes and converts CESM data values as follows:
+        - Convert depth values from cm to m.
+        """
+        if self.dim_names["depth"] == "z_t":
+            # Fill variables that only have data in upper 150m with NaNs below
+            if (
+                "z_t_150m" in self.ds.dims
+                and np.equal(self.ds.z_t[:15].values, self.ds.z_t_150m.values).all()
+            ):
+                for var in self.var_names:
+                    if "z_t_150m" in self.ds[var].dims:
+                        self.ds[var] = self.ds[var].rename({"z_t_150m": "z_t"})
+
+            # Convert depth from cm to m
+            ds = self.ds.assign_coords({"depth": self.ds["z_t"] / 100})
+            ds["depth"].attrs["long_name"] = "Depth"
+            ds["depth"].attrs["units"] = "m"
+            ds = ds.swap_dims({"z_t": "depth"})
+            # update dataset
+            object.__setattr__(self, "ds", ds)
+
+            # Update dim_names with "depth": "depth" key-value pair
+            updated_dim_names = self.dim_names.copy()
+            updated_dim_names["depth"] = "depth"
+            object.__setattr__(self, "dim_names", updated_dim_names)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -715,13 +811,16 @@ class ERA5Dataset(Dataset):
         # Convert radiation from J/m^2 to W/m^2
         self.ds[self.var_names["swr"]] /= 3600
         self.ds[self.var_names["lwr"]] /= 3600
-
+        self.ds[self.var_names["swr"]].attrs["units"] = "W/m^2"
+        self.ds[self.var_names["lwr"]].attrs["units"] = "W/m^2"
         # Convert rainfall from m to cm/day
         self.ds[self.var_names["rain"]] *= 100 * 24
 
         # Convert temperature from Kelvin to Celsius
         self.ds[self.var_names["t2m"]] -= 273.15
         self.ds[self.var_names["d2m"]] -= 273.15
+        self.ds[self.var_names["t2m"]].attrs["units"] = "degrees C"
+        self.ds[self.var_names["d2m"]].attrs["units"] = "degrees C"
 
         # Compute relative humidity if not present
         if "qair" not in self.ds.data_vars:
@@ -745,6 +844,8 @@ class ERA5Dataset(Dataset):
             )
             cff = cff * qair
             self.ds["qair"] = 0.62197 * (cff / (patm - 0.378 * cff))
+            self.ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
+            self.ds["qair"].attrs["units"] = "kg/kg"
 
             # Update var_names dictionary
             var_names = {**self.var_names, "qair": "qair"}

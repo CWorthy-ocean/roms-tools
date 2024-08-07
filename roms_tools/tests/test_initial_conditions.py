@@ -214,12 +214,12 @@ def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climato
     )
     assert np.allclose(0.5 * (ds['ALK'].sel(month=1) + ds['ALK'].sel(month=2)), bgc_data.ds['ALK'], equal_nan=True)
 
-def test_initial_conditions_data_consistency_plot_save(initial_conditions, tmp_path):
+def test_initial_conditions_data_consistency_plot_save(initial_conditions_with_bgc_from_climatology, tmp_path):
     """
     Test that the data within the InitialConditions object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
     """
-    initial_conditions.ds.load()
+    initial_conditions_with_bgc_from_climatology.ds.load()
 
     # Define the expected data
     expected_temp = np.array(
@@ -366,24 +366,47 @@ def test_initial_conditions_data_consistency_plot_save(initial_conditions, tmp_p
         dtype=np.float32,
     )
 
-    # Check the values in the dataset
-    assert np.allclose(initial_conditions.ds["temp"].values, expected_temp)
-    assert np.allclose(initial_conditions.ds["salt"].values, expected_salt)
-    assert np.allclose(initial_conditions.ds["zeta"].values, expected_zeta)
-    assert np.allclose(initial_conditions.ds["u"].values, expected_u)
-    assert np.allclose(initial_conditions.ds["v"].values, expected_v)
-    assert np.allclose(initial_conditions.ds["ubar"].values, expected_ubar)
-    assert np.allclose(initial_conditions.ds["vbar"].values, expected_vbar)
+    expected_alk = np.array([[[[2341.926 , 2340.8894, 2340.557 ],
+         [2317.8875, 2315.86  , 2315.2148],
+         [2297.689 , 2285.8933, 2284.404 ],
+         [2276.4216, 2258.4436, 2256.1062]],
 
-    initial_conditions.plot(varname="temp", s=0)
-    initial_conditions.plot(varname="temp", eta=0)
-    initial_conditions.plot(varname="temp", xi=0)
-    initial_conditions.plot(varname="temp", s=0, xi=0)
-    initial_conditions.plot(varname="temp", eta=0, xi=0)
-    initial_conditions.plot(varname="zeta")
+        [[2330.5837, 2329.8225, 2329.5264],
+         [2317.878 , 2316.6787, 2316.3088],
+         [2278.9314, 2269.464 , 2268.904 ],
+         [2259.975 , 2247.7456, 2246.0632]],
+
+        [[2376.7534, 2373.4402, 2372.9192],
+         [2362.5308, 2360.5066, 2360.2224],
+         [2350.3384, 2344.3135, 2343.6768],
+         [2310.4275, 2287.6785, 2281.5872]],
+
+        [[2384.8064, 2386.2126, 2386.632 ],
+         [2383.737 , 2385.1553, 2385.6685],
+         [2380.2297, 2381.4849, 2381.8616],
+         [2350.0762, 2342.5403, 2339.2244]]]], dtype=np.float32)
+
+    # Check the values in the dataset
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["temp"].values, expected_temp)
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["salt"].values, expected_salt)
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["zeta"].values, expected_zeta)
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["u"].values, expected_u)
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["v"].values, expected_v)
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["ubar"].values, expected_ubar)
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["vbar"].values, expected_vbar)
+    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["ALK"].values, expected_alk)
+
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="zeta")
+    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", s=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", eta=0, xi=0)
 
     filepath = tmp_path / "initial_conditions.nc"
-    initial_conditions.save(filepath)
+    initial_conditions_with_bgc_from_climatology.save(filepath)
     assert filepath.exists()
 
 

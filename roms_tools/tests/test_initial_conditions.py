@@ -88,7 +88,11 @@ def initial_conditions_with_bgc_from_climatology(
         vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         physics_source={"filename": fname, "name": "GLORYS"},
-        bgc_source={"filename": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+        bgc_source={
+            "filename": fname_bgc,
+            "name": "CESM_REGRIDDED",
+            "climatology": True,
+        },
     )
 
 
@@ -100,7 +104,6 @@ def initial_conditions_with_bgc_from_climatology(
         "initial_conditions_with_bgc_from_climatology",
     ],
 )
-
 def test_initial_conditions_creation(ic_fixture, request):
     """
     Test the creation of the InitialConditions object.
@@ -109,7 +112,11 @@ def test_initial_conditions_creation(ic_fixture, request):
     ic = request.getfixturevalue(ic_fixture)
 
     assert ic.ini_time == datetime(2021, 6, 29)
-    assert ic.physics_source == {"name": "GLORYS", "filename": download_test_data("GLORYS_test_data.nc"), "climatology": False}
+    assert ic.physics_source == {
+        "name": "GLORYS",
+        "filename": download_test_data("GLORYS_test_data.nc"),
+        "climatology": False,
+    }
     assert isinstance(ic.ds, xr.Dataset)
     assert "temp" in ic.ds
     assert "salt" in ic.ds
@@ -117,54 +124,71 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert "v" in ic.ds
     assert "zeta" in ic.ds
 
+
 # Test initialization with missing 'name' in physics_source
-def test_initial_conditions_missing_physics_name(example_grid, example_vertical_coordinate):
+def test_initial_conditions_missing_physics_name(
+    example_grid, example_vertical_coordinate
+):
     with pytest.raises(ValueError, match="`physics_source` must include a 'name'."):
         InitialConditions(
             grid=example_grid,
             vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
-            physics_source={"filename": "physics_data.nc"}
+            physics_source={"filename": "physics_data.nc"},
         )
 
+
 # Test initialization with missing 'filename' in physics_source
-def test_initial_conditions_missing_physics_filename(example_grid, example_vertical_coordinate):
+def test_initial_conditions_missing_physics_filename(
+    example_grid, example_vertical_coordinate
+):
     with pytest.raises(ValueError, match="`physics_source` must include a 'filename'."):
         InitialConditions(
             grid=example_grid,
             vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
-            physics_source={"name": "GLORYS"}
+            physics_source={"name": "GLORYS"},
         )
+
 
 # Test initialization with missing 'name' in bgc_source
 def test_initial_conditions_missing_bgc_name(example_grid, example_vertical_coordinate):
-    
+
     fname = download_test_data("GLORYS_test_data.nc")
-    with pytest.raises(ValueError, match="`bgc_source` must include a 'name' if it is provided."):
+    with pytest.raises(
+        ValueError, match="`bgc_source` must include a 'name' if it is provided."
+    ):
         InitialConditions(
             grid=example_grid,
             vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
             physics_source={"name": "GLORYS", "filename": fname},
-            bgc_source={"filename": "bgc_data.nc"}
+            bgc_source={"filename": "bgc_data.nc"},
         )
+
 
 # Test initialization with missing 'filename' in bgc_source
-def test_initial_conditions_missing_bgc_filename(example_grid, example_vertical_coordinate):
-    
+def test_initial_conditions_missing_bgc_filename(
+    example_grid, example_vertical_coordinate
+):
+
     fname = download_test_data("GLORYS_test_data.nc")
-    with pytest.raises(ValueError, match="`bgc_source` must include a 'filename' if it is provided."):
+    with pytest.raises(
+        ValueError, match="`bgc_source` must include a 'filename' if it is provided."
+    ):
         InitialConditions(
             grid=example_grid,
             vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
             physics_source={"name": "GLORYS", "filename": fname},
-            bgc_source={"name": "CESM_REGRIDDED"}
+            bgc_source={"name": "CESM_REGRIDDED"},
         )
 
+
 # Test default climatology value
-def test_initial_conditions_default_climatology(example_grid, example_vertical_coordinate):
+def test_initial_conditions_default_climatology(
+    example_grid, example_vertical_coordinate
+):
 
     fname = download_test_data("GLORYS_test_data.nc")
 
@@ -172,13 +196,16 @@ def test_initial_conditions_default_climatology(example_grid, example_vertical_c
         grid=example_grid,
         vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
-        physics_source={"name": "GLORYS", "filename": fname}
+        physics_source={"name": "GLORYS", "filename": fname},
     )
 
     assert initial_conditions.physics_source["climatology"] is False
     assert initial_conditions.bgc_source is None
 
-def test_initial_conditions_default_bgc_climatology(example_grid, example_vertical_coordinate):
+
+def test_initial_conditions_default_bgc_climatology(
+    example_grid, example_vertical_coordinate
+):
 
     fname = download_test_data("GLORYS_test_data.nc")
     fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")
@@ -188,33 +215,37 @@ def test_initial_conditions_default_bgc_climatology(example_grid, example_vertic
         vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         physics_source={"name": "GLORYS", "filename": fname},
-        bgc_source={"name": "CESM_REGRIDDED", "filename": fname_bgc}
+        bgc_source={"name": "CESM_REGRIDDED", "filename": fname_bgc},
     )
 
     assert initial_conditions.bgc_source["climatology"] is False
 
+
 def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climatology):
-    
+
     fname_bgc = download_test_data("CESM_regional_test_data_climatology.nc")
     ds = xr.open_dataset(fname_bgc)
 
     # check if interpolated value for Jan 15 is indeed January value from climatology
     bgc_data = CESMBGCDataset(
-        filename=fname_bgc,
-        start_time=datetime(2012, 1, 15),
-        climatology=True
+        filename=fname_bgc, start_time=datetime(2012, 1, 15), climatology=True
     )
-    assert np.allclose(ds['ALK'].sel(month=1), bgc_data.ds['ALK'], equal_nan=True)
+    assert np.allclose(ds["ALK"].sel(month=1), bgc_data.ds["ALK"], equal_nan=True)
 
     # check if interpolated value for Jan 30 is indeed average of January and February value from climatology
     bgc_data = CESMBGCDataset(
-        filename=fname_bgc,
-        start_time=datetime(2012, 1, 30),
-        climatology=True
+        filename=fname_bgc, start_time=datetime(2012, 1, 30), climatology=True
     )
-    assert np.allclose(0.5 * (ds['ALK'].sel(month=1) + ds['ALK'].sel(month=2)), bgc_data.ds['ALK'], equal_nan=True)
+    assert np.allclose(
+        0.5 * (ds["ALK"].sel(month=1) + ds["ALK"].sel(month=2)),
+        bgc_data.ds["ALK"],
+        equal_nan=True,
+    )
 
-def test_initial_conditions_data_consistency_plot_save(initial_conditions_with_bgc_from_climatology, tmp_path):
+
+def test_initial_conditions_data_consistency_plot_save(
+    initial_conditions_with_bgc_from_climatology, tmp_path
+):
     """
     Test that the data within the InitialConditions object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
@@ -366,35 +397,63 @@ def test_initial_conditions_data_consistency_plot_save(initial_conditions_with_b
         dtype=np.float32,
     )
 
-    expected_alk = np.array([[[[2341.926 , 2340.8894, 2340.557 ],
-         [2317.8875, 2315.86  , 2315.2148],
-         [2297.689 , 2285.8933, 2284.404 ],
-         [2276.4216, 2258.4436, 2256.1062]],
-
-        [[2330.5837, 2329.8225, 2329.5264],
-         [2317.878 , 2316.6787, 2316.3088],
-         [2278.9314, 2269.464 , 2268.904 ],
-         [2259.975 , 2247.7456, 2246.0632]],
-
-        [[2376.7534, 2373.4402, 2372.9192],
-         [2362.5308, 2360.5066, 2360.2224],
-         [2350.3384, 2344.3135, 2343.6768],
-         [2310.4275, 2287.6785, 2281.5872]],
-
-        [[2384.8064, 2386.2126, 2386.632 ],
-         [2383.737 , 2385.1553, 2385.6685],
-         [2380.2297, 2381.4849, 2381.8616],
-         [2350.0762, 2342.5403, 2339.2244]]]], dtype=np.float32)
+    expected_alk = np.array(
+        [
+            [
+                [
+                    [2341.926, 2340.8894, 2340.557],
+                    [2317.8875, 2315.86, 2315.2148],
+                    [2297.689, 2285.8933, 2284.404],
+                    [2276.4216, 2258.4436, 2256.1062],
+                ],
+                [
+                    [2330.5837, 2329.8225, 2329.5264],
+                    [2317.878, 2316.6787, 2316.3088],
+                    [2278.9314, 2269.464, 2268.904],
+                    [2259.975, 2247.7456, 2246.0632],
+                ],
+                [
+                    [2376.7534, 2373.4402, 2372.9192],
+                    [2362.5308, 2360.5066, 2360.2224],
+                    [2350.3384, 2344.3135, 2343.6768],
+                    [2310.4275, 2287.6785, 2281.5872],
+                ],
+                [
+                    [2384.8064, 2386.2126, 2386.632],
+                    [2383.737, 2385.1553, 2385.6685],
+                    [2380.2297, 2381.4849, 2381.8616],
+                    [2350.0762, 2342.5403, 2339.2244],
+                ],
+            ]
+        ],
+        dtype=np.float32,
+    )
 
     # Check the values in the dataset
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["temp"].values, expected_temp)
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["salt"].values, expected_salt)
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["zeta"].values, expected_zeta)
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["u"].values, expected_u)
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["v"].values, expected_v)
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["ubar"].values, expected_ubar)
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["vbar"].values, expected_vbar)
-    assert np.allclose(initial_conditions_with_bgc_from_climatology.ds["ALK"].values, expected_alk)
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["temp"].values, expected_temp
+    )
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["salt"].values, expected_salt
+    )
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["zeta"].values, expected_zeta
+    )
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["u"].values, expected_u
+    )
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["v"].values, expected_v
+    )
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["ubar"].values, expected_ubar
+    )
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["vbar"].values, expected_vbar
+    )
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds["ALK"].values, expected_alk
+    )
 
     initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0)
     initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0)

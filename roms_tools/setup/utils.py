@@ -228,7 +228,9 @@ def interpolate_from_climatology(
         )
 
         if np.size(time) == 1:
-            data_array_interpolated = data_array_interpolated.expand_dims({time_dim_name: 1})
+            data_array_interpolated = data_array_interpolated.expand_dims(
+                {time_dim_name: 1}
+            )
         return data_array_interpolated
 
     if isinstance(field, xr.DataArray):

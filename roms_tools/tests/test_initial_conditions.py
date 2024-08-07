@@ -7,6 +7,7 @@ import tempfile
 import os
 import textwrap
 from roms_tools.setup.download import download_test_data
+from roms_tools.setup.datasets import CESMBGCDataset
 
 
 @pytest.fixture
@@ -49,7 +50,7 @@ def initial_conditions(example_grid, example_vertical_coordinate):
         grid=example_grid,
         vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
-        filename=fname,
+        physics_source={"filename": fname, "name": "GLORYS"},
     )
 
 
@@ -66,8 +67,8 @@ def initial_conditions_with_bgc(example_grid, example_vertical_coordinate):
         grid=example_grid,
         vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
-        filename=fname,
-        bgc_filename=fname_bgc,
+        physics_source={"filename": fname, "name": "GLORYS"},
+        bgc_source={"filename": fname_bgc, "name": "CESM_REGRIDDED"},
     )
 
 
@@ -86,8 +87,8 @@ def initial_conditions_with_bgc_from_climatology(
         grid=example_grid,
         vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
-        filename=fname,
-        bgc_filename=fname_bgc,
+        physics_source={"filename": fname, "name": "GLORYS"},
+        bgc_source={"filename": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
     )
 
 
@@ -99,6 +100,7 @@ def initial_conditions_with_bgc_from_climatology(
         "initial_conditions_with_bgc_from_climatology",
     ],
 )
+
 def test_initial_conditions_creation(ic_fixture, request):
     """
     Test the creation of the InitialConditions object.
@@ -107,8 +109,7 @@ def test_initial_conditions_creation(ic_fixture, request):
     ic = request.getfixturevalue(ic_fixture)
 
     assert ic.ini_time == datetime(2021, 6, 29)
-    assert ic.filename == download_test_data("GLORYS_test_data.nc")
-    assert ic.source == "GLORYS"
+    assert ic.physics_source == {"name": "GLORYS", "filename": download_test_data("GLORYS_test_data.nc"), "climatology": False}
     assert isinstance(ic.ds, xr.Dataset)
     assert "temp" in ic.ds
     assert "salt" in ic.ds
@@ -116,6 +117,102 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert "v" in ic.ds
     assert "zeta" in ic.ds
 
+# Test initialization with missing 'name' in physics_source
+def test_initial_conditions_missing_physics_name(example_grid, example_vertical_coordinate):
+    with pytest.raises(ValueError, match="`physics_source` must include a 'name'."):
+        InitialConditions(
+            grid=example_grid,
+            vertical_coordinate=example_vertical_coordinate,
+            ini_time=datetime(2021, 6, 29),
+            physics_source={"filename": "physics_data.nc"}
+        )
+
+# Test initialization with missing 'filename' in physics_source
+def test_initial_conditions_missing_physics_filename(example_grid, example_vertical_coordinate):
+    with pytest.raises(ValueError, match="`physics_source` must include a 'filename'."):
+        InitialConditions(
+            grid=example_grid,
+            vertical_coordinate=example_vertical_coordinate,
+            ini_time=datetime(2021, 6, 29),
+            physics_source={"name": "GLORYS"}
+        )
+
+# Test initialization with missing 'name' in bgc_source
+def test_initial_conditions_missing_bgc_name(example_grid, example_vertical_coordinate):
+    
+    fname = download_test_data("GLORYS_test_data.nc")
+    with pytest.raises(ValueError, match="`bgc_source` must include a 'name' if it is provided."):
+        InitialConditions(
+            grid=example_grid,
+            vertical_coordinate=example_vertical_coordinate,
+            ini_time=datetime(2021, 6, 29),
+            physics_source={"name": "GLORYS", "filename": fname},
+            bgc_source={"filename": "bgc_data.nc"}
+        )
+
+# Test initialization with missing 'filename' in bgc_source
+def test_initial_conditions_missing_bgc_filename(example_grid, example_vertical_coordinate):
+    
+    fname = download_test_data("GLORYS_test_data.nc")
+    with pytest.raises(ValueError, match="`bgc_source` must include a 'filename' if it is provided."):
+        InitialConditions(
+            grid=example_grid,
+            vertical_coordinate=example_vertical_coordinate,
+            ini_time=datetime(2021, 6, 29),
+            physics_source={"name": "GLORYS", "filename": fname},
+            bgc_source={"name": "CESM_REGRIDDED"}
+        )
+
+# Test default climatology value
+def test_initial_conditions_default_climatology(example_grid, example_vertical_coordinate):
+
+    fname = download_test_data("GLORYS_test_data.nc")
+
+    initial_conditions = InitialConditions(
+        grid=example_grid,
+        vertical_coordinate=example_vertical_coordinate,
+        ini_time=datetime(2021, 6, 29),
+        physics_source={"name": "GLORYS", "filename": fname}
+    )
+
+    assert initial_conditions.physics_source["climatology"] is False
+    assert initial_conditions.bgc_source is None
+
+def test_initial_conditions_default_bgc_climatology(example_grid, example_vertical_coordinate):
+
+    fname = download_test_data("GLORYS_test_data.nc")
+    fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")
+
+    initial_conditions = InitialConditions(
+        grid=example_grid,
+        vertical_coordinate=example_vertical_coordinate,
+        ini_time=datetime(2021, 6, 29),
+        physics_source={"name": "GLORYS", "filename": fname},
+        bgc_source={"name": "CESM_REGRIDDED", "filename": fname_bgc}
+    )
+
+    assert initial_conditions.bgc_source["climatology"] is False
+
+def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climatology):
+    
+    fname_bgc = download_test_data("CESM_regional_test_data_climatology.nc")
+    ds = xr.open_dataset(fname_bgc)
+
+    # check if interpolated value for Jan 15 is indeed January value from climatology
+    bgc_data = CESMBGCDataset(
+        filename=fname_bgc,
+        start_time=datetime(2012, 1, 15),
+        climatology=True
+    )
+    assert np.allclose(ds['ALK'].sel(month=1), bgc_data.ds['ALK'], equal_nan=True)
+
+    # check if interpolated value for Jan 30 is indeed average of January and February value from climatology
+    bgc_data = CESMBGCDataset(
+        filename=fname_bgc,
+        start_time=datetime(2012, 1, 30),
+        climatology=True
+    )
+    assert np.allclose(0.5 * (ds['ALK'].sel(month=1) + ds['ALK'].sel(month=2)), bgc_data.ds['ALK'], equal_nan=True)
 
 def test_initial_conditions_data_consistency_plot_save(initial_conditions, tmp_path):
     """

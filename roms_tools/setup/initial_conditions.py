@@ -3,7 +3,7 @@ import numpy as np
 import yaml
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Optional, Dict, Union
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
@@ -18,73 +18,88 @@ from roms_tools.setup.utils import (
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 
-
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions:
     """
-    Represents initial conditions for ROMS.
+    Represents initial conditions for ROMS, including physical and biogeochemical data.
 
     Parameters
     ----------
     grid : Grid
-        Object representing the grid information.
-    vertical_coordinate: VerticalCoordinate
-        Object representing the vertical coordinate information
+        Object representing the grid information used for the model.
+    vertical_coordinate : VerticalCoordinate
+        Object representing the vertical coordinate system.
     ini_time : datetime
-        Desired initialization time.
+        The date and time at which the initial conditions are set.
     model_reference_date : datetime, optional
-        Reference date for the model. Default is January 1, 2000.
-    source : str, optional
-        Source of the initial condition data. Default is "GLORYS".
-    filename: str
-        Path to the source data file. Can contain wildcards.
-    bgc_source : Optional[str], optional
-        Source of the biogeochemical (BGC) initial condition data. Default is None.
-    bgc_filename : Optional[str], optional
-        Path to the BGC data file. Can contain wildcards. Default is None.
+        The reference date for the model. Defaults to January 1, 2000.
+    physics_source : Dict[str, Union[str, None]]
+        Dictionary specifying the source of the physical initial condition data:
+        - "name" (str): Name of the data source (e.g., "GLORYS").
+        - "filename" (str): Path to the physical data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
+    bgc_source : Optional[Dict[str, Union[str, None]]]
+        Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
+        - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
+        - "filename" (str): Path to the BGC data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
 
     Attributes
     ----------
     ds : xr.Dataset
-        Xarray Dataset containing the initial condition data.
-    bgc : bool
-        Indicates whether biogeochemical data is included.
+        Xarray Dataset containing the initial condition data loaded from the specified files.
 
+    Examples
+    --------
+    >>> initial_conditions = InitialConditions(
+    ...     grid=grid,
+    ...     vertical_coordinate=vertical_coordinate,
+    ...     ini_time=datetime(2022, 1, 1),
+    ...     physics_source={"name": "GLORYS", "filename": "physics_data.nc"},
+    ...     bgc_source={"name": "CESM_REGRIDDED", "filename": "bgc_data.nc"}
+    ... )
     """
 
     grid: Grid
     vertical_coordinate: VerticalCoordinate
     ini_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "GLORYS"
-    filename: str
-    bgc_source: Optional[str] = None
-    bgc_filename: Optional[str] = None
-    bgc: bool = field(init=False, repr=False)
+    physics_source: Dict[str, Union[str, None]]
+    bgc_source: Optional[Dict[str, Union[str, None]]] = None
+
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-
-        if self.source == "GLORYS":
-            data = GLORYSDataset(filename=self.filename, start_time=self.ini_time)
+        if "name" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'name'.")
+        if "filename" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'filename'.")
+        # set self.physics_source["climatology"] to False if not provided
+        object.__setattr__(self, "physics_source", {**self.physics_source, "climatology": self.physics_source.get("climatology", False)})
+        if self.physics_source["name"] == "GLORYS":
+            data = GLORYSDataset(filename=self.physics_source["filename"], start_time=self.ini_time, climatology=self.physics_source["climatology"])
         else:
-            raise ValueError('Only "GLORYS" is a valid option for source.')
-
+            raise ValueError('Only "GLORYS" is a valid option for physics_source["name"].')
         if self.bgc_source is not None:
-            object.__setattr__(self, "bgc", True)
-            if self.bgc_source == "CESM_REGRIDDED":
+            if "name" not in self.bgc_source.keys():
+                raise ValueError("`bgc_source` must include a 'name' if it is provided.")
+            if "filename" not in self.bgc_source.keys():
+                raise ValueError("`bgc_source` must include a 'filename' if it is provided.")
+            # set self.physics_source["climatology"] to False if not provided
+            object.__setattr__(self, "bgc_source", {**self.bgc_source, "climatology": self.bgc_source.get("climatology", False)})
+
+            if self.bgc_source["name"] == "CESM_REGRIDDED":
 
                 bgc_data = CESMBGCDataset(
-                    filename=self.bgc_filename,
+                    filename=self.bgc_source["filename"],
                     start_time=self.ini_time,
+                    climatology=self.bgc_source["climatology"]
                 )
                 bgc_data.post_process()
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for bgc_source.'
+                    'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
                 )
-        else:
-            object.__setattr__(self, "bgc", False)
 
         lon = self.grid.ds.lon_rho
         lat = self.grid.ds.lat_rho
@@ -106,7 +121,7 @@ class InitialConditions:
             margin=2,
             straddle=straddle,
         )
-        if self.bgc:
+        if self.bgc_source is not None:
             bgc_data.choose_subdomain(
                 latitude_range=[lat.min().values, lat.max().values],
                 longitude_range=[lon.min().values, lon.max().values],
@@ -159,7 +174,7 @@ class InitialConditions:
             )
 
         # do the same for the BGC variables if present
-        if self.bgc:
+        if self.bgc_source is not None:
             fill_dims = [
                 bgc_data.dim_names["latitude"],
                 bgc_data.dim_names["longitude"],
@@ -259,7 +274,7 @@ class InitialConditions:
         ds["vbar"].attrs["long_name"] = "vertically integrated v-flux component"
         ds["vbar"].attrs["units"] = "m/s"
 
-        if self.bgc:
+        if self.bgc_source is not None:
             ds["PO4"] = data_vars["PO4"].astype(np.float32)
             ds["PO4"].attrs["long_name"] = "Dissolved Inorganic Phosphate"
             ds["PO4"].attrs["units"] = "mmol/m^3"
@@ -412,7 +427,9 @@ class InitialConditions:
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["ini_time"] = str(self.ini_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["source"] = self.source
+        ds.attrs["physical_source"] = self.physics_source["name"]
+        if self.bgc_source is not None:
+            ds.attrs["bgc_source"] = self.bgc_source["name"]
 
         if data.dim_names["time"] != "time":
             ds = ds.rename({data.dim_names["time"]: "time"})
@@ -634,12 +651,14 @@ class InitialConditions:
 
         initial_conditions_data = {
             "InitialConditions": {
-                "filename": self.filename,
+                "physics_source": self.physics_source,
                 "ini_time": self.ini_time.isoformat(),
                 "model_reference_date": self.model_reference_date.isoformat(),
-                "source": self.source,
             }
         }
+        # Include bgc_source if it's not None
+        if self.bgc_source is not None:
+            initial_conditions_data["InitialConditions"]["bgc_source"] = self.bgc_source
 
         yaml_data = {
             **grid_yaml_data,

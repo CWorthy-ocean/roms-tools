@@ -1,4 +1,7 @@
 import xarray as xr
+import numpy as np
+from typing import Union
+import pandas as pd
 
 
 def nan_check(field, mask) -> None:
@@ -162,46 +165,75 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
     return field_interpolated
 
 
-def interpolate_from_climatology(field, time_dim_name, time):
+def interpolate_from_climatology(
+    field: Union[xr.DataArray, xr.Dataset],
+    time_dim_name: str,
+    time: Union[xr.DataArray, pd.DatetimeIndex],
+) -> Union[xr.DataArray, xr.Dataset]:
     """
     Interpolates the given field temporally based on the specified time points.
 
+    If `field` is an xarray.Dataset, this function applies the interpolation to all data variables in the dataset.
+
     Parameters
     ----------
-    field : xarray.DataArray
-        The field data to be interpolated.
+    field : xarray.DataArray or xarray.Dataset
+        The field data to be interpolated. Can be a single DataArray or a Dataset.
+    time_dim_name : str
+        The name of the dimension in `field` that represents time.
     time : xarray.DataArray or pandas.DatetimeIndex
         The target time points for interpolation.
 
     Returns
     -------
-    xr.DataArray
-        The field values interpolated to the specified time points.
-
-
+    xarray.DataArray or xarray.Dataset
+        The field values interpolated to the specified time points. The type matches the input type.
     """
-    field["time"] = field[time_dim_name].dt.days
-    day_of_year = time.dt.dayofyear
 
-    # Concatenate across the beginning and end of the year
-    time_concat = xr.concat(
-        [
-            field["time"][-1] - 365.25,
-            field["time"],
-            365.25 + field["time"][0],
-        ],
-        dim="time",
-    )
-    field_concat = xr.concat(
-        [
-            field.isel(time=-1),
-            field,
-            field.isel(time=0),
-        ],
-        dim="time",
-    )
-    field_concat["time"] = time_concat
-    # Interpolate to specified times
-    field_interpolated = field_concat.interp(time=day_of_year, method="linear")
+    def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
 
-    return field_interpolated
+        if isinstance(time, xr.DataArray):
+            # Extract day of year from xarray.DataArray
+            day_of_year = time.dt.dayofyear.values
+        else:
+            if np.size(time) == 1:
+                day_of_year = time.timetuple().tm_yday
+            else:
+                day_of_year = np.array([t.timetuple().tm_yday for t in time])
+
+        # Concatenate across the beginning and end of the year
+        time_concat = xr.concat(
+            [
+                data_array[time_dim_name][-1] - 365.25,
+                data_array[time_dim_name],
+                365.25 + data_array[time_dim_name][0],
+            ],
+            dim=time_dim_name,
+        )
+        data_array_concat = xr.concat(
+            [
+                data_array.isel(**{time_dim_name: -1}),
+                data_array,
+                data_array.isel(**{time_dim_name: 0}),
+            ],
+            dim=time_dim_name,
+        )
+        data_array_concat[time_dim_name] = time_concat
+
+        # Interpolate to specified times
+        data_array_interpolated = data_array_concat.interp(
+            **{time_dim_name: day_of_year}, method="linear"
+        )
+
+        return data_array_interpolated
+
+    if isinstance(field, xr.DataArray):
+        return interpolate_single_field(field)
+    elif isinstance(field, xr.Dataset):
+        interpolated_data_vars = {
+            var: interpolate_single_field(data_array)
+            for var, data_array in field.data_vars.items()
+        }
+        return xr.Dataset(interpolated_data_vars, attrs=field.attrs)
+    else:
+        raise TypeError("Input 'field' must be an xarray.DataArray or xarray.Dataset.")

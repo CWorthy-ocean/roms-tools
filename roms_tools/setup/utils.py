@@ -194,12 +194,14 @@ def interpolate_from_climatology(
 
         if isinstance(time, xr.DataArray):
             # Extract day of year from xarray.DataArray
-            day_of_year = time.dt.dayofyear.values
+            day_of_year = time.dt.dayofyear
         else:
             if np.size(time) == 1:
                 day_of_year = time.timetuple().tm_yday
             else:
                 day_of_year = np.array([t.timetuple().tm_yday for t in time])
+
+        data_array[time_dim_name] = data_array[time_dim_name].dt.days
 
         # Concatenate across the beginning and end of the year
         time_concat = xr.concat(
@@ -225,6 +227,8 @@ def interpolate_from_climatology(
             **{time_dim_name: day_of_year}, method="linear"
         )
 
+        if np.size(time) == 1:
+            data_array_interpolated = data_array_interpolated.expand_dims({time_dim_name: 1})
         return data_array_interpolated
 
     if isinstance(field, xr.DataArray):

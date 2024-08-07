@@ -27,13 +27,13 @@ class Dataset:
         Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
 
     Attributes
     ----------
     ds : xr.Dataset
         The xarray Dataset containing the forcing data on its original grid.
-    climatology : bool
-        Indicates whether the dataset is climatological. Set to `True` if relevant.
 
     Examples
     --------
@@ -59,9 +59,9 @@ class Dataset:
             "time": "time",
         }
     )
+    climatology: Optional[bool] = False
 
     ds: xr.Dataset = field(init=False, repr=False)
-    climatology: bool = field(init=False, default=False)
 
     def __post_init__(self):
         """
@@ -71,13 +71,11 @@ class Dataset:
         3. Selects relevant fields as specified by var_names.
         4. Ensures latitude values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
-        6. Sets the climatology attribute based on whether the dataset is climatological.
         """
 
         ds = self.load_data()
 
         # Select relevant times
-        object.__setattr__(self, "climatology", False)
         if self.start_time is not None:
             if "time" in self.dim_names:
                 ds = self.select_relevant_times(ds)
@@ -225,7 +223,7 @@ class Dataset:
 
         time_dim = self.dim_names["time"]
         if time_dim in ds.coords or time_dim in ds.data_vars:
-            if time_dim == "month":
+            if self.climatology:
                 # Define the days in each month and convert to timedelta
                 increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
                 days = np.cumsum(increments)
@@ -234,22 +232,19 @@ class Dataset:
                 )
                 time = xr.DataArray(timedelta_ns, dims=["month"])
                 ds = ds.assign_coords({"time": time})
-                ds = ds.swap_dims({"month": "time"})
-
-                # Update dimension names
-                updated_dim_names = self.dim_names.copy()
-                updated_dim_names["time"] = "time"
-                object.__setattr__(self, "dim_names", updated_dim_names)
-
+                if time_dim != "time":
+                    ds = ds.swap_dims({time_dim: "time"})
+                    ds = ds.drop_vars(time_dim)
+                    # Update dimension names
+                    updated_dim_names = self.dim_names.copy()
+                    updated_dim_names["time"] = "time"
+                    object.__setattr__(self, "dim_names", updated_dim_names)
+                    time_dim = self.dim_names["time"]
                 if not self.end_time:
                     # Interpolate from climatology for initial conditions
                     ds = interpolate_from_climatology(
                         ds, self.dim_names["time"], self.start_time
                     )
-                else:
-                    # Set climatology flag for full climatology datasets
-                    object.__setattr__(self, "climatology", True)
-                    pass
             else:
                 if not self.end_time:
                     end_time = self.start_time + timedelta(days=1)
@@ -264,7 +259,6 @@ class Dataset:
             warnings.warn(
                 f"Dataset at {self.filename} does not contain any time information."
             )
-
         if not ds.sizes[time_dim]:
             raise ValueError("No matching times found.")
 

@@ -7,7 +7,7 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import glob
 import numpy as np
-from typing import Optional, Dict
+from typing import Optional, Dict, Union
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.datasets import ERA5Dataset
 from roms_tools.setup.utils import nan_check, interpolate_from_climatology
@@ -23,15 +23,15 @@ class SWRCorrection:
 
     Parameters
     ----------
-    filename : str
-        Filename of the correction data.
+    path : str
+        Path to the correction data file.
     varname : str
         Variable identifier for the correction.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
         Default is {"longitude": "lon", "latitude": "lat", "time": "time"}.
-    temporal_resolution : str, optional
-        Temporal resolution of the correction data. Default is "climatology".
+    climatology : bool, optional
+        Indicaters if the correction data is a climatology. Defaults to True.
 
     Attributes
     ----------
@@ -41,18 +41,18 @@ class SWRCorrection:
     Examples
     --------
     >>> swr_correction = SWRCorrection(
-    ...     filename="correction_data.nc",
+    ...     path="correction_data.nc",
     ...     varname="corr",
     ...     dim_names={
     ...         "time": "time",
     ...         "latitude": "latitude",
     ...         "longitude": "longitude",
     ...     },
-    ...     temporal_resolution="climatology",
+    ...     climatology=True,
     ... )
     """
 
-    filename: str
+    path: str
     varname: str
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {
@@ -61,13 +61,13 @@ class SWRCorrection:
             "time": "time",
         }
     )
-    temporal_resolution: str = "climatology"
+    climatology: bool = True
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        if self.temporal_resolution != "climatology":
+        if not self.climatology:
             raise NotImplementedError(
-                f"temporal_resolution must be 'climatology', got {self.temporal_resolution}"
+                "Correction data must be a climatology. Set climatology to True."
             )
 
         ds = self._load_data()
@@ -94,15 +94,15 @@ class SWRCorrection:
         # Check if the file exists
 
         # Check if any file matching the wildcard pattern exists
-        matching_files = glob.glob(self.filename)
+        matching_files = glob.glob(self.path)
         if not matching_files:
             raise FileNotFoundError(
-                f"No files found matching the pattern '{self.filename}'."
+                f"No files found matching the pattern '{self.path}'."
             )
 
         # Load the dataset
         ds = xr.open_dataset(
-            self.filename,
+            self.path,
             chunks={
                 self.dim_names["time"]: -1,
                 self.dim_names["latitude"]: -1,
@@ -239,12 +239,12 @@ class SWRCorrection:
         Raises
         ------
         NotImplementedError
-            If the temporal resolution is not set to 'climatology'.
+            If 'climatology' is set to False.
 
         """
-        if self.temporal_resolution != "climatology":
+        if not self.climatology:
             raise NotImplementedError(
-                f"temporal_resolution must be 'climatology', got {self.temporal_resolution}"
+                "Correction data must be a climatology. Set climatology to True."
             )
         else:
             return interpolate_from_climatology(field, self.dim_names["time"], time)
@@ -294,15 +294,15 @@ class Rivers:
 
     Parameters
     ----------
-    filename : str, optional
-        Filename of the river forcing data.
+    path : str, optional
+        Path to river forcing data file.
     """
 
-    filename: str = ""
+    path: str = ""
 
     def __post_init__(self):
-        if not self.filename:
-            raise ValueError("The 'filename' must be provided.")
+        if not self.path:
+            raise ValueError("The 'path' must be provided.")
 
     @classmethod
     def from_yaml(cls, filepath: str) -> "Rivers":
@@ -351,22 +351,23 @@ class AtmosphericForcing:
     ----------
     grid : Grid
         Object representing the grid information.
-    use_coarse_grid: bool
-        Whether to interpolate to coarsened grid. Default is False.
     start_time : datetime
         Start time of the desired forcing data.
     end_time : datetime
         End time of the desired forcing data.
-    model_reference_date : datetime, optional
-        Reference date for the model. Default is January 1, 2000.
-    source : str, optional
-        Source of the atmospheric forcing data. Default is "ERA5".
-    filename: str
-        Path to the atmospheric forcing source data file. Can contain wildcards.
+    physics_source : Dict[str, Union[str, None]]
+        Dictionary specifying the source of the physical surface forcing data:
+        - "name" (str): Name of the data source (e.g., "ERA5").
+        - "path" (str): Path to the physical data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
     swr_correction : SWRCorrection
         Shortwave radiation correction configuration.
     rivers : Rivers, optional
         River forcing configuration.
+    use_coarse_grid: bool
+        Whether to interpolate to coarsened grid. Default is False.
+    model_reference_date : datetime, optional
+        Reference date for the model. Default is January 1, 2000.
 
     Attributes
     ----------
@@ -376,41 +377,52 @@ class AtmosphericForcing:
 
     Examples
     --------
-    >>> grid_info = Grid(...)
-    >>> start_time = datetime(2000, 1, 1)
-    >>> end_time = datetime(2000, 1, 2)
     >>> atm_forcing = AtmosphericForcing(
-    ...     grid=grid_info,
-    ...     start_time=start_time,
-    ...     end_time=end_time,
-    ...     source="ERA5",
-    ...     filename="atmospheric_data_*.nc",
+    ...     grid=grid,
+    ...     start_time=datetime(2000, 1, 1),
+    ...     end_time=datetime(2000, 1, 2),
+    ...     physics_source={"name": "ERA5", "path": "physics_data.nc"},
     ...     swr_correction=swr_correction,
     ... )
     """
 
     grid: Grid
-    use_coarse_grid: bool = False
     start_time: datetime
     end_time: datetime
-    model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "ERA5"
-    filename: str
+    physics_source: Dict[str, Union[str, None]]
     swr_correction: Optional["SWRCorrection"] = None
     rivers: Optional["Rivers"] = None
+    use_coarse_grid: bool = False
+    model_reference_date: datetime = datetime(2000, 1, 1)
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
 
-        if self.source == "ERA5":
+        if "name" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'name'.")
+        if "path" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'path'.")
+        # set self.physics_source["climatology"] to False if not provided
+        object.__setattr__(
+            self,
+            "physics_source",
+            {
+                **self.physics_source,
+                "climatology": self.physics_source.get("climatology", False),
+            },
+        )
+        if self.physics_source["name"] == "ERA5":
             data = ERA5Dataset(
-                filename=self.filename,
+                filename=self.physics_source["path"],
                 start_time=self.start_time,
                 end_time=self.end_time,
+                climatology=self.physics_source["climatology"],
             )
             data.post_process()
         else:
-            raise ValueError('Only "ERA5" is a valid option for source.')
+            raise ValueError(
+                'Only "ERA5" is a valid option for physics_source["name"].'
+            )
 
         if self.use_coarse_grid:
             if "lon_coarse" not in self.grid.ds:
@@ -547,11 +559,11 @@ class AtmosphericForcing:
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["start_time"] = str(self.start_time)
         ds.attrs["end_time"] = str(self.end_time)
-        ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["source"] = self.source
-        ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
+        ds.attrs["physics_source"] = self.physics_source["name"]
         ds.attrs["swr_correction"] = str(self.swr_correction is not None)
         ds.attrs["rivers"] = str(self.rivers is not None)
+        ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
 
         if self.use_coarse_grid:
             ds = ds.assign_coords({"lon": lon, "lat": lat})
@@ -617,14 +629,6 @@ class AtmosphericForcing:
 
         Examples
         --------
-        >>> atm_forcing = AtmosphericForcing(
-        ...     grid=grid_info,
-        ...     start_time=start_time,
-        ...     end_time=end_time,
-        ...     source="ERA5",
-        ...     filename="atmospheric_data_*.nc",
-        ...     swr_correction=swr_correction,
-        ... )
         >>> atm_forcing.plot("uwnd", time=0)
         """
 
@@ -770,12 +774,11 @@ class AtmosphericForcing:
         # Combine all sections
         atmospheric_forcing_data = {
             "AtmosphericForcing": {
-                "filename": self.filename,
                 "start_time": self.start_time.isoformat(),
                 "end_time": self.end_time.isoformat(),
-                "model_reference_date": self.model_reference_date.isoformat(),
-                "source": self.source,
+                "physics_source": self.physics_source,
                 "use_coarse_grid": self.use_coarse_grid,
+                "model_reference_date": self.model_reference_date.isoformat(),
             }
         }
 

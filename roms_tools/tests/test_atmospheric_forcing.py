@@ -186,8 +186,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert atm_forcing.ds is not None
@@ -199,8 +198,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         use_coarse_grid=True,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert isinstance(atm_forcing.ds, xr.Dataset)
@@ -214,8 +212,11 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
 
     assert atm_forcing.start_time == start_time
     assert atm_forcing.end_time == end_time
-    assert atm_forcing.filename == fname
-    assert atm_forcing.source == "ERA5"
+    assert atm_forcing.physics_source == {
+        "name": "ERA5",
+        "path": fname,
+        "climatology": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -239,8 +240,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
             grid=grid,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
     grid.coarsen()
@@ -251,8 +251,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
             use_coarse_grid=True,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
 
@@ -272,8 +271,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
             grid=grid_that_straddles_180_degree_meridian,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
     grid_that_straddles_180_degree_meridian.coarsen()
@@ -286,8 +284,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
             use_coarse_grid=True,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
 
@@ -316,8 +313,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert isinstance(atm_forcing.ds, xr.Dataset)
@@ -336,8 +332,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
         use_coarse_grid=True,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert isinstance(atm_forcing.ds, xr.Dataset)
@@ -351,8 +346,11 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
     assert atm_forcing.start_time == start_time
     assert atm_forcing.end_time == end_time
-    assert atm_forcing.filename == fname
-    assert atm_forcing.source == "ERA5"
+    assert atm_forcing.physics_source == {
+        "name": "ERA5",
+        "path": fname,
+        "climatology": False,
+    }
 
 
 @pytest.fixture
@@ -370,8 +368,7 @@ def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
 
@@ -385,14 +382,14 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         known_hash="a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
     )
     correction = SWRCorrection(
-        filename=correction_filename,
+        path=correction_filename,
         varname="ssr_corr",
         dim_names={
             "longitude": "longitude",
             "latitude": "latitude",
             "time": "time",
         },
-        temporal_resolution="climatology",
+        climatology=True,
     )
 
     start_time = datetime(2020, 1, 31)
@@ -404,8 +401,7 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
         swr_correction=correction,
     )
 
@@ -1620,10 +1616,10 @@ def swr_correction():
     correction_filename
 
     return SWRCorrection(
-        filename=correction_filename,
+        path=correction_filename,
         varname="ssr_corr",
         dim_names={"time": "time", "latitude": "latitude", "longitude": "longitude"},
-        temporal_resolution="climatology",
+        climatology=True,
     )
 
 

@@ -168,9 +168,7 @@ def test_initial_conditions_missing_bgc_name(example_grid, example_vertical_coor
 
 
 # Test initialization with missing 'path' in bgc_source
-def test_initial_conditions_missing_bgc_path(
-    example_grid, example_vertical_coordinate
-):
+def test_initial_conditions_missing_bgc_path(example_grid, example_vertical_coordinate):
 
     fname = download_test_data("GLORYS_test_data.nc")
     with pytest.raises(

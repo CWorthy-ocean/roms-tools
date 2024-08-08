@@ -123,7 +123,7 @@ def test_select_times(data_fixture, expected_time_values, request):
         # Instantiate Dataset object using the temporary file
         dataset = Dataset(
             filename=filepath,
-            var_names=["var"],
+            var_names={"var": "var"},
             start_time=start_time,
             end_time=end_time,
         )
@@ -158,7 +158,9 @@ def test_select_times_no_end_time(data_fixture, expected_time_values, request):
         dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        dataset = Dataset(filename=filepath, var_names=["var"], start_time=start_time)
+        dataset = Dataset(
+            filename=filepath, var_names={"var": "var"}, start_time=start_time
+        )
 
         assert dataset.ds is not None
         assert len(dataset.ds.time) == len(expected_time_values)
@@ -184,7 +186,7 @@ def test_multiple_matching_times(global_dataset_with_multiple_times_per_day):
             ValueError,
             match="There must be exactly one time matching the start_time. Found 2 matching times.",
         ):
-            Dataset(filename=filepath, var_names=["var"], start_time=start_time)
+            Dataset(filename=filepath, var_names={"var": "var"}, start_time=start_time)
     finally:
         os.remove(filepath)
 
@@ -205,7 +207,7 @@ def test_no_matching_times(global_dataset):
         with pytest.raises(ValueError, match="No matching times found."):
             Dataset(
                 filename=filepath,
-                var_names=["var"],
+                var_names={"var": "var"},
                 start_time=start_time,
                 end_time=end_time,
             )
@@ -228,7 +230,7 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
         # Instantiate Dataset object using the temporary file
         dataset = Dataset(
             filename=filepath,
-            var_names=["var"],
+            var_names={"var": "var"},
             dim_names={
                 "latitude": "latitude",
                 "longitude": "longitude",
@@ -253,7 +255,7 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
         # test choosing subdomain for domain that does not straddle the dateline
         dataset = Dataset(
             filename=filepath,
-            var_names=["var"],
+            var_names={"var": "var"},
             dim_names={
                 "latitude": "latitude",
                 "longitude": "longitude",
@@ -285,7 +287,7 @@ def test_check_if_global_with_global_dataset(global_dataset):
         filepath = tmpfile.name
         global_dataset.to_netcdf(filepath)
     try:
-        dataset = Dataset(filename=filepath, var_names=["var"])
+        dataset = Dataset(filename=filepath, var_names={"var": "var"})
         is_global = dataset.check_if_global(dataset.ds)
         assert is_global
     finally:
@@ -298,7 +300,7 @@ def test_check_if_global_with_non_global_dataset(non_global_dataset):
         filepath = tmpfile.name
         non_global_dataset.to_netcdf(filepath)
     try:
-        dataset = Dataset(filename=filepath, var_names=["var"])
+        dataset = Dataset(filename=filepath, var_names={"var": "var"})
         is_global = dataset.check_if_global(dataset.ds)
 
         assert not is_global

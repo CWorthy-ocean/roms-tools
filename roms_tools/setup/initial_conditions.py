@@ -3,10 +3,11 @@ import numpy as np
 import yaml
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
+from typing import Optional, Dict, Union
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
-from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.utils import (
     nan_check,
@@ -21,65 +22,109 @@ import matplotlib.pyplot as plt
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions:
     """
-    Represents initial conditions for ROMS.
+    Represents initial conditions for ROMS, including physical and biogeochemical data.
 
     Parameters
     ----------
     grid : Grid
-        Object representing the grid information.
-    vertical_coordinate: VerticalCoordinate
-        Object representing the vertical coordinate information
+        Object representing the grid information used for the model.
+    vertical_coordinate : VerticalCoordinate
+        Object representing the vertical coordinate system.
     ini_time : datetime
-        Desired initialization time.
+        The date and time at which the initial conditions are set.
+    physics_source : Dict[str, Union[str, None]]
+        Dictionary specifying the source of the physical initial condition data:
+        - "name" (str): Name of the data source (e.g., "GLORYS").
+        - "path" (str): Path to the physical data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
+    bgc_source : Optional[Dict[str, Union[str, None]]]
+        Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
+        - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
+        - "path" (str): Path to the BGC data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
     model_reference_date : datetime, optional
-        Reference date for the model. Default is January 1, 2000.
-    source : str, optional
-        Source of the initial condition data. Default is "GLORYS".
-    filename: str
-        Path to the source data file. Can contain wildcards.
+        The reference date for the model. Defaults to January 1, 2000.
 
     Attributes
     ----------
     ds : xr.Dataset
-        Xarray Dataset containing the initial condition data.
+        Xarray Dataset containing the initial condition data loaded from the specified files.
 
+    Examples
+    --------
+    >>> initial_conditions = InitialConditions(
+    ...     grid=grid,
+    ...     vertical_coordinate=vertical_coordinate,
+    ...     ini_time=datetime(2022, 1, 1),
+    ...     physics_source={"name": "GLORYS", "path": "physics_data.nc"},
+    ...     bgc_source={"name": "CESM_REGRIDDED", "path": "bgc_data.nc"},
+    ... )
     """
 
     grid: Grid
     vertical_coordinate: VerticalCoordinate
     ini_time: datetime
+    physics_source: Dict[str, Union[str, None]]
+    bgc_source: Optional[Dict[str, Union[str, None]]] = None
     model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "GLORYS"
-    filename: str
+
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-
-        # Check that the source is "GLORYS"
-        if self.source != "GLORYS":
-            raise ValueError('Only "GLORYS" is a valid option for source.')
-        if self.source == "GLORYS":
-            dims = {
-                "longitude": "longitude",
-                "latitude": "latitude",
-                "depth": "depth",
-                "time": "time",
-            }
-
-            varnames = {
-                "temp": "thetao",
-                "salt": "so",
-                "u": "uo",
-                "v": "vo",
-                "ssh": "zos",
-            }
-
-        data = Dataset(
-            filename=self.filename,
-            start_time=self.ini_time,
-            var_names=varnames.values(),
-            dim_names=dims,
+        if "name" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'name'.")
+        if "path" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'path'.")
+        # set self.physics_source["climatology"] to False if not provided
+        object.__setattr__(
+            self,
+            "physics_source",
+            {
+                **self.physics_source,
+                "climatology": self.physics_source.get("climatology", False),
+            },
         )
+        if self.physics_source["name"] == "GLORYS":
+            data = GLORYSDataset(
+                filename=self.physics_source["path"],
+                start_time=self.ini_time,
+                climatology=self.physics_source["climatology"],
+            )
+        else:
+            raise ValueError(
+                'Only "GLORYS" is a valid option for physics_source["name"].'
+            )
+        if self.bgc_source is not None:
+            if "name" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'name' if it is provided."
+                )
+            if "path" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'path' if it is provided."
+                )
+            # set self.physics_source["climatology"] to False if not provided
+            object.__setattr__(
+                self,
+                "bgc_source",
+                {
+                    **self.bgc_source,
+                    "climatology": self.bgc_source.get("climatology", False),
+                },
+            )
+
+            if self.bgc_source["name"] == "CESM_REGRIDDED":
+
+                bgc_data = CESMBGCDataset(
+                    filename=self.bgc_source["path"],
+                    start_time=self.ini_time,
+                    climatology=self.bgc_source["climatology"],
+                )
+                bgc_data.post_process()
+            else:
+                raise ValueError(
+                    'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
+                )
 
         lon = self.grid.ds.lon_rho
         lat = self.grid.ds.lat_rho
@@ -92,30 +137,32 @@ class InitialConditions:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
-        # The following consists of two steps:
-        # Step 1: Choose subdomain of forcing data including safety margin for interpolation, and Step 2: Convert to the proper longitude range.
-        # We perform these two steps for two reasons:
-        # A) Since the horizontal dimensions consist of a single chunk, selecting a subdomain before interpolation is a lot more performant.
-        # B) Step 1 is necessary to avoid discontinuous longitudes that could be introduced by Step 2. Specifically, discontinuous longitudes
-        # can lead to artifacts in the interpolation process. Specifically, if there is a data gap if data is not global,
-        # discontinuous longitudes could result in values that appear to come from a distant location instead of producing NaNs.
-        # These NaNs are important as they can be identified and handled appropriately by the nan_check function.
+        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
+        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
+        # would not be detected by the nan_check function.
         data.choose_subdomain(
             latitude_range=[lat.min().values, lat.max().values],
             longitude_range=[lon.min().values, lon.max().values],
             margin=2,
             straddle=straddle,
         )
+        if self.bgc_source is not None:
+            bgc_data.choose_subdomain(
+                latitude_range=[lat.min().values, lat.max().values],
+                longitude_range=[lon.min().values, lon.max().values],
+                margin=2,
+                straddle=straddle,
+            )
 
         # interpolate onto desired grid
-        fill_dims = [dims["latitude"], dims["longitude"]]
+        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
 
         # 2d interpolation
-        mask = xr.where(data.ds[varnames["ssh"]].isel(time=0).isnull(), 0, 1)
-        coords = {dims["latitude"]: lat, dims["longitude"]: lon}
+        mask = xr.where(data.ds[data.var_names["ssh"]].isel(time=0).isnull(), 0, 1)
+        coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
 
         ssh = fill_and_interpolate(
-            data.ds[varnames["ssh"]].astype(np.float64),
+            data.ds[data.var_names["ssh"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -126,32 +173,74 @@ class InitialConditions:
 
         # extrapolate deepest value all the way to bottom ("flooding")
         for var in ["temp", "salt", "u", "v"]:
-            data.ds[varnames[var]] = extrapolate_deepest_to_bottom(
-                data.ds[varnames[var]], dims["depth"]
+            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+                data.ds[data.var_names[var]], data.dim_names["depth"]
             )
-
-        mask = xr.where(data.ds[varnames["temp"]].isel(time=0).isnull(), 0, 1)
+        mask = xr.where(data.ds[data.var_names["temp"]].isel(time=0).isnull(), 0, 1)
         coords = {
-            dims["latitude"]: lat,
-            dims["longitude"]: lon,
-            dims["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
+            data.dim_names["latitude"]: lat,
+            data.dim_names["longitude"]: lon,
+            data.dim_names["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
         }
 
         # setting fillvalue_interp to None means that we allow extrapolation in the
         # interpolation step to avoid NaNs at the surface if the lowest depth in original
         # data is greater than zero
         data_vars = {}
+
         for var in ["temp", "salt", "u", "v"]:
             data_vars[var] = fill_and_interpolate(
-                data.ds[varnames[var]].astype(np.float64),
+                data.ds[data.var_names[var]].astype(np.float64),
                 mask,
                 fill_dims=fill_dims,
                 coords=coords,
                 method="linear",
                 fillvalue_interp=None,
             )
+            if data.dim_names["time"] != "time":
+                data_vars[var] = data_vars[var].rename({data.dim_names["time"]: "time"})
 
-        # rotate to grid orientation
+        # do the same for the BGC variables if present
+        if self.bgc_source is not None:
+            fill_dims = [
+                bgc_data.dim_names["latitude"],
+                bgc_data.dim_names["longitude"],
+            ]
+
+            for var in bgc_data.var_names.values():
+                bgc_data.ds[var] = extrapolate_deepest_to_bottom(
+                    bgc_data.ds[var], bgc_data.dim_names["depth"]
+                )
+            mask = xr.where(
+                bgc_data.ds[bgc_data.var_names["PO4"]].isel(time=0).isnull(), 0, 1
+            )
+            coords = {
+                bgc_data.dim_names["latitude"]: lat,
+                bgc_data.dim_names["longitude"]: lon,
+                bgc_data.dim_names["depth"]: self.vertical_coordinate.ds[
+                    "layer_depth_rho"
+                ],
+            }
+            for var in bgc_data.var_names.keys():
+                data_vars[var] = fill_and_interpolate(
+                    bgc_data.ds[bgc_data.var_names[var]].astype(np.float64),
+                    mask,
+                    fill_dims=fill_dims,
+                    coords=coords,
+                    method="linear",
+                    fillvalue_interp=None,
+                )
+                if bgc_data.dim_names["time"] != "time":
+                    data_vars[var] = data_vars[var].rename(
+                        {bgc_data.dim_names["time"]: "time"}
+                    )
+                if self.bgc_source["climatology"]:
+                    # make sure time coordinate coincides, otherwise BGC variables are written into .ds as NaNs
+                    data_vars[var] = data_vars[var].assign_coords(
+                        {"time": data_vars["temp"]["time"]}
+                    )
+
+        # rotate velocities to grid orientation
         u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
         v_rot = data_vars["v"] * np.cos(angle) - data_vars["u"] * np.sin(angle)
 
@@ -203,19 +292,158 @@ class InitialConditions:
         # initialize vertical velocity to zero
         ds["w"] = xr.zeros_like(
             self.vertical_coordinate.ds["interface_depth_rho"].expand_dims(
-                time=ds[dims["time"]]
+                time=ds[data.dim_names["time"]]
             )
         ).astype(np.float32)
         ds["w"].attrs["long_name"] = "w-flux component"
         ds["w"].attrs["units"] = "m/s"
 
-        ds["ubar"] = ubar.transpose(dims["time"], "eta_rho", "xi_u").astype(np.float32)
+        ds["ubar"] = ubar.transpose(data.dim_names["time"], "eta_rho", "xi_u").astype(
+            np.float32
+        )
         ds["ubar"].attrs["long_name"] = "vertically integrated u-flux component"
         ds["ubar"].attrs["units"] = "m/s"
 
-        ds["vbar"] = vbar.transpose(dims["time"], "eta_v", "xi_rho").astype(np.float32)
+        ds["vbar"] = vbar.transpose(data.dim_names["time"], "eta_v", "xi_rho").astype(
+            np.float32
+        )
         ds["vbar"].attrs["long_name"] = "vertically integrated v-flux component"
         ds["vbar"].attrs["units"] = "m/s"
+
+        if self.bgc_source is not None:
+            ds["PO4"] = data_vars["PO4"].astype(np.float32)
+            ds["PO4"].attrs["long_name"] = "Dissolved Inorganic Phosphate"
+            ds["PO4"].attrs["units"] = "mmol/m^3"
+
+            ds["NO3"] = data_vars["NO3"].astype(np.float32)
+            ds["NO3"].attrs["long_name"] = "Dissolved Inorganic Nitrate"
+            ds["NO3"].attrs["units"] = "mmol/m^3"
+
+            ds["SiO3"] = data_vars["SiO3"].astype(np.float32)
+            ds["SiO3"].attrs["long_name"] = "Dissolved Inorganic Silicate"
+            ds["SiO3"].attrs["units"] = "mmol/m^3"
+
+            ds["NH4"] = data_vars["NH4"].astype(np.float32)
+            ds["NH4"].attrs["long_name"] = "Dissolved Ammonia"
+            ds["NH4"].attrs["units"] = "mmol/m^3"
+
+            ds["Fe"] = data_vars["Fe"].astype(np.float32)
+            ds["Fe"].attrs["long_name"] = "Dissolved Inorganic Iron"
+            ds["Fe"].attrs["units"] = "mmol/m^3"
+
+            ds["Lig"] = data_vars["Lig"].astype(np.float32)
+            ds["Lig"].attrs["long_name"] = "Iron Binding Ligand"
+            ds["Lig"].attrs["units"] = "mmol/m^3"
+
+            ds["O2"] = data_vars["O2"].astype(np.float32)
+            ds["O2"].attrs["long_name"] = "Dissolved Oxygen"
+            ds["O2"].attrs["units"] = "mmol/m^3"
+
+            ds["DIC"] = data_vars["DIC"].astype(np.float32)
+            ds["DIC"].attrs["long_name"] = "Dissolved Inorganic Carbon"
+            ds["DIC"].attrs["units"] = "mmol/m^3"
+
+            ds["DIC_ALT_CO2"] = data_vars["DIC_ALT_CO2"].astype(np.float32)
+            ds["DIC_ALT_CO2"].attrs[
+                "long_name"
+            ] = "Dissolved Inorganic Carbon, Alternative CO2"
+            ds["DIC_ALT_CO2"].attrs["units"] = "mmol/m^3"
+
+            ds["ALK"] = data_vars["ALK"].astype(np.float32)
+            ds["ALK"].attrs["long_name"] = "Alkalinity"
+            ds["ALK"].attrs["units"] = "meq/m^3"
+
+            ds["ALK_ALT_CO2"] = data_vars["ALK_ALT_CO2"].astype(np.float32)
+            ds["ALK_ALT_CO2"].attrs["long_name"] = "Alkalinity, Alternative CO2"
+            ds["ALK_ALT_CO2"].attrs["units"] = "meq/m^3"
+
+            ds["DOC"] = data_vars["DOC"].astype(np.float32)
+            ds["DOC"].attrs["long_name"] = "Dissolved Organic Carbon"
+            ds["DOC"].attrs["units"] = "mmol/m^3"
+
+            ds["DON"] = data_vars["DON"].astype(np.float32)
+            ds["DON"].attrs["long_name"] = "Dissolved Organic Nitrogen"
+            ds["DON"].attrs["units"] = "mmol/m^3"
+
+            ds["DOP"] = data_vars["DOP"].astype(np.float32)
+            ds["DOP"].attrs["long_name"] = "Dissolved Organic Phosphorus"
+            ds["DOP"].attrs["units"] = "mmol/m^3"
+
+            ds["DOPr"] = data_vars["DOPr"].astype(np.float32)
+            ds["DOPr"].attrs["long_name"] = "Refractory Dissolved Organic Phosphorus"
+            ds["DOPr"].attrs["units"] = "mmol/m^3"
+
+            ds["DONr"] = data_vars["DONr"].astype(np.float32)
+            ds["DONr"].attrs["long_name"] = "Refractory Dissolved Organic Nitrogen"
+            ds["DONr"].attrs["units"] = "mmol/m^3"
+
+            ds["DOCr"] = data_vars["DOCr"].astype(np.float32)
+            ds["DOCr"].attrs["long_name"] = "Refractory Dissolved Organic Carbon"
+            ds["DOCr"].attrs["units"] = "mmol/m^3"
+
+            ds["zooC"] = data_vars["zooC"].astype(np.float32)
+            ds["zooC"].attrs["long_name"] = "Zooplankton Carbon"
+            ds["zooC"].attrs["units"] = "mmol/m^3"
+
+            ds["spChl"] = data_vars["spChl"].astype(np.float32)
+            ds["spChl"].attrs["long_name"] = "Small Phytoplankton Chlorophyll"
+            ds["spChl"].attrs["units"] = "mg/m^3"
+
+            ds["spC"] = data_vars["spC"].astype(np.float32)
+            ds["spC"].attrs["long_name"] = "Small Phytoplankton Carbon"
+            ds["spC"].attrs["units"] = "mmol/m^3"
+
+            ds["spC"] = data_vars["spC"].astype(np.float32)
+            ds["spC"].attrs["long_name"] = "Small Phytoplankton Carbon"
+            ds["spC"].attrs["units"] = "mmol/m^3"
+
+            ds["spP"] = data_vars["spP"].astype(np.float32)
+            ds["spP"].attrs["long_name"] = "Small Phytoplankton Phosphorous"
+            ds["spP"].attrs["units"] = "mmol/m^3"
+
+            ds["spFe"] = data_vars["spFe"].astype(np.float32)
+            ds["spFe"].attrs["long_name"] = "Small Phytoplankton Iron"
+            ds["spFe"].attrs["units"] = "mmol/m^3"
+
+            ds["spCaCO3"] = data_vars["spCaCO3"].astype(np.float32)
+            ds["spCaCO3"].attrs["long_name"] = "Small Phytoplankton CaCO3"
+            ds["spCaCO3"].attrs["units"] = "mmol/m^3"
+
+            ds["diatChl"] = data_vars["diatChl"].astype(np.float32)
+            ds["diatChl"].attrs["long_name"] = "Diatom Chlorophyll"
+            ds["diatChl"].attrs["units"] = "mg/m^3"
+
+            ds["diatC"] = data_vars["diatC"].astype(np.float32)
+            ds["diatC"].attrs["long_name"] = "Diatom Carbon"
+            ds["diatC"].attrs["units"] = "mmol/m^3"
+
+            ds["diatP"] = data_vars["diatP"].astype(np.float32)
+            ds["diatP"].attrs["long_name"] = "Diatom Phosphorus"
+            ds["diatP"].attrs["units"] = "mmol/m^3"
+
+            ds["diatFe"] = data_vars["diatFe"].astype(np.float32)
+            ds["diatFe"].attrs["long_name"] = "Diatom Iron"
+            ds["diatFe"].attrs["units"] = "mmol/m^3"
+
+            ds["diatSi"] = data_vars["diatSi"].astype(np.float32)
+            ds["diatSi"].attrs["long_name"] = "Diatom Silicate"
+            ds["diatSi"].attrs["units"] = "mmol/m^3"
+
+            ds["diazChl"] = data_vars["diazChl"].astype(np.float32)
+            ds["diazChl"].attrs["long_name"] = "Diazotroph Chlorophyll"
+            ds["diazChl"].attrs["units"] = "mg/m^3"
+
+            ds["diazC"] = data_vars["diazC"].astype(np.float32)
+            ds["diazC"].attrs["long_name"] = "Diazotroph Carbon"
+            ds["diazC"].attrs["units"] = "mmol/m^3"
+
+            ds["diazP"] = data_vars["diazP"].astype(np.float32)
+            ds["diazP"].attrs["long_name"] = "Diazotroph Phosphorus"
+            ds["diazP"].attrs["units"] = "mmol/m^3"
+
+            ds["diazFe"] = data_vars["diazFe"].astype(np.float32)
+            ds["diazFe"].attrs["long_name"] = "Diazotroph Iron"
+            ds["diazFe"].attrs["units"] = "mmol/m^3"
 
         ds = ds.assign_coords(
             {
@@ -235,10 +463,9 @@ class InitialConditions:
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["ini_time"] = str(self.ini_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["source"] = self.source
-
-        if dims["time"] != "time":
-            ds = ds.rename({dims["time"]: "time"})
+        ds.attrs["physical_source"] = self.physics_source["name"]
+        if self.bgc_source is not None:
+            ds.attrs["bgc_source"] = self.bgc_source["name"]
 
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
@@ -289,6 +516,38 @@ class InitialConditions:
             - "w": w-flux component.
             - "ubar": Vertically integrated u-flux component.
             - "vbar": Vertically integrated v-flux component.
+            - "PO4": Dissolved Inorganic Phosphate (mmol/m³).
+            - "NO3": Dissolved Inorganic Nitrate (mmol/m³).
+            - "SiO3": Dissolved Inorganic Silicate (mmol/m³).
+            - "NH4": Dissolved Ammonia (mmol/m³).
+            - "Fe": Dissolved Inorganic Iron (mmol/m³).
+            - "Lig": Iron Binding Ligand (mmol/m³).
+            - "O2": Dissolved Oxygen (mmol/m³).
+            - "DIC": Dissolved Inorganic Carbon (mmol/m³).
+            - "DIC_ALT_CO2": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³).
+            - "ALK": Alkalinity (meq/m³).
+            - "ALK_ALT_CO2": Alkalinity, Alternative CO2 (meq/m³).
+            - "DOC": Dissolved Organic Carbon (mmol/m³).
+            - "DON": Dissolved Organic Nitrogen (mmol/m³).
+            - "DOP": Dissolved Organic Phosphorus (mmol/m³).
+            - "DOPr": Refractory Dissolved Organic Phosphorus (mmol/m³).
+            - "DONr": Refractory Dissolved Organic Nitrogen (mmol/m³).
+            - "DOCr": Refractory Dissolved Organic Carbon (mmol/m³).
+            - "zooC": Zooplankton Carbon (mmol/m³).
+            - "spChl": Small Phytoplankton Chlorophyll (mg/m³).
+            - "spC": Small Phytoplankton Carbon (mmol/m³).
+            - "spP": Small Phytoplankton Phosphorous (mmol/m³).
+            - "spFe": Small Phytoplankton Iron (mmol/m³).
+            - "spCaCO3": Small Phytoplankton CaCO3 (mmol/m³).
+            - "diatChl": Diatom Chlorophyll (mg/m³).
+            - "diatC": Diatom Carbon (mmol/m³).
+            - "diatP": Diatom Phosphorus (mmol/m³).
+            - "diatFe": Diatom Iron (mmol/m³).
+            - "diatSi": Diatom Silicate (mmol/m³).
+            - "diazChl": Diazotroph Chlorophyll (mg/m³).
+            - "diazC": Diazotroph Carbon (mmol/m³).
+            - "diazP": Diazotroph Phosphorus (mmol/m³).
+            - "diazFe": Diazotroph Iron (mmol/m³).
         s : int, optional
             The index of the vertical layer to plot. Default is None.
         eta : int, optional
@@ -306,9 +565,9 @@ class InitialConditions:
         Raises
         ------
         ValueError
-            If the specified varname is not one of the valid options.
-            If field is 3D and none of s_rho, eta, xi are specified.
-            If field is 2D and both eta and xi are specified.
+            If the specified `varname` is not one of the valid options.
+            If the field specified by `varname` is 3D and none of `s`, `eta`, or `xi` are specified.
+            If the field specified by `varname` is 2D and both `eta` and `xi` are specified.
         """
 
         if len(self.ds[varname].squeeze().dims) == 3 and not any(
@@ -376,7 +635,10 @@ class InitialConditions:
         else:
             vmax = field.max().values
             vmin = field.min().values
-            cmap = plt.colormaps.get_cmap("YlOrRd")
+            if varname in ["temp", "salt"]:
+                cmap = plt.colormaps.get_cmap("YlOrRd")
+            else:
+                cmap = plt.colormaps.get_cmap("YlGn")
         cmap.set_bad(color="gray")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
@@ -454,12 +716,14 @@ class InitialConditions:
 
         initial_conditions_data = {
             "InitialConditions": {
-                "filename": self.filename,
+                "physics_source": self.physics_source,
                 "ini_time": self.ini_time.isoformat(),
                 "model_reference_date": self.model_reference_date.isoformat(),
-                "source": self.source,
             }
         }
+        # Include bgc_source if it's not None
+        if self.bgc_source is not None:
+            initial_conditions_data["InitialConditions"]["bgc_source"] = self.bgc_source
 
         yaml_data = {
             **grid_yaml_data,

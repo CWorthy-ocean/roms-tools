@@ -6,7 +6,7 @@ import numpy as np
 import tempfile
 import os
 import textwrap
-from roms_tools.setup.datasets import download_test_data
+from roms_tools.setup.download import download_test_data
 
 
 @pytest.fixture
@@ -50,8 +50,7 @@ def boundary_forcing(example_grid, example_vertical_coordinate):
         vertical_coordinate=example_vertical_coordinate,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source="glorys",
-        filename=fname,
+        physics_source={"name": "GLORYS", "path": fname},
     )
 
 
@@ -61,8 +60,11 @@ def test_boundary_forcing_creation(boundary_forcing):
     """
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
     assert boundary_forcing.end_time == datetime(2021, 6, 30)
-    assert boundary_forcing.filename == download_test_data("GLORYS_test_data.nc")
-    assert boundary_forcing.source == "glorys"
+    assert boundary_forcing.physics_source == {
+        "name": "GLORYS",
+        "path": download_test_data("GLORYS_test_data.nc"),
+        "climatology": False,
+    }
 
 
 def test_boundary_forcing_ds_attribute(boundary_forcing):

@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 from roms_tools import Grid, AtmosphericForcing, SWRCorrection
-from roms_tools.setup.datasets import download_test_data
+from roms_tools.setup.download import download_test_data
 import xarray as xr
 import tempfile
 import os
@@ -186,8 +186,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert atm_forcing.ds is not None
@@ -199,8 +198,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         use_coarse_grid=True,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert isinstance(atm_forcing.ds, xr.Dataset)
@@ -214,8 +212,11 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
 
     assert atm_forcing.start_time == start_time
     assert atm_forcing.end_time == end_time
-    assert atm_forcing.filename == fname
-    assert atm_forcing.source == "ERA5"
+    assert atm_forcing.physics_source == {
+        "name": "ERA5",
+        "path": fname,
+        "climatology": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -239,8 +240,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
             grid=grid,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
     grid.coarsen()
@@ -251,8 +251,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
             use_coarse_grid=True,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
 
@@ -272,8 +271,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
             grid=grid_that_straddles_180_degree_meridian,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
     grid_that_straddles_180_degree_meridian.coarsen()
@@ -286,8 +284,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
             use_coarse_grid=True,
             start_time=start_time,
             end_time=end_time,
-            source="ERA5",
-            filename=fname,
+            physics_source={"name": "ERA5", "path": fname},
         )
 
 
@@ -316,8 +313,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert isinstance(atm_forcing.ds, xr.Dataset)
@@ -336,8 +332,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
         use_coarse_grid=True,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
     assert isinstance(atm_forcing.ds, xr.Dataset)
@@ -351,8 +346,11 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
     assert atm_forcing.start_time == start_time
     assert atm_forcing.end_time == end_time
-    assert atm_forcing.filename == fname
-    assert atm_forcing.source == "ERA5"
+    assert atm_forcing.physics_source == {
+        "name": "ERA5",
+        "path": fname,
+        "climatology": False,
+    }
 
 
 @pytest.fixture
@@ -370,8 +368,7 @@ def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
     )
 
 
@@ -385,14 +382,14 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         known_hash="a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
     )
     correction = SWRCorrection(
-        filename=correction_filename,
+        path=correction_filename,
         varname="ssr_corr",
         dim_names={
             "longitude": "longitude",
             "latitude": "latitude",
             "time": "time",
         },
-        temporal_resolution="climatology",
+        climatology=True,
     )
 
     start_time = datetime(2020, 1, 31)
@@ -404,8 +401,7 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        source="ERA5",
-        filename=fname,
+        physics_source={"name": "ERA5", "path": fname},
         swr_correction=correction,
     )
 
@@ -559,67 +555,134 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
                 np.array(
                     [
                         [
-                            [2.0345396e01, 3.2848579e01],
-                            [7.1687141e01, 7.4629196e01],
-                            [1.2855386e02, 1.9472108e02],
-                            [1.7835985e02, 2.0598582e02],
-                            [2.4759137e02, 2.3326712e02],
-                            [2.3055316e02, 2.1832445e02],
-                            [2.1866821e02, 1.8515254e02],
+                            [
+                                2.0345396e01,
+                                7.1687141e01,
+                                1.2855386e02,
+                                1.7835985e02,
+                                2.4759137e02,
+                                2.3055316e02,
+                                2.1866821e02,
+                            ],
+                            [
+                                1.8974031e01,
+                                2.0692104e01,
+                                1.1139817e02,
+                                1.4908310e02,
+                                2.3330269e02,
+                                1.1800186e02,
+                                2.1442001e02,
+                            ],
+                            [
+                                9.5367859e01,
+                                1.1730759e02,
+                                1.3710544e02,
+                                2.1596344e02,
+                                1.1043810e02,
+                                7.6220886e01,
+                                9.0121040e01,
+                            ],
+                            [
+                                7.7221687e01,
+                                1.2257743e02,
+                                7.8461441e01,
+                                7.3550613e01,
+                                4.7777473e01,
+                                3.1707375e01,
+                                5.4698215e01,
+                            ],
+                            [
+                                3.9274761e01,
+                                3.0638720e01,
+                                4.3393879e01,
+                                2.4530497e01,
+                                1.6565577e01,
+                                1.3347603e01,
+                                2.5458445e01,
+                            ],
+                            [
+                                1.7271362e01,
+                                1.4313513e01,
+                                1.3647677e01,
+                                8.3360624e00,
+                                3.3492086e00,
+                                2.3186626e00,
+                                2.1239614e00,
+                            ],
+                            [
+                                1.0622130e01,
+                                6.2982388e00,
+                                1.1909422e00,
+                                0.0000000e00,
+                                0.0000000e00,
+                                0.0000000e00,
+                                0.0000000e00,
+                            ],
                         ],
                         [
-                            [1.8974031e01, 2.7193939e01],
-                            [2.0692104e01, 2.0835009e01],
-                            [1.1139817e02, 7.1233307e01],
-                            [1.4908310e02, 1.4508174e02],
-                            [2.3330269e02, 2.0451334e02],
-                            [1.1800186e02, 1.0378988e02],
-                            [2.1442001e02, 1.9593568e02],
-                        ],
-                        [
-                            [9.5367859e01, 1.0570849e02],
-                            [1.1730759e02, 1.3862865e02],
-                            [1.3710544e02, 1.4445511e02],
-                            [2.1596344e02, 2.2553131e02],
-                            [1.1043810e02, 8.7840797e01],
-                            [7.6220886e01, 6.7152107e01],
-                            [9.0121040e01, 6.9752350e01],
-                        ],
-                        [
-                            [7.7221687e01, 8.8704170e01],
-                            [1.2257743e02, 1.4620630e02],
-                            [7.8461441e01, 8.6310257e01],
-                            [7.3550613e01, 7.0209435e01],
-                            [4.7777473e01, 4.0398537e01],
-                            [3.1707375e01, 2.5448185e01],
-                            [5.4698215e01, 4.5346252e01],
-                        ],
-                        [
-                            [3.9274761e01, 6.2564697e01],
-                            [3.0638720e01, 4.2063152e01],
-                            [4.3393879e01, 5.5304630e01],
-                            [2.4530497e01, 2.2452543e01],
-                            [1.6565577e01, 1.8183731e01],
-                            [1.3347603e01, 1.0362802e01],
-                            [2.5458445e01, 1.8535559e01],
-                        ],
-                        [
-                            [1.7271362e01, 3.0190443e01],
-                            [1.4313513e01, 2.2516962e01],
-                            [1.3647677e01, 2.0513937e01],
-                            [8.3360624e00, 1.1818749e01],
-                            [3.3492086e00, 3.7765646e00],
-                            [2.3186626e00, 1.6394116e00],
-                            [2.1239614e00, 2.3138286e-01],
-                        ],
-                        [
-                            [1.0622130e01, 2.4329630e01],
-                            [6.2982388e00, 1.2172097e01],
-                            [1.1909422e00, 2.9701986e00],
-                            [0.0000000e00, 4.5030624e-02],
-                            [0.0000000e00, 0.0000000e00],
-                            [0.0000000e00, 0.0000000e00],
-                            [0.0000000e00, 0.0000000e00],
+                            [
+                                3.2848579e01,
+                                7.4629196e01,
+                                1.9472108e02,
+                                2.0598582e02,
+                                2.3326712e02,
+                                2.1832445e02,
+                                1.8515254e02,
+                            ],
+                            [
+                                2.7193939e01,
+                                2.0835009e01,
+                                7.1233307e01,
+                                1.4508174e02,
+                                2.0451334e02,
+                                1.0378988e02,
+                                1.9593568e02,
+                            ],
+                            [
+                                1.0570849e02,
+                                1.3862865e02,
+                                1.4445511e02,
+                                2.2553131e02,
+                                8.7840797e01,
+                                6.7152107e01,
+                                6.9752350e01,
+                            ],
+                            [
+                                8.8704170e01,
+                                1.4620630e02,
+                                8.6310257e01,
+                                7.0209435e01,
+                                4.0398537e01,
+                                2.5448185e01,
+                                4.5346252e01,
+                            ],
+                            [
+                                6.2564697e01,
+                                4.2063152e01,
+                                5.5304630e01,
+                                2.2452543e01,
+                                1.8183731e01,
+                                1.0362802e01,
+                                1.8535559e01,
+                            ],
+                            [
+                                3.0190443e01,
+                                2.2516962e01,
+                                2.0513937e01,
+                                1.1818749e01,
+                                3.7765646e00,
+                                1.6394116e00,
+                                2.3138286e-01,
+                            ],
+                            [
+                                2.4329630e01,
+                                1.2172097e01,
+                                2.9701986e00,
+                                4.5030624e-02,
+                                0.0000000e00,
+                                0.0000000e00,
+                                0.0000000e00,
+                            ],
                         ],
                     ],
                     dtype=np.float32,
@@ -1046,7 +1109,6 @@ def test_atmospheric_forcing_data_consistency_plot_save(
         ],
         dtype=np.float32,
     )
-
     expected_Tair = np.array(
         [
             [
@@ -1075,7 +1137,7 @@ def test_atmospheric_forcing_data_consistency_plot_save(
                     -0.5690303,
                     -2.3495994,
                     -15.370553,
-                    -19.28607,
+                    -19.289997,
                 ],
                 [
                     -9.177512,
@@ -1084,30 +1146,30 @@ def test_atmospheric_forcing_data_consistency_plot_save(
                     -3.7056556,
                     -10.697647,
                     -18.948631,
-                    -23.336071,
+                    -23.376123,
                 ],
                 [
                     -15.661556,
-                    -23.100325,
-                    -21.965107,
-                    -29.660362,
-                    -26.471872,
+                    -23.100355,
+                    -21.994339,
+                    -29.661201,
+                    -26.471874,
                     -26.348959,
-                    -28.95834,
+                    -28.97584,
                 ],
                 [
-                    -24.605135,
-                    -26.762844,
-                    -29.470911,
-                    -30.107069,
+                    -24.909988,
+                    -26.92668,
+                    -29.5114,
+                    -30.11024,
                     -25.887157,
                     -26.812098,
                     -32.926876,
                 ],
                 [
-                    -26.673147,
-                    -29.413385,
-                    -30.100338,
+                    -26.899937,
+                    -29.645899,
+                    -30.121904,
                     -29.684294,
                     -30.642694,
                     -29.153072,
@@ -1140,7 +1202,7 @@ def test_atmospheric_forcing_data_consistency_plot_save(
                     -0.6793834,
                     -1.9613675,
                     -15.220611,
-                    -19.080027,
+                    -19.084148,
                 ],
                 [
                     -8.883304,
@@ -1149,30 +1211,30 @@ def test_atmospheric_forcing_data_consistency_plot_save(
                     -3.9015381,
                     -10.273033,
                     -18.5212,
-                    -23.289701,
+                    -23.331766,
                 ],
                 [
                     -14.871544,
-                    -22.748655,
-                    -21.94059,
-                    -29.776194,
+                    -22.748688,
+                    -21.973629,
+                    -29.777143,
                     -26.546505,
                     -26.173407,
-                    -29.121338,
+                    -29.139715,
                 ],
                 [
-                    -24.285597,
-                    -26.681915,
-                    -29.44489,
-                    -30.269762,
+                    -24.59206,
+                    -26.851955,
+                    -29.489199,
+                    -30.27334,
                     -26.018312,
                     -26.81835,
                     -32.84492,
                 ],
                 [
-                    -26.240913,
-                    -29.185444,
-                    -30.05311,
+                    -26.451527,
+                    -29.415953,
+                    -30.07525,
                     -29.673147,
                     -30.659044,
                     -29.123781,
@@ -1187,132 +1249,132 @@ def test_atmospheric_forcing_data_consistency_plot_save(
         [
             [
                 [
-                    0.00608214,
-                    0.00485943,
-                    0.00434451,
-                    0.00392352,
-                    0.00350673,
-                    0.00393602,
-                    0.00386828,
+                    0.0060822,
+                    0.0048595,
+                    0.00434452,
+                    0.00392386,
+                    0.00350679,
+                    0.00393684,
+                    0.00386832,
                 ],
                 [
-                    0.00496389,
-                    0.0044483,
-                    0.00362612,
-                    0.00270351,
-                    0.00263139,
-                    0.00267393,
-                    0.00188468,
+                    0.00496396,
+                    0.00444844,
+                    0.00362669,
+                    0.0027039,
+                    0.00263158,
+                    0.00268065,
+                    0.00188471,
                 ],
                 [
-                    0.00218881,
-                    0.00164652,
-                    0.00180753,
-                    0.00201019,
-                    0.00222358,
-                    0.00087732,
-                    0.00062476,
+                    0.00218931,
+                    0.00164752,
+                    0.00180771,
+                    0.00201025,
+                    0.00222373,
+                    0.00087739,
+                    0.0006346,
                 ],
                 [
-                    0.00138125,
-                    0.00205246,
-                    0.00235401,
+                    0.0014008,
+                    0.00205272,
+                    0.00235442,
                     0.00265417,
-                    0.00145432,
-                    0.00066223,
-                    0.00043854,
+                    0.00145444,
+                    0.00066224,
+                    0.00048542,
                 ],
                 [
-                    0.00082216,
-                    0.00046076,
-                    0.00046506,
-                    0.00023305,
-                    0.00031997,
-                    0.00033908,
-                    0.00025723,
+                    0.00082356,
+                    0.0004623,
+                    0.00057463,
+                    0.00025071,
+                    0.00032594,
+                    0.00033909,
+                    0.00028633,
                 ],
                 [
-                    0.0003852,
-                    0.00031066,
-                    0.00024204,
-                    0.00022732,
-                    0.00032728,
+                    0.00041308,
+                    0.00034891,
+                    0.00027696,
+                    0.00024237,
+                    0.00032729,
                     0.00030786,
-                    0.00018567,
+                    0.00018568,
                 ],
                 [
-                    0.00032216,
-                    0.00024468,
-                    0.00023315,
+                    0.00034559,
+                    0.00027157,
+                    0.00024169,
                     0.00026326,
-                    0.00022695,
+                    0.00022696,
                     0.00025577,
-                    0.00029945,
+                    0.00029947,
                 ],
             ],
             [
                 [
-                    0.00611161,
-                    0.00487512,
-                    0.00432123,
-                    0.00410325,
-                    0.00363046,
-                    0.00388684,
-                    0.00398353,
+                    0.0061117,
+                    0.00487523,
+                    0.00432124,
+                    0.00410334,
+                    0.00363048,
+                    0.00388888,
+                    0.00398394,
                 ],
                 [
-                    0.004997,
-                    0.00455964,
-                    0.00391408,
-                    0.00286727,
-                    0.00263738,
-                    0.00266042,
-                    0.00188382,
+                    0.00499707,
+                    0.0045597,
+                    0.00391427,
+                    0.00286811,
+                    0.00263745,
+                    0.00266608,
+                    0.00188403,
                 ],
                 [
-                    0.00221575,
-                    0.00166183,
-                    0.00184349,
-                    0.00198757,
-                    0.00228314,
-                    0.00087687,
-                    0.00063481,
+                    0.00221635,
+                    0.00166319,
+                    0.00184379,
+                    0.00198759,
+                    0.00228325,
+                    0.00087703,
+                    0.00064521,
                 ],
                 [
-                    0.00141166,
-                    0.0020337,
-                    0.00229338,
+                    0.00143134,
+                    0.00203374,
+                    0.00229373,
                     0.00262552,
-                    0.00149892,
-                    0.00068138,
-                    0.00043698,
+                    0.00149901,
+                    0.00068139,
+                    0.0004829,
                 ],
                 [
-                    0.00085138,
-                    0.00047381,
-                    0.00046279,
-                    0.00023133,
-                    0.00031678,
-                    0.00034515,
-                    0.00025435,
+                    0.00085248,
+                    0.00047552,
+                    0.00056961,
+                    0.00024881,
+                    0.00032247,
+                    0.00034516,
+                    0.00028347,
                 ],
                 [
-                    0.0003951,
-                    0.0003132,
-                    0.0002411,
-                    0.00022282,
-                    0.00031977,
+                    0.00042441,
+                    0.00035251,
+                    0.00027714,
+                    0.00023793,
+                    0.00031979,
                     0.00031098,
-                    0.00018751,
+                    0.00018754,
                 ],
                 [
-                    0.00033148,
-                    0.00024932,
-                    0.00023372,
+                    0.00035735,
+                    0.00027766,
+                    0.00024232,
                     0.00026297,
                     0.00022758,
                     0.00025663,
-                    0.00029231,
+                    0.00029233,
                 ],
             ],
         ],
@@ -1554,10 +1616,10 @@ def swr_correction():
     correction_filename
 
     return SWRCorrection(
-        filename=correction_filename,
+        path=correction_filename,
         varname="ssr_corr",
         dim_names={"time": "time", "latitude": "latitude", "longitude": "longitude"},
-        temporal_resolution="climatology",
+        climatology=True,
     )
 
 

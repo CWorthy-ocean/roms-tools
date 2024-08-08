@@ -1,86 +1,12 @@
-import pooch
 import xarray as xr
 from dataclasses import dataclass, field
 import glob
 from datetime import datetime, timedelta
 import numpy as np
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 import dask
-
-# Create a Pooch object to manage the global topography data
-pup_data = pooch.create(
-    # Use the default cache folder for the operating system
-    path=pooch.os_cache("roms-tools"),
-    base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
-    # The registry specifies the files that can be fetched
-    registry={
-        "etopo5.nc": "sha256:23600e422d59bbf7c3666090166a0d468c8ee16092f4f14e32c4e928fbcd627b",
-    },
-)
-
-# Create a Pooch object to manage the test data
-pup_test_data = pooch.create(
-    # Use the default cache folder for the operating system
-    path=pooch.os_cache("roms-tools"),
-    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
-    # The registry specifies the files that can be fetched
-    registry={
-        "GLORYS_test_data.nc": "648f88ec29c433bcf65f257c1fb9497bd3d5d3880640186336b10ed54f7129d2",
-        "ERA5_regional_test_data.nc": "bd12ce3b562fbea2a80a3b79ba74c724294043c28dc98ae092ad816d74eac794",
-        "ERA5_global_test_data.nc": "8ed177ab64c02caf509b9fb121cf6713f286cc603b1f302f15f3f4eb0c21dc4f",
-        "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",
-        "TPXO_regional_test_data.nc": "11739245e2286d9c9d342dce5221e6435d2072b50028bef2e86a30287b3b4032",
-    },
-)
-
-
-def fetch_topo(topography_source: str) -> xr.Dataset:
-    """
-    Load the global topography data as an xarray Dataset.
-
-    Parameters
-    ----------
-    topography_source : str
-        The source of the topography data to be loaded. Available options:
-        - "ETOPO5"
-
-    Returns
-    -------
-    xr.Dataset
-        The global topography data as an xarray Dataset.
-    """
-    # Mapping from user-specified topography options to corresponding filenames in the registry
-    topo_dict = {"ETOPO5": "etopo5.nc"}
-
-    # Fetch the file using Pooch, downloading if necessary
-    fname = pup_data.fetch(topo_dict[topography_source])
-
-    # Load the dataset using xarray and return it
-    ds = xr.open_dataset(fname)
-    return ds
-
-
-def download_test_data(filename: str) -> str:
-    """
-    Download the test data file.
-
-    Parameters
-    ----------
-    filename : str
-        The name of the test data file to be downloaded. Available options:
-        - "GLORYS_test_data.nc"
-        - "ERA5_regional_test_data.nc"
-        - "ERA5_global_test_data.nc"
-
-    Returns
-    -------
-    str
-        The path to the downloaded test data file.
-    """
-    # Fetch the file using Pooch, downloading if necessary
-    fname = pup_test_data.fetch(filename)
-
-    return fname
+import warnings
+from roms_tools.setup.utils import interpolate_from_climatology
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -97,10 +23,12 @@ class Dataset:
     end_time : Optional[datetime], optional
         The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
         or no filtering is applied if start_time is not provided.
-    var_names : List[str]
-        List of variable names that are required in the dataset.
+    var_names: Dict[str, str]
+        Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
 
     Attributes
     ----------
@@ -123,7 +51,7 @@ class Dataset:
     filename: str
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
-    var_names: List[str]
+    var_names: Dict[str, str]
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
@@ -131,15 +59,26 @@ class Dataset:
             "time": "time",
         }
     )
+    climatology: Optional[bool] = False
 
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
+        """
+        Post-initialization processing:
+        1. Loads the dataset from the specified filename.
+        2. Applies time filtering based on start_time and end_time if provided.
+        3. Selects relevant fields as specified by var_names.
+        4. Ensures latitude values are in ascending order.
+        5. Checks if the dataset covers the entire globe and adjusts if necessary.
+        """
+
         ds = self.load_data()
 
         # Select relevant times
-        if "time" in self.dim_names and self.start_time is not None:
-            ds = self.select_relevant_times(ds)
+        if self.start_time is not None:
+            if "time" in self.dim_names:
+                ds = self.select_relevant_times(ds)
 
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
@@ -228,20 +167,21 @@ class Dataset:
             If `ds` does not contain all variables listed in `self.var_names`.
 
         """
-        missing_vars = [var for var in self.var_names if var not in ds.data_vars]
+        missing_vars = [
+            var for var in self.var_names.values() if var not in ds.data_vars
+        ]
         if missing_vars:
             raise ValueError(
                 f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
             )
 
         for var in ds.data_vars:
-            if var not in self.var_names:
+            if var not in self.var_names.values():
                 ds = ds.drop_vars(var)
 
         return ds
 
     def select_relevant_times(self, ds) -> xr.Dataset:
-
         """
         Selects and returns the subset of the dataset corresponding to the specified time range.
 
@@ -259,20 +199,66 @@ class Dataset:
         xr.Dataset
             A dataset containing only the data points within the specified time range.
 
+        Notes
+        -----
+        If the dataset has a 'month' dimension, it assumes the data is climatological and performs
+        interpolation or sets the climatology flag accordingly. If the time dimension is 'month',
+        the method calculates the time as a cumulative sum of days in each month, converts it to
+        `timedelta64[ns]`, and updates the dataset's time coordinates.
+
+        If `self.end_time` is not provided and only a single time slice is required, interpolation
+        from climatology is applied. For datasets covering full climatology, the climatology flag is set
+        to True, and no additional filtering is performed.
+
+        Raises
+        ------
+        ValueError
+            If no matching times are found or if the number of matching times does not meet expectations.
+
+        Warns
+        -----
+        Warning
+            If no time information is found in the dataset.
         """
 
         time_dim = self.dim_names["time"]
+        if time_dim in ds.coords or time_dim in ds.data_vars:
+            if self.climatology:
+                # Define the days in each month and convert to timedelta
+                increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
+                days = np.cumsum(increments)
+                timedelta_ns = np.array(days, dtype="timedelta64[D]").astype(
+                    "timedelta64[ns]"
+                )
+                time = xr.DataArray(timedelta_ns, dims=["month"])
+                ds = ds.assign_coords({"time": time})
+                if time_dim != "time":
+                    ds = ds.swap_dims({time_dim: "time"})
+                    ds = ds.drop_vars(time_dim)
+                    # Update dimension names
+                    updated_dim_names = self.dim_names.copy()
+                    updated_dim_names["time"] = "time"
+                    object.__setattr__(self, "dim_names", updated_dim_names)
+                    time_dim = self.dim_names["time"]
+                if not self.end_time:
+                    # Interpolate from climatology for initial conditions
+                    ds = interpolate_from_climatology(
+                        ds, self.dim_names["time"], self.start_time
+                    )
+            else:
+                if not self.end_time:
+                    end_time = self.start_time + timedelta(days=1)
+                else:
+                    end_time = self.end_time
 
-        if not self.end_time:
-            end_time = self.start_time + timedelta(days=1)
+                times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
+                    ds[time_dim] < np.datetime64(end_time)
+                )
+                ds = ds.where(times, drop=True)
         else:
-            end_time = self.end_time
-
-        times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
-            ds[time_dim] < np.datetime64(end_time)
-        )
-        ds = ds.where(times, drop=True)
-
+            warnings.warn(
+                f"Dataset at {self.filename} does not contain any time information."
+            )
         if not ds.sizes[time_dim]:
             raise ValueError("No matching times found.")
 
@@ -341,7 +327,7 @@ class Dataset:
 
         ds_concatenated[self.dim_names["longitude"]] = lon_concatenated
 
-        for var in self.var_names:
+        for var in self.var_names.values():
             if self.dim_names["longitude"] in ds[var].dims:
                 field = ds[var]
                 field_concatenated = xr.concat(
@@ -455,3 +441,406 @@ class Dataset:
 
         if (depth >= 0).all():
             self.ds[self.dim_names["depth"]] = -depth
+
+
+@dataclass(frozen=True, kw_only=True)
+class TPXODataset(Dataset):
+    """
+    Represents tidal data on the original grid from the TPXO dataset.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the TPXO dataset file.
+    var_names : Dict[str, str], optional
+        Dictionary of variable names required in the dataset. Defaults to:
+        {
+            "h_Re": "h_Re",
+            "h_Im": "h_Im",
+            "sal_Re": "sal_Re",
+            "sal_Im": "sal_Im",
+            "u_Re": "u_Re",
+            "u_Im": "u_Im",
+            "v_Re": "v_Re",
+            "v_Im": "v_Im",
+            "depth": "depth"
+        }
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset. Defaults to:
+        {"longitude": "ny", "latitude": "nx", "ntides": "nc"}.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
+    reference_date : datetime
+        The reference date for the TPXO data. Default is datetime(1992, 1, 1).
+    """
+
+    filename: str
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "ssh_Re": "h_Re",
+            "ssh_Im": "h_Im",
+            "sal_Re": "sal_Re",
+            "sal_Im": "sal_Im",
+            "u_Re": "u_Re",
+            "u_Im": "u_Im",
+            "v_Re": "v_Re",
+            "v_Im": "v_Im",
+            "depth": "depth",
+        }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
+    )
+    ds: xr.Dataset = field(init=False, repr=False)
+    reference_date: datetime = datetime(1992, 1, 1)
+
+    def __post_init__(self):
+        # Perform any necessary dataset initialization or modifications here
+        ds = super().load_data()
+
+        # Clean up dataset
+        ds = ds.assign_coords(
+            {
+                "omega": ds["omega"],
+                "nx": ds["lon_r"].isel(
+                    ny=0
+                ),  # lon_r is constant along ny, i.e., is only a function of nx
+                "ny": ds["lat_r"].isel(
+                    nx=0
+                ),  # lat_r is constant along nx, i.e., is only a function of ny
+            }
+        )
+        ds = ds.rename({"nx": "longitude", "ny": "latitude"})
+
+        object.__setattr__(
+            self,
+            "dim_names",
+            {
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "ntides": self.dim_names["ntides"],
+            },
+        )
+        # Select relevant fields
+        ds = super().select_relevant_fields(ds)
+
+        # Check whether the data covers the entire globe
+        is_global = self.check_if_global(ds)
+
+        if is_global:
+            ds = self.concatenate_longitudes(ds)
+
+        object.__setattr__(self, "ds", ds)
+
+    def check_number_constituents(self, ntides: int):
+        """
+        Checks if the number of constituents in the dataset is at least `ntides`.
+
+        Parameters
+        ----------
+        ntides : int
+            The required number of tidal constituents.
+
+        Raises
+        ------
+        ValueError
+            If the number of constituents in the dataset is less than `ntides`.
+        """
+        if len(self.ds[self.dim_names["ntides"]]) < ntides:
+            raise ValueError(
+                f"The dataset contains fewer than {ntides} tidal constituents."
+            )
+
+
+@dataclass(frozen=True, kw_only=True)
+class GLORYSDataset(Dataset):
+    """
+    Represents GLORYS data on original grid.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the data files. Can contain wildcards.
+    start_time : Optional[datetime], optional
+        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    end_time : Optional[datetime], optional
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
+        or no filtering is applied if start_time is not provided.
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the GLORYS data on its original grid.
+    """
+
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "temp": "thetao",
+            "salt": "so",
+            "u": "uo",
+            "v": "vo",
+            "ssh": "zos",
+        }
+    )
+
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "depth": "depth",
+            "time": "time",
+        }
+    )
+
+
+@dataclass(frozen=True, kw_only=True)
+class CESMBGCDataset(Dataset):
+    """
+    Represents CESM BGC data on original grid.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the data files. Can contain wildcards.
+    start_time : Optional[datetime], optional
+        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    end_time : Optional[datetime], optional
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
+        or no filtering is applied if start_time is not provided.
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the GLORYS data on its original grid.
+    """
+
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "SiO3",
+            "NH4": "NH4",
+            "Fe": "Fe",
+            "Lig": "Lig",
+            "O2": "O2",
+            "DIC": "DIC",
+            "DIC_ALT_CO2": "DIC_ALT_CO2",
+            "ALK": "ALK",
+            "ALK_ALT_CO2": "ALK_ALT_CO2",
+            "DOC": "DOC",
+            "DON": "DON",
+            "DOP": "DOP",
+            "DOPr": "DOPr",
+            "DONr": "DONr",
+            "DOCr": "DOCr",
+            "spChl": "spChl",
+            "spC": "spC",
+            "spP": "spP",
+            "spFe": "spFe",
+            "diatChl": "diatChl",
+            "diatC": "diatC",
+            "diatP": "diatP",
+            "diatFe": "diatFe",
+            "diatSi": "diatSi",
+            "diazChl": "diazChl",
+            "diazC": "diazC",
+            "diazP": "diazP",
+            "diazFe": "diazFe",
+            "spCaCO3": "spCaCO3",
+            "zooC": "zooC",
+        }
+    )
+
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "z_t",
+            "time": "time",
+        }
+    )
+    # overwrite load_data method from parent class
+    def load_data(self) -> xr.Dataset:
+        """
+        Load dataset from the specified file.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The loaded xarray Dataset containing the forcing data.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the specified file does not exist.
+        """
+
+        # Check if the file exists
+        matching_files = glob.glob(self.filename)
+        if not matching_files:
+            raise FileNotFoundError(
+                f"No files found matching the pattern '{self.filename}'."
+            )
+
+        # Load the dataset
+        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+            # Define the chunk sizes
+            chunks = {
+                self.dim_names["latitude"]: -1,
+                self.dim_names["longitude"]: -1,
+            }
+
+            ds = xr.open_mfdataset(
+                self.filename,
+                combine="nested",
+                coords="minimal",
+                compat="override",
+                chunks=chunks,
+                engine="netcdf4",
+            )
+
+            if "time" not in ds.dims:
+                if "month" in ds.dims:
+                    self.dim_names["time"] = "month"
+                else:
+                    ds = ds.expand_dims({"time": 1})
+
+        return ds
+
+    def post_process(self):
+        """
+        Processes and converts CESM data values as follows:
+        - Convert depth values from cm to m.
+        """
+        if self.dim_names["depth"] == "z_t":
+            # Fill variables that only have data in upper 150m with NaNs below
+            if (
+                "z_t_150m" in self.ds.dims
+                and np.equal(self.ds.z_t[:15].values, self.ds.z_t_150m.values).all()
+            ):
+                for var in self.var_names:
+                    if "z_t_150m" in self.ds[var].dims:
+                        self.ds[var] = self.ds[var].rename({"z_t_150m": "z_t"})
+                        self.ds[var] = self.ds[var].chunk({"z_t": -1})
+            # Convert depth from cm to m
+            ds = self.ds.assign_coords({"depth": self.ds["z_t"] / 100})
+            ds["depth"].attrs["long_name"] = "Depth"
+            ds["depth"].attrs["units"] = "m"
+            ds = ds.swap_dims({"z_t": "depth"})
+            # update dataset
+            object.__setattr__(self, "ds", ds)
+
+            # Update dim_names with "depth": "depth" key-value pair
+            updated_dim_names = self.dim_names.copy()
+            updated_dim_names["depth"] = "depth"
+            object.__setattr__(self, "dim_names", updated_dim_names)
+
+
+@dataclass(frozen=True, kw_only=True)
+class ERA5Dataset(Dataset):
+    """
+    Represents ERA5 data on original grid.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the data files. Can contain wildcards.
+    start_time : Optional[datetime], optional
+        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    end_time : Optional[datetime], optional
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
+        or no filtering is applied if start_time is not provided.
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the GLORYS data on its original grid.
+    """
+
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "u10": "u10",
+            "v10": "v10",
+            "swr": "ssr",
+            "lwr": "strd",
+            "t2m": "t2m",
+            "d2m": "d2m",
+            "rain": "tp",
+            "mask": "sst",
+        }
+    )
+
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "time": "time",
+        }
+    )
+
+    def post_process(self):
+        """
+        Processes and converts ERA5 data values as follows:
+        - Convert radiation values from J/m^2 to W/m^2.
+        - Convert rainfall from meters to cm/day.
+        - Convert temperature from Kelvin to Celsius.
+        - Compute relative humidity if not present, convert to absolute humidity.
+        """
+        # Translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
+        # Convert radiation from J/m^2 to W/m^2
+        self.ds[self.var_names["swr"]] /= 3600
+        self.ds[self.var_names["lwr"]] /= 3600
+        self.ds[self.var_names["swr"]].attrs["units"] = "W/m^2"
+        self.ds[self.var_names["lwr"]].attrs["units"] = "W/m^2"
+        # Convert rainfall from m to cm/day
+        self.ds[self.var_names["rain"]] *= 100 * 24
+
+        # Convert temperature from Kelvin to Celsius
+        self.ds[self.var_names["t2m"]] -= 273.15
+        self.ds[self.var_names["d2m"]] -= 273.15
+        self.ds[self.var_names["t2m"]].attrs["units"] = "degrees C"
+        self.ds[self.var_names["d2m"]].attrs["units"] = "degrees C"
+
+        # Compute relative humidity if not present
+        if "qair" not in self.ds.data_vars:
+            qair = np.exp(
+                (17.625 * self.ds[self.var_names["d2m"]])
+                / (243.04 + self.ds[self.var_names["d2m"]])
+            ) / np.exp(
+                (17.625 * self.ds[self.var_names["t2m"]])
+                / (243.04 + self.ds[self.var_names["t2m"]])
+            )
+            # Convert relative to absolute humidity
+            patm = 1010.0
+            cff = (
+                (1.0007 + 3.46e-6 * patm)
+                * 6.1121
+                * np.exp(
+                    17.502
+                    * self.ds[self.var_names["t2m"]]
+                    / (240.97 + self.ds[self.var_names["t2m"]])
+                )
+            )
+            cff = cff * qair
+            self.ds["qair"] = 0.62197 * (cff / (patm - 0.378 * cff))
+            self.ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
+            self.ds["qair"].attrs["units"] = "kg/kg"
+
+            # Update var_names dictionary
+            var_names = {**self.var_names, "qair": "qair"}
+            object.__setattr__(self, "var_names", var_names)

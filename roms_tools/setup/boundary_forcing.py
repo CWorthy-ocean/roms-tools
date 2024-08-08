@@ -2,12 +2,12 @@ import xarray as xr
 import numpy as np
 import yaml
 import importlib.metadata
-from typing import Dict
+from typing import Dict, Union
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
-from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.datasets import GLORYSDataset
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.utils import (
     nan_check,
@@ -38,22 +38,29 @@ class BoundaryForcing:
         End time of the desired boundary forcing data.
     boundaries : Dict[str, bool], optional
         Dictionary specifying which boundaries are forced (south, east, north, west). Default is all True.
+    physics_source : Dict[str, Union[str, None]]
+        Dictionary specifying the source of the physical boundary forcing data:
+        - "name" (str): Name of the data source (e.g., "GLORYS").
+        - "path" (str): Path to the physical data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
-    source : str, optional
-        Source of the boundary forcing data. Default is "glorys".
-    filename: str
-        Path to the source data file. Can contain wildcards.
 
     Attributes
     ----------
     ds : xr.Dataset
         Xarray Dataset containing the atmospheric forcing data.
 
-    Notes
-    -----
-    This class represents atmospheric forcing data used in ocean modeling. It provides a convenient
-    interface to work with forcing data including shortwave radiation correction and river forcing.
+    Examples
+    --------
+    >>> boundary_forcing = BoundaryForcing(
+    ...     grid=grid,
+    ...     vertical_coordinate=vertical_coordinate,
+    ...     boundaries={"south": True, "east": True, "north": False, "west": True},
+    ...     start_time=datetime(2022, 1, 1),
+    ...     end_time=datetime(2022, 1, 2),
+    ...     physics_source={"name": "GLORYS", "path": "physics_data.nc"},
+    ... )
     """
 
     grid: Grid
@@ -68,39 +75,41 @@ class BoundaryForcing:
             "west": True,
         }
     )
+    physics_source: Dict[str, Union[str, None]]
     model_reference_date: datetime = datetime(2000, 1, 1)
-    source: str = "glorys"
-    filename: str
+
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
 
+        if "name" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'name'.")
+        if "path" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'path'.")
+        # set self.physics_source["climatology"] to False if not provided
+        object.__setattr__(
+            self,
+            "physics_source",
+            {
+                **self.physics_source,
+                "climatology": self.physics_source.get("climatology", False),
+            },
+        )
+        if self.physics_source["name"] == "GLORYS":
+            data = GLORYSDataset(
+                filename=self.physics_source["path"],
+                start_time=self.start_time,
+                end_time=self.end_time,
+                climatology=self.physics_source["climatology"],
+            )
+        else:
+            raise ValueError(
+                'Only "GLORYS" is a valid option for physics_source["name"].'
+            )
+
         lon = self.grid.ds.lon_rho
         lat = self.grid.ds.lat_rho
         angle = self.grid.ds.angle
-
-        if self.source == "glorys":
-            dims = {
-                "longitude": "longitude",
-                "latitude": "latitude",
-                "depth": "depth",
-                "time": "time",
-            }
-
-            varnames = {
-                "temp": "thetao",
-                "salt": "so",
-                "u": "uo",
-                "v": "vo",
-                "ssh": "zos",
-            }
-        data = Dataset(
-            filename=self.filename,
-            start_time=self.start_time,
-            end_time=self.end_time,
-            var_names=varnames.values(),
-            dim_names=dims,
-        )
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
@@ -121,19 +130,19 @@ class BoundaryForcing:
 
         # extrapolate deepest value all the way to bottom ("flooding") to prepare for 3d interpolation
         for var in ["temp", "salt", "u", "v"]:
-            data.ds[varnames[var]] = extrapolate_deepest_to_bottom(
-                data.ds[varnames[var]], dims["depth"]
+            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+                data.ds[data.var_names[var]], data.dim_names["depth"]
             )
 
         # interpolate onto desired grid
-        fill_dims = [dims["latitude"], dims["longitude"]]
+        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
 
         # 2d interpolation
-        coords = {dims["latitude"]: lat, dims["longitude"]: lon}
-        mask = xr.where(data.ds[varnames["ssh"]].isel(time=0).isnull(), 0, 1)
+        coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
+        mask = xr.where(data.ds[data.var_names["ssh"]].isel(time=0).isnull(), 0, 1)
 
         ssh = fill_and_interpolate(
-            data.ds[varnames["ssh"]].astype(np.float64),
+            data.ds[data.var_names["ssh"]].astype(np.float64),
             mask,
             fill_dims=fill_dims,
             coords=coords,
@@ -142,11 +151,11 @@ class BoundaryForcing:
 
         # 3d interpolation
         coords = {
-            dims["latitude"]: lat,
-            dims["longitude"]: lon,
-            dims["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
+            data.dim_names["latitude"]: lat,
+            data.dim_names["longitude"]: lon,
+            data.dim_names["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
         }
-        mask = xr.where(data.ds[varnames["temp"]].isel(time=0).isnull(), 0, 1)
+        mask = xr.where(data.ds[data.var_names["temp"]].isel(time=0).isnull(), 0, 1)
 
         data_vars = {}
         # setting fillvalue_interp to None means that we allow extrapolation in the
@@ -156,7 +165,7 @@ class BoundaryForcing:
         for var in ["temp", "salt", "u", "v"]:
 
             data_vars[var] = fill_and_interpolate(
-                data.ds[varnames[var]].astype(np.float64),
+                data.ds[data.var_names[var]].astype(np.float64),
                 mask,
                 fill_dims=fill_dims,
                 coords=coords,
@@ -403,8 +412,8 @@ class BoundaryForcing:
                 )
 
         # deal with time dimension
-        if dims["time"] != "time":
-            ds = ds.rename({dims["time"]: "time"})
+        if data.dim_names["time"] != "time":
+            ds = ds.rename({data.dim_names["time"]: "time"})
 
         # Translate the time coordinate to days since the model reference date
         # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
@@ -434,7 +443,7 @@ class BoundaryForcing:
         ds.attrs["start_time"] = str(self.start_time)
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["source"] = self.source
+        ds.attrs["phsyics_source"] = self.physics_source["name"]
 
         object.__setattr__(self, "ds", ds)
 
@@ -637,12 +646,11 @@ class BoundaryForcing:
 
         boundary_forcing_data = {
             "BoundaryForcing": {
-                "filename": self.filename,
                 "start_time": self.start_time.isoformat(),
                 "end_time": self.end_time.isoformat(),
-                "model_reference_date": self.model_reference_date.isoformat(),
-                "source": self.source,
                 "boundaries": self.boundaries,
+                "physics_source": self.physics_source,
+                "model_reference_date": self.model_reference_date.isoformat(),
             }
         }
 

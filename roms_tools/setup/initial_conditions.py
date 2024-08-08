@@ -37,12 +37,12 @@ class InitialConditions:
     physics_source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the physical initial condition data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "filename" (str): Path to the physical data file. Can contain wildcards.
+        - "path" (str): Path to the physical data file. Can contain wildcards.
         - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
     bgc_source : Optional[Dict[str, Union[str, None]]]
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
         - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
-        - "filename" (str): Path to the BGC data file. Can contain wildcards.
+        - "path" (str): Path to the BGC data file. Can contain wildcards.
         - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
 
     Attributes
@@ -56,8 +56,8 @@ class InitialConditions:
     ...     grid=grid,
     ...     vertical_coordinate=vertical_coordinate,
     ...     ini_time=datetime(2022, 1, 1),
-    ...     physics_source={"name": "GLORYS", "filename": "physics_data.nc"},
-    ...     bgc_source={"name": "CESM_REGRIDDED", "filename": "bgc_data.nc"},
+    ...     physics_source={"name": "GLORYS", "path": "physics_data.nc"},
+    ...     bgc_source={"name": "CESM_REGRIDDED", "path": "bgc_data.nc"},
     ... )
     """
 
@@ -73,8 +73,8 @@ class InitialConditions:
     def __post_init__(self):
         if "name" not in self.physics_source.keys():
             raise ValueError("`physics_source` must include a 'name'.")
-        if "filename" not in self.physics_source.keys():
-            raise ValueError("`physics_source` must include a 'filename'.")
+        if "path" not in self.physics_source.keys():
+            raise ValueError("`physics_source` must include a 'path'.")
         # set self.physics_source["climatology"] to False if not provided
         object.__setattr__(
             self,
@@ -86,7 +86,7 @@ class InitialConditions:
         )
         if self.physics_source["name"] == "GLORYS":
             data = GLORYSDataset(
-                filename=self.physics_source["filename"],
+                filename=self.physics_source["path"],
                 start_time=self.ini_time,
                 climatology=self.physics_source["climatology"],
             )
@@ -99,9 +99,9 @@ class InitialConditions:
                 raise ValueError(
                     "`bgc_source` must include a 'name' if it is provided."
                 )
-            if "filename" not in self.bgc_source.keys():
+            if "path" not in self.bgc_source.keys():
                 raise ValueError(
-                    "`bgc_source` must include a 'filename' if it is provided."
+                    "`bgc_source` must include a 'path' if it is provided."
                 )
             # set self.physics_source["climatology"] to False if not provided
             object.__setattr__(
@@ -116,7 +116,7 @@ class InitialConditions:
             if self.bgc_source["name"] == "CESM_REGRIDDED":
 
                 bgc_data = CESMBGCDataset(
-                    filename=self.bgc_source["filename"],
+                    filename=self.bgc_source["path"],
                     start_time=self.ini_time,
                     climatology=self.bgc_source["climatology"],
                 )

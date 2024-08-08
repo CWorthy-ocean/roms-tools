@@ -30,7 +30,7 @@ class TidalForcing:
     source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the tidal data:
         - "name" (str): Name of the data source (e.g., "TPXO").
-        - "filename" (str): Path to the tidal data file. Can contain wildcards.
+        - "path" (str): Path to the tidal data file. Can contain wildcards.
     ntides : int, optional
         Number of constituents to consider. Maximum number is 14. Default is 10.
     allan_factor : float, optional
@@ -46,7 +46,7 @@ class TidalForcing:
     Examples
     --------
     >>> tidal_forcing = TidalForcing(
-    ...     grid=grid, source={"name": "TPXO", "filename": "tpxo_data.nc"}
+    ...     grid=grid, source={"name": "TPXO", "path": "tpxo_data.nc"}
     ... )
     """
 
@@ -61,10 +61,10 @@ class TidalForcing:
     def __post_init__(self):
         if "name" not in self.source.keys():
             raise ValueError("`source` must include a 'name'.")
-        if "filename" not in self.source.keys():
-            raise ValueError("`source` must include a 'filename'.")
+        if "path" not in self.source.keys():
+            raise ValueError("`source` must include a 'path'.")
         if self.source["name"] == "TPXO":
-            data = TPXODataset(filename=self.source["filename"])
+            data = TPXODataset(filename=self.source["path"])
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
 

@@ -32,8 +32,6 @@ class InitialConditions:
         Object representing the vertical coordinate system.
     ini_time : datetime
         The date and time at which the initial conditions are set.
-    model_reference_date : datetime, optional
-        The reference date for the model. Defaults to January 1, 2000.
     physics_source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the physical initial condition data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
@@ -44,6 +42,8 @@ class InitialConditions:
         - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
         - "path" (str): Path to the BGC data file. Can contain wildcards.
         - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
+    model_reference_date : datetime, optional
+        The reference date for the model. Defaults to January 1, 2000.
 
     Attributes
     ----------
@@ -64,9 +64,9 @@ class InitialConditions:
     grid: Grid
     vertical_coordinate: VerticalCoordinate
     ini_time: datetime
-    model_reference_date: datetime = datetime(2000, 1, 1)
     physics_source: Dict[str, Union[str, None]]
     bgc_source: Optional[Dict[str, Union[str, None]]] = None
+    model_reference_date: datetime = datetime(2000, 1, 1)
 
     ds: xr.Dataset = field(init=False, repr=False)
 

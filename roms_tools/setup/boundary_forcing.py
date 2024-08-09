@@ -2,18 +2,15 @@ import xarray as xr
 import numpy as np
 import yaml
 import importlib.metadata
-from typing import Dict, Union
+from typing import Dict, Union, Optional
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
+from roms_tools.setup.roms_mixin import ROMSToolsMixin
 from datetime import datetime
-from roms_tools.setup.datasets import GLORYSDataset
-from roms_tools.setup.fill import fill_and_interpolate
+from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
-    extrapolate_deepest_to_bottom,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import calendar
@@ -22,7 +19,7 @@ import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
-class BoundaryForcing:
+class BoundaryForcing(ROMSToolsMixin):
     """
     Represents boundary forcing for ROMS.
 
@@ -43,6 +40,11 @@ class BoundaryForcing:
         - "name" (str): Name of the data source (e.g., "GLORYS").
         - "path" (str): Path to the physical data file. Can contain wildcards.
         - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
+    bgc_source : Optional[Dict[str, Union[str, None]]]
+        Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
+        - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
+        - "path" (str): Path to the BGC data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
 
@@ -60,6 +62,11 @@ class BoundaryForcing:
     ...     start_time=datetime(2022, 1, 1),
     ...     end_time=datetime(2022, 1, 2),
     ...     physics_source={"name": "GLORYS", "path": "physics_data.nc"},
+    ...     bgc_source={
+    ...         "name": "CESM_REGRIDDED",
+    ...         "path": "bgc_data.nc",
+    ...         "climatology": True,
+    ...     },
     ... )
     """
 
@@ -76,11 +83,58 @@ class BoundaryForcing:
         }
     )
     physics_source: Dict[str, Union[str, None]]
+    bgc_source: Optional[Dict[str, Union[str, None]]] = None
     model_reference_date: datetime = datetime(2000, 1, 1)
 
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
+
+        self._input_checks()
+
+        data = self._get_data()
+
+        d_meta = super().get_variable_metadata()
+        bdry_coords, rename = super().get_boundary_info()
+
+        vars_2d = ["zeta"]
+        vars_3d = ["temp", "salt", "u", "v"]
+        data_vars = super().regrid_data(data, vars_2d, vars_3d)
+        data_vars = super().process_velocities(data_vars)
+        ds = self._write_into_dataset(data_vars, d_meta, bdry_coords, rename)
+        ds = self._add_global_metadata(ds, bdry_coords, rename)
+
+        for direction in ["south", "east", "north", "west"]:
+            nan_check(
+                ds[f"zeta_{direction}"].isel(time=0),
+                self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
+            )
+
+        object.__setattr__(self, "ds", ds)
+
+        if self.bgc_source is not None:
+            bgc_data = self._get_bgc_data()
+
+            vars_2d = []
+            vars_3d = bgc_data.var_names.values()
+            bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d)
+
+            # Ensure time coordinate matches if climatology is applied in one case but not the other
+            if (
+                not self.physics_source["climatology"]
+                and self.bgc_source["climatology"]
+            ):
+                for var in bgc_data_vars.keys():
+                    bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
+                        {"time": data_vars["temp"]["time"]}
+                    )
+
+            ds_bgc = self._write_into_dataset(bgc_data_vars, d_meta)
+            ds_bgc = self._add_global_metadata(ds_bgc)
+
+            object.__setattr__(self, "ds_bgc", ds_bgc)
+
+    def _input_checks(self):
 
         if "name" not in self.physics_source.keys():
             raise ValueError("`physics_source` must include a 'name'.")
@@ -95,6 +149,27 @@ class BoundaryForcing:
                 "climatology": self.physics_source.get("climatology", False),
             },
         )
+        if self.bgc_source is not None:
+            if "name" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'name' if it is provided."
+                )
+            if "path" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'path' if it is provided."
+                )
+            # set self.physics_source["climatology"] to False if not provided
+            object.__setattr__(
+                self,
+                "bgc_source",
+                {
+                    **self.bgc_source,
+                    "climatology": self.bgc_source.get("climatology", False),
+                },
+            )
+
+    def _get_data(self):
+
         if self.physics_source["name"] == "GLORYS":
             data = GLORYSDataset(
                 filename=self.physics_source["path"],
@@ -107,273 +182,119 @@ class BoundaryForcing:
                 'Only "GLORYS" is a valid option for physics_source["name"].'
             )
 
-        lon = self.grid.ds.lon_rho
-        lat = self.grid.ds.lat_rho
-        angle = self.grid.ds.angle
+        return data
 
-        # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
-        lon = xr.where(lon > 180, lon - 360, lon)
-        straddle = True
-        if not self.grid.straddle and abs(lon).min() > 5:
-            lon = xr.where(lon < 0, lon + 360, lon)
-            straddle = False
+    def _get_bgc_data(self):
 
-        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
-        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
-        # would not be detected by the nan_check function.
-        data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
-            margin=2,
-            straddle=straddle,
-        )
+        if self.bgc_source["name"] == "CESM_REGRIDDED":
 
-        # extrapolate deepest value all the way to bottom ("flooding") to prepare for 3d interpolation
-        for var in ["temp", "salt", "u", "v"]:
-            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
-                data.ds[data.var_names[var]], data.dim_names["depth"]
+            data = CESMBGCDataset(
+                filename=self.bgc_source["path"],
+                start_time=self.start_time,
+                end_time=self.end_time,
+                climatology=self.bgc_source["climatology"],
+            )
+            data.post_process()
+        else:
+            raise ValueError(
+                'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
             )
 
-        # interpolate onto desired grid
-        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
+        return data
 
-        # 2d interpolation
-        coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
-        mask = xr.where(data.ds[data.var_names["ssh"]].isel(time=0).isnull(), 0, 1)
+    def _write_into_dataset(self, data_vars, d_meta, bdry_coords, rename, ds=None):
 
-        ssh = fill_and_interpolate(
-            data.ds[data.var_names["ssh"]].astype(np.float64),
-            mask,
-            fill_dims=fill_dims,
-            coords=coords,
-            method="linear",
-        )
+        if ds is None:
+            # save in new dataset
+            ds = xr.Dataset()
 
-        # 3d interpolation
-        coords = {
-            data.dim_names["latitude"]: lat,
-            data.dim_names["longitude"]: lon,
-            data.dim_names["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
-        }
-        mask = xr.where(data.ds[data.var_names["temp"]].isel(time=0).isnull(), 0, 1)
+        for direction in ["south", "east", "north", "west"]:
+            if self.boundaries[direction]:
 
-        data_vars = {}
-        # setting fillvalue_interp to None means that we allow extrapolation in the
-        # interpolation step to avoid NaNs at the surface if the lowest depth in original
-        # data is greater than zero
+                for var in data_vars.keys():
+                    if var in ["u", "ubar"]:
+                        ds[f"{var}_{direction}"] = (
+                            data_vars[var]
+                            .isel(**bdry_coords["u"][direction])
+                            .rename(**rename["u"][direction])
+                            .astype(np.float32)
+                        )
+                    elif var in ["v", "vbar"]:
+                        ds[f"{var}_{direction}"] = (
+                            data_vars[var]
+                            .isel(**bdry_coords["v"][direction])
+                            .rename(**rename["v"][direction])
+                            .astype(np.float32)
+                        )
+                    else:
+                        ds[f"{var}_{direction}"] = (
+                            data_vars[var]
+                            .isel(**bdry_coords["rho"][direction])
+                            .rename(**rename["rho"][direction])
+                            .astype(np.float32)
+                        )
+                    ds[f"{var}_{direction}"].attrs[
+                        "long_name"
+                    ] = f"{direction}ern boundary {d_meta[var]['long_name']}"
+                    ds[f"{var}_{direction}"].attrs["units"] = d_meta[var]["units"]
 
-        for var in ["temp", "salt", "u", "v"]:
+        return ds
 
-            data_vars[var] = fill_and_interpolate(
-                data.ds[data.var_names[var]].astype(np.float64),
-                mask,
-                fill_dims=fill_dims,
-                coords=coords,
-                method="linear",
-                fillvalue_interp=None,
-            )
-
-        # rotate velocities to grid orientation
-        u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
-        v_rot = data_vars["v"] * np.cos(angle) - data_vars["u"] * np.sin(angle)
-
-        # interpolate to u- and v-points
-        u = interpolate_from_rho_to_u(u_rot)
-        v = interpolate_from_rho_to_v(v_rot)
-
-        # 3d masks for ROMS domain
-        umask = self.grid.ds.mask_u.expand_dims({"s_rho": u.s_rho})
-        vmask = self.grid.ds.mask_v.expand_dims({"s_rho": v.s_rho})
-
-        u = u * umask
-        v = v * vmask
-
-        # Compute barotropic velocity
-
-        # thicknesses
-        dz = -self.vertical_coordinate.ds["interface_depth_rho"].diff(dim="s_w")
-        dz = dz.rename({"s_w": "s_rho"})
-        # thicknesses at u- and v-points
-        dzu = interpolate_from_rho_to_u(dz)
-        dzv = interpolate_from_rho_to_v(dz)
-
-        ubar = (dzu * u).sum(dim="s_rho") / dzu.sum(dim="s_rho")
-        vbar = (dzv * v).sum(dim="s_rho") / dzv.sum(dim="s_rho")
-
-        # Boundary coordinates for rho-points
-        bdry_coords_rho = {
-            "south": {"eta_rho": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_rho": 0},
-        }
-        # How to rename the dimensions at rho-points
-        rename_rho = {
-            "south": {"xi_rho": "xi_rho_south"},
-            "east": {"eta_rho": "eta_rho_east"},
-            "north": {"xi_rho": "xi_rho_north"},
-            "west": {"eta_rho": "eta_rho_west"},
-        }
-
-        # Boundary coordinates for u-points
-        bdry_coords_u = {
-            "south": {"eta_rho": 0},
-            "east": {"xi_u": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_u": 0},
-        }
-        # How to rename the dimensions at u-points
-        rename_u = {
-            "south": {"xi_u": "xi_u_south"},
-            "east": {"eta_rho": "eta_u_east"},
-            "north": {"xi_u": "xi_u_north"},
-            "west": {"eta_rho": "eta_u_west"},
-        }
-
-        # Boundary coordinates for v-points
-        bdry_coords_v = {
-            "south": {"eta_v": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_v": -1},
-            "west": {"xi_rho": 0},
-        }
-        # How to rename the dimensions at v-points
-        rename_v = {
-            "south": {"xi_rho": "xi_v_south"},
-            "east": {"eta_v": "eta_v_east"},
-            "north": {"xi_rho": "xi_v_north"},
-            "west": {"eta_v": "eta_v_west"},
-        }
-
-        ds = xr.Dataset()
+    def _add_global_metadata(self, ds, bdry_coords, rename):
 
         for direction in ["south", "east", "north", "west"]:
 
             if self.boundaries[direction]:
 
-                ds[f"zeta_{direction}"] = (
-                    ssh.isel(**bdry_coords_rho[direction])
-                    .rename(**rename_rho[direction])
-                    .astype(np.float32)
-                )
-                ds[f"zeta_{direction}"].attrs[
-                    "long_name"
-                ] = f"{direction}ern boundary sea surface height"
-                ds[f"zeta_{direction}"].attrs["units"] = "m"
-
-                ds[f"temp_{direction}"] = (
-                    data_vars["temp"]
-                    .isel(**bdry_coords_rho[direction])
-                    .rename(**rename_rho[direction])
-                    .astype(np.float32)
-                )
-                ds[f"temp_{direction}"].attrs[
-                    "long_name"
-                ] = f"{direction}ern boundary potential temperature"
-                ds[f"temp_{direction}"].attrs["units"] = "Celsius"
-
-                ds[f"salt_{direction}"] = (
-                    data_vars["salt"]
-                    .isel(**bdry_coords_rho[direction])
-                    .rename(**rename_rho[direction])
-                    .astype(np.float32)
-                )
-                ds[f"salt_{direction}"].attrs[
-                    "long_name"
-                ] = f"{direction}ern boundary salinity"
-                ds[f"salt_{direction}"].attrs["units"] = "PSU"
-
-                ds[f"u_{direction}"] = (
-                    u.isel(**bdry_coords_u[direction])
-                    .rename(**rename_u[direction])
-                    .astype(np.float32)
-                )
-                ds[f"u_{direction}"].attrs[
-                    "long_name"
-                ] = f"{direction}ern boundary u-flux component"
-                ds[f"u_{direction}"].attrs["units"] = "m/s"
-
-                ds[f"v_{direction}"] = (
-                    v.isel(**bdry_coords_v[direction])
-                    .rename(**rename_v[direction])
-                    .astype(np.float32)
-                )
-                ds[f"v_{direction}"].attrs[
-                    "long_name"
-                ] = f"{direction}ern boundary v-flux component"
-                ds[f"v_{direction}"].attrs["units"] = "m/s"
-
-                ds[f"ubar_{direction}"] = (
-                    ubar.isel(**bdry_coords_u[direction])
-                    .rename(**rename_u[direction])
-                    .astype(np.float32)
-                )
-                ds[f"ubar_{direction}"].attrs[
-                    "long_name"
-                ] = f"{direction}ern boundary vertically integrated u-flux component"
-                ds[f"ubar_{direction}"].attrs["units"] = "m/s"
-
-                ds[f"vbar_{direction}"] = (
-                    vbar.isel(**bdry_coords_v[direction])
-                    .rename(**rename_v[direction])
-                    .astype(np.float32)
-                )
-                ds[f"vbar_{direction}"].attrs[
-                    "long_name"
-                ] = f"{direction}ern boundary vertically integrated v-flux component"
-                ds[f"vbar_{direction}"].attrs["units"] = "m/s"
-
-                # assign the correct depth coordinates
-
                 lat_rho = self.grid.ds.lat_rho.isel(
-                    **bdry_coords_rho[direction]
-                ).rename(**rename_rho[direction])
+                    **bdry_coords["rho"][direction]
+                ).rename(**rename["rho"][direction])
                 lon_rho = self.grid.ds.lon_rho.isel(
-                    **bdry_coords_rho[direction]
-                ).rename(**rename_rho[direction])
+                    **bdry_coords["rho"][direction]
+                ).rename(**rename["rho"][direction])
                 layer_depth_rho = (
                     self.vertical_coordinate.ds["layer_depth_rho"]
-                    .isel(**bdry_coords_rho[direction])
-                    .rename(**rename_rho[direction])
+                    .isel(**bdry_coords["rho"][direction])
+                    .rename(**rename["rho"][direction])
                 )
                 interface_depth_rho = (
                     self.vertical_coordinate.ds["interface_depth_rho"]
-                    .isel(**bdry_coords_rho[direction])
-                    .rename(**rename_rho[direction])
+                    .isel(**bdry_coords["rho"][direction])
+                    .rename(**rename["rho"][direction])
                 )
 
-                lat_u = self.grid.ds.lat_u.isel(**bdry_coords_u[direction]).rename(
-                    **rename_u[direction]
+                lat_u = self.grid.ds.lat_u.isel(**bdry_coords["u"][direction]).rename(
+                    **rename["u"][direction]
                 )
-                lon_u = self.grid.ds.lon_u.isel(**bdry_coords_u[direction]).rename(
-                    **rename_u[direction]
+                lon_u = self.grid.ds.lon_u.isel(**bdry_coords["u"][direction]).rename(
+                    **rename["u"][direction]
                 )
                 layer_depth_u = (
                     self.vertical_coordinate.ds["layer_depth_u"]
-                    .isel(**bdry_coords_u[direction])
-                    .rename(**rename_u[direction])
+                    .isel(**bdry_coords["u"][direction])
+                    .rename(**rename["u"][direction])
                 )
                 interface_depth_u = (
                     self.vertical_coordinate.ds["interface_depth_u"]
-                    .isel(**bdry_coords_u[direction])
-                    .rename(**rename_u[direction])
+                    .isel(**bdry_coords["u"][direction])
+                    .rename(**rename["u"][direction])
                 )
 
-                lat_v = self.grid.ds.lat_v.isel(**bdry_coords_v[direction]).rename(
-                    **rename_v[direction]
+                lat_v = self.grid.ds.lat_v.isel(**bdry_coords["v"][direction]).rename(
+                    **rename["v"][direction]
                 )
-                lon_v = self.grid.ds.lon_v.isel(**bdry_coords_v[direction]).rename(
-                    **rename_v[direction]
+                lon_v = self.grid.ds.lon_v.isel(**bdry_coords["v"][direction]).rename(
+                    **rename["v"][direction]
                 )
                 layer_depth_v = (
                     self.vertical_coordinate.ds["layer_depth_v"]
-                    .isel(**bdry_coords_v[direction])
-                    .rename(**rename_v[direction])
+                    .isel(**bdry_coords["v"][direction])
+                    .rename(**rename["v"][direction])
                 )
                 interface_depth_v = (
                     self.vertical_coordinate.ds["interface_depth_v"]
-                    .isel(**bdry_coords_v[direction])
-                    .rename(**rename_v[direction])
+                    .isel(**bdry_coords["v"][direction])
+                    .rename(**rename["v"][direction])
                 )
 
                 ds = ds.assign_coords(
@@ -393,45 +314,23 @@ class BoundaryForcing:
                     }
                 )
 
-                ds = ds.drop_vars(
-                    [
-                        "layer_depth_rho",
-                        "layer_depth_u",
-                        "layer_depth_v",
-                        "interface_depth_rho",
-                        "interface_depth_u",
-                        "interface_depth_v",
-                        "lat_rho",
-                        "lon_rho",
-                        "lat_u",
-                        "lon_u",
-                        "lat_v",
-                        "lon_v",
-                        "s_rho",
-                    ]
-                )
-
-        # deal with time dimension
-        if data.dim_names["time"] != "time":
-            ds = ds.rename({data.dim_names["time"]: "time"})
-
-        # Translate the time coordinate to days since the model reference date
-        # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
-        model_reference_date = np.datetime64(self.model_reference_date)
-
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-        bry_time = ds["time"] - model_reference_date
-        ds = ds.assign_coords(bry_time=("time", bry_time.data))
-        ds["bry_time"].attrs[
-            "long_name"
-        ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
-
-        ds["theta_s"] = self.vertical_coordinate.ds["theta_s"]
-        ds["theta_b"] = self.vertical_coordinate.ds["theta_b"]
-        ds["Tcline"] = self.vertical_coordinate.ds["Tcline"]
-        ds["hc"] = self.vertical_coordinate.ds["hc"]
-        ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
-        ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
+        ds = ds.drop_vars(
+            [
+                "s_rho",
+                "layer_depth_rho",
+                "layer_depth_u",
+                "layer_depth_v",
+                "interface_depth_rho",
+                "interface_depth_u",
+                "interface_depth_v",
+                "lat_rho",
+                "lon_rho",
+                "lat_u",
+                "lon_u",
+                "lat_v",
+                "lon_v",
+            ]
+        )
 
         ds.attrs["title"] = "ROMS boundary forcing file created by ROMS-Tools"
         # Include the version of roms-tools
@@ -444,14 +343,28 @@ class BoundaryForcing:
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["phsyics_source"] = self.physics_source["name"]
+        if self.bgc_source is not None:
+            ds.attrs["bgc_source"] = self.bgc_source["name"]
 
-        object.__setattr__(self, "ds", ds)
+        # Translate the time coordinate to days since the model reference date
+        # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
+        model_reference_date = np.datetime64(self.model_reference_date)
 
-        for direction in ["south", "east", "north", "west"]:
-            nan_check(
-                ds[f"zeta_{direction}"].isel(time=0),
-                self.grid.ds.mask_rho.isel(**bdry_coords_rho[direction]),
-            )
+        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        bry_time = ds["time"] - model_reference_date
+        ds = ds.assign_coords(bry_time=("time", bry_time.data))
+        ds["bry_time"].attrs[
+            "long_name"
+        ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
+
+        ds.attrs["theta_s"] = self.vertical_coordinate.ds["theta_s"].item()
+        ds.attrs["theta_b"] = self.vertical_coordinate.ds["theta_b"].item()
+        ds.attrs["Tcline"] = self.vertical_coordinate.ds["Tcline"].item()
+        ds.attrs["hc"] = self.vertical_coordinate.ds["hc"].item()
+        ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
+        ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
+
+        return ds
 
     def plot(
         self,

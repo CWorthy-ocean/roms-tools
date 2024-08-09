@@ -586,7 +586,7 @@ class GLORYSDataset(Dataset):
             "salt": "so",
             "u": "uo",
             "v": "vo",
-            "ssh": "zos",
+            "zeta": "zos",
         }
     )
 

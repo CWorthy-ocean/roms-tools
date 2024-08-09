@@ -218,21 +218,21 @@ def test_boundary_forcing_data_consistency_plot_save(boundary_forcing):
         dtype=np.float32,
     )
 
-    expected_ubar_south = np.array([[0.0], [0.0], [0.0]], dtype=np.float32)
+    expected_ubar_south = np.array([[0.0, 0.0, 0.0]], dtype=np.float32)
     expected_ubar_east = np.array(
-        [[0.0], [0.0], [0.04028399], [0.02812303]], dtype=np.float32
+        [[0.0, 0.0, 0.04028399, 0.02812303]], dtype=np.float32
     )
     expected_ubar_north = np.array(
-        [[0.03866891], [0.04446249], [0.02812303]], dtype=np.float32
+        [[0.03866891, 0.04446249, 0.02812303]], dtype=np.float32
     )
-    expected_ubar_west = np.array([[0.0], [0.0], [0.0], [0.03866891]], dtype=np.float32)
+    expected_ubar_west = np.array([[0.0, 0.0, 0.0, 0.03866891]], dtype=np.float32)
 
-    expected_vbar_south = np.array([[0.0], [0.0], [0.0], [0.0]], dtype=np.float32)
-    expected_vbar_east = np.array([[0.0], [0.0], [-0.09326097]], dtype=np.float32)
+    expected_vbar_south = np.array([[0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+    expected_vbar_east = np.array([[0.0, 0.0, -0.09326097]], dtype=np.float32)
     expected_vbar_north = np.array(
-        [[-0.01189703], [0.0], [0.02102064], [-0.09326097]], dtype=np.float32
+        [[-0.01189703, 0.0, 0.02102064, -0.09326097]], dtype=np.float32
     )
-    expected_vbar_west = np.array([[0.0], [0.0], [-0.01189703]], dtype=np.float32)
+    expected_vbar_west = np.array([[0.0, 0.0, -0.01189703]], dtype=np.float32)
 
     # Check the values in the dataset
     assert np.allclose(boundary_forcing.ds["zeta_south"].values, expected_zeta_south)

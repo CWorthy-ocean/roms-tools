@@ -738,6 +738,10 @@ class CESMBGCDataset(Dataset):
             ds["depth"].attrs["long_name"] = "Depth"
             ds["depth"].attrs["units"] = "m"
             ds = ds.swap_dims({"z_t": "depth"})
+            if "z_t" in ds:
+                ds = ds.drop_vars("z_t")
+            if "z_t_150m" in ds:
+                ds = ds.drop_vars("z_t_150m")
             # update dataset
             object.__setattr__(self, "ds", ds)
 
@@ -774,8 +778,8 @@ class ERA5Dataset(Dataset):
 
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
-            "u10": "u10",
-            "v10": "v10",
+            "u": "u10",
+            "v": "v10",
             "swr": "ssr",
             "lwr": "strd",
             "t2m": "t2m",
@@ -844,3 +848,11 @@ class ERA5Dataset(Dataset):
             # Update var_names dictionary
             var_names = {**self.var_names, "qair": "qair"}
             object.__setattr__(self, "var_names", var_names)
+
+        if "mask" in self.var_names.keys():
+            mask = xr.where(self.ds[self.var_names["mask"]].isel(time=0).isnull(), 0, 1)
+
+            for var in self.ds.data_vars:
+                self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
+
+            del self.var_names["mask"]

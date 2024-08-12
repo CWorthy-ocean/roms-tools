@@ -1,6 +1,8 @@
 import xarray as xr
 import numpy as np
+import pandas as pd
 import yaml
+from datatree import DataTree
 import importlib.metadata
 from typing import Dict, Union, Optional
 from dataclasses import dataclass, field, asdict
@@ -99,40 +101,25 @@ class BoundaryForcing(ROMSToolsMixin):
 
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
+
         data_vars = super().regrid_data(data, vars_2d, vars_3d)
         data_vars = super().process_velocities(data_vars)
-        ds = self._write_into_dataset(data_vars, d_meta, bdry_coords, rename)
-        ds = self._add_global_metadata(ds, bdry_coords, rename)
 
-        for direction in ["south", "east", "north", "west"]:
-            nan_check(
-                ds[f"zeta_{direction}"].isel(time=0),
-                self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
-            )
-
-        object.__setattr__(self, "ds", ds)
+        object.__setattr__(data, "data_vars", data_vars)
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
 
             vars_2d = []
             vars_3d = bgc_data.var_names.values()
-            bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d)
+            data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d)
+            object.__setattr__(bgc_data, "data_vars", data_vars)
+        else:
+            bgc_data = None
 
-            # Ensure time coordinate matches if climatology is applied in one case but not the other
-            if (
-                not self.physics_source["climatology"]
-                and self.bgc_source["climatology"]
-            ):
-                for var in bgc_data_vars.keys():
-                    bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
-                        {"time": data_vars["temp"]["time"]}
-                    )
+        ds = self._write_into_datatree(data, bgc_data, d_meta, bdry_coords, rename)
 
-            ds_bgc = self._write_into_dataset(bgc_data_vars, d_meta)
-            ds_bgc = self._add_global_metadata(ds_bgc)
-
-            object.__setattr__(self, "ds_bgc", ds_bgc)
+        object.__setattr__(self, "ds", ds)
 
     def _input_checks(self):
 
@@ -158,7 +145,7 @@ class BoundaryForcing(ROMSToolsMixin):
                 raise ValueError(
                     "`bgc_source` must include a 'path' if it is provided."
                 )
-            # set self.physics_source["climatology"] to False if not provided
+            # set self.bgc_source["climatology"] to False if not provided
             object.__setattr__(
                 self,
                 "bgc_source",
@@ -202,33 +189,32 @@ class BoundaryForcing(ROMSToolsMixin):
 
         return data
 
-    def _write_into_dataset(self, data_vars, d_meta, bdry_coords, rename, ds=None):
+    def _write_into_dataset(self, data, d_meta, bdry_coords, rename):
 
-        if ds is None:
-            # save in new dataset
-            ds = xr.Dataset()
+        # save in new dataset
+        ds = xr.Dataset()
 
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
 
-                for var in data_vars.keys():
+                for var in data.data_vars.keys():
                     if var in ["u", "ubar"]:
                         ds[f"{var}_{direction}"] = (
-                            data_vars[var]
+                            data.data_vars[var]
                             .isel(**bdry_coords["u"][direction])
                             .rename(**rename["u"][direction])
                             .astype(np.float32)
                         )
                     elif var in ["v", "vbar"]:
                         ds[f"{var}_{direction}"] = (
-                            data_vars[var]
+                            data.data_vars[var]
                             .isel(**bdry_coords["v"][direction])
                             .rename(**rename["v"][direction])
                             .astype(np.float32)
                         )
                     else:
                         ds[f"{var}_{direction}"] = (
-                            data_vars[var]
+                            data.data_vars[var]
                             .isel(**bdry_coords["rho"][direction])
                             .rename(**rename["rho"][direction])
                             .astype(np.float32)
@@ -238,9 +224,78 @@ class BoundaryForcing(ROMSToolsMixin):
                     ] = f"{direction}ern boundary {d_meta[var]['long_name']}"
                     ds[f"{var}_{direction}"].attrs["units"] = d_meta[var]["units"]
 
+        # Gracefully handle dropping variables that might not be present
+        variables_to_drop = [
+            "s_rho",
+            "layer_depth_rho",
+            "layer_depth_u",
+            "layer_depth_v",
+            "interface_depth_rho",
+            "interface_depth_u",
+            "interface_depth_v",
+            "lat_rho",
+            "lon_rho",
+            "lat_u",
+            "lon_u",
+            "lat_v",
+            "lon_v",
+        ]
+        existing_vars = [var for var in variables_to_drop if var in ds]
+        ds = ds.drop_vars(existing_vars)
+
+        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        if data.climatology:
+            # Convert to pandas TimedeltaIndex
+            timedelta_index = pd.to_timedelta(ds["time"].values)
+            # Determine the start of the year for the base_datetime
+            start_of_year = datetime(self.model_reference_date.year, 1, 1)
+            # Calculate the offset from midnight of the new year
+            offset = self.model_reference_date - start_of_year
+            bry_time = xr.DataArray(
+                timedelta_index - offset,
+                dims="time",
+            )
+        else:
+            # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
+            bry_time = ds["time"] - np.datetime64(self.model_reference_date)
+
+        ds = ds.assign_coords(bry_time=("time", bry_time.data))
+        ds["bry_time"].attrs[
+            "long_name"
+        ] = f"time since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
+        if data.climatology:
+            ds["bry_time"].attrs["cycle_length"] = 365.25
+
         return ds
 
-    def _add_global_metadata(self, ds, bdry_coords, rename):
+    def _write_into_datatree(self, data, bgc_data, d_meta, bdry_coords, rename):
+
+        ds = self._add_global_metadata()
+        ds = DataTree(name="root", data=ds)
+
+        ds_physics = self._write_into_dataset(data, d_meta, bdry_coords, rename)
+        ds_physics = self._add_coordinates(bdry_coords, rename, ds_physics)
+
+        for direction in ["south", "east", "north", "west"]:
+            if self.boundaries[direction]:
+                nan_check(
+                    ds_physics[f"zeta_{direction}"].isel(time=0),
+                    self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
+                )
+
+        ds_physics = DataTree(name="physics", parent=ds, data=ds_physics)
+
+        if bgc_data:
+            ds_bgc = self._write_into_dataset(bgc_data, d_meta, bdry_coords, rename)
+            ds_bgc = self._add_coordinates(bdry_coords, rename, ds_bgc)
+            ds_bgc = DataTree(name="bgc", parent=ds, data=ds_bgc)
+
+        return ds
+
+    def _add_coordinates(self, bdry_coords, rename, ds=None):
+
+        if ds is None:
+            ds = xr.Dataset()
 
         for direction in ["south", "east", "north", "west"]:
 
@@ -314,24 +369,31 @@ class BoundaryForcing(ROMSToolsMixin):
                     }
                 )
 
-        ds = ds.drop_vars(
-            [
-                "s_rho",
-                "layer_depth_rho",
-                "layer_depth_u",
-                "layer_depth_v",
-                "interface_depth_rho",
-                "interface_depth_u",
-                "interface_depth_v",
-                "lat_rho",
-                "lon_rho",
-                "lat_u",
-                "lon_u",
-                "lat_v",
-                "lon_v",
-            ]
-        )
+        # Gracefully handle dropping variables that might not be present
+        variables_to_drop = [
+            "s_rho",
+            "layer_depth_rho",
+            "layer_depth_u",
+            "layer_depth_v",
+            "interface_depth_rho",
+            "interface_depth_u",
+            "interface_depth_v",
+            "lat_rho",
+            "lon_rho",
+            "lat_u",
+            "lon_u",
+            "lat_v",
+            "lon_v",
+        ]
+        existing_vars = [var for var in variables_to_drop if var in ds]
+        ds = ds.drop_vars(existing_vars)
 
+        return ds
+
+    def _add_global_metadata(self, ds=None):
+
+        if ds is None:
+            ds = xr.Dataset()
         ds.attrs["title"] = "ROMS boundary forcing file created by ROMS-Tools"
         # Include the version of roms-tools
         try:
@@ -345,17 +407,6 @@ class BoundaryForcing(ROMSToolsMixin):
         ds.attrs["phsyics_source"] = self.physics_source["name"]
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
-
-        # Translate the time coordinate to days since the model reference date
-        # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
-        model_reference_date = np.datetime64(self.model_reference_date)
-
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-        bry_time = ds["time"] - model_reference_date
-        ds = ds.assign_coords(bry_time=("time", bry_time.data))
-        ds["bry_time"].attrs[
-            "long_name"
-        ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
 
         ds.attrs["theta_s"] = self.vertical_coordinate.ds["theta_s"].item()
         ds.attrs["theta_b"] = self.vertical_coordinate.ds["theta_b"].item()
@@ -379,14 +430,45 @@ class BoundaryForcing(ROMSToolsMixin):
         ----------
         varname : str
             The name of the initial conditions field to plot. Options include:
-            - "temp_{direction}": Potential temperature.
-            - "salt_{direction}": Salinity.
-            - "zeta_{direction}": Sea surface height.
-            - "u_{direction}": u-flux component.
-            - "v_{direction}": v-flux component.
-            - "ubar_{direction}": Vertically integrated u-flux component.
-            - "vbar_{direction}": Vertically integrated v-flux component.
-            where {direction} can be one of ["south", "east", "north", "west"].
+            - "temp_{direction}": Potential temperature, where {direction} can be one of ["south", "east", "north", "west"].
+            - "salt_{direction}": Salinity, where {direction} can be one of ["south", "east", "north", "west"].
+            - "zeta_{direction}": Sea surface height, where {direction} can be one of ["south", "east", "north", "west"].
+            - "u_{direction}": u-flux component, where {direction} can be one of ["south", "east", "north", "west"].
+            - "v_{direction}": v-flux component, where {direction} can be one of ["south", "east", "north", "west"].
+            - "ubar_{direction}": Vertically integrated u-flux component, where {direction} can be one of ["south", "east", "north", "west"].
+            - "vbar_{direction}": Vertically integrated v-flux component, where {direction} can be one of ["south", "east", "north", "west"].
+            - "PO4_{direction}": Dissolved Inorganic Phosphate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "NO3_{direction}": Dissolved Inorganic Nitrate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "SiO3_{direction}": Dissolved Inorganic Silicate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "NH4_{direction}": Dissolved Ammonia (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "Fe_{direction}": Dissolved Inorganic Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "Lig_{direction}": Iron Binding Ligand (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "O2_{direction}": Dissolved Oxygen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DIC_{direction}": Dissolved Inorganic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DIC_ALT_CO2_{direction}": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "ALK_{direction}": Alkalinity (meq/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "ALK_ALT_CO2_{direction}": Alkalinity, Alternative CO2 (meq/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DOC_{direction}": Dissolved Organic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DON_{direction}": Dissolved Organic Nitrogen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DOP_{direction}": Dissolved Organic Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DOPr_{direction}": Refractory Dissolved Organic Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DONr_{direction}": Refractory Dissolved Organic Nitrogen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "DOCr_{direction}": Refractory Dissolved Organic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "zooC_{direction}": Zooplankton Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "spChl_{direction}": Small Phytoplankton Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "spC_{direction}": Small Phytoplankton Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "spP_{direction}": Small Phytoplankton Phosphorous (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "spFe_{direction}": Small Phytoplankton Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "spCaCO3_{direction}": Small Phytoplankton CaCO3 (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diatChl_{direction}": Diatom Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diatC_{direction}": Diatom Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diatP_{direction}": Diatom Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diatFe_{direction}": Diatom Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diatSi_{direction}": Diatom Silicate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diazChl_{direction}": Diazotroph Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diazC_{direction}": Diazotroph Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diazP_{direction}": Diazotroph Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+            - "diazFe_{direction}": Diazotroph Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
         time : int, optional
             The time index to plot. Default is 0.
         layer_contours : bool, optional
@@ -404,8 +486,17 @@ class BoundaryForcing(ROMSToolsMixin):
             If the specified varname is not one of the valid options.
         """
 
-        field = self.ds[varname].isel(time=time).load()
+        if varname in self.ds["physics"]:
+            ds = self.ds["physics"]
+        else:
+            if "bgc" in self.ds and varname in self.ds["bgc"]:
+                ds = self.ds["bgc"]
+            else:
+                raise ValueError(
+                    f"Variable '{varname}' is not found in 'physics' or 'bgc' datasets."
+                )
 
+        field = ds[varname].isel(time=time).load()
         title = field.long_name
 
         # chose colorbar
@@ -429,13 +520,13 @@ class BoundaryForcing(ROMSToolsMixin):
                 ]
                 try:
                     interface_depth = next(
-                        self.ds[depth_label]
-                        for depth_label in self.ds.coords
+                        ds[depth_label]
+                        for depth_label in ds.coords
                         if any(
                             depth_label.startswith(prefix) for prefix in depths_to_check
                         )
                         and (
-                            set(self.ds[depth_label].dims) - {"s_w"}
+                            set(ds[depth_label].dims) - {"s_w"}
                             == set(field.dims) - {"s_rho"}
                         )
                     )

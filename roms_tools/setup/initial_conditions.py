@@ -137,7 +137,7 @@ class InitialConditions(ROMSToolsMixin):
                 raise ValueError(
                     "`bgc_source` must include a 'path' if it is provided."
                 )
-            # set self.physics_source["climatology"] to False if not provided
+            # set self.bgc_source["climatology"] to False if not provided
             object.__setattr__(
                 self,
                 "bgc_source",
@@ -178,11 +178,10 @@ class InitialConditions(ROMSToolsMixin):
 
         return bgc_data
 
-    def _write_into_dataset(self, data_vars, d_meta, ds=None):
+    def _write_into_dataset(self, data_vars, d_meta):
 
-        if ds is None:
-            # save in new dataset
-            ds = xr.Dataset()
+        # save in new dataset
+        ds = xr.Dataset()
 
         for var in data_vars.keys():
             ds[var] = data_vars[var].astype(np.float32)

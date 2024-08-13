@@ -93,29 +93,40 @@ class BoundaryForcing(ROMSToolsMixin):
     def __post_init__(self):
 
         self._input_checks()
+        lon, lat, angle, straddle = super().get_target_lon_lat()
 
         data = self._get_data()
-
-        d_meta = super().get_variable_metadata()
-        bdry_coords, rename = super().get_boundary_info()
+        data.choose_subdomain(
+            latitude_range=[lat.min().values, lat.max().values],
+            longitude_range=[lon.min().values, lon.max().values],
+            margin=2,
+            straddle=straddle,
+        )
 
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
-
-        data_vars = super().regrid_data(data, vars_2d, vars_3d)
-        data_vars = super().process_velocities(data_vars)
-
+        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super().process_velocities(data_vars, angle)
         object.__setattr__(data, "data_vars", data_vars)
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
+            bgc_data.choose_subdomain(
+                latitude_range=[lat.min().values, lat.max().values],
+                longitude_range=[lon.min().values, lon.max().values],
+                margin=2,
+                straddle=straddle,
+            )
 
             vars_2d = []
             vars_3d = bgc_data.var_names.values()
-            data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d)
+            data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
             object.__setattr__(bgc_data, "data_vars", data_vars)
         else:
             bgc_data = None
+
+        d_meta = super().get_variable_metadata()
+        bdry_coords, rename = super().get_boundary_info()
 
         ds = self._write_into_datatree(data, bgc_data, d_meta, bdry_coords, rename)
 
@@ -271,10 +282,15 @@ class BoundaryForcing(ROMSToolsMixin):
     def _write_into_datatree(self, data, bgc_data, d_meta, bdry_coords, rename):
 
         ds = self._add_global_metadata()
+        ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
+        ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
+
         ds = DataTree(name="root", data=ds)
 
         ds_physics = self._write_into_dataset(data, d_meta, bdry_coords, rename)
         ds_physics = self._add_coordinates(bdry_coords, rename, ds_physics)
+        ds_physics = self._add_global_metadata(ds_physics)
+        ds_physics.attrs["physics_source"] = self.physics_source["name"]
 
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
@@ -288,6 +304,8 @@ class BoundaryForcing(ROMSToolsMixin):
         if bgc_data:
             ds_bgc = self._write_into_dataset(bgc_data, d_meta, bdry_coords, rename)
             ds_bgc = self._add_coordinates(bdry_coords, rename, ds_bgc)
+            ds_bgc = self._add_global_metadata(ds_bgc)
+            ds_bgc.attrs["bgc_source"] = self.bgc_source["name"]
             ds_bgc = DataTree(name="bgc", parent=ds, data=ds_bgc)
 
         return ds
@@ -404,16 +422,11 @@ class BoundaryForcing(ROMSToolsMixin):
         ds.attrs["start_time"] = str(self.start_time)
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["phsyics_source"] = self.physics_source["name"]
-        if self.bgc_source is not None:
-            ds.attrs["bgc_source"] = self.bgc_source["name"]
 
         ds.attrs["theta_s"] = self.vertical_coordinate.ds["theta_s"].item()
         ds.attrs["theta_b"] = self.vertical_coordinate.ds["theta_b"].item()
         ds.attrs["Tcline"] = self.vertical_coordinate.ds["Tcline"].item()
         ds.attrs["hc"] = self.vertical_coordinate.ds["hc"].item()
-        ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
-        ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
 
         return ds
 
@@ -507,7 +520,10 @@ class BoundaryForcing(ROMSToolsMixin):
         else:
             vmax = field.max().values
             vmin = field.min().values
-            cmap = plt.colormaps.get_cmap("YlOrRd")
+            if varname.startswith(("temp", "salt")):
+                cmap = plt.colormaps.get_cmap("YlOrRd")
+            else:
+                cmap = plt.colormaps.get_cmap("YlGn")
         cmap.set_bad(color="gray")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
@@ -576,46 +592,60 @@ class BoundaryForcing(ROMSToolsMixin):
         filenames = []
         writes = []
 
-        # Group dataset by year
-        gb = self.ds.groupby("time.year")
-
-        for year, group_ds in gb:
-            # Further group each yearly group by month
-            sub_gb = group_ds.groupby("time.month")
-
-            for month, ds in sub_gb:
-                # Chunk the dataset by the specified time chunk size
-                ds = ds.chunk({"time": time_chunk_size})
-                datasets.append(ds)
-
-                # Determine the number of days in the month
-                num_days_in_month = calendar.monthrange(year, month)[1]
-                first_day = ds.time.dt.day.values[0]
-                last_day = ds.time.dt.day.values[-1]
-
-                # Create filename based on whether the dataset contains a full month
-                if first_day == 1 and last_day == num_days_in_month:
-                    # Full month format: "filepath.YYYYMM.nc"
-                    year_month_str = f"{year}{month:02}"
-                    filename = f"{filepath}.{year_month_str}.nc"
+        for node in ["physics", "bgc"]:
+            if node in self.ds:
+                ds = self.ds[node].to_dataset()
+                # copy vertical coordinate variables from parent to children because I believe this is info that ROMS needs
+                for var in self.ds.data_vars:
+                    ds[var] = self.ds[var]
+                if hasattr(ds["bry_time"], "cycle_length"):
+                    filename = f"{filepath}.{node}.clim.nc"
+                    print("Saving the following file:")
+                    print(filename)
+                    ds.to_netcdf(filename)
                 else:
-                    # Partial month format: "filepath.YYYYMMDD-DD.nc"
-                    year_month_day_str = f"{year}{month:02}{first_day:02}-{last_day:02}"
-                    filename = f"{filepath}.{year_month_day_str}.nc"
-                filenames.append(filename)
+                    # Group dataset by year
+                    gb = ds.groupby("time.year")
 
-        print("Saving the following files:")
-        for filename in filenames:
-            print(filename)
+                    for year, group_ds in gb:
+                        # Further group each yearly group by month
+                        sub_gb = group_ds.groupby("time.month")
 
-        for ds, filename in zip(datasets, filenames):
+                        for month, ds in sub_gb:
+                            # Chunk the dataset by the specified time chunk size
+                            ds = ds.chunk({"time": time_chunk_size})
+                            datasets.append(ds)
 
-            # Prepare the dataset for writing to a netCDF file without immediately computing
-            write = ds.to_netcdf(filename, compute=False)
-            writes.append(write)
+                            # Determine the number of days in the month
+                            num_days_in_month = calendar.monthrange(year, month)[1]
+                            first_day = ds.time.dt.day.values[0]
+                            last_day = ds.time.dt.day.values[-1]
 
-        # Perform the actual write operations in parallel
-        dask.compute(*writes)
+                            # Create filename based on whether the dataset contains a full month
+                            if first_day == 1 and last_day == num_days_in_month:
+                                # Full month format: "filepath.YYYYMM.nc"
+                                year_month_str = f"{year}{month:02}"
+                                filename = f"{filepath}.{node}.{year_month_str}.nc"
+                            else:
+                                # Partial month format: "filepath.YYYYMMDD-DD.nc"
+                                year_month_day_str = (
+                                    f"{year}{month:02}{first_day:02}-{last_day:02}"
+                                )
+                                filename = f"{filepath}.{node}.{year_month_day_str}.nc"
+                            filenames.append(filename)
+
+                    print("Saving the following files:")
+                    for filename in filenames:
+                        print(filename)
+
+                    for ds, filename in zip(datasets, filenames):
+
+                        # Prepare the dataset for writing to a netCDF file without immediately computing
+                        write = ds.to_netcdf(filename, compute=False)
+                        writes.append(write)
+
+                    # Perform the actual write operations in parallel
+                    dask.compute(*writes)
 
     def to_yaml(self, filepath: str) -> None:
         """
@@ -654,6 +684,7 @@ class BoundaryForcing(ROMSToolsMixin):
                 "end_time": self.end_time.isoformat(),
                 "boundaries": self.boundaries,
                 "physics_source": self.physics_source,
+                "bgc_source": self.bgc_source,
                 "model_reference_date": self.model_reference_date.isoformat(),
             }
         }

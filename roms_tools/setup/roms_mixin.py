@@ -29,7 +29,29 @@ class ROMSToolsMixin:
     grid: Grid
     vertical_coordinate: VerticalCoordinate = None
 
-    def regrid_data(self, data, vars_2d, vars_3d, use_coarse_grid=False):
+    def get_target_lon_lat(self, use_coarse_grid=False):
+        """
+        Retrieves the longitude and latitude arrays from the grid and adjusts them based on the grid's orientation.
+
+        This method provides longitude and latitude coordinates, with options for using a coarse grid
+        if specified. It also handles longitudes to ensure they are between -180 and 180 degrees and adjusts
+        based on whether the grid straddles the Greenwich meridian.
+
+        Parameters
+        ----------
+        use_coarse_grid : bool, optional
+            If True, uses the coarse grid data for longitude and latitude. Defaults to False.
+
+        Returns
+        -------
+        tuple of (xarray.DataArray, xarray.DataArray, xarray.DataArray, bool)
+            The longitude latitude, and angle arrays, and a boolean indicating whether the grid straddles the meridian.
+
+        Raises
+        ------
+        ValueError
+            If the coarse grid data has not been generated yet.
+        """
 
         if use_coarse_grid:
             if "lon_coarse" not in self.grid.ds:
@@ -39,9 +61,11 @@ class ROMSToolsMixin:
 
             lon = self.grid.ds.lon_coarse
             lat = self.grid.ds.lat_coarse
+            angle = self.grid.ds.angle_coarse
         else:
             lon = self.grid.ds.lon_rho
             lat = self.grid.ds.lat_rho
+            angle = self.grid.ds.angle
 
         # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
         lon = xr.where(lon > 180, lon - 360, lon)
@@ -50,15 +74,43 @@ class ROMSToolsMixin:
             lon = xr.where(lon < 0, lon + 360, lon)
             straddle = False
 
-        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
-        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
-        # would not be detected by the nan_check function.
-        data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
-            margin=2,
-            straddle=straddle,
-        )
+        return lon, lat, angle, straddle
+
+    def regrid_data(self, data, vars_2d, vars_3d, lon, lat):
+
+        """
+        Interpolates data onto the desired grid and processes it for 2D and 3D variables.
+
+        This method interpolates the specified 2D and 3D variables onto a new grid defined by the provided
+        longitude and latitude coordinates. It handles both 2D and 3D data, performing extrapolation for 3D
+        variables to fill values up to the bottom of the depth range.
+
+        Parameters
+        ----------
+        data : DataContainer
+            The container holding the variables to be interpolated. It must include attributes such as
+            `dim_names` and `var_names`.
+        vars_2d : list of str
+            List of 2D variable names that should be interpolated.
+        vars_3d : list of str
+            List of 3D variable names that should be interpolated.
+        lon : xarray.DataArray
+            Longitude coordinates for interpolation.
+        lat : xarray.DataArray
+            Latitude coordinates for interpolation.
+
+        Returns
+        -------
+        dict of str: xarray.DataArray
+            A dictionary where keys are variable names and values are the interpolated DataArrays.
+
+        Notes
+        -----
+        - 2D interpolation is performed using linear interpolation on the provided latitude and longitude coordinates.
+        - For 3D variables, the method extrapolates the deepest values to the bottom of the depth range and interpolates
+          using the specified depth coordinates.
+        - The method assumes the presence of `dim_names` and `var_names` attributes in the `data` object.
+        """
 
         # interpolate onto desired grid
         data_vars = {}
@@ -108,17 +160,32 @@ class ROMSToolsMixin:
 
         return data_vars
 
-    def process_velocities(self, data_vars, use_coarse_grid=False, interpolate=True):
+    def process_velocities(self, data_vars, angle, interpolate=True):
+        """
+        Processes and rotates velocity components, and interpolates them to the appropriate grid points.
 
-        if use_coarse_grid:
-            if "angle_coarse" not in self.grid.ds:
-                raise ValueError(
-                    "Grid has not been coarsened yet. Execute grid.coarsen() first."
-                )
+        This method performs the following steps:
+        1. Rotates the velocity components to align with the grid orientation using the provided angle.
+        2. Optionally interpolates the rotated velocities to the u- and v-points of the grid.
+        3. If a vertical coordinate is provided, computes the barotropic velocities by integrating
+           over the vertical dimension.
 
-            angle = self.grid.ds.angle_coarse
-        else:
-            angle = self.grid.ds.angle
+        Parameters
+        ----------
+        data_vars : dict of str: xarray.DataArray
+            Dictionary containing the velocity components to be processed. Must include keys "u" and "v".
+        angle : xarray.DataArray
+            DataArray containing the angle used for rotating the velocity components to the grid orientation.
+        interpolate : bool, optional
+            If True, interpolates the velocities to the u- and v-points. Defaults to True.
+
+        Returns
+        -------
+        dict of str: xarray.DataArray
+            Dictionary of processed velocity components. Includes "ubar" and "vbar" if a vertical coordinate
+            is provided.
+
+        """
 
         # rotate velocities to grid orientation
         u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
@@ -154,6 +221,18 @@ class ROMSToolsMixin:
         return data_vars
 
     def get_variable_metadata(self):
+        """
+        Retrieves metadata for commonly used variables in the dataset.
+
+        This method returns a dictionary containing the metadata for various variables, including long names
+        and units for each variable.
+
+        Returns
+        -------
+        dict of str: dict
+            Dictionary where keys are variable names and values are dictionaries with "long_name" and "units" keys.
+
+        """
 
         d = {
             "uwnd": {"long_name": "10 meter wind in x-direction", "units": "m/s"},
@@ -240,6 +319,19 @@ class ROMSToolsMixin:
         return d
 
     def get_boundary_info(self):
+        """
+        Provides boundary coordinate information and renaming conventions for grid boundaries.
+
+        This method returns two dictionaries: one specifying the boundary coordinates for different types of
+        grid variables (e.g., "rho", "u", "v"), and another specifying how to rename dimensions for these boundaries.
+
+        Returns
+        -------
+        tuple of (dict, dict)
+            - A dictionary mapping variable types and directions to boundary coordinates.
+            - A dictionary mapping variable types and directions to new dimension names.
+
+        """
 
         # Boundary coordinates
         bdry_coords = {

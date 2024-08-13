@@ -74,22 +74,33 @@ class InitialConditions(ROMSToolsMixin):
     def __post_init__(self):
 
         self._input_checks()
+        lon, lat, angle, straddle = super().get_target_lon_lat()
 
         data = self._get_data()
-
-        d_meta = super().get_variable_metadata()
+        data.choose_subdomain(
+            latitude_range=[lat.min().values, lat.max().values],
+            longitude_range=[lon.min().values, lon.max().values],
+            margin=2,
+            straddle=straddle,
+        )
 
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
-        data_vars = super().regrid_data(data, vars_2d, vars_3d)
-        data_vars = super().process_velocities(data_vars)
+        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super().process_velocities(data_vars, angle)
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
+            bgc_data.choose_subdomain(
+                latitude_range=[lat.min().values, lat.max().values],
+                longitude_range=[lon.min().values, lon.max().values],
+                margin=2,
+                straddle=straddle,
+            )
 
             vars_2d = []
             vars_3d = bgc_data.var_names.values()
-            bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d)
+            bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
 
             # Ensure time coordinate matches if climatology is applied in one case but not the other
             if (
@@ -104,6 +115,7 @@ class InitialConditions(ROMSToolsMixin):
             # Combine data variables from physical and biogeochemical sources
             data_vars.update(bgc_data_vars)
 
+        d_meta = super().get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)
 
         ds = self._add_global_metadata(ds)

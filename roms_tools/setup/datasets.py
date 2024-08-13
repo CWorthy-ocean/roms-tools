@@ -74,6 +74,7 @@ class Dataset:
         """
 
         ds = self.load_data()
+        self.check_dataset(ds)
 
         # Select relevant times
         if self.start_time is not None:
@@ -84,9 +85,7 @@ class Dataset:
         ds = self.select_relevant_fields(ds)
 
         # Make sure that latitude is ascending
-        diff = np.diff(ds[self.dim_names["latitude"]])
-        if np.all(diff < 0):
-            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
+        ds = self.ensure_latitude_ascending(ds)
 
         # Check whether the data covers the entire globe
         is_global = self.check_if_global(ds)
@@ -147,6 +146,34 @@ class Dataset:
 
         return ds
 
+    def check_dataset(self, ds: xr.Dataset) -> None:
+        """
+        Check if the dataset contains the specified variables and dimensions.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to check.
+
+        Raises
+        ------
+        ValueError
+            If the dataset does not contain the specified variables or dimensions.
+        """
+        missing_vars = [
+            var for var in self.var_names.values() if var not in ds.data_vars
+        ]
+        if missing_vars:
+            raise ValueError(
+                f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
+            )
+
+        missing_dims = [dim for dim in self.dim_names.values() if dim not in ds.dims]
+        if missing_dims:
+            raise ValueError(
+                f"Dataset does not contain all required dimensions. The following dimensions are missing: {missing_vars}"
+            )
+
     def select_relevant_fields(self, ds) -> xr.Dataset:
         """
         Selects and returns a subset of the dataset containing only the variables specified in `self.var_names`.
@@ -161,19 +188,7 @@ class Dataset:
         xr.Dataset
             A dataset containing only the variables specified in `self.var_names`.
 
-        Raises
-        ------
-        ValueError
-            If `ds` does not contain all variables listed in `self.var_names`.
-
         """
-        missing_vars = [
-            var for var in self.var_names.values() if var not in ds.data_vars
-        ]
-        if missing_vars:
-            raise ValueError(
-                f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
-            )
 
         for var in ds.data_vars:
             if var not in self.var_names.values():
@@ -217,11 +232,13 @@ class Dataset:
 
         Warns
         -----
-        Warning
-            If no time information is found in the dataset.
+        UserWarning
+            If the dataset contains only 12 time steps but the climatology flag is not set.
+            This may indicate that the dataset represents climatology data.
         """
 
         time_dim = self.dim_names["time"]
+
         if time_dim in ds.coords or time_dim in ds.data_vars:
             if self.climatology:
                 # Define the days in each month and convert to timedelta
@@ -232,6 +249,7 @@ class Dataset:
                 )
                 time = xr.DataArray(timedelta_ns, dims=["month"])
                 ds = ds.assign_coords({"time": time})
+
                 if time_dim != "time":
                     ds = ds.swap_dims({time_dim: "time"})
                     ds = ds.drop_vars(time_dim)
@@ -240,12 +258,21 @@ class Dataset:
                     updated_dim_names["time"] = "time"
                     object.__setattr__(self, "dim_names", updated_dim_names)
                     time_dim = self.dim_names["time"]
+
                 if not self.end_time:
                     # Interpolate from climatology for initial conditions
                     ds = interpolate_from_climatology(
                         ds, self.dim_names["time"], self.start_time
                     )
+
             else:
+                if len(ds[time_dim]) == 12:
+                    warnings.warn(
+                        "The dataset contains exactly 12 time steps. This may indicate that it is "
+                        "climatological data. Please verify if climatology is appropriate for your "
+                        "analysis and set the climatology flag to True."
+                    )
+
                 if not self.end_time:
                     end_time = self.start_time + timedelta(days=1)
                 else:
@@ -257,10 +284,12 @@ class Dataset:
                 ds = ds.where(times, drop=True)
         else:
             warnings.warn(
-                f"Dataset at {self.filename} does not contain any time information."
+                "Dataset does not contain any time information. Please check if the time dimension "
+                "is correctly named or if the dataset includes time data."
             )
+
         if not ds.sizes[time_dim]:
-            raise ValueError("No matching times found.")
+            raise ValueError("No matching times found in the dataset.")
 
         if not self.end_time:
             if ds.sizes[time_dim] != 1:
@@ -268,6 +297,27 @@ class Dataset:
                 raise ValueError(
                     f"There must be exactly one time matching the start_time. Found {found_times} matching times."
                 )
+
+        return ds
+
+    def ensure_latitude_ascending(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Ensure that the latitude dimension is in ascending order.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to check.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with latitude in ascending order.
+        """
+        # Make sure that latitude is ascending
+        lat_diff = np.diff(ds[self.dim_names["latitude"]])
+        if np.all(lat_diff < 0):
+            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
 
         return ds
 
@@ -369,6 +419,12 @@ class Dataset:
             The subset of the original dataset representing the chosen subdomain, including an extended area
             to cover one extra grid point beyond the specified ranges if return_subdomain is True.
             Otherwise, returns None.
+
+        Notes
+        -----
+        Restricting data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
+        to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
+        would not be detected by the nan_check function.
 
         Raises
         ------
@@ -856,3 +912,125 @@ class ERA5Dataset(Dataset):
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
             del self.var_names["mask"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class ERA5Correction(Dataset):
+    """
+    Dataset to correct ERA5 radiation.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the correction files. Can contain wildcards.
+    var_names: Dict[str, str]
+        Dictionary of variable names that are required in the dataset. Should contain the variable identifier for the correction.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+        Defaults to {"longitude": "longitude", "latitude": "latitutde", "time": "time"}.
+    climatology : bool, optional
+        Indicaters if the correction data is a climatology. Defaults to True.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The loaded xarray Dataset containing the correction data.
+
+    Examples
+    --------
+    >>> swr_correction = SWRCorrection(
+    ...     path="correction_data.nc",
+    ...     varname="corr",
+    ...     dim_names={
+    ...         "time": "time",
+    ...         "latitude": "latitude",
+    ...         "longitude": "longitude",
+    ...     },
+    ...     climatology=True,
+    ... )
+    """
+
+    filename: str
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "swr_corr": "ssr_corr",
+        }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "time": "time",
+        }
+    )
+    climatology: Optional[bool] = True
+
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self):
+        if not self.climatology:
+            raise NotImplementedError(
+                "Correction data must be a climatology. Set climatology to True."
+            )
+
+        ds = super().load_data()
+        super().check_dataset(ds)
+        ds = super().ensure_latitude_ascending(ds)
+
+        object.__setattr__(self, "ds", ds)
+
+    def choose_subdomain(self, coords, straddle: bool):
+        """
+        Converts longitude values in the dataset if necessary and selects a subdomain based on the specified coordinates.
+
+        This method converts longitude values between different ranges if required and then extracts a subset of the
+        dataset according to the given coordinates. It updates the dataset in place to reflect the selected subdomain.
+
+        Parameters
+        ----------
+        coords : dict
+            A dictionary specifying the target coordinates for selecting the subdomain. Keys should correspond to the
+            dimension names of the dataset (e.g., latitude and longitude), and values should be the desired ranges or
+            specific coordinate values.
+        straddle : bool
+            If True, assumes that target longitudes are in the range [-180, 180]. If False, assumes longitudes are in the
+            range [0, 360]. This parameter determines how longitude values are converted if necessary.
+
+        Raises
+        ------
+        ValueError
+            If the specified subdomain does not fully contain the specified latitude or longitude values. This can occur
+            if the dataset does not cover the full range of provided coordinates.
+
+        Notes
+        -----
+        - The dataset (`self.ds`) is updated in place to reflect the chosen subdomain.
+        """
+
+        lon = self.ds[self.dim_names["longitude"]]
+
+        if lon.min().values < 0 and not straddle:
+            # Convert from [-180, 180] to [0, 360]
+            self.ds[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
+
+        if lon.max().values > 180 and straddle:
+            # Convert from [0, 360] to [-180, 180]
+            self.ds[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
+
+        # Select the subdomain based on the specified latitude and longitude ranges
+        subdomain = self.ds.sel(**coords)
+
+        # Check if the selected subdomain contains the specified latitude and longitude values
+        if not subdomain[self.dim_names["latitude"]].equals(
+            coords[self.dim_names["latitude"]]
+        ):
+            raise ValueError(
+                "The correction dataset does not contain all specified latitude values."
+            )
+        if not subdomain[self.dim_names["longitude"]].equals(
+            coords[self.dim_names["longitude"]]
+        ):
+            raise ValueError(
+                "The correction dataset does not contain all specified longitude values."
+            )
+        object.__setattr__(self, "ds", subdomain)

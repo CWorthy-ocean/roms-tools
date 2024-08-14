@@ -8,7 +8,7 @@ from typing import Dict, Union, Optional
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.vertical_coordinate import VerticalCoordinate
-from roms_tools.setup.roms_mixin import ROMSToolsMixin
+from roms_tools.setup.mixins import ROMSToolsMixins
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
-class BoundaryForcing(ROMSToolsMixin):
+class BoundaryForcing(ROMSToolsMixins):
     """
     Represents boundary forcing for ROMS.
 

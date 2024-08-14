@@ -11,13 +11,13 @@ from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
 )
-from roms_tools.setup.roms_mixin import ROMSToolsMixin
+from roms_tools.setup.mixins import ROMSToolsMixins
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
-class InitialConditions(ROMSToolsMixin):
+class InitialConditions(ROMSToolsMixins):
     """
     Represents initial conditions for ROMS, including physical and biogeochemical data.
 

@@ -12,7 +12,7 @@ import numpy as np
 
 
 @dataclass(frozen=True, kw_only=True)
-class ROMSToolsMixin:
+class ROMSToolsMixins:
     """
     Represents a mixin tool for ROMS-Tools with capabilities shared by the various
     ROMS-Tools dataclasses.
@@ -163,62 +163,68 @@ class ROMSToolsMixin:
     def process_velocities(self, data_vars, angle, interpolate=True):
         """
         Processes and rotates velocity components, and interpolates them to the appropriate grid points.
-
+    
         This method performs the following steps:
         1. Rotates the velocity components to align with the grid orientation using the provided angle.
         2. Optionally interpolates the rotated velocities to the u- and v-points of the grid.
         3. If a vertical coordinate is provided, computes the barotropic velocities by integrating
            over the vertical dimension.
-
+    
         Parameters
         ----------
         data_vars : dict of str: xarray.DataArray
-            Dictionary containing the velocity components to be processed. Must include keys "u" and "v".
+            Dictionary containing the velocity components to be processed. Must include keys "u" and "v"
+            or "uwnd" and "vwnd".
         angle : xarray.DataArray
             DataArray containing the angle used for rotating the velocity components to the grid orientation.
         interpolate : bool, optional
             If True, interpolates the velocities to the u- and v-points. Defaults to True.
-
+    
         Returns
         -------
         dict of str: xarray.DataArray
             Dictionary of processed velocity components. Includes "ubar" and "vbar" if a vertical coordinate
             is provided.
-
         """
-
-        # rotate velocities to grid orientation
-        u_rot = data_vars["u"] * np.cos(angle) + data_vars["v"] * np.sin(angle)
-        v_rot = data_vars["v"] * np.cos(angle) - data_vars["u"] * np.sin(angle)
-
-        # interpolate to u- and v-points
-        u = interpolate_from_rho_to_u(u_rot)
-        v = interpolate_from_rho_to_v(v_rot)
-
+        # Determine the correct variable names based on the keys in data_vars
+        uname = "u" if "u" in data_vars else "uwnd"
+        vname = "v" if "v" in data_vars else "vwnd"
+    
+        # Rotate velocities to grid orientation
+        u_rot = data_vars[uname] * np.cos(angle) + data_vars[vname] * np.sin(angle)
+        v_rot = data_vars[vname] * np.cos(angle) - data_vars[uname] * np.sin(angle)
+    
+        # Interpolate to u- and v-points
+        if interpolate:
+            data_vars[uname]= interpolate_from_rho_to_u(u_rot)
+            data_vars[vname] = interpolate_from_rho_to_v(v_rot)
+        else:
+            data_vars[uname] = u_rot
+            data_vars[vname] = v_rot
+    
         if self.vertical_coordinate is not None:
-            # 3d masks for ROMS domain
+            # 3D masks for ROMS domain
             umask = self.grid.ds.mask_u.expand_dims({"s_rho": u.s_rho})
             vmask = self.grid.ds.mask_v.expand_dims({"s_rho": v.s_rho})
-
-            data_vars["u"] = u * umask
-            data_vars["v"] = v * vmask
-
+    
+            data_vars[uname] = u * umask
+            data_vars[vname] = v * vmask
+    
             # Compute barotropic velocity
-            # thicknesses
             dz = -self.vertical_coordinate.ds["interface_depth_rho"].diff(dim="s_w")
             dz = dz.rename({"s_w": "s_rho"})
-            # thicknesses at u- and v-points
             dzu = interpolate_from_rho_to_u(dz)
             dzv = interpolate_from_rho_to_v(dz)
-
+    
             data_vars["ubar"] = (
-                (dzu * data_vars["u"]).sum(dim="s_rho") / dzu.sum(dim="s_rho")
+                (dzu * data_vars[uname]).sum(dim="s_rho") / dzu.sum(dim="s_rho")
             ).transpose("time", "eta_rho", "xi_u")
             data_vars["vbar"] = (
-                (dzv * data_vars["v"]).sum(dim="s_rho") / dzv.sum(dim="s_rho")
+                (dzv * data_vars[vname]).sum(dim="s_rho") / dzv.sum(dim="s_rho")
             ).transpose("time", "eta_v", "xi_rho")
-
+    
         return data_vars
+
 
     def get_variable_metadata(self):
         """

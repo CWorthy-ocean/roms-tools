@@ -204,11 +204,11 @@ class ROMSToolsMixins:
     
         if self.vertical_coordinate is not None:
             # 3D masks for ROMS domain
-            umask = self.grid.ds.mask_u.expand_dims({"s_rho": u.s_rho})
-            vmask = self.grid.ds.mask_v.expand_dims({"s_rho": v.s_rho})
+            umask = self.grid.ds.mask_u.expand_dims({"s_rho": data_vars[uname].s_rho})
+            vmask = self.grid.ds.mask_v.expand_dims({"s_rho": data_vars[vname].s_rho})
     
-            data_vars[uname] = u * umask
-            data_vars[vname] = v * vmask
+            data_vars[uname] = data_vars[uname] * umask
+            data_vars[vname] = data_vars[vname] * vmask
     
             # Compute barotropic velocity
             dz = -self.vertical_coordinate.ds["interface_depth_rho"].diff(dim="s_w")

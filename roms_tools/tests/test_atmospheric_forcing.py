@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from roms_tools import Grid, AtmosphericForcing, SWRCorrection
+from roms_tools import Grid, AtmosphericForcing
 from roms_tools.setup.download import download_test_data
 import xarray as xr
 import tempfile
@@ -377,20 +377,6 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
     """
     Fixture for creating a AtmosphericForcing object with shortwave radiation correction.
     """
-    correction_filename = pooch.retrieve(
-        url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/SSR_correction.nc",
-        known_hash="a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
-    )
-    correction = SWRCorrection(
-        path=correction_filename,
-        varname="ssr_corr",
-        dim_names={
-            "longitude": "longitude",
-            "latitude": "latitude",
-            "time": "time",
-        },
-        climatology=True,
-    )
 
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
@@ -402,7 +388,7 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
-        swr_correction=correction,
+        correct_radiation=True,
     )
 
 
@@ -1603,105 +1589,3 @@ def test_from_yaml_missing_atmospheric_forcing():
         os.remove(yaml_filepath)
 
 
-# SWRCorrection unit checks
-
-
-@pytest.fixture
-def swr_correction():
-
-    correction_filename = pooch.retrieve(
-        url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/SSR_correction.nc",
-        known_hash="a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
-    )
-    correction_filename
-
-    return SWRCorrection(
-        path=correction_filename,
-        varname="ssr_corr",
-        dim_names={"time": "time", "latitude": "latitude", "longitude": "longitude"},
-        climatology=True,
-    )
-
-
-def test_check_dataset(swr_correction):
-
-    ds = swr_correction.ds.copy()
-    ds = ds.drop_vars("ssr_corr")
-    with pytest.raises(ValueError):
-        swr_correction._check_dataset(ds)
-
-    ds = swr_correction.ds.copy()
-    ds = ds.rename({"latitude": "lat", "longitude": "long"})
-    with pytest.raises(ValueError):
-        swr_correction._check_dataset(ds)
-
-
-def test_ensure_latitude_ascending(swr_correction):
-
-    ds = swr_correction.ds.copy()
-
-    ds["latitude"] = ds["latitude"][::-1]
-    ds = swr_correction._ensure_latitude_ascending(ds)
-    assert np.all(np.diff(ds["latitude"]) > 0)
-
-
-def test_handle_longitudes(swr_correction):
-    swr_correction.ds["longitude"] = (
-        (swr_correction.ds["longitude"] + 180) % 360
-    ) - 180  # Convert to [-180, 180]
-    swr_correction._handle_longitudes(straddle=False)
-    assert np.all(
-        (swr_correction.ds["longitude"] >= 0) & (swr_correction.ds["longitude"] <= 360)
-    )
-
-
-def test_choose_subdomain(swr_correction):
-    lats = swr_correction.ds.latitude[10:20]
-    lons = swr_correction.ds.longitude[10:20]
-    coords = {"latitude": lats, "longitude": lons}
-    subdomain = swr_correction._choose_subdomain(coords)
-    assert (subdomain["latitude"] == lats).all()
-    assert (subdomain["longitude"] == lons).all()
-
-
-def test_interpolate_temporally(swr_correction):
-    field = swr_correction.ds["ssr_corr"]
-
-    fname = download_test_data("ERA5_regional_test_data.nc")
-    era5_times = xr.open_dataset(fname).time
-    interpolated_field = swr_correction._interpolate_temporally(field, era5_times)
-    assert len(interpolated_field.time) == len(era5_times)
-
-
-def test_from_yaml_missing_swr_correction():
-    yaml_content = textwrap.dedent(
-        """\
-    ---
-    roms_tools_version: 0.0.0
-    ---
-    Grid:
-      nx: 100
-      ny: 100
-      size_x: 1800
-      size_y: 2400
-      center_lon: -10
-      center_lat: 61
-      rot: -20
-      topography_source: ETOPO5
-      smooth_factor: 8
-      hmin: 5.0
-      rmax: 0.2
-    """
-    )
-
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
-
-    try:
-        with pytest.raises(
-            ValueError, match="No SWRCorrection configuration found in the YAML file."
-        ):
-            SWRCorrection.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)

@@ -5,11 +5,10 @@ import importlib.metadata
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from datetime import datetime
-import glob
 import numpy as np
-from typing import Optional, Dict, Union
-from roms_tools.setup.fill import fill_and_interpolate
-from roms_tools.setup.datasets import ERA5Dataset
+from typing import Dict, Union
+from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.datasets import ERA5Dataset, ERA5Correction
 from roms_tools.setup.utils import nan_check, interpolate_from_climatology
 from roms_tools.setup.plot import _plot
 import calendar
@@ -17,333 +16,7 @@ import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
-class SWRCorrection:
-    """
-    Configuration for shortwave radiation correction.
-
-    Parameters
-    ----------
-    path : str
-        Path to the correction data file.
-    varname : str
-        Variable identifier for the correction.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-        Default is {"longitude": "lon", "latitude": "lat", "time": "time"}.
-    climatology : bool, optional
-        Indicaters if the correction data is a climatology. Defaults to True.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The loaded xarray Dataset containing the correction data.
-
-    Examples
-    --------
-    >>> swr_correction = SWRCorrection(
-    ...     path="correction_data.nc",
-    ...     varname="corr",
-    ...     dim_names={
-    ...         "time": "time",
-    ...         "latitude": "latitude",
-    ...         "longitude": "longitude",
-    ...     },
-    ...     climatology=True,
-    ... )
-    """
-
-    path: str
-    varname: str
-    dim_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "longitude": "longitude",
-            "latitude": "latitutde",
-            "time": "time",
-        }
-    )
-    climatology: bool = True
-    ds: xr.Dataset = field(init=False, repr=False)
-
-    def __post_init__(self):
-        if not self.climatology:
-            raise NotImplementedError(
-                "Correction data must be a climatology. Set climatology to True."
-            )
-
-        ds = self._load_data()
-        self._check_dataset(ds)
-        ds = self._ensure_latitude_ascending(ds)
-
-        object.__setattr__(self, "ds", ds)
-
-    def _load_data(self):
-        """
-        Load data from the specified file.
-
-        Returns
-        -------
-        ds : xr.Dataset
-            The loaded xarray Dataset containing the correction data.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified file does not exist.
-
-        """
-        # Check if the file exists
-
-        # Check if any file matching the wildcard pattern exists
-        matching_files = glob.glob(self.path)
-        if not matching_files:
-            raise FileNotFoundError(
-                f"No files found matching the pattern '{self.path}'."
-            )
-
-        # Load the dataset
-        ds = xr.open_dataset(
-            self.path,
-            chunks={
-                self.dim_names["time"]: -1,
-                self.dim_names["latitude"]: -1,
-                self.dim_names["longitude"]: -1,
-            },
-        )
-
-        return ds
-
-    def _check_dataset(self, ds: xr.Dataset) -> None:
-        """
-        Check if the dataset contains the specified variable and dimensions.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to check.
-
-        Raises
-        ------
-        ValueError
-            If the dataset does not contain the specified variable or dimensions.
-        """
-        if self.varname not in ds:
-            raise ValueError(
-                f"The dataset does not contain the variable '{self.varname}'."
-            )
-
-        for dim in self.dim_names.values():
-            if dim not in ds.dims:
-                raise ValueError(f"The dataset does not contain the dimension '{dim}'.")
-
-    def _ensure_latitude_ascending(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Ensure that the latitude dimension is in ascending order.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to check.
-
-        Returns
-        -------
-        ds : xr.Dataset
-            The xarray Dataset with latitude in ascending order.
-        """
-        # Make sure that latitude is ascending
-        lat_diff = np.diff(ds[self.dim_names["latitude"]])
-        if np.all(lat_diff < 0):
-            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
-
-        return ds
-
-    def _handle_longitudes(self, straddle: bool) -> None:
-        """
-        Handles the conversion of longitude values in the dataset from one range to another.
-
-        Parameters
-        ----------
-        straddle : bool
-            If True, target longitudes are in range [-180, 180].
-            If False, target longitudes are in range [0, 360].
-
-        Raises
-        ------
-        ValueError: If the conversion results in discontinuous longitudes.
-        """
-        lon = self.ds[self.dim_names["longitude"]]
-
-        if lon.min().values < 0 and not straddle:
-            # Convert from [-180, 180] to [0, 360]
-            self.ds[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
-
-        if lon.max().values > 180 and straddle:
-            # Convert from [0, 360] to [-180, 180]
-            self.ds[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
-
-    def _choose_subdomain(self, coords) -> xr.Dataset:
-        """
-        Selects a subdomain from the dataset based on the specified latitude and longitude ranges.
-
-        Parameters
-        ----------
-        coords : dict
-            A dictionary specifying the target coordinates.
-
-        Returns
-        -------
-        xr.Dataset
-            The subset of the original dataset representing the chosen subdomain.
-
-        Raises
-        ------
-        ValueError
-            If the specified subdomain is not fully contained within the dataset.
-        """
-
-        # Select the subdomain based on the specified latitude and longitude ranges
-        subdomain = self.ds.sel(**coords)
-
-        # Check if the selected subdomain contains the specified latitude and longitude values
-        if not subdomain[self.dim_names["latitude"]].equals(
-            coords[self.dim_names["latitude"]]
-        ):
-            raise ValueError(
-                "The correction dataset does not contain all specified latitude values."
-            )
-        if not subdomain[self.dim_names["longitude"]].equals(
-            coords[self.dim_names["longitude"]]
-        ):
-            raise ValueError(
-                "The correction dataset does not contain all specified longitude values."
-            )
-
-        return subdomain
-
-    def _interpolate_temporally(self, field, time):
-        """
-        Interpolates the given field temporally based on the specified time points.
-
-        Parameters
-        ----------
-        field : xarray.DataArray
-            The field data to be interpolated. This can be any variable from the dataset that
-            requires temporal interpolation, such as correction factors or any other relevant data.
-        time : xarray.DataArray or pandas.DatetimeIndex
-            The target time points for interpolation.
-
-        Returns
-        -------
-        xr.DataArray
-            The field values interpolated to the specified time points.
-
-        Raises
-        ------
-        NotImplementedError
-            If 'climatology' is set to False.
-
-        """
-        if not self.climatology:
-            raise NotImplementedError(
-                "Correction data must be a climatology. Set climatology to True."
-            )
-        else:
-            return interpolate_from_climatology(field, self.dim_names["time"], time)
-
-    @classmethod
-    def from_yaml(cls, filepath: str) -> "SWRCorrection":
-        """
-        Create an instance of the class from a YAML file.
-
-        Parameters
-        ----------
-        filepath : str
-            The path to the YAML file from which the parameters will be read.
-
-        Returns
-        -------
-        Grid
-            An instance of the Grid class.
-        """
-        # Read the entire file content
-        with open(filepath, "r") as file:
-            file_content = file.read()
-
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        swr_correction_data = None
-
-        # Iterate over documents to find the header and grid configuration
-        for doc in documents:
-            if doc is None:
-                continue
-            if "SWRCorrection" in doc:
-                swr_correction_data = doc["SWRCorrection"]
-                break
-
-        if swr_correction_data is None:
-            raise ValueError("No SWRCorrection configuration found in the YAML file.")
-
-        return cls(**swr_correction_data)
-
-
-@dataclass(frozen=True, kw_only=True)
-class Rivers:
-    """
-    Configuration for river forcing.
-
-    Parameters
-    ----------
-    path : str, optional
-        Path to river forcing data file.
-    """
-
-    path: str = ""
-
-    def __post_init__(self):
-        if not self.path:
-            raise ValueError("The 'path' must be provided.")
-
-    @classmethod
-    def from_yaml(cls, filepath: str) -> "Rivers":
-        """
-        Create an instance of the class from a YAML file.
-
-        Parameters
-        ----------
-        filepath : str
-            The path to the YAML file from which the parameters will be read.
-
-        Returns
-        -------
-        Grid
-            An instance of the Grid class.
-        """
-        # Read the entire file content
-        with open(filepath, "r") as file:
-            file_content = file.read()
-
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        rivers_data = None
-
-        # Iterate over documents to find the header and grid configuration
-        for doc in documents:
-            if doc is None:
-                continue
-            if "Rivers" in doc:
-                rivers_data = doc
-                break
-
-        if rivers_data is None:
-            raise ValueError("No Rivers configuration found in the YAML file.")
-
-        return cls(**rivers_data)
-
-
-@dataclass(frozen=True, kw_only=True)
-class AtmosphericForcing:
+class AtmosphericForcing(ROMSToolsMixins):
     """
     Represents atmospheric forcing data for ocean modeling.
 
@@ -360,10 +33,13 @@ class AtmosphericForcing:
         - "name" (str): Name of the data source (e.g., "ERA5").
         - "path" (str): Path to the physical data file. Can contain wildcards.
         - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
-    swr_correction : SWRCorrection
-        Shortwave radiation correction configuration.
-    rivers : Rivers, optional
-        River forcing configuration.
+    bgc_source : Optional[Dict[str, Union[str, None]]]
+        Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
+        - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
+        - "path" (str): Path to the BGC data file. Can contain wildcards.
+        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
+    correct_radiation : bool
+        Whether to correct shortwave radiation. Default is False.
     use_coarse_grid: bool
         Whether to interpolate to coarsened grid. Default is False.
     model_reference_date : datetime, optional
@@ -382,7 +58,7 @@ class AtmosphericForcing:
     ...     start_time=datetime(2000, 1, 1),
     ...     end_time=datetime(2000, 1, 2),
     ...     physics_source={"name": "ERA5", "path": "physics_data.nc"},
-    ...     swr_correction=swr_correction,
+    ...     correct_radiation=True
     ... )
     """
 
@@ -390,13 +66,90 @@ class AtmosphericForcing:
     start_time: datetime
     end_time: datetime
     physics_source: Dict[str, Union[str, None]]
-    swr_correction: Optional["SWRCorrection"] = None
-    rivers: Optional["Rivers"] = None
+    bgc_source: Dict[str, Union[str, None]] = None
+    correct_radiation: bool = False
     use_coarse_grid: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
+
+        self._input_checks()
+        lon, lat, angle, straddle = super().get_target_lon_lat(self.use_coarse_grid)
+
+        data = self._get_data()
+        data.choose_subdomain(
+            latitude_range=[lat.min().values, lat.max().values],
+            longitude_range=[lon.min().values, lon.max().values],
+            margin=2,
+            straddle=straddle,
+        )
+
+
+        vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
+        vars_3d = []
+        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super().process_velocities(data_vars, angle, interpolate=False)
+
+        if self.correct_radiation:
+            correction_data = self._get_correction_data()
+            # choose same subdomain as forcing data so that we can use same mask
+            coords_correction = {
+                correction_data.dim_names["latitude"]: data.ds[
+                    data.dim_names["latitude"]
+                ],
+                correction_data.dim_names["longitude"]: data.ds[
+                    data.dim_names["longitude"]
+                ],
+            }
+            correction_data.choose_subdomain(coords_correction, straddle=straddle)
+            # apply mask from ERA5 data
+            if "mask" in data.var_names.keys():
+                mask = xr.where(
+                    data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1
+                )
+                print(mask)
+                for var in correction_data.ds.data_vars:
+                    correction_data.ds[var] = xr.where(
+                        mask == 1, correction_data.ds[var], np.nan
+                    )
+            vars_2d = ["swr_corr"]
+            vars_3d = []
+            # spatial interpolation
+            data_vars_corr = super().regrid_data(
+                correction_data, vars_2d, vars_3d, lon, lat
+            )
+            # temporal interpolation
+            corr_factor = interpolate_from_climatology(
+                data_vars_corr["swr_corr"],
+                correction_data.dim_names["time"],
+                time=data_vars["swrad"].time,
+            )
+
+            data_vars["swrad"] = data_vars["swrad"] * corr_factor
+
+        d_meta = super().get_variable_metadata()
+
+        ds = self._write_into_dataset(data_vars, d_meta)
+        if self.use_coarse_grid:
+            ds = ds.assign_coords({"lon": lon, "lat": lat})
+            ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
+
+        ds = self._add_global_metadata(ds)
+
+        if self.use_coarse_grid:
+            mask = self.grid.ds["mask_coarse"].rename(
+                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+            )
+        else:
+            mask = self.grid.ds["mask_rho"]
+
+        for var in ds.data_vars:
+            nan_check(ds[var].isel(time=0), mask)
+
+        object.__setattr__(self, "ds", ds)
+
+    def _input_checks(self):
 
         if "name" not in self.physics_source.keys():
             raise ValueError("`physics_source` must include a 'name'.")
@@ -411,6 +164,28 @@ class AtmosphericForcing:
                 "climatology": self.physics_source.get("climatology", False),
             },
         )
+
+        if self.bgc_source is not None:
+            if "name" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'name' if it is provided."
+                )
+            if "path" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'path' if it is provided."
+                )
+            # set self.bgc_source["climatology"] to False if not provided
+            object.__setattr__(
+                self,
+                "bgc_source",
+                {
+                    **self.bgc_source,
+                    "climatology": self.bgc_source.get("climatology", False),
+                },
+            )
+
+    def _get_data(self):
+
         if self.physics_source["name"] == "ERA5":
             data = ERA5Dataset(
                 filename=self.physics_source["path"],
@@ -424,131 +199,35 @@ class AtmosphericForcing:
                 'Only "ERA5" is a valid option for physics_source["name"].'
             )
 
-        if self.use_coarse_grid:
-            if "lon_coarse" not in self.grid.ds:
-                raise ValueError(
-                    "Grid has not been coarsened yet. Execute grid.coarsen() first."
-                )
+        return data
 
-            lon = self.grid.ds.lon_coarse
-            lat = self.grid.ds.lat_coarse
-            angle = self.grid.ds.angle_coarse
+    def _get_correction_data(self):
+
+        if self.physics_source["name"] == "ERA5":
+            correction_data = ERA5Correction()
         else:
-            lon = self.grid.ds.lon_rho
-            lat = self.grid.ds.lat_rho
-            angle = self.grid.ds.angle
-
-        # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
-        lon = xr.where(lon > 180, lon - 360, lon)
-        straddle = True
-        if not self.grid.straddle and abs(lon).min() > 5:
-            lon = xr.where(lon < 0, lon + 360, lon)
-            straddle = False
-
-        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
-        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
-        # would not be detected by the nan_check function.
-        data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
-            margin=2,
-            straddle=straddle,
-        )
-
-        # interpolate onto desired grid
-        coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
-
-        data_vars = {}
-
-        mask = xr.where(data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1)
-
-        # Fill and interpolate each variable
-        for var in ["u10", "v10", "swr", "lwr", "t2m", "qair", "rain"]:
-            data_vars[var] = fill_and_interpolate(
-                data.ds[data.var_names[var]],
-                mask,
-                list(coords.keys()),
-                coords,
-                method="linear",
+            raise ValueError(
+                "The 'correct_radiation' feature is currently only supported for 'ERA5' as the physics source. "
+                "Please ensure your 'physics_source' is set to 'ERA5' or implement additional handling for other sources."
             )
 
-        # correct shortwave radiation
-        if self.swr_correction:
+        return correction_data
 
-            # choose same subdomain as forcing data so that we can use same mask
-            self.swr_correction._handle_longitudes(straddle=straddle)
-            coords_correction = {
-                self.swr_correction.dim_names["latitude"]: data.ds[
-                    data.dim_names["latitude"]
-                ],
-                self.swr_correction.dim_names["longitude"]: data.ds[
-                    data.dim_names["longitude"]
-                ],
-            }
-            subdomain = self.swr_correction._choose_subdomain(coords_correction)
+    def _write_into_dataset(self, data_vars, d_meta, ds=None):
 
-            # spatial interpolation
-            corr_factor = subdomain[self.swr_correction.varname]
-            coords_correction = {
-                self.swr_correction.dim_names["latitude"]: lat,
-                self.swr_correction.dim_names["longitude"]: lon,
-            }
-            corr_factor = fill_and_interpolate(
-                corr_factor,
-                mask,
-                list(coords_correction.keys()),
-                coords_correction,
-                method="linear",
-            )
+        if ds is None:
+            # save in new dataset
+            ds = xr.Dataset()
 
-            # temporal interpolation
-            corr_factor = self.swr_correction._interpolate_temporally(
-                corr_factor, time=data_vars["swr"].time
-            )
-            data_vars["swr"] = data_vars["swr"] * corr_factor
+        for var in data_vars.keys():
+            ds[var] = data_vars[var].astype(np.float32)
+            ds[var].attrs["long_name"] = d_meta[var]["long_name"]
+            ds[var].attrs["units"] = d_meta[var]["units"]
 
-        if self.rivers:
-            NotImplementedError("River forcing is not implemented yet.")
-            # rain = rain + rivers
+        return ds
 
-        # save in new dataset
-        ds = xr.Dataset()
+    def _add_global_metadata(self, ds):
 
-        ds["uwnd"] = (
-            data_vars["u10"] * np.cos(angle) + data_vars["v10"] * np.sin(angle)
-        ).astype(
-            np.float32
-        )  # rotate to grid orientation
-        ds["uwnd"].attrs["long_name"] = "10 meter wind in x-direction"
-        ds["uwnd"].attrs["units"] = "m/s"
-
-        ds["vwnd"] = (
-            data_vars["v10"] * np.cos(angle) - data_vars["u10"] * np.sin(angle)
-        ).astype(
-            np.float32
-        )  # rotate to grid orientation
-        ds["vwnd"].attrs["long_name"] = "10 meter wind in y-direction"
-        ds["vwnd"].attrs["units"] = "m/s"
-
-        ds["swrad"] = data_vars["swr"].astype(np.float32)
-        ds["swrad"].attrs["long_name"] = "Downward short-wave (solar) radiation"
-        ds["swrad"].attrs["units"] = "W/m^2"
-
-        ds["lwrad"] = data_vars["lwr"].astype(np.float32)
-        ds["lwrad"].attrs["long_name"] = "Downward long-wave (thermal) radiation"
-        ds["lwrad"].attrs["units"] = "W/m^2"
-
-        ds["Tair"] = data_vars["t2m"].astype(np.float32)
-        ds["Tair"].attrs["long_name"] = "Air temperature at 2m"
-        ds["Tair"].attrs["units"] = "degrees C"
-
-        ds["qair"] = data_vars["qair"].astype(np.float32)
-        ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
-        ds["qair"].attrs["units"] = "kg/kg"
-
-        ds["rain"] = data_vars["rain"].astype(np.float32)
-        ds["rain"].attrs["long_name"] = "Total precipitation"
-        ds["rain"].attrs["units"] = "cm/day"
 
         ds.attrs["title"] = "ROMS atmospheric forcing file created by ROMS-Tools"
         # Include the version of roms-tools
@@ -560,29 +239,17 @@ class AtmosphericForcing:
         ds.attrs["start_time"] = str(self.start_time)
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["physics_source"] = self.physics_source["name"]
-        ds.attrs["swr_correction"] = str(self.swr_correction is not None)
-        ds.attrs["rivers"] = str(self.rivers is not None)
+        if self.bgc_source is not None:
+            ds.attrs["bgc_source"] = self.bgc_source["name"]
+        ds.attrs["correct_radiation"] = str(self.correct_radiation)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
 
-        if self.use_coarse_grid:
-            ds = ds.assign_coords({"lon": lon, "lat": lat})
-            ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
-            mask_roms = self.grid.ds["mask_coarse"].rename(
-                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
-            )
-        else:
-            mask_roms = self.grid.ds["mask_rho"]
-
-        if data.dim_names["time"] != "time":
-            ds = ds.rename({data.dim_names["time"]: "time"})
-
-        # Preserve the original time coordinate for readability
-        ds = ds.assign_coords({"absolute_time": ds["time"]})
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords({"abs_time": ds["time"]})
 
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
-
         # Convert the time coordinate to the format expected by ROMS (days since model reference date)
         ds["time"] = (
             (ds["time"] - model_reference_date).astype("float64") / 3600 / 24 * 1e-9
@@ -592,10 +259,7 @@ class AtmosphericForcing:
         ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
         ds["time"].attrs["units"] = "days"
 
-        for var in ds.data_vars:
-            nan_check(ds[var].isel(time=0), mask_roms)
-
-        object.__setattr__(self, "ds", ds)
+        return ds
 
     def plot(self, varname, time=0) -> None:
         """
@@ -634,7 +298,7 @@ class AtmosphericForcing:
 
         title = "%s at time %s" % (
             self.ds[varname].long_name,
-            np.datetime_as_string(self.ds["absolute_time"].isel(time=time), unit="s"),
+            np.datetime_as_string(self.ds["abs_time"].isel(time=time), unit="s"),
         )
 
         field = self.ds[varname].isel(time=time).compute()
@@ -693,11 +357,11 @@ class AtmosphericForcing:
         writes = []
 
         # Group dataset by year
-        gb = self.ds.groupby("absolute_time.year")
+        gb = self.ds.groupby("abs_time.year")
 
         for year, group_ds in gb:
             # Further group each yearly group by month
-            sub_gb = group_ds.groupby("absolute_time.month")
+            sub_gb = group_ds.groupby("abs_time.month")
 
             for month, ds in sub_gb:
                 # Chunk the dataset by the specified time chunk size
@@ -706,8 +370,8 @@ class AtmosphericForcing:
 
                 # Determine the number of days in the month
                 num_days_in_month = calendar.monthrange(year, month)[1]
-                first_day = ds.time.absolute_time.dt.day.values[0]
-                last_day = ds.time.absolute_time.dt.day.values[-1]
+                first_day = ds.time.abs_time.dt.day.values[0]
+                last_day = ds.time.abs_time.dt.day.values[-1]
 
                 # Create filename based on whether the dataset contains a full month
                 if first_day == 1 and last_day == num_days_in_month:
@@ -747,13 +411,6 @@ class AtmosphericForcing:
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
 
-        if self.swr_correction:
-            swr_correction_data = asdict(self.swr_correction)
-            swr_correction_data.pop("ds", None)
-        else:
-            swr_correction_data = None
-
-        rivers_data = asdict(self.rivers) if self.rivers else None
 
         # Include the version of roms-tools
         try:
@@ -766,10 +423,6 @@ class AtmosphericForcing:
 
         # Create YAML data for Grid and optional attributes
         grid_yaml_data = {"Grid": grid_data}
-        swr_correction_yaml_data = (
-            {"SWRCorrection": swr_correction_data} if swr_correction_data else {}
-        )
-        rivers_yaml_data = {"Rivers": rivers_data} if rivers_data else {}
 
         # Combine all sections
         atmospheric_forcing_data = {
@@ -777,16 +430,18 @@ class AtmosphericForcing:
                 "start_time": self.start_time.isoformat(),
                 "end_time": self.end_time.isoformat(),
                 "physics_source": self.physics_source,
+                "correct_radiation": self.correct_radiation,
                 "use_coarse_grid": self.use_coarse_grid,
                 "model_reference_date": self.model_reference_date.isoformat(),
             }
         }
+        # Include bgc_source if it's not None
+        if self.bgc_source is not None:
+            atmospheric_forcing_data["AtmosphericForcing"]["bgc_source"] = self.bgc_source
 
         # Merge YAML data while excluding empty sections
         yaml_data = {
             **grid_yaml_data,
-            **swr_correction_yaml_data,
-            **rivers_yaml_data,
             **atmospheric_forcing_data,
         }
 
@@ -818,8 +473,6 @@ class AtmosphericForcing:
         # Split the content into YAML documents
         documents = list(yaml.safe_load_all(file_content))
 
-        swr_correction_data = None
-        rivers_data = None
         atmospheric_forcing_data = None
 
         # Process the YAML documents
@@ -828,10 +481,6 @@ class AtmosphericForcing:
                 continue
             if "AtmosphericForcing" in doc:
                 atmospheric_forcing_data = doc["AtmosphericForcing"]
-            if "SWRCorrection" in doc:
-                swr_correction_data = doc["SWRCorrection"]
-            if "Rivers" in doc:
-                rivers_data = doc["Rivers"]
 
         if atmospheric_forcing_data is None:
             raise ValueError(
@@ -847,20 +496,8 @@ class AtmosphericForcing:
         # Create Grid instance from the YAML file
         grid = Grid.from_yaml(filepath)
 
-        if swr_correction_data is not None:
-            swr_correction = SWRCorrection.from_yaml(filepath)
-        else:
-            swr_correction = None
-
-        if rivers_data is not None:
-            rivers = Rivers.from_yaml(filepath)
-        else:
-            rivers = None
-
         # Create and return an instance of AtmosphericForcing
         return cls(
             grid=grid,
-            swr_correction=swr_correction,
-            rivers=rivers,
             **atmospheric_forcing_data,
         )

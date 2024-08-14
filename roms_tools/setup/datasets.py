@@ -7,6 +7,7 @@ from typing import Dict, Optional
 import dask
 import warnings
 from roms_tools.setup.utils import interpolate_from_climatology
+from roms_tools.setup.download import download_correction_data
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -32,6 +33,8 @@ class Dataset:
 
     Attributes
     ----------
+    is_global : bool
+        Indicates whether the dataset covers the entire globe.
     ds : xr.Dataset
         The xarray Dataset containing the forcing data on its original grid.
 
@@ -61,6 +64,7 @@ class Dataset:
     )
     climatology: Optional[bool] = False
 
+    is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -77,9 +81,8 @@ class Dataset:
         self.check_dataset(ds)
 
         # Select relevant times
-        if self.start_time is not None:
-            if "time" in self.dim_names:
-                ds = self.select_relevant_times(ds)
+        if "time" in self.dim_names and self.start_time is not None:
+            ds = self.select_relevant_times(ds)
 
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
@@ -88,9 +91,10 @@ class Dataset:
         ds = self.ensure_latitude_ascending(ds)
 
         # Check whether the data covers the entire globe
-        is_global = self.check_if_global(ds)
+        object.__setattr__(self, "is_global", self.check_if_global(ds))
 
-        if is_global:
+        # If dataset is global concatenate three copies of field along longitude dimension
+        if self.is_global:
             ds = self.concatenate_longitudes(ds)
 
         object.__setattr__(self, "ds", ds)
@@ -342,7 +346,7 @@ class Dataset:
         dlon = (
             ds[self.dim_names["longitude"]][0] - ds[self.dim_names["longitude"]][-1]
         ) % 360.0
-        is_global = np.isclose(dlon, dlon_mean, rtol=0.0, atol=1e-3)
+        is_global = np.isclose(dlon, dlon_mean, rtol=0.0, atol=1e-3).item()
 
         return is_global
 
@@ -394,15 +398,15 @@ class Dataset:
         self, latitude_range, longitude_range, margin, straddle, return_subdomain=False
     ):
         """
-        Selects a subdomain from the given xarray Dataset based on latitude and longitude ranges,
-        extending the selection by the specified margin. Handles the conversion of longitude values
-        in the dataset from one range to another.
+        Selects a subdomain from the xarray Dataset based on specified latitude and longitude ranges,
+        extending the selection by a specified margin. Handles longitude conversions to accommodate different
+        longitude ranges.
 
         Parameters
         ----------
-        latitude_range : tuple
+        latitude_range : tuple of float
             A tuple (lat_min, lat_max) specifying the minimum and maximum latitude values of the subdomain.
-        longitude_range : tuple
+        longitude_range : tuple of float
             A tuple (lon_min, lon_max) specifying the minimum and maximum longitude values of the subdomain.
         margin : float
             Margin in degrees to extend beyond the specified latitude and longitude ranges when selecting the subdomain.
@@ -410,51 +414,53 @@ class Dataset:
             If True, target longitudes are expected in the range [-180, 180].
             If False, target longitudes are expected in the range [0, 360].
         return_subdomain : bool, optional
-            If True, returns the subset of the original dataset. If False, assigns it to self.ds.
-            Default is False.
+            If True, returns the subset of the original dataset as an xarray Dataset. If False, assigns the subset to `self.ds`.
+            Defaults to False.
 
         Returns
         -------
-        xr.Dataset
-            The subset of the original dataset representing the chosen subdomain, including an extended area
-            to cover one extra grid point beyond the specified ranges if return_subdomain is True.
-            Otherwise, returns None.
+        xr.Dataset or None
+            If `return_subdomain` is True, returns the subset of the original dataset representing the chosen subdomain,
+            including an extended area to cover one extra grid point beyond the specified ranges. If `return_subdomain` is False,
+            returns None as the subset is assigned to `self.ds`.
 
         Notes
         -----
-        Restricting data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
-        to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
-        would not be detected by the nan_check function.
+        This method adjusts the longitude range if necessary to ensure it matches the expected range for the dataset.
+        It also handles longitude discontinuities that can occur when converting to different longitude ranges.
+        This is important for avoiding artifacts in the interpolation process.
 
         Raises
         ------
         ValueError
             If the selected latitude or longitude range does not intersect with the dataset.
         """
+
         lat_min, lat_max = latitude_range
         lon_min, lon_max = longitude_range
 
-        lon = self.ds[self.dim_names["longitude"]]
-        # Adjust longitude range if needed to match the expected range
-        if not straddle:
-            if lon.min() < -180:
-                if lon_max + margin > 0:
-                    lon_min -= 360
-                    lon_max -= 360
-            elif lon.min() < 0:
-                if lon_max + margin > 180:
-                    lon_min -= 360
-                    lon_max -= 360
+        if not self.is_global:
+            # Adjust longitude range if needed to match the expected range
+            lon = self.ds[self.dim_names["longitude"]]
+            if not straddle:
+                if lon.min() < -180:
+                    if lon_max + margin > 0:
+                        lon_min -= 360
+                        lon_max -= 360
+                elif lon.min() < 0:
+                    if lon_max + margin > 180:
+                        lon_min -= 360
+                        lon_max -= 360
 
-        if straddle:
-            if lon.max() > 360:
-                if lon_min - margin < 180:
-                    lon_min += 360
-                    lon_max += 360
-            elif lon.max() > 180:
-                if lon_min - margin < 0:
-                    lon_min += 360
-                    lon_max += 360
+            if straddle:
+                if lon.max() > 360:
+                    if lon_min - margin < 180:
+                        lon_min += 360
+                        lon_max += 360
+                elif lon.max() > 180:
+                    if lon_min - margin < 0:
+                        lon_min += 360
+                        lon_max += 360
 
         # Select the subdomain
         subdomain = self.ds.sel(
@@ -584,10 +590,11 @@ class TPXODataset(Dataset):
         ds = super().select_relevant_fields(ds)
 
         # Check whether the data covers the entire globe
-        is_global = self.check_if_global(ds)
+        object.__setattr__(self, "is_global", super().check_if_global(ds))
 
-        if is_global:
-            ds = self.concatenate_longitudes(ds)
+        # If dataset is global concatenate three copies of field along longitude dimension
+        if self.is_global:
+            ds = super().concatenate_longitudes(ds)
 
         object.__setattr__(self, "ds", ds)
 
@@ -834,11 +841,11 @@ class ERA5Dataset(Dataset):
 
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
-            "u": "u10",
-            "v": "v10",
-            "swr": "ssr",
-            "lwr": "strd",
-            "t2m": "t2m",
+            "uwnd": "u10",
+            "vwnd": "v10",
+            "swrad": "ssr",
+            "lwrad": "strd",
+            "Tair": "t2m",
             "d2m": "d2m",
             "rain": "tp",
             "mask": "sst",
@@ -863,17 +870,17 @@ class ERA5Dataset(Dataset):
         """
         # Translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
         # Convert radiation from J/m^2 to W/m^2
-        self.ds[self.var_names["swr"]] /= 3600
-        self.ds[self.var_names["lwr"]] /= 3600
-        self.ds[self.var_names["swr"]].attrs["units"] = "W/m^2"
-        self.ds[self.var_names["lwr"]].attrs["units"] = "W/m^2"
+        self.ds[self.var_names["swrad"]] /= 3600
+        self.ds[self.var_names["lwrad"]] /= 3600
+        self.ds[self.var_names["swrad"]].attrs["units"] = "W/m^2"
+        self.ds[self.var_names["lwrad"]].attrs["units"] = "W/m^2"
         # Convert rainfall from m to cm/day
         self.ds[self.var_names["rain"]] *= 100 * 24
 
         # Convert temperature from Kelvin to Celsius
-        self.ds[self.var_names["t2m"]] -= 273.15
+        self.ds[self.var_names["Tair"]] -= 273.15
         self.ds[self.var_names["d2m"]] -= 273.15
-        self.ds[self.var_names["t2m"]].attrs["units"] = "degrees C"
+        self.ds[self.var_names["Tair"]].attrs["units"] = "degrees C"
         self.ds[self.var_names["d2m"]].attrs["units"] = "degrees C"
 
         # Compute relative humidity if not present
@@ -882,8 +889,8 @@ class ERA5Dataset(Dataset):
                 (17.625 * self.ds[self.var_names["d2m"]])
                 / (243.04 + self.ds[self.var_names["d2m"]])
             ) / np.exp(
-                (17.625 * self.ds[self.var_names["t2m"]])
-                / (243.04 + self.ds[self.var_names["t2m"]])
+                (17.625 * self.ds[self.var_names["Tair"]])
+                / (243.04 + self.ds[self.var_names["Tair"]])
             )
             # Convert relative to absolute humidity
             patm = 1010.0
@@ -892,8 +899,8 @@ class ERA5Dataset(Dataset):
                 * 6.1121
                 * np.exp(
                     17.502
-                    * self.ds[self.var_names["t2m"]]
-                    / (240.97 + self.ds[self.var_names["t2m"]])
+                    * self.ds[self.var_names["Tair"]]
+                    / (240.97 + self.ds[self.var_names["Tair"]])
                 )
             )
             cff = cff * qair
@@ -911,49 +918,36 @@ class ERA5Dataset(Dataset):
             for var in self.ds.data_vars:
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
-            del self.var_names["mask"]
 
 
 @dataclass(frozen=True, kw_only=True)
 class ERA5Correction(Dataset):
     """
-    Dataset to correct ERA5 radiation.
+    Global dataset to correct ERA5 radiation. The dataset contains multiplicative correction factors for the ERA5 shortwave radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
 
     Parameters
     ----------
-    filename : str
-        The path to the correction files. Can contain wildcards.
-    var_names: Dict[str, str]
-        Dictionary of variable names that are required in the dataset. Should contain the variable identifier for the correction.
+    filename : str, optional
+        The path to the correction files. Defaults to download_correction_data('SSR_correction.nc').
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+        Defaults to {"swr_corr": "ssr_corr"}.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
-        Defaults to {"longitude": "longitude", "latitude": "latitutde", "time": "time"}.
+        Defaults to {"longitude": "longitude", "latitude": "latitude", "time": "time"}.
     climatology : bool, optional
-        Indicaters if the correction data is a climatology. Defaults to True.
+        Indicates if the correction data is a climatology. Defaults to True.
 
     Attributes
     ----------
     ds : xr.Dataset
         The loaded xarray Dataset containing the correction data.
-
-    Examples
-    --------
-    >>> swr_correction = SWRCorrection(
-    ...     path="correction_data.nc",
-    ...     varname="corr",
-    ...     dim_names={
-    ...         "time": "time",
-    ...         "latitude": "latitude",
-    ...         "longitude": "longitude",
-    ...     },
-    ...     climatology=True,
-    ... )
     """
 
-    filename: str
+    filename: str = field(default_factory=lambda: download_correction_data('SSR_correction.nc'))
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
-            "swr_corr": "ssr_corr",
+            "swr_corr": "ssr_corr", # multiplicative correction factor for ERA5 shortwave radiation
         }
     )
     dim_names: Dict[str, str] = field(
@@ -968,16 +962,14 @@ class ERA5Correction(Dataset):
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
+
         if not self.climatology:
             raise NotImplementedError(
                 "Correction data must be a climatology. Set climatology to True."
             )
 
-        ds = super().load_data()
-        super().check_dataset(ds)
-        ds = super().ensure_latitude_ascending(ds)
+        super().__post_init__()
 
-        object.__setattr__(self, "ds", ds)
 
     def choose_subdomain(self, coords, straddle: bool):
         """
@@ -1009,13 +1001,14 @@ class ERA5Correction(Dataset):
 
         lon = self.ds[self.dim_names["longitude"]]
 
-        if lon.min().values < 0 and not straddle:
-            # Convert from [-180, 180] to [0, 360]
-            self.ds[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
+        if not self.is_global:
+            if lon.min().values < 0 and not straddle:
+                # Convert from [-180, 180] to [0, 360]
+                self.ds[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
 
-        if lon.max().values > 180 and straddle:
-            # Convert from [0, 360] to [-180, 180]
-            self.ds[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
+            if lon.max().values > 180 and straddle:
+                # Convert from [0, 360] to [-180, 180]
+                self.ds[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
 
         # Select the subdomain based on the specified latitude and longitude ranges
         subdomain = self.ds.sel(**coords)

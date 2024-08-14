@@ -9,6 +9,7 @@ dependencies:
   - matplotlib
   - cartopy
   - xarray
+  - xarray-datatree
   - netcdf4
   - pooch
   - packaging

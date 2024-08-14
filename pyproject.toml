@@ -21,6 +21,7 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "xarray >=2022.6.0",
+    "xarray-datatree",
     "numpy",
     "netcdf4",
     "pooch",

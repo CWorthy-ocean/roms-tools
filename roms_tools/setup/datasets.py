@@ -9,6 +9,8 @@ import warnings
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
     interpolate_from_climatology,
+    is_cftime_datetime,
+    convert_cftime_to_datetime,
 )
 from roms_tools.setup.download import download_correction_data
 
@@ -83,11 +85,12 @@ class Dataset:
         ds = self.load_data()
         self.check_dataset(ds)
 
+        print(ds)
         # Select relevant times
         if "time" in self.dim_names and self.start_time is not None:
             ds = self.add_time_info(ds)
             ds = self.select_relevant_times(ds)
-
+        print(ds)
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
 
@@ -270,7 +273,10 @@ class Dataset:
                         "climatological data. Please verify if climatology is appropriate for your "
                         "analysis and set the climatology flag to True."
                     )
-
+                if is_cftime_datetime(ds[time_dim]):
+                    ds = ds.assign_coords(
+                        {time_dim: convert_cftime_to_datetime(ds[time_dim])}
+                    )
                 if not self.end_time:
                     end_time = self.start_time + timedelta(days=1)
                 else:
@@ -662,9 +668,9 @@ class GLORYSDataset(Dataset):
 
 
 @dataclass(frozen=True, kw_only=True)
-class CESMBGCDataset(Dataset):
+class CESMDataset(Dataset):
     """
-    Represents CESM BGC data on original grid.
+    Represents CESM data on original grid.
 
     Parameters
     ----------
@@ -687,54 +693,6 @@ class CESMBGCDataset(Dataset):
     ds : xr.Dataset
         The xarray Dataset containing the GLORYS data on its original grid.
     """
-
-    var_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "PO4": "PO4",
-            "NO3": "NO3",
-            "SiO3": "SiO3",
-            "NH4": "NH4",
-            "Fe": "Fe",
-            "Lig": "Lig",
-            "O2": "O2",
-            "DIC": "DIC",
-            "DIC_ALT_CO2": "DIC_ALT_CO2",
-            "ALK": "ALK",
-            "ALK_ALT_CO2": "ALK_ALT_CO2",
-            "DOC": "DOC",
-            "DON": "DON",
-            "DOP": "DOP",
-            "DOPr": "DOPr",
-            "DONr": "DONr",
-            "DOCr": "DOCr",
-            "spChl": "spChl",
-            "spC": "spC",
-            "spP": "spP",
-            "spFe": "spFe",
-            "diatChl": "diatChl",
-            "diatC": "diatC",
-            "diatP": "diatP",
-            "diatFe": "diatFe",
-            "diatSi": "diatSi",
-            "diazChl": "diazChl",
-            "diazC": "diazC",
-            "diazP": "diazP",
-            "diazFe": "diazFe",
-            "spCaCO3": "spCaCO3",
-            "zooC": "zooC",
-        }
-    )
-
-    dim_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "longitude": "lon",
-            "latitude": "lat",
-            "depth": "z_t",
-            "time": "time",
-        }
-    )
-
-    climatology: Optional[bool] = True
 
     # overwrite load_data method from parent class
     def load_data(self) -> xr.Dataset:
@@ -817,6 +775,81 @@ class CESMBGCDataset(Dataset):
 
         return ds
 
+
+@dataclass(frozen=True, kw_only=True)
+class CESMBGCDataset(CESMDataset):
+    """
+    Represents CESM BGC data on original grid.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the data files. Can contain wildcards.
+    start_time : Optional[datetime], optional
+        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    end_time : Optional[datetime], optional
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
+        or no filtering is applied if start_time is not provided.
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to True.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the GLORYS data on its original grid.
+    """
+
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "SiO3",
+            "NH4": "NH4",
+            "Fe": "Fe",
+            "Lig": "Lig",
+            "O2": "O2",
+            "DIC": "DIC",
+            "DIC_ALT_CO2": "DIC_ALT_CO2",
+            "ALK": "ALK",
+            "ALK_ALT_CO2": "ALK_ALT_CO2",
+            "DOC": "DOC",
+            "DON": "DON",
+            "DOP": "DOP",
+            "DOPr": "DOPr",
+            "DONr": "DONr",
+            "DOCr": "DOCr",
+            "spChl": "spChl",
+            "spC": "spC",
+            "spP": "spP",
+            "spFe": "spFe",
+            "diatChl": "diatChl",
+            "diatC": "diatC",
+            "diatP": "diatP",
+            "diatFe": "diatFe",
+            "diatSi": "diatSi",
+            "diazChl": "diazChl",
+            "diazC": "diazC",
+            "diazP": "diazP",
+            "diazFe": "diazFe",
+            "spCaCO3": "spCaCO3",
+            "zooC": "zooC",
+        }
+    )
+
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "z_t",
+        }
+    )
+
+    climatology: Optional[bool] = True
+
     def post_process(self):
         """
         Processes and converts CESM data values as follows:
@@ -852,7 +885,7 @@ class CESMBGCDataset(Dataset):
 
 
 @dataclass(frozen=True, kw_only=True)
-class CESMBGCSurfaceForcingDataset(Dataset):
+class CESMBGCSurfaceForcingDataset(CESMDataset):
     """
     Represents CESM BGC surface forcing data on original grid.
 
@@ -893,7 +926,6 @@ class CESMBGCSurfaceForcingDataset(Dataset):
         default_factory=lambda: {
             "longitude": "lon",
             "latitude": "lat",
-            "time": "time",
         }
     )
 

@@ -309,10 +309,10 @@ def test_check_if_global_with_non_global_dataset(non_global_dataset):
 
 
 def test_check_dataset(global_dataset):
-    
+
     ds = global_dataset.copy()
     ds = ds.drop_vars("var")
-    
+
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
@@ -322,11 +322,10 @@ def test_check_dataset(global_dataset):
         start_time = datetime(2022, 2, 1)
         end_time = datetime(2022, 3, 1)
         with pytest.raises(
-            ValueError,
-            match="Dataset does not contain all required variables."
-            ):
+            ValueError, match="Dataset does not contain all required variables."
+        ):
 
-            dataset = Dataset(
+            Dataset(
                 filename=filepath,
                 var_names={"var": "var"},
                 start_time=start_time,
@@ -334,7 +333,6 @@ def test_check_dataset(global_dataset):
             )
     finally:
         os.remove(filepath)
-
 
     ds = global_dataset.copy()
     ds = ds.rename({"latitude": "lat", "longitude": "long"})
@@ -348,11 +346,10 @@ def test_check_dataset(global_dataset):
         start_time = datetime(2022, 2, 1)
         end_time = datetime(2022, 3, 1)
         with pytest.raises(
-            ValueError,
-            match="Dataset does not contain all required dimensions."
-            ):
+            ValueError, match="Dataset does not contain all required dimensions."
+        ):
 
-            dataset = Dataset(
+            Dataset(
                 filename=filepath,
                 var_names={"var": "var"},
                 start_time=start_time,
@@ -371,4 +368,3 @@ def test_era5_correction_choose_subdomain():
     data.choose_subdomain(coords, straddle=False)
     assert (data.ds["latitude"] == lats).all()
     assert (data.ds["longitude"] == lons).all()
-

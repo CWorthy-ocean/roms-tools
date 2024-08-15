@@ -163,13 +163,13 @@ class ROMSToolsMixins:
     def process_velocities(self, data_vars, angle, interpolate=True):
         """
         Processes and rotates velocity components, and interpolates them to the appropriate grid points.
-    
+
         This method performs the following steps:
         1. Rotates the velocity components to align with the grid orientation using the provided angle.
         2. Optionally interpolates the rotated velocities to the u- and v-points of the grid.
         3. If a vertical coordinate is provided, computes the barotropic velocities by integrating
            over the vertical dimension.
-    
+
         Parameters
         ----------
         data_vars : dict of str: xarray.DataArray
@@ -179,7 +179,7 @@ class ROMSToolsMixins:
             DataArray containing the angle used for rotating the velocity components to the grid orientation.
         interpolate : bool, optional
             If True, interpolates the velocities to the u- and v-points. Defaults to True.
-    
+
         Returns
         -------
         dict of str: xarray.DataArray
@@ -189,42 +189,41 @@ class ROMSToolsMixins:
         # Determine the correct variable names based on the keys in data_vars
         uname = "u" if "u" in data_vars else "uwnd"
         vname = "v" if "v" in data_vars else "vwnd"
-    
+
         # Rotate velocities to grid orientation
         u_rot = data_vars[uname] * np.cos(angle) + data_vars[vname] * np.sin(angle)
         v_rot = data_vars[vname] * np.cos(angle) - data_vars[uname] * np.sin(angle)
-    
+
         # Interpolate to u- and v-points
         if interpolate:
-            data_vars[uname]= interpolate_from_rho_to_u(u_rot)
+            data_vars[uname] = interpolate_from_rho_to_u(u_rot)
             data_vars[vname] = interpolate_from_rho_to_v(v_rot)
         else:
             data_vars[uname] = u_rot
             data_vars[vname] = v_rot
-    
+
         if self.vertical_coordinate is not None:
             # 3D masks for ROMS domain
             umask = self.grid.ds.mask_u.expand_dims({"s_rho": data_vars[uname].s_rho})
             vmask = self.grid.ds.mask_v.expand_dims({"s_rho": data_vars[vname].s_rho})
-    
+
             data_vars[uname] = data_vars[uname] * umask
             data_vars[vname] = data_vars[vname] * vmask
-    
+
             # Compute barotropic velocity
             dz = -self.vertical_coordinate.ds["interface_depth_rho"].diff(dim="s_w")
             dz = dz.rename({"s_w": "s_rho"})
             dzu = interpolate_from_rho_to_u(dz)
             dzv = interpolate_from_rho_to_v(dz)
-    
+
             data_vars["ubar"] = (
                 (dzu * data_vars[uname]).sum(dim="s_rho") / dzu.sum(dim="s_rho")
             ).transpose("time", "eta_rho", "xi_u")
             data_vars["vbar"] = (
                 (dzv * data_vars[vname]).sum(dim="s_rho") / dzv.sum(dim="s_rho")
             ).transpose("time", "eta_v", "xi_rho")
-    
-        return data_vars
 
+        return data_vars
 
     def get_variable_metadata(self):
         """

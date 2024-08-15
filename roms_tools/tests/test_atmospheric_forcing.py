@@ -5,7 +5,6 @@ from roms_tools.setup.download import download_test_data
 import xarray as xr
 import tempfile
 import os
-import pooch
 import numpy as np
 import textwrap
 
@@ -1587,5 +1586,3 @@ def test_from_yaml_missing_atmospheric_forcing():
             AtmosphericForcing.from_yaml(yaml_filepath)
     finally:
         os.remove(yaml_filepath)
-
-

@@ -38,7 +38,7 @@ class InitialConditions(ROMSToolsMixins):
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
         - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
         - "path" (str): Path to the BGC data file. Can contain wildcards.
-        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
+        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to True.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
 
@@ -149,13 +149,13 @@ class InitialConditions(ROMSToolsMixins):
                 raise ValueError(
                     "`bgc_source` must include a 'path' if it is provided."
                 )
-            # set self.bgc_source["climatology"] to False if not provided
+            # set self.bgc_source["climatology"] to True if not provided
             object.__setattr__(
                 self,
                 "bgc_source",
                 {
                     **self.bgc_source,
-                    "climatology": self.bgc_source.get("climatology", False),
+                    "climatology": self.bgc_source.get("climatology", True),
                 },
             )
 

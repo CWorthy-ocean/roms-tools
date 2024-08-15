@@ -216,7 +216,7 @@ def test_initial_conditions_default_bgc_climatology(
         bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
     )
 
-    assert initial_conditions.bgc_source["climatology"] is False
+    assert initial_conditions.bgc_source["climatology"] is True
 
 
 def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climatology):

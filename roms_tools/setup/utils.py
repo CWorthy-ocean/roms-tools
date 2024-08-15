@@ -2,6 +2,7 @@ import xarray as xr
 import numpy as np
 from typing import Union
 import pandas as pd
+import cftime
 
 
 def nan_check(field, mask) -> None:
@@ -275,3 +276,79 @@ def interpolate_from_climatology(
         return xr.Dataset(interpolated_data_vars, attrs=field.attrs)
     else:
         raise TypeError("Input 'field' must be an xarray.DataArray or xarray.Dataset.")
+
+
+def is_cftime_datetime(data_array: xr.DataArray) -> bool:
+    """
+    Checks if the xarray DataArray contains cftime datetime objects.
+
+    Parameters
+    ----------
+    data_array : xr.DataArray
+        The xarray DataArray to be checked for cftime datetime objects.
+
+    Returns
+    -------
+    bool
+        True if the DataArray contains cftime datetime objects, False otherwise.
+
+    Raises
+    ------
+    TypeError
+        If the values in the DataArray are not of type numpy.ndarray or list.
+    """
+    # List of cftime datetime types
+    cftime_types = (
+        cftime.DatetimeNoLeap,
+        cftime.DatetimeJulian,
+        cftime.DatetimeGregorian,
+    )
+
+    # Check if any of the coordinate values are of cftime type
+    if isinstance(data_array.values, (np.ndarray, list)):
+        # Check the dtype of the array; numpy datetime64 indicates it's not cftime
+        if data_array.values.dtype == "datetime64[ns]":
+            return False
+
+        # Check if any of the values in the array are instances of cftime types
+        return any(isinstance(value, cftime_types) for value in data_array.values)
+
+    # Handle unexpected types
+    raise TypeError("DataArray values must be of type numpy.ndarray or list.")
+
+
+def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:
+    """
+    Converts cftime datetime objects to numpy datetime64 objects in a numpy ndarray.
+
+    Parameters
+    ----------
+    data_array : np.ndarray
+        The numpy ndarray containing cftime datetime objects to be converted.
+
+    Returns
+    -------
+    np.ndarray
+        The ndarray with cftime datetimes converted to numpy datetime64 objects.
+
+    Notes
+    -----
+    This function is intended to be used with numpy ndarrays. If you need to convert
+    cftime datetime objects in an xarray.DataArray, please use the appropriate function
+    to handle xarray.DataArray conversions.
+    """
+    # List of cftime datetime types
+    cftime_types = (
+        cftime.DatetimeNoLeap,
+        cftime.DatetimeJulian,
+        cftime.DatetimeGregorian,
+    )
+
+    # Define a conversion function for cftime to numpy datetime64
+    def convert_datetime(dt):
+        if isinstance(dt, cftime_types):
+            # Convert to ISO format and then to nanosecond precision
+            return np.datetime64(dt.isoformat(), "ns")
+        return np.datetime64(dt, "ns")
+
+    return np.vectorize(convert_datetime)(data_array)

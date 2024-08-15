@@ -165,6 +165,38 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
     return field_interpolated
 
 
+def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
+    """
+    Assigns climatology dates to the dataset's time dimension.
+
+    This function updates the dataset's time coordinates to reflect climatological dates.
+    It defines fixed day increments for each month and assigns these to the specified time dimension.
+    The increments represent the cumulative days at mid-month for each month.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset to which climatological dates will be assigned.
+    time_dim : str
+        The name of the time dimension in the dataset that will be updated with climatological dates.
+
+    Returns
+    -------
+    xr.Dataset
+        The updated xarray Dataset with climatological dates assigned to the specified time dimension.
+
+    """
+    # Define the days in each month and convert to timedelta
+    increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
+    days = np.cumsum(increments)
+    timedelta_ns = np.array(days, dtype="timedelta64[D]").astype("timedelta64[ns]")
+    time = xr.DataArray(timedelta_ns, dims=[time_dim])
+    ds = ds.assign_coords({"time": time})
+    ds = ds.drop_vars(time_dim)
+
+    return ds
+
+
 def interpolate_from_climatology(
     field: Union[xr.DataArray, xr.Dataset],
     time_dim_name: str,

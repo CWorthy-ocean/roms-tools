@@ -6,7 +6,10 @@ import numpy as np
 from typing import Dict, Optional
 import dask
 import warnings
-from roms_tools.setup.utils import interpolate_from_climatology
+from roms_tools.setup.utils import (
+    assign_dates_to_climatology,
+    interpolate_from_climatology,
+)
 from roms_tools.setup.download import download_correction_data
 
 
@@ -82,6 +85,7 @@ class Dataset:
 
         # Select relevant times
         if "time" in self.dim_names and self.start_time is not None:
+            ds = self.add_time_info(ds)
             ds = self.select_relevant_times(ds)
 
         # Select relevant fields
@@ -200,6 +204,27 @@ class Dataset:
 
         return ds
 
+    import xarray as xr
+
+    def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Dummy method to be overridden by child classes to add time information to the dataset.
+
+        This method is intended as a placeholder and should be implemented in subclasses
+        to provide specific functionality for adding time-related information to the dataset.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to which time information will be added.
+
+        Returns
+        -------
+        xr.Dataset
+            The xarray Dataset with time information added (as implemented by child classes).
+        """
+        return ds
+
     def select_relevant_times(self, ds) -> xr.Dataset:
         """
         Selects and returns the subset of the dataset corresponding to the specified time range.
@@ -218,17 +243,6 @@ class Dataset:
         xr.Dataset
             A dataset containing only the data points within the specified time range.
 
-        Notes
-        -----
-        If the dataset has a 'month' dimension, it assumes the data is climatological and performs
-        interpolation or sets the climatology flag accordingly. If the time dimension is 'month',
-        the method calculates the time as a cumulative sum of days in each month, converts it to
-        `timedelta64[ns]`, and updates the dataset's time coordinates.
-
-        If `self.end_time` is not provided and only a single time slice is required, interpolation
-        from climatology is applied. For datasets covering full climatology, the climatology flag is set
-        to True, and no additional filtering is performed.
-
         Raises
         ------
         ValueError
@@ -242,33 +256,13 @@ class Dataset:
         """
 
         time_dim = self.dim_names["time"]
-
         if time_dim in ds.coords or time_dim in ds.data_vars:
             if self.climatology:
-                # Define the days in each month and convert to timedelta
-                increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
-                days = np.cumsum(increments)
-                timedelta_ns = np.array(days, dtype="timedelta64[D]").astype(
-                    "timedelta64[ns]"
-                )
-                time = xr.DataArray(timedelta_ns, dims=["month"])
-                ds = ds.assign_coords({"time": time})
-
-                if time_dim != "time":
-                    ds = ds.swap_dims({time_dim: "time"})
-                    ds = ds.drop_vars(time_dim)
-                    # Update dimension names
-                    updated_dim_names = self.dim_names.copy()
-                    updated_dim_names["time"] = "time"
-                    object.__setattr__(self, "dim_names", updated_dim_names)
-                    time_dim = self.dim_names["time"]
-
                 if not self.end_time:
                     # Interpolate from climatology for initial conditions
                     ds = interpolate_from_climatology(
                         ds, self.dim_names["time"], self.start_time
                     )
-
             else:
                 if len(ds[time_dim]) == 12:
                     warnings.warn(
@@ -636,6 +630,8 @@ class GLORYSDataset(Dataset):
         Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
 
     Attributes
     ----------
@@ -662,6 +658,8 @@ class GLORYSDataset(Dataset):
         }
     )
 
+    climatology: Optional[bool] = False
+
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCDataset(Dataset):
@@ -681,6 +679,8 @@ class CESMBGCDataset(Dataset):
         Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to True.
 
     Attributes
     ----------
@@ -733,6 +733,9 @@ class CESMBGCDataset(Dataset):
             "time": "time",
         }
     )
+
+    climatology: Optional[bool] = True
+
     # overwrite load_data method from parent class
     def load_data(self) -> xr.Dataset:
         """
@@ -781,11 +784,45 @@ class CESMBGCDataset(Dataset):
 
         return ds
 
+    def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Adds time information to the dataset based on the climatology flag and dimension names.
+
+        This method processes the dataset to include time information according to the climatology
+        setting. If the dataset represents climatology data and the time dimension is labeled as
+        "month", it assigns dates to the dataset based on a monthly climatology. Additionally, it
+        handles dimension name updates if necessary.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset to which time information will be added.
+
+        Returns
+        -------
+        xr.Dataset
+            The dataset with time information added, including adjustments for climatology and
+            dimension names.
+        """
+        time_dim = self.dim_names["time"]
+
+        if self.climatology and time_dim == "month":
+            ds = assign_dates_to_climatology(ds, time_dim)
+            # rename dimension
+            ds = ds.swap_dims({time_dim: "time"})
+            # Update dimension names
+            updated_dim_names = self.dim_names.copy()
+            updated_dim_names["time"] = "time"
+            object.__setattr__(self, "dim_names", updated_dim_names)
+
+        return ds
+
     def post_process(self):
         """
         Processes and converts CESM data values as follows:
         - Convert depth values from cm to m.
         """
+
         if self.dim_names["depth"] == "z_t":
             # Fill variables that only have data in upper 150m with NaNs below
             if (
@@ -815,6 +852,55 @@ class CESMBGCDataset(Dataset):
 
 
 @dataclass(frozen=True, kw_only=True)
+class CESMBGCSurfaceForcingDataset(Dataset):
+    """
+    Represents CESM BGC surface forcing data on original grid.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the data files. Can contain wildcards.
+    start_time : Optional[datetime], optional
+        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    end_time : Optional[datetime], optional
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
+        or no filtering is applied if start_time is not provided.
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the GLORYS data on its original grid.
+    """
+
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "pco2_air": "pCO2SURF",
+            "pco2_air_alt": "pCO2SURF",
+            "iron": "IRON_FLUX",
+            "dust": "dust_FLUX_IN",
+            "nox": "NOx_FLUX",
+            "nhy": "NHy_FLUX",
+        }
+    )
+
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "time": "time",
+        }
+    )
+
+    climatology: Optional[bool] = False
+
+
+@dataclass(frozen=True, kw_only=True)
 class ERA5Dataset(Dataset):
     """
     Represents ERA5 data on original grid.
@@ -832,6 +918,8 @@ class ERA5Dataset(Dataset):
         Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
 
     Attributes
     ----------
@@ -859,6 +947,8 @@ class ERA5Dataset(Dataset):
             "time": "time",
         }
     )
+
+    climatology: Optional[bool] = False
 
     def post_process(self):
         """
@@ -919,7 +1009,6 @@ class ERA5Dataset(Dataset):
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
 
-
 @dataclass(frozen=True, kw_only=True)
 class ERA5Correction(Dataset):
     """
@@ -944,10 +1033,12 @@ class ERA5Correction(Dataset):
         The loaded xarray Dataset containing the correction data.
     """
 
-    filename: str = field(default_factory=lambda: download_correction_data('SSR_correction.nc'))
+    filename: str = field(
+        default_factory=lambda: download_correction_data("SSR_correction.nc")
+    )
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
-            "swr_corr": "ssr_corr", # multiplicative correction factor for ERA5 shortwave radiation
+            "swr_corr": "ssr_corr",  # multiplicative correction factor for ERA5 shortwave radiation
         }
     )
     dim_names: Dict[str, str] = field(
@@ -969,7 +1060,6 @@ class ERA5Correction(Dataset):
             )
 
         super().__post_init__()
-
 
     def choose_subdomain(self, coords, straddle: bool):
         """
@@ -1008,7 +1098,9 @@ class ERA5Correction(Dataset):
 
             if lon.max().values > 180 and straddle:
                 # Convert from [0, 360] to [-180, 180]
-                self.ds[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
+                self.ds[self.dim_names["longitude"]] = xr.where(
+                    lon > 180, lon - 360, lon
+                )
 
         # Select the subdomain based on the specified latitude and longitude ranges
         subdomain = self.ds.sel(**coords)

@@ -634,8 +634,8 @@ def test_boundary_forcing_data_consistency_plot_save(
         filepath = tmpfile.name
 
     boundary_forcing_with_bgc_from_climatology.save(filepath)
-    physics_filepath = filepath + ".physics.20210629-29.nc"
-    bgc_filepath = filepath + ".bgc.clim.nc"
+    physics_filepath = filepath + "_physics_20210629-29.nc"
+    bgc_filepath = filepath + "_bgc_clim.nc"
 
     try:
         assert os.path.exists(physics_filepath)

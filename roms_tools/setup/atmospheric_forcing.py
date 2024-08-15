@@ -1,6 +1,8 @@
 import xarray as xr
+import pandas as pd
 import dask
 import yaml
+from datatree import DataTree
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
@@ -8,7 +10,11 @@ from datetime import datetime
 import numpy as np
 from typing import Dict, Union
 from roms_tools.setup.mixins import ROMSToolsMixins
-from roms_tools.setup.datasets import ERA5Dataset, ERA5Correction
+from roms_tools.setup.datasets import (
+    ERA5Dataset,
+    ERA5Correction,
+    CESMBGCSurfaceForcingDataset,
+)
 from roms_tools.setup.utils import nan_check, interpolate_from_climatology
 from roms_tools.setup.plot import _plot
 import calendar
@@ -58,7 +64,7 @@ class AtmosphericForcing(ROMSToolsMixins):
     ...     start_time=datetime(2000, 1, 1),
     ...     end_time=datetime(2000, 1, 2),
     ...     physics_source={"name": "ERA5", "path": "physics_data.nc"},
-    ...     correct_radiation=True
+    ...     correct_radiation=True,
     ... )
     """
 
@@ -76,6 +82,8 @@ class AtmosphericForcing(ROMSToolsMixins):
 
         self._input_checks()
         lon, lat, angle, straddle = super().get_target_lon_lat(self.use_coarse_grid)
+        object.__setattr__(self, "target_lon", lon)
+        object.__setattr__(self, "target_lat", lat)
 
         data = self._get_data()
         data.choose_subdomain(
@@ -84,8 +92,8 @@ class AtmosphericForcing(ROMSToolsMixins):
             margin=2,
             straddle=straddle,
         )
-
-
+        print(data)
+        print(data.ds)
         vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
         vars_3d = []
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
@@ -108,7 +116,6 @@ class AtmosphericForcing(ROMSToolsMixins):
                 mask = xr.where(
                     data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1
                 )
-                print(mask)
                 for var in correction_data.ds.data_vars:
                     correction_data.ds[var] = xr.where(
                         mask == 1, correction_data.ds[var], np.nan
@@ -128,14 +135,29 @@ class AtmosphericForcing(ROMSToolsMixins):
 
             data_vars["swrad"] = data_vars["swrad"] * corr_factor
 
+        object.__setattr__(data, "data_vars", data_vars)
+
+        if self.bgc_source is not None:
+            bgc_data = self._get_bgc_data()
+            bgc_data.choose_subdomain(
+                latitude_range=[lat.min().values, lat.max().values],
+                longitude_range=[lon.min().values, lon.max().values],
+                margin=2,
+                straddle=straddle,
+            )
+            print(bgc_data)
+            print(bgc_data.ds)
+
+            vars_2d = bgc_data.var_names.keys()
+            vars_3d = []
+            data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
+            object.__setattr__(bgc_data, "data_vars", data_vars)
+        else:
+            bgc_data = None
+
         d_meta = super().get_variable_metadata()
 
-        ds = self._write_into_dataset(data_vars, d_meta)
-        if self.use_coarse_grid:
-            ds = ds.assign_coords({"lon": lon, "lat": lat})
-            ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
-
-        ds = self._add_global_metadata(ds)
+        ds = self._write_into_datatree(data, bgc_data, d_meta)
 
         if self.use_coarse_grid:
             mask = self.grid.ds["mask_coarse"].rename(
@@ -144,8 +166,8 @@ class AtmosphericForcing(ROMSToolsMixins):
         else:
             mask = self.grid.ds["mask_rho"]
 
-        for var in ds.data_vars:
-            nan_check(ds[var].isel(time=0), mask)
+        for var in ds["physics"].data_vars:
+            nan_check(ds["physics"][var].isel(time=0), mask)
 
         object.__setattr__(self, "ds", ds)
 
@@ -213,23 +235,97 @@ class AtmosphericForcing(ROMSToolsMixins):
 
         return correction_data
 
-    def _write_into_dataset(self, data_vars, d_meta, ds=None):
+    def _get_bgc_data(self):
 
-        if ds is None:
-            # save in new dataset
-            ds = xr.Dataset()
+        if self.bgc_source["name"] == "CESM_REGRIDDED":
 
-        for var in data_vars.keys():
-            ds[var] = data_vars[var].astype(np.float32)
+            bgc_data = CESMBGCSurfaceForcingDataset(
+                filename=self.bgc_source["path"],
+                start_time=self.start_time,
+                end_time=self.end_time,
+                climatology=self.bgc_source["climatology"],
+            )
+        else:
+            raise ValueError(
+                'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
+            )
+
+        return bgc_data
+
+    def _write_into_dataset(self, data, d_meta):
+
+        # save in new dataset
+        ds = xr.Dataset()
+
+        for var in data.data_vars.keys():
+            ds[var] = data.data_vars[var].astype(np.float32)
             ds[var].attrs["long_name"] = d_meta[var]["long_name"]
             ds[var].attrs["units"] = d_meta[var]["units"]
 
+        if self.use_coarse_grid:
+            ds = ds.assign_coords({"lon": self.target_lon, "lat": self.target_lat})
+            ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
+
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords({"abs_time": ds["time"]})
+
+        # Convert the time coordinate to the format expected by ROMS
+        if data.climatology:
+            # Convert to pandas TimedeltaIndex
+            timedelta_index = pd.to_timedelta(ds["time"].values)
+            # Determine the start of the year for the base_datetime
+            start_of_year = datetime(self.model_reference_date.year, 1, 1)
+            # Calculate the offset from midnight of the new year
+            offset = self.model_reference_date - start_of_year
+            sfc_time = xr.DataArray(
+                timedelta_index - offset,
+                dims="time",
+            )
+        else:
+            sfc_time = (
+                (ds["time"] - np.datetime64(self.model_reference_date)).astype(
+                    "float64"
+                )
+                / 3600
+                / 24
+                * 1e-9
+            )
+
+        ds = ds.assign_coords({"time": sfc_time})
+        ds["time"].attrs[
+            "long_name"
+        ] = f"time since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
+        ds["time"].attrs["units"] = "days"
+
+        if data.climatology:
+            ds["time"].attrs["cycle_length"] = 365.25
+
         return ds
 
-    def _add_global_metadata(self, ds):
+    def _write_into_datatree(self, data, bgc_data, d_meta):
 
+        ds = self._add_global_metadata()
 
-        ds.attrs["title"] = "ROMS atmospheric forcing file created by ROMS-Tools"
+        ds = DataTree(name="root", data=ds)
+
+        ds_physics = self._write_into_dataset(data, d_meta)
+        ds_physics = self._add_global_metadata(ds_physics)
+        ds_physics.attrs["physics_source"] = self.physics_source["name"]
+        ds_physics = DataTree(name="physics", parent=ds, data=ds_physics)
+
+        if bgc_data:
+            ds_bgc = self._write_into_dataset(bgc_data, d_meta)
+            ds_bgc = self._add_global_metadata(ds_bgc)
+            ds_bgc.attrs["bgc_source"] = self.bgc_source["name"]
+            ds_bgc = DataTree(name="bgc", parent=ds, data=ds_bgc)
+
+        return ds
+
+    def _add_global_metadata(self, ds=None):
+
+        if ds is None:
+            ds = xr.Dataset()
+        ds.attrs["title"] = "ROMS surface forcing file created by ROMS-Tools"
         # Include the version of roms-tools
         try:
             roms_tools_version = importlib.metadata.version("roms-tools")
@@ -242,22 +338,8 @@ class AtmosphericForcing(ROMSToolsMixins):
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
         ds.attrs["correct_radiation"] = str(self.correct_radiation)
-        ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
-
-        # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords({"abs_time": ds["time"]})
-
-        # Translate the time coordinate to days since the model reference date
-        model_reference_date = np.datetime64(self.model_reference_date)
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-        ds["time"] = (
-            (ds["time"] - model_reference_date).astype("float64") / 3600 / 24 * 1e-9
-        )
-        ds["time"].attrs[
-            "long_name"
-        ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
-        ds["time"].attrs["units"] = "days"
+        ds.attrs["model_reference_date"] = str(self.model_reference_date)
 
         return ds
 
@@ -296,12 +378,18 @@ class AtmosphericForcing(ROMSToolsMixins):
         >>> atm_forcing.plot("uwnd", time=0)
         """
 
-        title = "%s at time %s" % (
-            self.ds[varname].long_name,
-            np.datetime_as_string(self.ds["abs_time"].isel(time=time), unit="s"),
-        )
+        if varname in self.ds["physics"]:
+            ds = self.ds["physics"]
+        else:
+            if "bgc" in self.ds and varname in self.ds["bgc"]:
+                ds = self.ds["bgc"]
+            else:
+                raise ValueError(
+                    f"Variable '{varname}' is not found in 'physics' or 'bgc' datasets."
+                )
 
-        field = self.ds[varname].isel(time=time).compute()
+        field = ds[varname].isel(time=time).load()
+        title = field.long_name
 
         # choose colorbar
         if varname in ["uwnd", "vwnd"]:
@@ -356,46 +444,57 @@ class AtmosphericForcing(ROMSToolsMixins):
         filenames = []
         writes = []
 
-        # Group dataset by year
-        gb = self.ds.groupby("abs_time.year")
-
-        for year, group_ds in gb:
-            # Further group each yearly group by month
-            sub_gb = group_ds.groupby("abs_time.month")
-
-            for month, ds in sub_gb:
-                # Chunk the dataset by the specified time chunk size
-                ds = ds.chunk({"time": time_chunk_size})
-                datasets.append(ds)
-
-                # Determine the number of days in the month
-                num_days_in_month = calendar.monthrange(year, month)[1]
-                first_day = ds.time.abs_time.dt.day.values[0]
-                last_day = ds.time.abs_time.dt.day.values[-1]
-
-                # Create filename based on whether the dataset contains a full month
-                if first_day == 1 and last_day == num_days_in_month:
-                    # Full month format: "filepath.YYYYMM.nc"
-                    year_month_str = f"{year}{month:02}"
-                    filename = f"{filepath}.{year_month_str}.nc"
+        for node in ["physics", "bgc"]:
+            if node in self.ds:
+                ds = self.ds[node].to_dataset()
+                if hasattr(ds["time"], "cycle_length"):
+                    filename = f"{filepath}_{node}_clim.nc"
+                    print("Saving the following file:")
+                    print(filename)
+                    ds.to_netcdf(filename)
                 else:
-                    # Partial month format: "filepath.YYYYMMDD-DD.nc"
-                    year_month_day_str = f"{year}{month:02}{first_day:02}-{last_day:02}"
-                    filename = f"{filepath}.{year_month_day_str}.nc"
-                filenames.append(filename)
+                    # Group dataset by year
+                    gb = ds.groupby("abs_time.year")
 
-        print("Saving the following files:")
-        for filename in filenames:
-            print(filename)
+                    for year, group_ds in gb:
+                        # Further group each yearly group by month
+                        sub_gb = group_ds.groupby("abs_time.month")
 
-        for ds, filename in zip(datasets, filenames):
+                        for month, ds in sub_gb:
+                            # Chunk the dataset by the specified time chunk size
+                            ds = ds.chunk({"time": time_chunk_size})
+                            datasets.append(ds)
 
-            # Prepare the dataset for writing to a netCDF file without immediately computing
-            write = ds.to_netcdf(filename, compute=False)
-            writes.append(write)
+                            # Determine the number of days in the month
+                            num_days_in_month = calendar.monthrange(year, month)[1]
+                            first_day = ds.abs_time.dt.day.values[0]
+                            last_day = ds.abs_time.dt.day.values[-1]
 
-        # Perform the actual write operations in parallel
-        dask.persist(*writes)
+                            # Create filename based on whether the dataset contains a full month
+                            if first_day == 1 and last_day == num_days_in_month:
+                                # Full month format: "filepath_physics_YYYYMM.nc"
+                                year_month_str = f"{year}{month:02}"
+                                filename = f"{filepath}_{node}_{year_month_str}.nc"
+                            else:
+                                # Partial month format: "filepath_physics_YYYYMMDD-DD.nc"
+                                year_month_day_str = (
+                                    f"{year}{month:02}{first_day:02}-{last_day:02}"
+                                )
+                                filename = f"{filepath}_{node}_{year_month_day_str}.nc"
+                            filenames.append(filename)
+
+                    print("Saving the following files:")
+                    for filename in filenames:
+                        print(filename)
+
+                    for ds, filename in zip(datasets, filenames):
+
+                        # Prepare the dataset for writing to a netCDF file without immediately computing
+                        write = ds.to_netcdf(filename, compute=False)
+                        writes.append(write)
+
+                    # Perform the actual write operations in parallel
+                    dask.compute(*writes)
 
     def to_yaml(self, filepath: str) -> None:
         """
@@ -410,7 +509,6 @@ class AtmosphericForcing(ROMSToolsMixins):
         grid_data = asdict(self.grid)
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
-
 
         # Include the version of roms-tools
         try:
@@ -437,7 +535,9 @@ class AtmosphericForcing(ROMSToolsMixins):
         }
         # Include bgc_source if it's not None
         if self.bgc_source is not None:
-            atmospheric_forcing_data["AtmosphericForcing"]["bgc_source"] = self.bgc_source
+            atmospheric_forcing_data["AtmosphericForcing"][
+                "bgc_source"
+            ] = self.bgc_source
 
         # Merge YAML data while excluding empty sections
         yaml_data = {

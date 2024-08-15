@@ -320,6 +320,15 @@ class ROMSToolsMixins:
             "diazC": {"long_name": "diazotroph carbon", "units": "mmol/m^3"},
             "diazP": {"long_name": "diazotroph phosphorus", "units": "mmol/m^3"},
             "diazFe": {"long_name": "diazotroph iron", "units": "mmol/m^3"},
+            "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
+            "pco2_air_alt": {
+                "long_name": "atmospheric pCO2, alternative CO2",
+                "units": "ppmv",
+            },
+            "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
+            "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},
+            "nox": {"long_name": "NOx decomposition", "units": "kg/m^2/s"},
+            "nhy": {"long_name": "NHy decomposition", "units": "kg/m^2/s"},
         }
         return d
 

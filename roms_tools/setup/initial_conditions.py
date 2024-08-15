@@ -99,7 +99,7 @@ class InitialConditions(ROMSToolsMixins):
             )
 
             vars_2d = []
-            vars_3d = bgc_data.var_names.values()
+            vars_3d = bgc_data.var_names.keys()
             bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
 
             # Ensure time coordinate matches if climatology is applied in one case but not the other

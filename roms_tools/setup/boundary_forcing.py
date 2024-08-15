@@ -46,7 +46,7 @@ class BoundaryForcing(ROMSToolsMixins):
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
         - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
         - "path" (str): Path to the BGC data file. Can contain wildcards.
-        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
+        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to True.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
 
@@ -119,7 +119,7 @@ class BoundaryForcing(ROMSToolsMixins):
             )
 
             vars_2d = []
-            vars_3d = bgc_data.var_names.values()
+            vars_3d = bgc_data.var_names.keys()
             data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
             object.__setattr__(bgc_data, "data_vars", data_vars)
         else:
@@ -129,6 +129,13 @@ class BoundaryForcing(ROMSToolsMixins):
         bdry_coords, rename = super().get_boundary_info()
 
         ds = self._write_into_datatree(data, bgc_data, d_meta, bdry_coords, rename)
+
+        for direction in ["south", "east", "north", "west"]:
+            if self.boundaries[direction]:
+                nan_check(
+                    ds["physics"][f"zeta_{direction}"].isel(bry_time=0),
+                    self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
+                )
 
         object.__setattr__(self, "ds", ds)
 
@@ -156,13 +163,13 @@ class BoundaryForcing(ROMSToolsMixins):
                 raise ValueError(
                     "`bgc_source` must include a 'path' if it is provided."
                 )
-            # set self.bgc_source["climatology"] to False if not provided
+            # set self.bgc_source["climatology"] to True if not provided
             object.__setattr__(
                 self,
                 "bgc_source",
                 {
                     **self.bgc_source,
-                    "climatology": self.bgc_source.get("climatology", False),
+                    "climatology": self.bgc_source.get("climatology", True),
                 },
             )
 
@@ -254,7 +261,10 @@ class BoundaryForcing(ROMSToolsMixins):
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
 
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords({"abs_time": ds["time"]})
+
+        # Convert the time coordinate to the format expected by ROMS
         if data.climatology:
             # Convert to pandas TimedeltaIndex
             timedelta_index = pd.to_timedelta(ds["time"].values)
@@ -270,10 +280,14 @@ class BoundaryForcing(ROMSToolsMixins):
             # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
             bry_time = ds["time"] - np.datetime64(self.model_reference_date)
 
-        ds = ds.assign_coords(bry_time=("time", bry_time.data))
+        ds = ds.assign_coords({"bry_time": bry_time})
         ds["bry_time"].attrs[
             "long_name"
-        ] = f"time since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
+        ] = f"time since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='ns')}"
+        ds["bry_time"].encoding["units"] = "nanoseconds"
+        ds = ds.swap_dims({"time": "bry_time"})
+        ds = ds.drop_vars("time")
+
         if data.climatology:
             ds["bry_time"].attrs["cycle_length"] = 365.25
 
@@ -291,13 +305,6 @@ class BoundaryForcing(ROMSToolsMixins):
         ds_physics = self._add_coordinates(bdry_coords, rename, ds_physics)
         ds_physics = self._add_global_metadata(ds_physics)
         ds_physics.attrs["physics_source"] = self.physics_source["name"]
-
-        for direction in ["south", "east", "north", "west"]:
-            if self.boundaries[direction]:
-                nan_check(
-                    ds_physics[f"zeta_{direction}"].isel(time=0),
-                    self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
-                )
 
         ds_physics = DataTree(name="physics", parent=ds, data=ds_physics)
 
@@ -509,7 +516,7 @@ class BoundaryForcing(ROMSToolsMixins):
                     f"Variable '{varname}' is not found in 'physics' or 'bgc' datasets."
                 )
 
-        field = ds[varname].isel(time=time).load()
+        field = ds[varname].isel(bry_time=time).load()
         title = field.long_name
 
         # chose colorbar
@@ -599,39 +606,39 @@ class BoundaryForcing(ROMSToolsMixins):
                 for var in self.ds.data_vars:
                     ds[var] = self.ds[var]
                 if hasattr(ds["bry_time"], "cycle_length"):
-                    filename = f"{filepath}.{node}.clim.nc"
+                    filename = f"{filepath}_{node}_clim.nc"
                     print("Saving the following file:")
                     print(filename)
                     ds.to_netcdf(filename)
                 else:
                     # Group dataset by year
-                    gb = ds.groupby("time.year")
+                    gb = ds.groupby("abs_time.year")
 
                     for year, group_ds in gb:
                         # Further group each yearly group by month
-                        sub_gb = group_ds.groupby("time.month")
+                        sub_gb = group_ds.groupby("abs_time.month")
 
                         for month, ds in sub_gb:
                             # Chunk the dataset by the specified time chunk size
-                            ds = ds.chunk({"time": time_chunk_size})
+                            ds = ds.chunk({"bry_time": time_chunk_size})
                             datasets.append(ds)
 
                             # Determine the number of days in the month
                             num_days_in_month = calendar.monthrange(year, month)[1]
-                            first_day = ds.time.dt.day.values[0]
-                            last_day = ds.time.dt.day.values[-1]
+                            first_day = ds.abs_time.dt.day.values[0]
+                            last_day = ds.abs_time.dt.day.values[-1]
 
                             # Create filename based on whether the dataset contains a full month
                             if first_day == 1 and last_day == num_days_in_month:
-                                # Full month format: "filepath.YYYYMM.nc"
+                                # Full month format: "filepath_physics_YYYYMM.nc"
                                 year_month_str = f"{year}{month:02}"
-                                filename = f"{filepath}.{node}.{year_month_str}.nc"
+                                filename = f"{filepath}_{node}_{year_month_str}.nc"
                             else:
-                                # Partial month format: "filepath.YYYYMMDD-DD.nc"
+                                # Partial month format: "filepath_physics_YYYYMMDD-DD.nc"
                                 year_month_day_str = (
                                     f"{year}{month:02}{first_day:02}-{last_day:02}"
                                 )
-                                filename = f"{filepath}.{node}.{year_month_day_str}.nc"
+                                filename = f"{filepath}_{node}_{year_month_day_str}.nc"
                             filenames.append(filename)
 
                     print("Saving the following files:")

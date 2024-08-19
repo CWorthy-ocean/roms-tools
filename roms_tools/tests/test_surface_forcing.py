@@ -1779,9 +1779,7 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     """
 
     # Check the values in the dataset
-    corrected_surface_forcing_with_bgc_from_climatology.plot(
-        varname="pco2_air", time=0
-    )
+    corrected_surface_forcing_with_bgc_from_climatology.plot(varname="pco2_air", time=0)
 
     expected_pco2_air = np.array(
         [

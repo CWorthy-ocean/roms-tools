@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from roms_tools import Grid, AtmosphericForcing
+from roms_tools import Grid, SurfaceForcing
 from roms_tools.setup.download import download_test_data
 import tempfile
 import os
@@ -174,7 +174,7 @@ def grid_that_straddles_180_degree_meridian():
 )
 def test_successful_initialization_with_regional_data(grid_fixture, request):
     """
-    Test successful initialization of AtmosphericForcing with regional data.
+    Test successful initialization of SurfaceForcing with regional data.
 
     Verifies that attributes are correctly set and data contains expected variables.
     """
@@ -185,18 +185,18 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
     )
 
-    assert atm_forcing.ds is not None
+    assert sfc_forcing.ds is not None
 
     grid.coarsen()
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         use_coarse_grid=True,
         start_time=start_time,
@@ -204,17 +204,17 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         physics_source={"name": "ERA5", "path": fname},
     )
 
-    assert "uwnd" in atm_forcing.ds["physics"]
-    assert "vwnd" in atm_forcing.ds["physics"]
-    assert "swrad" in atm_forcing.ds["physics"]
-    assert "lwrad" in atm_forcing.ds["physics"]
-    assert "Tair" in atm_forcing.ds["physics"]
-    assert "qair" in atm_forcing.ds["physics"]
-    assert "rain" in atm_forcing.ds["physics"]
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
 
-    assert atm_forcing.start_time == start_time
-    assert atm_forcing.end_time == end_time
-    assert atm_forcing.physics_source == {
+    assert sfc_forcing.start_time == start_time
+    assert sfc_forcing.end_time == end_time
+    assert sfc_forcing.physics_source == {
         "name": "ERA5",
         "path": fname,
         "climatology": False,
@@ -243,7 +243,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
 
     with pytest.raises(ValueError, match="NaN values found"):
 
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid,
             start_time=start_time,
             end_time=end_time,
@@ -253,7 +253,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
     grid.coarsen()
 
     with pytest.raises(ValueError, match="NaN values found"):
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid,
             use_coarse_grid=True,
             start_time=start_time,
@@ -266,7 +266,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
     grid_that_straddles_180_degree_meridian,
 ):
     """
-    Test initialization of AtmosphericForcing with a grid that straddles the 180° meridian.
+    Test initialization of SurfaceForcing with a grid that straddles the 180° meridian.
 
     Ensures ValueError is raised when the longitude range does not intersect with the dataset.
     """
@@ -279,7 +279,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
         ValueError, match="Selected longitude range does not intersect with dataset"
     ):
 
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid_that_straddles_180_degree_meridian,
             start_time=start_time,
             end_time=end_time,
@@ -291,7 +291,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
     with pytest.raises(
         ValueError, match="Selected longitude range does not intersect with dataset"
     ):
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid_that_straddles_180_degree_meridian,
             use_coarse_grid=True,
             start_time=start_time,
@@ -315,9 +315,9 @@ def test_no_longitude_intersection_initialization_with_regional_data(
 )
 def test_successful_initialization_with_global_data(grid_fixture, request):
     """
-    Test initialization of AtmosphericForcing with global data.
+    Test initialization of SurfaceForcing with global data.
 
-    Verifies that the AtmosphericForcing object is correctly initialized with global data,
+    Verifies that the SurfaceForcing object is correctly initialized with global data,
     including the correct handling of the grid and physics data. Checks both coarse and fine grid initialization.
     """
     start_time = datetime(2020, 1, 31)
@@ -327,60 +327,60 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
     )
-    assert atm_forcing.start_time == start_time
-    assert atm_forcing.end_time == end_time
-    assert atm_forcing.physics_source == {
+    assert sfc_forcing.start_time == start_time
+    assert sfc_forcing.end_time == end_time
+    assert sfc_forcing.physics_source == {
         "name": "ERA5",
         "path": fname,
         "climatology": False,
     }
 
-    assert "uwnd" in atm_forcing.ds["physics"]
-    assert "vwnd" in atm_forcing.ds["physics"]
-    assert "swrad" in atm_forcing.ds["physics"]
-    assert "lwrad" in atm_forcing.ds["physics"]
-    assert "Tair" in atm_forcing.ds["physics"]
-    assert "qair" in atm_forcing.ds["physics"]
-    assert "rain" in atm_forcing.ds["physics"]
-    assert atm_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
+    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
 
     grid.coarsen()
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         use_coarse_grid=True,
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
     )
-    assert atm_forcing.start_time == start_time
-    assert atm_forcing.end_time == end_time
-    assert atm_forcing.physics_source == {
+    assert sfc_forcing.start_time == start_time
+    assert sfc_forcing.end_time == end_time
+    assert sfc_forcing.physics_source == {
         "name": "ERA5",
         "path": fname,
         "climatology": False,
     }
 
-    assert "uwnd" in atm_forcing.ds["physics"]
-    assert "vwnd" in atm_forcing.ds["physics"]
-    assert "swrad" in atm_forcing.ds["physics"]
-    assert "lwrad" in atm_forcing.ds["physics"]
-    assert "Tair" in atm_forcing.ds["physics"]
-    assert "qair" in atm_forcing.ds["physics"]
-    assert "rain" in atm_forcing.ds["physics"]
-    assert atm_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
+    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
 
 
 @pytest.fixture
-def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
+def surface_forcing(grid_that_straddles_180_degree_meridian):
     """
-    Fixture for creating a AtmosphericForcing object.
+    Fixture for creating a SurfaceForcing object.
     """
 
     start_time = datetime(2020, 1, 31)
@@ -388,7 +388,7 @@ def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
 
     fname = download_test_data("ERA5_global_test_data.nc")
 
-    return AtmosphericForcing(
+    return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
@@ -397,9 +397,9 @@ def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
 
 
 @pytest.fixture
-def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
+def corrected_surface_forcing(grid_that_straddles_180_degree_meridian):
     """
-    Fixture for creating a AtmosphericForcing object with shortwave radiation correction.
+    Fixture for creating a SurfaceForcing object with shortwave radiation correction.
     """
 
     start_time = datetime(2020, 1, 31)
@@ -407,7 +407,7 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
 
     fname = download_test_data("ERA5_global_test_data.nc")
 
-    return AtmosphericForcing(
+    return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
@@ -417,9 +417,9 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
 
 
 @pytest.fixture
-def corrected_atmospheric_forcing_with_bgc(grid_that_straddles_180_degree_meridian):
+def corrected_surface_forcing_with_bgc(grid_that_straddles_180_degree_meridian):
     """
-    Fixture for creating a AtmosphericForcing object with shortwave radiation correction and BGC.
+    Fixture for creating a SurfaceForcing object with shortwave radiation correction and BGC.
     """
 
     start_time = datetime(2020, 1, 31)
@@ -428,7 +428,7 @@ def corrected_atmospheric_forcing_with_bgc(grid_that_straddles_180_degree_meridi
     fname = download_test_data("ERA5_global_test_data.nc")
     fname_bgc = download_test_data("CESM_surface_global_test_data.nc")
 
-    return AtmosphericForcing(
+    return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
@@ -439,11 +439,11 @@ def corrected_atmospheric_forcing_with_bgc(grid_that_straddles_180_degree_meridi
 
 
 @pytest.fixture
-def corrected_atmospheric_forcing_with_bgc_from_climatology(
+def corrected_surface_forcing_with_bgc_from_climatology(
     grid_that_straddles_180_degree_meridian,
 ):
     """
-    Fixture for creating a AtmosphericForcing object with shortwave radiation correction and BGC from climatology.
+    Fixture for creating a SurfaceForcing object with shortwave radiation correction and BGC from climatology.
     """
 
     start_time = datetime(2020, 1, 31)
@@ -452,7 +452,7 @@ def corrected_atmospheric_forcing_with_bgc_from_climatology(
     fname = download_test_data("ERA5_global_test_data.nc")
     fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
 
-    return AtmosphericForcing(
+    return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
@@ -462,79 +462,79 @@ def corrected_atmospheric_forcing_with_bgc_from_climatology(
     )
 
 
-def test_time_attr_climatology(corrected_atmospheric_forcing_with_bgc_from_climatology):
+def test_time_attr_climatology(corrected_surface_forcing_with_bgc_from_climatology):
     """
     Test that the 'cycle_length' attribute is present in the time coordinate of the BGC dataset
     when using climatology data.
     """
     assert hasattr(
-        corrected_atmospheric_forcing_with_bgc_from_climatology.ds["bgc"].time,
+        corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"].time,
         "cycle_length",
     )
 
 
-def test_time_attr(corrected_atmospheric_forcing_with_bgc):
+def test_time_attr(corrected_surface_forcing_with_bgc):
     """
     Test that the 'cycle_length' attribute is not present in the time coordinate of the BGC dataset
     when not using climatology data.
     """
     assert not hasattr(
-        corrected_atmospheric_forcing_with_bgc.ds["bgc"].time, "cycle_length"
+        corrected_surface_forcing_with_bgc.ds["bgc"].time, "cycle_length"
     )
 
 
 @pytest.mark.parametrize(
-    "atm_forcing_fixture",
+    "sfc_forcing_fixture",
     [
-        "corrected_atmospheric_forcing_with_bgc",
-        "corrected_atmospheric_forcing_with_bgc_from_climatology",
+        "corrected_surface_forcing_with_bgc",
+        "corrected_surface_forcing_with_bgc_from_climatology",
     ],
 )
-def test_atmospheric_forcing_creation(atm_forcing_fixture, request):
+def test_surface_forcing_creation(sfc_forcing_fixture, request):
     """
-    Test the creation and initialization of the AtmosphericForcing object.
+    Test the creation and initialization of the SurfaceForcing object.
 
-    Verifies that the AtmosphericForcing object is properly created with correct attributes,
+    Verifies that the SurfaceForcing object is properly created with correct attributes,
     including physics and BGC sources. Ensures that expected variables are present in the dataset
     and that attributes match the given configurations.
     """
 
     fname = download_test_data("ERA5_global_test_data.nc")
 
-    atm_forcing = request.getfixturevalue(atm_forcing_fixture)
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
-    assert atm_forcing.start_time == datetime(2020, 1, 31)
-    assert atm_forcing.end_time == datetime(2020, 2, 2)
-    assert atm_forcing.physics_source == {
+    assert sfc_forcing.start_time == datetime(2020, 1, 31)
+    assert sfc_forcing.end_time == datetime(2020, 2, 2)
+    assert sfc_forcing.physics_source == {
         "name": "ERA5",
         "path": fname,
         "climatology": False,
     }
-    assert atm_forcing.bgc_source["name"] == "CESM_REGRIDDED"
+    assert sfc_forcing.bgc_source["name"] == "CESM_REGRIDDED"
 
-    assert "uwnd" in atm_forcing.ds["physics"]
-    assert "vwnd" in atm_forcing.ds["physics"]
-    assert "swrad" in atm_forcing.ds["physics"]
-    assert "lwrad" in atm_forcing.ds["physics"]
-    assert "Tair" in atm_forcing.ds["physics"]
-    assert "qair" in atm_forcing.ds["physics"]
-    assert "rain" in atm_forcing.ds["physics"]
-    assert atm_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
+    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
 
-    assert "pco2_air" in atm_forcing.ds["bgc"]
-    assert "pco2_air_alt" in atm_forcing.ds["bgc"]
-    assert "iron" in atm_forcing.ds["bgc"]
-    assert "dust" in atm_forcing.ds["bgc"]
-    assert "nox" in atm_forcing.ds["bgc"]
-    assert "nhy" in atm_forcing.ds["bgc"]
-    assert atm_forcing.ds["bgc"].attrs["bgc_source"] == "CESM_REGRIDDED"
+    assert "pco2_air" in sfc_forcing.ds["bgc"]
+    assert "pco2_air_alt" in sfc_forcing.ds["bgc"]
+    assert "iron" in sfc_forcing.ds["bgc"]
+    assert "dust" in sfc_forcing.ds["bgc"]
+    assert "nox" in sfc_forcing.ds["bgc"]
+    assert "nhy" in sfc_forcing.ds["bgc"]
+    assert sfc_forcing.ds["bgc"].attrs["bgc_source"] == "CESM_REGRIDDED"
 
 
 @pytest.mark.parametrize(
-    "atm_forcing_fixture, expected_swrad",
+    "sfc_forcing_fixture, expected_swrad",
     [
         (
-            "atmospheric_forcing",
+            "surface_forcing",
             [
                 np.array(
                     [
@@ -674,7 +674,7 @@ def test_atmospheric_forcing_creation(atm_forcing_fixture, request):
             ],
         ),
         (
-            "corrected_atmospheric_forcing",
+            "corrected_surface_forcing",
             [
                 np.array(
                     [
@@ -815,16 +815,16 @@ def test_atmospheric_forcing_creation(atm_forcing_fixture, request):
         ),
     ],
 )
-def test_atmospheric_forcing_data_consistency_plot_save(
-    atm_forcing_fixture, expected_swrad, request, tmp_path
+def test_surface_forcing_data_consistency_plot_save(
+    sfc_forcing_fixture, expected_swrad, request, tmp_path
 ):
     """
-    Test that the data within the AtmosphericForcing object remains consistent.
+    Test that the data within the SurfaceForcing object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
     """
-    atm_forcing = request.getfixturevalue(atm_forcing_fixture)
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
-    atm_forcing.ds.load()
+    sfc_forcing.ds.load()
 
     expected_uwnd = np.array(
         [
@@ -1642,7 +1642,7 @@ def test_atmospheric_forcing_data_consistency_plot_save(
     )
 
     # Check the values in the dataset
-    ds = atm_forcing.ds["physics"]
+    ds = sfc_forcing.ds["physics"]
 
     assert np.allclose(ds["uwnd"].values, expected_uwnd)
     assert np.allclose(ds["vwnd"].values, expected_vwnd)
@@ -1652,13 +1652,13 @@ def test_atmospheric_forcing_data_consistency_plot_save(
     assert np.allclose(ds["qair"].values, expected_qair)
     assert np.allclose(ds["rain"].values, expected_rain)
 
-    atm_forcing.plot(varname="uwnd", time=0)
+    sfc_forcing.plot(varname="uwnd", time=0)
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
 
-    atm_forcing.save(filepath)
+    sfc_forcing.save(filepath)
     extended_filepath = filepath + "_physics_20200201-01.nc"
 
     try:
@@ -1667,16 +1667,16 @@ def test_atmospheric_forcing_data_consistency_plot_save(
         os.remove(extended_filepath)
 
 
-def test_atmospheric_forcing_bgc_data_consistency_plot_save(
-    corrected_atmospheric_forcing_with_bgc,
+def test_surface_forcing_bgc_data_consistency_plot_save(
+    corrected_surface_forcing_with_bgc,
 ):
     """
-    Test that the BGC data within the AtmosphericForcing object remains consistent.
+    Test that the BGC data within the SurfaceForcing object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
     """
 
     # Check the values in the dataset
-    corrected_atmospheric_forcing_with_bgc.plot(varname="pco2_air", time=0)
+    corrected_surface_forcing_with_bgc.plot(varname="pco2_air", time=0)
 
     expected_pco2_air = np.array(
         [
@@ -1750,7 +1750,7 @@ def test_atmospheric_forcing_bgc_data_consistency_plot_save(
     )
 
     assert np.allclose(
-        corrected_atmospheric_forcing_with_bgc.ds["bgc"]["pco2_air"].values,
+        corrected_surface_forcing_with_bgc.ds["bgc"]["pco2_air"].values,
         expected_pco2_air,
     )
 
@@ -1758,7 +1758,7 @@ def test_atmospheric_forcing_bgc_data_consistency_plot_save(
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
 
-    corrected_atmospheric_forcing_with_bgc.save(filepath)
+    corrected_surface_forcing_with_bgc.save(filepath)
     physics_filepath = filepath + "_physics_20200201-01.nc"
     bgc_filepath = filepath + "_bgc_20200201-01.nc"
 
@@ -1770,16 +1770,16 @@ def test_atmospheric_forcing_bgc_data_consistency_plot_save(
         os.remove(bgc_filepath)
 
 
-def test_atmospheric_forcing_bgc_data_from_clim_consistency_plot_save(
-    corrected_atmospheric_forcing_with_bgc_from_climatology,
+def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
+    corrected_surface_forcing_with_bgc_from_climatology,
 ):
     """
-    Test that the BGC data within the AtmosphericForcing object remains consistent.
+    Test that the BGC data within the SurfaceForcing object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
     """
 
     # Check the values in the dataset
-    corrected_atmospheric_forcing_with_bgc_from_climatology.plot(
+    corrected_surface_forcing_with_bgc_from_climatology.plot(
         varname="pco2_air", time=0
     )
 
@@ -2538,7 +2538,7 @@ def test_atmospheric_forcing_bgc_data_from_clim_consistency_plot_save(
     )
 
     assert np.allclose(
-        corrected_atmospheric_forcing_with_bgc_from_climatology.ds["bgc"][
+        corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"][
             "pco2_air"
         ].values,
         expected_pco2_air,
@@ -2548,7 +2548,7 @@ def test_atmospheric_forcing_bgc_data_from_clim_consistency_plot_save(
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
 
-    corrected_atmospheric_forcing_with_bgc_from_climatology.save(filepath)
+    corrected_surface_forcing_with_bgc_from_climatology.save(filepath)
     physics_filepath = filepath + "_physics_20200201-01.nc"
     bgc_filepath = filepath + "_bgc_clim.nc"
 
@@ -2561,35 +2561,35 @@ def test_atmospheric_forcing_bgc_data_from_clim_consistency_plot_save(
 
 
 @pytest.mark.parametrize(
-    "atm_forcing_fixture",
+    "sfc_forcing_fixture",
     [
-        "atmospheric_forcing",
-        "corrected_atmospheric_forcing",
-        "corrected_atmospheric_forcing_with_bgc",
-        "corrected_atmospheric_forcing_with_bgc_from_climatology",
+        "surface_forcing",
+        "corrected_surface_forcing",
+        "corrected_surface_forcing_with_bgc",
+        "corrected_surface_forcing_with_bgc_from_climatology",
     ],
 )
-def test_roundtrip_yaml(atm_forcing_fixture, request):
-    """Test that creating an AtmosphericForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+def test_roundtrip_yaml(sfc_forcing_fixture, request):
+    """Test that creating an SurfaceForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
-    atm_forcing = request.getfixturevalue(atm_forcing_fixture)
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
 
     try:
-        atm_forcing.to_yaml(filepath)
+        sfc_forcing.to_yaml(filepath)
 
-        atm_forcing_from_file = AtmosphericForcing.from_yaml(filepath)
+        sfc_forcing_from_file = SurfaceForcing.from_yaml(filepath)
 
-        assert atm_forcing == atm_forcing_from_file
+        assert sfc_forcing == sfc_forcing_from_file
 
     finally:
         os.remove(filepath)
 
 
-def test_from_yaml_missing_atmospheric_forcing():
+def test_from_yaml_missing_surface_forcing():
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -2617,8 +2617,8 @@ def test_from_yaml_missing_atmospheric_forcing():
     try:
         with pytest.raises(
             ValueError,
-            match="No AtmosphericForcing configuration found in the YAML file.",
+            match="No SurfaceForcing configuration found in the YAML file.",
         ):
-            AtmosphericForcing.from_yaml(yaml_filepath)
+            SurfaceForcing.from_yaml(yaml_filepath)
     finally:
         os.remove(yaml_filepath)

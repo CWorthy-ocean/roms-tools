@@ -22,9 +22,9 @@ import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
-class AtmosphericForcing(ROMSToolsMixins):
+class SurfaceForcing(ROMSToolsMixins):
     """
-    Represents atmospheric forcing data for ocean modeling.
+    Represents surface forcing data for ocean modeling.
 
     Parameters
     ----------
@@ -54,12 +54,12 @@ class AtmosphericForcing(ROMSToolsMixins):
     Attributes
     ----------
     ds : xr.Dataset
-        Xarray Dataset containing the atmospheric forcing data.
+        Xarray Dataset containing the surface forcing data.
 
 
     Examples
     --------
-    >>> atm_forcing = AtmosphericForcing(
+    >>> atm_forcing = SurfaceForcing(
     ...     grid=grid,
     ...     start_time=datetime(2000, 1, 1),
     ...     end_time=datetime(2000, 1, 2),
@@ -340,12 +340,12 @@ class AtmosphericForcing(ROMSToolsMixins):
 
     def plot(self, varname, time=0) -> None:
         """
-        Plot the specified atmospheric forcing field for a given time slice.
+        Plot the specified surface forcing field for a given time slice.
 
         Parameters
         ----------
         varname : str
-            The name of the atmospheric forcing field to plot. Options include:
+            The name of the surface forcing field to plot. Options include:
             - "uwnd": 10 meter wind in x-direction.
             - "vwnd": 10 meter wind in y-direction.
             - "swrad": Downward short-wave (solar) radiation.
@@ -414,7 +414,7 @@ class AtmosphericForcing(ROMSToolsMixins):
 
     def save(self, filepath: str, time_chunk_size: int = 1) -> None:
         """
-        Save the interpolated atmospheric forcing fields to netCDF4 files.
+        Save the interpolated surface forcing fields to netCDF4 files.
 
         This method groups the dataset by year and month, chunks the data by the specified
         time chunk size, and saves each chunked subset to a separate netCDF4 file named
@@ -518,8 +518,8 @@ class AtmosphericForcing(ROMSToolsMixins):
         grid_yaml_data = {"Grid": grid_data}
 
         # Combine all sections
-        atmospheric_forcing_data = {
-            "AtmosphericForcing": {
+        surface_forcing_data = {
+            "SurfaceForcing": {
                 "start_time": self.start_time.isoformat(),
                 "end_time": self.end_time.isoformat(),
                 "physics_source": self.physics_source,
@@ -530,14 +530,14 @@ class AtmosphericForcing(ROMSToolsMixins):
         }
         # Include bgc_source if it's not None
         if self.bgc_source is not None:
-            atmospheric_forcing_data["AtmosphericForcing"][
+            surface_forcing_data["SurfaceForcing"][
                 "bgc_source"
             ] = self.bgc_source
 
         # Merge YAML data while excluding empty sections
         yaml_data = {
             **grid_yaml_data,
-            **atmospheric_forcing_data,
+            **surface_forcing_data,
         }
 
         with open(filepath, "w") as file:
@@ -547,9 +547,9 @@ class AtmosphericForcing(ROMSToolsMixins):
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: str) -> "AtmosphericForcing":
+    def from_yaml(cls, filepath: str) -> "SurfaceForcing":
         """
-        Create an instance of the AtmosphericForcing class from a YAML file.
+        Create an instance of the SurfaceForcing class from a YAML file.
 
         Parameters
         ----------
@@ -558,8 +558,8 @@ class AtmosphericForcing(ROMSToolsMixins):
 
         Returns
         -------
-        AtmosphericForcing
-            An instance of the AtmosphericForcing class.
+        SurfaceForcing
+            An instance of the SurfaceForcing class.
         """
         # Read the entire file content
         with open(filepath, "r") as file:
@@ -568,31 +568,31 @@ class AtmosphericForcing(ROMSToolsMixins):
         # Split the content into YAML documents
         documents = list(yaml.safe_load_all(file_content))
 
-        atmospheric_forcing_data = None
+        surface_forcing_data = None
 
         # Process the YAML documents
         for doc in documents:
             if doc is None:
                 continue
-            if "AtmosphericForcing" in doc:
-                atmospheric_forcing_data = doc["AtmosphericForcing"]
+            if "SurfaceForcing" in doc:
+                surface_forcing_data = doc["SurfaceForcing"]
 
-        if atmospheric_forcing_data is None:
+        if surface_forcing_data is None:
             raise ValueError(
-                "No AtmosphericForcing configuration found in the YAML file."
+                "No SurfaceForcing configuration found in the YAML file."
             )
 
         # Convert from string to datetime
         for date_string in ["model_reference_date", "start_time", "end_time"]:
-            atmospheric_forcing_data[date_string] = datetime.fromisoformat(
-                atmospheric_forcing_data[date_string]
+            surface_forcing_data[date_string] = datetime.fromisoformat(
+                surface_forcing_data[date_string]
             )
 
         # Create Grid instance from the YAML file
         grid = Grid.from_yaml(filepath)
 
-        # Create and return an instance of AtmosphericForcing
+        # Create and return an instance of SurfaceForcing
         return cls(
             grid=grid,
-            **atmospheric_forcing_data,
+            **surface_forcing_data,
         )

@@ -8,7 +8,7 @@ Welcome to the ROMS-Tools documentation!
 
 **ROMS-Tools** is a python package for creating the input files that are necessary
 to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation.
-This includes creating a grid, tidal, boundary, and atmospheric forcings, initial conditions, and more!
+This includes creating a grid, tidal, boundary, and surface forcings, initial conditions, and more!
 This python package is strongly inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
 
 
@@ -25,7 +25,7 @@ This python package is strongly inspired by the `UCLA MATLAB tools <https://gith
 
    Creating a grid <grid>
    Creating tidal forcing <tides>
-   Creating atmospheric forcing <atmospheric_forcing>
+   Creating surface forcing <surface_forcing>
    Creating a vertical coordinate <vertical_coordinate>
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>

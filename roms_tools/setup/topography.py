@@ -10,8 +10,41 @@ from itertools import count
 
 
 def _add_topography_and_mask(
-    ds, topography_source, smooth_factor, hmin, rmax
+    ds, topography_source, hmin, smooth_factor=8.0, rmax=0.2
 ) -> xr.Dataset:
+    """
+    Adds topography and a land/water mask to the dataset based on the provided topography source.
+
+    This function performs the following operations:
+    1. Interpolates topography data onto the desired grid.
+    2. Applies a mask based on ocean depth.
+    3. Smooths the topography globally to reduce grid-scale instabilities.
+    4. Fills enclosed basins with land.
+    5. Smooths the topography locally to ensure the steepness ratio satisfies the rmax criterion.
+    6. Adds topography metadata.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset to which topography and the land/water mask will be added.
+    topography_source : str
+        The source of the topography data.
+    hmin : float
+        The minimum allowable depth for the topography.
+    smooth_factor : float, optional
+        The smoothing factor used in the domain-wide Gaussian smoothing of the
+        topography. Smaller values result in less smoothing, while larger
+        values produce more smoothing. The default is 8.0.
+    rmax : float, optional
+        The maximum allowable steepness ratio for the topography smoothing.
+        This parameter controls the local smoothing of the topography. Smaller values result in
+        smoother topography, while larger values preserve more detail. The default is 0.2.
+
+    Returns
+    -------
+    xr.Dataset
+        The dataset with added topography, mask, and metadata.
+    """
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
 

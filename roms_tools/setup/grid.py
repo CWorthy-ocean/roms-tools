@@ -46,17 +46,8 @@ class Grid:
     topography_source : str, optional
         Specifies the data source to use for the topography. Options are
         "ETOPO5". The default is "ETOPO5".
-    smooth_factor : float, optional
-        The smoothing factor used in the domain-wide Gaussian smoothing of the
-        topography. Smaller values result in less smoothing, while larger
-        values produce more smoothing. The default is 8.
     hmin : float, optional
         The minimum ocean depth (in meters). The default is 5.
-    rmax : float, optional
-        The maximum slope parameter (in meters). This parameter controls
-        the local smoothing of the topography. Smaller values result in
-        smoother topography, while larger values preserve more detail.
-        The default is 0.2.
 
      Attributes
      ----------
@@ -76,12 +67,8 @@ class Grid:
          Rotation of grid x-direction from lines of constant latitude.
      topography_source : str
          Data source used for the topography.
-     smooth_factor : int
-         Smoothing factor used in the domain-wide Gaussian smoothing of the topography.
      hmin : float
          Minimum ocean depth (in meters).
-     rmax : float
-         Maximum slope parameter (in meters).
      ds : xr.Dataset
          The xarray Dataset containing the grid data.
      straddle : bool
@@ -102,9 +89,7 @@ class Grid:
     center_lat: float
     rot: float = 0
     topography_source: str = "ETOPO5"
-    smooth_factor: int = 8
     hmin: float = 5.0
-    rmax: float = 0.2
     ds: xr.Dataset = field(init=False, repr=False)
     straddle: bool = field(init=False, repr=False)
 
@@ -125,16 +110,14 @@ class Grid:
         # Update self.ds with topography and mask information
         self.add_topography_and_mask(
             topography_source=self.topography_source,
-            smooth_factor=self.smooth_factor,
             hmin=self.hmin,
-            rmax=self.rmax,
         )
 
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
     def add_topography_and_mask(
-        self, topography_source="ETOPO5", smooth_factor=8, hmin=5.0, rmax=0.2
+        self, topography_source="ETOPO5", hmin=5.0
     ) -> None:
         """
         Add topography and mask to the grid dataset.
@@ -149,17 +132,8 @@ class Grid:
         topography_source : str, optional
             Specifies the data source to use for the topography. Options are
             "ETOPO5". The default is "ETOPO5".
-        smooth_factor : float, optional
-            The smoothing factor used in the domain-wide Gaussian smoothing of the
-            topography. Smaller values result in less smoothing, while larger
-            values produce more smoothing. The default is 8.
         hmin : float, optional
             The minimum ocean depth (in meters). The default is 5.
-        rmax : float, optional
-            The maximum slope parameter (in meters). This parameter controls
-            the local smoothing of the topography. Smaller values result in
-            smoother topography, while larger values preserve more detail.
-            The default is 0.2.
 
         Returns
         -------
@@ -168,7 +142,7 @@ class Grid:
         """
 
         ds = _add_topography_and_mask(
-            self.ds, topography_source, smooth_factor, hmin, rmax
+            self.ds, topography_source, hmin
         )
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
@@ -282,9 +256,7 @@ class Grid:
             "size_x",
             "size_y",
             "topography_source",
-            "smooth_factor",
             "hmin",
-            "rmax",
         ]:
             if attr in ds.attrs:
                 object.__setattr__(grid, attr, ds.attrs[attr])

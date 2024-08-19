@@ -54,11 +54,6 @@ class ROMSToolsMixins:
         """
 
         if use_coarse_grid:
-            if "lon_coarse" not in self.grid.ds:
-                raise ValueError(
-                    "Grid has not been coarsened yet. Execute grid.coarsen() first."
-                )
-
             lon = self.grid.ds.lon_coarse
             lat = self.grid.ds.lat_coarse
             angle = self.grid.ds.angle_coarse

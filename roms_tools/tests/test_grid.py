@@ -85,9 +85,7 @@ def test_roundtrip_netcdf():
         center_lat=0.0,
         rot=0.0,
         topography_source="ETOPO5",
-        smooth_factor=2,
         hmin=5.0,
-        rmax=0.2,
     )
 
     # Create a temporary file
@@ -121,9 +119,7 @@ def test_roundtrip_yaml():
         center_lat=0.0,
         rot=0.0,
         topography_source="ETOPO5",
-        smooth_factor=2,
         hmin=5.0,
-        rmax=0.2,
     )
 
     # Create a temporary file
@@ -155,9 +151,7 @@ def test_from_yaml_missing_version():
       center_lat: 61
       rot: -20
       topography_source: ETOPO5
-      smooth_factor: 8
       hmin: 5.0
-      rmax: 0.2
     """
     )
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
@@ -206,9 +200,7 @@ def test_from_yaml_version_mismatch():
       center_lat: 61
       rot: -20
       topography_source: ETOPO5
-      smooth_factor: 8
       hmin: 5.0
-      rmax: 0.2
     """
     )
 

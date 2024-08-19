@@ -112,9 +112,13 @@ class Grid:
             topography_source=self.topography_source,
             hmin=self.hmin,
         )
-
+        
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
+        
+        # Update the grid by adding grid variables that are coarsened versions of the original grid variables
+        self._coarsen()
+
 
     def add_topography_and_mask(
         self, topography_source="ETOPO5", hmin=5.0
@@ -146,31 +150,6 @@ class Grid:
         )
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
-
-    def compute_bathymetry_laplacian(self):
-        """
-        Compute the Laplacian of the 'h' field in the provided grid dataset.
-
-        Adds:
-        xarray.DataArray: The Laplacian of the 'h' field as a new variable in the dataset self.ds.
-        """
-
-        # Extract the 'h' field and grid spacing variables
-        h = self.ds.h
-        pm = self.ds.pm  # Reciprocal of grid spacing in x-direction
-        pn = self.ds.pn  # Reciprocal of grid spacing in y-direction
-
-        # Compute second derivatives using finite differences
-        d2h_dx2 = (h.shift(xi_rho=-1) - 2 * h + h.shift(xi_rho=1)) * pm**2
-        d2h_dy2 = (h.shift(eta_rho=-1) - 2 * h + h.shift(eta_rho=1)) * pn**2
-
-        # Compute the Laplacian by summing second derivatives
-        laplacian_h = d2h_dx2 + d2h_dy2
-
-        # Add the Laplacian as a new variable in the dataset
-        self.ds["h_laplacian"] = laplacian_h
-        self.ds["h_laplacian"].attrs["long_name"] = "Laplacian of final bathymetry"
-        self.ds["h_laplacian"].attrs["units"] = "1/m"
 
     def save(self, filepath: str) -> None:
         """
@@ -241,9 +220,12 @@ class Grid:
 
         # Set the dataset for the grid instance
         object.__setattr__(grid, "ds", ds)
-
+        
         # Check if the Greenwich meridian goes through the domain.
         grid._straddle()
+
+        # Update the grid by adding grid variables that are coarsened versions of the original grid variables
+        grid._coarsen()
 
         # Manually set the remaining attributes by extracting parameters from dataset
         object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
@@ -382,7 +364,7 @@ class Grid:
         else:
             _plot(self.ds, straddle=self.straddle)
 
-    def coarsen(self):
+    def _coarsen(self):
         """
         Update the grid by adding grid variables that are coarsened versions of the original
         fine-resoluion grid variables. The coarsening is by a factor of two.

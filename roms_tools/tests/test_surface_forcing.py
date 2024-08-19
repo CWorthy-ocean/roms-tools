@@ -194,8 +194,6 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
 
     assert sfc_forcing.ds is not None
 
-    grid.coarsen()
-
     sfc_forcing = SurfaceForcing(
         grid=grid,
         use_coarse_grid=True,
@@ -250,8 +248,6 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
             physics_source={"name": "ERA5", "path": fname},
         )
 
-    grid.coarsen()
-
     with pytest.raises(ValueError, match="NaN values found"):
         SurfaceForcing(
             grid=grid,
@@ -285,8 +281,6 @@ def test_no_longitude_intersection_initialization_with_regional_data(
             end_time=end_time,
             physics_source={"name": "ERA5", "path": fname},
         )
-
-    grid_that_straddles_180_degree_meridian.coarsen()
 
     with pytest.raises(
         ValueError, match="Selected longitude range does not intersect with dataset"
@@ -349,8 +343,6 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
     assert "qair" in sfc_forcing.ds["physics"]
     assert "rain" in sfc_forcing.ds["physics"]
     assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
-
-    grid.coarsen()
 
     sfc_forcing = SurfaceForcing(
         grid=grid,

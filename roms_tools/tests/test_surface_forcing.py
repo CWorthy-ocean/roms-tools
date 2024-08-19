@@ -1655,7 +1655,7 @@ def test_surface_forcing_data_consistency_plot_save(
     sfc_forcing.plot(varname="uwnd", time=0)
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
     sfc_forcing.save(filepath)
@@ -1755,7 +1755,7 @@ def test_surface_forcing_bgc_data_consistency_plot_save(
     )
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
     corrected_surface_forcing_with_bgc.save(filepath)
@@ -1779,9 +1779,7 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     """
 
     # Check the values in the dataset
-    corrected_surface_forcing_with_bgc_from_climatology.plot(
-        varname="pco2_air", time=0
-    )
+    corrected_surface_forcing_with_bgc_from_climatology.plot(varname="pco2_air", time=0)
 
     expected_pco2_air = np.array(
         [
@@ -2545,7 +2543,7 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     )
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
     corrected_surface_forcing_with_bgc_from_climatology.save(filepath)

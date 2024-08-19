@@ -630,7 +630,7 @@ def test_boundary_forcing_data_consistency_plot_save(
     boundary_forcing_with_bgc_from_climatology.plot(varname="ALK_west")
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
     boundary_forcing_with_bgc_from_climatology.save(filepath)

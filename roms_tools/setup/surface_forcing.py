@@ -444,9 +444,8 @@ class SurfaceForcing(ROMSToolsMixins):
                 ds = self.ds[node].to_dataset()
                 if hasattr(ds["time"], "cycle_length"):
                     filename = f"{filepath}_{node}_clim.nc"
-                    print("Saving the following file:")
-                    print(filename)
-                    ds.to_netcdf(filename)
+                    filenames.append(filename)
+                    datasets.append(ds)
                 else:
                     # Group dataset by year
                     gb = ds.groupby("abs_time.year")
@@ -478,18 +477,15 @@ class SurfaceForcing(ROMSToolsMixins):
                                 filename = f"{filepath}_{node}_{year_month_day_str}.nc"
                             filenames.append(filename)
 
-                    print("Saving the following files:")
-                    for filename in filenames:
-                        print(filename)
+        print("Saving the following files:")
+        for ds, filename in zip(datasets, filenames):
+            print(filename)
+            # Prepare the dataset for writing to a netCDF file without immediately computing
+            write = ds.to_netcdf(filename, compute=False)
+            writes.append(write)
 
-                    for ds, filename in zip(datasets, filenames):
-
-                        # Prepare the dataset for writing to a netCDF file without immediately computing
-                        write = ds.to_netcdf(filename, compute=False)
-                        writes.append(write)
-
-                    # Perform the actual write operations in parallel
-                    dask.compute(*writes)
+        # Perform the actual write operations in parallel
+        dask.compute(*writes)
 
     def to_yaml(self, filepath: str) -> None:
         """
@@ -530,9 +526,7 @@ class SurfaceForcing(ROMSToolsMixins):
         }
         # Include bgc_source if it's not None
         if self.bgc_source is not None:
-            surface_forcing_data["SurfaceForcing"][
-                "bgc_source"
-            ] = self.bgc_source
+            surface_forcing_data["SurfaceForcing"]["bgc_source"] = self.bgc_source
 
         # Merge YAML data while excluding empty sections
         yaml_data = {
@@ -578,9 +572,7 @@ class SurfaceForcing(ROMSToolsMixins):
                 surface_forcing_data = doc["SurfaceForcing"]
 
         if surface_forcing_data is None:
-            raise ValueError(
-                "No SurfaceForcing configuration found in the YAML file."
-            )
+            raise ValueError("No SurfaceForcing configuration found in the YAML file.")
 
         # Convert from string to datetime
         for date_string in ["model_reference_date", "start_time", "end_time"]:

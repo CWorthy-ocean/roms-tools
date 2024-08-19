@@ -607,9 +607,8 @@ class BoundaryForcing(ROMSToolsMixins):
                     ds[var] = self.ds[var]
                 if hasattr(ds["bry_time"], "cycle_length"):
                     filename = f"{filepath}_{node}_clim.nc"
-                    print("Saving the following file:")
-                    print(filename)
-                    ds.to_netcdf(filename)
+                    filenames.append(filename)
+                    datasets.append(ds)
                 else:
                     # Group dataset by year
                     gb = ds.groupby("abs_time.year")
@@ -641,18 +640,15 @@ class BoundaryForcing(ROMSToolsMixins):
                                 filename = f"{filepath}_{node}_{year_month_day_str}.nc"
                             filenames.append(filename)
 
-                    print("Saving the following files:")
-                    for filename in filenames:
-                        print(filename)
+        print("Saving the following files:")
+        for ds, filename in zip(datasets, filenames):
+            print(filename)
+            # Prepare the dataset for writing to a netCDF file without immediately computing
+            write = ds.to_netcdf(filename, compute=False)
+            writes.append(write)
 
-                    for ds, filename in zip(datasets, filenames):
-
-                        # Prepare the dataset for writing to a netCDF file without immediately computing
-                        write = ds.to_netcdf(filename, compute=False)
-                        writes.append(write)
-
-                    # Perform the actual write operations in parallel
-                    dask.compute(*writes)
+        # Perform the actual write operations in parallel
+        dask.compute(*writes)
 
     def to_yaml(self, filepath: str) -> None:
         """

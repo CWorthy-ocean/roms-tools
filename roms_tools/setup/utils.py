@@ -193,8 +193,6 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     timedelta_ns = np.array(days, dtype="timedelta64[D]").astype("timedelta64[ns]")
     time = xr.DataArray(timedelta_ns, dims=[time_dim])
     ds = ds.assign_coords({"time": time})
-    ds = ds.drop_vars(time_dim)
-
     return ds
 
 

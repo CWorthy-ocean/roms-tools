@@ -85,12 +85,11 @@ class Dataset:
         ds = self.load_data()
         self.check_dataset(ds)
 
-        print(ds)
         # Select relevant times
         if "time" in self.dim_names and self.start_time is not None:
             ds = self.add_time_info(ds)
             ds = self.select_relevant_times(ds)
-        print(ds)
+
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
 
@@ -291,7 +290,6 @@ class Dataset:
                 "Dataset does not contain any time information. Please check if the time dimension "
                 "is correctly named or if the dataset includes time data."
             )
-
         if not ds.sizes[time_dim]:
             raise ValueError("No matching times found in the dataset.")
 
@@ -733,12 +731,15 @@ class CESMDataset(Dataset):
                 chunks=chunks,
                 engine="netcdf4",
             )
-
-            if "time" not in ds.dims:
-                if "month" in ds.dims:
-                    self.dim_names["time"] = "month"
+            if "time" not in self.dim_names:
+                if "time" in ds.dims:
+                    self.dim_names["time"] = "time"
                 else:
-                    ds = ds.expand_dims({"time": 1})
+                    if "month" in ds.dims:
+                        self.dim_names["time"] = "month"
+                    else:
+                        ds = ds.expand_dims({"time": 1})
+                        self.dim_names["time"] = "time"
 
         return ds
 

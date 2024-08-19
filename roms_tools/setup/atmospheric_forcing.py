@@ -92,8 +92,6 @@ class AtmosphericForcing(ROMSToolsMixins):
             margin=2,
             straddle=straddle,
         )
-        print(data)
-        print(data.ds)
         vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
         vars_3d = []
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
@@ -145,8 +143,6 @@ class AtmosphericForcing(ROMSToolsMixins):
                 margin=2,
                 straddle=straddle,
             )
-            print(bgc_data)
-            print(bgc_data.ds)
 
             vars_2d = bgc_data.var_names.keys()
             vars_3d = []

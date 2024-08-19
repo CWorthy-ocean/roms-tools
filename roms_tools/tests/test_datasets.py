@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime
 import numpy as np
 import xarray as xr
-from roms_tools.setup.datasets import Dataset
+from roms_tools.setup.datasets import Dataset, ERA5Correction
 import tempfile
 import os
 
@@ -306,3 +306,65 @@ def test_check_if_global_with_non_global_dataset(non_global_dataset):
         assert not is_global
     finally:
         os.remove(filepath)
+
+
+def test_check_dataset(global_dataset):
+
+    ds = global_dataset.copy()
+    ds = ds.drop_vars("var")
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+        ds.to_netcdf(filepath)
+    try:
+        # Instantiate Dataset object using the temporary file
+        start_time = datetime(2022, 2, 1)
+        end_time = datetime(2022, 3, 1)
+        with pytest.raises(
+            ValueError, match="Dataset does not contain all required variables."
+        ):
+
+            Dataset(
+                filename=filepath,
+                var_names={"var": "var"},
+                start_time=start_time,
+                end_time=end_time,
+            )
+    finally:
+        os.remove(filepath)
+
+    ds = global_dataset.copy()
+    ds = ds.rename({"latitude": "lat", "longitude": "long"})
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+        ds.to_netcdf(filepath)
+    try:
+        # Instantiate Dataset object using the temporary file
+        start_time = datetime(2022, 2, 1)
+        end_time = datetime(2022, 3, 1)
+        with pytest.raises(
+            ValueError, match="Dataset does not contain all required dimensions."
+        ):
+
+            Dataset(
+                filename=filepath,
+                var_names={"var": "var"},
+                start_time=start_time,
+                end_time=end_time,
+            )
+    finally:
+        os.remove(filepath)
+
+
+def test_era5_correction_choose_subdomain():
+
+    data = ERA5Correction()
+    lats = data.ds.latitude[10:20]
+    lons = data.ds.longitude[10:20]
+    coords = {"latitude": lats, "longitude": lons}
+    data.choose_subdomain(coords, straddle=False)
+    assert (data.ds["latitude"] == lats).all()
+    assert (data.ds["longitude"] == lons).all()

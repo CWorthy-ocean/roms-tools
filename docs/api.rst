@@ -26,14 +26,13 @@ Tidal Forcing
 
    roms_tools.TidalForcing
 
-Atmospheric Forcing
---------------------
+Surface Forcing
+----------------
 
 .. autosummary::
    :toctree: generated/
 
-   roms_tools.AtmosphericForcing
-   roms_tools.SWRCorrection
+   roms_tools.SurfaceForcing
 
 Initial Conditions
 --------------------

@@ -1,11 +1,9 @@
 import pytest
 from datetime import datetime
-from roms_tools import Grid, AtmosphericForcing, SWRCorrection
+from roms_tools import Grid, SurfaceForcing
 from roms_tools.setup.download import download_test_data
-import xarray as xr
 import tempfile
 import os
-import pooch
 import numpy as np
 import textwrap
 
@@ -175,6 +173,11 @@ def grid_that_straddles_180_degree_meridian():
     ],
 )
 def test_successful_initialization_with_regional_data(grid_fixture, request):
+    """
+    Test successful initialization of SurfaceForcing with regional data.
+
+    Verifies that attributes are correctly set and data contains expected variables.
+    """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
@@ -182,18 +185,18 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
     )
 
-    assert atm_forcing.ds is not None
+    assert sfc_forcing.ds is not None
 
     grid.coarsen()
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         use_coarse_grid=True,
         start_time=start_time,
@@ -201,18 +204,17 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         physics_source={"name": "ERA5", "path": fname},
     )
 
-    assert isinstance(atm_forcing.ds, xr.Dataset)
-    assert "uwnd" in atm_forcing.ds
-    assert "vwnd" in atm_forcing.ds
-    assert "swrad" in atm_forcing.ds
-    assert "lwrad" in atm_forcing.ds
-    assert "Tair" in atm_forcing.ds
-    assert "qair" in atm_forcing.ds
-    assert "rain" in atm_forcing.ds
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
 
-    assert atm_forcing.start_time == start_time
-    assert atm_forcing.end_time == end_time
-    assert atm_forcing.physics_source == {
+    assert sfc_forcing.start_time == start_time
+    assert sfc_forcing.end_time == end_time
+    assert sfc_forcing.physics_source == {
         "name": "ERA5",
         "path": fname,
         "climatology": False,
@@ -227,6 +229,11 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
     ],
 )
 def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
+    """
+    Test handling of NaN values during initialization with regional data.
+
+    Ensures ValueError is raised if NaN values are detected in the dataset.
+    """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
@@ -236,7 +243,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
 
     with pytest.raises(ValueError, match="NaN values found"):
 
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid,
             start_time=start_time,
             end_time=end_time,
@@ -246,7 +253,7 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
     grid.coarsen()
 
     with pytest.raises(ValueError, match="NaN values found"):
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid,
             use_coarse_grid=True,
             start_time=start_time,
@@ -258,6 +265,11 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
 def test_no_longitude_intersection_initialization_with_regional_data(
     grid_that_straddles_180_degree_meridian,
 ):
+    """
+    Test initialization of SurfaceForcing with a grid that straddles the 180° meridian.
+
+    Ensures ValueError is raised when the longitude range does not intersect with the dataset.
+    """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
@@ -267,7 +279,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
         ValueError, match="Selected longitude range does not intersect with dataset"
     ):
 
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid_that_straddles_180_degree_meridian,
             start_time=start_time,
             end_time=end_time,
@@ -279,7 +291,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
     with pytest.raises(
         ValueError, match="Selected longitude range does not intersect with dataset"
     ):
-        AtmosphericForcing(
+        SurfaceForcing(
             grid=grid_that_straddles_180_degree_meridian,
             use_coarse_grid=True,
             start_time=start_time,
@@ -302,6 +314,12 @@ def test_no_longitude_intersection_initialization_with_regional_data(
     ],
 )
 def test_successful_initialization_with_global_data(grid_fixture, request):
+    """
+    Test initialization of SurfaceForcing with global data.
+
+    Verifies that the SurfaceForcing object is correctly initialized with global data,
+    including the correct handling of the grid and physics data. Checks both coarse and fine grid initialization.
+    """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
@@ -309,54 +327,60 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
     )
+    assert sfc_forcing.start_time == start_time
+    assert sfc_forcing.end_time == end_time
+    assert sfc_forcing.physics_source == {
+        "name": "ERA5",
+        "path": fname,
+        "climatology": False,
+    }
 
-    assert isinstance(atm_forcing.ds, xr.Dataset)
-    assert "uwnd" in atm_forcing.ds
-    assert "vwnd" in atm_forcing.ds
-    assert "swrad" in atm_forcing.ds
-    assert "lwrad" in atm_forcing.ds
-    assert "Tair" in atm_forcing.ds
-    assert "qair" in atm_forcing.ds
-    assert "rain" in atm_forcing.ds
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
+    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
 
     grid.coarsen()
 
-    atm_forcing = AtmosphericForcing(
+    sfc_forcing = SurfaceForcing(
         grid=grid,
         use_coarse_grid=True,
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
     )
-
-    assert isinstance(atm_forcing.ds, xr.Dataset)
-    assert "uwnd" in atm_forcing.ds
-    assert "vwnd" in atm_forcing.ds
-    assert "swrad" in atm_forcing.ds
-    assert "lwrad" in atm_forcing.ds
-    assert "Tair" in atm_forcing.ds
-    assert "qair" in atm_forcing.ds
-    assert "rain" in atm_forcing.ds
-
-    assert atm_forcing.start_time == start_time
-    assert atm_forcing.end_time == end_time
-    assert atm_forcing.physics_source == {
+    assert sfc_forcing.start_time == start_time
+    assert sfc_forcing.end_time == end_time
+    assert sfc_forcing.physics_source == {
         "name": "ERA5",
         "path": fname,
         "climatology": False,
     }
 
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
+    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
+
 
 @pytest.fixture
-def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
+def surface_forcing(grid_that_straddles_180_degree_meridian):
     """
-    Fixture for creating a AtmosphericForcing object.
+    Fixture for creating a SurfaceForcing object.
     """
 
     start_time = datetime(2020, 1, 31)
@@ -364,7 +388,7 @@ def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
 
     fname = download_test_data("ERA5_global_test_data.nc")
 
-    return AtmosphericForcing(
+    return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
@@ -373,44 +397,144 @@ def atmospheric_forcing(grid_that_straddles_180_degree_meridian):
 
 
 @pytest.fixture
-def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
+def corrected_surface_forcing(grid_that_straddles_180_degree_meridian):
     """
-    Fixture for creating a AtmosphericForcing object with shortwave radiation correction.
+    Fixture for creating a SurfaceForcing object with shortwave radiation correction.
     """
-    correction_filename = pooch.retrieve(
-        url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/SSR_correction.nc",
-        known_hash="a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
-    )
-    correction = SWRCorrection(
-        path=correction_filename,
-        varname="ssr_corr",
-        dim_names={
-            "longitude": "longitude",
-            "latitude": "latitude",
-            "time": "time",
-        },
-        climatology=True,
-    )
 
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
     fname = download_test_data("ERA5_global_test_data.nc")
 
-    return AtmosphericForcing(
+    return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
         physics_source={"name": "ERA5", "path": fname},
-        swr_correction=correction,
+        correct_radiation=True,
+    )
+
+
+@pytest.fixture
+def corrected_surface_forcing_with_bgc(grid_that_straddles_180_degree_meridian):
+    """
+    Fixture for creating a SurfaceForcing object with shortwave radiation correction and BGC.
+    """
+
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_global_test_data.nc")
+    fname_bgc = download_test_data("CESM_surface_global_test_data.nc")
+
+    return SurfaceForcing(
+        grid=grid_that_straddles_180_degree_meridian,
+        start_time=start_time,
+        end_time=end_time,
+        physics_source={"name": "ERA5", "path": fname},
+        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
+        correct_radiation=True,
+    )
+
+
+@pytest.fixture
+def corrected_surface_forcing_with_bgc_from_climatology(
+    grid_that_straddles_180_degree_meridian,
+):
+    """
+    Fixture for creating a SurfaceForcing object with shortwave radiation correction and BGC from climatology.
+    """
+
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_global_test_data.nc")
+    fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
+
+    return SurfaceForcing(
+        grid=grid_that_straddles_180_degree_meridian,
+        start_time=start_time,
+        end_time=end_time,
+        physics_source={"name": "ERA5", "path": fname},
+        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
+        correct_radiation=True,
+    )
+
+
+def test_time_attr_climatology(corrected_surface_forcing_with_bgc_from_climatology):
+    """
+    Test that the 'cycle_length' attribute is present in the time coordinate of the BGC dataset
+    when using climatology data.
+    """
+    assert hasattr(
+        corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"].time,
+        "cycle_length",
+    )
+
+
+def test_time_attr(corrected_surface_forcing_with_bgc):
+    """
+    Test that the 'cycle_length' attribute is not present in the time coordinate of the BGC dataset
+    when not using climatology data.
+    """
+    assert not hasattr(
+        corrected_surface_forcing_with_bgc.ds["bgc"].time, "cycle_length"
     )
 
 
 @pytest.mark.parametrize(
-    "atm_forcing_fixture, expected_swrad",
+    "sfc_forcing_fixture",
+    [
+        "corrected_surface_forcing_with_bgc",
+        "corrected_surface_forcing_with_bgc_from_climatology",
+    ],
+)
+def test_surface_forcing_creation(sfc_forcing_fixture, request):
+    """
+    Test the creation and initialization of the SurfaceForcing object.
+
+    Verifies that the SurfaceForcing object is properly created with correct attributes,
+    including physics and BGC sources. Ensures that expected variables are present in the dataset
+    and that attributes match the given configurations.
+    """
+
+    fname = download_test_data("ERA5_global_test_data.nc")
+
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+
+    assert sfc_forcing.start_time == datetime(2020, 1, 31)
+    assert sfc_forcing.end_time == datetime(2020, 2, 2)
+    assert sfc_forcing.physics_source == {
+        "name": "ERA5",
+        "path": fname,
+        "climatology": False,
+    }
+    assert sfc_forcing.bgc_source["name"] == "CESM_REGRIDDED"
+
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
+    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
+
+    assert "pco2_air" in sfc_forcing.ds["bgc"]
+    assert "pco2_air_alt" in sfc_forcing.ds["bgc"]
+    assert "iron" in sfc_forcing.ds["bgc"]
+    assert "dust" in sfc_forcing.ds["bgc"]
+    assert "nox" in sfc_forcing.ds["bgc"]
+    assert "nhy" in sfc_forcing.ds["bgc"]
+    assert sfc_forcing.ds["bgc"].attrs["bgc_source"] == "CESM_REGRIDDED"
+
+
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture, expected_swrad",
     [
         (
-            "atmospheric_forcing",
+            "surface_forcing",
             [
                 np.array(
                     [
@@ -550,7 +674,7 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
             ],
         ),
         (
-            "corrected_atmospheric_forcing",
+            "corrected_surface_forcing",
             [
                 np.array(
                     [
@@ -691,16 +815,16 @@ def corrected_atmospheric_forcing(grid_that_straddles_180_degree_meridian):
         ),
     ],
 )
-def test_atmospheric_forcing_data_consistency_plot_save(
-    atm_forcing_fixture, expected_swrad, request, tmp_path
+def test_surface_forcing_data_consistency_plot_save(
+    sfc_forcing_fixture, expected_swrad, request, tmp_path
 ):
     """
-    Test that the data within the AtmosphericForcing object remains consistent.
+    Test that the data within the SurfaceForcing object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
     """
-    atm_forcing = request.getfixturevalue(atm_forcing_fixture)
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
-    atm_forcing.ds.load()
+    sfc_forcing.ds.load()
 
     expected_uwnd = np.array(
         [
@@ -1518,22 +1642,24 @@ def test_atmospheric_forcing_data_consistency_plot_save(
     )
 
     # Check the values in the dataset
-    assert np.allclose(atm_forcing.ds["uwnd"].values, expected_uwnd)
-    assert np.allclose(atm_forcing.ds["vwnd"].values, expected_vwnd)
-    assert np.allclose(atm_forcing.ds["swrad"].values, expected_swrad)
-    assert np.allclose(atm_forcing.ds["lwrad"].values, expected_lwrad)
-    assert np.allclose(atm_forcing.ds["Tair"].values, expected_Tair)
-    assert np.allclose(atm_forcing.ds["qair"].values, expected_qair)
-    assert np.allclose(atm_forcing.ds["rain"].values, expected_rain)
+    ds = sfc_forcing.ds["physics"]
 
-    atm_forcing.plot(varname="uwnd", time=0)
+    assert np.allclose(ds["uwnd"].values, expected_uwnd)
+    assert np.allclose(ds["vwnd"].values, expected_vwnd)
+    assert np.allclose(ds["swrad"].values, expected_swrad)
+    assert np.allclose(ds["lwrad"].values, expected_lwrad)
+    assert np.allclose(ds["Tair"].values, expected_Tair)
+    assert np.allclose(ds["qair"].values, expected_qair)
+    assert np.allclose(ds["rain"].values, expected_rain)
+
+    sfc_forcing.plot(varname="uwnd", time=0)
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
-    atm_forcing.save(filepath)
-    extended_filepath = filepath + ".20200201-01.nc"
+    sfc_forcing.save(filepath)
+    extended_filepath = filepath + "_physics_20200201-01.nc"
 
     try:
         assert os.path.exists(extended_filepath)
@@ -1541,34 +1667,927 @@ def test_atmospheric_forcing_data_consistency_plot_save(
         os.remove(extended_filepath)
 
 
+def test_surface_forcing_bgc_data_consistency_plot_save(
+    corrected_surface_forcing_with_bgc,
+):
+    """
+    Test that the BGC data within the SurfaceForcing object remains consistent.
+    Also test plot and save methods in the same test since we dask arrays are already computed.
+    """
+
+    # Check the values in the dataset
+    corrected_surface_forcing_with_bgc.plot(varname="pco2_air", time=0)
+
+    expected_pco2_air = np.array(
+        [
+            [
+                [
+                    404.22748,
+                    413.57806,
+                    415.53137,
+                    412.00464,
+                    408.90378,
+                    403.009,
+                    399.49335,
+                ],
+                [
+                    418.73532,
+                    426.9579,
+                    437.74713,
+                    441.56055,
+                    442.04376,
+                    388.9692,
+                    388.6991,
+                ],
+                [
+                    428.60126,
+                    426.8612,
+                    432.61078,
+                    436.4323,
+                    403.53485,
+                    331.7332,
+                    343.11868,
+                ],
+                [
+                    401.68954,
+                    425.14883,
+                    436.7216,
+                    455.18954,
+                    357.83847,
+                    316.44016,
+                    354.0953,
+                ],
+                [
+                    430.29868,
+                    398.86063,
+                    400.73868,
+                    399.2477,
+                    357.3982,
+                    340.97977,
+                    354.399,
+                ],
+                [
+                    425.6459,
+                    403.8653,
+                    375.61847,
+                    368.8612,
+                    353.72507,
+                    340.38684,
+                    352.58127,
+                ],
+                [
+                    417.63498,
+                    414.74066,
+                    393.7536,
+                    361.35803,
+                    357.5395,
+                    353.18665,
+                    361.26233,
+                ],
+            ]
+        ],
+        dtype=np.float32,
+    )
+
+    assert np.allclose(
+        corrected_surface_forcing_with_bgc.ds["bgc"]["pco2_air"].values,
+        expected_pco2_air,
+    )
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath = tmpfile.name
+
+    corrected_surface_forcing_with_bgc.save(filepath)
+    physics_filepath = filepath + "_physics_20200201-01.nc"
+    bgc_filepath = filepath + "_bgc_20200201-01.nc"
+
+    try:
+        assert os.path.exists(physics_filepath)
+        assert os.path.exists(bgc_filepath)
+    finally:
+        os.remove(physics_filepath)
+        os.remove(bgc_filepath)
+
+
+def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
+    corrected_surface_forcing_with_bgc_from_climatology,
+):
+    """
+    Test that the BGC data within the SurfaceForcing object remains consistent.
+    Also test plot and save methods in the same test since we dask arrays are already computed.
+    """
+
+    # Check the values in the dataset
+    corrected_surface_forcing_with_bgc_from_climatology.plot(varname="pco2_air", time=0)
+
+    expected_pco2_air = np.array(
+        [
+            [
+                [
+                    398.14603,
+                    404.46167,
+                    407.15097,
+                    405.2776,
+                    404.13507,
+                    400.7547,
+                    398.85083,
+                ],
+                [
+                    409.1616,
+                    415.79483,
+                    425.67477,
+                    427.0116,
+                    430.06903,
+                    395.88733,
+                    390.09415,
+                ],
+                [
+                    417.66122,
+                    414.91043,
+                    417.62463,
+                    422.71118,
+                    412.35883,
+                    368.0207,
+                    366.4949,
+                ],
+                [
+                    387.8851,
+                    412.7159,
+                    418.03122,
+                    449.04837,
+                    382.74442,
+                    324.06628,
+                    360.40964,
+                ],
+                [
+                    416.6366,
+                    390.45486,
+                    390.24994,
+                    392.66037,
+                    374.50775,
+                    342.20087,
+                    352.27393,
+                ],
+                [
+                    411.73032,
+                    394.3381,
+                    370.42654,
+                    366.05936,
+                    353.22403,
+                    343.92136,
+                    341.2689,
+                ],
+                [
+                    407.44583,
+                    415.57016,
+                    384.86288,
+                    360.26337,
+                    356.596,
+                    352.26584,
+                    357.4343,
+                ],
+            ],
+            [
+                [
+                    404.22748,
+                    413.57806,
+                    415.53137,
+                    412.00464,
+                    408.90378,
+                    403.009,
+                    399.49335,
+                ],
+                [
+                    418.73532,
+                    426.9579,
+                    437.74713,
+                    441.56055,
+                    442.04376,
+                    388.9692,
+                    388.6991,
+                ],
+                [
+                    428.60126,
+                    426.8612,
+                    432.61078,
+                    436.4323,
+                    403.53485,
+                    331.7332,
+                    343.11868,
+                ],
+                [
+                    401.68954,
+                    425.14883,
+                    436.7216,
+                    455.18954,
+                    357.83847,
+                    316.44016,
+                    354.0953,
+                ],
+                [
+                    430.29868,
+                    398.86063,
+                    400.73868,
+                    399.2477,
+                    357.3982,
+                    340.97977,
+                    354.399,
+                ],
+                [
+                    425.6459,
+                    403.8653,
+                    375.61847,
+                    368.8612,
+                    353.72507,
+                    340.38684,
+                    352.58127,
+                ],
+                [
+                    417.63498,
+                    414.74066,
+                    393.7536,
+                    361.35803,
+                    357.5395,
+                    353.18665,
+                    361.26233,
+                ],
+            ],
+            [
+                [
+                    410.8616,
+                    423.02103,
+                    423.09604,
+                    419.10156,
+                    414.9103,
+                    407.07053,
+                    401.62665,
+                ],
+                [
+                    429.6854,
+                    434.3063,
+                    439.06766,
+                    443.2926,
+                    444.38937,
+                    392.52994,
+                    387.95245,
+                ],
+                [
+                    438.13297,
+                    440.14212,
+                    446.70282,
+                    445.9411,
+                    395.38516,
+                    326.51703,
+                    338.68753,
+                ],
+                [
+                    415.84042,
+                    440.29053,
+                    457.30914,
+                    440.55865,
+                    349.61758,
+                    325.13593,
+                    353.53876,
+                ],
+                [430.2406, 410.839, 411.3754, 402.27014, 358.84747, 346.353, 354.80054],
+                [
+                    435.1648,
+                    413.51578,
+                    385.1607,
+                    372.467,
+                    354.8004,
+                    343.80344,
+                    351.89355,
+                ],
+                [
+                    429.8856,
+                    423.3144,
+                    405.6345,
+                    363.35962,
+                    357.49466,
+                    354.8506,
+                    361.87515,
+                ],
+            ],
+            [
+                [
+                    404.8583,
+                    415.5544,
+                    416.2556,
+                    410.7852,
+                    405.22998,
+                    398.49936,
+                    395.41647,
+                ],
+                [
+                    430.01413,
+                    432.6222,
+                    436.35675,
+                    440.0094,
+                    442.04233,
+                    393.30008,
+                    387.82687,
+                ],
+                [
+                    439.19922,
+                    439.70526,
+                    444.8726,
+                    444.12234,
+                    384.99542,
+                    326.7951,
+                    337.15298,
+                ],
+                [
+                    423.3211,
+                    442.34293,
+                    452.6943,
+                    422.3202,
+                    350.5441,
+                    333.0299,
+                    353.19067,
+                ],
+                [
+                    435.60132,
+                    416.37122,
+                    412.31454,
+                    396.5343,
+                    360.8705,
+                    351.0615,
+                    354.82278,
+                ],
+                [
+                    442.0921,
+                    421.49625,
+                    389.07895,
+                    372.72894,
+                    356.47137,
+                    347.64758,
+                    349.50967,
+                ],
+                [
+                    423.49146,
+                    437.96732,
+                    416.40515,
+                    364.74283,
+                    357.54456,
+                    357.6978,
+                    363.92026,
+                ],
+            ],
+            [
+                [
+                    364.66605,
+                    348.29202,
+                    327.21948,
+                    312.5929,
+                    310.1843,
+                    311.27948,
+                    319.08026,
+                ],
+                [
+                    405.23355,
+                    383.24057,
+                    369.13156,
+                    379.3948,
+                    376.67355,
+                    333.73822,
+                    331.91266,
+                ],
+                [
+                    405.19348,
+                    396.86462,
+                    388.22614,
+                    390.81296,
+                    335.50076,
+                    305.39764,
+                    324.62347,
+                ],
+                [
+                    394.32132,
+                    420.4284,
+                    434.33023,
+                    402.13177,
+                    322.8607,
+                    324.56433,
+                    335.1503,
+                ],
+                [438.04025, 402.429, 398.4195, 385.3214, 360.3192, 352.68503, 345.7393],
+                [
+                    434.2024,
+                    417.87787,
+                    384.5583,
+                    369.64655,
+                    356.73856,
+                    350.8263,
+                    351.05643,
+                ],
+                [
+                    400.25546,
+                    432.73685,
+                    409.8863,
+                    364.9216,
+                    359.2582,
+                    361.94647,
+                    366.58585,
+                ],
+            ],
+            [
+                [
+                    320.0029,
+                    330.2735,
+                    303.61395,
+                    307.58713,
+                    320.75143,
+                    331.16663,
+                    335.8144,
+                ],
+                [353.0393, 332.46973, 303.4242, 296.3255, 298.1235, 326.996, 332.63177],
+                [333.67642, 326.4859, 311.252, 282.5213, 294.0293, 341.41116, 356.1976],
+                [
+                    279.0954,
+                    313.43964,
+                    318.8591,
+                    284.96204,
+                    266.36942,
+                    287.91168,
+                    343.8091,
+                ],
+                [
+                    336.50403,
+                    312.51163,
+                    317.2202,
+                    300.65918,
+                    293.41602,
+                    290.27216,
+                    345.08566,
+                ],
+                [
+                    332.25598,
+                    352.03445,
+                    350.67816,
+                    345.28265,
+                    347.45816,
+                    351.7342,
+                    352.62457,
+                ],
+                [
+                    337.58936,
+                    362.37796,
+                    386.74255,
+                    366.58105,
+                    361.49588,
+                    365.00146,
+                    368.1141,
+                ],
+            ],
+            [
+                [
+                    305.92316,
+                    306.93582,
+                    320.42093,
+                    334.3491,
+                    350.7195,
+                    373.15265,
+                    368.141,
+                ],
+                [
+                    293.1966,
+                    303.76968,
+                    312.18463,
+                    316.862,
+                    324.14975,
+                    362.1812,
+                    373.89975,
+                ],
+                [
+                    287.50125,
+                    288.732,
+                    292.04642,
+                    304.70465,
+                    342.6752,
+                    399.62433,
+                    398.39957,
+                ],
+                [
+                    285.4672,
+                    281.2273,
+                    281.9908,
+                    287.84683,
+                    327.07794,
+                    345.76187,
+                    364.13577,
+                ],
+                [
+                    317.54077,
+                    318.2395,
+                    314.44913,
+                    296.35068,
+                    285.5732,
+                    311.2991,
+                    344.32465,
+                ],
+                [
+                    340.03323,
+                    356.31216,
+                    360.23056,
+                    346.04034,
+                    301.41037,
+                    286.5328,
+                    332.2325,
+                ],
+                [
+                    367.48395,
+                    388.24136,
+                    413.18228,
+                    357.0047,
+                    337.4069,
+                    344.10382,
+                    354.71527,
+                ],
+            ],
+            [
+                [
+                    350.15866,
+                    350.08246,
+                    359.35062,
+                    374.62405,
+                    385.71454,
+                    393.22922,
+                    405.19373,
+                ],
+                [
+                    346.96497,
+                    341.0631,
+                    348.13092,
+                    356.104,
+                    362.08224,
+                    402.34842,
+                    413.2263,
+                ],
+                [
+                    335.66232,
+                    335.02692,
+                    333.9118,
+                    345.72632,
+                    377.76294,
+                    438.64017,
+                    440.5227,
+                ],
+                [
+                    336.00873,
+                    331.4235,
+                    330.77084,
+                    324.82394,
+                    364.6463,
+                    371.63107,
+                    393.25018,
+                ],
+                [
+                    376.79837,
+                    364.86725,
+                    352.64667,
+                    332.04468,
+                    330.4255,
+                    342.30908,
+                    369.07553,
+                ],
+                [
+                    385.23654,
+                    392.9487,
+                    391.2472,
+                    365.89276,
+                    319.08,
+                    340.74893,
+                    358.08716,
+                ],
+                [
+                    402.53976,
+                    408.4651,
+                    418.34943,
+                    391.3722,
+                    364.6873,
+                    334.38284,
+                    338.2357,
+                ],
+            ],
+            [
+                [
+                    384.82806,
+                    385.0281,
+                    387.55463,
+                    393.90097,
+                    400.93903,
+                    410.05496,
+                    414.2652,
+                ],
+                [
+                    373.90726,
+                    375.20236,
+                    376.56927,
+                    380.03513,
+                    377.76764,
+                    408.7514,
+                    421.60242,
+                ],
+                [
+                    368.0287,
+                    365.7465,
+                    365.68936,
+                    370.90225,
+                    395.10336,
+                    452.66885,
+                    456.04254,
+                ],
+                [
+                    359.98935,
+                    355.42517,
+                    356.04587,
+                    353.28638,
+                    387.7216,
+                    389.9909,
+                    412.54553,
+                ],
+                [
+                    401.3988,
+                    385.66016,
+                    374.76376,
+                    361.84274,
+                    364.27496,
+                    369.83444,
+                    391.7403,
+                ],
+                [
+                    406.04547,
+                    410.4884,
+                    404.08243,
+                    390.9909,
+                    364.52176,
+                    372.848,
+                    380.68518,
+                ],
+                [
+                    421.35165,
+                    423.7671,
+                    430.52847,
+                    414.28665,
+                    377.83176,
+                    361.36493,
+                    363.71622,
+                ],
+            ],
+            [
+                [
+                    384.3036,
+                    386.03488,
+                    390.42053,
+                    393.7354,
+                    398.90906,
+                    407.59833,
+                    414.67212,
+                ],
+                [
+                    383.4824,
+                    376.4454,
+                    365.8679,
+                    370.3737,
+                    384.7454,
+                    396.86765,
+                    401.57266,
+                ],
+                [
+                    384.68747,
+                    384.93744,
+                    376.9039,
+                    374.37,
+                    387.89017,
+                    425.60678,
+                    423.83215,
+                ],
+                [
+                    349.58817,
+                    353.14197,
+                    354.39044,
+                    362.20624,
+                    376.7501,
+                    388.17532,
+                    397.94363,
+                ],
+                [
+                    375.7726,
+                    367.9115,
+                    364.30243,
+                    357.57803,
+                    359.09372,
+                    378.4864,
+                    384.53183,
+                ],
+                [
+                    392.0134,
+                    393.79785,
+                    389.5198,
+                    381.37845,
+                    367.65408,
+                    371.40897,
+                    376.8739,
+                ],
+                [
+                    411.46152,
+                    413.26355,
+                    417.53354,
+                    400.22797,
+                    378.11246,
+                    364.16946,
+                    366.87015,
+                ],
+            ],
+            [
+                [
+                    388.30124,
+                    388.92444,
+                    384.93433,
+                    385.27805,
+                    388.80548,
+                    399.42645,
+                    405.78516,
+                ],
+                [
+                    379.37393,
+                    383.77905,
+                    381.04263,
+                    387.48773,
+                    383.45462,
+                    388.63864,
+                    392.0524,
+                ],
+                [
+                    382.59354,
+                    389.78592,
+                    383.2384,
+                    384.32312,
+                    393.3613,
+                    401.43216,
+                    400.07477,
+                ],
+                [
+                    347.17233,
+                    368.4824,
+                    367.16025,
+                    390.05325,
+                    381.87103,
+                    375.94528,
+                    384.04514,
+                ],
+                [
+                    363.02823,
+                    362.139,
+                    365.81894,
+                    370.0153,
+                    376.21783,
+                    376.71158,
+                    375.15192,
+                ],
+                [
+                    373.53513,
+                    377.82776,
+                    376.80414,
+                    377.8196,
+                    376.17963,
+                    375.08887,
+                    370.21902,
+                ],
+                [
+                    384.6436,
+                    392.61368,
+                    397.12335,
+                    392.19543,
+                    374.7854,
+                    366.11572,
+                    364.30585,
+                ],
+            ],
+            [
+                [
+                    397.632,
+                    401.96716,
+                    398.11554,
+                    400.73257,
+                    400.37378,
+                    401.6573,
+                    404.91113,
+                ],
+                [
+                    406.49796,
+                    414.25653,
+                    415.96265,
+                    422.45657,
+                    425.28955,
+                    399.92108,
+                    391.84106,
+                ],
+                [
+                    400.9218,
+                    412.2611,
+                    414.38895,
+                    411.9613,
+                    410.46597,
+                    382.8714,
+                    379.89563,
+                ],
+                [
+                    367.06268,
+                    389.9282,
+                    390.5468,
+                    416.58414,
+                    404.75714,
+                    356.0946,
+                    370.88605,
+                ],
+                [
+                    379.26697,
+                    372.37427,
+                    374.7852,
+                    381.90277,
+                    392.6096,
+                    369.72604,
+                    364.15964,
+                ],
+                [
+                    385.33365,
+                    380.70264,
+                    369.23062,
+                    368.49274,
+                    371.57126,
+                    372.64706,
+                    358.38586,
+                ],
+                [
+                    391.62207,
+                    403.18228,
+                    385.95084,
+                    370.7342,
+                    364.23724,
+                    361.9076,
+                    362.69427,
+                ],
+            ],
+        ],
+        dtype=np.float32,
+    )
+
+    assert np.allclose(
+        corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"][
+            "pco2_air"
+        ].values,
+        expected_pco2_air,
+    )
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath = tmpfile.name
+
+    corrected_surface_forcing_with_bgc_from_climatology.save(filepath)
+    physics_filepath = filepath + "_physics_20200201-01.nc"
+    bgc_filepath = filepath + "_bgc_clim.nc"
+
+    try:
+        assert os.path.exists(physics_filepath)
+        assert os.path.exists(bgc_filepath)
+    finally:
+        os.remove(physics_filepath)
+        os.remove(bgc_filepath)
+
+
 @pytest.mark.parametrize(
-    "atm_forcing_fixture",
+    "sfc_forcing_fixture",
     [
-        "atmospheric_forcing",
-        "corrected_atmospheric_forcing",
+        "surface_forcing",
+        "corrected_surface_forcing",
+        "corrected_surface_forcing_with_bgc",
+        "corrected_surface_forcing_with_bgc_from_climatology",
     ],
 )
-def test_roundtrip_yaml(atm_forcing_fixture, request):
-    """Test that creating an AtmosphericForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+def test_roundtrip_yaml(sfc_forcing_fixture, request):
+    """Test that creating an SurfaceForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
-    atm_forcing = request.getfixturevalue(atm_forcing_fixture)
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
 
     try:
-        atm_forcing.to_yaml(filepath)
+        sfc_forcing.to_yaml(filepath)
 
-        atm_forcing_from_file = AtmosphericForcing.from_yaml(filepath)
+        sfc_forcing_from_file = SurfaceForcing.from_yaml(filepath)
 
-        assert atm_forcing == atm_forcing_from_file
+        assert sfc_forcing == sfc_forcing_from_file
 
     finally:
         os.remove(filepath)
 
 
-def test_from_yaml_missing_atmospheric_forcing():
+def test_from_yaml_missing_surface_forcing():
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -1596,112 +2615,8 @@ def test_from_yaml_missing_atmospheric_forcing():
     try:
         with pytest.raises(
             ValueError,
-            match="No AtmosphericForcing configuration found in the YAML file.",
+            match="No SurfaceForcing configuration found in the YAML file.",
         ):
-            AtmosphericForcing.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
-
-
-# SWRCorrection unit checks
-
-
-@pytest.fixture
-def swr_correction():
-
-    correction_filename = pooch.retrieve(
-        url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/SSR_correction.nc",
-        known_hash="a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
-    )
-    correction_filename
-
-    return SWRCorrection(
-        path=correction_filename,
-        varname="ssr_corr",
-        dim_names={"time": "time", "latitude": "latitude", "longitude": "longitude"},
-        climatology=True,
-    )
-
-
-def test_check_dataset(swr_correction):
-
-    ds = swr_correction.ds.copy()
-    ds = ds.drop_vars("ssr_corr")
-    with pytest.raises(ValueError):
-        swr_correction._check_dataset(ds)
-
-    ds = swr_correction.ds.copy()
-    ds = ds.rename({"latitude": "lat", "longitude": "long"})
-    with pytest.raises(ValueError):
-        swr_correction._check_dataset(ds)
-
-
-def test_ensure_latitude_ascending(swr_correction):
-
-    ds = swr_correction.ds.copy()
-
-    ds["latitude"] = ds["latitude"][::-1]
-    ds = swr_correction._ensure_latitude_ascending(ds)
-    assert np.all(np.diff(ds["latitude"]) > 0)
-
-
-def test_handle_longitudes(swr_correction):
-    swr_correction.ds["longitude"] = (
-        (swr_correction.ds["longitude"] + 180) % 360
-    ) - 180  # Convert to [-180, 180]
-    swr_correction._handle_longitudes(straddle=False)
-    assert np.all(
-        (swr_correction.ds["longitude"] >= 0) & (swr_correction.ds["longitude"] <= 360)
-    )
-
-
-def test_choose_subdomain(swr_correction):
-    lats = swr_correction.ds.latitude[10:20]
-    lons = swr_correction.ds.longitude[10:20]
-    coords = {"latitude": lats, "longitude": lons}
-    subdomain = swr_correction._choose_subdomain(coords)
-    assert (subdomain["latitude"] == lats).all()
-    assert (subdomain["longitude"] == lons).all()
-
-
-def test_interpolate_temporally(swr_correction):
-    field = swr_correction.ds["ssr_corr"]
-
-    fname = download_test_data("ERA5_regional_test_data.nc")
-    era5_times = xr.open_dataset(fname).time
-    interpolated_field = swr_correction._interpolate_temporally(field, era5_times)
-    assert len(interpolated_field.time) == len(era5_times)
-
-
-def test_from_yaml_missing_swr_correction():
-    yaml_content = textwrap.dedent(
-        """\
-    ---
-    roms_tools_version: 0.0.0
-    ---
-    Grid:
-      nx: 100
-      ny: 100
-      size_x: 1800
-      size_y: 2400
-      center_lon: -10
-      center_lat: 61
-      rot: -20
-      topography_source: ETOPO5
-      smooth_factor: 8
-      hmin: 5.0
-      rmax: 0.2
-    """
-    )
-
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
-
-    try:
-        with pytest.raises(
-            ValueError, match="No SWRCorrection configuration found in the YAML file."
-        ):
-            SWRCorrection.from_yaml(yaml_filepath)
+            SurfaceForcing.from_yaml(yaml_filepath)
     finally:
         os.remove(yaml_filepath)

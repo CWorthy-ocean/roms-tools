@@ -290,9 +290,8 @@ class AtmosphericForcing(ROMSToolsMixins):
         ds = ds.assign_coords({"time": sfc_time})
         ds["time"].attrs[
             "long_name"
-        ] = f"time since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
-        ds["time"].attrs["units"] = "days"
-
+        ] = f"days since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
+        ds["time"].encoding["units"] = "days"
         if data.climatology:
             ds["time"].attrs["cycle_length"] = 365.25
 

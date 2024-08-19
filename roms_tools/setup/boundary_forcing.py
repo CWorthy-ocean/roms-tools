@@ -283,7 +283,7 @@ class BoundaryForcing(ROMSToolsMixins):
         ds = ds.assign_coords({"bry_time": bry_time})
         ds["bry_time"].attrs[
             "long_name"
-        ] = f"time since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='ns')}"
+        ] = f"nanoseconds since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='ns')}"
         ds["bry_time"].encoding["units"] = "nanoseconds"
         ds = ds.swap_dims({"time": "bry_time"})
         ds = ds.drop_vars("time")

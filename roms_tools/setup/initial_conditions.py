@@ -243,7 +243,7 @@ class InitialConditions(ROMSToolsMixins):
         ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
         ds["ocean_time"].attrs[
             "long_name"
-        ] = f"time since {np.datetime_as_string(model_reference_date, unit='D')}"
+        ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='D')}"
         ds["ocean_time"].attrs["units"] = "seconds"
 
         ds.attrs["theta_s"] = self.vertical_coordinate.ds["theta_s"].item()

@@ -526,7 +526,9 @@ class SurfaceForcing(ROMSToolsMixins):
         }
         # Include bgc_source if it's not None
         if self.bgc_source is not None:
-            surface_forcing_data["SurfaceForcing"]["bgc_source"] = self.bgc_source
+            surface_forcing_data["SurfaceForcing"][
+                "bgc_source"
+            ] = self.bgc_source
 
         # Merge YAML data while excluding empty sections
         yaml_data = {
@@ -572,7 +574,9 @@ class SurfaceForcing(ROMSToolsMixins):
                 surface_forcing_data = doc["SurfaceForcing"]
 
         if surface_forcing_data is None:
-            raise ValueError("No SurfaceForcing configuration found in the YAML file.")
+            raise ValueError(
+                "No SurfaceForcing configuration found in the YAML file."
+            )
 
         # Convert from string to datetime
         for date_string in ["model_reference_date", "start_time", "end_time"]:

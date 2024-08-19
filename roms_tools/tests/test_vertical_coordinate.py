@@ -1,31 +1,22 @@
 import pytest
 import numpy as np
-import tempfile
-import os
-from roms_tools import Grid, VerticalCoordinate
-import textwrap
+from roms_tools import Grid
 
 
-@pytest.fixture
-def example_grid():
-    """
-    Fixture for creating a Grid object.
-    """
-    grid = Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10
-    )
-
-    return grid
-
-
-def test_invalid_theta_s_value(example_grid):
+def test_invalid_theta_s_value():
     """
     Test the validation of the theta_s value.
     """
     with pytest.raises(ValueError):
 
-        VerticalCoordinate(
-            grid=example_grid,
+        Grid(
+            nx=2,
+            ny=2,
+            size_x=500,
+            size_y=1000,
+            center_lon=0,
+            center_lat=55,
+            rot=10,
             N=3,
             theta_s=11.0,  # Invalid value, should be 0 < theta_s <= 10
             theta_b=2.0,
@@ -33,14 +24,19 @@ def test_invalid_theta_s_value(example_grid):
         )
 
 
-def test_invalid_theta_b_value(example_grid):
+def test_invalid_theta_b_value():
     """
     Test the validation of the theta_b value.
     """
     with pytest.raises(ValueError):
-
-        VerticalCoordinate(
-            grid=example_grid,
+        Grid(
+            nx=2,
+            ny=2,
+            size_x=500,
+            size_y=1000,
+            center_lon=0,
+            center_lat=55,
+            rot=10,
             N=3,
             theta_s=5.0,
             theta_b=5.0,  # Invalid value, should be 0 < theta_b <= 4
@@ -48,18 +44,24 @@ def test_invalid_theta_b_value(example_grid):
         )
 
 
-@pytest.fixture
-def vertical_coordinate(example_grid):
-
-    return VerticalCoordinate(
-        grid=example_grid, N=3, theta_s=5.0, theta_b=2.0, hc=250.0
-    )
-
-
-def test_vertical_coordinate_data_consistency(vertical_coordinate, tmp_path):
+def test_vertical_coordinate_data_consistency():
     """
     Test that the data within the VerticalCoordinate object remains consistent.
     """
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
 
     # Define the expected data
     expected_sc_r = np.array([-0.8333333, -0.5, -0.16666667], dtype=np.float32)
@@ -219,119 +221,45 @@ def test_vertical_coordinate_data_consistency(vertical_coordinate, tmp_path):
         dtype=np.float32,
     )
     # Check the values in the dataset
-    assert np.allclose(vertical_coordinate.ds["sc_r"].values, expected_sc_r)
-    assert np.allclose(vertical_coordinate.ds["Cs_r"].values, expected_Cs_r)
+    assert np.allclose(grid.ds["sc_r"].values, expected_sc_r)
+    assert np.allclose(grid.ds["Cs_r"].values, expected_Cs_r)
+    assert np.allclose(grid.ds["layer_depth_rho"].values, expected_layer_depth_rho)
+    assert np.allclose(grid.ds["layer_depth_u"].values, expected_layer_depth_u)
+    assert np.allclose(grid.ds["layer_depth_v"].values, expected_layer_depth_v)
     assert np.allclose(
-        vertical_coordinate.ds["layer_depth_rho"].values, expected_layer_depth_rho
-    )
-    assert np.allclose(
-        vertical_coordinate.ds["layer_depth_u"].values, expected_layer_depth_u
-    )
-    assert np.allclose(
-        vertical_coordinate.ds["layer_depth_v"].values, expected_layer_depth_v
-    )
-    assert np.allclose(
-        vertical_coordinate.ds["interface_depth_rho"].values,
+        grid.ds["interface_depth_rho"].values,
         expected_interface_depth_rho,
     )
-    assert np.allclose(
-        vertical_coordinate.ds["interface_depth_u"].values, expected_interface_depth_u
+    assert np.allclose(grid.ds["interface_depth_u"].values, expected_interface_depth_u)
+    assert np.allclose(grid.ds["interface_depth_v"].values, expected_interface_depth_v)
+
+
+def test_plot():
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
     )
-    assert np.allclose(
-        vertical_coordinate.ds["interface_depth_v"].values, expected_interface_depth_v
-    )
-
-
-def test_plot(vertical_coordinate):
-    vertical_coordinate.plot("layer_depth_u", s=0)
-    vertical_coordinate.plot("layer_depth_rho", s=-1)
-    vertical_coordinate.plot("interface_depth_v", s=-1)
-    vertical_coordinate.plot("layer_depth_rho", eta=0)
-    vertical_coordinate.plot("layer_depth_u", eta=0)
-    vertical_coordinate.plot("layer_depth_v", eta=0)
-    vertical_coordinate.plot("interface_depth_rho", eta=0)
-    vertical_coordinate.plot("interface_depth_u", eta=0)
-    vertical_coordinate.plot("interface_depth_v", eta=0)
-    vertical_coordinate.plot("layer_depth_rho", xi=0)
-    vertical_coordinate.plot("layer_depth_u", xi=0)
-    vertical_coordinate.plot("layer_depth_v", xi=0)
-    vertical_coordinate.plot("interface_depth_rho", xi=0)
-    vertical_coordinate.plot("interface_depth_u", xi=0)
-    vertical_coordinate.plot("interface_depth_v", xi=0)
-
-
-def test_save(vertical_coordinate, tmp_path):
-    filepath = tmp_path / "vertical_coordinate.nc"
-    vertical_coordinate.save(filepath)
-    assert filepath.exists()
-
-
-def test_roundtrip(vertical_coordinate):
-    """Test that creating a vertical_coordinate, saving it to file, and re-opening it is the same as just creating it."""
-
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-
-    try:
-        vertical_coordinate.save(filepath)
-
-        vertical_coordinate_from_file = VerticalCoordinate.from_file(filepath)
-
-        assert vertical_coordinate.ds == vertical_coordinate_from_file.ds
-
-    finally:
-        os.remove(filepath)
-
-
-def test_roundtrip_yaml(vertical_coordinate):
-    """Test that creating a VerticalCoordinate object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
-
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-
-    try:
-        vertical_coordinate.to_yaml(filepath)
-
-        vertical_coordinate_from_file = VerticalCoordinate.from_yaml(filepath)
-
-        assert vertical_coordinate == vertical_coordinate_from_file
-
-    finally:
-        os.remove(filepath)
-
-
-def test_from_yaml_missing_vertical_coordinate():
-    yaml_content = textwrap.dedent(
-        """\
-    ---
-    roms_tools_version: 0.0.0
-    ---
-    Grid:
-      nx: 100
-      ny: 100
-      size_x: 1800
-      size_y: 2400
-      center_lon: -10
-      center_lat: 61
-      rot: -20
-      topography_source: ETOPO5
-      smooth_factor: 8
-      hmin: 5.0
-      rmax: 0.2
-    """
-    )
-
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
-
-    try:
-        with pytest.raises(
-            ValueError,
-            match="No VerticalCoordinate configuration found in the YAML file.",
-        ):
-            VerticalCoordinate.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+    grid.plot_vertical_coordinate("layer_depth_u", s=0)
+    grid.plot_vertical_coordinate("layer_depth_rho", s=-1)
+    grid.plot_vertical_coordinate("interface_depth_v", s=-1)
+    grid.plot_vertical_coordinate("layer_depth_rho", eta=0)
+    grid.plot_vertical_coordinate("layer_depth_u", eta=0)
+    grid.plot_vertical_coordinate("layer_depth_v", eta=0)
+    grid.plot_vertical_coordinate("interface_depth_rho", eta=0)
+    grid.plot_vertical_coordinate("interface_depth_u", eta=0)
+    grid.plot_vertical_coordinate("interface_depth_v", eta=0)
+    grid.plot_vertical_coordinate("layer_depth_rho", xi=0)
+    grid.plot_vertical_coordinate("layer_depth_u", xi=0)
+    grid.plot_vertical_coordinate("layer_depth_v", xi=0)
+    grid.plot_vertical_coordinate("interface_depth_rho", xi=0)
+    grid.plot_vertical_coordinate("interface_depth_u", xi=0)
+    grid.plot_vertical_coordinate("interface_depth_v", xi=0)

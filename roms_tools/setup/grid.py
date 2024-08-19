@@ -3,19 +3,18 @@ from dataclasses import dataclass, field, asdict
 
 import numpy as np
 import xarray as xr
+import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
 
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
-from roms_tools.setup.plot import _plot
+from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 
 import warnings
 
 RADIUS_OF_EARTH = 6371315.0  # in m
-
-
-# TODO should we store an xgcm.Grid object instead of an xarray Dataset? Or even subclass xgcm.Grid?
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -43,11 +42,19 @@ class Grid:
          Rotation of grid x-direction from lines of constant latitude, measured in degrees.
          Positive values represent a counterclockwise rotation.
          The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    N : int, optional
+        The number of vertical levels. The default is 100.
+    theta_s : float, optional
+        The surface control parameter. Must satisfy 0 < theta_s <= 10. The default is 5.0.
+    theta_b : float, optional
+        The bottom control parameter. Must satisfy 0 < theta_b <= 4. The default is 2.0.
+    hc : float, optional
+        The critical depth (in meters). The default is 300.0.
     topography_source : str, optional
         Specifies the data source to use for the topography. Options are
         "ETOPO5". The default is "ETOPO5".
     hmin : float, optional
-        The minimum ocean depth (in meters). The default is 5.
+        The minimum ocean depth (in meters). The default is 5.0.
 
      Attributes
      ----------
@@ -65,6 +72,14 @@ class Grid:
          Latitude of grid center.
      rot : float
          Rotation of grid x-direction from lines of constant latitude.
+    N : int
+        The number of vertical levels.
+    theta_s : float
+        The surface control parameter.
+    theta_b : float
+        The bottom control parameter.
+    hc : float
+        The critical depth (in meters).
      topography_source : str
          Data source used for the topography.
      hmin : float
@@ -88,6 +103,10 @@ class Grid:
     center_lon: float
     center_lat: float
     rot: float = 0
+    N: int = 100
+    theta_s: float = 5.0
+    theta_b: float = 2.0
+    hc: float = 300.0
     topography_source: str = "ETOPO5"
     hmin: float = 5.0
     ds: xr.Dataset = field(init=False, repr=False)
@@ -112,17 +131,16 @@ class Grid:
             topography_source=self.topography_source,
             hmin=self.hmin,
         )
-        
+
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
-        
+
         # Update the grid by adding grid variables that are coarsened versions of the original grid variables
         self._coarsen()
 
+        self.create_vertical_coordinate()
 
-    def add_topography_and_mask(
-        self, topography_source="ETOPO5", hmin=5.0
-    ) -> None:
+    def add_topography_and_mask(self, topography_source="ETOPO5", hmin=5.0) -> None:
         """
         Add topography and mask to the grid dataset.
 
@@ -145,11 +163,283 @@ class Grid:
             This method modifies the dataset in place and does not return a value.
         """
 
-        ds = _add_topography_and_mask(
-            self.ds, topography_source, hmin
-        )
+        ds = _add_topography_and_mask(self.ds, topography_source, hmin)
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
+
+    def _straddle(self) -> None:
+        """
+        Check if the Greenwich meridian goes through the domain.
+
+        This method sets the `straddle` attribute to `True` if the Greenwich meridian
+        (0° longitude) intersects the domain defined by `lon_rho`. Otherwise, it sets
+        the `straddle` attribute to `False`.
+
+        The check is based on whether the longitudinal differences between adjacent
+        points exceed 300 degrees, indicating a potential wraparound of longitude.
+        """
+
+        if (
+            np.abs(self.ds.lon_rho.diff("xi_rho")).max() > 300
+            or np.abs(self.ds.lon_rho.diff("eta_rho")).max() > 300
+        ):
+            object.__setattr__(self, "straddle", True)
+        else:
+            object.__setattr__(self, "straddle", False)
+
+    def _coarsen(self):
+        """
+        Update the grid by adding grid variables that are coarsened versions of the original
+        fine-resoluion grid variables. The coarsening is by a factor of two.
+
+        The specific variables being coarsened are:
+        - `lon_rho` -> `lon_coarse`: Longitude at rho points.
+        - `lat_rho` -> `lat_coarse`: Latitude at rho points.
+        - `h` -> `h_coarse`: Bathymetry (depth).
+        - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
+        - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
+
+        Returns
+        -------
+        None
+
+        Modifies
+        --------
+        self.ds : xr.Dataset
+            The dataset attribute of the Grid instance is updated with the new coarser variables.
+        """
+        d = {
+            "lon_rho": "lon_coarse",
+            "lat_rho": "lat_coarse",
+            "h": "h_coarse",
+            "angle": "angle_coarse",
+            "mask_rho": "mask_coarse",
+        }
+
+        for fine_var, coarse_var in d.items():
+            fine_field = self.ds[fine_var]
+            if self.straddle and fine_var == "lon_rho":
+                fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
+
+            coarse_field = _f2c(fine_field)
+            if fine_var == "lon_rho":
+                coarse_field = xr.where(
+                    coarse_field < 0, coarse_field + 360, coarse_field
+                )
+
+            self.ds[coarse_var] = coarse_field
+
+        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0)
+
+    def create_vertical_coordinate(self):
+
+        h = self.ds.h
+
+        cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, "r")
+        zr = compute_depth(h * 0, h, self.hc, cs_r, sigma_r)
+        cs_w, sigma_w = sigma_stretch(self.theta_s, self.theta_b, self.N, "w")
+        zw = compute_depth(h * 0, h, self.hc, cs_w, sigma_w)
+
+        self.ds["sc_r"] = sigma_r.astype(np.float32)
+        self.ds["sc_r"].attrs["long_name"] = "S-coordinate at rho-points"
+        self.ds["sc_r"].attrs["units"] = "nondimensional"
+
+        self.ds["Cs_r"] = cs_r.astype(np.float32)
+        self.ds["Cs_r"].attrs[
+            "long_name"
+        ] = "S-coordinate stretching curves at rho-points"
+        self.ds["Cs_r"].attrs["units"] = "nondimensional"
+
+        self.ds.attrs["theta_s"] = np.float32(self.theta_s)
+        self.ds.attrs["theta_b"] = np.float32(self.theta_b)
+        self.ds.attrs["hc"] = np.float32(self.hc)
+
+        depth = -zr
+        depth.attrs["long_name"] = "Layer depth at rho-points"
+        depth.attrs["units"] = "m"
+
+        depth_u = interpolate_from_rho_to_u(depth)
+        depth_u.attrs["long_name"] = "Layer depth at u-points"
+        depth_u.attrs["units"] = "m"
+
+        depth_v = interpolate_from_rho_to_v(depth)
+        depth_v.attrs["long_name"] = "Layer depth at v-points"
+        depth_v.attrs["units"] = "m"
+
+        interface_depth = -zw
+        interface_depth.attrs["long_name"] = "Interface depth at rho-points"
+        interface_depth.attrs["units"] = "m"
+
+        interface_depth_u = interpolate_from_rho_to_u(interface_depth)
+        interface_depth_u.attrs["long_name"] = "Interface depth at u-points"
+        interface_depth_u.attrs["units"] = "m"
+
+        interface_depth_v = interpolate_from_rho_to_v(interface_depth)
+        interface_depth_v.attrs["long_name"] = "Interface depth at v-points"
+        interface_depth_v.attrs["units"] = "m"
+
+        ds = self.ds.assign_coords(
+            {
+                "layer_depth_rho": depth.astype(np.float32),
+                "layer_depth_u": depth_u.astype(np.float32),
+                "layer_depth_v": depth_v.astype(np.float32),
+                "interface_depth_rho": interface_depth.astype(np.float32),
+                "interface_depth_u": interface_depth_u.astype(np.float32),
+                "interface_depth_v": interface_depth_v.astype(np.float32),
+            }
+        )
+        ds = ds.drop_vars(["eta_rho", "xi_rho"])
+
+        object.__setattr__(self, "ds", ds)
+
+    def plot(self, bathymetry: bool = False) -> None:
+        """
+        Plot the grid.
+
+        Parameters
+        ----------
+        bathymetry : bool
+            Whether or not to plot the bathymetry. Default is False.
+
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+
+        """
+
+        if bathymetry:
+            kwargs = {"cmap": "YlGnBu"}
+
+            _plot(
+                self.ds,
+                field=self.ds.h.where(self.ds.mask_rho),
+                straddle=self.straddle,
+                kwargs=kwargs,
+            )
+        else:
+            _plot(self.ds, straddle=self.straddle)
+
+    def plot_vertical_coordinate(
+        self,
+        varname="layer_depth_rho",
+        s=None,
+        eta=None,
+        xi=None,
+    ) -> None:
+        """
+        Plot the vertical coordinate system for a given eta-, xi-, or s-slice.
+
+        Parameters
+        ----------
+        varname : str, optional
+            The field to plot. Options are "depth_rho", "depth_u", "depth_v".
+        s: int, optional
+            The s-index to plot. Default is None.
+        eta : int, optional
+            The eta-index to plot. Default is None.
+        xi : int, optional
+            The xi-index to plot. Default is None.
+
+        Returns
+        -------
+        None
+            This method does not return any value. It generates and displays a plot.
+
+        Raises
+        ------
+        ValueError
+            If the specified varname is not one of the valid options.
+            If none of s, eta, xi are specified.
+        """
+
+        if not any([s is not None, eta is not None, xi is not None]):
+            raise ValueError("At least one of s, eta, or xi must be specified.")
+
+        self.ds[varname].load()
+        field = self.ds[varname].squeeze()
+
+        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
+            interface_depth = self.ds.interface_depth_rho
+        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
+            interface_depth = self.ds.interface_depth_u
+        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
+            interface_depth = self.ds.interface_depth_v
+
+        # slice the field as desired
+        title = field.long_name
+        if s is not None:
+            if "s_rho" in field.dims:
+                title = title + f", s_rho = {field.s_rho[s].item()}"
+                field = field.isel(s_rho=s)
+            elif "s_w" in field.dims:
+                title = title + f", s_w = {field.s_w[s].item()}"
+                field = field.isel(s_w=s)
+            else:
+                raise ValueError(
+                    f"None of the expected dimensions (s_rho, s_w) found in ds[{varname}]."
+                )
+
+        if eta is not None:
+            if "eta_rho" in field.dims:
+                title = title + f", eta_rho = {field.eta_rho[eta].item()}"
+                field = field.isel(eta_rho=eta)
+                interface_depth = interface_depth.isel(eta_rho=eta)
+            elif "eta_v" in field.dims:
+                title = title + f", eta_v = {field.eta_v[eta].item()}"
+                field = field.isel(eta_v=eta)
+                interface_depth = interface_depth.isel(eta_v=eta)
+            else:
+                raise ValueError(
+                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
+                )
+        if xi is not None:
+            if "xi_rho" in field.dims:
+                title = title + f", xi_rho = {field.xi_rho[xi].item()}"
+                field = field.isel(xi_rho=xi)
+                interface_depth = interface_depth.isel(xi_rho=xi)
+            elif "xi_u" in field.dims:
+                title = title + f", xi_u = {field.xi_u[xi].item()}"
+                field = field.isel(xi_u=xi)
+                interface_depth = interface_depth.isel(xi_u=xi)
+            else:
+                raise ValueError(
+                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
+                )
+
+        if eta is None and xi is None:
+            vmax = field.max().values
+            vmin = field.min().values
+            cmap = plt.colormaps.get_cmap("YlGnBu")
+            cmap.set_bad(color="gray")
+            kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+            _plot(
+                self.ds,
+                field=field,
+                straddle=self.straddle,
+                depth_contours=True,
+                title=title,
+                kwargs=kwargs,
+                c="g",
+            )
+        else:
+            if len(field.dims) == 2:
+                cmap = plt.colormaps.get_cmap("YlGnBu")
+                cmap.set_bad(color="gray")
+                kwargs = {"vmax": 0.0, "vmin": 0.0, "cmap": cmap, "add_colorbar": False}
+
+                _section_plot(
+                    xr.zeros_like(field),
+                    interface_depth=interface_depth,
+                    title=title,
+                    kwargs=kwargs,
+                )
+            else:
+                if "s_rho" in field.dims or "s_w" in field.dims:
+                    _profile_plot(field, title=title)
+                else:
+                    _line_plot(field, title=title)
 
     def save(self, filepath: str) -> None:
         """
@@ -160,6 +450,71 @@ class Grid:
         filepath
         """
         self.ds.to_netcdf(filepath)
+
+    @classmethod
+    def from_file(cls, filepath: str) -> "Grid":
+        """
+        Create a Grid instance from an existing file.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to the file containing the grid information.
+
+        Returns
+        -------
+        Grid
+            A new instance of Grid populated with data from the file.
+        """
+        # Load the dataset from the file
+        ds = xr.open_dataset(filepath)
+
+        if not all(mask in ds for mask in ["mask_u", "mask_v"]):
+            ds = _add_velocity_masks(ds)
+        if not all(coord in ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
+            ds = _add_lat_lon_at_velocity_points(ds)
+
+        # Create a new Grid instance without calling __init__ and __post_init__
+        grid = cls.__new__(cls)
+
+        # Set the dataset for the grid instance
+        object.__setattr__(grid, "ds", ds)
+
+        # Check if the Greenwich meridian goes through the domain.
+        grid._straddle()
+
+        # Coarsen the grid if necessary
+        if not all(
+            var in grid.ds
+            for var in [
+                "lon_coarse",
+                "lat_coarse",
+                "h_coarse",
+                "angle_coarse",
+                "mask_coarse",
+            ]
+        ):
+            grid._coarsen()
+        if not all(var in grid.ds for var in ["depth_rho", "interface_depth_rho"]):
+            grid.create_vertical_coordinate()
+
+        # Manually set the remaining attributes by extracting parameters from dataset
+        object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
+        object.__setattr__(grid, "ny", ds.sizes["eta_rho"] - 2)
+        object.__setattr__(grid, "center_lon", ds["tra_lon"].values.item())
+        object.__setattr__(grid, "center_lat", ds["tra_lat"].values.item())
+        object.__setattr__(grid, "rot", ds["rotate"].values.item())
+
+        for attr in [
+            "size_x",
+            "size_y",
+            "topography_source",
+            "hmin",
+        ]:
+            if attr in ds.attrs:
+                object.__setattr__(grid, attr, ds.attrs[attr])
+
+        return grid
 
     def to_yaml(self, filepath: str) -> None:
         """
@@ -191,59 +546,6 @@ class Grid:
             file.write(header)
             # Write YAML data
             yaml.dump(yaml_data, file, default_flow_style=False)
-
-    @classmethod
-    def from_file(cls, filepath: str) -> "Grid":
-        """
-        Create a Grid instance from an existing file.
-
-        Parameters
-        ----------
-        filepath : str
-            Path to the file containing the grid information.
-
-        Returns
-        -------
-        Grid
-            A new instance of Grid populated with data from the file.
-        """
-        # Load the dataset from the file
-        ds = xr.open_dataset(filepath)
-
-        if not all(mask in ds for mask in ["mask_u", "mask_v"]):
-            ds = _add_velocity_masks(ds)
-        if not all(coord in ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
-            ds = _add_lat_lon_at_velocity_points(ds)
-
-        # Create a new Grid instance without calling __init__ and __post_init__
-        grid = cls.__new__(cls)
-
-        # Set the dataset for the grid instance
-        object.__setattr__(grid, "ds", ds)
-        
-        # Check if the Greenwich meridian goes through the domain.
-        grid._straddle()
-
-        # Update the grid by adding grid variables that are coarsened versions of the original grid variables
-        grid._coarsen()
-
-        # Manually set the remaining attributes by extracting parameters from dataset
-        object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
-        object.__setattr__(grid, "ny", ds.sizes["eta_rho"] - 2)
-        object.__setattr__(grid, "center_lon", ds["tra_lon"].values.item())
-        object.__setattr__(grid, "center_lat", ds["tra_lat"].values.item())
-        object.__setattr__(grid, "rot", ds["rotate"].values.item())
-
-        for attr in [
-            "size_x",
-            "size_y",
-            "topography_source",
-            "hmin",
-        ]:
-            if attr in ds.attrs:
-                object.__setattr__(grid, attr, ds.attrs[attr])
-
-        return grid
 
     @classmethod
     def from_yaml(cls, filepath: str) -> "Grid":
@@ -311,102 +613,6 @@ class Grid:
         }
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
-
-    # def to_xgcm() -> Any:
-    #    # TODO we could convert the dataset to an xgcm.Grid object and return here?
-    #    raise NotImplementedError()
-
-    def _straddle(self) -> None:
-        """
-        Check if the Greenwich meridian goes through the domain.
-
-        This method sets the `straddle` attribute to `True` if the Greenwich meridian
-        (0° longitude) intersects the domain defined by `lon_rho`. Otherwise, it sets
-        the `straddle` attribute to `False`.
-
-        The check is based on whether the longitudinal differences between adjacent
-        points exceed 300 degrees, indicating a potential wraparound of longitude.
-        """
-
-        if (
-            np.abs(self.ds.lon_rho.diff("xi_rho")).max() > 300
-            or np.abs(self.ds.lon_rho.diff("eta_rho")).max() > 300
-        ):
-            object.__setattr__(self, "straddle", True)
-        else:
-            object.__setattr__(self, "straddle", False)
-
-    def plot(self, bathymetry: bool = False) -> None:
-        """
-        Plot the grid.
-
-        Parameters
-        ----------
-        bathymetry : bool
-            Whether or not to plot the bathymetry. Default is False.
-
-        Returns
-        -------
-        None
-            This method does not return any value. It generates and displays a plot.
-
-        """
-
-        if bathymetry:
-            kwargs = {"cmap": "YlGnBu"}
-
-            _plot(
-                self.ds,
-                field=self.ds.h.where(self.ds.mask_rho),
-                straddle=self.straddle,
-                kwargs=kwargs,
-            )
-        else:
-            _plot(self.ds, straddle=self.straddle)
-
-    def _coarsen(self):
-        """
-        Update the grid by adding grid variables that are coarsened versions of the original
-        fine-resoluion grid variables. The coarsening is by a factor of two.
-
-        The specific variables being coarsened are:
-        - `lon_rho` -> `lon_coarse`: Longitude at rho points.
-        - `lat_rho` -> `lat_coarse`: Latitude at rho points.
-        - `h` -> `h_coarse`: Bathymetry (depth).
-        - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
-        - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
-
-        Returns
-        -------
-        None
-
-        Modifies
-        --------
-        self.ds : xr.Dataset
-            The dataset attribute of the Grid instance is updated with the new coarser variables.
-        """
-        d = {
-            "lon_rho": "lon_coarse",
-            "lat_rho": "lat_coarse",
-            "h": "h_coarse",
-            "angle": "angle_coarse",
-            "mask_rho": "mask_coarse",
-        }
-
-        for fine_var, coarse_var in d.items():
-            fine_field = self.ds[fine_var]
-            if self.straddle and fine_var == "lon_rho":
-                fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
-
-            coarse_field = _f2c(fine_field)
-            if fine_var == "lon_rho":
-                coarse_field = xr.where(
-                    coarse_field < 0, coarse_field + 360, coarse_field
-                )
-
-            self.ds[coarse_var] = coarse_field
-
-        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0)
 
 
 def _make_grid_ds(

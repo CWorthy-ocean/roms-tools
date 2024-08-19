@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.utils import (
     extrapolate_deepest_to_bottom,
@@ -21,13 +20,10 @@ class ROMSToolsMixins:
     ----------
     grid : Grid
         Object representing the grid information used for the model.
-    vertical_coordinate : VerticalCoordinate
-        Object representing the vertical coordinate system. Defaults to None.
 
     """
 
     grid: Grid
-    vertical_coordinate: VerticalCoordinate = None
 
     def get_target_lon_lat(self, use_coarse_grid=False):
         """
@@ -129,7 +125,7 @@ class ROMSToolsMixins:
             coords = {
                 data.dim_names["latitude"]: lat,
                 data.dim_names["longitude"]: lon,
-                data.dim_names["depth"]: self.vertical_coordinate.ds["layer_depth_rho"],
+                data.dim_names["depth"]: self.grid.ds["layer_depth_rho"],
             }
         # extrapolate deepest value all the way to bottom ("flooding")
         for var in vars_3d:
@@ -162,8 +158,7 @@ class ROMSToolsMixins:
         This method performs the following steps:
         1. Rotates the velocity components to align with the grid orientation using the provided angle.
         2. Optionally interpolates the rotated velocities to the u- and v-points of the grid.
-        3. If a vertical coordinate is provided, computes the barotropic velocities by integrating
-           over the vertical dimension.
+        3. If the velocities are 3D (with vertical coordinates), computes barotropic (depth-averaged) velocities.
 
         Parameters
         ----------
@@ -178,8 +173,8 @@ class ROMSToolsMixins:
         Returns
         -------
         dict of str: xarray.DataArray
-            Dictionary of processed velocity components. Includes "ubar" and "vbar" if a vertical coordinate
-            is provided.
+            Dictionary of processed velocity components. Includes "ubar" and "vbar" if the velocity components
+            have vertical coordinates and are processed for barotropic (depth-averaged) velocities.
         """
         # Determine the correct variable names based on the keys in data_vars
         uname = "u" if "u" in data_vars else "uwnd"
@@ -197,7 +192,7 @@ class ROMSToolsMixins:
             data_vars[uname] = u_rot
             data_vars[vname] = v_rot
 
-        if self.vertical_coordinate is not None:
+        if "s_rho" in data_vars[uname].dims and "s_rho" in data_vars[vname].dims:
             # 3D masks for ROMS domain
             umask = self.grid.ds.mask_u.expand_dims({"s_rho": data_vars[uname].s_rho})
             vmask = self.grid.ds.mask_v.expand_dims({"s_rho": data_vars[vname].s_rho})
@@ -206,7 +201,7 @@ class ROMSToolsMixins:
             data_vars[vname] = data_vars[vname] * vmask
 
             # Compute barotropic velocity
-            dz = -self.vertical_coordinate.ds["interface_depth_rho"].diff(dim="s_w")
+            dz = -self.grid.ds["interface_depth_rho"].diff(dim="s_w")
             dz = dz.rename({"s_w": "s_rho"})
             dzu = interpolate_from_rho_to_u(dz)
             dzv = interpolate_from_rho_to_v(dz)

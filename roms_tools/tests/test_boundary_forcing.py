@@ -14,7 +14,13 @@ def example_grid():
     Fixture for creating a Grid object.
     """
     grid = Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10,
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
@@ -22,7 +28,6 @@ def example_grid():
     )
 
     return grid
-
 
 
 @pytest.fixture
@@ -42,9 +47,7 @@ def boundary_forcing(example_grid):
 
 
 @pytest.fixture
-def boundary_forcing_with_bgc_from_climatology(
-    example_grid
-):
+def boundary_forcing_with_bgc_from_climatology(example_grid):
     """
     Fixture for creating a BoundaryForcing object.
     """

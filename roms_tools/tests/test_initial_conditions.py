@@ -16,7 +16,13 @@ def example_grid():
     Fixture for creating a Grid object.
     """
     grid = Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10,
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
@@ -59,9 +65,7 @@ def initial_conditions_with_bgc(example_grid):
 
 
 @pytest.fixture
-def initial_conditions_with_bgc_from_climatology(
-    example_grid
-):
+def initial_conditions_with_bgc_from_climatology(example_grid):
     """
     Fixture for creating a dummy InitialConditions object.
     """
@@ -111,9 +115,7 @@ def test_initial_conditions_creation(ic_fixture, request):
 
 
 # Test initialization with missing 'name' in physics_source
-def test_initial_conditions_missing_physics_name(
-    example_grid
-):
+def test_initial_conditions_missing_physics_name(example_grid):
     with pytest.raises(ValueError, match="`physics_source` must include a 'name'."):
         InitialConditions(
             grid=example_grid,
@@ -123,9 +125,7 @@ def test_initial_conditions_missing_physics_name(
 
 
 # Test initialization with missing 'path' in physics_source
-def test_initial_conditions_missing_physics_path(
-    example_grid
-):
+def test_initial_conditions_missing_physics_path(example_grid):
     with pytest.raises(ValueError, match="`physics_source` must include a 'path'."):
         InitialConditions(
             grid=example_grid,
@@ -165,9 +165,7 @@ def test_initial_conditions_missing_bgc_path(example_grid):
 
 
 # Test default climatology value
-def test_initial_conditions_default_climatology(
-    example_grid
-):
+def test_initial_conditions_default_climatology(example_grid):
 
     fname = download_test_data("GLORYS_test_data.nc")
 
@@ -181,9 +179,7 @@ def test_initial_conditions_default_climatology(
     assert initial_conditions.bgc_source is None
 
 
-def test_initial_conditions_default_bgc_climatology(
-    example_grid
-):
+def test_initial_conditions_default_bgc_climatology(example_grid):
 
     fname = download_test_data("GLORYS_test_data.nc")
     fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")

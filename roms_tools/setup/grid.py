@@ -230,11 +230,11 @@ class Grid:
                 )
             if coarse_var in ["lon_coarse", "lat_coarse"]:
                 ds = self.ds.assign_coords(
-                    {coarse_var: coarse_field.astype(np.float32)}
+                    {coarse_var: coarse_field}
                 )
                 object.__setattr__(self, "ds", ds)
             else:
-                self.ds[coarse_var] = coarse_field.astype(np.float32)
+                self.ds[coarse_var] = coarse_field
         self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0).astype(
             np.int32
         )
@@ -961,11 +961,11 @@ def _create_grid_ds(
     )
 
     ds = ds.assign_coords(
-        {"lat_rho": lat_rho.astype(np.float32), "lon_rho": lon_rho.astype(np.float32)}
+        {"lat_rho": lat_rho, "lon_rho": lon_rho}
     )
 
     ds["angle"] = xr.Variable(
-        data=angle.astype(np.float32),
+        data=angle,
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
     )
@@ -1104,10 +1104,10 @@ def _add_lat_lon_at_velocity_points(ds, straddle):
 
     ds = ds.assign_coords(
         {
-            "lat_u": lat_u.astype(np.float32),
-            "lon_u": lon_u.astype(np.float32),
-            "lat_v": lat_v.astype(np.float32),
-            "lon_v": lon_v.astype(np.float32),
+            "lat_u": lat_u,
+            "lon_u": lon_u,
+            "lat_v": lat_v,
+            "lon_v": lon_v,
         }
     )
 

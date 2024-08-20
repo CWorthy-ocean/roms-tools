@@ -28,6 +28,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
+          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}  # Add a unique cache key
 
       - name: Conda info
         run: conda info

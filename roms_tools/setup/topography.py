@@ -45,6 +45,7 @@ def _add_topography_and_mask(
     xr.Dataset
         The dataset with added topography, mask, and metadata.
     """
+
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
 
@@ -56,16 +57,11 @@ def _add_topography_and_mask(
     mask = xr.where(hraw > 0, 1.0, 0.0)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
-    ds["hraw"] = _smooth_topography_globally(hraw, mask, smooth_factor)
-    ds["hraw"].attrs = {
-        "long_name": "Working bathymetry at rho-points",
-        "source": f"Raw bathymetry from {topography_source} (smoothing diameter {smooth_factor})",
-        "units": "meter",
-    }
+    hraw = _smooth_topography_globally(hraw, mask, smooth_factor)
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
-    ds["mask_rho"] = xr.DataArray(mask, dims=("eta_rho", "xi_rho"))
+    ds["mask_rho"] = xr.DataArray(mask.astype(np.int32), dims=("eta_rho", "xi_rho"))
     ds["mask_rho"].attrs = {
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
@@ -74,7 +70,7 @@ def _add_topography_and_mask(
     ds = _add_velocity_masks(ds)
 
     # smooth topography locally to satisfy r < rmax
-    ds["h"] = _smooth_topography_locally(ds["hraw"] * ds["mask_rho"], hmin, rmax)
+    ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
         "long_name": "Final bathymetry at rho-points",
         "units": "meter",
@@ -271,9 +267,7 @@ def _compute_rfactor(h):
 
 def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
     ds.attrs["topography_source"] = topography_source
-    ds.attrs["smooth_factor"] = smooth_factor
     ds.attrs["hmin"] = hmin
-    ds.attrs["rmax"] = rmax
 
     return ds
 
@@ -281,8 +275,12 @@ def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
 def _add_velocity_masks(ds):
 
     # add u- and v-masks
-    ds["mask_u"] = interpolate_from_rho_to_u(ds["mask_rho"], method="multiplicative")
-    ds["mask_v"] = interpolate_from_rho_to_v(ds["mask_rho"], method="multiplicative")
+    ds["mask_u"] = interpolate_from_rho_to_u(
+        ds["mask_rho"], method="multiplicative"
+    ).astype(np.int32)
+    ds["mask_v"] = interpolate_from_rho_to_v(
+        ds["mask_rho"], method="multiplicative"
+    ).astype(np.int32)
 
     ds["mask_u"].attrs = {"long_name": "Mask at u-points", "units": "land/water (0/1)"}
     ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}

@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from roms_tools import BoundaryForcing, Grid, VerticalCoordinate
+from roms_tools import BoundaryForcing, Grid
 import numpy as np
 import tempfile
 import os
@@ -14,30 +14,19 @@ def example_grid():
     Fixture for creating a Grid object.
     """
     grid = Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10
-    )
-
-    return grid
-
-
-@pytest.fixture
-def example_vertical_coordinate(example_grid):
-    """
-    Fixture for creating a VerticalCoordinate object.
-    """
-    vertical_coordinate = VerticalCoordinate(
-        grid=example_grid,
+        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
         hc=250.0,  # critical depth
     )
 
-    return vertical_coordinate
+    return grid
+
 
 
 @pytest.fixture
-def boundary_forcing(example_grid, example_vertical_coordinate):
+def boundary_forcing(example_grid):
     """
     Fixture for creating a BoundaryForcing object.
     """
@@ -46,7 +35,6 @@ def boundary_forcing(example_grid, example_vertical_coordinate):
 
     return BoundaryForcing(
         grid=example_grid,
-        vertical_coordinate=example_vertical_coordinate,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
         physics_source={"name": "GLORYS", "path": fname},
@@ -55,7 +43,7 @@ def boundary_forcing(example_grid, example_vertical_coordinate):
 
 @pytest.fixture
 def boundary_forcing_with_bgc_from_climatology(
-    example_grid, example_vertical_coordinate
+    example_grid
 ):
     """
     Fixture for creating a BoundaryForcing object.
@@ -66,7 +54,6 @@ def boundary_forcing_with_bgc_from_climatology(
 
     return BoundaryForcing(
         grid=example_grid,
-        vertical_coordinate=example_vertical_coordinate,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
         physics_source={"name": "GLORYS", "path": fname},

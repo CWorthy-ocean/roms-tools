@@ -135,6 +135,9 @@ class Grid:
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
+        ds = _add_lat_lon_at_velocity_points(self.ds, self.straddle)
+        object.__setattr__(self, "ds", ds)
+
         # Update the grid by adding grid variables that are coarsened versions of the original grid variables
         self._coarsen()
 
@@ -209,11 +212,10 @@ class Grid:
             The dataset attribute of the Grid instance is updated with the new coarser variables.
         """
         d = {
-            "lon_rho": "lon_coarse",
-            "lat_rho": "lat_coarse",
-            "h": "h_coarse",
             "angle": "angle_coarse",
             "mask_rho": "mask_coarse",
+            "lat_rho": "lat_coarse",
+            "lon_rho": "lon_coarse",
         }
 
         for fine_var, coarse_var in d.items():
@@ -226,10 +228,16 @@ class Grid:
                 coarse_field = xr.where(
                     coarse_field < 0, coarse_field + 360, coarse_field
                 )
-
-            self.ds[coarse_var] = coarse_field
-
-        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0)
+            if coarse_var in ["lon_coarse", "lat_coarse"]:
+                ds = self.ds.assign_coords(
+                    {coarse_var: coarse_field.astype(np.float32)}
+                )
+                object.__setattr__(self, "ds", ds)
+            else:
+                self.ds[coarse_var] = coarse_field.astype(np.float32)
+        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0).astype(
+            np.int32
+        )
 
     def create_vertical_coordinate(self):
 
@@ -471,8 +479,6 @@ class Grid:
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
             ds = _add_velocity_masks(ds)
-        if not all(coord in ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
-            ds = _add_lat_lon_at_velocity_points(ds)
 
         # Create a new Grid instance without calling __init__ and __post_init__
         grid = cls.__new__(cls)
@@ -482,6 +488,10 @@ class Grid:
 
         # Check if the Greenwich meridian goes through the domain.
         grid._straddle()
+
+        if not all(coord in grid.ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
+            ds = _add_lat_lon_at_velocity_points(grid.ds, grid.straddle)
+            object.__setattr__(grid, "ds", ds)
 
         # Coarsen the grid if necessary
         if not all(
@@ -937,12 +947,21 @@ def _create_grid_ds(
     center_lon,
     center_lat,
 ):
-    # Create xarray.Dataset object with lat_rho and lon_rho as coordinates
-    ds = xr.Dataset(
-        coords={
-            "lat_rho": (("eta_rho", "xi_rho"), (lat * 180 / np.pi).astype(np.float32)),
-            "lon_rho": (("eta_rho", "xi_rho"), (lon * 180 / np.pi).astype(np.float32)),
-        }
+    ds = xr.Dataset()
+
+    lon_rho = xr.Variable(
+        data=lon * 180 / np.pi,
+        dims=["eta_rho", "xi_rho"],
+        attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
+    )
+    lat_rho = xr.Variable(
+        data=lat * 180 / np.pi,
+        dims=["eta_rho", "xi_rho"],
+        attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
+    )
+
+    ds = ds.assign_coords(
+        {"lat_rho": lat_rho.astype(np.float32), "lon_rho": lon_rho.astype(np.float32)}
     )
 
     ds["angle"] = xr.Variable(
@@ -959,6 +978,7 @@ def _create_grid_ds(
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Coriolis parameter at rho-points", "units": "second-1"},
     )
+
     ds["pm"] = xr.Variable(
         data=pm,
         dims=["eta_rho", "xi_rho"],
@@ -976,24 +996,15 @@ def _create_grid_ds(
         },
     )
 
-    ds["lon_rho"] = xr.Variable(
-        data=lon * 180 / np.pi,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
-    )
-
-    ds["lat_rho"] = xr.Variable(
-        data=(lat * 180 / np.pi),
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
-    )
-
-    ds = _add_lat_lon_at_velocity_points(ds)
-
     return ds
 
 
 def _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot):
+
+    ds["spherical"] = xr.DataArray(np.array("T", dtype="S1"))
+    ds["spherical"].attrs["Long_name"] = "Grid type logical switch"
+    ds["spherical"].attrs["option_T"] = "spherical"
+
     ds.attrs["title"] = "ROMS grid created by ROMS-Tools"
 
     # Include the version of roms-tools
@@ -1067,12 +1078,24 @@ def _f2c_xdir(f):
     return fc
 
 
-def _add_lat_lon_at_velocity_points(ds):
+def _add_lat_lon_at_velocity_points(ds, straddle):
 
-    lat_u = interpolate_from_rho_to_u(ds["lat_rho"])
-    lon_u = interpolate_from_rho_to_u(ds["lon_rho"])
-    lat_v = interpolate_from_rho_to_v(ds["lat_rho"])
-    lon_v = interpolate_from_rho_to_v(ds["lon_rho"])
+    if straddle:
+        # avoid jump from 360 to 0 in interpolation
+        lon_rho = xr.where(ds["lon_rho"] > 180, ds["lon_rho"] - 360, ds["lon_rho"])
+    else:
+        lon_rho = ds["lon_rho"]
+    lat_rho = ds["lat_rho"]
+
+    lat_u = interpolate_from_rho_to_u(lat_rho)
+    lon_u = interpolate_from_rho_to_u(lon_rho)
+    lat_v = interpolate_from_rho_to_v(lat_rho)
+    lon_v = interpolate_from_rho_to_v(lon_rho)
+
+    if straddle:
+        # convert back to range [0, 360]
+        lon_u = xr.where(lon_u < 0, lon_u + 360, lon_u)
+        lon_v = xr.where(lon_v < 0, lon_v + 360, lon_v)
 
     lat_u.attrs = {"long_name": "latitude of u-points", "units": "degrees North"}
     lon_u.attrs = {"long_name": "longitude of u-points", "units": "degrees East"}
@@ -1080,7 +1103,12 @@ def _add_lat_lon_at_velocity_points(ds):
     lon_v.attrs = {"long_name": "longitude of v-points", "units": "degrees East"}
 
     ds = ds.assign_coords(
-        {"lat_u": lat_u.astype(np.float32), "lon_u": lon_u.astype(np.float32), "lat_v": lat_v.astype(np.float32), "lon_v": lon_v.astype(np.float32)}
+        {
+            "lat_u": lat_u.astype(np.float32),
+            "lon_u": lon_u.astype(np.float32),
+            "lat_v": lat_v.astype(np.float32),
+            "lon_v": lon_v.astype(np.float32),
+        }
     )
 
     return ds

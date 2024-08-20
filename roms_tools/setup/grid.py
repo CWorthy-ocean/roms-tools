@@ -501,9 +501,9 @@ class Grid:
         # Manually set the remaining attributes by extracting parameters from dataset
         object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
         object.__setattr__(grid, "ny", ds.sizes["eta_rho"] - 2)
-        object.__setattr__(grid, "center_lon", ds["tra_lon"].values.item())
-        object.__setattr__(grid, "center_lat", ds["tra_lat"].values.item())
-        object.__setattr__(grid, "rot", ds["rotate"].values.item())
+        object.__setattr__(grid, "center_lon", ds.attrs["center_lon"])
+        object.__setattr__(grid, "center_lat", ds.attrs["center_lat"])
+        object.__setattr__(grid, "rot", ds.attrs["rot"])
 
         for attr in [
             "size_x",
@@ -644,7 +644,7 @@ def _make_grid_ds(
 
     ds = _create_grid_ds(lon, lat, pm, pn, ang, rot, center_lon, center_lat)
 
-    ds = _add_global_metadata(ds, size_x, size_y)
+    ds = _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot)
 
     return ds
 
@@ -940,13 +940,13 @@ def _create_grid_ds(
     # Create xarray.Dataset object with lat_rho and lon_rho as coordinates
     ds = xr.Dataset(
         coords={
-            "lat_rho": (("eta_rho", "xi_rho"), lat * 180 / np.pi),
-            "lon_rho": (("eta_rho", "xi_rho"), lon * 180 / np.pi),
+            "lat_rho": (("eta_rho", "xi_rho"), (lat * 180 / np.pi).astype(np.float32)),
+            "lon_rho": (("eta_rho", "xi_rho"), (lon * 180 / np.pi).astype(np.float32)),
         }
     )
 
     ds["angle"] = xr.Variable(
-        data=angle,
+        data=angle.astype(np.float32),
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
     )
@@ -976,18 +976,6 @@ def _create_grid_ds(
         },
     )
 
-    ds["tra_lon"] = center_lon
-    ds["tra_lon"].attrs["long_name"] = "Longitudinal translation of base grid"
-    ds["tra_lon"].attrs["units"] = "degrees East"
-
-    ds["tra_lat"] = center_lat
-    ds["tra_lat"].attrs["long_name"] = "Latitudinal translation of base grid"
-    ds["tra_lat"].attrs["units"] = "degrees North"
-
-    ds["rotate"] = rot
-    ds["rotate"].attrs["long_name"] = "Rotation of base grid"
-    ds["rotate"].attrs["units"] = "degrees"
-
     ds["lon_rho"] = xr.Variable(
         data=lon * 180 / np.pi,
         dims=["eta_rho", "xi_rho"],
@@ -995,7 +983,7 @@ def _create_grid_ds(
     )
 
     ds["lat_rho"] = xr.Variable(
-        data=lat * 180 / np.pi,
+        data=(lat * 180 / np.pi),
         dims=["eta_rho", "xi_rho"],
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
@@ -1005,7 +993,7 @@ def _create_grid_ds(
     return ds
 
 
-def _add_global_metadata(ds, size_x, size_y):
+def _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot):
     ds.attrs["title"] = "ROMS grid created by ROMS-Tools"
 
     # Include the version of roms-tools
@@ -1017,6 +1005,9 @@ def _add_global_metadata(ds, size_x, size_y):
     ds.attrs["roms_tools_version"] = roms_tools_version
     ds.attrs["size_x"] = size_x
     ds.attrs["size_y"] = size_y
+    ds.attrs["center_lon"] = center_lon
+    ds.attrs["center_lat"] = center_lat
+    ds.attrs["rot"] = rot
 
     return ds
 
@@ -1089,7 +1080,7 @@ def _add_lat_lon_at_velocity_points(ds):
     lon_v.attrs = {"long_name": "longitude of v-points", "units": "degrees East"}
 
     ds = ds.assign_coords(
-        {"lat_u": lat_u, "lon_u": lon_u, "lat_v": lat_v, "lon_v": lon_v}
+        {"lat_u": lat_u.astype(np.float32), "lon_u": lon_u.astype(np.float32), "lat_v": lat_v.astype(np.float32), "lon_v": lon_v.astype(np.float32)}
     )
 
     return ds

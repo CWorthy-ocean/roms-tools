@@ -241,7 +241,6 @@ class InitialConditions(ROMSToolsMixins):
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
-        ds.attrs["Tcline"] = self.grid.ds.attrs["Tcline"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
         ds["sc_r"] = self.grid.ds["sc_r"]
         ds["Cs_r"] = self.grid.ds["Cs_r"]

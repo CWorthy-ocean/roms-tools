@@ -352,17 +352,22 @@ class InitialConditions(ROMSToolsMixins):
         field = self.ds[varname].squeeze()
 
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_rho
+            interface_depth = self.grid.ds.interface_depth_rho
+            layer_depth = self.grid.ds.layer_depth_rho
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            interface_depth = self.ds.interface_depth_u
+            interface_depth = self.grid.ds.interface_depth_u
+            layer_depth = self.grid.ds.layer_depth_u
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_v
+            interface_depth = self.grid.ds.interface_depth_v
+            layer_depth = self.grid.ds.layer_depth_v
 
         # slice the field as desired
         title = field.long_name
         if s is not None:
             title = title + f", s_rho = {field.s_rho[s].item()}"
             field = field.isel(s_rho=s)
+            layer_depth = layer_depth.isel(s_rho=s)
+            field = field.assign_coords({"layer_depth": layer_depth})
         else:
             depth_contours = False
 
@@ -370,10 +375,14 @@ class InitialConditions(ROMSToolsMixins):
             if "eta_rho" in field.dims:
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
+                layer_depth = layer_depth.isel(eta_rho=eta)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_rho=eta)
             elif "eta_v" in field.dims:
                 title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
+                layer_depth = layer_depth.isel(eta_v=eta)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_v=eta)
             else:
                 raise ValueError(
@@ -383,10 +392,14 @@ class InitialConditions(ROMSToolsMixins):
             if "xi_rho" in field.dims:
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
+                layer_depth = layer_depth.isel(xi_rho=xi)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_rho=xi)
             elif "xi_u" in field.dims:
                 title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
+                layer_depth = layer_depth.isel(xi_u=xi)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_u=xi)
             else:
                 raise ValueError(

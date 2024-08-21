@@ -415,6 +415,15 @@ def test_initial_conditions_data_consistency_plot_save(
     )
 
     initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="temp", s=0, depth_contours=True
+    )
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="temp", eta=0, layer_contours=True
+    )
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="temp", xi=0, layer_contours=True
+    )
     initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0)
     initial_conditions_with_bgc_from_climatology.plot(varname="temp", xi=0)
     initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0, xi=0)

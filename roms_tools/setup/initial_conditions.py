@@ -315,13 +315,23 @@ class InitialConditions(ROMSToolsMixins):
             - "diazP": Diazotroph Phosphorus (mmol/m³).
             - "diazFe": Diazotroph Iron (mmol/m³).
         s : int, optional
-            The index of the vertical layer to plot. Default is None.
+            The index of the vertical layer (`s_rho`) to plot. If not specified, the plot
+            will represent a horizontal slice (eta- or xi- plane). Default is None.
         eta : int, optional
-            The eta-index to plot. Default is None.
+            The eta-index to plot. Used for vertical sections or horizontal slices.
+            Default is None.
         xi : int, optional
-            The xi-index to plot. Default is None.
+            The xi-index to plot. Used for vertical sections or horizontal slices.
+            Default is None.
         depth_contours : bool, optional
-            Whether to include depth contours in the plot. Default is False.
+            If True, depth contours will be overlaid on the plot, showing lines of constant
+            depth. This is typically used for plots that show a single vertical layer.
+            Default is False.
+        layer_contours : bool, optional
+            If True, contour lines representing the boundaries between vertical layers will
+            be added to the plot. This is particularly useful in vertical sections to
+            visualize the layering of the water column. For clarity, the number of layer
+            contours displayed is limited to a maximum of 10. Default is False.
 
         Returns
         -------
@@ -334,6 +344,7 @@ class InitialConditions(ROMSToolsMixins):
             If the specified `varname` is not one of the valid options.
             If the field specified by `varname` is 3D and none of `s`, `eta`, or `xi` are specified.
             If the field specified by `varname` is 2D and both `eta` and `xi` are specified.
+
         """
 
         if len(self.ds[varname].squeeze().dims) == 3 and not any(

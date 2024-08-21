@@ -879,11 +879,12 @@ class CESMBGCDataset(CESMDataset):
             ds["depth"].attrs["long_name"] = "Depth"
             ds["depth"].attrs["units"] = "m"
             ds = ds.swap_dims({"z_t": "depth"})
-            if "z_t" in ds:
+            if "z_t" in ds.variables:
                 ds = ds.drop_vars("z_t")
-            if "z_t_150m" in ds:
+            if "z_t_150m" in ds.variables:
                 ds = ds.drop_vars("z_t_150m")
             # update dataset
+            print(ds)
             object.__setattr__(self, "ds", ds)
 
             # Update dim_names with "depth": "depth" key-value pair
@@ -938,6 +939,19 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
     )
 
     climatology: Optional[bool] = False
+
+    def post_process(self):
+        """
+        Perform post-processing on the dataset to remove specific variables.
+
+        This method checks if the variable "z_t" exists in the dataset. If it does,
+        the variable is removed from the dataset. The modified dataset is then
+        reassigned to the `ds` attribute of the object.
+        """
+
+        if "z_t" in self.ds.variables:
+            ds = self.ds.drop_vars("z_t")
+            object.__setattr__(self, "ds", ds)
 
 
 @dataclass(frozen=True, kw_only=True)

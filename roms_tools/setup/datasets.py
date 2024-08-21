@@ -774,6 +774,8 @@ class CESMDataset(Dataset):
             ds = assign_dates_to_climatology(ds, time_dim)
             # rename dimension
             ds = ds.swap_dims({time_dim: "time"})
+            if time_dim in ds.variables:
+                ds = ds.drop_vars(time_dim)
             # Update dimension names
             updated_dim_names = self.dim_names.copy()
             updated_dim_names["time"] = "time"

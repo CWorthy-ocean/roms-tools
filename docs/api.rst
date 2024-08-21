@@ -10,14 +10,6 @@ Grid
 
    roms_tools.Grid
 
-Vertical Coordinate
-------------------------
-
-.. autosummary::
-   :toctree: generated/
-
-   roms_tools.VerticalCoordinate
-
 Tidal Forcing
 ------------------
 

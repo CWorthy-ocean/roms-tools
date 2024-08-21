@@ -158,6 +158,8 @@ class TidalForcing(ROMSToolsMixins):
             ds[var].attrs["long_name"] = d_meta[var]["long_name"]
             ds[var].attrs["units"] = d_meta[var]["units"]
 
+        ds = ds.drop_vars(["lat_rho", "lon_rho"])
+
         return ds
 
     def _add_global_metadata(self, ds):

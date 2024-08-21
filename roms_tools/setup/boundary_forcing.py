@@ -7,7 +7,6 @@ import importlib.metadata
 from typing import Dict, Union, Optional
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from roms_tools.setup.mixins import ROMSToolsMixins
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
@@ -29,8 +28,6 @@ class BoundaryForcing(ROMSToolsMixins):
     ----------
     grid : Grid
         Object representing the grid information.
-    vertical_coordinate: VerticalCoordinate
-        Object representing the vertical coordinate information.
     start_time : datetime
         Start time of the desired boundary forcing data.
     end_time : datetime
@@ -59,7 +56,6 @@ class BoundaryForcing(ROMSToolsMixins):
     --------
     >>> boundary_forcing = BoundaryForcing(
     ...     grid=grid,
-    ...     vertical_coordinate=vertical_coordinate,
     ...     boundaries={"south": True, "east": True, "north": False, "west": True},
     ...     start_time=datetime(2022, 1, 1),
     ...     end_time=datetime(2022, 1, 2),
@@ -73,7 +69,6 @@ class BoundaryForcing(ROMSToolsMixins):
     """
 
     grid: Grid
-    vertical_coordinate: VerticalCoordinate
     start_time: datetime
     end_time: datetime
     boundaries: Dict[str, bool] = field(
@@ -296,8 +291,8 @@ class BoundaryForcing(ROMSToolsMixins):
     def _write_into_datatree(self, data, bgc_data, d_meta, bdry_coords, rename):
 
         ds = self._add_global_metadata()
-        ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
-        ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
+        ds["sc_r"] = self.grid.ds["sc_r"]
+        ds["Cs_r"] = self.grid.ds["Cs_r"]
 
         ds = DataTree(name="root", data=ds)
 
@@ -333,12 +328,12 @@ class BoundaryForcing(ROMSToolsMixins):
                     **bdry_coords["rho"][direction]
                 ).rename(**rename["rho"][direction])
                 layer_depth_rho = (
-                    self.vertical_coordinate.ds["layer_depth_rho"]
+                    self.grid.ds["layer_depth_rho"]
                     .isel(**bdry_coords["rho"][direction])
                     .rename(**rename["rho"][direction])
                 )
                 interface_depth_rho = (
-                    self.vertical_coordinate.ds["interface_depth_rho"]
+                    self.grid.ds["interface_depth_rho"]
                     .isel(**bdry_coords["rho"][direction])
                     .rename(**rename["rho"][direction])
                 )
@@ -350,12 +345,12 @@ class BoundaryForcing(ROMSToolsMixins):
                     **rename["u"][direction]
                 )
                 layer_depth_u = (
-                    self.vertical_coordinate.ds["layer_depth_u"]
+                    self.grid.ds["layer_depth_u"]
                     .isel(**bdry_coords["u"][direction])
                     .rename(**rename["u"][direction])
                 )
                 interface_depth_u = (
-                    self.vertical_coordinate.ds["interface_depth_u"]
+                    self.grid.ds["interface_depth_u"]
                     .isel(**bdry_coords["u"][direction])
                     .rename(**rename["u"][direction])
                 )
@@ -367,12 +362,12 @@ class BoundaryForcing(ROMSToolsMixins):
                     **rename["v"][direction]
                 )
                 layer_depth_v = (
-                    self.vertical_coordinate.ds["layer_depth_v"]
+                    self.grid.ds["layer_depth_v"]
                     .isel(**bdry_coords["v"][direction])
                     .rename(**rename["v"][direction])
                 )
                 interface_depth_v = (
-                    self.vertical_coordinate.ds["interface_depth_v"]
+                    self.grid.ds["interface_depth_v"]
                     .isel(**bdry_coords["v"][direction])
                     .rename(**rename["v"][direction])
                 )
@@ -430,10 +425,9 @@ class BoundaryForcing(ROMSToolsMixins):
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
 
-        ds.attrs["theta_s"] = self.vertical_coordinate.ds["theta_s"].item()
-        ds.attrs["theta_b"] = self.vertical_coordinate.ds["theta_b"].item()
-        ds.attrs["Tcline"] = self.vertical_coordinate.ds["Tcline"].item()
-        ds.attrs["hc"] = self.vertical_coordinate.ds["hc"].item()
+        ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
+        ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
+        ds.attrs["hc"] = self.grid.ds.attrs["hc"]
 
         return ds
 
@@ -664,11 +658,6 @@ class BoundaryForcing(ROMSToolsMixins):
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
 
-        # Serialize VerticalCoordinate data
-        vertical_coordinate_data = asdict(self.vertical_coordinate)
-        vertical_coordinate_data.pop("ds", None)  # Exclude non-serializable fields
-        vertical_coordinate_data.pop("grid", None)  # Exclude non-serializable fields
-
         # Include the version of roms-tools
         try:
             roms_tools_version = importlib.metadata.version("roms-tools")
@@ -679,7 +668,6 @@ class BoundaryForcing(ROMSToolsMixins):
         header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
 
         grid_yaml_data = {"Grid": grid_data}
-        vertical_coordinate_yaml_data = {"VerticalCoordinate": vertical_coordinate_data}
 
         boundary_forcing_data = {
             "BoundaryForcing": {
@@ -694,7 +682,6 @@ class BoundaryForcing(ROMSToolsMixins):
 
         yaml_data = {
             **grid_yaml_data,
-            **vertical_coordinate_yaml_data,
             **boundary_forcing_data,
         }
 
@@ -745,13 +732,10 @@ class BoundaryForcing(ROMSToolsMixins):
                 boundary_forcing_data[date_string]
             )
 
-        # Create VerticalCoordinate instance from the YAML file
-        vertical_coordinate = VerticalCoordinate.from_yaml(filepath)
-        grid = vertical_coordinate.grid
+        grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of InitialConditions
         return cls(
             grid=grid,
-            vertical_coordinate=vertical_coordinate,
             **boundary_forcing_data,
         )

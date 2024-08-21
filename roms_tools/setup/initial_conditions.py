@@ -5,7 +5,6 @@ import importlib.metadata
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Union
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.vertical_coordinate import VerticalCoordinate
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
@@ -25,8 +24,6 @@ class InitialConditions(ROMSToolsMixins):
     ----------
     grid : Grid
         Object representing the grid information used for the model.
-    vertical_coordinate : VerticalCoordinate
-        Object representing the vertical coordinate system.
     ini_time : datetime
         The date and time at which the initial conditions are set.
     physics_source : Dict[str, Union[str, None]]
@@ -51,7 +48,6 @@ class InitialConditions(ROMSToolsMixins):
     --------
     >>> initial_conditions = InitialConditions(
     ...     grid=grid,
-    ...     vertical_coordinate=vertical_coordinate,
     ...     ini_time=datetime(2022, 1, 1),
     ...     physics_source={"name": "GLORYS", "path": "physics_data.nc"},
     ...     bgc_source={
@@ -63,7 +59,6 @@ class InitialConditions(ROMSToolsMixins):
     """
 
     grid: Grid
-    vertical_coordinate: VerticalCoordinate
     ini_time: datetime
     physics_source: Dict[str, Union[str, None]]
     bgc_source: Optional[Dict[str, Union[str, None]]] = None
@@ -202,9 +197,7 @@ class InitialConditions(ROMSToolsMixins):
 
         # initialize vertical velocity to zero
         ds["w"] = xr.zeros_like(
-            self.vertical_coordinate.ds["interface_depth_rho"].expand_dims(
-                time=data_vars["u"].time
-            )
+            self.grid.ds["interface_depth_rho"].expand_dims(time=data_vars["u"].time)
         ).astype(np.float32)
         ds["w"].attrs["long_name"] = d_meta["w"]["long_name"]
         ds["w"].attrs["units"] = d_meta["w"]["units"]
@@ -215,10 +208,10 @@ class InitialConditions(ROMSToolsMixins):
 
         ds = ds.assign_coords(
             {
-                "layer_depth_u": self.vertical_coordinate.ds["layer_depth_u"],
-                "layer_depth_v": self.vertical_coordinate.ds["layer_depth_v"],
-                "interface_depth_u": self.vertical_coordinate.ds["interface_depth_u"],
-                "interface_depth_v": self.vertical_coordinate.ds["interface_depth_v"],
+                "layer_depth_u": self.grid.ds["layer_depth_u"],
+                "layer_depth_v": self.grid.ds["layer_depth_v"],
+                "interface_depth_u": self.grid.ds["interface_depth_u"],
+                "interface_depth_v": self.grid.ds["interface_depth_v"],
             }
         )
 
@@ -246,12 +239,11 @@ class InitialConditions(ROMSToolsMixins):
         ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='s')}"
         ds["ocean_time"].attrs["units"] = "seconds"
 
-        ds.attrs["theta_s"] = self.vertical_coordinate.ds["theta_s"].item()
-        ds.attrs["theta_b"] = self.vertical_coordinate.ds["theta_b"].item()
-        ds.attrs["Tcline"] = self.vertical_coordinate.ds["Tcline"].item()
-        ds.attrs["hc"] = self.vertical_coordinate.ds["hc"].item()
-        ds["sc_r"] = self.vertical_coordinate.ds["sc_r"]
-        ds["Cs_r"] = self.vertical_coordinate.ds["Cs_r"]
+        ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
+        ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
+        ds.attrs["hc"] = self.grid.ds.attrs["hc"]
+        ds["sc_r"] = self.grid.ds["sc_r"]
+        ds["Cs_r"] = self.grid.ds["Cs_r"]
 
         ds = ds.drop_vars(["s_rho"])
 
@@ -462,11 +454,6 @@ class InitialConditions(ROMSToolsMixins):
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
 
-        # Serialize VerticalCoordinate data
-        vertical_coordinate_data = asdict(self.vertical_coordinate)
-        vertical_coordinate_data.pop("ds", None)  # Exclude non-serializable fields
-        vertical_coordinate_data.pop("grid", None)  # Exclude non-serializable fields
-
         # Include the version of roms-tools
         try:
             roms_tools_version = importlib.metadata.version("roms-tools")
@@ -477,7 +464,6 @@ class InitialConditions(ROMSToolsMixins):
         header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
 
         grid_yaml_data = {"Grid": grid_data}
-        vertical_coordinate_yaml_data = {"VerticalCoordinate": vertical_coordinate_data}
 
         initial_conditions_data = {
             "InitialConditions": {
@@ -492,7 +478,6 @@ class InitialConditions(ROMSToolsMixins):
 
         yaml_data = {
             **grid_yaml_data,
-            **vertical_coordinate_yaml_data,
             **initial_conditions_data,
         }
 
@@ -545,13 +530,10 @@ class InitialConditions(ROMSToolsMixins):
                 initial_conditions_data[date_string]
             )
 
-        # Create VerticalCoordinate instance from the YAML file
-        vertical_coordinate = VerticalCoordinate.from_yaml(filepath)
-        grid = vertical_coordinate.grid
+        grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of InitialConditions
         return cls(
             grid=grid,
-            vertical_coordinate=vertical_coordinate,
             **initial_conditions_data,
         )

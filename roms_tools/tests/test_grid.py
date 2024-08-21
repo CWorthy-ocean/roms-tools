@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 import numpy.testing as npt
+import xarray as xr
 from roms_tools import Grid
 import os
 import tempfile
@@ -8,8 +9,43 @@ import importlib.metadata
 import textwrap
 
 
-def test_simple_regression():
+@pytest.fixture
+def simple_grid():
+
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
+
+    return grid
+
+
+def test_grid_creation(simple_grid):
+
+    assert simple_grid.nx == 1
+    assert simple_grid.ny == 1
+    assert simple_grid.size_x == 100
+    assert simple_grid.size_y == 100
+    assert simple_grid.center_lon == -20
+    assert simple_grid.center_lat == 0
+    assert simple_grid.rot == 0
+    assert isinstance(simple_grid.ds, xr.Dataset)
+
+
+def test_plot_save_methods(simple_grid, tmp_path):
+
+    simple_grid.plot(bathymetry=True)
+    filepath = tmp_path / "grid.nc"
+    simple_grid.save(filepath)
+    assert filepath.exists()
+
+
+@pytest.fixture
+def simple_grid_that_straddles_dateline():
+
+    grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=0, center_lat=0, rot=20)
+
+    return grid
+
+
+def test_simple_regression(simple_grid):
 
     expected_lat = np.array(
         [
@@ -26,9 +62,158 @@ def test_simple_regression():
         ]
     )
 
+    expected_lat_u = np.array(
+        [
+            [-8.99249453e-01, -8.99249453e-01],
+            [-2.39610306e-15, -2.28602368e-15],
+            [8.99249453e-01, 8.99249453e-01],
+        ]
+    )
+
+    expected_lon_u = np.array(
+        [
+            [339.55036143, 340.44963857],
+            [339.55036143, 340.44963857],
+            [339.55036143, 340.44963857],
+        ]
+    )
+
+    expected_lat_v = np.array(
+        [[-0.44962473, -0.44962473, -0.44962473], [0.44962473, 0.44962473, 0.44962473]]
+    )
+
+    expected_lon_v = np.array(
+        [[339.10072286, 340.0, 340.89927714], [339.10072286, 340.0, 340.89927714]]
+    )
+
+    expected_lat_coarse = np.array(
+        [[-1.34887418, -1.34887418], [1.34887418, 1.34887418]]
+    )
+
+    expected_lon_coarse = np.array(
+        [[338.65108429, 341.34891571], [338.65108429, 341.34891571]]
+    )
+
+    expected_angle = np.array(
+        [
+            [0.00000000e00, 0.00000000e00, 0.00000000e00],
+            [-3.83707366e-17, -3.83707366e-17, -3.83707366e-17],
+            [0.00000000e00, 0.00000000e00, 0.00000000e00],
+        ]
+    )
+
+    expected_angle_coarse = np.array(
+        [[1.91853683e-17, 1.91853683e-17], [1.91853683e-17, 1.91853683e-17]]
+    )
+
     # TODO: adapt tolerances according to order of magnitude of respective fields
-    npt.assert_allclose(grid.ds["lat_rho"], expected_lat, atol=1e-8)
-    npt.assert_allclose(grid.ds["lon_rho"], expected_lon, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lat_rho"], expected_lat, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lon_rho"], expected_lon, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lat_u"], expected_lat_u, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lon_u"], expected_lon_u, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lat_v"], expected_lat_v, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lon_v"], expected_lon_v, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lat_coarse"], expected_lat_coarse, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["lon_coarse"], expected_lon_coarse, atol=1e-8)
+    npt.assert_allclose(simple_grid.ds["angle"], expected_angle, atol=1e-8)
+    npt.assert_allclose(
+        simple_grid.ds["angle_coarse"], expected_angle_coarse, atol=1e-8
+    )
+
+
+def test_simple_regression_dateline(simple_grid_that_straddles_dateline):
+
+    expected_lat = np.array(
+        [
+            [-1.15258151e00, -8.45014017e-01, -5.37470876e-01],
+            [-3.07559747e-01, -2.14815958e-15, 3.07559747e-01],
+            [5.37470876e-01, 8.45014017e-01, 1.15258151e00],
+        ]
+    )
+    expected_lon = np.array(
+        [
+            [3.59462527e02, 3.07583728e-01, 1.15258257e00],
+            [3.59154948e02, 7.81866146e-16, 8.45052212e-01],
+            [3.58847417e02, 3.59692416e02, 5.37473154e-01],
+        ]
+    )
+    expected_lat_u = np.array(
+        [
+            [-0.99879776, -0.69124245],
+            [-0.15377987, 0.15377987],
+            [0.69124245, 0.99879776],
+        ]
+    )
+    expected_lon_u = np.array(
+        [
+            [3.59885055e02, 7.30083149e-01],
+            [3.59577474e02, 4.22526106e-01],
+            [3.59269917e02, 1.14944713e-01],
+        ]
+    )
+    expected_lat_v = np.array(
+        [[-0.73007063, -0.42250701, -0.11495556], [0.11495556, 0.42250701, 0.73007063]]
+    )
+    expected_lon_v = np.array(
+        [
+            [3.59308737e02, 1.53791864e-01, 9.98817391e-01],
+            [3.59001183e02, 3.59846208e02, 6.91262683e-01],
+        ]
+    )
+    expected_lat_coarse = np.array(
+        [[-1.72887807, -0.80621877], [0.80621877, 1.72887807]]
+    )
+    expected_lon_coarse = np.array(
+        [[359.19378677, 1.72883383], [358.27116617, 0.80621323]]
+    )
+    expected_angle = np.array(
+        [
+            [0.34910175, 0.34910175, 0.34910175],
+            [0.34906217, 0.34906217, 0.34906217],
+            [0.34910175, 0.34910175, 0.34910175],
+        ]
+    )
+    expected_angle_coarse = np.array(
+        [[0.34912155, 0.34912155], [0.34912155, 0.34912155]]
+    )
+
+    # TODO: adapt tolerances according to order of magnitude of respective fields
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lat_rho"], expected_lat, atol=1e-8
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lon_rho"], expected_lon, atol=1e-8
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lat_u"], expected_lat_u, atol=1e-8
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lon_u"], expected_lon_u, atol=1e-8
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lat_v"], expected_lat_v, atol=1e-8
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lon_v"], expected_lon_v, atol=1e-8
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lat_coarse"],
+        expected_lat_coarse,
+        atol=1e-8,
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["lon_coarse"],
+        expected_lon_coarse,
+        atol=1e-8,
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["angle"], expected_angle, atol=1e-8
+    )
+    npt.assert_allclose(
+        simple_grid_that_straddles_dateline.ds["angle_coarse"],
+        expected_angle_coarse,
+        atol=1e-8,
+    )
 
 
 def test_raise_if_domain_too_large():
@@ -85,9 +270,7 @@ def test_roundtrip_netcdf():
         center_lat=0.0,
         rot=0.0,
         topography_source="ETOPO5",
-        smooth_factor=2,
         hmin=5.0,
-        rmax=0.2,
     )
 
     # Create a temporary file
@@ -121,9 +304,7 @@ def test_roundtrip_yaml():
         center_lat=0.0,
         rot=0.0,
         topography_source="ETOPO5",
-        smooth_factor=2,
         hmin=5.0,
-        rmax=0.2,
     )
 
     # Create a temporary file
@@ -155,9 +336,7 @@ def test_from_yaml_missing_version():
       center_lat: 61
       rot: -20
       topography_source: ETOPO5
-      smooth_factor: 8
       hmin: 5.0
-      rmax: 0.2
     """
     )
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
@@ -206,9 +385,7 @@ def test_from_yaml_version_mismatch():
       center_lat: 61
       rot: -20
       topography_source: ETOPO5
-      smooth_factor: 8
       hmin: 5.0
-      rmax: 0.2
     """
     )
 

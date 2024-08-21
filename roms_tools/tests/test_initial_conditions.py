@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from roms_tools import InitialConditions, Grid, VerticalCoordinate
+from roms_tools import InitialConditions, Grid
 import xarray as xr
 import numpy as np
 import tempfile
@@ -16,30 +16,24 @@ def example_grid():
     Fixture for creating a Grid object.
     """
     grid = Grid(
-        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10
-    )
-
-    return grid
-
-
-@pytest.fixture
-def example_vertical_coordinate(example_grid):
-    """
-    Fixture for creating a VerticalCoordinate object.
-    """
-    vertical_coordinate = VerticalCoordinate(
-        grid=example_grid,
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
         hc=250.0,  # critical depth
     )
 
-    return vertical_coordinate
+    return grid
 
 
 @pytest.fixture
-def initial_conditions(example_grid, example_vertical_coordinate):
+def initial_conditions(example_grid):
     """
     Fixture for creating a dummy InitialConditions object.
     """
@@ -48,14 +42,13 @@ def initial_conditions(example_grid, example_vertical_coordinate):
 
     return InitialConditions(
         grid=example_grid,
-        vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         physics_source={"path": fname, "name": "GLORYS"},
     )
 
 
 @pytest.fixture
-def initial_conditions_with_bgc(example_grid, example_vertical_coordinate):
+def initial_conditions_with_bgc(example_grid):
     """
     Fixture for creating a dummy InitialConditions object.
     """
@@ -65,7 +58,6 @@ def initial_conditions_with_bgc(example_grid, example_vertical_coordinate):
 
     return InitialConditions(
         grid=example_grid,
-        vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         physics_source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
@@ -73,9 +65,7 @@ def initial_conditions_with_bgc(example_grid, example_vertical_coordinate):
 
 
 @pytest.fixture
-def initial_conditions_with_bgc_from_climatology(
-    example_grid, example_vertical_coordinate
-):
+def initial_conditions_with_bgc_from_climatology(example_grid):
     """
     Fixture for creating a dummy InitialConditions object.
     """
@@ -85,7 +75,6 @@ def initial_conditions_with_bgc_from_climatology(
 
     return InitialConditions(
         grid=example_grid,
-        vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         physics_source={"path": fname, "name": "GLORYS"},
         bgc_source={
@@ -126,33 +115,27 @@ def test_initial_conditions_creation(ic_fixture, request):
 
 
 # Test initialization with missing 'name' in physics_source
-def test_initial_conditions_missing_physics_name(
-    example_grid, example_vertical_coordinate
-):
+def test_initial_conditions_missing_physics_name(example_grid):
     with pytest.raises(ValueError, match="`physics_source` must include a 'name'."):
         InitialConditions(
             grid=example_grid,
-            vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
             physics_source={"path": "physics_data.nc"},
         )
 
 
 # Test initialization with missing 'path' in physics_source
-def test_initial_conditions_missing_physics_path(
-    example_grid, example_vertical_coordinate
-):
+def test_initial_conditions_missing_physics_path(example_grid):
     with pytest.raises(ValueError, match="`physics_source` must include a 'path'."):
         InitialConditions(
             grid=example_grid,
-            vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
             physics_source={"name": "GLORYS"},
         )
 
 
 # Test initialization with missing 'name' in bgc_source
-def test_initial_conditions_missing_bgc_name(example_grid, example_vertical_coordinate):
+def test_initial_conditions_missing_bgc_name(example_grid):
 
     fname = download_test_data("GLORYS_test_data.nc")
     with pytest.raises(
@@ -160,7 +143,6 @@ def test_initial_conditions_missing_bgc_name(example_grid, example_vertical_coor
     ):
         InitialConditions(
             grid=example_grid,
-            vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
             physics_source={"name": "GLORYS", "path": fname},
             bgc_source={"path": "bgc_data.nc"},
@@ -168,7 +150,7 @@ def test_initial_conditions_missing_bgc_name(example_grid, example_vertical_coor
 
 
 # Test initialization with missing 'path' in bgc_source
-def test_initial_conditions_missing_bgc_path(example_grid, example_vertical_coordinate):
+def test_initial_conditions_missing_bgc_path(example_grid):
 
     fname = download_test_data("GLORYS_test_data.nc")
     with pytest.raises(
@@ -176,7 +158,6 @@ def test_initial_conditions_missing_bgc_path(example_grid, example_vertical_coor
     ):
         InitialConditions(
             grid=example_grid,
-            vertical_coordinate=example_vertical_coordinate,
             ini_time=datetime(2021, 6, 29),
             physics_source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "CESM_REGRIDDED"},
@@ -184,15 +165,12 @@ def test_initial_conditions_missing_bgc_path(example_grid, example_vertical_coor
 
 
 # Test default climatology value
-def test_initial_conditions_default_climatology(
-    example_grid, example_vertical_coordinate
-):
+def test_initial_conditions_default_climatology(example_grid):
 
     fname = download_test_data("GLORYS_test_data.nc")
 
     initial_conditions = InitialConditions(
         grid=example_grid,
-        vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         physics_source={"name": "GLORYS", "path": fname},
     )
@@ -201,16 +179,13 @@ def test_initial_conditions_default_climatology(
     assert initial_conditions.bgc_source is None
 
 
-def test_initial_conditions_default_bgc_climatology(
-    example_grid, example_vertical_coordinate
-):
+def test_initial_conditions_default_bgc_climatology(example_grid):
 
     fname = download_test_data("GLORYS_test_data.nc")
     fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")
 
     initial_conditions = InitialConditions(
         grid=example_grid,
-        vertical_coordinate=example_vertical_coordinate,
         ini_time=datetime(2021, 6, 29),
         physics_source={"name": "GLORYS", "path": fname},
         bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},

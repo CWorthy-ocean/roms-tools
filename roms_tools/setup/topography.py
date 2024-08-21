@@ -10,8 +10,42 @@ from itertools import count
 
 
 def _add_topography_and_mask(
-    ds, topography_source, smooth_factor, hmin, rmax
+    ds, topography_source, hmin, smooth_factor=8.0, rmax=0.2
 ) -> xr.Dataset:
+    """
+    Adds topography and a land/water mask to the dataset based on the provided topography source.
+
+    This function performs the following operations:
+    1. Interpolates topography data onto the desired grid.
+    2. Applies a mask based on ocean depth.
+    3. Smooths the topography globally to reduce grid-scale instabilities.
+    4. Fills enclosed basins with land.
+    5. Smooths the topography locally to ensure the steepness ratio satisfies the rmax criterion.
+    6. Adds topography metadata.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset to which topography and the land/water mask will be added.
+    topography_source : str
+        The source of the topography data.
+    hmin : float
+        The minimum allowable depth for the topography.
+    smooth_factor : float, optional
+        The smoothing factor used in the domain-wide Gaussian smoothing of the
+        topography. Smaller values result in less smoothing, while larger
+        values produce more smoothing. The default is 8.0.
+    rmax : float, optional
+        The maximum allowable steepness ratio for the topography smoothing.
+        This parameter controls the local smoothing of the topography. Smaller values result in
+        smoother topography, while larger values preserve more detail. The default is 0.2.
+
+    Returns
+    -------
+    xr.Dataset
+        The dataset with added topography, mask, and metadata.
+    """
+
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
 
@@ -23,16 +57,11 @@ def _add_topography_and_mask(
     mask = xr.where(hraw > 0, 1.0, 0.0)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
-    ds["hraw"] = _smooth_topography_globally(hraw, mask, smooth_factor)
-    ds["hraw"].attrs = {
-        "long_name": "Working bathymetry at rho-points",
-        "source": f"Raw bathymetry from {topography_source} (smoothing diameter {smooth_factor})",
-        "units": "meter",
-    }
+    hraw = _smooth_topography_globally(hraw, mask, smooth_factor)
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
-    ds["mask_rho"] = xr.DataArray(mask, dims=("eta_rho", "xi_rho"))
+    ds["mask_rho"] = xr.DataArray(mask.astype(np.int32), dims=("eta_rho", "xi_rho"))
     ds["mask_rho"].attrs = {
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
@@ -41,7 +70,7 @@ def _add_topography_and_mask(
     ds = _add_velocity_masks(ds)
 
     # smooth topography locally to satisfy r < rmax
-    ds["h"] = _smooth_topography_locally(ds["hraw"] * ds["mask_rho"], hmin, rmax)
+    ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
         "long_name": "Final bathymetry at rho-points",
         "units": "meter",
@@ -238,9 +267,7 @@ def _compute_rfactor(h):
 
 def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
     ds.attrs["topography_source"] = topography_source
-    ds.attrs["smooth_factor"] = smooth_factor
     ds.attrs["hmin"] = hmin
-    ds.attrs["rmax"] = rmax
 
     return ds
 
@@ -248,8 +275,12 @@ def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
 def _add_velocity_masks(ds):
 
     # add u- and v-masks
-    ds["mask_u"] = interpolate_from_rho_to_u(ds["mask_rho"], method="multiplicative")
-    ds["mask_v"] = interpolate_from_rho_to_v(ds["mask_rho"], method="multiplicative")
+    ds["mask_u"] = interpolate_from_rho_to_u(
+        ds["mask_rho"], method="multiplicative"
+    ).astype(np.int32)
+    ds["mask_v"] = interpolate_from_rho_to_v(
+        ds["mask_rho"], method="multiplicative"
+    ).astype(np.int32)
 
     ds["mask_u"].attrs = {"long_name": "Mask at u-points", "units": "land/water (0/1)"}
     ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}

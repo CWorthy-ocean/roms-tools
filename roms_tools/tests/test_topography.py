@@ -31,12 +31,10 @@ def test_rmax_criterion():
         center_lon=30,
         center_lat=61,
         rot=20,
-        smooth_factor=4,
-        rmax=0.2,
     )
     r_eta, r_xi = _compute_rfactor(grid.ds.h)
     rmax0 = np.max([r_eta.max(), r_xi.max()])
-    npt.assert_array_less(rmax0, grid.rmax)
+    npt.assert_array_less(rmax0, 0.2)
 
 
 def test_hmin_criterion():
@@ -48,11 +46,15 @@ def test_hmin_criterion():
         center_lon=30,
         center_lat=61,
         rot=20,
-        smooth_factor=2,
-        rmax=0.2,
-        hmin=5,
+        hmin=5.0,
     )
 
+    assert grid.hmin == 5.0
+    assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+    grid.update_topography_and_mask(hmin=10.0)
+
+    assert grid.hmin == 10.0
     assert np.less_equal(grid.hmin, grid.ds.h.min())
 
 

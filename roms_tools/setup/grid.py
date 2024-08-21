@@ -127,7 +127,7 @@ class Grid:
         object.__setattr__(self, "ds", ds)
 
         # Update self.ds with topography and mask information
-        self.add_topography_and_mask(
+        self.update_topography_and_mask(
             topography_source=self.topography_source,
             hmin=self.hmin,
         )
@@ -141,11 +141,13 @@ class Grid:
         # Update the grid by adding grid variables that are coarsened versions of the original grid variables
         self._coarsen()
 
-        self.create_vertical_coordinate()
+        self.update_vertical_coordinate(
+            N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
+        )
 
-    def add_topography_and_mask(self, topography_source="ETOPO5", hmin=5.0) -> None:
+    def update_topography_and_mask(self, hmin, topography_source="ETOPO5") -> None:
         """
-        Add topography and mask to the grid dataset.
+        Update the grid dataset by adding or overwriting the topography and land/sea mask.
 
         This method processes the topography data and generates a land/sea mask.
         It applies several steps, including interpolating topography, smoothing
@@ -154,11 +156,11 @@ class Grid:
 
         Parameters
         ----------
-        topography_source : str, optional
+        hmin : float
+            The minimum ocean depth (in meters).
+        topography_source : str
             Specifies the data source to use for the topography. Options are
-            "ETOPO5". The default is "ETOPO5".
-        hmin : float, optional
-            The minimum ocean depth (in meters). The default is 5.
+            "ETOPO5". Default is "ETOPO5".
 
         Returns
         -------
@@ -169,6 +171,8 @@ class Grid:
         ds = _add_topography_and_mask(self.ds, topography_source, hmin)
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
+        object.__setattr__(self, "topography_source", topography_source)
+        object.__setattr__(self, "hmin", hmin)
 
     def _straddle(self) -> None:
         """
@@ -198,7 +202,6 @@ class Grid:
         The specific variables being coarsened are:
         - `lon_rho` -> `lon_coarse`: Longitude at rho points.
         - `lat_rho` -> `lat_coarse`: Latitude at rho points.
-        - `h` -> `h_coarse`: Bathymetry (depth).
         - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
         - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
 
@@ -229,9 +232,7 @@ class Grid:
                     coarse_field < 0, coarse_field + 360, coarse_field
                 )
             if coarse_var in ["lon_coarse", "lat_coarse"]:
-                ds = self.ds.assign_coords(
-                    {coarse_var: coarse_field}
-                )
+                ds = self.ds.assign_coords({coarse_var: coarse_field})
                 object.__setattr__(self, "ds", ds)
             else:
                 self.ds[coarse_var] = coarse_field
@@ -239,28 +240,67 @@ class Grid:
             np.int32
         )
 
-    def create_vertical_coordinate(self):
+    def update_vertical_coordinate(self, N, theta_s, theta_b, hc) -> None:
+        """
+        Create vertical coordinate variables for the ROMS grid.
 
-        h = self.ds.h
+        This method computes the S-coordinate stretching curves and depths
+        at various grid points (rho, u, v) using the specified parameters.
+        The computed depths and stretching curves are added to the dataset
+        as new coordinates, along with their corresponding attributes.
 
-        cs_r, sigma_r = sigma_stretch(self.theta_s, self.theta_b, self.N, "r")
-        zr = compute_depth(h * 0, h, self.hc, cs_r, sigma_r)
-        cs_w, sigma_w = sigma_stretch(self.theta_s, self.theta_b, self.N, "w")
-        zw = compute_depth(h * 0, h, self.hc, cs_w, sigma_w)
+        Parameters
+        ----------
+        N : int
+            Number of vertical levels.
+        theta_s : float
+            S-coordinate surface control parameter.
+        theta_b : float
+            S-coordinate bottom control parameter.
+        hc : float
+            Critical depth (m) used in ROMS vertical coordinate stretching.
 
-        self.ds["sc_r"] = sigma_r.astype(np.float32)
-        self.ds["sc_r"].attrs["long_name"] = "S-coordinate at rho-points"
-        self.ds["sc_r"].attrs["units"] = "nondimensional"
+        Returns
+        -------
+        None
+            This method modifies the dataset in place by adding vertical coordinate variables.
+        """
 
-        self.ds["Cs_r"] = cs_r.astype(np.float32)
-        self.ds["Cs_r"].attrs[
-            "long_name"
-        ] = "S-coordinate stretching curves at rho-points"
-        self.ds["Cs_r"].attrs["units"] = "nondimensional"
+        ds = self.ds
+        # need to drop vertical coordinates because they could cause conflict if N changed
+        vars_to_drop = [
+            "layer_depth_rho",
+            "layer_depth_u",
+            "layer_depth_v",
+            "interface_depth_rho",
+            "interface_depth_u",
+            "interface_depth_v",
+            "sc_r",
+            "Cs_r",
+        ]
 
-        self.ds.attrs["theta_s"] = np.float32(self.theta_s)
-        self.ds.attrs["theta_b"] = np.float32(self.theta_b)
-        self.ds.attrs["hc"] = np.float32(self.hc)
+        for var in vars_to_drop:
+            if var in ds.variables:
+                ds = ds.drop_vars(var)
+
+        h = ds.h
+
+        cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
+        zr = compute_depth(h * 0, h, hc, cs_r, sigma_r)
+        cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
+        zw = compute_depth(h * 0, h, hc, cs_w, sigma_w)
+
+        ds["sc_r"] = sigma_r.astype(np.float32)
+        ds["sc_r"].attrs["long_name"] = "S-coordinate at rho-points"
+        ds["sc_r"].attrs["units"] = "nondimensional"
+
+        ds["Cs_r"] = cs_r.astype(np.float32)
+        ds["Cs_r"].attrs["long_name"] = "S-coordinate stretching curves at rho-points"
+        ds["Cs_r"].attrs["units"] = "nondimensional"
+
+        ds.attrs["theta_s"] = np.float32(theta_s)
+        ds.attrs["theta_b"] = np.float32(theta_b)
+        ds.attrs["hc"] = np.float32(hc)
 
         depth = -zr
         depth.attrs["long_name"] = "Layer depth at rho-points"
@@ -286,7 +326,7 @@ class Grid:
         interface_depth_v.attrs["long_name"] = "Interface depth at v-points"
         interface_depth_v.attrs["units"] = "m"
 
-        ds = self.ds.assign_coords(
+        ds = ds.assign_coords(
             {
                 "layer_depth_rho": depth.astype(np.float32),
                 "layer_depth_u": depth_u.astype(np.float32),
@@ -299,6 +339,10 @@ class Grid:
         ds = ds.drop_vars(["eta_rho", "xi_rho"])
 
         object.__setattr__(self, "ds", ds)
+        object.__setattr__(self, "theta_s", theta_s)
+        object.__setattr__(self, "theta_b", theta_b)
+        object.__setattr__(self, "hc", hc)
+        object.__setattr__(self, "N", N)
 
     def plot(self, bathymetry: bool = False) -> None:
         """
@@ -341,7 +385,13 @@ class Grid:
         Parameters
         ----------
         varname : str, optional
-            The field to plot. Options are "depth_rho", "depth_u", "depth_v".
+            The vertical coordinate field to plot. Options include:
+            - "layer_depth_rho": Layer depth at rho-points.
+            - "layer_depth_u": Layer depth at u-points.
+            - "layer_depth_v": Layer depth at v-points.
+            - "interface_depth_rho": Interface depth at rho-points.
+            - "interface_depth_u": Interface depth at u-points.
+            - "interface_depth_v": Interface depth at v-points.
         s: int, optional
             The s-index to plot. Default is None.
         eta : int, optional
@@ -499,14 +549,22 @@ class Grid:
             for var in [
                 "lon_coarse",
                 "lat_coarse",
-                "h_coarse",
                 "angle_coarse",
                 "mask_coarse",
             ]
         ):
             grid._coarsen()
-        if not all(var in grid.ds for var in ["depth_rho", "interface_depth_rho"]):
-            grid.create_vertical_coordinate()
+
+        # Update vertical coordinate if necessary
+        if not all(var in grid.ds for var in ["sc_r", "Cs_r"]):
+            N = 100
+            theta_s = 5.0
+            theta_b = 2.0
+            hc = 300.0
+
+            grid.update_vertical_coordinate(
+                N=N, theta_s=theta_s, theta_b=theta_b, hc=hc
+            )
 
         # Manually set the remaining attributes by extracting parameters from dataset
         object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
@@ -960,9 +1018,7 @@ def _create_grid_ds(
         attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
     )
 
-    ds = ds.assign_coords(
-        {"lat_rho": lat_rho, "lon_rho": lon_rho}
-    )
+    ds = ds.assign_coords({"lat_rho": lat_rho, "lon_rho": lon_rho})
 
     ds["angle"] = xr.Variable(
         data=angle,

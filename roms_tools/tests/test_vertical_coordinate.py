@@ -44,6 +44,27 @@ def test_invalid_theta_b_value():
         )
 
 
+def test_update_vertical_coordinate():
+
+    grid = Grid(
+        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10
+    )
+
+    assert grid.N == 100
+    assert grid.theta_s == 5.0
+    assert grid.theta_b == 2.0
+    assert grid.hc == 300.0
+    assert len(grid.ds.s_rho) == 100
+
+    grid.update_vertical_coordinate(N=3, theta_s=10.0, theta_b=1.0, hc=400.0)
+
+    assert grid.N == 3
+    assert grid.theta_s == 10.0
+    assert grid.theta_b == 1.0
+    assert grid.hc == 400.0
+    assert len(grid.ds.s_rho) == 3
+
+
 def test_vertical_coordinate_data_consistency():
     """
     Test that the data within the VerticalCoordinate object remains consistent.

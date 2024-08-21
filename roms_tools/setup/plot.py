@@ -8,7 +8,6 @@ def _plot(
     field=None,
     depth_contours=False,
     straddle=False,
-    coarse_grid=False,
     c="red",
     title="",
     kwargs={},
@@ -21,29 +20,8 @@ def _plot(
     else:
 
         field = field.squeeze()
-
-        if coarse_grid:
-
-            field = field.rename({"eta_rho": "eta_coarse", "xi_rho": "xi_coarse"})
-            field = field.where(grid_ds.mask_coarse)
-            lon_deg = field.lon
-            lat_deg = field.lat
-
-        else:
-            if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-                field = field.where(grid_ds.mask_rho)
-                lon_deg = grid_ds["lon_rho"]
-                lat_deg = grid_ds["lat_rho"]
-            elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-                field = field.where(grid_ds.mask_u)
-                lon_deg = grid_ds["lon_u"]
-                lat_deg = grid_ds["lat_u"]
-            elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-                field = field.where(grid_ds.mask_v)
-                lon_deg = grid_ds["lon_v"]
-                lat_deg = grid_ds["lat_v"]
-            else:
-                ValueError("provided field does not have two horizontal dimension")
+        lon_deg = field.lon
+        lat_deg = field.lat
 
         # check if North or South pole are in domain
         if lat_deg.max().values > 89 or lat_deg.min().values < -89:

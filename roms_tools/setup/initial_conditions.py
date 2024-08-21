@@ -172,18 +172,18 @@ class InitialConditions(ROMSToolsMixins):
 
         if self.bgc_source["name"] == "CESM_REGRIDDED":
 
-            bgc_data = CESMBGCDataset(
+            data = CESMBGCDataset(
                 filename=self.bgc_source["path"],
                 start_time=self.ini_time,
                 climatology=self.bgc_source["climatology"],
             )
-            bgc_data.post_process()
+            data.post_process()
         else:
             raise ValueError(
                 'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
             )
 
-        return bgc_data
+        return data
 
     def _write_into_dataset(self, data_vars, d_meta):
 
@@ -365,12 +365,28 @@ class InitialConditions(ROMSToolsMixins):
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             interface_depth = self.grid.ds.interface_depth_rho
             layer_depth = self.grid.ds.layer_depth_rho
+            field = field.where(self.grid.ds.mask_rho)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_rho, "lat": self.grid.ds.lat_rho}
+            )
+
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
             interface_depth = self.grid.ds.interface_depth_u
             layer_depth = self.grid.ds.layer_depth_u
+            field = field.where(self.grid.ds.mask_u)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_u, "lat": self.grid.ds.lat_u}
+            )
+
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
             interface_depth = self.grid.ds.interface_depth_v
             layer_depth = self.grid.ds.layer_depth_v
+            field = field.where(self.grid.ds.mask_v)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_v, "lat": self.grid.ds.lat_v}
+            )
+        else:
+            ValueError("provided field does not have two horizontal dimension")
 
         # slice the field as desired
         title = field.long_name

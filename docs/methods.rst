@@ -50,24 +50,28 @@ During the grid generation process, ``ROMS-Tools`` also creates a topography fie
         center_lon=-10,
         center_lat=61,
         rot=20,
-        topography_source="etopo5",  # Data source for the topography (default: 'etopo5')
-        smooth_factor=8,  # Smoothing factor for global Gaussian smoothing of the topography (default: 8)
+        topography_source="ETOPO5",  # Data source for the topography (default: 'ETOPO5')
         hmin=5,  # Minimum ocean depth in meters (default: 5)
-        rmax=0.2,  # Maximum slope parameter in meters (default: 0.2)
     )
 
 This functionality is executed through the :meth:`roms_tools.Grid.add_topography_and_mask` method, which is automatically called when an instance of the :class:`roms_tools.Grid` class is created.
 
 Users can also directly apply the :meth:`roms_tools.Grid.add_topography_and_mask` method if they wish to overwrite an existing topography or if a grid has been loaded from a file that lacks a topography field. For more detailed information and examples, please refer to `this example <grid.ipynb>`_.
 
-The :meth:`roms_tools.Grid.add_topography_and_mask` method completes four steps:
+The :meth:`roms_tools.Grid.add_topography_and_mask` method completes five steps:
 
-1. The specified topography file is interpolated onto the ROMS grid.
-2. To avoid grid-scale instabilities, the topography is smoothed over the entire domain.
-3. Enclosed basins are filled with land.
-4. Regions where the ocean depth is shallower than ``hmin`` are set to ``hmin``. The topography is then smoothed locally to satisfy ``r < rmax``. This step modifies the topography predominantly along the continental shelf.
+0. The topography from the specified ``topography_source`` is interpolated onto the ROMS grid.
+1. The mask is defined using a dealiased version of the interpolated topography from step 0. In this step, the topography is evaluated at each grid point: values smaller than 0.11 meters are classified as land, and values larger than 0.11 meters are classified as ocean.
+2. The interpolated topography from step 0 is smoothed over the entire domain with a smoothing factor of 8. This step ensures that the topography is smooth at the grid scale, a prerequisite for avoiding grid-scale instabilities at runtime.
+3. The mask is modified by filling enclosed basins with land.
+4. Regions where the ocean depth is shallower than ``hmin`` are set to ``hmin``. The topography is then smoothed locally in such a way that the maximum slope parameter ``r_max`` is smaller than 0.2. The maximum slope parameter is given by
 
-Here are the four steps illustrated for an example domain:
+   .. math::
+      r = \max \left( \frac{|\Delta_x h|}{2h}, \frac{|\Delta_y h|}{2h} \right).
+
+The local smoothing in step 4 modifies the topography predominantly along the continental shelf.
+
+Here are these steps illustrated for an example domain:
 
 .. image:: images/Step1.png
    :width: 390
@@ -78,11 +82,7 @@ Here are the four steps illustrated for an example domain:
 .. image:: images/Step4.png
    :width: 390
 
-After the four steps are completed, the following variables are added to ``grid.ds``:
-
-- ``hraw``: the topography field after step 2
-- ``mask_rho``: the wet mask after step 3, obtained by finding the locations where ``hraw > 0`` and then filling in the enclosed basins
-- ``h``: the final bathymetry after step 4
+The final mask and bathymetry after these five steps are added to ``grid.ds`` as variable ``mask_rho`` and ``h``.
 
 Tidal Forcing
 ##############

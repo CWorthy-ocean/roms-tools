@@ -150,7 +150,9 @@ class ROMSToolsMixins:
                 data_vars[var] = data_vars[var].rename({data.dim_names["time"]: "time"})
 
             # transpose to correct order (time, s_rho, eta_rho, xi_rho)
-            data_vars[var] = data_vars[var].transpose("time", "s_rho", "eta_rho", "xi_rho")
+            data_vars[var] = data_vars[var].transpose(
+                "time", "s_rho", "eta_rho", "xi_rho"
+            )
 
         return data_vars
 

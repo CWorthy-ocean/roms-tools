@@ -202,18 +202,42 @@ class InitialConditions(ROMSToolsMixins):
         ds["w"].attrs["long_name"] = d_meta["w"]["long_name"]
         ds["w"].attrs["units"] = d_meta["w"]["units"]
 
+        variables_to_drop = [
+            "s_rho",
+            "lat_rho",
+            "lon_rho",
+            "layer_depth_rho",
+            "interface_depth_rho",
+            "lat_u",
+            "lon_u",
+            "lat_v",
+            "lon_v",
+        ]
+        existing_vars = [var for var in variables_to_drop if var in ds]
+        ds = ds.drop_vars(existing_vars)
+
+        ds["sc_r"] = self.grid.ds["sc_r"]
+        ds["Cs_r"] = self.grid.ds["Cs_r"]
+
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords({"abs_time": ds["time"]})
+
+        # Translate the time coordinate to days since the model reference date
+        model_reference_date = np.datetime64(self.model_reference_date)
+
+        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
+        ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
+        ds["ocean_time"].attrs[
+            "long_name"
+        ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='s')}"
+        ds["ocean_time"].attrs["units"] = "seconds"
+        ds = ds.swap_dims({"time": "ocean_time"})
+        ds = ds.drop_vars("time")
+
         return ds
 
     def _add_global_metadata(self, ds):
-
-        ds = ds.assign_coords(
-            {
-                "layer_depth_u": self.grid.ds["layer_depth_u"],
-                "layer_depth_v": self.grid.ds["layer_depth_v"],
-                "interface_depth_u": self.grid.ds["interface_depth_u"],
-                "interface_depth_v": self.grid.ds["interface_depth_v"],
-            }
-        )
 
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"
         # Include the version of roms-tools
@@ -228,24 +252,9 @@ class InitialConditions(ROMSToolsMixins):
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
 
-        # Translate the time coordinate to days since the model reference date
-        model_reference_date = np.datetime64(self.model_reference_date)
-
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-        ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
-        ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
-        ds["ocean_time"].attrs[
-            "long_name"
-        ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='s')}"
-        ds["ocean_time"].attrs["units"] = "seconds"
-
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
-        ds["sc_r"] = self.grid.ds["sc_r"]
-        ds["Cs_r"] = self.grid.ds["Cs_r"]
-
-        ds = ds.drop_vars(["s_rho"])
 
         return ds
 

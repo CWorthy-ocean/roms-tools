@@ -123,9 +123,9 @@ class ROMSToolsMixins:
         if vars_3d:
             # 3d interpolation
             coords = {
+                data.dim_names["depth"]: self.grid.ds["layer_depth_rho"],
                 data.dim_names["latitude"]: lat,
                 data.dim_names["longitude"]: lon,
-                data.dim_names["depth"]: self.grid.ds["layer_depth_rho"],
             }
         # extrapolate deepest value all the way to bottom ("flooding")
         for var in vars_3d:
@@ -148,6 +148,9 @@ class ROMSToolsMixins:
             )
             if data.dim_names["time"] != "time":
                 data_vars[var] = data_vars[var].rename({data.dim_names["time"]: "time"})
+
+            # transpose to correct order (time, s_rho, eta_rho, xi_rho)
+            data_vars[var] = data_vars[var].transpose("time", "s_rho", "eta_rho", "xi_rho")
 
         return data_vars
 

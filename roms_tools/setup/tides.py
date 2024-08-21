@@ -15,11 +15,12 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
 )
+from roms_tools.setup.mixins import ROMSToolsMixins
 import matplotlib.pyplot as plt
 
 
 @dataclass(frozen=True, kw_only=True)
-class TidalForcing:
+class TidalForcing(ROMSToolsMixins):
     """
     Represents tidal forcing data used in ocean modeling.
 
@@ -59,30 +60,13 @@ class TidalForcing:
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        if "name" not in self.source.keys():
-            raise ValueError("`source` must include a 'name'.")
-        if "path" not in self.source.keys():
-            raise ValueError("`source` must include a 'path'.")
-        if self.source["name"] == "TPXO":
-            data = TPXODataset(filename=self.source["path"])
-        else:
-            raise ValueError('Only "TPXO" is a valid option for source["name"].')
+
+        self._input_checks()
+        lon, lat, angle, straddle = super().get_target_lon_lat()
+
+        data = self._get_data()
 
         data.check_number_constituents(self.ntides)
-        # operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in longitude away from Greenwich meridian
-        lon = self.grid.ds.lon_rho
-        lat = self.grid.ds.lat_rho
-        angle = self.grid.ds.angle
-
-        lon = xr.where(lon > 180, lon - 360, lon)
-        straddle = True
-        if not self.grid.straddle and abs(lon).min() > 5:
-            lon = xr.where(lon < 0, lon + 360, lon)
-            straddle = False
-
-        # Restrict data to relevant subdomain to achieve better performance and to avoid discontinuous longitudes introduced by converting
-        # to a different longitude range (+- 360 degrees). Discontinues longitudes can lead to artifacts in the interpolation process that
-        # would not be detected by the nan_check function.
         data.choose_subdomain(
             latitude_range=[lat.min().values, lat.max().values],
             longitude_range=[lon.min().values, lon.max().values],
@@ -121,56 +105,62 @@ class TidalForcing:
                 method="linear",
             )
 
-        # Rotate to grid orientation
-        u_Re = data_vars["u_Re"] * np.cos(angle) + data_vars["v_Re"] * np.sin(angle)
-        v_Re = data_vars["v_Re"] * np.cos(angle) - data_vars["u_Re"] * np.sin(angle)
-        u_Im = data_vars["u_Im"] * np.cos(angle) + data_vars["v_Im"] * np.sin(angle)
-        v_Im = data_vars["v_Im"] * np.cos(angle) - data_vars["u_Im"] * np.sin(angle)
+        data_vars = super().process_velocities(
+            data_vars, angle, "u_Re", "v_Re", interpolate=False
+        )
+        data_vars = super().process_velocities(
+            data_vars, angle, "u_Im", "v_Im", interpolate=False
+        )
 
         # Convert to barotropic velocity
-        u_Re = u_Re / self.grid.ds.h
-        v_Re = v_Re / self.grid.ds.h
-        u_Im = u_Im / self.grid.ds.h
-        v_Im = v_Im / self.grid.ds.h
+        for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+            data_vars[varname] = data_vars[varname] / self.grid.ds.h
 
         # Interpolate from rho- to velocity points
-        u_Re = interpolate_from_rho_to_u(u_Re)
-        v_Re = interpolate_from_rho_to_v(v_Re)
-        u_Im = interpolate_from_rho_to_u(u_Im)
-        v_Im = interpolate_from_rho_to_v(v_Im)
+        for uname in ["u_Re", "u_Im"]:
+            data_vars[uname] = interpolate_from_rho_to_u(data_vars[uname])
+        for vname in ["v_Re", "v_Im"]:
+            data_vars[vname] = interpolate_from_rho_to_v(data_vars[vname])
+
+        d_meta = super().get_variable_metadata()
+        ds = self._write_into_dataset(data_vars, d_meta)
+        ds["omega"] = tides["omega"]
+
+        ds = self._add_global_metadata(ds)
+
+        for var in ["ssh_Re", "u_Re", "v_Im"]:
+            nan_check(ds[var].isel(ntides=0), self.grid.ds.mask_rho)
+
+        object.__setattr__(self, "ds", ds)
+
+    def _input_checks(self):
+
+        if "name" not in self.source.keys():
+            raise ValueError("`source` must include a 'name'.")
+        if "path" not in self.source.keys():
+            raise ValueError("`source` must include a 'path'.")
+
+    def _get_data(self):
+
+        if self.source["name"] == "TPXO":
+            data = TPXODataset(filename=self.source["path"])
+        else:
+            raise ValueError('Only "TPXO" is a valid option for source["name"].')
+        return data
+
+    def _write_into_dataset(self, data_vars, d_meta):
 
         # save in new dataset
         ds = xr.Dataset()
 
-        # ds["omega"] = tides["omega"]
+        for var in data_vars.keys():
+            ds[var] = data_vars[var].astype(np.float32)
+            ds[var].attrs["long_name"] = d_meta[var]["long_name"]
+            ds[var].attrs["units"] = d_meta[var]["units"]
 
-        ds["ssh_Re"] = data_vars["ssh_Re"].astype(np.float32)
-        ds["ssh_Im"] = data_vars["ssh_Im"].astype(np.float32)
-        ds["ssh_Re"].attrs["long_name"] = "Tidal elevation, real part"
-        ds["ssh_Im"].attrs["long_name"] = "Tidal elevation, complex part"
-        ds["ssh_Re"].attrs["units"] = "m"
-        ds["ssh_Im"].attrs["units"] = "m"
+        return ds
 
-        ds["pot_Re"] = data_vars["pot_Re"].astype(np.float32)
-        ds["pot_Im"] = data_vars["pot_Im"].astype(np.float32)
-        ds["pot_Re"].attrs["long_name"] = "Tidal potential, real part"
-        ds["pot_Im"].attrs["long_name"] = "Tidal potential, complex part"
-        ds["pot_Re"].attrs["units"] = "m"
-        ds["pot_Im"].attrs["units"] = "m"
-
-        ds["u_Re"] = u_Re.astype(np.float32)
-        ds["u_Im"] = u_Im.astype(np.float32)
-        ds["u_Re"].attrs["long_name"] = "Tidal velocity in x-direction, real part"
-        ds["u_Im"].attrs["long_name"] = "Tidal velocity in x-direction, complex part"
-        ds["u_Re"].attrs["units"] = "m/s"
-        ds["u_Im"].attrs["units"] = "m/s"
-
-        ds["v_Re"] = v_Re.astype(np.float32)
-        ds["v_Im"] = v_Im.astype(np.float32)
-        ds["v_Re"].attrs["long_name"] = "Tidal velocity in y-direction, real part"
-        ds["v_Im"].attrs["long_name"] = "Tidal velocity in y-direction, complex part"
-        ds["v_Re"].attrs["units"] = "m/s"
-        ds["v_Im"].attrs["units"] = "m/s"
+    def _add_global_metadata(self, ds):
 
         ds.attrs["title"] = "ROMS tidal forcing created by ROMS-Tools"
         # Include the version of roms-tools
@@ -185,10 +175,7 @@ class TidalForcing:
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["allan_factor"] = self.allan_factor
 
-        object.__setattr__(self, "ds", ds)
-
-        for var in ["ssh_Re", "u_Re", "v_Im"]:
-            nan_check(self.ds[var].isel(ntides=0), self.grid.ds.mask_rho)
+        return ds
 
     def plot(self, varname, ntides=0) -> None:
         """

@@ -584,8 +584,13 @@ class TPXODataset(Dataset):
                 "ntides": self.dim_names["ntides"],
             },
         )
+        self.check_dataset(ds)
+
         # Select relevant fields
         ds = super().select_relevant_fields(ds)
+
+        # Make sure that latitude is ascending
+        ds = super().ensure_latitude_ascending(ds)
 
         # Check whether the data covers the entire globe
         object.__setattr__(self, "is_global", super().check_if_global(ds))

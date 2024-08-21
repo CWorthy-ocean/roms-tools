@@ -193,15 +193,6 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
     )
 
     assert sfc_forcing.ds is not None
-
-    sfc_forcing = SurfaceForcing(
-        grid=grid,
-        use_coarse_grid=True,
-        start_time=start_time,
-        end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-    )
-
     assert "uwnd" in sfc_forcing.ds["physics"]
     assert "vwnd" in sfc_forcing.ds["physics"]
     assert "swrad" in sfc_forcing.ds["physics"]
@@ -217,6 +208,41 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         "path": fname,
         "climatology": False,
     }
+    assert not sfc_forcing.use_coarse_grid
+
+    sfc_forcing.plot("uwnd", time=0)
+    sfc_forcing.plot("vwnd", time=0)
+    sfc_forcing.plot("rain", time=0)
+
+    sfc_forcing = SurfaceForcing(
+        grid=grid,
+        use_coarse_grid=True,
+        start_time=start_time,
+        end_time=end_time,
+        physics_source={"name": "ERA5", "path": fname},
+    )
+
+    assert sfc_forcing.ds is not None
+    assert "uwnd" in sfc_forcing.ds["physics"]
+    assert "vwnd" in sfc_forcing.ds["physics"]
+    assert "swrad" in sfc_forcing.ds["physics"]
+    assert "lwrad" in sfc_forcing.ds["physics"]
+    assert "Tair" in sfc_forcing.ds["physics"]
+    assert "qair" in sfc_forcing.ds["physics"]
+    assert "rain" in sfc_forcing.ds["physics"]
+
+    assert sfc_forcing.start_time == start_time
+    assert sfc_forcing.end_time == end_time
+    assert sfc_forcing.physics_source == {
+        "name": "ERA5",
+        "path": fname,
+        "climatology": False,
+    }
+    assert sfc_forcing.use_coarse_grid
+
+    sfc_forcing.plot("uwnd", time=0)
+    sfc_forcing.plot("vwnd", time=0)
+    sfc_forcing.plot("rain", time=0)
 
 
 @pytest.mark.parametrize(

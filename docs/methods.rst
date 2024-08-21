@@ -64,7 +64,7 @@ The :meth:`roms_tools.Grid.add_topography_and_mask` method completes five steps:
 1. The mask is defined using a dealiased version of the interpolated topography from step 0. In this step, the topography is evaluated at each grid point: values smaller than 0.11 meters are classified as land, and values larger than 0.11 meters are classified as ocean.
 2. The interpolated topography from step 0 is smoothed over the entire domain with a smoothing factor of 8. This step ensures that the topography is smooth at the grid scale, a prerequisite for avoiding grid-scale instabilities at runtime.
 3. The mask is modified by filling enclosed basins with land.
-4. Regions where the ocean depth is shallower than ``hmin`` are set to ``hmin``. The topography is then smoothed locally in such a way that the maximum slope parameter ``r_max`` is smaller than 0.2. The maximum slope parameter is given by
+4. Regions where the ocean depth is shallower than ``hmin`` are set to ``hmin``. The topography is then smoothed locally in such a way that the maximum slope parameter ``r`` is smaller than 0.2. The maximum slope parameter is given by
 
    .. math::
       r = \max \left( \frac{|\Delta_x h|}{2h}, \frac{|\Delta_y h|}{2h} \right).

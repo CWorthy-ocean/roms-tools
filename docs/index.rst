@@ -26,7 +26,6 @@ This python package is strongly inspired by the `UCLA MATLAB tools <https://gith
    Creating a grid <grid>
    Creating tidal forcing <tides>
    Creating surface forcing <surface_forcing>
-   Creating a vertical coordinate <vertical_coordinate>
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>
 

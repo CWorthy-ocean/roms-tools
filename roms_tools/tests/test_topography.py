@@ -46,9 +46,15 @@ def test_hmin_criterion():
         center_lon=30,
         center_lat=61,
         rot=20,
-        hmin=5,
+        hmin=5.0,
     )
 
+    assert grid.hmin == 5.0
+    assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+    grid.update_topography_and_mask(hmin=10.0)
+
+    assert grid.hmin == 10.0
     assert np.less_equal(grid.hmin, grid.ds.h.min())
 
 

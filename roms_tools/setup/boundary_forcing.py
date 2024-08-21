@@ -101,7 +101,7 @@ class BoundaryForcing(ROMSToolsMixins):
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle)
+        data_vars = super().process_velocities(data_vars, angle, "u", "v")
         object.__setattr__(data, "data_vars", data_vars)
 
         if self.bgc_source is not None:

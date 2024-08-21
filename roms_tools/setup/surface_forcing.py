@@ -95,7 +95,9 @@ class SurfaceForcing(ROMSToolsMixins):
         vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
         vars_3d = []
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle, interpolate=False)
+        data_vars = super().process_velocities(
+            data_vars, angle, "uwnd", "vwnd", interpolate=False
+        )
 
         if self.correct_radiation:
             correction_data = self._get_correction_data()

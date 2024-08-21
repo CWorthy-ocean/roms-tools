@@ -96,23 +96,7 @@ def _plot(
         plt.colorbar(p, label=f"{field.long_name} [{field.units}]")
 
     if depth_contours:
-        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            if "layer_depth_rho" in field.coords:
-                depth = field.layer_depth_rho
-            else:
-                depth = field.interface_depth_rho
-        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            if "layer_depth_u" in field.coords:
-                depth = field.layer_depth_u
-            else:
-                depth = field.interface_depth_u
-        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            if "layer_depth_v" in field.coords:
-                depth = field.layer_depth_v
-            else:
-                depth = field.interface_depth_v
-
-        cs = ax.contour(lon_deg, lat_deg, depth, transform=proj, colors="k")
+        cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=10)
 
     return fig
@@ -135,12 +119,8 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}):
         )
 
     depths_to_check = [
-        "layer_depth_rho",
-        "layer_depth_u",
-        "layer_depth_v",
-        "interface_depth_rho",
-        "interface_depth_u",
-        "interface_depth_v",
+        "layer_depth",
+        "interface_depth",
     ]
     try:
         depth_label = next(

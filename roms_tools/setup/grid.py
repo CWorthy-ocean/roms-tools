@@ -476,7 +476,7 @@ class Grid:
                 self.ds,
                 field=field,
                 straddle=self.straddle,
-                depth_contours=True,
+                depth_contours=False,
                 title=title,
                 kwargs=kwargs,
                 c="g",

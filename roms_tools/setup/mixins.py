@@ -357,18 +357,18 @@ class ROMSToolsMixins:
         return d
 
     def get_boundary_info(self):
-        """
-        Provides boundary coordinate information and renaming conventions for grid boundaries.
 
-        This method returns two dictionaries: one specifying the boundary coordinates for different types of
-        grid variables (e.g., "rho", "u", "v"), and another specifying how to rename dimensions for these boundaries.
+        """
+        This method provides information about the boundary points for the rho, u, and v
+        variables on the grid, specifying the indices for the south, east, north, and west
+        boundaries.
 
         Returns
         -------
-        tuple of (dict, dict)
-            - A dictionary mapping variable types and directions to boundary coordinates.
-            - A dictionary mapping variable types and directions to new dimension names.
-
+        dict
+            A dictionary where keys are variable types ("rho", "u", "v"), and values
+            are nested dictionaries mapping directions ("south", "east", "north", "west")
+            to the corresponding boundary coordinates.
         """
 
         # Boundary coordinates
@@ -393,27 +393,4 @@ class ROMSToolsMixins:
             },
         }
 
-        # How to rename the dimensions
-
-        rename = {
-            "rho": {
-                "south": {"xi_rho": "xi_rho_south"},
-                "east": {"eta_rho": "eta_rho_east"},
-                "north": {"xi_rho": "xi_rho_north"},
-                "west": {"eta_rho": "eta_rho_west"},
-            },
-            "u": {
-                "south": {"xi_u": "xi_u_south"},
-                "east": {"eta_rho": "eta_u_east"},
-                "north": {"xi_u": "xi_u_north"},
-                "west": {"eta_rho": "eta_u_west"},
-            },
-            "v": {
-                "south": {"xi_rho": "xi_v_south"},
-                "east": {"eta_v": "eta_v_east"},
-                "north": {"xi_rho": "xi_v_north"},
-                "west": {"eta_v": "eta_v_west"},
-            },
-        }
-
-        return bdry_coords, rename
+        return bdry_coords

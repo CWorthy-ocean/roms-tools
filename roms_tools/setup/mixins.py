@@ -151,34 +151,43 @@ class ROMSToolsMixins:
 
         return data_vars
 
-    def process_velocities(self, data_vars, angle, interpolate=True):
+    def process_velocities(self, data_vars, angle, uname, vname, interpolate=True):
         """
-        Processes and rotates velocity components, and interpolates them to the appropriate grid points.
+        Process and rotate velocity components to align with the grid orientation and optionally interpolate
+        them to the appropriate grid points.
 
         This method performs the following steps:
-        1. Rotates the velocity components to align with the grid orientation using the provided angle.
-        2. Optionally interpolates the rotated velocities to the u- and v-points of the grid.
-        3. If the velocities are 3D (with vertical coordinates), computes barotropic (depth-averaged) velocities.
+
+        1. **Rotation**: Rotates the velocity components (e.g., `u`, `v`) to align with the grid orientation
+           using the provided angle data.
+        2. **Interpolation**: Optionally interpolates the rotated velocities from rho-points to u- and v-points
+           of the grid.
+        3. **Barotropic Velocity Calculation**: If the velocity components are 3D (with vertical coordinates),
+           computes the barotropic (depth-averaged) velocities.
 
         Parameters
         ----------
         data_vars : dict of str: xarray.DataArray
-            Dictionary containing the velocity components to be processed. Must include keys "u" and "v"
-            or "uwnd" and "vwnd".
+            Dictionary containing the velocity components to be processed. The dictionary should include keys
+            corresponding to the velocity component names (e.g., `uname`, `vname`).
         angle : xarray.DataArray
-            DataArray containing the angle used for rotating the velocity components to the grid orientation.
+            DataArray containing the grid angle values used to rotate the velocity components to the correct
+            orientation on the grid.
+        uname : str
+            The key corresponding to the zonal (east-west) velocity component in `data_vars`.
+        vname : str
+            The key corresponding to the meridional (north-south) velocity component in `data_vars`.
         interpolate : bool, optional
-            If True, interpolates the velocities to the u- and v-points. Defaults to True.
+            If True, interpolates the rotated velocity components to the u- and v-points of the grid.
+            Defaults to True.
 
         Returns
         -------
         dict of str: xarray.DataArray
-            Dictionary of processed velocity components. Includes "ubar" and "vbar" if the velocity components
-            have vertical coordinates and are processed for barotropic (depth-averaged) velocities.
+            A dictionary of the processed velocity components. The returned dictionary includes the rotated and,
+            if applicable, interpolated velocity components. If the input velocities are 3D (having a vertical
+            dimension), the dictionary also includes the barotropic (depth-averaged) velocities (`ubar` and `vbar`).
         """
-        # Determine the correct variable names based on the keys in data_vars
-        uname = "u" if "u" in data_vars else "uwnd"
-        vname = "v" if "v" in data_vars else "vwnd"
 
         # Rotate velocities to grid orientation
         u_rot = data_vars[uname] * np.cos(angle) + data_vars[vname] * np.sin(angle)
@@ -230,6 +239,26 @@ class ROMSToolsMixins:
         """
 
         d = {
+            "ssh_Re": {"long_name": "Tidal elevation, real part", "units": "m"},
+            "ssh_Im": {"long_name": "Tidal elevation, complex part", "units": "m"},
+            "pot_Re": {"long_name": "Tidal potential, real part", "units": "m"},
+            "pot_Im": {"long_name": "Tidal potential, complex part", "units": "m"},
+            "u_Re": {
+                "long_name": "Tidal velocity in x-direction, real part",
+                "units": "m/s",
+            },
+            "u_Im": {
+                "long_name": "Tidal velocity in x-direction, complex part",
+                "units": "m/s",
+            },
+            "v_Re": {
+                "long_name": "Tidal velocity in y-direction, real part",
+                "units": "m/s",
+            },
+            "v_Im": {
+                "long_name": "Tidal velocity in y-direction, complex part",
+                "units": "m/s",
+            },
             "uwnd": {"long_name": "10 meter wind in x-direction", "units": "m/s"},
             "vwnd": {"long_name": "10 meter wind in y-direction", "units": "m/s"},
             "swrad": {

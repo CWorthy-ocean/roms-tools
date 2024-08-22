@@ -14,6 +14,7 @@ from roms_tools.setup.utils import (
     nan_check,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    get_variable_metadata,
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
 import matplotlib.pyplot as plt
@@ -122,7 +123,7 @@ class TidalForcing(ROMSToolsMixins):
         for vname in ["v_Re", "v_Im"]:
             data_vars[vname] = interpolate_from_rho_to_v(data_vars[vname])
 
-        d_meta = super().get_variable_metadata()
+        d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)
         ds["omega"] = tides["omega"]
 

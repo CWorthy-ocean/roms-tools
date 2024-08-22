@@ -10,9 +10,7 @@ from roms_tools.setup.grid import Grid
 from roms_tools.setup.mixins import ROMSToolsMixins
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
-from roms_tools.setup.utils import (
-    nan_check,
-)
+from roms_tools.setup.utils import nan_check, get_variable_metadata, get_boundary_info
 from roms_tools.setup.plot import _section_plot, _line_plot
 import calendar
 import dask
@@ -120,8 +118,8 @@ class BoundaryForcing(ROMSToolsMixins):
         else:
             bgc_data = None
 
-        d_meta = super().get_variable_metadata()
-        bdry_coords = super().get_boundary_info()
+        d_meta = get_variable_metadata()
+        bdry_coords = get_boundary_info()
 
         ds = self._write_into_datatree(data, bgc_data, d_meta, bdry_coords)
 
@@ -332,7 +330,7 @@ class BoundaryForcing(ROMSToolsMixins):
             boundary and point type.
         """
 
-        bdry_coords = super().get_boundary_info()
+        bdry_coords = get_boundary_info()
 
         layer_depth = self.grid.ds[f"layer_depth_{point}"].isel(
             **bdry_coords[point][direction]

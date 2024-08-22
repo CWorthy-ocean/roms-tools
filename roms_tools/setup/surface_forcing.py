@@ -15,7 +15,11 @@ from roms_tools.setup.datasets import (
     ERA5Correction,
     CESMBGCSurfaceForcingDataset,
 )
-from roms_tools.setup.utils import nan_check, interpolate_from_climatology
+from roms_tools.setup.utils import (
+    nan_check,
+    interpolate_from_climatology,
+    get_variable_metadata,
+)
 from roms_tools.setup.plot import _plot
 import calendar
 import matplotlib.pyplot as plt
@@ -153,7 +157,7 @@ class SurfaceForcing(ROMSToolsMixins):
         else:
             bgc_data = None
 
-        d_meta = super().get_variable_metadata()
+        d_meta = get_variable_metadata()
 
         ds = self._write_into_datatree(data, bgc_data, d_meta)
 

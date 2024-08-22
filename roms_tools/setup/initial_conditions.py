@@ -7,9 +7,7 @@ from typing import Optional, Dict, Union
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
-from roms_tools.setup.utils import (
-    nan_check,
-)
+from roms_tools.setup.utils import nan_check, get_variable_metadata
 from roms_tools.setup.mixins import ROMSToolsMixins
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -110,7 +108,7 @@ class InitialConditions(ROMSToolsMixins):
             # Combine data variables from physical and biogeochemical sources
             data_vars.update(bgc_data_vars)
 
-        d_meta = super().get_variable_metadata()
+        d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)
 
         ds = self._add_global_metadata(ds)

@@ -71,7 +71,14 @@ def _plot(
 
     if field is not None:
         p = ax.pcolormesh(lon_deg, lat_deg, field, transform=proj, **kwargs)
-        plt.colorbar(p, label=f"{field.long_name} [{field.units}]")
+        if hasattr(field, "long_name"):
+            label = f"{field.long_name} [{field.units}]"
+        elif hasattr(field, "Long_name"):
+            # this is the case for matlab generated grids
+            label = f"{field.Long_name} [{field.units}]"
+        else:
+            label = ""
+        plt.colorbar(p, label=label)
 
     if depth_contours:
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")

@@ -9,6 +9,8 @@ from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
+    substitute_nans_by_fillvalue,
+    get_variable_metadata,
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
@@ -110,13 +112,18 @@ class InitialConditions(ROMSToolsMixins):
             # Combine data variables from physical and biogeochemical sources
             data_vars.update(bgc_data_vars)
 
-        d_meta = super().get_variable_metadata()
+        d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)
 
         ds = self._add_global_metadata(ds)
 
         ds["zeta"].load()
+        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
         nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
+
+        # substitute NaNs over land by a fill value to avoid blow-up of ROMS
+        for var in ds.data_vars:
+            ds[var] = substitute_nans_by_fillvalue(ds[var])
 
         object.__setattr__(self, "ds", ds)
 

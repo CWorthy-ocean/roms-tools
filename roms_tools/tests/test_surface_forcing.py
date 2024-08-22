@@ -424,6 +424,26 @@ def surface_forcing(grid_that_straddles_180_degree_meridian):
 
 
 @pytest.fixture
+def coarse_surface_forcing(grid_that_straddles_180_degree_meridian):
+    """
+    Fixture for creating a SurfaceForcing object.
+    """
+
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_global_test_data.nc")
+
+    return SurfaceForcing(
+        grid=grid_that_straddles_180_degree_meridian,
+        start_time=start_time,
+        end_time=end_time,
+        use_coarse_grid=True,
+        physics_source={"name": "ERA5", "path": fname},
+    )
+
+
+@pytest.fixture
 def corrected_surface_forcing(grid_that_straddles_180_degree_meridian):
     """
     Fixture for creating a SurfaceForcing object with shortwave radiation correction.
@@ -2769,6 +2789,7 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     "sfc_forcing_fixture",
     [
         "surface_forcing",
+        "coarse_surface_forcing",
         "corrected_surface_forcing",
         "corrected_surface_forcing_with_bgc",
         "corrected_surface_forcing_with_bgc_from_climatology",

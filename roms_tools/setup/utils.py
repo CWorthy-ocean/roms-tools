@@ -540,3 +540,33 @@ def get_boundary_info():
     }
 
     return bdry_coords
+
+
+def extract_single_value(data):
+    """
+    Extracts a single value from an xarray.DataArray or numpy array.
+
+    Parameters
+    ----------
+    data : xarray.DataArray or numpy.ndarray
+        The data from which to extract the single value.
+
+    Returns
+    -------
+    scalar
+        The single value contained in the array.
+
+    Raises
+    ------
+    ValueError
+        If the data contains more than one element or is not a recognized type.
+    """
+    # Convert xarray.DataArray to numpy array if necessary
+    if isinstance(data, xr.DataArray):
+        data = data.values
+
+    # Check that the data is a numpy array and contains only one element
+    if isinstance(data, np.ndarray) and data.size == 1:
+        return data.item()
+    else:
+        raise ValueError("Data must be a single-element array or DataArray.")

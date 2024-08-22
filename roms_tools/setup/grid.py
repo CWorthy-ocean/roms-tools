@@ -11,7 +11,7 @@ from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
-
+from roms_tools.setup.utils import extract_single_value
 import warnings
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -571,6 +571,12 @@ class Grid:
         ):
             grid._coarsen()
 
+        # Move variables to coordinates if necessary
+        for var in ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]:
+            if var not in ds.coords:
+                ds = grid.ds.set_coords(var)
+                object.__setattr__(grid, "ds", ds)
+
         # Update vertical coordinate if necessary
         if not all(var in grid.ds for var in ["sc_r", "Cs_r"]):
             N = 100
@@ -581,13 +587,45 @@ class Grid:
             grid.update_vertical_coordinate(
                 N=N, theta_s=theta_s, theta_b=theta_b, hc=hc
             )
+        else:
+            object.__setattr__(grid, "theta_s", ds.attrs["theta_s"].item())
+            object.__setattr__(grid, "theta_b", ds.attrs["theta_b"].item())
+            object.__setattr__(grid, "hc", ds.attrs["hc"].item())
+            object.__setattr__(grid, "N", len(ds.s_rho))
 
         # Manually set the remaining attributes by extracting parameters from dataset
         object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
         object.__setattr__(grid, "ny", ds.sizes["eta_rho"] - 2)
-        object.__setattr__(grid, "center_lon", ds.attrs["center_lon"])
-        object.__setattr__(grid, "center_lat", ds.attrs["center_lat"])
-        object.__setattr__(grid, "rot", ds.attrs["rot"])
+        if "center_lon" in ds.attrs:
+            center_lon = ds.attrs["center_lon"]
+        elif "tra_lon" in ds:
+            center_lon = extract_single_value(ds["tra_lon"])
+        else:
+            raise ValueError(
+                "Missing grid information: 'center_lon' attribute or 'tra_lon' variable "
+                "must be present in the dataset."
+            )
+        object.__setattr__(grid, "center_lon", center_lon)
+        if "center_lat" in ds.attrs:
+            center_lat = ds.attrs["center_lat"]
+        elif "tra_lat" in ds:
+            center_lat = extract_single_value(ds["tra_lat"])
+        else:
+            raise ValueError(
+                "Missing grid information: 'center_lat' attribute or 'tra_lat' variable "
+                "must be present in the dataset."
+            )
+        object.__setattr__(grid, "center_lat", center_lat)
+        if "rot" in ds.attrs:
+            rot = ds.attrs["rot"]
+        elif "rotate" in ds:
+            rot = extract_single_value(ds["rotate"])
+        else:
+            raise ValueError(
+                "Missing grid information: 'rot' attribute or 'rotate' variable "
+                "must be present in the dataset."
+            )
+        object.__setattr__(grid, "rot", rot)
 
         for attr in [
             "size_x",
@@ -596,7 +634,10 @@ class Grid:
             "hmin",
         ]:
             if attr in ds.attrs:
-                object.__setattr__(grid, attr, ds.attrs[attr])
+                a = ds.attrs[attr]
+            else:
+                a = None
+            object.__setattr__(grid, attr, a)
 
         return grid
 

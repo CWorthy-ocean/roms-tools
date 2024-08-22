@@ -101,7 +101,7 @@ class BoundaryForcing(ROMSToolsMixins):
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle)
+        data_vars = super().process_velocities(data_vars, angle, "u", "v")
         object.__setattr__(data, "data_vars", data_vars)
 
         if self.bgc_source is not None:
@@ -121,9 +121,9 @@ class BoundaryForcing(ROMSToolsMixins):
             bgc_data = None
 
         d_meta = super().get_variable_metadata()
-        bdry_coords, rename = super().get_boundary_info()
+        bdry_coords = super().get_boundary_info()
 
-        ds = self._write_into_datatree(data, bgc_data, d_meta, bdry_coords, rename)
+        ds = self._write_into_datatree(data, bgc_data, d_meta, bdry_coords)
 
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
@@ -202,7 +202,7 @@ class BoundaryForcing(ROMSToolsMixins):
 
         return data
 
-    def _write_into_dataset(self, data, d_meta, bdry_coords, rename):
+    def _write_into_dataset(self, data, d_meta, bdry_coords):
 
         # save in new dataset
         ds = xr.Dataset()
@@ -215,21 +215,18 @@ class BoundaryForcing(ROMSToolsMixins):
                         ds[f"{var}_{direction}"] = (
                             data.data_vars[var]
                             .isel(**bdry_coords["u"][direction])
-                            .rename(**rename["u"][direction])
                             .astype(np.float32)
                         )
                     elif var in ["v", "vbar"]:
                         ds[f"{var}_{direction}"] = (
                             data.data_vars[var]
                             .isel(**bdry_coords["v"][direction])
-                            .rename(**rename["v"][direction])
                             .astype(np.float32)
                         )
                     else:
                         ds[f"{var}_{direction}"] = (
                             data.data_vars[var]
                             .isel(**bdry_coords["rho"][direction])
-                            .rename(**rename["rho"][direction])
                             .astype(np.float32)
                         )
                     ds[f"{var}_{direction}"].attrs[
@@ -288,7 +285,7 @@ class BoundaryForcing(ROMSToolsMixins):
 
         return ds
 
-    def _write_into_datatree(self, data, bgc_data, d_meta, bdry_coords, rename):
+    def _write_into_datatree(self, data, bgc_data, d_meta, bdry_coords):
 
         ds = self._add_global_metadata()
         ds["sc_r"] = self.grid.ds["sc_r"]
@@ -296,119 +293,55 @@ class BoundaryForcing(ROMSToolsMixins):
 
         ds = DataTree(name="root", data=ds)
 
-        ds_physics = self._write_into_dataset(data, d_meta, bdry_coords, rename)
-        ds_physics = self._add_coordinates(bdry_coords, rename, ds_physics)
+        ds_physics = self._write_into_dataset(data, d_meta, bdry_coords)
         ds_physics = self._add_global_metadata(ds_physics)
         ds_physics.attrs["physics_source"] = self.physics_source["name"]
 
         ds_physics = DataTree(name="physics", parent=ds, data=ds_physics)
 
         if bgc_data:
-            ds_bgc = self._write_into_dataset(bgc_data, d_meta, bdry_coords, rename)
-            ds_bgc = self._add_coordinates(bdry_coords, rename, ds_bgc)
+            ds_bgc = self._write_into_dataset(bgc_data, d_meta, bdry_coords)
             ds_bgc = self._add_global_metadata(ds_bgc)
             ds_bgc.attrs["bgc_source"] = self.bgc_source["name"]
             ds_bgc = DataTree(name="bgc", parent=ds, data=ds_bgc)
 
         return ds
 
-    def _add_coordinates(self, bdry_coords, rename, ds=None):
+    def _get_coordinates(self, direction, point):
+        """
+        Retrieve layer and interface depth coordinates for a specified grid boundary.
 
-        if ds is None:
-            ds = xr.Dataset()
+        This method extracts the layer depth and interface depth coordinates along
+        a specified boundary (north, south, east, or west) and for a specified point
+        type (rho, u, or v) from the grid dataset.
 
-        for direction in ["south", "east", "north", "west"]:
+        Parameters
+        ----------
+        direction : str
+            The direction of the boundary to retrieve coordinates for. Valid options
+            are "north", "south", "east", and "west".
+        point : str
+            The type of grid point to retrieve coordinates for. Valid options are
+            "rho" for the grid's central points, "u" for the u-flux points, and "v"
+            for the v-flux points.
 
-            if self.boundaries[direction]:
+        Returns
+        -------
+        xarray.DataArray, xarray.DataArray
+            The layer depth and interface depth coordinates for the specified grid
+            boundary and point type.
+        """
 
-                lat_rho = self.grid.ds.lat_rho.isel(
-                    **bdry_coords["rho"][direction]
-                ).rename(**rename["rho"][direction])
-                lon_rho = self.grid.ds.lon_rho.isel(
-                    **bdry_coords["rho"][direction]
-                ).rename(**rename["rho"][direction])
-                layer_depth_rho = (
-                    self.grid.ds["layer_depth_rho"]
-                    .isel(**bdry_coords["rho"][direction])
-                    .rename(**rename["rho"][direction])
-                )
-                interface_depth_rho = (
-                    self.grid.ds["interface_depth_rho"]
-                    .isel(**bdry_coords["rho"][direction])
-                    .rename(**rename["rho"][direction])
-                )
+        bdry_coords = super().get_boundary_info()
 
-                lat_u = self.grid.ds.lat_u.isel(**bdry_coords["u"][direction]).rename(
-                    **rename["u"][direction]
-                )
-                lon_u = self.grid.ds.lon_u.isel(**bdry_coords["u"][direction]).rename(
-                    **rename["u"][direction]
-                )
-                layer_depth_u = (
-                    self.grid.ds["layer_depth_u"]
-                    .isel(**bdry_coords["u"][direction])
-                    .rename(**rename["u"][direction])
-                )
-                interface_depth_u = (
-                    self.grid.ds["interface_depth_u"]
-                    .isel(**bdry_coords["u"][direction])
-                    .rename(**rename["u"][direction])
-                )
+        layer_depth = self.grid.ds[f"layer_depth_{point}"].isel(
+            **bdry_coords[point][direction]
+        )
+        interface_depth = self.grid.ds[f"interface_depth_{point}"].isel(
+            **bdry_coords[point][direction]
+        )
 
-                lat_v = self.grid.ds.lat_v.isel(**bdry_coords["v"][direction]).rename(
-                    **rename["v"][direction]
-                )
-                lon_v = self.grid.ds.lon_v.isel(**bdry_coords["v"][direction]).rename(
-                    **rename["v"][direction]
-                )
-                layer_depth_v = (
-                    self.grid.ds["layer_depth_v"]
-                    .isel(**bdry_coords["v"][direction])
-                    .rename(**rename["v"][direction])
-                )
-                interface_depth_v = (
-                    self.grid.ds["interface_depth_v"]
-                    .isel(**bdry_coords["v"][direction])
-                    .rename(**rename["v"][direction])
-                )
-
-                ds = ds.assign_coords(
-                    {
-                        f"layer_depth_rho_{direction}": layer_depth_rho,
-                        f"layer_depth_u_{direction}": layer_depth_u,
-                        f"layer_depth_v_{direction}": layer_depth_v,
-                        f"interface_depth_rho_{direction}": interface_depth_rho,
-                        f"interface_depth_u_{direction}": interface_depth_u,
-                        f"interface_depth_v_{direction}": interface_depth_v,
-                        f"lat_rho_{direction}": lat_rho,
-                        f"lat_u_{direction}": lat_u,
-                        f"lat_v_{direction}": lat_v,
-                        f"lon_rho_{direction}": lon_rho,
-                        f"lon_u_{direction}": lon_u,
-                        f"lon_v_{direction}": lon_v,
-                    }
-                )
-
-        # Gracefully handle dropping variables that might not be present
-        variables_to_drop = [
-            "s_rho",
-            "layer_depth_rho",
-            "layer_depth_u",
-            "layer_depth_v",
-            "interface_depth_rho",
-            "interface_depth_u",
-            "interface_depth_v",
-            "lat_rho",
-            "lon_rho",
-            "lat_u",
-            "lon_u",
-            "lat_v",
-            "lon_v",
-        ]
-        existing_vars = [var for var in variables_to_drop if var in ds]
-        ds = ds.drop_vars(existing_vars)
-
-        return ds
+        return layer_depth, interface_depth
 
     def _add_global_metadata(self, ds=None):
 
@@ -486,8 +419,9 @@ class BoundaryForcing(ROMSToolsMixins):
         time : int, optional
             The time index to plot. Default is 0.
         layer_contours : bool, optional
-            Whether to include layer contours in the plot. This can help visualize the depth levels
-            of the field. Default is False.
+            If True, contour lines representing the boundaries between vertical layers will
+            be added to the plot. For clarity, the number of layer
+            contours displayed is limited to a maximum of 10. Default is False.
 
         Returns
         -------
@@ -513,6 +447,19 @@ class BoundaryForcing(ROMSToolsMixins):
         field = ds[varname].isel(bry_time=time).load()
         title = field.long_name
 
+        if "s_rho" in field.dims:
+            if varname.startswith(("u_", "ubar_")):
+                point = "u"
+            elif varname.startswith(("v_", "vbar_")):
+                point = "v"
+            else:
+                point = "rho"
+            direction = varname.split("_")[-1]
+
+            layer_depth, interface_depth = self._get_coordinates(direction, point)
+
+            field = field.assign_coords({"layer_depth": layer_depth})
+
         # chose colorbar
         if varname.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)
@@ -530,27 +477,6 @@ class BoundaryForcing(ROMSToolsMixins):
 
         if len(field.dims) == 2:
             if layer_contours:
-                depths_to_check = [
-                    "interface_depth_rho",
-                    "interface_depth_u",
-                    "interface_depth_v",
-                ]
-                try:
-                    interface_depth = next(
-                        ds[depth_label]
-                        for depth_label in ds.coords
-                        if any(
-                            depth_label.startswith(prefix) for prefix in depths_to_check
-                        )
-                        and (
-                            set(ds[depth_label].dims) - {"s_w"}
-                            == set(field.dims) - {"s_rho"}
-                        )
-                    )
-                except StopIteration:
-                    raise ValueError(
-                        f"None of the expected depths ({', '.join(depths_to_check)}) have dimensions matching field.dims"
-                    )
                 # restrict number of layer_contours to 10 for the sake of plot clearity
                 nr_layers = len(interface_depth["s_w"])
                 selected_layers = np.linspace(

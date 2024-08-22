@@ -114,4 +114,9 @@ def compute_depth(zeta, h, hc, cs, sigma):
     s = (hc * sigma + h * cs) / (hc + h)
     z = zeta + (zeta + h) * s
 
+    if "s_rho" in z.dims:
+        z = z.transpose("s_rho", "eta_rho", "xi_rho")
+    elif "s_w" in z.dims:
+        z = z.transpose("s_w", "eta_rho", "xi_rho")
+
     return z

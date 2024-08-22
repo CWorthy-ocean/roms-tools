@@ -584,8 +584,13 @@ class TPXODataset(Dataset):
                 "ntides": self.dim_names["ntides"],
             },
         )
+        self.check_dataset(ds)
+
         # Select relevant fields
         ds = super().select_relevant_fields(ds)
+
+        # Make sure that latitude is ascending
+        ds = super().ensure_latitude_ascending(ds)
 
         # Check whether the data covers the entire globe
         object.__setattr__(self, "is_global", super().check_if_global(ds))
@@ -769,6 +774,8 @@ class CESMDataset(Dataset):
             ds = assign_dates_to_climatology(ds, time_dim)
             # rename dimension
             ds = ds.swap_dims({time_dim: "time"})
+            if time_dim in ds.variables:
+                ds = ds.drop_vars(time_dim)
             # Update dimension names
             updated_dim_names = self.dim_names.copy()
             updated_dim_names["time"] = "time"
@@ -872,9 +879,9 @@ class CESMBGCDataset(CESMDataset):
             ds["depth"].attrs["long_name"] = "Depth"
             ds["depth"].attrs["units"] = "m"
             ds = ds.swap_dims({"z_t": "depth"})
-            if "z_t" in ds:
+            if "z_t" in ds.variables:
                 ds = ds.drop_vars("z_t")
-            if "z_t_150m" in ds:
+            if "z_t_150m" in ds.variables:
                 ds = ds.drop_vars("z_t_150m")
             # update dataset
             object.__setattr__(self, "ds", ds)
@@ -931,6 +938,19 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
     )
 
     climatology: Optional[bool] = False
+
+    def post_process(self):
+        """
+        Perform post-processing on the dataset to remove specific variables.
+
+        This method checks if the variable "z_t" exists in the dataset. If it does,
+        the variable is removed from the dataset. The modified dataset is then
+        reassigned to the `ds` attribute of the object.
+        """
+
+        if "z_t" in self.ds.variables:
+            ds = self.ds.drop_vars("z_t")
+            object.__setattr__(self, "ds", ds)
 
 
 @dataclass(frozen=True, kw_only=True)

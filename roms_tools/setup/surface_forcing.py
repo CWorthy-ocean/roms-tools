@@ -95,7 +95,9 @@ class SurfaceForcing(ROMSToolsMixins):
         vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
         vars_3d = []
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle, interpolate=False)
+        data_vars = super().process_velocities(
+            data_vars, angle, "uwnd", "vwnd", interpolate=False
+        )
 
         if self.correct_radiation:
             correction_data = self._get_correction_data()
@@ -235,18 +237,19 @@ class SurfaceForcing(ROMSToolsMixins):
 
         if self.bgc_source["name"] == "CESM_REGRIDDED":
 
-            bgc_data = CESMBGCSurfaceForcingDataset(
+            data = CESMBGCSurfaceForcingDataset(
                 filename=self.bgc_source["path"],
                 start_time=self.start_time,
                 end_time=self.end_time,
                 climatology=self.bgc_source["climatology"],
             )
+            data.post_process()
         else:
             raise ValueError(
                 'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
             )
 
-        return bgc_data
+        return data
 
     def _write_into_dataset(self, data, d_meta):
 
@@ -259,7 +262,6 @@ class SurfaceForcing(ROMSToolsMixins):
             ds[var].attrs["units"] = d_meta[var]["units"]
 
         if self.use_coarse_grid:
-            ds = ds.assign_coords({"lon": self.target_lon, "lat": self.target_lat})
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
         # Preserve absolute time coordinate for readability
@@ -294,6 +296,10 @@ class SurfaceForcing(ROMSToolsMixins):
         ds["time"].encoding["units"] = "days"
         if data.climatology:
             ds["time"].attrs["cycle_length"] = 365.25
+
+        variables_to_drop = ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]
+        existing_vars = [var for var in variables_to_drop if var in ds]
+        ds = ds.drop_vars(existing_vars)
 
         return ds
 
@@ -392,6 +398,15 @@ class SurfaceForcing(ROMSToolsMixins):
         field = ds[varname].isel(time=time).load()
         title = field.long_name
 
+        # assign lat / lon
+        if self.use_coarse_grid:
+            field = field.rename({"eta_rho": "eta_coarse", "xi_rho": "xi_coarse"})
+            field = field.where(self.grid.ds.mask_coarse)
+        else:
+            field = field.where(self.grid.ds.mask_rho)
+
+        field = field.assign_coords({"lon": self.target_lon, "lat": self.target_lat})
+
         # choose colorbar
         if varname in ["uwnd", "vwnd"]:
             vmax = max(field.max().values, -field.min().values)
@@ -412,7 +427,6 @@ class SurfaceForcing(ROMSToolsMixins):
             self.grid.ds,
             field=field,
             straddle=self.grid.straddle,
-            coarse_grid=self.use_coarse_grid,
             title=title,
             kwargs=kwargs,
             c="g",

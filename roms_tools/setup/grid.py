@@ -361,11 +361,20 @@ class Grid:
         """
 
         if bathymetry:
-            kwargs = {"cmap": "YlGnBu"}
+            field = self.ds.h.where(self.ds.mask_rho)
+            field = field.assign_coords(
+                {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
+            )
+
+            vmax = field.max().values
+            vmin = field.min().values
+            cmap = plt.colormaps.get_cmap("YlGnBu")
+            cmap.set_bad(color="gray")
+            kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
             _plot(
                 self.ds,
-                field=self.ds.h.where(self.ds.mask_rho),
+                field=field,
                 straddle=self.straddle,
                 kwargs=kwargs,
             )
@@ -419,10 +428,18 @@ class Grid:
 
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             interface_depth = self.ds.interface_depth_rho
+            field = field.where(self.ds.mask_rho)
+            field = field.assign_coords(
+                {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
+            )
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
             interface_depth = self.ds.interface_depth_u
+            field = field.where(self.ds.mask_u)
+            field = field.assign_coords({"lon": self.ds.lon_u, "lat": self.ds.lat_u})
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
             interface_depth = self.ds.interface_depth_v
+            field = field.where(self.ds.mask_v)
+            field = field.assign_coords({"lon": self.ds.lon_v, "lat": self.ds.lat_v})
 
         # slice the field as desired
         title = field.long_name
@@ -476,10 +493,9 @@ class Grid:
                 self.ds,
                 field=field,
                 straddle=self.straddle,
-                depth_contours=True,
+                depth_contours=False,
                 title=title,
                 kwargs=kwargs,
-                c="g",
             )
         else:
             if len(field.dims) == 2:

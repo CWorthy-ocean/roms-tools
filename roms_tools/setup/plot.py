@@ -8,7 +8,6 @@ def _plot(
     field=None,
     depth_contours=False,
     straddle=False,
-    coarse_grid=False,
     c="red",
     title="",
     kwargs={},
@@ -21,29 +20,8 @@ def _plot(
     else:
 
         field = field.squeeze()
-
-        if coarse_grid:
-
-            field = field.rename({"eta_rho": "eta_coarse", "xi_rho": "xi_coarse"})
-            field = field.where(grid_ds.mask_coarse)
-            lon_deg = field.lon
-            lat_deg = field.lat
-
-        else:
-            if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-                field = field.where(grid_ds.mask_rho)
-                lon_deg = grid_ds["lon_rho"]
-                lat_deg = grid_ds["lat_rho"]
-            elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-                field = field.where(grid_ds.mask_u)
-                lon_deg = grid_ds["lon_u"]
-                lat_deg = grid_ds["lat_u"]
-            elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-                field = field.where(grid_ds.mask_v)
-                lon_deg = grid_ds["lon_v"]
-                lat_deg = grid_ds["lat_v"]
-            else:
-                ValueError("provided field does not have two horizontal dimension")
+        lon_deg = field.lon
+        lat_deg = field.lat
 
         # check if North or South pole are in domain
         if lat_deg.max().values > 89 or lat_deg.min().values < -89:
@@ -96,23 +74,7 @@ def _plot(
         plt.colorbar(p, label=f"{field.long_name} [{field.units}]")
 
     if depth_contours:
-        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            if "layer_depth_rho" in field.coords:
-                depth = field.layer_depth_rho
-            else:
-                depth = field.interface_depth_rho
-        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            if "layer_depth_u" in field.coords:
-                depth = field.layer_depth_u
-            else:
-                depth = field.interface_depth_u
-        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            if "layer_depth_v" in field.coords:
-                depth = field.layer_depth_v
-            else:
-                depth = field.interface_depth_v
-
-        cs = ax.contour(lon_deg, lat_deg, depth, transform=proj, colors="k")
+        cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=10)
 
     return fig
@@ -135,12 +97,8 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}):
         )
 
     depths_to_check = [
-        "layer_depth_rho",
-        "layer_depth_u",
-        "layer_depth_v",
-        "interface_depth_rho",
-        "interface_depth_u",
-        "interface_depth_v",
+        "layer_depth",
+        "interface_depth",
     ]
     try:
         depth_label = next(

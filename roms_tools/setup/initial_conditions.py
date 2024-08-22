@@ -82,7 +82,7 @@ class InitialConditions(ROMSToolsMixins):
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle)
+        data_vars = super().process_velocities(data_vars, angle, "u", "v")
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
@@ -172,18 +172,18 @@ class InitialConditions(ROMSToolsMixins):
 
         if self.bgc_source["name"] == "CESM_REGRIDDED":
 
-            bgc_data = CESMBGCDataset(
+            data = CESMBGCDataset(
                 filename=self.bgc_source["path"],
                 start_time=self.ini_time,
                 climatology=self.bgc_source["climatology"],
             )
-            bgc_data.post_process()
+            data.post_process()
         else:
             raise ValueError(
                 'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
             )
 
-        return bgc_data
+        return data
 
     def _write_into_dataset(self, data_vars, d_meta):
 
@@ -202,18 +202,42 @@ class InitialConditions(ROMSToolsMixins):
         ds["w"].attrs["long_name"] = d_meta["w"]["long_name"]
         ds["w"].attrs["units"] = d_meta["w"]["units"]
 
+        variables_to_drop = [
+            "s_rho",
+            "lat_rho",
+            "lon_rho",
+            "layer_depth_rho",
+            "interface_depth_rho",
+            "lat_u",
+            "lon_u",
+            "lat_v",
+            "lon_v",
+        ]
+        existing_vars = [var for var in variables_to_drop if var in ds]
+        ds = ds.drop_vars(existing_vars)
+
+        ds["sc_r"] = self.grid.ds["sc_r"]
+        ds["Cs_r"] = self.grid.ds["Cs_r"]
+
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords({"abs_time": ds["time"]})
+
+        # Translate the time coordinate to days since the model reference date
+        model_reference_date = np.datetime64(self.model_reference_date)
+
+        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
+        ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
+        ds["ocean_time"].attrs[
+            "long_name"
+        ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='s')}"
+        ds["ocean_time"].attrs["units"] = "seconds"
+        ds = ds.swap_dims({"time": "ocean_time"})
+        ds = ds.drop_vars("time")
+
         return ds
 
     def _add_global_metadata(self, ds):
-
-        ds = ds.assign_coords(
-            {
-                "layer_depth_u": self.grid.ds["layer_depth_u"],
-                "layer_depth_v": self.grid.ds["layer_depth_v"],
-                "interface_depth_u": self.grid.ds["interface_depth_u"],
-                "interface_depth_v": self.grid.ds["interface_depth_v"],
-            }
-        )
 
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"
         # Include the version of roms-tools
@@ -228,24 +252,9 @@ class InitialConditions(ROMSToolsMixins):
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
 
-        # Translate the time coordinate to days since the model reference date
-        model_reference_date = np.datetime64(self.model_reference_date)
-
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
-        ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
-        ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
-        ds["ocean_time"].attrs[
-            "long_name"
-        ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='s')}"
-        ds["ocean_time"].attrs["units"] = "seconds"
-
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
-        ds["sc_r"] = self.grid.ds["sc_r"]
-        ds["Cs_r"] = self.grid.ds["Cs_r"]
-
-        ds = ds.drop_vars(["s_rho"])
 
         return ds
 
@@ -306,13 +315,23 @@ class InitialConditions(ROMSToolsMixins):
             - "diazP": Diazotroph Phosphorus (mmol/m³).
             - "diazFe": Diazotroph Iron (mmol/m³).
         s : int, optional
-            The index of the vertical layer to plot. Default is None.
+            The index of the vertical layer (`s_rho`) to plot. If not specified, the plot
+            will represent a horizontal slice (eta- or xi- plane). Default is None.
         eta : int, optional
-            The eta-index to plot. Default is None.
+            The eta-index to plot. Used for vertical sections or horizontal slices.
+            Default is None.
         xi : int, optional
-            The xi-index to plot. Default is None.
+            The xi-index to plot. Used for vertical sections or horizontal slices.
+            Default is None.
         depth_contours : bool, optional
-            Whether to include depth contours in the plot. Default is False.
+            If True, depth contours will be overlaid on the plot, showing lines of constant
+            depth. This is typically used for plots that show a single vertical layer.
+            Default is False.
+        layer_contours : bool, optional
+            If True, contour lines representing the boundaries between vertical layers will
+            be added to the plot. This is particularly useful in vertical sections to
+            visualize the layering of the water column. For clarity, the number of layer
+            contours displayed is limited to a maximum of 10. Default is False.
 
         Returns
         -------
@@ -325,6 +344,7 @@ class InitialConditions(ROMSToolsMixins):
             If the specified `varname` is not one of the valid options.
             If the field specified by `varname` is 3D and none of `s`, `eta`, or `xi` are specified.
             If the field specified by `varname` is 2D and both `eta` and `xi` are specified.
+
         """
 
         if len(self.ds[varname].squeeze().dims) == 3 and not any(
@@ -343,17 +363,38 @@ class InitialConditions(ROMSToolsMixins):
         field = self.ds[varname].squeeze()
 
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_rho
+            interface_depth = self.grid.ds.interface_depth_rho
+            layer_depth = self.grid.ds.layer_depth_rho
+            field = field.where(self.grid.ds.mask_rho)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_rho, "lat": self.grid.ds.lat_rho}
+            )
+
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            interface_depth = self.ds.interface_depth_u
+            interface_depth = self.grid.ds.interface_depth_u
+            layer_depth = self.grid.ds.layer_depth_u
+            field = field.where(self.grid.ds.mask_u)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_u, "lat": self.grid.ds.lat_u}
+            )
+
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_v
+            interface_depth = self.grid.ds.interface_depth_v
+            layer_depth = self.grid.ds.layer_depth_v
+            field = field.where(self.grid.ds.mask_v)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_v, "lat": self.grid.ds.lat_v}
+            )
+        else:
+            ValueError("provided field does not have two horizontal dimension")
 
         # slice the field as desired
         title = field.long_name
         if s is not None:
             title = title + f", s_rho = {field.s_rho[s].item()}"
             field = field.isel(s_rho=s)
+            layer_depth = layer_depth.isel(s_rho=s)
+            field = field.assign_coords({"layer_depth": layer_depth})
         else:
             depth_contours = False
 
@@ -361,10 +402,14 @@ class InitialConditions(ROMSToolsMixins):
             if "eta_rho" in field.dims:
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
+                layer_depth = layer_depth.isel(eta_rho=eta)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_rho=eta)
             elif "eta_v" in field.dims:
                 title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
+                layer_depth = layer_depth.isel(eta_v=eta)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_v=eta)
             else:
                 raise ValueError(
@@ -374,10 +419,14 @@ class InitialConditions(ROMSToolsMixins):
             if "xi_rho" in field.dims:
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
+                layer_depth = layer_depth.isel(xi_rho=xi)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_rho=xi)
             elif "xi_u" in field.dims:
                 title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
+                layer_depth = layer_depth.isel(xi_u=xi)
+                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_u=xi)
             else:
                 raise ValueError(

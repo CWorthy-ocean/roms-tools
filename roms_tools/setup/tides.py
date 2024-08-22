@@ -217,6 +217,25 @@ class TidalForcing(ROMSToolsMixins):
         """
 
         field = self.ds[varname].isel(ntides=ntides).compute()
+        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
+            field = field.where(self.grid.ds.mask_rho)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_rho, "lat": self.grid.ds.lat_rho}
+            )
+
+        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
+            field = field.where(self.grid.ds.mask_u)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_u, "lat": self.grid.ds.lat_u}
+            )
+
+        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
+            field = field.where(self.grid.ds.mask_v)
+            field = field.assign_coords(
+                {"lon": self.grid.ds.lon_v, "lat": self.grid.ds.lat_v}
+            )
+        else:
+            ValueError("provided field does not have two horizontal dimension")
 
         title = "%s, ntides = %i" % (field.long_name, self.ds[varname].ntides[ntides])
 

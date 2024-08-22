@@ -884,7 +884,6 @@ class CESMBGCDataset(CESMDataset):
             if "z_t_150m" in ds.variables:
                 ds = ds.drop_vars("z_t_150m")
             # update dataset
-            print(ds)
             object.__setattr__(self, "ds", ds)
 
             # Update dim_names with "depth": "depth" key-value pair

@@ -255,7 +255,38 @@ def test_initial_conditions_data_consistency_plot_save(
     Test that the data within the InitialConditions object remains consistent.
     Also test plot and save methods in the same test since we dask arrays are already computed.
     """
-    initial_conditions_with_bgc_from_climatology.ds.load()
+
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="temp", s=0, depth_contours=True
+    )
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="temp", eta=0, layer_contours=True
+    )
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="temp", xi=0, layer_contours=True
+    )
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="u", s=0, layer_contours=True
+    )
+    initial_conditions_with_bgc_from_climatology.plot(varname="u", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="u", eta=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="u", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(
+        varname="v", s=0, layer_contours=True
+    )
+    initial_conditions_with_bgc_from_climatology.plot(varname="v", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="v", eta=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="v", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="zeta")
+    initial_conditions_with_bgc_from_climatology.plot(varname="ubar")
+    initial_conditions_with_bgc_from_climatology.plot(varname="vbar")
+    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", s=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", eta=0, xi=0)
 
     # Define the expected data
     expected_temp = np.array(
@@ -445,24 +476,6 @@ def test_initial_conditions_data_consistency_plot_save(
     assert np.allclose(
         initial_conditions_with_bgc_from_climatology.ds["ALK"].values, expected_alk
     )
-
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(
-        varname="temp", s=0, depth_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(
-        varname="temp", eta=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(
-        varname="temp", xi=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="zeta")
-    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", s=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", eta=0, xi=0)
 
     filepath = tmp_path / "initial_conditions.nc"
     initial_conditions_with_bgc_from_climatology.save(filepath)

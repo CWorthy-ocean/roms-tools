@@ -174,10 +174,19 @@ def grid_that_straddles_180_degree_meridian():
 )
 def test_successful_initialization_with_regional_data(grid_fixture, request):
     """
-    Test successful initialization of SurfaceForcing with regional data.
+    Test the initialization of SurfaceForcing with regional ERA5 data.
 
-    Verifies that attributes are correctly set and data contains expected variables.
+    This test checks the following:
+    1. SurfaceForcing object initializes successfully with provided regional data.
+    2. Attributes such as `start_time`, `end_time`, and `physics_source` are set correctly.
+    3. The dataset contains expected variables, including "uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", and "rain".
+    4. Surface forcing plots for "uwnd", "vwnd", and "rain" are generated without errors.
+
+    The test is performed twice:
+    - First with the default fine grid.
+    - Then with the coarse grid enabled.
     """
+
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
@@ -480,11 +489,61 @@ def corrected_surface_forcing_with_bgc_from_climatology(
     )
 
 
+def test_nans_filled_in(grid_that_straddles_dateline):
+    """
+    Test that the surface forcing fields contain no NaNs.
+
+    The test is performed twice:
+    - First with the default fine grid.
+    - Then with the coarse grid enabled.
+    """
+
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_regional_test_data.nc")
+    fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
+
+    sfc_forcing = SurfaceForcing(
+        grid=grid_that_straddles_dateline,
+        start_time=start_time,
+        end_time=end_time,
+        physics_source={"name": "ERA5", "path": fname},
+        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
+    )
+
+    # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
+    # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
+    # completed; the nan_check passes if there are NaNs only over land
+    assert not sfc_forcing.ds["physics"]["uwnd"].isnull().any().values.item()
+    assert not sfc_forcing.ds["physics"]["vwnd"].isnull().any().values.item()
+    assert not sfc_forcing.ds["physics"]["rain"].isnull().any().values.item()
+    assert not sfc_forcing.ds["bgc"]["pco2_air"].isnull().any().values.item()
+
+    sfc_forcing = SurfaceForcing(
+        grid=grid_that_straddles_dateline,
+        use_coarse_grid=True,
+        start_time=start_time,
+        end_time=end_time,
+        physics_source={"name": "ERA5", "path": fname},
+        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
+    )
+
+    # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
+    # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
+    # completed; the nan_check passes if there are NaNs only over land
+    assert not sfc_forcing.ds["physics"]["uwnd"].isnull().any().values.item()
+    assert not sfc_forcing.ds["physics"]["vwnd"].isnull().any().values.item()
+    assert not sfc_forcing.ds["physics"]["rain"].isnull().any().values.item()
+    assert not sfc_forcing.ds["bgc"]["pco2_air"].isnull().any().values.item()
+
+
 def test_time_attr_climatology(corrected_surface_forcing_with_bgc_from_climatology):
     """
     Test that the 'cycle_length' attribute is present in the time coordinate of the BGC dataset
     when using climatology data.
     """
+    print(corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"].time)
     assert hasattr(
         corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"].time,
         "cycle_length",

@@ -216,6 +216,38 @@ def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climato
     )
 
 
+def test_coordinates_existence_and_values(initial_conditions_with_bgc_from_climatology):
+    """
+    Test that the dataset contains the expected coordinates with the correct values.
+    """
+
+    # Expected coordinates and their values
+    expected_coords = {
+        "abs_time": np.array(["2021-06-29T00:00:00.000000000"], dtype="datetime64[ns]"),
+        "ocean_time": np.array([6.7824e08], dtype=float),
+    }
+    # Check that the dataset contains exactly the expected coordinates and no others
+    actual_coords = set(initial_conditions_with_bgc_from_climatology.ds.coords.keys())
+    expected_coords_set = set(expected_coords.keys())
+
+    assert actual_coords == expected_coords_set, (
+        f"Unexpected coordinates found. Expected only {expected_coords_set}, "
+        f"but found {actual_coords}."
+    )
+
+    # Check that the coordinate values match the expected values
+    np.testing.assert_array_equal(
+        initial_conditions_with_bgc_from_climatology.ds.coords["abs_time"].values,
+        expected_coords["abs_time"],
+    )
+    np.testing.assert_allclose(
+        initial_conditions_with_bgc_from_climatology.ds.coords["ocean_time"].values,
+        expected_coords["ocean_time"],
+        rtol=1e-9,
+        atol=0,
+    )
+
+
 def test_initial_conditions_data_consistency_plot_save(
     initial_conditions_with_bgc_from_climatology, tmp_path
 ):

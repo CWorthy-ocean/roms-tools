@@ -227,7 +227,7 @@ class InitialConditions(ROMSToolsMixins):
 
         # Convert the time coordinate to the format expected by ROMS (days since model reference date)
         ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
-        ds = ds.assign_coords(ocean_time=("time", np.float32(ocean_time)))
+        ds = ds.assign_coords(ocean_time=("time", ocean_time.data.astype("float64")))
         ds["ocean_time"].attrs[
             "long_name"
         ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='s')}"

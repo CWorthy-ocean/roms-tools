@@ -41,6 +41,28 @@ def nan_check(field, mask) -> None:
         )
 
 
+def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
+    """
+    Replace NaN values in the field with a specified fill value.
+
+    This function replaces any NaN values in the input field with the provided fill value.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The data array in which NaN values need to be replaced. This is typically an xarray.DataArray.
+    fill_value : scalar, optional
+        The value to use for replacing NaNs. Default is 0.0.
+
+    Returns
+    -------
+    xr.DataArray
+        The data array with NaN values replaced by the specified fill value.
+    """
+
+    return field.fillna(fill_value)
+
+
 def interpolate_from_rho_to_u(field, method="additive"):
 
     """

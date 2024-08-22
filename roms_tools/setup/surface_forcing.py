@@ -17,6 +17,7 @@ from roms_tools.setup.datasets import (
 )
 from roms_tools.setup.utils import (
     nan_check,
+    substitute_nans_by_fillvalue,
     interpolate_from_climatology,
     get_variable_metadata,
 )
@@ -168,8 +169,16 @@ class SurfaceForcing(ROMSToolsMixins):
         else:
             mask = self.grid.ds["mask_rho"]
 
+        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
         for var in ds["physics"].data_vars:
             nan_check(ds["physics"][var].isel(time=0), mask)
+
+        # substitute NaNs over land by a fill value to avoid blow-up of ROMS
+        for var in ds["physics"].data_vars:
+            ds["physics"][var] = substitute_nans_by_fillvalue(ds["physics"][var])
+        if self.bgc_source is not None:
+            for var in ds["bgc"].data_vars:
+                ds["bgc"][var] = substitute_nans_by_fillvalue(ds["bgc"][var])
 
         object.__setattr__(self, "ds", ds)
 

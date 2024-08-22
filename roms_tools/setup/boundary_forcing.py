@@ -10,7 +10,12 @@ from roms_tools.setup.grid import Grid
 from roms_tools.setup.mixins import ROMSToolsMixins
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
-from roms_tools.setup.utils import nan_check, get_variable_metadata, get_boundary_info
+from roms_tools.setup.utils import (
+    nan_check,
+    substitute_nans_by_fillvalue,
+    get_variable_metadata,
+    get_boundary_info,
+)
 from roms_tools.setup.plot import _section_plot, _line_plot
 import calendar
 import dask
@@ -123,12 +128,20 @@ class BoundaryForcing(ROMSToolsMixins):
 
         ds = self._write_into_datatree(data, bgc_data, d_meta, bdry_coords)
 
+        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
                 nan_check(
                     ds["physics"][f"zeta_{direction}"].isel(bry_time=0),
                     self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
                 )
+
+        # substitute NaNs over land by a fill value to avoid blow-up of ROMS
+        for var in ds["physics"].data_vars:
+            ds["physics"][var] = substitute_nans_by_fillvalue(ds["physics"][var])
+        if self.bgc_source is not None:
+            for var in ds["bgc"].data_vars:
+                ds["bgc"][var] = substitute_nans_by_fillvalue(ds["bgc"][var])
 
         object.__setattr__(self, "ds", ds)
 

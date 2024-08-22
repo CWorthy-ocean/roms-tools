@@ -548,6 +548,136 @@ def test_surface_forcing_creation(sfc_forcing_fixture, request):
     assert sfc_forcing.ds["bgc"].attrs["bgc_source"] == "CESM_REGRIDDED"
 
 
+def test_coordinates_existence_and_values(corrected_surface_forcing_with_bgc):
+    """
+    Test that the dataset contains the expected coordinates with the correct values.
+    """
+
+    for group in ["physics", "bgc"]:
+        if group == "physics":
+            # Expected coordinates and their values
+            expected_coords = {
+                "abs_time": np.array(
+                    ["2020-02-01T00:00:00.000000000", "2020-02-01T01:00:00.000000000"],
+                    dtype="datetime64[ns]",
+                ),
+                "time": np.array([7336.0, 7336.041667]),
+            }
+        elif group == "bgc":
+            # Expected coordinates and their values
+            expected_coords = {
+                "abs_time": np.array(
+                    ["2020-02-01T00:00:00.000000000"], dtype="datetime64[ns]"
+                ),
+                "time": np.array([7336.0]),
+            }
+
+        # Check that the dataset contains exactly the expected coordinates and no others
+        actual_coords = set(corrected_surface_forcing_with_bgc.ds[group].coords.keys())
+        expected_coords_set = set(expected_coords.keys())
+
+        assert actual_coords == expected_coords_set, (
+            f"Unexpected coordinates found. Expected only {expected_coords_set}, "
+            f"but found {actual_coords}."
+        )
+
+        # Check that the coordinate values match the expected values
+        np.testing.assert_array_equal(
+            corrected_surface_forcing_with_bgc.ds[group].coords["abs_time"].values,
+            expected_coords["abs_time"],
+        )
+        np.testing.assert_allclose(
+            corrected_surface_forcing_with_bgc.ds[group].coords["time"].values,
+            expected_coords["time"],
+            rtol=1e-9,
+            atol=0,
+        )
+
+
+def test_coordinates_existence_and_values_climatology(
+    corrected_surface_forcing_with_bgc_from_climatology,
+):
+    """
+    Test that the dataset contains the expected coordinates with the correct values.
+    """
+
+    for group in ["physics", "bgc"]:
+        if group == "physics":
+            # Expected coordinates and their values
+            expected_coords = {
+                "abs_time": np.array(
+                    ["2020-02-01T00:00:00.000000000", "2020-02-01T01:00:00.000000000"],
+                    dtype="datetime64[ns]",
+                ),
+                "time": np.array([7336.0, 7336.041667]),
+            }
+        elif group == "bgc":
+            # Expected coordinates and their values
+            expected_coords = {
+                "abs_time": np.array(
+                    [
+                        1296000000000000,
+                        3888000000000000,
+                        6393600000000000,
+                        9072000000000000,
+                        11664000000000000,
+                        14342400000000000,
+                        16934400000000000,
+                        19612800000000000,
+                        22291200000000000,
+                        24883200000000000,
+                        27561600000000000,
+                        30153600000000000,
+                    ],
+                    dtype="timedelta64[ns]",
+                ),
+                "time": np.array(
+                    [
+                        1296000000000000,
+                        3888000000000000,
+                        6393600000000000,
+                        9072000000000000,
+                        11664000000000000,
+                        14342400000000000,
+                        16934400000000000,
+                        19612800000000000,
+                        22291200000000000,
+                        24883200000000000,
+                        27561600000000000,
+                        30153600000000000,
+                    ],
+                    dtype="timedelta64[ns]",
+                ),
+            }
+
+        # Check that the dataset contains exactly the expected coordinates and no others
+        actual_coords = set(
+            corrected_surface_forcing_with_bgc_from_climatology.ds[group].coords.keys()
+        )
+        expected_coords_set = set(expected_coords.keys())
+
+        assert actual_coords == expected_coords_set, (
+            f"Unexpected coordinates found. Expected only {expected_coords_set}, "
+            f"but found {actual_coords}."
+        )
+
+        # Check that the coordinate values match the expected values
+        np.testing.assert_array_equal(
+            corrected_surface_forcing_with_bgc_from_climatology.ds[group]
+            .coords["abs_time"]
+            .values,
+            expected_coords["abs_time"],
+        )
+        np.testing.assert_allclose(
+            corrected_surface_forcing_with_bgc_from_climatology.ds[group]
+            .coords["time"]
+            .values,
+            expected_coords["time"],
+            rtol=1e-9,
+            atol=0,
+        )
+
+
 @pytest.mark.parametrize(
     "sfc_forcing_fixture, expected_swrad",
     [

@@ -12,8 +12,10 @@ from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.datasets import TPXODataset
 from roms_tools.setup.utils import (
     nan_check,
+    substitute_nans_by_fillvalue,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    get_variable_metadata,
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
 import matplotlib.pyplot as plt
@@ -122,14 +124,19 @@ class TidalForcing(ROMSToolsMixins):
         for vname in ["v_Re", "v_Im"]:
             data_vars[vname] = interpolate_from_rho_to_v(data_vars[vname])
 
-        d_meta = super().get_variable_metadata()
+        d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)
         ds["omega"] = tides["omega"]
 
         ds = self._add_global_metadata(ds)
 
+        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
         for var in ["ssh_Re", "u_Re", "v_Im"]:
             nan_check(ds[var].isel(ntides=0), self.grid.ds.mask_rho)
+
+        # substitute NaNs over land by a fill value to avoid blow-up of ROMS
+        for var in ds.data_vars:
+            ds[var] = substitute_nans_by_fillvalue(ds[var])
 
         object.__setattr__(self, "ds", ds)
 

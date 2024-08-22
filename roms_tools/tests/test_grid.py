@@ -7,6 +7,7 @@ import os
 import tempfile
 import importlib.metadata
 import textwrap
+from roms_tools.setup.download import download_test_data
 
 
 @pytest.fixture
@@ -255,6 +256,62 @@ def test_grid_straddle_crosses_meridian():
         rot=20,
     )
     assert not grid.straddle
+
+
+def test_compatability_with_matlab_grid():
+
+    fname = download_test_data("grid_created_with_matlab.nc")
+
+    grid = Grid.from_file(fname)
+
+    assert not grid.straddle
+    assert grid.theta_s == 5.0
+    assert grid.theta_b == 2.0
+    assert grid.hc == 300.0
+    assert grid.N == 100
+    assert grid.nx == 24
+    assert grid.ny == 24
+    assert grid.center_lon == -4.1
+    assert grid.center_lat == 52.4
+    assert grid.rot == 0.0
+
+    expected_coords = set(
+        [
+            "lat_rho",
+            "lon_rho",
+            "lat_u",
+            "lon_u",
+            "lat_v",
+            "lon_v",
+            "lat_coarse",
+            "lon_coarse",
+            "layer_depth_rho",
+            "layer_depth_u",
+            "layer_depth_v",
+            "interface_depth_rho",
+            "interface_depth_u",
+            "interface_depth_v",
+        ]
+    )
+    actual_coords = set(grid.ds.coords.keys())
+    assert actual_coords == expected_coords
+
+    grid.plot(bathymetry=True)
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        filepath = tmpfile.name
+    try:
+        # Save the grid to a file
+        grid.save(filepath)
+
+        # Load the grid from the file
+        grid_from_file = Grid.from_file(filepath)
+
+        # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+        assert grid == grid_from_file
+
+    finally:
+        os.remove(filepath)
 
 
 def test_roundtrip_netcdf():

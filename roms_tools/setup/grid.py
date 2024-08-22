@@ -11,7 +11,7 @@ from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
-
+from roms_tools.setup.utils import extract_single_value
 import warnings
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -599,7 +599,7 @@ class Grid:
         if "center_lon" in ds.attrs:
             center_lon = ds.attrs["center_lon"]
         elif "tra_lon" in ds:
-            center_lon = ds["tra_lon"].item()
+            center_lon = extract_single_value(ds["tra_lon"])
         else:
             raise ValueError(
                 "Missing grid information: 'center_lon' attribute or 'tra_lon' variable "
@@ -609,7 +609,7 @@ class Grid:
         if "center_lat" in ds.attrs:
             center_lat = ds.attrs["center_lat"]
         elif "tra_lat" in ds:
-            center_lat = ds["tra_lat"].values.item()
+            center_lat = extract_single_value(ds["tra_lat"])
         else:
             raise ValueError(
                 "Missing grid information: 'center_lat' attribute or 'tra_lat' variable "
@@ -617,9 +617,9 @@ class Grid:
             )
         object.__setattr__(grid, "center_lat", center_lat)
         if "rot" in ds.attrs:
-            rot = ds.attrs["rot"].values.item()
+            rot = ds.attrs["rot"]
         elif "rotate" in ds:
-            rot = ds["rotate"].values.item()
+            rot = extract_single_value(ds["rotate"])
         else:
             raise ValueError(
                 "Missing grid information: 'rot' attribute or 'rotate' variable "

@@ -57,7 +57,7 @@ def _add_topography_and_mask(
     mask = xr.where(hraw > 0, 1.0, 0.0)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
-    hraw = _smooth_topography_globally(hraw, mask, smooth_factor)
+    hraw = _smooth_topography_globally(hraw, smooth_factor)
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
@@ -115,10 +115,12 @@ def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
     return hraw
 
 
-def _smooth_topography_globally(hraw, wet_mask, factor) -> xr.DataArray:
+def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
     # since GCM-Filters assumes periodic domain, we extend the domain by one grid cell in each dimension
     # and set that margin to land
-    margin_mask = xr.concat([wet_mask, 0 * wet_mask.isel(eta_rho=-1)], dim="eta_rho")
+
+    mask = xr.ones_like(hraw)
+    margin_mask = xr.concat([mask, 0 * mask.isel(eta_rho=-1)], dim="eta_rho")
     margin_mask = xr.concat(
         [margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
     )

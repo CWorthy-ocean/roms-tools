@@ -207,13 +207,6 @@ class ROMSToolsMixins:
             data_vars[vname] = v_rot
 
         if "s_rho" in data_vars[uname].dims and "s_rho" in data_vars[vname].dims:
-            # 3D masks for ROMS domain
-            umask = self.grid.ds.mask_u.expand_dims({"s_rho": data_vars[uname].s_rho})
-            vmask = self.grid.ds.mask_v.expand_dims({"s_rho": data_vars[vname].s_rho})
-
-            data_vars[uname] = data_vars[uname] * umask
-            data_vars[vname] = data_vars[vname] * vmask
-
             # Compute barotropic velocity
             dz = -self.grid.ds["interface_depth_rho"].diff(dim="s_w")
             dz = dz.rename({"s_w": "s_rho"})

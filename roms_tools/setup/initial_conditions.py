@@ -28,7 +28,7 @@ class InitialConditions(ROMSToolsMixins):
         Object representing the grid information used for the model.
     ini_time : datetime
         The date and time at which the initial conditions are set.
-    physics_source : Dict[str, Union[str, None]]
+    source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the physical initial condition data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
         - "path" (str): Path to the physical data file. Can contain wildcards.
@@ -51,7 +51,7 @@ class InitialConditions(ROMSToolsMixins):
     >>> initial_conditions = InitialConditions(
     ...     grid=grid,
     ...     ini_time=datetime(2022, 1, 1),
-    ...     physics_source={"name": "GLORYS", "path": "physics_data.nc"},
+    ...     source={"name": "GLORYS", "path": "physics_data.nc"},
     ...     bgc_source={
     ...         "name": "CESM_REGRIDDED",
     ...         "path": "bgc_data.nc",
@@ -62,7 +62,7 @@ class InitialConditions(ROMSToolsMixins):
 
     grid: Grid
     ini_time: datetime
-    physics_source: Dict[str, Union[str, None]]
+    source: Dict[str, Union[str, None]]
     bgc_source: Optional[Dict[str, Union[str, None]]] = None
     model_reference_date: datetime = datetime(2000, 1, 1)
 
@@ -100,10 +100,7 @@ class InitialConditions(ROMSToolsMixins):
             bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
 
             # Ensure time coordinate matches if climatology is applied in one case but not the other
-            if (
-                not self.physics_source["climatology"]
-                and self.bgc_source["climatology"]
-            ):
+            if not self.source["climatology"] and self.bgc_source["climatology"]:
                 for var in bgc_data_vars.keys():
                     bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
                         {"time": data_vars["temp"]["time"]}
@@ -129,17 +126,17 @@ class InitialConditions(ROMSToolsMixins):
 
     def _input_checks(self):
 
-        if "name" not in self.physics_source.keys():
-            raise ValueError("`physics_source` must include a 'name'.")
-        if "path" not in self.physics_source.keys():
-            raise ValueError("`physics_source` must include a 'path'.")
-        # set self.physics_source["climatology"] to False if not provided
+        if "name" not in self.source.keys():
+            raise ValueError("`source` must include a 'name'.")
+        if "path" not in self.source.keys():
+            raise ValueError("`source` must include a 'path'.")
+        # set self.source["climatology"] to False if not provided
         object.__setattr__(
             self,
-            "physics_source",
+            "source",
             {
-                **self.physics_source,
-                "climatology": self.physics_source.get("climatology", False),
+                **self.source,
+                "climatology": self.source.get("climatology", False),
             },
         )
         if self.bgc_source is not None:
@@ -163,16 +160,14 @@ class InitialConditions(ROMSToolsMixins):
 
     def _get_data(self):
 
-        if self.physics_source["name"] == "GLORYS":
+        if self.source["name"] == "GLORYS":
             data = GLORYSDataset(
-                filename=self.physics_source["path"],
+                filename=self.source["path"],
                 start_time=self.ini_time,
-                climatology=self.physics_source["climatology"],
+                climatology=self.source["climatology"],
             )
         else:
-            raise ValueError(
-                'Only "GLORYS" is a valid option for physics_source["name"].'
-            )
+            raise ValueError('Only "GLORYS" is a valid option for source["name"].')
         return data
 
     def _get_bgc_data(self):
@@ -255,7 +250,7 @@ class InitialConditions(ROMSToolsMixins):
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["ini_time"] = str(self.ini_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["physical_source"] = self.physics_source["name"]
+        ds.attrs["source"] = self.source["name"]
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
 
@@ -523,7 +518,7 @@ class InitialConditions(ROMSToolsMixins):
 
         initial_conditions_data = {
             "InitialConditions": {
-                "physics_source": self.physics_source,
+                "source": self.source,
                 "ini_time": self.ini_time.isoformat(),
                 "model_reference_date": self.model_reference_date.isoformat(),
             }

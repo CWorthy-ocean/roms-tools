@@ -2,7 +2,6 @@ import xarray as xr
 import pandas as pd
 import dask
 import yaml
-from datatree import DataTree
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
@@ -29,26 +28,25 @@ import matplotlib.pyplot as plt
 @dataclass(frozen=True, kw_only=True)
 class SurfaceForcing(ROMSToolsMixins):
     """
-    Represents surface forcing data for ocean modeling.
+    Represents surface forcing input data for ROMS.
 
     Parameters
     ----------
     grid : Grid
         Object representing the grid information.
     start_time : datetime
-        Start time of the desired forcing data.
+        Start time of the desired surface forcing data.
     end_time : datetime
-        End time of the desired forcing data.
-    physics_source : Dict[str, Union[str, None]]
-        Dictionary specifying the source of the physical surface forcing data:
+        End time of the desired surface forcing data.
+    source : Dict[str, Union[str, None]]
+        Dictionary specifying the source of the surface forcing data:
         - "name" (str): Name of the data source (e.g., "ERA5").
-        - "path" (str): Path to the physical data file. Can contain wildcards.
-        - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
-    bgc_source : Optional[Dict[str, Union[str, None]]]
-        Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
-        - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
-        - "path" (str): Path to the BGC data file. Can contain wildcards.
-        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
+        - "path" (str): Path to the raw data file. Wildcards
+          can be used to specify multiple files.
+        - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+    type : str
+        Specifies the type of forcing data, either "physics" for physical
+        atmospheric forcing or "bgc" for biogeochemical forcing.
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is False.
     use_coarse_grid: bool
@@ -64,11 +62,12 @@ class SurfaceForcing(ROMSToolsMixins):
 
     Examples
     --------
-    >>> atm_forcing = SurfaceForcing(
+    >>> surface_forcing = SurfaceForcing(
     ...     grid=grid,
     ...     start_time=datetime(2000, 1, 1),
     ...     end_time=datetime(2000, 1, 2),
-    ...     physics_source={"name": "ERA5", "path": "physics_data.nc"},
+    ...     source={"name": "ERA5", "path": "era5_data.nc"},
+    ...     type="physics",
     ...     correct_radiation=True,
     ... )
     """
@@ -76,8 +75,8 @@ class SurfaceForcing(ROMSToolsMixins):
     grid: Grid
     start_time: datetime
     end_time: datetime
-    physics_source: Dict[str, Union[str, None]]
-    bgc_source: Dict[str, Union[str, None]] = None
+    source: Dict[str, Union[str, None]]
+    type: str = "physics"
     correct_radiation: bool = False
     use_coarse_grid: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -97,70 +96,59 @@ class SurfaceForcing(ROMSToolsMixins):
             margin=2,
             straddle=straddle,
         )
-        vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
+        if self.type == "physics":
+            vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
+        elif self.type == "bgc":
+            vars_2d = data.var_names.keys()
         vars_3d = []
+
         data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(
-            data_vars, angle, "uwnd", "vwnd", interpolate=False
-        )
 
-        if self.correct_radiation:
-            correction_data = self._get_correction_data()
-            # choose same subdomain as forcing data so that we can use same mask
-            coords_correction = {
-                correction_data.dim_names["latitude"]: data.ds[
-                    data.dim_names["latitude"]
-                ],
-                correction_data.dim_names["longitude"]: data.ds[
-                    data.dim_names["longitude"]
-                ],
-            }
-            correction_data.choose_subdomain(coords_correction, straddle=straddle)
-            # apply mask from ERA5 data
-            if "mask" in data.var_names.keys():
-                mask = xr.where(
-                    data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1
-                )
-                for var in correction_data.ds.data_vars:
-                    correction_data.ds[var] = xr.where(
-                        mask == 1, correction_data.ds[var], np.nan
+        if self.type == "physics":
+            data_vars = super().process_velocities(
+                data_vars, angle, "uwnd", "vwnd", interpolate=False
+            )
+            if self.correct_radiation:
+                correction_data = self._get_correction_data()
+                # choose same subdomain as forcing data so that we can use same mask
+                coords_correction = {
+                    correction_data.dim_names["latitude"]: data.ds[
+                        data.dim_names["latitude"]
+                    ],
+                    correction_data.dim_names["longitude"]: data.ds[
+                        data.dim_names["longitude"]
+                    ],
+                }
+                correction_data.choose_subdomain(coords_correction, straddle=straddle)
+                # apply mask from ERA5 data
+                if "mask" in data.var_names.keys():
+                    mask = xr.where(
+                        data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1
                     )
-            vars_2d = ["swr_corr"]
-            vars_3d = []
-            # spatial interpolation
-            data_vars_corr = super().regrid_data(
-                correction_data, vars_2d, vars_3d, lon, lat
-            )
-            # temporal interpolation
-            corr_factor = interpolate_from_climatology(
-                data_vars_corr["swr_corr"],
-                correction_data.dim_names["time"],
-                time=data_vars["swrad"].time,
-            )
+                    for var in correction_data.ds.data_vars:
+                        correction_data.ds[var] = xr.where(
+                            mask == 1, correction_data.ds[var], np.nan
+                        )
+                vars_2d = ["swr_corr"]
+                vars_3d = []
+                # spatial interpolation
+                data_vars_corr = super().regrid_data(
+                    correction_data, vars_2d, vars_3d, lon, lat
+                )
+                # temporal interpolation
+                corr_factor = interpolate_from_climatology(
+                    data_vars_corr["swr_corr"],
+                    correction_data.dim_names["time"],
+                    time=data_vars["swrad"].time,
+                )
 
-            data_vars["swrad"] = data_vars["swrad"] * corr_factor
+                data_vars["swrad"] = data_vars["swrad"] * corr_factor
 
         object.__setattr__(data, "data_vars", data_vars)
 
-        if self.bgc_source is not None:
-            bgc_data = self._get_bgc_data()
-            bgc_data.choose_subdomain(
-                latitude_range=[lat.min().values, lat.max().values],
-                longitude_range=[lon.min().values, lon.max().values],
-                margin=2,
-                straddle=straddle,
-            )
-
-            vars_2d = bgc_data.var_names.keys()
-            vars_3d = []
-            data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
-            object.__setattr__(bgc_data, "data_vars", data_vars)
-        else:
-            bgc_data = None
-
         d_meta = get_variable_metadata()
 
-        ds = self._write_into_datatree(data, bgc_data, d_meta)
+        ds = self._write_into_dataset(data, d_meta)
 
         if self.use_coarse_grid:
             mask = self.grid.ds["mask_coarse"].rename(
@@ -170,99 +158,74 @@ class SurfaceForcing(ROMSToolsMixins):
             mask = self.grid.ds["mask_rho"]
 
         # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
-        for var in ds["physics"].data_vars:
-            nan_check(ds["physics"][var].isel(time=0), mask)
+        for var in ds.data_vars:
+            nan_check(ds[var].isel(time=0), mask)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var in ds["physics"].data_vars:
-            ds["physics"][var] = substitute_nans_by_fillvalue(ds["physics"][var])
-        if self.bgc_source is not None:
-            for var in ds["bgc"].data_vars:
-                ds["bgc"][var] = substitute_nans_by_fillvalue(ds["bgc"][var])
+        for var in ds.data_vars:
+            ds[var] = substitute_nans_by_fillvalue(ds[var])
 
         object.__setattr__(self, "ds", ds)
 
     def _input_checks(self):
+        # Validate the 'type' parameter
+        if self.type not in ["physics", "bgc"]:
+            raise ValueError("`type` must be either 'physics' or 'bgc'.")
 
-        if "name" not in self.physics_source.keys():
-            raise ValueError("`physics_source` must include a 'name'.")
-        if "path" not in self.physics_source.keys():
-            raise ValueError("`physics_source` must include a 'path'.")
-        # set self.physics_source["climatology"] to False if not provided
+        # Ensure 'source' dictionary contains required keys
+        if "name" not in self.source:
+            raise ValueError("`source` must include a 'name'.")
+        if "path" not in self.source:
+            raise ValueError("`source` must include a 'path'.")
+
+        # Set 'climatology' to False if not provided in 'source'
         object.__setattr__(
             self,
-            "physics_source",
-            {
-                **self.physics_source,
-                "climatology": self.physics_source.get("climatology", False),
-            },
+            "source",
+            {**self.source, "climatology": self.source.get("climatology", False)},
         )
-
-        if self.bgc_source is not None:
-            if "name" not in self.bgc_source.keys():
-                raise ValueError(
-                    "`bgc_source` must include a 'name' if it is provided."
-                )
-            if "path" not in self.bgc_source.keys():
-                raise ValueError(
-                    "`bgc_source` must include a 'path' if it is provided."
-                )
-            # set self.bgc_source["climatology"] to False if not provided
-            object.__setattr__(
-                self,
-                "bgc_source",
-                {
-                    **self.bgc_source,
-                    "climatology": self.bgc_source.get("climatology", False),
-                },
-            )
 
     def _get_data(self):
 
-        if self.physics_source["name"] == "ERA5":
-            data = ERA5Dataset(
-                filename=self.physics_source["path"],
-                start_time=self.start_time,
-                end_time=self.end_time,
-                climatology=self.physics_source["climatology"],
-            )
-            data.post_process()
-        else:
-            raise ValueError(
-                'Only "ERA5" is a valid option for physics_source["name"].'
-            )
+        data_dict = {
+            "filename": self.source["path"],
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "climatology": self.source["climatology"],
+        }
+
+        if self.type == "physics":
+            if self.source["name"] == "ERA5":
+                data = ERA5Dataset(**data_dict)
+                data.post_process()
+            else:
+                raise ValueError(
+                    'Only "ERA5" is a valid option for source["name"] when type is "physics".'
+                )
+
+        elif self.type == "bgc":
+            if self.source["name"] == "CESM_REGRIDDED":
+
+                data = CESMBGCSurfaceForcingDataset(**data_dict)
+                data.post_process()
+            else:
+                raise ValueError(
+                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                )
 
         return data
 
     def _get_correction_data(self):
 
-        if self.physics_source["name"] == "ERA5":
+        if self.source["name"] == "ERA5":
             correction_data = ERA5Correction()
         else:
             raise ValueError(
-                "The 'correct_radiation' feature is currently only supported for 'ERA5' as the physics source. "
-                "Please ensure your 'physics_source' is set to 'ERA5' or implement additional handling for other sources."
+                "The 'correct_radiation' feature is currently only supported for 'ERA5' as the source. "
+                "Please ensure your 'source' is set to 'ERA5' or implement additional handling for other sources."
             )
 
         return correction_data
-
-    def _get_bgc_data(self):
-
-        if self.bgc_source["name"] == "CESM_REGRIDDED":
-
-            data = CESMBGCSurfaceForcingDataset(
-                filename=self.bgc_source["path"],
-                start_time=self.start_time,
-                end_time=self.end_time,
-                climatology=self.bgc_source["climatology"],
-            )
-            data.post_process()
-        else:
-            raise ValueError(
-                'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
-            )
-
-        return data
 
     def _write_into_dataset(self, data, d_meta):
 
@@ -314,24 +277,7 @@ class SurfaceForcing(ROMSToolsMixins):
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
 
-        return ds
-
-    def _write_into_datatree(self, data, bgc_data, d_meta):
-
-        ds = self._add_global_metadata()
-
-        ds = DataTree(name="root", data=ds)
-
-        ds_physics = self._write_into_dataset(data, d_meta)
-        ds_physics = self._add_global_metadata(ds_physics)
-        ds_physics.attrs["physics_source"] = self.physics_source["name"]
-        ds_physics = DataTree(name="physics", parent=ds, data=ds_physics)
-
-        if bgc_data:
-            ds_bgc = self._write_into_dataset(bgc_data, d_meta)
-            ds_bgc = self._add_global_metadata(ds_bgc)
-            ds_bgc.attrs["bgc_source"] = self.bgc_source["name"]
-            ds_bgc = DataTree(name="bgc", parent=ds, data=ds_bgc)
+        ds = self._add_global_metadata(ds)
 
         return ds
 
@@ -348,12 +294,13 @@ class SurfaceForcing(ROMSToolsMixins):
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["start_time"] = str(self.start_time)
         ds.attrs["end_time"] = str(self.end_time)
-        ds.attrs["physics_source"] = self.physics_source["name"]
-        if self.bgc_source is not None:
-            ds.attrs["bgc_source"] = self.bgc_source["name"]
+        ds.attrs["source"] = self.source["name"]
         ds.attrs["correct_radiation"] = str(self.correct_radiation)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+
+        ds.attrs["type"] = self.type
+        ds.attrs["source"] = self.source["name"]
 
         return ds
 
@@ -390,7 +337,7 @@ class SurfaceForcing(ROMSToolsMixins):
         Raises
         ------
         ValueError
-            If the specified varname is not one of the valid options.
+            If the specified varname is not found in dataset.
 
 
         Examples
@@ -398,17 +345,10 @@ class SurfaceForcing(ROMSToolsMixins):
         >>> atm_forcing.plot("uwnd", time=0)
         """
 
-        if varname in self.ds["physics"]:
-            ds = self.ds["physics"]
-        else:
-            if "bgc" in self.ds and varname in self.ds["bgc"]:
-                ds = self.ds["bgc"]
-            else:
-                raise ValueError(
-                    f"Variable '{varname}' is not found in 'physics' or 'bgc' datasets."
-                )
+        if varname not in self.ds:
+            raise ValueError(f"Variable '{varname}' is not found in dataset.")
 
-        field = ds[varname].isel(time=time).load()
+        field = self.ds[varname].isel(time=time).load()
         title = field.long_name
 
         # assign lat / lon
@@ -472,43 +412,40 @@ class SurfaceForcing(ROMSToolsMixins):
         filenames = []
         writes = []
 
-        for node in ["physics", "bgc"]:
-            if node in self.ds:
-                ds = self.ds[node].to_dataset()
-                if hasattr(ds["time"], "cycle_length"):
-                    filename = f"{filepath}_{node}_clim.nc"
-                    filenames.append(filename)
+        if hasattr(self.ds["time"], "cycle_length"):
+            filename = f"{filepath}_clim.nc"
+            filenames.append(filename)
+            datasets.append(self.ds)
+        else:
+            # Group dataset by year
+            gb = self.ds.groupby("abs_time.year")
+
+            for year, group_ds in gb:
+                # Further group each yearly group by month
+                sub_gb = group_ds.groupby("abs_time.month")
+
+                for month, ds in sub_gb:
+                    # Chunk the dataset by the specified time chunk size
+                    ds = ds.chunk({"time": time_chunk_size})
                     datasets.append(ds)
-                else:
-                    # Group dataset by year
-                    gb = ds.groupby("abs_time.year")
 
-                    for year, group_ds in gb:
-                        # Further group each yearly group by month
-                        sub_gb = group_ds.groupby("abs_time.month")
+                    # Determine the number of days in the month
+                    num_days_in_month = calendar.monthrange(year, month)[1]
+                    first_day = ds.abs_time.dt.day.values[0]
+                    last_day = ds.abs_time.dt.day.values[-1]
 
-                        for month, ds in sub_gb:
-                            # Chunk the dataset by the specified time chunk size
-                            ds = ds.chunk({"time": time_chunk_size})
-                            datasets.append(ds)
-
-                            # Determine the number of days in the month
-                            num_days_in_month = calendar.monthrange(year, month)[1]
-                            first_day = ds.abs_time.dt.day.values[0]
-                            last_day = ds.abs_time.dt.day.values[-1]
-
-                            # Create filename based on whether the dataset contains a full month
-                            if first_day == 1 and last_day == num_days_in_month:
-                                # Full month format: "filepath_physics_YYYYMM.nc"
-                                year_month_str = f"{year}{month:02}"
-                                filename = f"{filepath}_{node}_{year_month_str}.nc"
-                            else:
-                                # Partial month format: "filepath_physics_YYYYMMDD-DD.nc"
-                                year_month_day_str = (
-                                    f"{year}{month:02}{first_day:02}-{last_day:02}"
-                                )
-                                filename = f"{filepath}_{node}_{year_month_day_str}.nc"
-                            filenames.append(filename)
+                    # Create filename based on whether the dataset contains a full month
+                    if first_day == 1 and last_day == num_days_in_month:
+                        # Full month format: "filepath_YYYYMM.nc"
+                        year_month_str = f"{year}{month:02}"
+                        filename = f"{filepath}_{year_month_str}.nc"
+                    else:
+                        # Partial month format: "filepath_YYYYMMDD-DD.nc"
+                        year_month_day_str = (
+                            f"{year}{month:02}{first_day:02}-{last_day:02}"
+                        )
+                        filename = f"{filepath}_{year_month_day_str}.nc"
+                    filenames.append(filename)
 
         print("Saving the following files:")
         for ds, filename in zip(datasets, filenames):
@@ -551,15 +488,13 @@ class SurfaceForcing(ROMSToolsMixins):
             "SurfaceForcing": {
                 "start_time": self.start_time.isoformat(),
                 "end_time": self.end_time.isoformat(),
-                "physics_source": self.physics_source,
+                "source": self.source,
+                "type": self.type,
                 "correct_radiation": self.correct_radiation,
                 "use_coarse_grid": self.use_coarse_grid,
                 "model_reference_date": self.model_reference_date.isoformat(),
             }
         }
-        # Include bgc_source if it's not None
-        if self.bgc_source is not None:
-            surface_forcing_data["SurfaceForcing"]["bgc_source"] = self.bgc_source
 
         # Merge YAML data while excluding empty sections
         yaml_data = {

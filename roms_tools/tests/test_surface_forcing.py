@@ -178,7 +178,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
 
     This test checks the following:
     1. SurfaceForcing object initializes successfully with provided regional data.
-    2. Attributes such as `start_time`, `end_time`, and `physics_source` are set correctly.
+    2. Attributes such as `start_time`, `end_time`, and `source` are set correctly.
     3. The dataset contains expected variables, including "uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", and "rain".
     4. Surface forcing plots for "uwnd", "vwnd", and "rain" are generated without errors.
 
@@ -194,64 +194,41 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    sfc_forcing = SurfaceForcing(
-        grid=grid,
-        start_time=start_time,
-        end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-    )
+    for use_coarse_grid in [False, True]:
+        sfc_forcing = SurfaceForcing(
+            grid=grid,
+            use_coarse_grid=use_coarse_grid,
+            start_time=start_time,
+            end_time=end_time,
+            source={"name": "ERA5", "path": fname},
+        )
 
-    assert sfc_forcing.ds is not None
-    assert "uwnd" in sfc_forcing.ds["physics"]
-    assert "vwnd" in sfc_forcing.ds["physics"]
-    assert "swrad" in sfc_forcing.ds["physics"]
-    assert "lwrad" in sfc_forcing.ds["physics"]
-    assert "Tair" in sfc_forcing.ds["physics"]
-    assert "qair" in sfc_forcing.ds["physics"]
-    assert "rain" in sfc_forcing.ds["physics"]
+        assert sfc_forcing.ds is not None
+        assert "uwnd" in sfc_forcing.ds
+        assert "vwnd" in sfc_forcing.ds
+        assert "swrad" in sfc_forcing.ds
+        assert "lwrad" in sfc_forcing.ds
+        assert "Tair" in sfc_forcing.ds
+        assert "qair" in sfc_forcing.ds
+        assert "rain" in sfc_forcing.ds
 
-    assert sfc_forcing.start_time == start_time
-    assert sfc_forcing.end_time == end_time
-    assert sfc_forcing.physics_source == {
-        "name": "ERA5",
-        "path": fname,
-        "climatology": False,
-    }
-    assert not sfc_forcing.use_coarse_grid
+        assert sfc_forcing.start_time == start_time
+        assert sfc_forcing.end_time == end_time
+        assert sfc_forcing.type == "physics"
+        assert sfc_forcing.source == {
+            "name": "ERA5",
+            "path": fname,
+            "climatology": False,
+        }
 
-    sfc_forcing.plot("uwnd", time=0)
-    sfc_forcing.plot("vwnd", time=0)
-    sfc_forcing.plot("rain", time=0)
+        if use_coarse_grid:
+            assert sfc_forcing.use_coarse_grid
+        else:
+            assert not sfc_forcing.use_coarse_grid
 
-    sfc_forcing = SurfaceForcing(
-        grid=grid,
-        use_coarse_grid=True,
-        start_time=start_time,
-        end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-    )
-
-    assert sfc_forcing.ds is not None
-    assert "uwnd" in sfc_forcing.ds["physics"]
-    assert "vwnd" in sfc_forcing.ds["physics"]
-    assert "swrad" in sfc_forcing.ds["physics"]
-    assert "lwrad" in sfc_forcing.ds["physics"]
-    assert "Tair" in sfc_forcing.ds["physics"]
-    assert "qair" in sfc_forcing.ds["physics"]
-    assert "rain" in sfc_forcing.ds["physics"]
-
-    assert sfc_forcing.start_time == start_time
-    assert sfc_forcing.end_time == end_time
-    assert sfc_forcing.physics_source == {
-        "name": "ERA5",
-        "path": fname,
-        "climatology": False,
-    }
-    assert sfc_forcing.use_coarse_grid
-
-    sfc_forcing.plot("uwnd", time=0)
-    sfc_forcing.plot("vwnd", time=0)
-    sfc_forcing.plot("rain", time=0)
+        sfc_forcing.plot("uwnd", time=0)
+        sfc_forcing.plot("vwnd", time=0)
+        sfc_forcing.plot("rain", time=0)
 
 
 @pytest.mark.parametrize(
@@ -274,23 +251,16 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    with pytest.raises(ValueError, match="NaN values found"):
+    for use_coarse_grid in [True, False]:
+        with pytest.raises(ValueError, match="NaN values found"):
 
-        SurfaceForcing(
-            grid=grid,
-            start_time=start_time,
-            end_time=end_time,
-            physics_source={"name": "ERA5", "path": fname},
-        )
-
-    with pytest.raises(ValueError, match="NaN values found"):
-        SurfaceForcing(
-            grid=grid,
-            use_coarse_grid=True,
-            start_time=start_time,
-            end_time=end_time,
-            physics_source={"name": "ERA5", "path": fname},
-        )
+            SurfaceForcing(
+                grid=grid,
+                use_coarse_grid=use_coarse_grid,
+                start_time=start_time,
+                end_time=end_time,
+                source={"name": "ERA5", "path": fname},
+            )
 
 
 def test_no_longitude_intersection_initialization_with_regional_data(
@@ -306,27 +276,18 @@ def test_no_longitude_intersection_initialization_with_regional_data(
 
     fname = download_test_data("ERA5_regional_test_data.nc")
 
-    with pytest.raises(
-        ValueError, match="Selected longitude range does not intersect with dataset"
-    ):
+    for use_coarse_grid in [True, False]:
+        with pytest.raises(
+            ValueError, match="Selected longitude range does not intersect with dataset"
+        ):
 
-        SurfaceForcing(
-            grid=grid_that_straddles_180_degree_meridian,
-            start_time=start_time,
-            end_time=end_time,
-            physics_source={"name": "ERA5", "path": fname},
-        )
-
-    with pytest.raises(
-        ValueError, match="Selected longitude range does not intersect with dataset"
-    ):
-        SurfaceForcing(
-            grid=grid_that_straddles_180_degree_meridian,
-            use_coarse_grid=True,
-            start_time=start_time,
-            end_time=end_time,
-            physics_source={"name": "ERA5", "path": fname},
-        )
+            SurfaceForcing(
+                grid=grid_that_straddles_180_degree_meridian,
+                use_coarse_grid=use_coarse_grid,
+                start_time=start_time,
+                end_time=end_time,
+                source={"name": "ERA5", "path": fname},
+            )
 
 
 @pytest.mark.parametrize(
@@ -356,52 +317,82 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
     grid = request.getfixturevalue(grid_fixture)
 
-    sfc_forcing = SurfaceForcing(
-        grid=grid,
-        start_time=start_time,
-        end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-    )
-    assert sfc_forcing.start_time == start_time
-    assert sfc_forcing.end_time == end_time
-    assert sfc_forcing.physics_source == {
-        "name": "ERA5",
-        "path": fname,
-        "climatology": False,
-    }
+    for use_coarse_grid in [True, False]:
+        sfc_forcing = SurfaceForcing(
+            grid=grid,
+            use_coarse_grid=use_coarse_grid,
+            start_time=start_time,
+            end_time=end_time,
+            source={"name": "ERA5", "path": fname},
+        )
+        assert sfc_forcing.start_time == start_time
+        assert sfc_forcing.end_time == end_time
+        assert sfc_forcing.type == "physics"
+        assert sfc_forcing.source == {
+            "name": "ERA5",
+            "path": fname,
+            "climatology": False,
+        }
 
-    assert "uwnd" in sfc_forcing.ds["physics"]
-    assert "vwnd" in sfc_forcing.ds["physics"]
-    assert "swrad" in sfc_forcing.ds["physics"]
-    assert "lwrad" in sfc_forcing.ds["physics"]
-    assert "Tair" in sfc_forcing.ds["physics"]
-    assert "qair" in sfc_forcing.ds["physics"]
-    assert "rain" in sfc_forcing.ds["physics"]
-    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
+        assert "uwnd" in sfc_forcing.ds
+        assert "vwnd" in sfc_forcing.ds
+        assert "swrad" in sfc_forcing.ds
+        assert "lwrad" in sfc_forcing.ds
+        assert "Tair" in sfc_forcing.ds
+        assert "qair" in sfc_forcing.ds
+        assert "rain" in sfc_forcing.ds
+        assert sfc_forcing.ds.attrs["source"] == "ERA5"
 
-    sfc_forcing = SurfaceForcing(
-        grid=grid,
-        use_coarse_grid=True,
-        start_time=start_time,
-        end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-    )
-    assert sfc_forcing.start_time == start_time
-    assert sfc_forcing.end_time == end_time
-    assert sfc_forcing.physics_source == {
-        "name": "ERA5",
-        "path": fname,
-        "climatology": False,
-    }
+        if use_coarse_grid:
+            assert sfc_forcing.use_coarse_grid
+        else:
+            assert not sfc_forcing.use_coarse_grid
 
-    assert "uwnd" in sfc_forcing.ds["physics"]
-    assert "vwnd" in sfc_forcing.ds["physics"]
-    assert "swrad" in sfc_forcing.ds["physics"]
-    assert "lwrad" in sfc_forcing.ds["physics"]
-    assert "Tair" in sfc_forcing.ds["physics"]
-    assert "qair" in sfc_forcing.ds["physics"]
-    assert "rain" in sfc_forcing.ds["physics"]
-    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
+
+def test_nans_filled_in(grid_that_straddles_dateline):
+    """
+    Test that the surface forcing fields contain no NaNs.
+
+    The test is performed twice:
+    - First with the default fine grid.
+    - Then with the coarse grid enabled.
+    """
+
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = download_test_data("ERA5_regional_test_data.nc")
+    fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
+
+    for use_coarse_grid in [True, False]:
+        sfc_forcing = SurfaceForcing(
+            grid=grid_that_straddles_dateline,
+            use_coarse_grid=use_coarse_grid,
+            start_time=start_time,
+            end_time=end_time,
+            source={"name": "ERA5", "path": fname},
+        )
+
+        # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
+        # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
+        # completed; the nan_check passes if there are NaNs only over land
+        assert not sfc_forcing.ds["uwnd"].isnull().any().values.item()
+        assert not sfc_forcing.ds["vwnd"].isnull().any().values.item()
+        assert not sfc_forcing.ds["rain"].isnull().any().values.item()
+
+        sfc_forcing = SurfaceForcing(
+            grid=grid_that_straddles_dateline,
+            use_coarse_grid=use_coarse_grid,
+            start_time=start_time,
+            end_time=end_time,
+            source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
+            type="bgc",
+        )
+
+        # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
+        # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
+        # completed; the nan_check passes if there are NaNs only over land
+        assert not sfc_forcing.ds["pco2_air"].isnull().any().values.item()
 
 
 @pytest.fixture
@@ -419,7 +410,7 @@ def surface_forcing(grid_that_straddles_180_degree_meridian):
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
+        source={"name": "ERA5", "path": fname},
     )
 
 
@@ -439,7 +430,7 @@ def coarse_surface_forcing(grid_that_straddles_180_degree_meridian):
         start_time=start_time,
         end_time=end_time,
         use_coarse_grid=True,
-        physics_source={"name": "ERA5", "path": fname},
+        source={"name": "ERA5", "path": fname},
     )
 
 
@@ -458,241 +449,148 @@ def corrected_surface_forcing(grid_that_straddles_180_degree_meridian):
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
+        source={"name": "ERA5", "path": fname},
         correct_radiation=True,
     )
 
 
 @pytest.fixture
-def corrected_surface_forcing_with_bgc(grid_that_straddles_180_degree_meridian):
+def bgc_surface_forcing(grid_that_straddles_180_degree_meridian):
     """
-    Fixture for creating a SurfaceForcing object with shortwave radiation correction and BGC.
+    Fixture for creating a SurfaceForcing object with BGC.
     """
 
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_global_test_data.nc")
     fname_bgc = download_test_data("CESM_surface_global_test_data.nc")
 
     return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
-        correct_radiation=True,
+        source={"name": "CESM_REGRIDDED", "path": fname_bgc},
+        type="bgc",
     )
 
 
 @pytest.fixture
-def corrected_surface_forcing_with_bgc_from_climatology(
+def bgc_surface_forcing_from_climatology(
     grid_that_straddles_180_degree_meridian,
 ):
     """
-    Fixture for creating a SurfaceForcing object with shortwave radiation correction and BGC from climatology.
+    Fixture for creating a SurfaceForcing object with BGC from climatology.
     """
 
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_global_test_data.nc")
     fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
 
     return SurfaceForcing(
         grid=grid_that_straddles_180_degree_meridian,
         start_time=start_time,
         end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
-        correct_radiation=True,
+        source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
+        type="bgc",
     )
 
 
-def test_nans_filled_in(grid_that_straddles_dateline):
-    """
-    Test that the surface forcing fields contain no NaNs.
-
-    The test is performed twice:
-    - First with the default fine grid.
-    - Then with the coarse grid enabled.
-    """
-
-    start_time = datetime(2020, 1, 31)
-    end_time = datetime(2020, 2, 2)
-
-    fname = download_test_data("ERA5_regional_test_data.nc")
-    fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
-
-    sfc_forcing = SurfaceForcing(
-        grid=grid_that_straddles_dateline,
-        start_time=start_time,
-        end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
-    )
-
-    # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
-    # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
-    # completed; the nan_check passes if there are NaNs only over land
-    assert not sfc_forcing.ds["physics"]["uwnd"].isnull().any().values.item()
-    assert not sfc_forcing.ds["physics"]["vwnd"].isnull().any().values.item()
-    assert not sfc_forcing.ds["physics"]["rain"].isnull().any().values.item()
-    assert not sfc_forcing.ds["bgc"]["pco2_air"].isnull().any().values.item()
-
-    sfc_forcing = SurfaceForcing(
-        grid=grid_that_straddles_dateline,
-        use_coarse_grid=True,
-        start_time=start_time,
-        end_time=end_time,
-        physics_source={"name": "ERA5", "path": fname},
-        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
-    )
-
-    # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
-    # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
-    # completed; the nan_check passes if there are NaNs only over land
-    assert not sfc_forcing.ds["physics"]["uwnd"].isnull().any().values.item()
-    assert not sfc_forcing.ds["physics"]["vwnd"].isnull().any().values.item()
-    assert not sfc_forcing.ds["physics"]["rain"].isnull().any().values.item()
-    assert not sfc_forcing.ds["bgc"]["pco2_air"].isnull().any().values.item()
-
-
-def test_time_attr_climatology(corrected_surface_forcing_with_bgc_from_climatology):
+def test_time_attr_climatology(bgc_surface_forcing_from_climatology):
     """
     Test that the 'cycle_length' attribute is present in the time coordinate of the BGC dataset
     when using climatology data.
     """
-    print(corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"].time)
+    print(bgc_surface_forcing_from_climatology.ds.time)
     assert hasattr(
-        corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"].time,
+        bgc_surface_forcing_from_climatology.ds.time,
         "cycle_length",
     )
 
 
-def test_time_attr(corrected_surface_forcing_with_bgc):
+def test_time_attr(bgc_surface_forcing):
     """
     Test that the 'cycle_length' attribute is not present in the time coordinate of the BGC dataset
     when not using climatology data.
     """
-    assert not hasattr(
-        corrected_surface_forcing_with_bgc.ds["bgc"].time, "cycle_length"
-    )
+    assert not hasattr(bgc_surface_forcing.ds.time, "cycle_length")
 
 
 @pytest.mark.parametrize(
-    "sfc_forcing_fixture",
+    "sfc_forcing_fixture, expected_climatology, expected_fname",
     [
-        "corrected_surface_forcing_with_bgc",
-        "corrected_surface_forcing_with_bgc_from_climatology",
+        (
+            "bgc_surface_forcing",
+            False,
+            download_test_data("CESM_surface_global_test_data.nc"),
+        ),
+        (
+            "bgc_surface_forcing_from_climatology",
+            True,
+            download_test_data("CESM_surface_global_test_data_climatology.nc"),
+        ),
     ],
 )
-def test_surface_forcing_creation(sfc_forcing_fixture, request):
+def test_surface_forcing_creation(
+    sfc_forcing_fixture, expected_climatology, expected_fname, request
+):
     """
-    Test the creation and initialization of the SurfaceForcing object.
+    Test the creation and initialization of the SurfaceForcing object with BGC.
 
-    Verifies that the SurfaceForcing object is properly created with correct attributes,
-    including physics and BGC sources. Ensures that expected variables are present in the dataset
+    Verifies that the SurfaceForcing object is properly created with correct attributes.
+    Ensures that expected variables are present in the dataset
     and that attributes match the given configurations.
     """
 
-    fname = download_test_data("ERA5_global_test_data.nc")
-
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+
+    assert sfc_forcing.ds is not None
+    assert "pco2_air" in sfc_forcing.ds
+    assert "pco2_air_alt" in sfc_forcing.ds
+    assert "iron" in sfc_forcing.ds
+    assert "dust" in sfc_forcing.ds
+    assert "nox" in sfc_forcing.ds
+    assert "nhy" in sfc_forcing.ds
 
     assert sfc_forcing.start_time == datetime(2020, 1, 31)
     assert sfc_forcing.end_time == datetime(2020, 2, 2)
-    assert sfc_forcing.physics_source == {
-        "name": "ERA5",
-        "path": fname,
-        "climatology": False,
+    assert sfc_forcing.type == "bgc"
+    assert sfc_forcing.source == {
+        "name": "CESM_REGRIDDED",
+        "path": expected_fname,
+        "climatology": expected_climatology,
     }
-    assert sfc_forcing.bgc_source["name"] == "CESM_REGRIDDED"
+    assert not sfc_forcing.use_coarse_grid
+    assert sfc_forcing.ds.attrs["source"] == "CESM_REGRIDDED"
 
-    assert "uwnd" in sfc_forcing.ds["physics"]
-    assert "vwnd" in sfc_forcing.ds["physics"]
-    assert "swrad" in sfc_forcing.ds["physics"]
-    assert "lwrad" in sfc_forcing.ds["physics"]
-    assert "Tair" in sfc_forcing.ds["physics"]
-    assert "qair" in sfc_forcing.ds["physics"]
-    assert "rain" in sfc_forcing.ds["physics"]
-    assert sfc_forcing.ds["physics"].attrs["physics_source"] == "ERA5"
-
-    assert "pco2_air" in sfc_forcing.ds["bgc"]
-    assert "pco2_air_alt" in sfc_forcing.ds["bgc"]
-    assert "iron" in sfc_forcing.ds["bgc"]
-    assert "dust" in sfc_forcing.ds["bgc"]
-    assert "nox" in sfc_forcing.ds["bgc"]
-    assert "nhy" in sfc_forcing.ds["bgc"]
-    assert sfc_forcing.ds["bgc"].attrs["bgc_source"] == "CESM_REGRIDDED"
+    sfc_forcing.plot("pco2_air", time=0)
 
 
-def test_coordinates_existence_and_values(corrected_surface_forcing_with_bgc):
-    """
-    Test that the dataset contains the expected coordinates with the correct values.
-    """
-
-    for group in ["physics", "bgc"]:
-        if group == "physics":
-            # Expected coordinates and their values
-            expected_coords = {
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture, expected_coords",
+    [
+        (
+            "corrected_surface_forcing",
+            {
                 "abs_time": np.array(
                     ["2020-02-01T00:00:00.000000000", "2020-02-01T01:00:00.000000000"],
                     dtype="datetime64[ns]",
                 ),
                 "time": np.array([7336.0, 7336.041667]),
-            }
-        elif group == "bgc":
-            # Expected coordinates and their values
-            expected_coords = {
+            },
+        ),
+        (
+            "bgc_surface_forcing",
+            {
                 "abs_time": np.array(
                     ["2020-02-01T00:00:00.000000000"], dtype="datetime64[ns]"
                 ),
                 "time": np.array([7336.0]),
-            }
-
-        # Check that the dataset contains exactly the expected coordinates and no others
-        actual_coords = set(corrected_surface_forcing_with_bgc.ds[group].coords.keys())
-        expected_coords_set = set(expected_coords.keys())
-
-        assert actual_coords == expected_coords_set, (
-            f"Unexpected coordinates found. Expected only {expected_coords_set}, "
-            f"but found {actual_coords}."
-        )
-
-        # Check that the coordinate values match the expected values
-        np.testing.assert_array_equal(
-            corrected_surface_forcing_with_bgc.ds[group].coords["abs_time"].values,
-            expected_coords["abs_time"],
-        )
-        np.testing.assert_allclose(
-            corrected_surface_forcing_with_bgc.ds[group].coords["time"].values,
-            expected_coords["time"],
-            rtol=1e-9,
-            atol=0,
-        )
-
-
-def test_coordinates_existence_and_values_climatology(
-    corrected_surface_forcing_with_bgc_from_climatology,
-):
-    """
-    Test that the dataset contains the expected coordinates with the correct values.
-    """
-
-    for group in ["physics", "bgc"]:
-        if group == "physics":
-            # Expected coordinates and their values
-            expected_coords = {
-                "abs_time": np.array(
-                    ["2020-02-01T00:00:00.000000000", "2020-02-01T01:00:00.000000000"],
-                    dtype="datetime64[ns]",
-                ),
-                "time": np.array([7336.0, 7336.041667]),
-            }
-        elif group == "bgc":
-            # Expected coordinates and their values
-            expected_coords = {
+            },
+        ),
+        (
+            "bgc_surface_forcing_from_climatology",
+            {
                 "abs_time": np.array(
                     [
                         1296000000000000,
@@ -727,34 +625,39 @@ def test_coordinates_existence_and_values_climatology(
                     ],
                     dtype="timedelta64[ns]",
                 ),
-            }
+            },
+        ),
+    ],
+)
+def test_coordinates_existence_and_values(
+    sfc_forcing_fixture, expected_coords, request
+):
+    """
+    Test that the dataset contains the expected coordinates with the correct values.
+    """
 
-        # Check that the dataset contains exactly the expected coordinates and no others
-        actual_coords = set(
-            corrected_surface_forcing_with_bgc_from_climatology.ds[group].coords.keys()
-        )
-        expected_coords_set = set(expected_coords.keys())
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
-        assert actual_coords == expected_coords_set, (
-            f"Unexpected coordinates found. Expected only {expected_coords_set}, "
-            f"but found {actual_coords}."
-        )
+    # Check that the dataset contains exactly the expected coordinates and no others
+    actual_coords = set(sfc_forcing.ds.coords.keys())
+    expected_coords_set = set(expected_coords.keys())
 
-        # Check that the coordinate values match the expected values
-        np.testing.assert_array_equal(
-            corrected_surface_forcing_with_bgc_from_climatology.ds[group]
-            .coords["abs_time"]
-            .values,
-            expected_coords["abs_time"],
-        )
-        np.testing.assert_allclose(
-            corrected_surface_forcing_with_bgc_from_climatology.ds[group]
-            .coords["time"]
-            .values,
-            expected_coords["time"],
-            rtol=1e-9,
-            atol=0,
-        )
+    assert actual_coords == expected_coords_set, (
+        f"Unexpected coordinates found. Expected only {expected_coords_set}, "
+        f"but found {actual_coords}."
+    )
+
+    # Check that the coordinate values match the expected values
+    np.testing.assert_array_equal(
+        sfc_forcing.ds.coords["abs_time"].values,
+        expected_coords["abs_time"],
+    )
+    np.testing.assert_allclose(
+        sfc_forcing.ds.coords["time"].values,
+        expected_coords["time"],
+        rtol=1e-9,
+        atol=0,
+    )
 
 
 @pytest.mark.parametrize(
@@ -1869,7 +1772,7 @@ def test_surface_forcing_data_consistency_plot_save(
     )
 
     # Check the values in the dataset
-    ds = sfc_forcing.ds["physics"]
+    ds = sfc_forcing.ds
 
     assert np.allclose(ds["uwnd"].values, expected_uwnd)
     assert np.allclose(ds["vwnd"].values, expected_vwnd)
@@ -1886,7 +1789,7 @@ def test_surface_forcing_data_consistency_plot_save(
         filepath = tmpfile.name
 
     sfc_forcing.save(filepath)
-    extended_filepath = filepath + "_physics_20200201-01.nc"
+    extended_filepath = filepath + "_20200201-01.nc"
 
     try:
         assert os.path.exists(extended_filepath)
@@ -1895,7 +1798,7 @@ def test_surface_forcing_data_consistency_plot_save(
 
 
 def test_surface_forcing_bgc_data_consistency_plot_save(
-    corrected_surface_forcing_with_bgc,
+    bgc_surface_forcing,
 ):
     """
     Test that the BGC data within the SurfaceForcing object remains consistent.
@@ -1903,7 +1806,7 @@ def test_surface_forcing_bgc_data_consistency_plot_save(
     """
 
     # Check the values in the dataset
-    corrected_surface_forcing_with_bgc.plot(varname="pco2_air", time=0)
+    bgc_surface_forcing.plot(varname="pco2_air", time=0)
 
     expected_pco2_air = np.array(
         [
@@ -1977,7 +1880,7 @@ def test_surface_forcing_bgc_data_consistency_plot_save(
     )
 
     assert np.allclose(
-        corrected_surface_forcing_with_bgc.ds["bgc"]["pco2_air"].values,
+        bgc_surface_forcing.ds["pco2_air"].values,
         expected_pco2_air,
     )
 
@@ -1985,20 +1888,17 @@ def test_surface_forcing_bgc_data_consistency_plot_save(
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
-    corrected_surface_forcing_with_bgc.save(filepath)
-    physics_filepath = filepath + "_physics_20200201-01.nc"
-    bgc_filepath = filepath + "_bgc_20200201-01.nc"
+    bgc_surface_forcing.save(filepath)
+    extended_filepath = filepath + "_20200201-01.nc"
 
     try:
-        assert os.path.exists(physics_filepath)
-        assert os.path.exists(bgc_filepath)
+        assert os.path.exists(extended_filepath)
     finally:
-        os.remove(physics_filepath)
-        os.remove(bgc_filepath)
+        os.remove(extended_filepath)
 
 
 def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
-    corrected_surface_forcing_with_bgc_from_climatology,
+    bgc_surface_forcing_from_climatology,
 ):
     """
     Test that the BGC data within the SurfaceForcing object remains consistent.
@@ -2006,7 +1906,7 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     """
 
     # Check the values in the dataset
-    corrected_surface_forcing_with_bgc_from_climatology.plot(varname="pco2_air", time=0)
+    bgc_surface_forcing_from_climatology.plot(varname="pco2_air", time=0)
 
     expected_pco2_air = np.array(
         [
@@ -2763,9 +2663,7 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     )
 
     assert np.allclose(
-        corrected_surface_forcing_with_bgc_from_climatology.ds["bgc"][
-            "pco2_air"
-        ].values,
+        bgc_surface_forcing_from_climatology.ds["pco2_air"].values,
         expected_pco2_air,
     )
 
@@ -2773,16 +2671,13 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
-    corrected_surface_forcing_with_bgc_from_climatology.save(filepath)
-    physics_filepath = filepath + "_physics_20200201-01.nc"
-    bgc_filepath = filepath + "_bgc_clim.nc"
+    bgc_surface_forcing_from_climatology.save(filepath)
+    extended_filepath = filepath + "_clim.nc"
 
     try:
-        assert os.path.exists(physics_filepath)
-        assert os.path.exists(bgc_filepath)
+        assert os.path.exists(extended_filepath)
     finally:
-        os.remove(physics_filepath)
-        os.remove(bgc_filepath)
+        os.remove(extended_filepath)
 
 
 @pytest.mark.parametrize(
@@ -2791,8 +2686,8 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
-        "corrected_surface_forcing_with_bgc",
-        "corrected_surface_forcing_with_bgc_from_climatology",
+        "bgc_surface_forcing",
+        "bgc_surface_forcing_from_climatology",
     ],
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request):

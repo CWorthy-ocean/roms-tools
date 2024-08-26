@@ -42,89 +42,105 @@ def boundary_forcing(example_grid):
         grid=example_grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        physics_source={"name": "GLORYS", "path": fname},
+        source={"name": "GLORYS", "path": fname},
     )
 
 
 @pytest.fixture
-def boundary_forcing_with_bgc_from_climatology(example_grid):
+def bgc_boundary_forcing_from_climatology(example_grid):
     """
     Fixture for creating a BoundaryForcing object.
     """
 
-    fname = download_test_data("GLORYS_test_data.nc")
     fname_bgc = download_test_data("CESM_regional_test_data_climatology.nc")
 
     return BoundaryForcing(
         grid=example_grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        physics_source={"name": "GLORYS", "path": fname},
-        bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+        type="bgc",
     )
+
+
+def test_boundary_forcing_creation(boundary_forcing):
+    """
+    Test the creation of the BoundaryForcing object.
+    """
+
+    fname = download_test_data("GLORYS_test_data.nc")
+
+    assert boundary_forcing.start_time == datetime(2021, 6, 29)
+    assert boundary_forcing.end_time == datetime(2021, 6, 30)
+    assert boundary_forcing.source == {
+        "name": "GLORYS",
+        "path": fname,
+        "climatology": False,
+    }
+    assert boundary_forcing.model_reference_date == datetime(2000, 1, 1)
+    assert boundary_forcing.boundaries == {
+        "south": True,
+        "east": True,
+        "north": True,
+        "west": True,
+    }
+
+    assert boundary_forcing.ds.source == "GLORYS"
+    for direction in ["south", "east", "north", "west"]:
+        assert f"temp_{direction}" in boundary_forcing.ds
+        assert f"salt_{direction}" in boundary_forcing.ds
+        assert f"u_{direction}" in boundary_forcing.ds
+        assert f"v_{direction}" in boundary_forcing.ds
+        assert f"zeta_{direction}" in boundary_forcing.ds
+
+    assert len(boundary_forcing.ds.bry_time) == 1
+
+
+def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatology):
+    """
+    Test the creation of the BoundaryForcing object.
+    """
+
+    fname_bgc = download_test_data("CESM_regional_test_data_climatology.nc")
+
+    assert bgc_boundary_forcing_from_climatology.start_time == datetime(2021, 6, 29)
+    assert bgc_boundary_forcing_from_climatology.end_time == datetime(2021, 6, 30)
+    assert bgc_boundary_forcing_from_climatology.source == {
+        "path": fname_bgc,
+        "name": "CESM_REGRIDDED",
+        "climatology": True,
+    }
+    assert bgc_boundary_forcing_from_climatology.model_reference_date == datetime(
+        2000, 1, 1
+    )
+    assert bgc_boundary_forcing_from_climatology.boundaries == {
+        "south": True,
+        "east": True,
+        "north": True,
+        "west": True,
+    }
+
+    assert bgc_boundary_forcing_from_climatology.ds.source == "CESM_REGRIDDED"
+    for direction in ["south", "east", "north", "west"]:
+        for var in ["ALK", "PO4"]:
+            assert f"{var}_{direction}" in bgc_boundary_forcing_from_climatology.ds
+
+    assert len(bgc_boundary_forcing_from_climatology.ds.bry_time) == 12
 
 
 @pytest.mark.parametrize(
-    "bdry_forcing_fixture",
+    "bdry_forcing_fixture, expected_coords",
     [
-        "boundary_forcing",
-        "boundary_forcing_with_bgc_from_climatology",
-    ],
-)
-def test_boundary_forcing_creation(bdry_forcing_fixture, request):
-    """
-    Test the creation of the BoundaryForcing object.
-    """
-
-    bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
-
-    assert bdry_forcing.start_time == datetime(2021, 6, 29)
-    assert bdry_forcing.end_time == datetime(2021, 6, 30)
-
-    assert bdry_forcing.ds["physics"].physics_source == "GLORYS"
-    for direction in ["south", "east", "north", "west"]:
-        assert f"temp_{direction}" in bdry_forcing.ds["physics"]
-        assert f"salt_{direction}" in bdry_forcing.ds["physics"]
-        assert f"u_{direction}" in bdry_forcing.ds["physics"]
-        assert f"v_{direction}" in bdry_forcing.ds["physics"]
-        assert f"zeta_{direction}" in bdry_forcing.ds["physics"]
-    assert len(bdry_forcing.ds["physics"].bry_time) == 1
-
-
-def test_boundary_forcing_creation_with_bgc(boundary_forcing_with_bgc_from_climatology):
-    """
-    Test the creation of the BoundaryForcing object.
-    """
-
-    assert (
-        boundary_forcing_with_bgc_from_climatology.ds["bgc"].bgc_source
-        == "CESM_REGRIDDED"
-    )
-    for direction in ["south", "east", "north", "west"]:
-        for var in ["ALK", "PO4"]:
-            assert (
-                f"{var}_{direction}"
-                in boundary_forcing_with_bgc_from_climatology.ds["bgc"]
-            )
-
-    assert len(boundary_forcing_with_bgc_from_climatology.ds["bgc"].bry_time) == 12
-
-
-def test_coordinates_existence_and_values(boundary_forcing_with_bgc_from_climatology):
-    """
-    Test that the dataset contains the expected coordinates with the correct values.
-    """
-
-    for group in ["physics", "bgc"]:
-        if group == "physics":
-            # Expected coordinates and their values
-            expected_coords = {
+        (
+            "boundary_forcing",
+            {
                 "abs_time": np.array(["2021-06-29T00:00:00"], dtype="datetime64[ns]"),
                 "bry_time": np.array([678240000000000000], dtype="timedelta64[ns]"),
-            }
-        elif group == "bgc":
-            # Expected coordinates and their values
-            expected_coords = {
+            },
+        ),
+        (
+            "bgc_boundary_forcing_from_climatology",
+            {
                 "abs_time": np.array(
                     [
                         1296000000000000,
@@ -159,38 +175,43 @@ def test_coordinates_existence_and_values(boundary_forcing_with_bgc_from_climato
                     ],
                     dtype="timedelta64[ns]",
                 ),
-            }
+            },
+        ),
+    ],
+)
+def test_coordinates_existence_and_values(
+    bdry_forcing_fixture, expected_coords, request
+):
+    """
+    Test that the dataset contains the expected coordinates with the correct values.
+    """
 
-        # Check that the dataset contains exactly the expected coordinates and no others
-        actual_coords = set(
-            boundary_forcing_with_bgc_from_climatology.ds[group].coords.keys()
-        )
-        expected_coords_set = set(expected_coords.keys())
+    bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
 
-        assert actual_coords == expected_coords_set, (
-            f"Unexpected coordinates found. Expected only {expected_coords_set}, "
-            f"but found {actual_coords}."
-        )
+    # Check that the dataset contains exactly the expected coordinates and no others
+    actual_coords = set(bdry_forcing.ds.coords.keys())
+    expected_coords_set = set(expected_coords.keys())
 
-        # Check that the coordinate values match the expected values
-        np.testing.assert_array_equal(
-            boundary_forcing_with_bgc_from_climatology.ds[group]
-            .coords["abs_time"]
-            .values,
-            expected_coords["abs_time"],
-        )
-        np.testing.assert_allclose(
-            boundary_forcing_with_bgc_from_climatology.ds[group]
-            .coords["bry_time"]
-            .values,
-            expected_coords["bry_time"],
-            rtol=1e-9,
-            atol=0,
-        )
+    assert actual_coords == expected_coords_set, (
+        f"Unexpected coordinates found. Expected only {expected_coords_set}, "
+        f"but found {actual_coords}."
+    )
+
+    # Check that the coordinate values match the expected values
+    np.testing.assert_array_equal(
+        bdry_forcing.ds.coords["abs_time"].values,
+        expected_coords["abs_time"],
+    )
+    np.testing.assert_allclose(
+        bdry_forcing.ds.coords["bry_time"].values,
+        expected_coords["bry_time"],
+        rtol=1e-9,
+        atol=0,
+    )
 
 
 def test_boundary_forcing_data_consistency_plot_save(
-    boundary_forcing_with_bgc_from_climatology,
+    boundary_forcing,
 ):
     """
     Test that the data within the BoundaryForcing object remains consistent.
@@ -367,6 +388,66 @@ def test_boundary_forcing_data_consistency_plot_save(
         [[0.03502939, -0.02095497, -0.01424322]], dtype=np.float32
     )
 
+    ds = boundary_forcing.ds.compute()
+
+    # Check the values in the dataset
+    assert np.allclose(ds["zeta_south"].values, expected_zeta_south)
+    assert np.allclose(ds["zeta_east"].values, expected_zeta_east)
+    assert np.allclose(ds["zeta_north"].values, expected_zeta_north)
+    assert np.allclose(ds["zeta_west"].values, expected_zeta_west)
+    assert np.allclose(ds["temp_south"].values, expected_temp_south)
+    assert np.allclose(ds["temp_east"].values, expected_temp_east)
+    assert np.allclose(ds["temp_north"].values, expected_temp_north)
+    assert np.allclose(ds["temp_west"].values, expected_temp_west)
+    assert np.allclose(ds["u_south"].values, expected_u_south)
+    assert np.allclose(ds["u_east"].values, expected_u_east)
+    assert np.allclose(ds["u_north"].values, expected_u_north)
+    assert np.allclose(ds["u_west"].values, expected_u_west)
+    assert np.allclose(ds["v_south"].values, expected_v_south)
+    assert np.allclose(ds["v_east"].values, expected_v_east)
+    assert np.allclose(ds["v_north"].values, expected_v_north)
+    assert np.allclose(ds["v_west"].values, expected_v_west)
+    assert np.allclose(ds["ubar_south"].values, expected_ubar_south)
+    assert np.allclose(ds["ubar_east"].values, expected_ubar_east)
+    assert np.allclose(ds["ubar_north"].values, expected_ubar_north)
+    assert np.allclose(ds["ubar_west"].values, expected_ubar_west)
+    assert np.allclose(ds["vbar_south"].values, expected_vbar_south)
+    assert np.allclose(ds["vbar_east"].values, expected_vbar_east)
+    assert np.allclose(ds["vbar_north"].values, expected_vbar_north)
+    assert np.allclose(ds["vbar_west"].values, expected_vbar_west)
+
+    boundary_forcing.plot(varname="temp_south", layer_contours=True)
+    boundary_forcing.plot(varname="temp_east", layer_contours=True)
+    boundary_forcing.plot(varname="temp_north", layer_contours=True)
+    boundary_forcing.plot(varname="temp_west", layer_contours=True)
+    boundary_forcing.plot(varname="zeta_south")
+    boundary_forcing.plot(varname="zeta_east")
+    boundary_forcing.plot(varname="zeta_north")
+    boundary_forcing.plot(varname="zeta_west")
+    boundary_forcing.plot(varname="vbar_north")
+    boundary_forcing.plot(varname="ubar_west")
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath = tmpfile.name
+
+    boundary_forcing.save(filepath)
+    extended_filepath = filepath + "_20210629-29.nc"
+
+    try:
+        assert os.path.exists(extended_filepath)
+    finally:
+        os.remove(extended_filepath)
+
+
+def test_bgc_boundary_forcing_data_consistency_plot_save(
+    bgc_boundary_forcing_from_climatology,
+):
+    """
+    Test that the data within the BoundaryForcing object remains consistent.
+    Also test plot and save methods in the same test since we dask arrays are already computed.
+    """
+    # Define the expected data
     expected_alk_south = np.array(
         [
             [
@@ -631,83 +712,37 @@ def test_boundary_forcing_data_consistency_plot_save(
         dtype=np.float32,
     )
 
-    ds = boundary_forcing_with_bgc_from_climatology.ds["physics"].compute()
-    ds_bgc = boundary_forcing_with_bgc_from_climatology.ds["bgc"]
+    ds_bgc = bgc_boundary_forcing_from_climatology.ds
 
     # Check the values in the dataset
-    assert np.allclose(ds["zeta_south"].values, expected_zeta_south)
-    assert np.allclose(ds["zeta_east"].values, expected_zeta_east)
-    assert np.allclose(ds["zeta_north"].values, expected_zeta_north)
-    assert np.allclose(ds["zeta_west"].values, expected_zeta_west)
-    assert np.allclose(ds["temp_south"].values, expected_temp_south)
-    assert np.allclose(ds["temp_east"].values, expected_temp_east)
-    assert np.allclose(ds["temp_north"].values, expected_temp_north)
-    assert np.allclose(ds["temp_west"].values, expected_temp_west)
-    assert np.allclose(ds["u_south"].values, expected_u_south)
-    assert np.allclose(ds["u_east"].values, expected_u_east)
-    assert np.allclose(ds["u_north"].values, expected_u_north)
-    assert np.allclose(ds["u_west"].values, expected_u_west)
-    assert np.allclose(ds["v_south"].values, expected_v_south)
-    assert np.allclose(ds["v_east"].values, expected_v_east)
-    assert np.allclose(ds["v_north"].values, expected_v_north)
-    assert np.allclose(ds["v_west"].values, expected_v_west)
-    assert np.allclose(ds["ubar_south"].values, expected_ubar_south)
-    assert np.allclose(ds["ubar_east"].values, expected_ubar_east)
-    assert np.allclose(ds["ubar_north"].values, expected_ubar_north)
-    assert np.allclose(ds["ubar_west"].values, expected_ubar_west)
-    assert np.allclose(ds["vbar_south"].values, expected_vbar_south)
-    assert np.allclose(ds["vbar_east"].values, expected_vbar_east)
-    assert np.allclose(ds["vbar_north"].values, expected_vbar_north)
-    assert np.allclose(ds["vbar_west"].values, expected_vbar_west)
     assert np.allclose(ds_bgc["ALK_south"].values, expected_alk_south)
     assert np.allclose(ds_bgc["ALK_east"].values, expected_alk_east)
     assert np.allclose(ds_bgc["ALK_north"].values, expected_alk_north)
     assert np.allclose(ds_bgc["ALK_west"].values, expected_alk_west)
 
-    boundary_forcing_with_bgc_from_climatology.plot(
-        varname="temp_south", layer_contours=True
-    )
-    boundary_forcing_with_bgc_from_climatology.plot(
-        varname="temp_east", layer_contours=True
-    )
-    boundary_forcing_with_bgc_from_climatology.plot(
-        varname="temp_north", layer_contours=True
-    )
-    boundary_forcing_with_bgc_from_climatology.plot(
-        varname="temp_west", layer_contours=True
-    )
-    boundary_forcing_with_bgc_from_climatology.plot(varname="zeta_south")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="zeta_east")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="zeta_north")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="zeta_west")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="vbar_north")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="ubar_west")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="ALK_south")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="ALK_east")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="ALK_north")
-    boundary_forcing_with_bgc_from_climatology.plot(varname="ALK_west")
+    bgc_boundary_forcing_from_climatology.plot(varname="ALK_south")
+    bgc_boundary_forcing_from_climatology.plot(varname="ALK_east")
+    bgc_boundary_forcing_from_climatology.plot(varname="ALK_north")
+    bgc_boundary_forcing_from_climatology.plot(varname="ALK_west")
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
-    boundary_forcing_with_bgc_from_climatology.save(filepath)
-    physics_filepath = filepath + "_physics_20210629-29.nc"
-    bgc_filepath = filepath + "_bgc_clim.nc"
+    bgc_boundary_forcing_from_climatology.save(filepath)
+    extended_filepath = filepath + "_clim.nc"
 
     try:
-        assert os.path.exists(physics_filepath)
-        assert os.path.exists(bgc_filepath)
+        assert os.path.exists(extended_filepath)
     finally:
-        os.remove(physics_filepath)
-        os.remove(bgc_filepath)
+        os.remove(extended_filepath)
 
 
 @pytest.mark.parametrize(
     "bdry_forcing_fixture",
     [
         "boundary_forcing",
-        "boundary_forcing_with_bgc_from_climatology",
+        "bgc_boundary_forcing_from_climatology",
     ],
 )
 def test_roundtrip_yaml(bdry_forcing_fixture, request):

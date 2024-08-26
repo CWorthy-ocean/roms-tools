@@ -43,7 +43,7 @@ def initial_conditions(example_grid):
     return InitialConditions(
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
-        physics_source={"path": fname, "name": "GLORYS"},
+        source={"path": fname, "name": "GLORYS"},
     )
 
 
@@ -59,7 +59,7 @@ def initial_conditions_with_bgc(example_grid):
     return InitialConditions(
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
-        physics_source={"path": fname, "name": "GLORYS"},
+        source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
     )
 
@@ -76,7 +76,7 @@ def initial_conditions_with_bgc_from_climatology(example_grid):
     return InitialConditions(
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
-        physics_source={"path": fname, "name": "GLORYS"},
+        source={"path": fname, "name": "GLORYS"},
         bgc_source={
             "path": fname_bgc,
             "name": "CESM_REGRIDDED",
@@ -101,7 +101,7 @@ def test_initial_conditions_creation(ic_fixture, request):
     ic = request.getfixturevalue(ic_fixture)
 
     assert ic.ini_time == datetime(2021, 6, 29)
-    assert ic.physics_source == {
+    assert ic.source == {
         "name": "GLORYS",
         "path": download_test_data("GLORYS_test_data.nc"),
         "climatology": False,
@@ -114,23 +114,23 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert "zeta" in ic.ds
 
 
-# Test initialization with missing 'name' in physics_source
+# Test initialization with missing 'name' in source
 def test_initial_conditions_missing_physics_name(example_grid):
-    with pytest.raises(ValueError, match="`physics_source` must include a 'name'."):
+    with pytest.raises(ValueError, match="`source` must include a 'name'."):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
-            physics_source={"path": "physics_data.nc"},
+            source={"path": "physics_data.nc"},
         )
 
 
-# Test initialization with missing 'path' in physics_source
+# Test initialization with missing 'path' in source
 def test_initial_conditions_missing_physics_path(example_grid):
-    with pytest.raises(ValueError, match="`physics_source` must include a 'path'."):
+    with pytest.raises(ValueError, match="`source` must include a 'path'."):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
-            physics_source={"name": "GLORYS"},
+            source={"name": "GLORYS"},
         )
 
 
@@ -144,7 +144,7 @@ def test_initial_conditions_missing_bgc_name(example_grid):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
-            physics_source={"name": "GLORYS", "path": fname},
+            source={"name": "GLORYS", "path": fname},
             bgc_source={"path": "bgc_data.nc"},
         )
 
@@ -159,7 +159,7 @@ def test_initial_conditions_missing_bgc_path(example_grid):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
-            physics_source={"name": "GLORYS", "path": fname},
+            source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "CESM_REGRIDDED"},
         )
 
@@ -172,10 +172,10 @@ def test_initial_conditions_default_climatology(example_grid):
     initial_conditions = InitialConditions(
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
-        physics_source={"name": "GLORYS", "path": fname},
+        source={"name": "GLORYS", "path": fname},
     )
 
-    assert initial_conditions.physics_source["climatology"] is False
+    assert initial_conditions.source["climatology"] is False
     assert initial_conditions.bgc_source is None
 
 
@@ -187,7 +187,7 @@ def test_initial_conditions_default_bgc_climatology(example_grid):
     initial_conditions = InitialConditions(
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
-        physics_source={"name": "GLORYS", "path": fname},
+        source={"name": "GLORYS", "path": fname},
         bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
     )
 

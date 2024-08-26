@@ -501,11 +501,11 @@ def test_time_attr_climatology(bgc_surface_forcing_from_climatology):
     Test that the 'cycle_length' attribute is present in the time coordinate of the BGC dataset
     when using climatology data.
     """
-    print(bgc_surface_forcing_from_climatology.ds.time)
     assert hasattr(
         bgc_surface_forcing_from_climatology.ds.time,
         "cycle_length",
     )
+    assert hasattr(bgc_surface_forcing_from_climatology.ds, "climatology")
 
 
 def test_time_attr(bgc_surface_forcing):
@@ -514,6 +514,7 @@ def test_time_attr(bgc_surface_forcing):
     when not using climatology data.
     """
     assert not hasattr(bgc_surface_forcing.ds.time, "cycle_length")
+    assert not hasattr(bgc_surface_forcing.ds, "climatology")
 
 
 @pytest.mark.parametrize(
@@ -593,20 +594,20 @@ def test_surface_forcing_creation(
             {
                 "abs_time": np.array(
                     [
-                        1296000000000000,
-                        3888000000000000,
-                        6393600000000000,
-                        9072000000000000,
-                        11664000000000000,
-                        14342400000000000,
-                        16934400000000000,
-                        19612800000000000,
-                        22291200000000000,
-                        24883200000000000,
-                        27561600000000000,
-                        30153600000000000,
+                        "2000-01-16T00:00:00.000000000",
+                        "2000-02-15T00:00:00.000000000",
+                        "2000-03-15T00:00:00.000000000",
+                        "2000-04-15T00:00:00.000000000",
+                        "2000-05-15T00:00:00.000000000",
+                        "2000-06-15T00:00:00.000000000",
+                        "2000-07-15T00:00:00.000000000",
+                        "2000-08-15T00:00:00.000000000",
+                        "2000-09-15T00:00:00.000000000",
+                        "2000-10-15T00:00:00.000000000",
+                        "2000-11-15T00:00:00.000000000",
+                        "2000-12-15T00:00:00.000000000",
                     ],
-                    dtype="timedelta64[ns]",
+                    dtype="datetime64[ns]",
                 ),
                 "time": np.array(
                     [

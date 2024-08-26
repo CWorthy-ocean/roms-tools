@@ -240,11 +240,15 @@ class SurfaceForcing(ROMSToolsMixins):
         if self.use_coarse_grid:
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
-        # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords({"abs_time": ds["time"]})
+        ds = self._add_global_metadata(ds)
 
         # Convert the time coordinate to the format expected by ROMS
         if data.climatology:
+            ds.attrs["climatology"] = str(True)
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords(
+                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
+            )
             # Convert to pandas TimedeltaIndex
             timedelta_index = pd.to_timedelta(ds["time"].values)
             # Determine the start of the year for the base_datetime
@@ -256,6 +260,9 @@ class SurfaceForcing(ROMSToolsMixins):
                 dims="time",
             )
         else:
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords({"abs_time": ds["time"]})
+
             sfc_time = (
                 (ds["time"] - np.datetime64(self.model_reference_date)).astype(
                     "float64"
@@ -276,8 +283,6 @@ class SurfaceForcing(ROMSToolsMixins):
         variables_to_drop = ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
-
-        ds = self._add_global_metadata(ds)
 
         return ds
 

@@ -476,7 +476,7 @@ class BoundaryForcing(ROMSToolsMixins):
         filenames = []
         writes = []
 
-        if hasattr(self.ds["bry_time"], "cycle_length"):
+        if hasattr(self.ds, "climatology"):
             filename = f"{filepath}_clim.nc"
             filenames.append(filename)
             datasets.append(self.ds)

@@ -460,8 +460,8 @@ def bgc_surface_forcing(grid_that_straddles_180_degree_meridian):
     Fixture for creating a SurfaceForcing object with BGC.
     """
 
-    start_time = datetime(2020, 1, 31)
-    end_time = datetime(2020, 2, 2)
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
 
     fname_bgc = download_test_data("CESM_surface_global_test_data.nc")
 
@@ -482,8 +482,8 @@ def bgc_surface_forcing_from_climatology(
     Fixture for creating a SurfaceForcing object with BGC from climatology.
     """
 
-    start_time = datetime(2020, 1, 31)
-    end_time = datetime(2020, 2, 2)
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
 
     fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
 
@@ -501,10 +501,11 @@ def test_time_attr_climatology(bgc_surface_forcing_from_climatology):
     Test that the 'cycle_length' attribute is present in the time coordinate of the BGC dataset
     when using climatology data.
     """
-    assert hasattr(
-        bgc_surface_forcing_from_climatology.ds.time,
-        "cycle_length",
-    )
+    for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
+        assert hasattr(
+            bgc_surface_forcing_from_climatology.ds[time_coord],
+            "cycle_length",
+        )
     assert hasattr(bgc_surface_forcing_from_climatology.ds, "climatology")
 
 
@@ -513,7 +514,11 @@ def test_time_attr(bgc_surface_forcing):
     Test that the 'cycle_length' attribute is not present in the time coordinate of the BGC dataset
     when not using climatology data.
     """
-    assert not hasattr(bgc_surface_forcing.ds.time, "cycle_length")
+    for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
+        assert not hasattr(
+            bgc_surface_forcing.ds[time_coord],
+            "cycle_length",
+        )
     assert not hasattr(bgc_surface_forcing.ds, "climatology")
 
 
@@ -553,8 +558,8 @@ def test_surface_forcing_creation(
     assert "nox" in sfc_forcing.ds
     assert "nhy" in sfc_forcing.ds
 
-    assert sfc_forcing.start_time == datetime(2020, 1, 31)
-    assert sfc_forcing.end_time == datetime(2020, 2, 2)
+    assert sfc_forcing.start_time == datetime(2020, 2, 1)
+    assert sfc_forcing.end_time == datetime(2020, 2, 1)
     assert sfc_forcing.type == "bgc"
     assert sfc_forcing.source == {
         "name": "CESM_REGRIDDED",
@@ -586,7 +591,11 @@ def test_surface_forcing_creation(
                 "abs_time": np.array(
                     ["2020-02-01T00:00:00.000000000"], dtype="datetime64[ns]"
                 ),
-                "time": np.array([7336.0]),
+                "pco2_time": np.array([7336.0]),
+                "iron_time": np.array([7336.0]),
+                "dust_time": np.array([7336.0]),
+                "nox_time": np.array([7336.0]),
+                "nhy_time": np.array([7336.0]),
             },
         ),
         (
@@ -609,7 +618,75 @@ def test_surface_forcing_creation(
                     ],
                     dtype="datetime64[ns]",
                 ),
-                "time": np.array(
+                "pco2_time": np.array(
+                    [
+                        1296000000000000,
+                        3888000000000000,
+                        6393600000000000,
+                        9072000000000000,
+                        11664000000000000,
+                        14342400000000000,
+                        16934400000000000,
+                        19612800000000000,
+                        22291200000000000,
+                        24883200000000000,
+                        27561600000000000,
+                        30153600000000000,
+                    ],
+                    dtype="timedelta64[ns]",
+                ),
+                "dust_time": np.array(
+                    [
+                        1296000000000000,
+                        3888000000000000,
+                        6393600000000000,
+                        9072000000000000,
+                        11664000000000000,
+                        14342400000000000,
+                        16934400000000000,
+                        19612800000000000,
+                        22291200000000000,
+                        24883200000000000,
+                        27561600000000000,
+                        30153600000000000,
+                    ],
+                    dtype="timedelta64[ns]",
+                ),
+                "iron_time": np.array(
+                    [
+                        1296000000000000,
+                        3888000000000000,
+                        6393600000000000,
+                        9072000000000000,
+                        11664000000000000,
+                        14342400000000000,
+                        16934400000000000,
+                        19612800000000000,
+                        22291200000000000,
+                        24883200000000000,
+                        27561600000000000,
+                        30153600000000000,
+                    ],
+                    dtype="timedelta64[ns]",
+                ),
+                "nox_time": np.array(
+                    [
+                        1296000000000000,
+                        3888000000000000,
+                        6393600000000000,
+                        9072000000000000,
+                        11664000000000000,
+                        14342400000000000,
+                        16934400000000000,
+                        19612800000000000,
+                        22291200000000000,
+                        24883200000000000,
+                        27561600000000000,
+                        30153600000000000,
+                    ],
+                    dtype="timedelta64[ns]",
+                ),
+                "nhy_time": np.array(
                     [
                         1296000000000000,
                         3888000000000000,
@@ -649,16 +726,19 @@ def test_coordinates_existence_and_values(
     )
 
     # Check that the coordinate values match the expected values
-    np.testing.assert_array_equal(
-        sfc_forcing.ds.coords["abs_time"].values,
-        expected_coords["abs_time"],
-    )
-    np.testing.assert_allclose(
-        sfc_forcing.ds.coords["time"].values,
-        expected_coords["time"],
-        rtol=1e-9,
-        atol=0,
-    )
+    for time_coord in sfc_forcing.ds.coords:
+        if time_coord == "abs_time":
+            np.testing.assert_array_equal(
+                sfc_forcing.ds.coords["abs_time"].values,
+                expected_coords["abs_time"],
+            )
+        else:
+            np.testing.assert_allclose(
+                sfc_forcing.ds.coords[time_coord].values,
+                expected_coords[time_coord],
+                rtol=1e-9,
+                atol=0,
+            )
 
 
 @pytest.mark.parametrize(
@@ -2671,6 +2751,7 @@ def test_surface_forcing_bgc_data_from_clim_consistency_plot_save(
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
+        print(filepath)
 
     bgc_surface_forcing_from_climatology.save(filepath)
     extended_filepath = filepath + "_clim.nc"

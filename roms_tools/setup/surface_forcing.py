@@ -240,11 +240,15 @@ class SurfaceForcing(ROMSToolsMixins):
         if self.use_coarse_grid:
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
-        # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords({"abs_time": ds["time"]})
+        ds = self._add_global_metadata(ds)
 
         # Convert the time coordinate to the format expected by ROMS
         if data.climatology:
+            ds.attrs["climatology"] = str(True)
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords(
+                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
+            )
             # Convert to pandas TimedeltaIndex
             timedelta_index = pd.to_timedelta(ds["time"].values)
             # Determine the start of the year for the base_datetime
@@ -256,6 +260,9 @@ class SurfaceForcing(ROMSToolsMixins):
                 dims="time",
             )
         else:
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords({"abs_time": ds["time"]})
+
             sfc_time = (
                 (ds["time"] - np.datetime64(self.model_reference_date)).astype(
                     "float64"
@@ -265,19 +272,32 @@ class SurfaceForcing(ROMSToolsMixins):
                 * 1e-9
             )
 
-        ds = ds.assign_coords({"time": sfc_time})
-        ds["time"].attrs[
-            "long_name"
-        ] = f"days since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
-        ds["time"].encoding["units"] = "days"
-        if data.climatology:
-            ds["time"].attrs["cycle_length"] = 365.25
+        if self.type == "physics":
+            time_coords = ["time"]
+        elif self.type == "bgc":
+            time_coords = [
+                "pco2_time",
+                "iron_time",
+                "dust_time",
+                "nox_time",
+                "nhy_time",
+            ]
+        for time_coord in time_coords:
+            ds = ds.assign_coords({time_coord: sfc_time})
+            ds[time_coord].attrs[
+                "long_name"
+            ] = f"days since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
+            ds[time_coord].encoding["dtype"] = "float64"
+            ds[time_coord].encoding["units"] = "days"
+            if data.climatology:
+                ds[time_coord].attrs["cycle_length"] = 365.25
+
+        if self.type == "bgc":
+            ds = ds.drop_vars(["time"])
 
         variables_to_drop = ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
-
-        ds = self._add_global_metadata(ds)
 
         return ds
 
@@ -412,7 +432,7 @@ class SurfaceForcing(ROMSToolsMixins):
         filenames = []
         writes = []
 
-        if hasattr(self.ds["time"], "cycle_length"):
+        if hasattr(self.ds, "climatology"):
             filename = f"{filepath}_clim.nc"
             filenames.append(filename)
             datasets.append(self.ds)

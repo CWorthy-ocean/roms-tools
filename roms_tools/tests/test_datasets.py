@@ -94,13 +94,27 @@ def non_global_dataset():
 @pytest.mark.parametrize(
     "data_fixture, expected_time_values",
     [
-        ("global_dataset", [np.datetime64("2022-02-01T00:00:00")]),
-        ("global_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
+        (
+            "global_dataset",
+            [
+                np.datetime64("2022-02-01T00:00:00"),
+                np.datetime64("2022-03-01T00:00:00"),
+            ],
+        ),
+        (
+            "global_dataset_with_noon_times",
+            [
+                np.datetime64("2022-01-01T12:00:00"),
+                np.datetime64("2022-02-01T12:00:00"),
+                np.datetime64("2022-03-01T12:00:00"),
+            ],
+        ),
         (
             "global_dataset_with_multiple_times_per_day",
             [
                 np.datetime64("2022-02-01T00:00:00"),
                 np.datetime64("2022-02-01T12:00:00"),
+                np.datetime64("2022-03-01T00:00:00"),
             ],
         ),
     ],
@@ -191,20 +205,33 @@ def test_multiple_matching_times(global_dataset_with_multiple_times_per_day):
         os.remove(filepath)
 
 
-def test_no_matching_times(global_dataset):
+def test_warnings_times(global_dataset):
     """
     Test handling when no matching times are found.
     """
-    start_time = datetime(2021, 1, 1)
-    end_time = datetime(2021, 2, 1)
-
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
         global_dataset.to_netcdf(filepath)
     try:
         # Instantiate Dataset object using the temporary file
-        with pytest.raises(ValueError, match="No matching times found."):
+        with pytest.warns(
+            Warning, match="No records found at or before the start_time."
+        ):
+            start_time = datetime(2021, 1, 1)
+            end_time = datetime(2021, 2, 1)
+
+            Dataset(
+                filename=filepath,
+                var_names={"var": "var"},
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+        with pytest.warns(Warning, match="No records found at or after the end_time."):
+            start_time = datetime(2024, 1, 1)
+            end_time = datetime(2024, 2, 1)
+
             Dataset(
                 filename=filepath,
                 var_names={"var": "var"},

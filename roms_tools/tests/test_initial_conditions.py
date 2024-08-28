@@ -246,6 +246,12 @@ def test_coordinates_existence_and_values(initial_conditions_with_bgc_from_clima
         rtol=1e-9,
         atol=0,
     )
+    assert (
+        initial_conditions_with_bgc_from_climatology.ds.coords["ocean_time"].attrs[
+            "units"
+        ]
+        == "seconds"
+    )
 
 
 def test_initial_conditions_data_consistency_plot_save(

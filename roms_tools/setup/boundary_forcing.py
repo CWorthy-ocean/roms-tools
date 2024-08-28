@@ -229,11 +229,15 @@ class BoundaryForcing(ROMSToolsMixins):
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
 
-        # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords({"abs_time": ds["time"]})
+        ds = self._add_global_metadata(ds)
 
         # Convert the time coordinate to the format expected by ROMS
         if data.climatology:
+            ds.attrs["climatology"] = str(True)
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords(
+                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
+            )
             # Convert to pandas TimedeltaIndex
             timedelta_index = pd.to_timedelta(ds["time"].values)
             # Determine the start of the year for the base_datetime
@@ -245,6 +249,8 @@ class BoundaryForcing(ROMSToolsMixins):
                 dims="time",
             )
         else:
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords({"abs_time": ds["time"]})
             # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
             bry_time = ds["time"] - np.datetime64(self.model_reference_date)
 
@@ -261,7 +267,6 @@ class BoundaryForcing(ROMSToolsMixins):
 
         ds["sc_r"] = self.grid.ds["sc_r"]
         ds["Cs_r"] = self.grid.ds["Cs_r"]
-        ds = self._add_global_metadata(ds)
 
         return ds
 
@@ -471,7 +476,7 @@ class BoundaryForcing(ROMSToolsMixins):
         filenames = []
         writes = []
 
-        if hasattr(self.ds["bry_time"], "cycle_length"):
+        if hasattr(self.ds, "climatology"):
             filename = f"{filepath}_clim.nc"
             filenames.append(filename)
             datasets.append(self.ds)

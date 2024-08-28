@@ -231,9 +231,8 @@ class Dataset:
         """
         Selects and returns the subset of the dataset corresponding to the specified time range.
 
-        This function filters the dataset to include only the data points within the specified
-        time range, defined by `self.start_time` and `self.end_time`. If `self.end_time` is not
-        provided, it defaults to one day after `self.start_time`.
+        This function filters the dataset to include all times between `start_time` and `end_time`,
+        plus exactly one record at or before `start_time`, and exactly one record at or after `end_time`.
 
         Parameters
         ----------
@@ -243,22 +242,26 @@ class Dataset:
         Returns
         -------
         xr.Dataset
-            A dataset containing only the data points within the specified time range.
+            A dataset containing the filtered time range.
 
         Raises
         ------
         ValueError
-            If no matching times are found or if the number of matching times does not meet expectations.
+            If no matching times are found.
 
         Warns
         -----
         UserWarning
-            If the dataset contains only 12 time steps but the climatology flag is not set.
+            If the dataset contains exactly 12 time steps but the climatology flag is not set.
             This may indicate that the dataset represents climatology data.
+
+        UserWarning
+            If no records at or before `self.start_time` or no records at or after `self.end_time` are found.
+
         """
 
         time_dim = self.dim_names["time"]
-        if time_dim in ds.coords or time_dim in ds.data_vars:
+        if time_dim in ds.variables:
             if self.climatology:
                 if not self.end_time:
                     # Interpolate from climatology for initial conditions
@@ -276,29 +279,58 @@ class Dataset:
                     ds = ds.assign_coords(
                         {time_dim: convert_cftime_to_datetime(ds[time_dim])}
                     )
-                if not self.end_time:
-                    end_time = self.start_time + timedelta(days=1)
-                else:
+                if self.end_time:
                     end_time = self.end_time
 
-                times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
-                    ds[time_dim] < np.datetime64(end_time)
-                )
-                ds = ds.where(times, drop=True)
+                    # Identify records before or at start_time
+                    before_start = ds[time_dim] <= np.datetime64(self.start_time)
+                    if before_start.any():
+                        closest_before_start = (
+                            ds[time_dim].where(before_start, drop=True).max()
+                        )
+                    else:
+                        warnings.warn("No records found at or before the start_time.")
+                        closest_before_start = ds[time_dim].min()
+
+                    # Identify records after or at end_time
+                    after_end = ds[time_dim] >= np.datetime64(end_time)
+                    if after_end.any():
+                        closest_after_end = (
+                            ds[time_dim].where(after_end, drop=True).min()
+                        )
+                    else:
+                        warnings.warn("No records found at or after the end_time.")
+                        closest_after_end = ds[time_dim].max()
+
+                    # Select records within the time range and add the closest before/after
+                    within_range = (ds[time_dim] > np.datetime64(self.start_time)) & (
+                        ds[time_dim] < np.datetime64(end_time)
+                    )
+                    selected_times = ds[time_dim].where(
+                        within_range
+                        | (ds[time_dim] == closest_before_start)
+                        | (ds[time_dim] == closest_after_end),
+                        drop=True,
+                    )
+                    ds = ds.sel({time_dim: selected_times})
+                else:
+                    end_time = self.start_time + timedelta(days=1)
+                    times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
+                        ds[time_dim] < np.datetime64(end_time)
+                    )
+                    ds = ds.where(times, drop=True)
+
+                    if ds.sizes[time_dim] != 1:
+                        found_times = ds.sizes[time_dim]
+                        raise ValueError(
+                            f"There must be exactly one time matching the start_time. Found {found_times} matching times."
+                        )
+
         else:
             warnings.warn(
                 "Dataset does not contain any time information. Please check if the time dimension "
                 "is correctly named or if the dataset includes time data."
             )
-        if not ds.sizes[time_dim]:
-            raise ValueError("No matching times found in the dataset.")
-
-        if not self.end_time:
-            if ds.sizes[time_dim] != 1:
-                found_times = ds.sizes[time_dim]
-                raise ValueError(
-                    f"There must be exactly one time matching the start_time. Found {found_times} matching times."
-                )
 
         return ds
 

@@ -94,6 +94,7 @@ def test_boundary_forcing_creation(boundary_forcing):
         assert f"zeta_{direction}" in boundary_forcing.ds
 
     assert len(boundary_forcing.ds.bry_time) == 1
+    assert not hasattr(boundary_forcing.ds, "climatology")
 
 
 def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatology):
@@ -126,6 +127,7 @@ def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatolog
             assert f"{var}_{direction}" in bgc_boundary_forcing_from_climatology.ds
 
     assert len(bgc_boundary_forcing_from_climatology.ds.bry_time) == 12
+    assert hasattr(bgc_boundary_forcing_from_climatology.ds, "climatology")
 
 
 @pytest.mark.parametrize(
@@ -143,20 +145,20 @@ def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatolog
             {
                 "abs_time": np.array(
                     [
-                        1296000000000000,
-                        3888000000000000,
-                        6393600000000000,
-                        9072000000000000,
-                        11664000000000000,
-                        14342400000000000,
-                        16934400000000000,
-                        19612800000000000,
-                        22291200000000000,
-                        24883200000000000,
-                        27561600000000000,
-                        30153600000000000,
+                        "2000-01-16T00:00:00.000000000",
+                        "2000-02-15T00:00:00.000000000",
+                        "2000-03-15T00:00:00.000000000",
+                        "2000-04-15T00:00:00.000000000",
+                        "2000-05-15T00:00:00.000000000",
+                        "2000-06-15T00:00:00.000000000",
+                        "2000-07-15T00:00:00.000000000",
+                        "2000-08-15T00:00:00.000000000",
+                        "2000-09-15T00:00:00.000000000",
+                        "2000-10-15T00:00:00.000000000",
+                        "2000-11-15T00:00:00.000000000",
+                        "2000-12-15T00:00:00.000000000",
                     ],
-                    dtype="timedelta64[ns]",
+                    dtype="datetime64[ns]",
                 ),
                 "bry_time": np.array(
                     [

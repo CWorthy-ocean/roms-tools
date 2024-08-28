@@ -137,7 +137,7 @@ def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatolog
             "boundary_forcing",
             {
                 "abs_time": np.array(["2021-06-29T00:00:00"], dtype="datetime64[ns]"),
-                "bry_time": np.array([678240000000000000], dtype="timedelta64[ns]"),
+                "bry_time": np.array([7850.0]),
             },
         ),
         (
@@ -162,20 +162,19 @@ def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatolog
                 ),
                 "bry_time": np.array(
                     [
-                        1296000000000000,
-                        3888000000000000,
-                        6393600000000000,
-                        9072000000000000,
-                        11664000000000000,
-                        14342400000000000,
-                        16934400000000000,
-                        19612800000000000,
-                        22291200000000000,
-                        24883200000000000,
-                        27561600000000000,
-                        30153600000000000,
-                    ],
-                    dtype="timedelta64[ns]",
+                        15.0,
+                        45.0,
+                        74.0,
+                        105.0,
+                        135.0,
+                        166.0,
+                        196.0,
+                        227.0,
+                        258.0,
+                        288.0,
+                        319.0,
+                        349.0,
+                    ]
                 ),
             },
         ),
@@ -210,6 +209,7 @@ def test_coordinates_existence_and_values(
         rtol=1e-9,
         atol=0,
     )
+    assert bdry_forcing.ds.coords["bry_time"].attrs["units"] == "days"
 
 
 def test_boundary_forcing_data_consistency_plot_save(

@@ -240,25 +240,38 @@ class BoundaryForcing(ROMSToolsMixins):
             )
             # Convert to pandas TimedeltaIndex
             timedelta_index = pd.to_timedelta(ds["time"].values)
+
             # Determine the start of the year for the base_datetime
             start_of_year = datetime(self.model_reference_date.year, 1, 1)
+
             # Calculate the offset from midnight of the new year
             offset = self.model_reference_date - start_of_year
+
+            # Convert the timedelta to nanoseconds first, then to days
             bry_time = xr.DataArray(
-                timedelta_index - offset,
+                (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
                 dims="time",
             )
+
         else:
             # Preserve absolute time coordinate for readability
             ds = ds.assign_coords({"abs_time": ds["time"]})
             # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
-            bry_time = ds["time"] - np.datetime64(self.model_reference_date)
+            bry_time = (
+                (ds["time"] - np.datetime64(self.model_reference_date)).astype(
+                    "float64"
+                )
+                / 3600
+                / 24
+                * 1e-9
+            )
 
         ds = ds.assign_coords({"bry_time": bry_time})
         ds["bry_time"].attrs[
             "long_name"
-        ] = f"nanoseconds since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='ns')}"
-        ds["bry_time"].encoding["units"] = "nanoseconds"
+        ] = f"days since {str(self.model_reference_date)}"
+        ds["bry_time"].encoding["units"] = "days"
+        ds["bry_time"].attrs["units"] = "days"
         ds = ds.swap_dims({"time": "bry_time"})
         ds = ds.drop_vars("time")
 

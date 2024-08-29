@@ -188,12 +188,22 @@ class TestPartitionGrid:
         xrt.assert_identical(partitioned_datasets[0], grid.ds)
 
 
-def test_partition_missing_dims(grid):
+class TestPartitionMissingDims:
+    def test_partition_missing_dims(self, grid):
+        dims_to_drop = ["xi_u", "eta_v", "eta_coarse", "xi_coarse"]
 
-    dims_to_drop = ["xi_u", "eta_v", "eta_coarse", "xi_coarse"]
+        ds_missing_dims = grid.ds.drop_dims(dims_to_drop)
 
-    ds_missing_dims = grid.ds.drop_dims(dims_to_drop)
+        _, partitioned_datasets = partition(ds_missing_dims, nx=1, ny=1)
 
-    _, partitioned_datasets = partition(ds_missing_dims, nx=1, ny=1)
+        xrt.assert_identical(partitioned_datasets[0], ds_missing_dims)
 
-    xrt.assert_identical(partitioned_datasets[0], ds_missing_dims)
+    def test_partition_missing_all_dims(self, grid):
+        # this is all the partitionable dims, so in this case the file will just be copied nx * ny times
+        dims_to_drop = ["eta_rho", "xi_rho", "xi_u", "eta_v", "eta_coarse", "xi_coarse"]
+
+        ds_missing_dims = grid.ds.drop_dims(dims_to_drop)
+
+        _, partitioned_datasets = partition(ds_missing_dims, nx=1, ny=1)
+
+        xrt.assert_identical(partitioned_datasets[0], ds_missing_dims)

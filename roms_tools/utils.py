@@ -15,11 +15,15 @@ def partition(
     if not isinstance(nx, Integral) or not isinstance(ny, Integral):
         raise ValueError("nx and ny must be integers")
 
-    # 'eta_rho' and 'xi_rho' are always expected to be present
-    partitionable_dims_maybe_present = ["eta_v", "xi_u", "eta_coarse", "xi_coarse"]
-    dims_to_partition = ["eta_rho", "xi_rho"] + [
-        d for d in partitionable_dims_maybe_present if d in ds.dims
+    partitionable_dims_maybe_present = [
+        "eta_rho",
+        "xi_rho",
+        "eta_v",
+        "xi_u",
+        "eta_coarse",
+        "xi_coarse",
     ]
+    dims_to_partition = [d for d in partitionable_dims_maybe_present if d in ds.dims]
 
     # if eta is periodic there are no ghost cells along those dimensions
     if "eta_v" in ds.sizes and ds.sizes["eta_rho"] == ds.sizes["eta_v"]:
@@ -43,12 +47,14 @@ def partition(
                 f"Partitioning nx = {nx} ny = {ny} does not divide the domain into subdomains of integer size."
             )
 
-    eta_rho_domain_size = integer_division_or_raise(
-        ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, nx
-    )
-    xi_rho_domain_size = integer_division_or_raise(
-        ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, ny
-    )
+    if "eta_rho" in dims_to_partition:
+        eta_rho_domain_size = integer_division_or_raise(
+            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, nx
+        )
+    if "xi_rho" in dims_to_partition:
+        xi_rho_domain_size = integer_division_or_raise(
+            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, ny
+        )
 
     if "eta_v" in dims_to_partition:
         eta_v_domain_size = integer_division_or_raise(
@@ -125,19 +131,20 @@ def partition(
             file_number = i + (j * ny)
             file_numbers.append(file_number)
 
-            eta_rho_partition_indices = cumsum(partitioned_sizes["eta_rho"])
-            xi_rho_partition_indices = cumsum(partitioned_sizes["xi_rho"])
+            indexers = {}
 
-            indexers = {
-                "eta_rho": slice(
+            if "eta_rho" in dims_to_partition:
+                eta_rho_partition_indices = cumsum(partitioned_sizes["eta_rho"])
+                indexers["eta_rho"] = slice(
                     int(eta_rho_partition_indices[i]),
                     int(eta_rho_partition_indices[i + 1]),
-                ),
-                "xi_rho": slice(
+                )
+            if "xi_rho" in dims_to_partition:
+                xi_rho_partition_indices = cumsum(partitioned_sizes["xi_rho"])
+                indexers["xi_rho"] = slice(
                     int(xi_rho_partition_indices[j]),
                     int(xi_rho_partition_indices[j + 1]),
-                ),
-            }
+                )
 
             if "eta_v" in dims_to_partition:
                 eta_v_partition_indices = cumsum(partitioned_sizes["eta_v"])

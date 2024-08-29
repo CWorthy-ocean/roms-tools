@@ -188,8 +188,11 @@ class TestPartitionGrid:
         xrt.assert_identical(partitioned_datasets[0], grid.ds)
 
     def test_invalid_partitioning(self, grid):
-        with pytest.raises(ValueError, match="nx and ny must be integers"):
+        with pytest.raises(ValueError, match="nx and ny must be positive integers"):
             partition(grid.ds, nx=3.0, ny=1)
+
+        with pytest.raises(ValueError, match="nx and ny must be positive integers"):
+            partition(grid.ds, nx=-3, ny=1)
 
         with pytest.raises(ValueError, match="does not divide the domain"):
             partition(grid.ds, nx=4, ny=1)

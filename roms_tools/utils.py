@@ -11,9 +11,8 @@ def partition(
     Split a ROMS dataset up into nx by ny spatial tiles.
     """
 
-    # TODO also check they are positive integers
-    if not isinstance(nx, Integral) or not isinstance(ny, Integral):
-        raise ValueError("nx and ny must be integers")
+    if not isinstance(nx, Integral) or nx < 1 or not isinstance(ny, Integral) or ny < 1:
+        raise ValueError("nx and ny must be positive integers")
 
     partitionable_dims_maybe_present = [
         "eta_rho",

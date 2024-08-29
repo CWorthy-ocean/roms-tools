@@ -32,6 +32,7 @@ pup_test_data = pooch.create(
     # The registry specifies the files that can be fetched
     registry={
         "GLORYS_test_data.nc": "648f88ec29c433bcf65f257c1fb9497bd3d5d3880640186336b10ed54f7129d2",
+        "GLORYS_coarse_test_data.nc": "9db59f90daeae9953e3c38d55cf43e1baebfb61673ddc11305fb00a5ff33b273",
         "ERA5_regional_test_data.nc": "bd12ce3b562fbea2a80a3b79ba74c724294043c28dc98ae092ad816d74eac794",
         "ERA5_global_test_data.nc": "8ed177ab64c02caf509b9fb121cf6713f286cc603b1f302f15f3f4eb0c21dc4f",
         "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",

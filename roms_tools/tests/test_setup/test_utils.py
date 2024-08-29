@@ -14,5 +14,3 @@ def test_interpolate_from_climatology():
 
     interpolated_field = interpolate_from_climatology(field, "time", era5_times)
     assert len(interpolated_field.time) == len(era5_times)
-
-

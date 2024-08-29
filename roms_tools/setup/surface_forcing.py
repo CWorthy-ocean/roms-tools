@@ -251,12 +251,16 @@ class SurfaceForcing(ROMSToolsMixins):
             )
             # Convert to pandas TimedeltaIndex
             timedelta_index = pd.to_timedelta(ds["time"].values)
+
             # Determine the start of the year for the base_datetime
             start_of_year = datetime(self.model_reference_date.year, 1, 1)
+
             # Calculate the offset from midnight of the new year
             offset = self.model_reference_date - start_of_year
+
+            # Convert the timedelta to nanoseconds first, then to days
             sfc_time = xr.DataArray(
-                timedelta_index - offset,
+                (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
                 dims="time",
             )
         else:
@@ -286,9 +290,9 @@ class SurfaceForcing(ROMSToolsMixins):
             ds = ds.assign_coords({time_coord: sfc_time})
             ds[time_coord].attrs[
                 "long_name"
-            ] = f"days since {np.datetime_as_string(np.datetime64(self.model_reference_date), unit='D')}"
-            ds[time_coord].encoding["dtype"] = "float64"
+            ] = f"days since {str(self.model_reference_date)}"
             ds[time_coord].encoding["units"] = "days"
+            ds[time_coord].attrs["units"] = "days"
             if data.climatology:
                 ds[time_coord].attrs["cycle_length"] = 365.25
 

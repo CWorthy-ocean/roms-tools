@@ -232,7 +232,7 @@ class InitialConditions(ROMSToolsMixins):
         ds = ds.assign_coords(ocean_time=("time", ocean_time.data.astype("float64")))
         ds["ocean_time"].attrs[
             "long_name"
-        ] = f"seconds since {np.datetime_as_string(model_reference_date, unit='s')}"
+        ] = f"seconds since {str(self.model_reference_date)}"
         ds["ocean_time"].attrs["units"] = "seconds"
         ds = ds.swap_dims({"time": "ocean_time"})
         ds = ds.drop_vars("time")

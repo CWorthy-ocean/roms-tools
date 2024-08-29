@@ -278,9 +278,6 @@ class BoundaryForcing(ROMSToolsMixins):
         if data.climatology:
             ds["bry_time"].attrs["cycle_length"] = 365.25
 
-        ds["sc_r"] = self.grid.ds["sc_r"]
-        ds["Cs_r"] = self.grid.ds["Cs_r"]
-
         return ds
 
     def _get_coordinates(self, direction, point):

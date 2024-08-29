@@ -218,8 +218,8 @@ class InitialConditions(ROMSToolsMixins):
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
 
-        ds["sc_r"] = self.grid.ds["sc_r"]
-        ds["Cs_r"] = self.grid.ds["Cs_r"]
+        ds["Cs_r"] = self.grid.ds["CS_r"]
+        ds["Cs_w"] = self.grid.ds["CS_w"]
 
         # Preserve absolute time coordinate for readability
         ds = ds.assign_coords({"abs_time": ds["time"]})

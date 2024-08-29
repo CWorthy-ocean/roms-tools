@@ -85,7 +85,7 @@ def test_vertical_coordinate_data_consistency():
     )
 
     # Define the expected data
-    expected_sc_r = np.array([-0.8333333, -0.5, -0.16666667], dtype=np.float32)
+    expected_Cs_w = np.array([-1.0, -0.34645913, -0.05373908, 0.0], dtype=np.float32)
     expected_Cs_r = np.array([-0.6641397, -0.15129805, -0.01156188], dtype=np.float32)
     expected_layer_depth_rho = np.array(
         [
@@ -242,8 +242,8 @@ def test_vertical_coordinate_data_consistency():
     )
 
     # Check the values in the dataset
-    assert np.allclose(grid.ds["sc_r"].values, expected_sc_r)
-    assert np.allclose(grid.ds["Cs_r"].values, expected_Cs_r)
+    assert np.allclose(grid.ds["CS_w"].values, expected_Cs_w)
+    assert np.allclose(grid.ds["CS_r"].values, expected_Cs_r)
     assert np.allclose(grid.ds["layer_depth_rho"].values, expected_layer_depth_rho)
     assert np.allclose(grid.ds["layer_depth_u"].values, expected_layer_depth_u)
     assert np.allclose(grid.ds["layer_depth_v"].values, expected_layer_depth_v)

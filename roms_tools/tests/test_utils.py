@@ -186,3 +186,14 @@ class TestPartitionGrid:
         partitioned_datasets = partition(grid.ds, nx=1, ny=1)
 
         xrt.assert_identical(partitioned_datasets[0], grid.ds)
+
+
+def test_partition_missing_dims(grid):
+
+    dims_to_drop = ["xi_u", "eta_v", "eta_coarse", "xi_coarse"]
+
+    ds_missing_dims = grid.ds.drop_dims(dims_to_drop)
+
+    partitioned_datasets = partition(ds_missing_dims, nx=1, ny=1)
+
+    xrt.assert_identical(partitioned_datasets[0], ds_missing_dims)

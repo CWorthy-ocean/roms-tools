@@ -9,6 +9,7 @@ def partition(ds: xr.Dataset, nx: int = 1, ny: int = 1) -> list[xr.Dataset]:
     Split a ROMS dataset up into nx by ny spatial tiles.
     """
 
+    # TODO also check they are positive integers
     if not isinstance(nx, Integral) or not isinstance(ny, Integral):
         raise ValueError("nx and ny must be integers")
 
@@ -54,24 +55,44 @@ def partition(ds: xr.Dataset, nx: int = 1, ny: int = 1) -> list[xr.Dataset]:
         ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, ny
     )
 
+    # TODO make robust to missing dimensions
+
+    # unpartitioned dimensions should have sizes unchanged
+    partitioned_sizes = {dim: [size] for dim, size in ds.sizes.items()}
+
     # TODO refactor to use two functions for odd- and even-length dimensions
-    partitioned_sizes = {
-        "eta_rho": [eta_rho_domain_size + n_eta_ghost_cells]
-        + [eta_rho_domain_size] * (nx - 2)
-        + [eta_rho_domain_size + n_eta_ghost_cells],
-        "eta_v": [eta_v_domain_size] * (nx - 1)
-        + [eta_v_domain_size + n_eta_ghost_cells],
-        "xi_rho": [xi_rho_domain_size + n_xi_ghost_cells]
-        + [xi_rho_domain_size] * (nx - 2)
-        + [xi_rho_domain_size + n_xi_ghost_cells],
-        "xi_u": [xi_u_domain_size] * (nx - 1) + [xi_u_domain_size + n_xi_ghost_cells],
-        "eta_coarse": [eta_coarse_domain_size + n_eta_ghost_cells]
-        + [eta_coarse_domain_size] * (nx - 2)
-        + [eta_coarse_domain_size + n_eta_ghost_cells],
-        "xi_coarse": [xi_coarse_domain_size + n_xi_ghost_cells]
-        + [xi_coarse_domain_size] * (nx - 2)
-        + [xi_coarse_domain_size + n_xi_ghost_cells],
-    }
+    partitioned_sizes["eta_v"] = [eta_v_domain_size] * (nx - 1) + [
+        eta_v_domain_size + n_eta_ghost_cells
+    ]
+    partitioned_sizes["xi_u"] = [xi_u_domain_size] * (ny - 1) + [
+        xi_u_domain_size + n_xi_ghost_cells
+    ]
+
+    if nx > 1:
+        partitioned_sizes["eta_rho"] = (
+            [eta_rho_domain_size + n_eta_ghost_cells]
+            + [eta_rho_domain_size] * (nx - 2)
+            + [eta_rho_domain_size + n_eta_ghost_cells]
+        )
+
+        partitioned_sizes["eta_coarse"] = (
+            [eta_coarse_domain_size + n_eta_ghost_cells]
+            + [eta_coarse_domain_size] * (nx - 2)
+            + [eta_coarse_domain_size + n_eta_ghost_cells]
+        )
+
+    if ny > 1:
+        partitioned_sizes["xi_rho"] = (
+            [xi_rho_domain_size + n_xi_ghost_cells]
+            + [xi_rho_domain_size] * (ny - 2)
+            + [xi_rho_domain_size + n_xi_ghost_cells]
+        )
+
+        partitioned_sizes["xi_coarse"] = (
+            [xi_coarse_domain_size + n_xi_ghost_cells]
+            + [xi_coarse_domain_size] * (ny - 2)
+            + [xi_coarse_domain_size + n_xi_ghost_cells]
+        )
 
     def cumsum(pmf):
         """Implementation of cumsum which ensures the result starts with zero"""
@@ -81,9 +102,9 @@ def partition(ds: xr.Dataset, nx: int = 1, ny: int = 1) -> list[xr.Dataset]:
         return cdf
 
     partitioned_datasets = []
-    for i in range(nx):
-        for j in range(ny):
-            # file_number = j + (i * nx)
+    for j in range(ny):
+        for i in range(nx):
+            # file_number = i + (j * ny)
 
             eta_rho_partition_indices = cumsum(partitioned_sizes["eta_rho"])
             eta_v_partition_indices = cumsum(partitioned_sizes["eta_v"])

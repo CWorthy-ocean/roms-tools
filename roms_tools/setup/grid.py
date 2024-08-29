@@ -299,11 +299,11 @@ class Grid:
 
         # use variable names CS_r and CS_w rather than Cs_r and Cs_w to get around bug
         # in UCLA-ROMS code in grid check
-        ds["CS_r"] = cs_r.astype(np.float64)
+        ds["CS_r"] = cs_r.astype(np.float32)
         ds["CS_r"].attrs["long_name"] = "S-coordinate stretching curves at rho-points"
         ds["CS_r"].attrs["units"] = "nondimensional"
 
-        ds["CS_w"] = cs_w.astype(np.float64)
+        ds["CS_w"] = cs_w.astype(np.float32)
         ds["CS_w"].attrs["long_name"] = "S-coordinate stretching curves at w-points"
         ds["CS_w"].attrs["units"] = "nondimensional"
 

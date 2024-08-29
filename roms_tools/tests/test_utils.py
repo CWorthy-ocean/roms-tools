@@ -16,7 +16,7 @@ def grid():
 
 class TestPartitionGrid:
     def test_partition_grid_along_x(self, grid):
-        ds1, ds2, ds3 = partition(grid.ds, nx=3, ny=1)
+        _, [ds1, ds2, ds3] = partition(grid.ds, nx=3, ny=1)
 
         assert ds1.sizes == {
             "eta_rho": 11,
@@ -50,7 +50,7 @@ class TestPartitionGrid:
         }
 
     def test_partition_grid_along_y(self, grid):
-        ds1, ds2, ds3 = partition(grid.ds, nx=1, ny=3)
+        _, [ds1, ds2, ds3] = partition(grid.ds, nx=1, ny=3)
 
         assert ds1.sizes == {
             "eta_rho": 32,
@@ -86,7 +86,7 @@ class TestPartitionGrid:
     def test_partition_grid_along_xy(self, grid):
         # decomposition is increasing eta to the right, increasing xi down
         # fmt: off
-        [ds1, ds2, ds3,
+        _, [ds1, ds2, ds3,
          ds4, ds5, ds6,
          ds7, ds8, ds9] = partition(grid.ds, nx=3, ny=3)
         # fmt: on
@@ -183,7 +183,7 @@ class TestPartitionGrid:
         }
 
     def test_partition_grid_no_op(self, grid):
-        partitioned_datasets = partition(grid.ds, nx=1, ny=1)
+        _, partitioned_datasets = partition(grid.ds, nx=1, ny=1)
 
         xrt.assert_identical(partitioned_datasets[0], grid.ds)
 
@@ -194,6 +194,6 @@ def test_partition_missing_dims(grid):
 
     ds_missing_dims = grid.ds.drop_dims(dims_to_drop)
 
-    partitioned_datasets = partition(ds_missing_dims, nx=1, ny=1)
+    _, partitioned_datasets = partition(ds_missing_dims, nx=1, ny=1)
 
     xrt.assert_identical(partitioned_datasets[0], ds_missing_dims)

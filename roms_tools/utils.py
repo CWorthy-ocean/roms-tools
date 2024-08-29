@@ -4,7 +4,9 @@ import numpy as np
 import xarray as xr
 
 
-def partition(ds: xr.Dataset, nx: int = 1, ny: int = 1) -> list[xr.Dataset]:
+def partition(
+    ds: xr.Dataset, nx: int = 1, ny: int = 1
+) -> tuple[list[int], list[xr.Dataset]]:
     """
     Split a ROMS dataset up into nx by ny spatial tiles.
     """
@@ -116,10 +118,12 @@ def partition(ds: xr.Dataset, nx: int = 1, ny: int = 1) -> list[xr.Dataset]:
         np.cumsum(pmf, out=cdf[1:])
         return cdf
 
+    file_numbers = []
     partitioned_datasets = []
     for j in range(ny):
         for i in range(nx):
-            # file_number = i + (j * ny)
+            file_number = i + (j * ny)
+            file_numbers.append(file_number)
 
             eta_rho_partition_indices = cumsum(partitioned_sizes["eta_rho"])
             xi_rho_partition_indices = cumsum(partitioned_sizes["xi_rho"])
@@ -165,5 +169,4 @@ def partition(ds: xr.Dataset, nx: int = 1, ny: int = 1) -> list[xr.Dataset]:
 
             partitioned_datasets.append(partitioned_ds)
 
-    # TODO return the file number index too?
-    return partitioned_datasets
+    return file_numbers, partitioned_datasets

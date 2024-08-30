@@ -8,23 +8,23 @@ import textwrap
 from roms_tools.setup.download import download_test_data
 
 
-def test_grid_creation(simple_grid):
+def test_grid_creation(grid):
 
-    assert simple_grid.nx == 1
-    assert simple_grid.ny == 1
-    assert simple_grid.size_x == 100
-    assert simple_grid.size_y == 100
-    assert simple_grid.center_lon == -20
-    assert simple_grid.center_lat == 0
-    assert simple_grid.rot == 0
-    assert isinstance(simple_grid.ds, xr.Dataset)
+    assert grid.nx == 1
+    assert grid.ny == 1
+    assert grid.size_x == 100
+    assert grid.size_y == 100
+    assert grid.center_lon == -20
+    assert grid.center_lat == 0
+    assert grid.rot == 0
+    assert isinstance(grid.ds, xr.Dataset)
 
 
-def test_plot_save_methods(simple_grid, tmp_path):
+def test_plot_save_methods(grid, tmp_path):
 
-    simple_grid.plot(bathymetry=True)
+    grid.plot(bathymetry=True)
     filepath = tmp_path / "grid.nc"
-    simple_grid.save(filepath)
+    grid.save(filepath)
     assert filepath.exists()
 
 

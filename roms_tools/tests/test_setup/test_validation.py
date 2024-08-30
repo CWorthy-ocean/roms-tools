@@ -63,7 +63,6 @@ def test_save_results(forcing_fixture, name, request):
 def test_check_results(forcing_fixture, name, request):
 
     forcing = request.getfixturevalue(forcing_fixture)
-    forcing.ds.load()
 
     fname = _get_fname(name)
     expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)

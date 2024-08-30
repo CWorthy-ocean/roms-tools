@@ -10,8 +10,23 @@ from roms_tools import (
 from roms_tools.setup.download import download_test_data
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--overwrite",
+        action="append",
+        default=[],
+        help="Specify which fixtures to overwrite. Use 'all' to overwrite all fixtures.",
+    )
+
+
+def pytest_configure(config):
+    if "all" in config.getoption("--overwrite"):
+        # If 'all' is specified, overwrite everything
+        config.option.overwrite = ["all"]
+
+
 @pytest.fixture(scope="session")
-def simple_grid():
+def grid():
 
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
 
@@ -19,7 +34,7 @@ def simple_grid():
 
 
 @pytest.fixture(scope="session")
-def simple_grid_that_straddles_dateline():
+def grid_that_straddles_dateline():
 
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=0, center_lat=0, rot=20)
 

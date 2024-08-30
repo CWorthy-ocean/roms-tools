@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "bry_time",
+        "s_rho",
+        "xi_rho"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "southern boundary dissolved organic carbon",
+    "units": "mmol/m^3"
+}

@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "bry_time",
+        "s_rho",
+        "eta_rho"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "western boundary dissolved inorganic carbon",
+    "units": "mmol/m^3"
+}

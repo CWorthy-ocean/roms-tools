@@ -1,0 +1,391 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "climatology": "True",
+            "correct_radiation": "False",
+            "end_time": "2020-02-01 00:00:00",
+            "model_reference_date": "2000-01-01 00:00:00",
+            "roms_tools_version": "0.1.dev98",
+            "source": "CESM_REGRIDDED",
+            "start_time": "2020-02-01 00:00:00",
+            "title": "ROMS surface forcing file created by ROMS-Tools",
+            "type": "bgc",
+            "use_coarse_grid": "False"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "abs_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "abs_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "calendar": "proleptic_gregorian",
+            "units": "days since 2000-01-16 00:00:00"
+        },
+        "dust/.zarray": {
+            "chunks": [
+                12,
+                7,
+                7
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                7,
+                7
+            ],
+            "zarr_format": 2
+        },
+        "dust/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "long_name": "dust decomposition",
+            "units": "kg/m^2/s"
+        },
+        "dust_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "dust_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "cycle_length": 365.25,
+            "long_name": "days since 2000-01-01 00:00:00",
+            "units": "days"
+        },
+        "iron/.zarray": {
+            "chunks": [
+                12,
+                7,
+                7
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                7,
+                7
+            ],
+            "zarr_format": 2
+        },
+        "iron/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "long_name": "iron decomposition",
+            "units": "nmol/cm^2/s"
+        },
+        "iron_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "iron_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "cycle_length": 365.25,
+            "long_name": "days since 2000-01-01 00:00:00",
+            "units": "days"
+        },
+        "nhy/.zarray": {
+            "chunks": [
+                12,
+                7,
+                7
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                7,
+                7
+            ],
+            "zarr_format": 2
+        },
+        "nhy/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "long_name": "NHy decomposition",
+            "units": "kg/m^2/s"
+        },
+        "nhy_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "nhy_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "cycle_length": 365.25,
+            "long_name": "days since 2000-01-01 00:00:00",
+            "units": "days"
+        },
+        "nox/.zarray": {
+            "chunks": [
+                12,
+                7,
+                7
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                7,
+                7
+            ],
+            "zarr_format": 2
+        },
+        "nox/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "long_name": "NOx decomposition",
+            "units": "kg/m^2/s"
+        },
+        "nox_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "nox_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "cycle_length": 365.25,
+            "long_name": "days since 2000-01-01 00:00:00",
+            "units": "days"
+        },
+        "pco2_air/.zarray": {
+            "chunks": [
+                12,
+                7,
+                7
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                7,
+                7
+            ],
+            "zarr_format": 2
+        },
+        "pco2_air/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "long_name": "atmospheric pCO2",
+            "units": "ppmv"
+        },
+        "pco2_air_alt/.zarray": {
+            "chunks": [
+                12,
+                7,
+                7
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                7,
+                7
+            ],
+            "zarr_format": 2
+        },
+        "pco2_air_alt/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "long_name": "atmospheric pCO2, alternative CO2",
+            "units": "ppmv"
+        },
+        "pco2_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "pco2_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "cycle_length": 365.25,
+            "long_name": "days since 2000-01-01 00:00:00",
+            "units": "days"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

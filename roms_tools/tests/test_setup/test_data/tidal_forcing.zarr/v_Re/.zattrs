@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "ntides",
+        "eta_v",
+        "xi_rho"
+    ],
+    "coordinates": "omega",
+    "long_name": "Tidal velocity in y-direction, real part",
+    "units": "m/s"
+}

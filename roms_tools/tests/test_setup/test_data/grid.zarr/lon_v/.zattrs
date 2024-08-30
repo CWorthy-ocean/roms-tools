@@ -1,0 +1,8 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "eta_v",
+        "xi_rho"
+    ],
+    "long_name": "longitude of v-points",
+    "units": "degrees East"
+}

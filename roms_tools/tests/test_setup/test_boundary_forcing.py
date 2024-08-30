@@ -1,71 +1,10 @@
 import pytest
 from datetime import datetime
-from roms_tools import BoundaryForcing, Grid
+from roms_tools import BoundaryForcing
 import tempfile
 import os
 import textwrap
 from roms_tools.setup.download import download_test_data
-
-
-@pytest.fixture
-def boundary_forcing():
-    """
-    Fixture for creating a BoundaryForcing object.
-    """
-
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
-
-    return BoundaryForcing(
-        grid=grid,
-        start_time=datetime(2021, 6, 29),
-        end_time=datetime(2021, 6, 30),
-        source={"name": "GLORYS", "path": fname},
-    )
-
-
-@pytest.fixture
-def bgc_boundary_forcing_from_climatology():
-    """
-    Fixture for creating a BoundaryForcing object.
-    """
-
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
-
-    return BoundaryForcing(
-        grid=grid,
-        start_time=datetime(2021, 6, 29),
-        end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
-        type="bgc",
-    )
 
 
 def test_boundary_forcing_creation(boundary_forcing):

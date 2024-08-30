@@ -8,14 +8,6 @@ import textwrap
 from roms_tools.setup.download import download_test_data
 
 
-@pytest.fixture
-def simple_grid():
-
-    grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
-
-    return grid
-
-
 def test_grid_creation(simple_grid):
 
     assert simple_grid.nx == 1
@@ -34,14 +26,6 @@ def test_plot_save_methods(simple_grid, tmp_path):
     filepath = tmp_path / "grid.nc"
     simple_grid.save(filepath)
     assert filepath.exists()
-
-
-@pytest.fixture
-def simple_grid_that_straddles_dateline():
-
-    grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=0, center_lat=0, rot=20)
-
-    return grid
 
 
 def test_raise_if_domain_too_large():

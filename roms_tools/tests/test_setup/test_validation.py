@@ -1,13 +1,6 @@
 import pytest
 import os
 import xarray as xr
-import zarr
-
-from roms_tools.tests.test_setup.test_grid import simple_grid, simple_grid_that_straddles_dateline
-from roms_tools.tests.test_setup.test_tides import tidal_forcing
-from roms_tools.tests.test_setup.test_initial_conditions import initial_conditions_with_bgc_from_climatology
-from roms_tools.tests.test_setup.test_boundary_forcing import boundary_forcing, bgc_boundary_forcing_from_climatology
-from roms_tools.tests.test_setup.test_surface_forcing import surface_forcing, coarse_surface_forcing, corrected_surface_forcing, bgc_surface_forcing, bgc_surface_forcing_from_climatology
 
 
 # https://stackoverflow.com/questions/66970626/pytest-skip-test-condition-depending-on-environment
@@ -17,6 +10,7 @@ def requires_env(varname, value):
         not env_value == value,
         reason=f"Test skipped unless environment variable {varname}=={value}",
     )
+
 
 def _get_fname(name):
     dirname = os.path.dirname(__file__)
@@ -40,14 +34,15 @@ def _get_fname(name):
         ("bgc_surface_forcing", "bgc_surface_forcing"),
         ("bgc_surface_forcing_from_climatology", "bgc_surface_forcing_from_clim"),
         ("boundary_forcing", "boundary_forcing"),
-        ("bgc_boundary_forcing_from_climatology", "bgc_boundary_forcing_from_clim")
-    ]
+        ("bgc_boundary_forcing_from_climatology", "bgc_boundary_forcing_from_clim"),
+    ],
 )
 def test_save_results(forcing_fixture, name, request):
 
     forcing = request.getfixturevalue(forcing_fixture)
     fname = _get_fname(name)
     forcing.ds.to_zarr(fname, mode="w")
+
 
 @pytest.mark.parametrize(
     "forcing_fixture, name",
@@ -62,11 +57,11 @@ def test_save_results(forcing_fixture, name, request):
         ("bgc_surface_forcing", "bgc_surface_forcing"),
         ("bgc_surface_forcing_from_climatology", "bgc_surface_forcing_from_clim"),
         ("boundary_forcing", "boundary_forcing"),
-        ("bgc_boundary_forcing_from_climatology", "bgc_boundary_forcing_from_clim")
-    ]
+        ("bgc_boundary_forcing_from_climatology", "bgc_boundary_forcing_from_clim"),
+    ],
 )
 def test_check_results(forcing_fixture, name, request):
-    
+
     forcing = request.getfixturevalue(forcing_fixture)
     forcing.ds.load()
 
@@ -74,6 +69,3 @@ def test_check_results(forcing_fixture, name, request):
     expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)
 
     xr.testing.assert_allclose(forcing.ds, expected_forcing_ds)
-
-    
-

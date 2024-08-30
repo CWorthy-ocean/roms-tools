@@ -165,21 +165,6 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
         )
 
 
-@pytest.fixture
-def tidal_forcing():
-
-    grid = Grid(
-        nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
-    )
-    fname = download_test_data("TPXO_regional_test_data.nc")
-
-    return TidalForcing(
-        grid=grid,
-        source={"name": "TPXO", "path": fname},
-        ntides=1,
-    )
-
-
 def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
     """
     Test plot and save methods in the same test since we dask arrays are already computed.

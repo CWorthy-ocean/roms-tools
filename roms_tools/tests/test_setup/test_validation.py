@@ -3,11 +3,11 @@ import os
 import xarray as xr
 import zarr
 
-from test_grid import simple_grid, simple_grid_that_straddles_dateline
-from test_tides import tidal_forcing
-from test_initial_conditions import initial_conditions_with_bgc_from_climatology
-from test_boundary_forcing import boundary_forcing, bgc_boundary_forcing_from_climatology
-from test_surface_forcing import surface_forcing, coarse_surface_forcing, corrected_surface_forcing, bgc_surface_forcing, bgc_surface_forcing_from_climatology
+from roms_tools.tests.test_setup.test_grid import simple_grid, simple_grid_that_straddles_dateline
+from roms_tools.tests.test_setup.test_tides import tidal_forcing
+from roms_tools.tests.test_setup.test_initial_conditions import initial_conditions_with_bgc_from_climatology
+from roms_tools.tests.test_setup.test_boundary_forcing import boundary_forcing, bgc_boundary_forcing_from_climatology
+from roms_tools.tests.test_setup.test_surface_forcing import surface_forcing, coarse_surface_forcing, corrected_surface_forcing, bgc_surface_forcing, bgc_surface_forcing_from_climatology
 
 
 # https://stackoverflow.com/questions/66970626/pytest-skip-test-condition-depending-on-environment

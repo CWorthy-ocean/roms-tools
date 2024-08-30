@@ -1,7 +1,14 @@
 import pytest
 from datetime import datetime
-from roms_tools import Grid, TidalForcing, InitialConditions, BoundaryForcing, SurfaceForcing
+from roms_tools import (
+    Grid,
+    TidalForcing,
+    InitialConditions,
+    BoundaryForcing,
+    SurfaceForcing,
+)
 from roms_tools.setup.download import download_test_data
+
 
 @pytest.fixture(scope="session")
 def simple_grid():
@@ -10,12 +17,14 @@ def simple_grid():
 
     return grid
 
+
 @pytest.fixture(scope="session")
 def simple_grid_that_straddles_dateline():
 
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=0, center_lat=0, rot=20)
 
     return grid
+
 
 @pytest.fixture(scope="session")
 def tidal_forcing():
@@ -126,6 +135,7 @@ def initial_conditions_with_bgc_from_climatology():
         },
     )
 
+
 @pytest.fixture(scope="session")
 def boundary_forcing():
     """
@@ -185,6 +195,7 @@ def bgc_boundary_forcing_from_climatology():
         source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
         type="bgc",
     )
+
 
 @pytest.fixture(scope="session")
 def surface_forcing():
@@ -331,5 +342,3 @@ def bgc_surface_forcing_from_climatology():
         source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
         type="bgc",
     )
-
-

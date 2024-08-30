@@ -43,3 +43,11 @@ Boundary Forcing
    roms_tools.BoundaryForcing
 
 =======
+
+Utilities
+---------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.utils.partition

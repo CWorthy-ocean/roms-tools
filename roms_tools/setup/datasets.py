@@ -900,7 +900,9 @@ class CESMBGCDataset(CESMDataset):
             # Fill variables that only have data in upper 150m with NaNs below
             if (
                 "z_t_150m" in self.ds.dims
-                and np.equal(self.ds.z_t[:15].values, self.ds.z_t_150m.values).all()
+                and np.equal(
+                    self.ds.z_t[: len(self.ds.z_t_150m)].values, self.ds.z_t_150m.values
+                ).all()
             ):
                 for var in self.var_names:
                     if "z_t_150m" in self.ds[var].dims:

@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "bry_time",
-        "eta_rho"
-    ],
-    "coordinates": "abs_time",
-    "long_name": "eastern boundary sea surface height",
-    "units": "m"
-}

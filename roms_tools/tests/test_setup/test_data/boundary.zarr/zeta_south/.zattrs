@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "bry_time",
-        "xi_rho"
-    ],
-    "coordinates": "abs_time",
-    "long_name": "southern boundary sea surface height",
-    "units": "m"
-}

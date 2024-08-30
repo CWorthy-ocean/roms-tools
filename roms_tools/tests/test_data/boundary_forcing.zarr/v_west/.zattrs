@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "bry_time",
+        "s_rho",
+        "eta_v"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "western boundary v-flux component",
+    "units": "m/s"
+}

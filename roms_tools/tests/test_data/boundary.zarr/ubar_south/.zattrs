@@ -1,0 +1,9 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "bry_time",
+        "xi_u"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "southern boundary vertically integrated u-flux component",
+    "units": "m/s"
+}

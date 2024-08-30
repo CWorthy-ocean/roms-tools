@@ -1,5 +1,6 @@
 import pytest
 import os
+import shutil
 import xarray as xr
 
 
@@ -41,7 +42,12 @@ def test_save_results(forcing_fixture, name, request):
 
     forcing = request.getfixturevalue(forcing_fixture)
     fname = _get_fname(name)
-    forcing.ds.to_zarr(fname, mode="a")
+
+    # Check if the Zarr directory exists and delete it if it does
+    if os.path.exists(fname):
+        shutil.rmtree(fname)
+
+    forcing.ds.to_zarr(fname)
 
 
 @pytest.mark.parametrize(

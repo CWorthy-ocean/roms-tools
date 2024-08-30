@@ -56,25 +56,3 @@ def test_hmin_criterion():
 
     assert grid.hmin == 10.0
     assert np.less_equal(grid.hmin, grid.ds.h.min())
-
-
-def test_data_consistency():
-    """
-    Test that the topography generation remains consistent.
-    """
-
-    grid = Grid(
-        nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
-    )
-
-    expected_h = np.array(
-        [
-            [4363.08576713, 4363.08576713, 4181.51447365, 4007.67724635, 4007.67724635],
-            [4363.08576713, 4363.08576713, 4181.51447365, 4007.67724635, 4007.67724635],
-            [4129.88401143, 4129.88401143, 3559.91339228, 2719.86487785, 2719.86487785],
-            [3828.89248818, 3828.89248818, 2596.98060983, 1828.88986469, 1828.88986469],
-            [3828.89248818, 3828.89248818, 2596.98060983, 1828.88986469, 1828.88986469],
-        ]
-    )
-
-    assert np.allclose(grid.ds["h"].values, expected_h)

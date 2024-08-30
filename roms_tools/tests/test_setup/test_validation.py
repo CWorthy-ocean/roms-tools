@@ -41,7 +41,7 @@ def test_save_results(forcing_fixture, name, request):
 
     forcing = request.getfixturevalue(forcing_fixture)
     fname = _get_fname(name)
-    forcing.ds.to_zarr(fname, mode="w")
+    forcing.ds.to_zarr(fname, mode="a")
 
 
 @pytest.mark.parametrize(

@@ -501,6 +501,18 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
     finally:
         os.remove(extended_filepath)
 
+    sfc_forcing.save(filepath, nx=1)
+    expected_filepath_list = [
+        f"{filepath}_20200201-01.{index}.nc" for index in range(1)
+    ]
+
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
+
 
 def test_surface_forcing_bgc_plot_save(
     bgc_surface_forcing,
@@ -523,6 +535,18 @@ def test_surface_forcing_bgc_plot_save(
         assert os.path.exists(extended_filepath)
     finally:
         os.remove(extended_filepath)
+
+    bgc_surface_forcing.save(filepath, ny=5)
+    expected_filepath_list = [
+        f"{filepath}_20200201-01.{index}.nc" for index in range(5)
+    ]
+
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
 
 
 def test_surface_forcing_bgc_from_clim_plot_save(
@@ -547,6 +571,16 @@ def test_surface_forcing_bgc_from_clim_plot_save(
         assert os.path.exists(extended_filepath)
     finally:
         os.remove(extended_filepath)
+
+    bgc_surface_forcing_from_climatology.save(filepath, nx=5)
+    expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(5)]
+
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
 
 
 @pytest.mark.parametrize(

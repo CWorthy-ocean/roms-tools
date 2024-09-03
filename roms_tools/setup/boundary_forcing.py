@@ -16,8 +16,8 @@ from roms_tools.setup.utils import (
     get_boundary_info,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
+from roms_tools.utils import partition
 import calendar
-import dask
 import matplotlib.pyplot as plt
 
 
@@ -463,76 +463,106 @@ class BoundaryForcing(ROMSToolsMixins):
         else:
             _line_plot(field, title=title)
 
-    def save(self, filepath: str, time_chunk_size: int = 1) -> None:
+    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
         """
         Save the interpolated boundary forcing fields to netCDF4 files.
 
-        This method groups the dataset by year and month, chunks the data by the specified
-        time chunk size, and saves each chunked subset to a separate netCDF4 file named
-        according to the year, month, and day range if not a complete month of data is included.
+        This method saves the dataset by grouping it into yearly and monthly subsets. Each subset is then written to one or more netCDF4 files.
+        The filenames of the output files reflect the temporal coverage of the data.
+
+        There are two modes of saving the dataset:
+
+        1. **Single File Mode (default)**:
+           - If both `nx` and `ny` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
+             with the base filename specified by `filepath`. The file names will follow the format:
+             - `"filepath_YYYYMM.nc"` for complete months of data
+             - `"filepath_YYYYMMDD-DD.nc"` for partial months of data
+
+        2. **Partitioned Mode**:
+           - If either `nx` or `ny` is specified, the dataset is divided into spatial tiles along the x-axis and y-axis.
+             Each spatial tile is saved as a separate netCDF4 file. In this case, filenames include a partition index:
+             - `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc. for full month files
+             - `"filepath_YYYYMMDD-DD.0.nc"`, `"filepath_YYYYMMDD-DD.1.nc"`, etc. for partial month files
 
         Parameters
         ----------
         filepath : str
-            The base path and filename for the output files. The files will be named with
-            the format "filepath.YYYYMM.nc" if a full month of data is included, or
-            "filepath.YYYYMMDD-DD.nc" otherwise.
-        time_chunk_size : int, optional
-            Number of time slices to include in each chunk along the time dimension. Default is 1,
-            meaning each chunk contains one time slice.
+            The base path and filename for the output files. The format of the filenames depends on whether partitioning is used
+            and the temporal range of the data. For partitioned datasets, files will be named with an additional index, e.g.,
+            `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
+        nx : int, optional
+            The number of partitions along the x-axis. If `None`, no spatial partitioning is performed.
+        ny : int, optional
+            The number of partitions along the y-axis. If `None`, no spatial partitioning is performed.
 
         Returns
         -------
         None
+            This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
-        datasets = []
-        filenames = []
-        writes = []
+
+        dataset_list = []
+        output_filenames = []
 
         if hasattr(self.ds, "climatology"):
-            filename = f"{filepath}_clim.nc"
-            filenames.append(filename)
-            datasets.append(self.ds)
+            output_filename = f"{filepath}_clim"
+            output_filenames.append(output_filename)
+            dataset_list.append(self.ds)
         else:
             # Group dataset by year
-            gb = self.ds.groupby("abs_time.year")
+            grouped_by_year = self.ds.groupby("abs_time.year")
 
-            for year, group_ds in gb:
+            for year, yearly_dataset in grouped_by_year:
                 # Further group each yearly group by month
-                sub_gb = group_ds.groupby("abs_time.month")
+                grouped_by_month = yearly_dataset.groupby("abs_time.month")
 
-                for month, ds in sub_gb:
-                    # Chunk the dataset by the specified time chunk size
-                    ds = ds.chunk({"bry_time": time_chunk_size})
-                    datasets.append(ds)
+                for month, monthly_dataset in grouped_by_month:
+                    dataset_list.append(monthly_dataset)
 
                     # Determine the number of days in the month
-                    num_days_in_month = calendar.monthrange(year, month)[1]
-                    first_day = ds.abs_time.dt.day.values[0]
-                    last_day = ds.abs_time.dt.day.values[-1]
+                    days_in_month = calendar.monthrange(year, month)[1]
+                    first_day = monthly_dataset.abs_time.dt.day.values[0]
+                    last_day = monthly_dataset.abs_time.dt.day.values[-1]
 
                     # Create filename based on whether the dataset contains a full month
-                    if first_day == 1 and last_day == num_days_in_month:
+                    if first_day == 1 and last_day == days_in_month:
                         # Full month format: "filepath_physics_YYYYMM.nc"
                         year_month_str = f"{year}{month:02}"
-                        filename = f"{filepath}_{year_month_str}.nc"
+                        output_filename = f"{filepath}_{year_month_str}"
                     else:
                         # Partial month format: "filepath_physics_YYYYMMDD-DD.nc"
                         year_month_day_str = (
                             f"{year}{month:02}{first_day:02}-{last_day:02}"
                         )
-                        filename = f"{filepath}_{year_month_day_str}.nc"
-                    filenames.append(filename)
+                        output_filename = f"{filepath}_{year_month_day_str}"
+                    output_filenames.append(output_filename)
 
         print("Saving the following files:")
-        for ds, filename in zip(datasets, filenames):
-            print(filename)
-            # Prepare the dataset for writing to a netCDF file without immediately computing
-            write = ds.to_netcdf(filename, compute=False)
-            writes.append(write)
+        if nx is None and ny is None:
+            # Save the dataset as a single file
+            output_filenames = [f"{filename}.nc" for filename in output_filenames]
+            for filename in output_filenames:
+                print(filename)
+            xr.save_mfdataset(dataset_list, output_filenames)
+        else:
+            # Partition the dataset and save each partition as a separate file
+            nx = nx or 1
+            ny = ny or 1
 
-        # Perform the actual write operations in parallel
-        dask.compute(*writes)
+            partitioned_datasets = []
+            partitioned_filenames = []
+            for dataset, base_filename in zip(dataset_list, output_filenames):
+                partition_indices, partitions = partition(dataset, nx=nx, ny=ny)
+                partition_filenames = [
+                    f"{base_filename}.{index}.nc" for index in partition_indices
+                ]
+                partitioned_datasets.extend(partitions)
+                partitioned_filenames.extend(partition_filenames)
+
+            for filename in partitioned_filenames:
+                print(filename)
+
+            xr.save_mfdataset(partitioned_datasets, partitioned_filenames)
 
     def to_yaml(self, filepath: str) -> None:
         """

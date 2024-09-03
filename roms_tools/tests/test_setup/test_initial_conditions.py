@@ -162,9 +162,7 @@ def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climato
     )
 
 
-def test_initial_conditions_plot_save(
-    initial_conditions_with_bgc_from_climatology, tmp_path
-):
+def test_initial_conditions_plot_save(initial_conditions_with_bgc_from_climatology):
     """
     Test plot and save methods.
     """
@@ -201,9 +199,24 @@ def test_initial_conditions_plot_save(
     initial_conditions_with_bgc_from_climatology.plot(varname="ALK", s=0, xi=0)
     initial_conditions_with_bgc_from_climatology.plot(varname="ALK", eta=0, xi=0)
 
-    filepath = tmp_path / "initial_conditions.nc"
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath = tmpfile.name
     initial_conditions_with_bgc_from_climatology.save(filepath)
-    assert filepath.exists()
+    try:
+        assert os.path.exists(filepath)
+    finally:
+        os.remove(filepath)
+
+    initial_conditions_with_bgc_from_climatology.save(filepath, nx=2)
+    expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(2)]
+
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
 
 
 def test_roundtrip_yaml(initial_conditions):

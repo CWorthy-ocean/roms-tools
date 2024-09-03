@@ -8,7 +8,48 @@ def partition(
     ds: xr.Dataset, nx: int = 1, ny: int = 1
 ) -> tuple[list[int], list[xr.Dataset]]:
     """
-    Split a ROMS dataset up into nx by ny spatial tiles.
+    Partition a ROMS (Regional Ocean Modeling System) dataset into smaller spatial tiles.
+
+    This function divides the input dataset into `nx` by `ny` tiles, where each tile
+    represents a subdomain of the original dataset. The partitioning is performed along
+    the spatial dimensions `eta_rho`, `xi_rho`, `eta_v`, `xi_u`, `eta_coarse`, and `xi_coarse`,
+    depending on which dimensions are present in the dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The input ROMS dataset that is to be partitioned.
+
+    nx : int, optional
+        The number of partitions along the `eta` (latitude) direction. Must be a positive integer. Default is 1.
+
+    ny : int, optional
+        The number of partitions along the `xi` (longitude) direction. Must be a positive integer. Default is 1.
+
+    Returns
+    -------
+    tuple[list[int], list[xr.Dataset]]
+        A tuple containing two elements:
+        - A list of integers representing the file numbers associated with each partition.
+        - A list of `xarray.Dataset` objects, each representing a partitioned subdomain of the original dataset.
+
+    Raises
+    ------
+    ValueError
+        If `nx` or `ny` is not a positive integer, or if the dataset cannot be evenly partitioned
+        into the specified number of tiles.
+
+
+    Example
+    -------
+    >>> partitioned_file_numbers, partitioned_datasets = partition(ds, nx=2, ny=3)
+    >>> print(partitioned_file_numbers)
+    [0, 1, 2, 3, 4, 5]
+    >>> print([ds.sizes for ds in partitioned_datasets])
+    [{'eta_rho': 50, 'xi_rho': 50}, {'eta_rho': 50, 'xi_rho': 50}, ...]
+
+    This example partitions the dataset into 2 tiles along the `eta` direction and 3 tiles
+    along the `xi` direction, resulting in a total of 6 partitions.
     """
 
     if not isinstance(nx, Integral) or nx < 1 or not isinstance(ny, Integral) or ny < 1:
@@ -37,40 +78,63 @@ def partition(
     else:
         n_xi_ghost_cells = 1
 
-    def integer_division_or_raise(a: int, b: int) -> int:
+    def integer_division_or_raise(a: int, b: int, dimension: str) -> int:
+        """
+        Perform integer division and ensure that the division is exact.
+
+        Parameters
+        ----------
+        a : int
+            The numerator for the division.
+        b : int
+            The denominator for the division.
+        dimension : str
+            The name of the dimension being partitioned, used for error reporting.
+
+        Returns
+        -------
+        int
+            The result of the integer division.
+
+        Raises
+        ------
+        ValueError
+            If the division is not exact, indicating that the domain cannot be evenly divided
+            along the specified dimension.
+        """
         remainder = a % b
         if remainder == 0:
             return a // b
         else:
             raise ValueError(
-                f"Partitioning nx = {nx} ny = {ny} does not divide the domain into subdomains of integer size."
+                f"Dimension '{dimension}' of size {a} cannot be evenly divided into {b} partitions."
             )
 
     if "eta_rho" in dims_to_partition:
         eta_rho_domain_size = integer_division_or_raise(
-            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, nx
+            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, nx, "eta_rho"
         )
     if "xi_rho" in dims_to_partition:
         xi_rho_domain_size = integer_division_or_raise(
-            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, ny
+            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, ny, "xi_rho"
         )
 
     if "eta_v" in dims_to_partition:
         eta_v_domain_size = integer_division_or_raise(
-            ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, nx
+            ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, nx, "eta_v"
         )
     if "xi_u" in dims_to_partition:
         xi_u_domain_size = integer_division_or_raise(
-            ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, ny
+            ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, ny, "xi_u"
         )
 
     if "eta_coarse" in dims_to_partition:
         eta_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["eta_coarse"] - 2 * n_eta_ghost_cells, nx
+            ds.sizes["eta_coarse"] - 2 * n_eta_ghost_cells, nx, "eta_coarse"
         )
     if "xi_coarse" in dims_to_partition:
         xi_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, ny
+            ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, ny, "xi_coarse"
         )
 
     # unpartitioned dimensions should have sizes unchanged
@@ -127,7 +191,7 @@ def partition(
     partitioned_datasets = []
     for j in range(ny):
         for i in range(nx):
-            file_number = i + (j * ny)
+            file_number = i + (j * nx)
             file_numbers.append(file_number)
 
             indexers = {}

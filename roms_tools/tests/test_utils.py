@@ -194,7 +194,7 @@ class TestPartitionGrid:
         with pytest.raises(ValueError, match="nx and ny must be positive integers"):
             partition(grid.ds, nx=-3, ny=1)
 
-        with pytest.raises(ValueError, match="does not divide the domain"):
+        with pytest.raises(ValueError, match="cannot be evenly divided"):
             partition(grid.ds, nx=4, ny=1)
 
 
@@ -217,3 +217,16 @@ class TestPartitionMissingDims:
         _, partitioned_datasets = partition(ds_missing_dims, nx=1, ny=1)
 
         xrt.assert_identical(partitioned_datasets[0], ds_missing_dims)
+
+
+class TestFileNumbers:
+    def test_partition_file_numbers(self, grid):
+        nx = 3
+        ny = 5
+        file_numbers, _ = partition(grid.ds, nx=nx, ny=ny)
+
+        # Generate the expected file numbers
+        expected_file_numbers = list(range(nx * ny))
+
+        # Check if file_numbers is a continuous range without gaps
+        assert file_numbers == expected_file_numbers

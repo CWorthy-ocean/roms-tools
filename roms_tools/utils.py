@@ -78,40 +78,63 @@ def partition(
     else:
         n_xi_ghost_cells = 1
 
-    def integer_division_or_raise(a: int, b: int) -> int:
+    def integer_division_or_raise(a: int, b: int, dimension: str) -> int:
+        """
+        Perform integer division and ensure that the division is exact.
+
+        Parameters
+        ----------
+        a : int
+            The numerator for the division.
+        b : int
+            The denominator for the division.
+        dimension : str
+            The name of the dimension being partitioned, used for error reporting.
+
+        Returns
+        -------
+        int
+            The result of the integer division.
+
+        Raises
+        ------
+        ValueError
+            If the division is not exact, indicating that the domain cannot be evenly divided
+            along the specified dimension.
+        """
         remainder = a % b
         if remainder == 0:
             return a // b
         else:
             raise ValueError(
-                f"Partitioning nx = {nx} ny = {ny} does not divide the domain into subdomains of integer size."
+                f"Dimension '{dimension}' of size {a} cannot be evenly divided into {b} partitions."
             )
 
     if "eta_rho" in dims_to_partition:
         eta_rho_domain_size = integer_division_or_raise(
-            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, nx
+            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, nx, "eta_rho"
         )
     if "xi_rho" in dims_to_partition:
         xi_rho_domain_size = integer_division_or_raise(
-            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, ny
+            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, ny, "xi_rho"
         )
 
     if "eta_v" in dims_to_partition:
         eta_v_domain_size = integer_division_or_raise(
-            ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, nx
+            ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, nx, "eta_v"
         )
     if "xi_u" in dims_to_partition:
         xi_u_domain_size = integer_division_or_raise(
-            ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, ny
+            ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, ny, "xi_u"
         )
 
     if "eta_coarse" in dims_to_partition:
         eta_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["eta_coarse"] - 2 * n_eta_ghost_cells, nx
+            ds.sizes["eta_coarse"] - 2 * n_eta_ghost_cells, nx, "eta_coarse"
         )
     if "xi_coarse" in dims_to_partition:
         xi_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, ny
+            ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, ny, "xi_coarse"
         )
 
     # unpartitioned dimensions should have sizes unchanged

@@ -1,0 +1,314 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "allan_factor": 2.0,
+            "model_reference_date": "2000-01-01 00:00:00",
+            "roms_tools_version": "0.1.dev98",
+            "source": "TPXO",
+            "title": "ROMS tidal forcing created by ROMS-Tools"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "omega/.zarray": {
+            "chunks": [
+                1
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1
+            ],
+            "zarr_format": 2
+        },
+        "omega/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides"
+            ],
+            "long_name": "Tidal frequencies",
+            "units": "1/s"
+        },
+        "pot_Im/.zarray": {
+            "chunks": [
+                1,
+                5,
+                5
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                5,
+                5
+            ],
+            "zarr_format": 2
+        },
+        "pot_Im/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal potential, complex part",
+            "units": "m"
+        },
+        "pot_Re/.zarray": {
+            "chunks": [
+                1,
+                5,
+                5
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                5,
+                5
+            ],
+            "zarr_format": 2
+        },
+        "pot_Re/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal potential, real part",
+            "units": "m"
+        },
+        "ssh_Im/.zarray": {
+            "chunks": [
+                1,
+                5,
+                5
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                5,
+                5
+            ],
+            "zarr_format": 2
+        },
+        "ssh_Im/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal elevation, complex part",
+            "units": "m"
+        },
+        "ssh_Re/.zarray": {
+            "chunks": [
+                1,
+                5,
+                5
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                5,
+                5
+            ],
+            "zarr_format": 2
+        },
+        "ssh_Re/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal elevation, real part",
+            "units": "m"
+        },
+        "u_Im/.zarray": {
+            "chunks": [
+                1,
+                5,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                5,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "u_Im/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_rho",
+                "xi_u"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal velocity in x-direction, complex part",
+            "units": "m/s"
+        },
+        "u_Re/.zarray": {
+            "chunks": [
+                1,
+                5,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                5,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "u_Re/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_rho",
+                "xi_u"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal velocity in x-direction, real part",
+            "units": "m/s"
+        },
+        "v_Im/.zarray": {
+            "chunks": [
+                1,
+                4,
+                5
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                4,
+                5
+            ],
+            "zarr_format": 2
+        },
+        "v_Im/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_v",
+                "xi_rho"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal velocity in y-direction, complex part",
+            "units": "m/s"
+        },
+        "v_Re/.zarray": {
+            "chunks": [
+                1,
+                4,
+                5
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                4,
+                5
+            ],
+            "zarr_format": 2
+        },
+        "v_Re/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides",
+                "eta_v",
+                "xi_rho"
+            ],
+            "coordinates": "omega",
+            "long_name": "Tidal velocity in y-direction, real part",
+            "units": "m/s"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

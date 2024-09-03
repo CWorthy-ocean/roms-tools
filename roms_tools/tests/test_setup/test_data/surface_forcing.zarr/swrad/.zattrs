@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "eta_rho",
+        "xi_rho"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "downward short-wave (solar) radiation",
+    "units": "W/m^2"
+}

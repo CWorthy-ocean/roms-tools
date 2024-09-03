@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "bry_time",
+        "s_rho",
+        "eta_rho"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "eastern boundary small phytoplankton chlorophyll",
+    "units": "mg/m^3"
+}

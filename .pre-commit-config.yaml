@@ -1,5 +1,8 @@
+default_stages: [commit, push]
 ci:
   autoupdate_schedule: monthly
+
+exclude: roms_tools/tests/test_setup/test_data/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

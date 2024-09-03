@@ -1,0 +1,11 @@
+{
+    "correct_radiation": "False",
+    "end_time": "2020-02-02 00:00:00",
+    "model_reference_date": "2000-01-01 00:00:00",
+    "roms_tools_version": "0.1.dev98",
+    "source": "ERA5",
+    "start_time": "2020-01-31 00:00:00",
+    "title": "ROMS surface forcing file created by ROMS-Tools",
+    "type": "physics",
+    "use_coarse_grid": "False"
+}

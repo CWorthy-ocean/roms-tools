@@ -1,0 +1,311 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "correct_radiation": "False",
+            "end_time": "2020-02-02 00:00:00",
+            "model_reference_date": "2000-01-01 00:00:00",
+            "roms_tools_version": "0.1.dev98",
+            "source": "ERA5",
+            "start_time": "2020-01-31 00:00:00",
+            "title": "ROMS surface forcing file created by ROMS-Tools",
+            "type": "physics",
+            "use_coarse_grid": "True"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "Tair/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Tair/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "air temperature at 2m",
+            "units": "degrees Celsius"
+        },
+        "abs_time/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i4",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "abs_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "calendar": "gregorian",
+            "units": "hours since 1900-01-01"
+        },
+        "lwrad/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "lwrad/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "downward long-wave (thermal) radiation",
+            "units": "W/m^2"
+        },
+        "qair/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "qair/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "absolute humidity at 2m",
+            "units": "kg/kg"
+        },
+        "rain/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "rain/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "total precipitation",
+            "units": "cm/day"
+        },
+        "swrad/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "swrad/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "downward short-wave (solar) radiation",
+            "units": "W/m^2"
+        },
+        "time/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "long_name": "days since 2000-01-01 00:00:00",
+            "units": "days"
+        },
+        "uwnd/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "uwnd/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "10 meter wind in x-direction",
+            "units": "m/s"
+        },
+        "vwnd/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "vwnd/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "10 meter wind in y-direction",
+            "units": "m/s"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

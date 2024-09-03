@@ -1,0 +1,9 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "eta_rho",
+        "xi_rho"
+    ],
+    "coordinates": "lat_rho lon_rho",
+    "long_name": "Coriolis parameter at rho-points",
+    "units": "second-1"
+}

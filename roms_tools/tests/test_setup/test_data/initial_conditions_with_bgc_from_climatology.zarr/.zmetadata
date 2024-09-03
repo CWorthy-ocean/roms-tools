@@ -1,0 +1,1598 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "bgc_source": "CESM_REGRIDDED",
+            "hc": 250.0,
+            "ini_time": "2021-06-29 00:00:00",
+            "model_reference_date": "2000-01-01 00:00:00",
+            "roms_tools_version": "0.1.dev98",
+            "source": "GLORYS",
+            "theta_b": 2.0,
+            "theta_s": 5.0,
+            "title": "ROMS initial conditions file created by ROMS-Tools"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "ALK/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "alkalinity",
+            "units": "meq/m^3"
+        },
+        "ALK_ALT_CO2/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_ALT_CO2/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "alkalinity, alternative CO2",
+            "units": "meq/m^3"
+        },
+        "Cs_r/.zarray": {
+            "chunks": [
+                3
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                3
+            ],
+            "zarr_format": 2
+        },
+        "Cs_r/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "s_rho"
+            ],
+            "long_name": "S-coordinate stretching curves at rho-points",
+            "units": "nondimensional"
+        },
+        "DIC/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved inorganic carbon",
+            "units": "mmol/m^3"
+        },
+        "DIC_ALT_CO2/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_ALT_CO2/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved inorganic carbon, alternative CO2",
+            "units": "mmol/m^3"
+        },
+        "DOC/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOC/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOCr/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOCr/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "refractory dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DON/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DON/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DONr/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DONr/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "refractory dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DOP/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOP/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOPr/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOPr/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "refractory dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "Fe/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Fe/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved inorganic iron",
+            "units": "mmol/m^3"
+        },
+        "Lig/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Lig/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "iron binding ligand",
+            "units": "mmol/m^3"
+        },
+        "NH4/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NH4/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved ammonia",
+            "units": "mmol/m^3"
+        },
+        "NO3/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NO3/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved inorganic nitrate",
+            "units": "mmol/m^3"
+        },
+        "O2/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "O2/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved oxygen",
+            "units": "mmol/m^3"
+        },
+        "PO4/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "PO4/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved inorganic phosphate",
+            "units": "mmol/m^3"
+        },
+        "SiO3/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "SiO3/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "dissolved inorganic silicate",
+            "units": "mmol/m^3"
+        },
+        "abs_time/.zarray": {
+            "chunks": [
+                1
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1
+            ],
+            "zarr_format": 2
+        },
+        "abs_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time"
+            ],
+            "calendar": "proleptic_gregorian",
+            "units": "days since 2021-06-29 00:00:00"
+        },
+        "diatC/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatC/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diatom carbon",
+            "units": "mmol/m^3"
+        },
+        "diatChl/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatChl/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diatom chloropyll",
+            "units": "mg/m^3"
+        },
+        "diatFe/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatFe/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diatom iron",
+            "units": "mmol/m^3"
+        },
+        "diatP/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatP/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diatom phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diatSi/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatSi/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diatom silicate",
+            "units": "mmol/m^3"
+        },
+        "diazC/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazC/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diazotroph carbon",
+            "units": "mmol/m^3"
+        },
+        "diazChl/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazChl/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diazotroph chloropyll",
+            "units": "mg/m^3"
+        },
+        "diazFe/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazFe/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diazotroph iron",
+            "units": "mmol/m^3"
+        },
+        "diazP/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazP/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "diazotroph phosphorus",
+            "units": "mmol/m^3"
+        },
+        "ocean_time/.zarray": {
+            "chunks": [
+                1
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1
+            ],
+            "zarr_format": 2
+        },
+        "ocean_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time"
+            ],
+            "long_name": "seconds since 2000-01-01 00:00:00",
+            "units": "seconds"
+        },
+        "salt/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "salt/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "salinity",
+            "units": "PSU"
+        },
+        "sc_r/.zarray": {
+            "chunks": [
+                3
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                3
+            ],
+            "zarr_format": 2
+        },
+        "sc_r/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "s_rho"
+            ],
+            "long_name": "S-coordinate at rho-points",
+            "units": "nondimensional"
+        },
+        "spC/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spC/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "small phytoplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "spCaCO3/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spCaCO3/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "small phytoplankton CaCO3",
+            "units": "mmol/m^3"
+        },
+        "spChl/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spChl/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "small phytoplankton chlorophyll",
+            "units": "mg/m^3"
+        },
+        "spFe/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spFe/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "small phytoplankton iron",
+            "units": "mmol/m^3"
+        },
+        "spP/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spP/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "small phytoplankton phosphorous",
+            "units": "mmol/m^3"
+        },
+        "temp/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "temp/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "potential temperature",
+            "units": "degrees Celsius"
+        },
+        "u/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                3
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                3
+            ],
+            "zarr_format": 2
+        },
+        "u/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_u"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "u-flux component",
+            "units": "m/s"
+        },
+        "ubar/.zarray": {
+            "chunks": [
+                1,
+                4,
+                3
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                4,
+                3
+            ],
+            "zarr_format": 2
+        },
+        "ubar/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "eta_rho",
+                "xi_u"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "vertically integrated u-flux component",
+            "units": "m/s"
+        },
+        "v/.zarray": {
+            "chunks": [
+                1,
+                3,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "v/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_v",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "v-flux component",
+            "units": "m/s"
+        },
+        "vbar/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "vbar/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "eta_v",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "vertically integrated v-flux component",
+            "units": "m/s"
+        },
+        "w/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                4,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "w/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_w",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "w-flux component",
+            "units": "m/s"
+        },
+        "zeta/.zarray": {
+            "chunks": [
+                1,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "zeta/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "sea surface height",
+            "units": "m"
+        },
+        "zooC/.zarray": {
+            "chunks": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3,
+                4,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "zooC/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ocean_time",
+                "s_rho",
+                "eta_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time",
+            "long_name": "zooplankton carbon",
+            "units": "mmol/m^3"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

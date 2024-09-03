@@ -194,7 +194,7 @@ class TestPartitionGrid:
         with pytest.raises(ValueError, match="nx and ny must be positive integers"):
             partition(grid.ds, nx=-3, ny=1)
 
-        with pytest.raises(ValueError, match="does not divide the domain"):
+        with pytest.raises(ValueError, match="cannot be evenly divided"):
             partition(grid.ds, nx=4, ny=1)
 
 

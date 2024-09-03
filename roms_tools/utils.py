@@ -187,11 +187,12 @@ def partition(
         np.cumsum(pmf, out=cdf[1:])
         return cdf
 
-    file_numbers = [i + j * nx for j in range(ny) for i in range(nx)]
+    file_numbers = []
     partitioned_datasets = []
-
     for j in range(ny):
         for i in range(nx):
+            file_number = i + (j * nx)
+            file_numbers.append(file_number)
 
             indexers = {}
 

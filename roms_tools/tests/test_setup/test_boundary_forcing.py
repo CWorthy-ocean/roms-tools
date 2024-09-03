@@ -109,8 +109,20 @@ def test_boundary_forcing_plot_save(
     finally:
         os.remove(extended_filepath)
 
+    boundary_forcing.save(filepath, nx=2)
+    expected_filepath_list = [
+        f"{filepath}_20210629-29.{index}.nc" for index in range(2)
+    ]
 
-def test_bgc_boundary_forcing_data_consistency_plot_save(
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
+
+
+def test_bgc_boundary_forcing_plot_save(
     bgc_boundary_forcing_from_climatology,
 ):
     """
@@ -133,6 +145,16 @@ def test_bgc_boundary_forcing_data_consistency_plot_save(
         assert os.path.exists(extended_filepath)
     finally:
         os.remove(extended_filepath)
+
+    bgc_boundary_forcing_from_climatology.save(filepath, ny=2)
+    expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(2)]
+
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
 
 
 @pytest.mark.parametrize(

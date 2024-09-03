@@ -184,6 +184,16 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
     finally:
         os.remove(filepath)
 
+    tidal_forcing.save(filepath, nx=3, ny=3)
+    expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(9)]
+
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
+
 
 def test_roundtrip_yaml(tidal_forcing):
     """Test that creating a TidalForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""

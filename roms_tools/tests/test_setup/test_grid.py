@@ -20,12 +20,29 @@ def test_grid_creation(grid):
     assert isinstance(grid.ds, xr.Dataset)
 
 
-def test_plot_save_methods(grid, tmp_path):
+def test_plot_save_methods():
+
+    grid = Grid(
+        nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
+    )
 
     grid.plot(bathymetry=True)
-    filepath = tmp_path / "grid.nc"
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath = tmpfile.name
     grid.save(filepath)
-    assert filepath.exists()
+    try:
+        assert os.path.exists(filepath)
+    finally:
+        os.remove(filepath)
+
+    grid.save(filepath, nx=2, ny=5)
+    expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(10)]
+    try:
+        for expected_filepath in expected_filepath_list:
+            assert os.path.exists(expected_filepath)
+    finally:
+        for expected_filepath in expected_filepath_list:
+            os.remove(expected_filepath)
 
 
 def test_raise_if_domain_too_large():

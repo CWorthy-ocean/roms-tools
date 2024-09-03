@@ -18,6 +18,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.utils import partition
 import matplotlib.pyplot as plt
 
 
@@ -262,15 +263,52 @@ class TidalForcing(ROMSToolsMixins):
             title=title,
         )
 
-    def save(self, filepath: str) -> None:
+    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
         """
         Save the tidal forcing information to a netCDF4 file.
 
+        This method supports saving the dataset in two modes:
+
+        1. **Single File Mode (default)**:
+           - If both `nx` and `ny` are `None`, the entire dataset is saved as a single file at the specified `filepath`.
+
+        2. **Partitioned Mode**:
+           - If either `nx` or `ny` is provided, the dataset is divided into `nx` by `ny` spatial tiles and each tile is saved as a separate file.
+           - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
+
         Parameters
         ----------
-        filepath
+        filepath : str
+            The base path or filename where the dataset should be saved.
+        nx : int, optional
+            The number of partitions along the x-axis. If `None`, no partitioning is done.
+        ny : int, optional
+            The number of partitions along the y-axis. If `None`, no partitioning is done.
+
+        Returns
+        -------
+        None
         """
-        self.ds.to_netcdf(filepath)
+
+        if nx is None and ny is None:
+            print("Saving the following file:")
+            print(filepath)
+            self.ds.to_netcdf(filepath)
+        else:
+            nx = nx or 1
+            ny = ny or 1
+
+            file_numbers, partitioned_datasets = partition(self.ds, nx=nx, ny=ny)
+
+            paths_to_partitioned_files = [
+                f"{filepath}.{file_number}.nc" for file_number in file_numbers
+            ]
+
+            print("Saving the following files:")
+            for path in paths_to_partitioned_files:
+                print(path)
+
+            xr.save_mfdataset(partitioned_datasets, paths_to_partitioned_files)
 
     def to_yaml(self, filepath: str) -> None:
         """

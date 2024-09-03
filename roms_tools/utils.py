@@ -8,7 +8,48 @@ def partition(
     ds: xr.Dataset, nx: int = 1, ny: int = 1
 ) -> tuple[list[int], list[xr.Dataset]]:
     """
-    Split a ROMS dataset up into nx by ny spatial tiles.
+    Partition a ROMS (Regional Ocean Modeling System) dataset into smaller spatial tiles.
+
+    This function divides the input dataset into `nx` by `ny` tiles, where each tile
+    represents a subdomain of the original dataset. The partitioning is performed along
+    the spatial dimensions `eta_rho`, `xi_rho`, `eta_v`, `xi_u`, `eta_coarse`, and `xi_coarse`,
+    depending on which dimensions are present in the dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The input ROMS dataset that is to be partitioned.
+
+    nx : int, optional
+        The number of partitions along the `eta` (latitude) direction. Must be a positive integer. Default is 1.
+
+    ny : int, optional
+        The number of partitions along the `xi` (longitude) direction. Must be a positive integer. Default is 1.
+
+    Returns
+    -------
+    tuple[list[int], list[xr.Dataset]]
+        A tuple containing two elements:
+        - A list of integers representing the file numbers associated with each partition.
+        - A list of `xarray.Dataset` objects, each representing a partitioned subdomain of the original dataset.
+
+    Raises
+    ------
+    ValueError
+        If `nx` or `ny` is not a positive integer, or if the dataset cannot be evenly partitioned
+        into the specified number of tiles.
+
+
+    Example
+    -------
+    >>> partitioned_file_numbers, partitioned_datasets = partition(ds, nx=2, ny=3)
+    >>> print(partitioned_file_numbers)
+    [0, 1, 2, 3, 4, 5]
+    >>> print([ds.sizes for ds in partitioned_datasets])
+    [{'eta_rho': 50, 'xi_rho': 50}, {'eta_rho': 50, 'xi_rho': 50}, ...]
+
+    This example partitions the dataset into 2 tiles along the `eta` direction and 3 tiles
+    along the `xi` direction, resulting in a total of 6 partitions.
     """
 
     if not isinstance(nx, Integral) or nx < 1 or not isinstance(ny, Integral) or ny < 1:

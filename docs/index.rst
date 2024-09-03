@@ -29,6 +29,8 @@ This python package is strongly inspired by the `UCLA MATLAB tools <https://gith
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>
 
+   Partitioning the input files <partition>
+
 .. toctree::
    :maxdepth: 1
    :caption: Community

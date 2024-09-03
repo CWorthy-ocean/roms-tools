@@ -61,7 +61,7 @@ Users can also directly apply the :meth:`roms_tools.Grid.update_topography_and_m
 The :meth:`roms_tools.Grid.update_topography_and_mask` method completes five steps:
 
 0. The topography from the specified ``topography_source`` is interpolated onto the ROMS grid.
-1. The mask is defined using a dealiased version of the interpolated topography from step 0. In this step, the topography is evaluated at each grid point: values smaller than 0.0 meters are classified as land, and values larger than 0.0 meters are classified as ocean.
+1. The mask is defined using the interpolated topography from step 0. In this step, the topography is evaluated at each grid point: values smaller than 0.0 meters are classified as land, and values larger than 0.0 meters are classified as ocean.
 2. The interpolated topography from step 0 is smoothed over the entire domain with a smoothing factor of 8. This step ensures that the topography is smooth at the grid scale, a prerequisite for avoiding grid-scale instabilities at runtime.
 3. The mask is modified by filling enclosed basins with land.
 4. Regions where the ocean depth is shallower than ``hmin`` are set to ``hmin``. The topography is then smoothed locally in such a way that the maximum slope parameter ``r`` is smaller than 0.2. The maximum slope parameter is given by
@@ -84,11 +84,25 @@ Here are these steps illustrated for an example domain:
 
 The final mask and bathymetry after these five steps are added to ``grid.ds`` as variable ``mask_rho`` and ``h``.
 
+Vertical Coordinate
+###################
+
+Coming soon ...
+
 Tidal Forcing
-##############
+#############
 
-Coming soon...
+The tidal forcing data is sourced from the TPXO atlas, where the latter is based on :cite:t:`egbert_efficient_2002`. The TPXO data undergoes two essential corrections:
 
+- **Self-Attraction and Loading (SAL) Correction**: The self-attraction and loading effects are subtracted from the equilibrium tide to derive the tidal potential. This correction accounts for the Earth's deformation and the redistribution of mass in the ocean due to the gravitational pull of the tides.
+
+- **Phase and Amplitude Correction**: The tidal potential, tidal elevation, and tidal velocities are adjusted to align with the model's reference date, which may differ from the TPXO reference date. This adjustment includes phase correction and amplitude scaling to ensure accurate tidal representation.
+
+Once these corrections are applied, the corrected data is interpolated onto the ROMS grid, producing the following field pairs, each consisting of a real and imaginary component:
+
+- **Tidal Elevation**: ``ssh_Re``, ``ssh_Im``
+- **Tidal Potential**: ``pot_Re``, ``pot_Im``
+- **Tidal Barotropic Velocities**: ``u_Re``, ``u_Im``, ``v_Re``, ``v_Im``
 
 Surface Forcing
 ################

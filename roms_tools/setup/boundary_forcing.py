@@ -501,6 +501,9 @@ class BoundaryForcing(ROMSToolsMixins):
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
         dataset_list = []
         output_filenames = []
 
@@ -526,11 +529,11 @@ class BoundaryForcing(ROMSToolsMixins):
 
                     # Create filename based on whether the dataset contains a full month
                     if first_day == 1 and last_day == days_in_month:
-                        # Full month format: "filepath_physics_YYYYMM.nc"
+                        # Full month format: "filepath_physics_YYYYMM"
                         year_month_str = f"{year}{month:02}"
                         output_filename = f"{filepath}_{year_month_str}"
                     else:
-                        # Partial month format: "filepath_physics_YYYYMMDD-DD.nc"
+                        # Partial month format: "filepath_physics_YYYYMMDD-DD"
                         year_month_day_str = (
                             f"{year}{month:02}{first_day:02}-{last_day:02}"
                         )

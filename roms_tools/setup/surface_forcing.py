@@ -447,6 +447,9 @@ class SurfaceForcing(ROMSToolsMixins):
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
         dataset_list = []
         output_filenames = []
 

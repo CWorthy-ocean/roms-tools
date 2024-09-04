@@ -509,6 +509,9 @@ class InitialConditions(ROMSToolsMixins):
         None
         """
 
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
         if nx is None and ny is None:
             print("Saving the following file:")
             print(filepath)

@@ -30,19 +30,18 @@ def test_plot_save_methods():
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
     grid.save(filepath)
-    try:
-        assert os.path.exists(filepath)
-    finally:
-        os.remove(filepath)
+
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
+
+    assert os.path.exists(f"{filepath}.nc")
+    os.remove(f"{filepath}.nc")
 
     grid.save(filepath, nx=2, ny=5)
     expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(10)]
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+    for expected_filepath in expected_filepath_list:
+        assert os.path.exists(expected_filepath)
+        os.remove(expected_filepath)
 
 
 def test_raise_if_domain_too_large():
@@ -126,20 +125,21 @@ def test_compatability_with_matlab_grid():
 
     grid.plot(bathymetry=True)
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
-    try:
-        # Save the grid to a file
-        grid.save(filepath)
+    # Save the grid to a file
+    grid.save(filepath)
 
-        # Load the grid from the file
-        grid_from_file = Grid.from_file(filepath)
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
 
-        # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
-        assert grid == grid_from_file
+    # Load the grid from the file
+    grid_from_file = Grid.from_file(f"{filepath}.nc")
 
-    finally:
-        os.remove(filepath)
+    # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+    assert grid == grid_from_file
+
+    os.remove(f"{filepath}.nc")
 
 
 def test_roundtrip_netcdf():
@@ -159,21 +159,21 @@ def test_roundtrip_netcdf():
     )
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
-    try:
-        # Save the grid to a file
-        grid_init.save(filepath)
+    # Save the grid to a file
+    grid_init.save(filepath)
 
-        # Load the grid from the file
-        grid_from_file = Grid.from_file(filepath)
+    # Load the grid from the file
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
+    grid_from_file = Grid.from_file(f"{filepath}.nc")
 
-        # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
-        assert grid_init == grid_from_file
+    # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+    assert grid_init == grid_from_file
 
-    finally:
-        os.remove(filepath)
+    os.remove(f"{filepath}.nc")
 
 
 def test_roundtrip_yaml():
@@ -193,19 +193,17 @@ def test_roundtrip_yaml():
     )
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
-    try:
-        grid_init.to_yaml(filepath)
+    grid_init.to_yaml(filepath)
 
-        grid_from_file = Grid.from_yaml(filepath)
+    grid_from_file = Grid.from_yaml(filepath)
 
-        # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
-        assert grid_init == grid_from_file
+    # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+    assert grid_init == grid_from_file
 
-    finally:
-        os.remove(filepath)
+    os.remove(filepath)
 
 
 def test_from_yaml_missing_version():
@@ -228,13 +226,12 @@ def test_from_yaml_missing_version():
         yaml_filepath = tmp_file.name
         tmp_file.write(yaml_content.encode())
 
-    try:
-        with pytest.raises(
-            ValueError, match="Version of ROMS-Tools not found in the YAML file."
-        ):
-            Grid.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+    with pytest.raises(
+        ValueError, match="Version of ROMS-Tools not found in the YAML file."
+    ):
+        Grid.from_yaml(yaml_filepath)
+
+    os.remove(yaml_filepath)
 
 
 def test_from_yaml_missing_grid():
@@ -246,13 +243,12 @@ def test_from_yaml_missing_grid():
         yaml_filepath = tmp_file.name
         tmp_file.write(yaml_content.encode())
 
-    try:
-        with pytest.raises(
-            ValueError, match="No Grid configuration found in the YAML file."
-        ):
-            Grid.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+    with pytest.raises(
+        ValueError, match="No Grid configuration found in the YAML file."
+    ):
+        Grid.from_yaml(yaml_filepath)
+
+    os.remove(yaml_filepath)
 
 
 def test_from_yaml_version_mismatch():
@@ -278,11 +274,10 @@ def test_from_yaml_version_mismatch():
         yaml_filepath = tmp_file.name
         tmp_file.write(yaml_content.encode())
 
-    try:
-        with pytest.warns(
-            UserWarning,
-            match="Current roms-tools version.*does not match the version in the YAML header.*",
-        ):
-            Grid.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+    with pytest.warns(
+        UserWarning,
+        match="Current roms-tools version.*does not match the version in the YAML header.*",
+    ):
+        Grid.from_yaml(yaml_filepath)
+
+    os.remove(yaml_filepath)

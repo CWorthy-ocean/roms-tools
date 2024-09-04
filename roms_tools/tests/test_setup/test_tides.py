@@ -174,25 +174,23 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
     tidal_forcing.plot(varname="ssh_Re", ntides=0)
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
 
     tidal_forcing.save(filepath)
 
-    try:
-        assert os.path.exists(filepath)
-    finally:
-        os.remove(filepath)
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
+
+    assert os.path.exists(f"{filepath}.nc")
+    os.remove(f"{filepath}.nc")
 
     tidal_forcing.save(filepath, nx=3, ny=3)
     expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(9)]
 
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+    for expected_filepath in expected_filepath_list:
+        assert os.path.exists(expected_filepath)
+        os.remove(expected_filepath)
 
 
 def test_roundtrip_yaml(tidal_forcing):

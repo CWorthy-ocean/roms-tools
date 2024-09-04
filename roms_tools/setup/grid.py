@@ -11,8 +11,7 @@ from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
-from roms_tools.setup.utils import extract_single_value
-from roms_tools.utils import partition
+from roms_tools.setup.utils import extract_single_value, save_datasets
 import warnings
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -523,7 +522,7 @@ class Grid:
         This method supports saving the dataset in two modes:
 
         1. **Single File Mode (default)**:
-           - If both `nx` and `ny` are `None`, the entire dataset is saved as a single file at the specified `filepath`.
+           - If both `nx` and `ny` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
 
         2. **Partitioned Mode**:
            - If either `nx` or `ny` is provided, the dataset is divided into `nx` by `ny` spatial tiles and each tile is saved as a separate file.
@@ -541,30 +540,16 @@ class Grid:
         Returns
         -------
         None
+            This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
         if filepath.endswith(".nc"):
             filepath = filepath[:-3]
 
-        if nx is None and ny is None:
-            print("Saving the following file:")
-            print(filepath)
-            self.ds.to_netcdf(filepath)
-        else:
-            nx = nx or 1
-            ny = ny or 1
+        dataset_list = [self.ds]
+        output_filenames = [filepath]
 
-            file_numbers, partitioned_datasets = partition(self.ds, nx=nx, ny=ny)
-
-            paths_to_partitioned_files = [
-                f"{filepath}.{file_number}.nc" for file_number in file_numbers
-            ]
-
-            print("Saving the following files:")
-            for path in paths_to_partitioned_files:
-                print(path)
-
-            xr.save_mfdataset(partitioned_datasets, paths_to_partitioned_files)
+        save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 
     @classmethod
     def from_file(cls, filepath: str) -> "Grid":

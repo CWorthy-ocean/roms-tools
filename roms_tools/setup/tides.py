@@ -16,9 +16,9 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_variable_metadata,
+    save_datasets,
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
-from roms_tools.utils import partition
 import matplotlib.pyplot as plt
 
 
@@ -270,7 +270,7 @@ class TidalForcing(ROMSToolsMixins):
         This method supports saving the dataset in two modes:
 
         1. **Single File Mode (default)**:
-           - If both `nx` and `ny` are `None`, the entire dataset is saved as a single file at the specified `filepath`.
+           - If both `nx` and `ny` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
 
         2. **Partitioned Mode**:
            - If either `nx` or `ny` is provided, the dataset is divided into `nx` by `ny` spatial tiles and each tile is saved as a separate file.
@@ -288,30 +288,16 @@ class TidalForcing(ROMSToolsMixins):
         Returns
         -------
         None
+            This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
         if filepath.endswith(".nc"):
             filepath = filepath[:-3]
 
-        if nx is None and ny is None:
-            print("Saving the following file:")
-            print(filepath)
-            self.ds.to_netcdf(filepath)
-        else:
-            nx = nx or 1
-            ny = ny or 1
+        dataset_list = [self.ds]
+        output_filenames = [filepath]
 
-            file_numbers, partitioned_datasets = partition(self.ds, nx=nx, ny=ny)
-
-            paths_to_partitioned_files = [
-                f"{filepath}.{file_number}.nc" for file_number in file_numbers
-            ]
-
-            print("Saving the following files:")
-            for path in paths_to_partitioned_files:
-                print(path)
-
-            xr.save_mfdataset(partitioned_datasets, paths_to_partitioned_files)
+        save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 
     def to_yaml(self, filepath: str) -> None:
         """

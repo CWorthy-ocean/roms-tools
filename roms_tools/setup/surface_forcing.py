@@ -18,10 +18,10 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
     interpolate_from_climatology,
     get_variable_metadata,
+    group_dataset,
+    save_datasets,
 )
 from roms_tools.setup.plot import _plot
-from roms_tools.utils import partition
-import calendar
 import matplotlib.pyplot as plt
 
 
@@ -411,24 +411,20 @@ class SurfaceForcing(ROMSToolsMixins):
 
     def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
         """
-        Save the interpolated surface forcing fields to netCDF4 files.
+        Save the surface forcing fields to netCDF4 files.
 
-        This method saves the dataset by grouping it into yearly and monthly subsets. Each subset is then written to one or more netCDF4 files.
-        The filenames of the output files reflect the temporal coverage of the data.
+        This method saves the dataset by grouping it into subsets based on the data frequency. The subsets are then written
+        to one or more netCDF4 files. The filenames of the output files reflect the temporal coverage of the data.
 
         There are two modes of saving the dataset:
 
         1. **Single File Mode (default)**:
            - If both `nx` and `ny` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
-             with the base filename specified by `filepath`. The file names will follow the format:
-             - `"filepath_YYYYMM.nc"` for complete months of data
-             - `"filepath_YYYYMMDD-DD.nc"` for partial months of data
+             with the base filename specified by `filepath.nc`.
 
         2. **Partitioned Mode**:
            - If either `nx` or `ny` is specified, the dataset is divided into spatial tiles along the x-axis and y-axis.
-             Each spatial tile is saved as a separate netCDF4 file. In this case, filenames include a partition index:
-             - `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc. for full month files
-             - `"filepath_YYYYMMDD-DD.0.nc"`, `"filepath_YYYYMMDD-DD.1.nc"`, etc. for partial month files
+             Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
@@ -450,68 +446,8 @@ class SurfaceForcing(ROMSToolsMixins):
         if filepath.endswith(".nc"):
             filepath = filepath[:-3]
 
-        dataset_list = []
-        output_filenames = []
-
-        if hasattr(self.ds, "climatology"):
-            output_filename = f"{filepath}_clim"
-            output_filenames.append(output_filename)
-            dataset_list.append(self.ds)
-        else:
-            # Group dataset by year
-            grouped_by_year = self.ds.groupby("abs_time.year")
-
-            for year, yearly_dataset in grouped_by_year:
-                # Further group each yearly group by month
-                grouped_by_month = yearly_dataset.groupby("abs_time.month")
-
-                for month, monthly_dataset in grouped_by_month:
-                    dataset_list.append(monthly_dataset)
-
-                    # Determine the number of days in the month
-                    days_in_month = calendar.monthrange(year, month)[1]
-                    first_day = monthly_dataset.abs_time.dt.day.values[0]
-                    last_day = monthly_dataset.abs_time.dt.day.values[-1]
-
-                    # Create filename based on whether the dataset contains a full month
-                    if first_day == 1 and last_day == days_in_month:
-                        # Full month format: "filepath_physics_YYYYMM.nc"
-                        year_month_str = f"{year}{month:02}"
-                        output_filename = f"{filepath}_{year_month_str}"
-                    else:
-                        # Partial month format: "filepath_physics_YYYYMMDD-DD.nc"
-                        year_month_day_str = (
-                            f"{year}{month:02}{first_day:02}-{last_day:02}"
-                        )
-                        output_filename = f"{filepath}_{year_month_day_str}"
-                    output_filenames.append(output_filename)
-
-        print("Saving the following files:")
-        if nx is None and ny is None:
-            # Save the dataset as a single file
-            output_filenames = [f"{filename}.nc" for filename in output_filenames]
-            for filename in output_filenames:
-                print(filename)
-            xr.save_mfdataset(dataset_list, output_filenames)
-        else:
-            # Partition the dataset and save each partition as a separate file
-            nx = nx or 1
-            ny = ny or 1
-
-            partitioned_datasets = []
-            partitioned_filenames = []
-            for dataset, base_filename in zip(dataset_list, output_filenames):
-                partition_indices, partitions = partition(dataset, nx=nx, ny=ny)
-                partition_filenames = [
-                    f"{base_filename}.{index}.nc" for index in partition_indices
-                ]
-                partitioned_datasets.extend(partitions)
-                partitioned_filenames.extend(partition_filenames)
-
-            for filename in partitioned_filenames:
-                print(filename)
-
-            xr.save_mfdataset(partitioned_datasets, partitioned_filenames)
+        dataset_list, output_filenames = group_dataset(self.ds, filepath)
+        save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 
     def to_yaml(self, filepath: str) -> None:
         """

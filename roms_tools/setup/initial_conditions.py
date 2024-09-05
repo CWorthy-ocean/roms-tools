@@ -11,6 +11,7 @@ from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
     get_variable_metadata,
+    save_datasets,
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
@@ -481,15 +482,41 @@ class InitialConditions(ROMSToolsMixins):
                 else:
                     _line_plot(field, title=title)
 
-    def save(self, filepath: str) -> None:
+    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
         """
         Save the initial conditions information to a netCDF4 file.
 
+        This method supports saving the dataset in two modes:
+
+        1. **Single File Mode (default)**:
+           - If both `nx` and `ny` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
+
+        2. **Partitioned Mode**:
+           - If either `nx` or `ny` is provided, the dataset is divided into `nx` by `ny` spatial tiles and each tile is saved as a separate file.
+           - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
+
         Parameters
         ----------
-        filepath
+        filepath : str
+            The base path or filename where the dataset should be saved.
+        nx : int, optional
+            The number of partitions along the x-axis. If `None`, no partitioning is done.
+        ny : int, optional
+            The number of partitions along the y-axis. If `None`, no partitioning is done.
+
+        Returns
+        -------
+        None
+            This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
-        self.ds.to_netcdf(filepath)
+
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
+        dataset_list = [self.ds.load()]
+        output_filenames = [filepath]
+
+        save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 
     def to_yaml(self, filepath: str) -> None:
         """

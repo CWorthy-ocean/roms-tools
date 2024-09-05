@@ -1,0 +1,7 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "ntides"
+    ],
+    "long_name": "Tidal frequencies",
+    "units": "1/s"
+}

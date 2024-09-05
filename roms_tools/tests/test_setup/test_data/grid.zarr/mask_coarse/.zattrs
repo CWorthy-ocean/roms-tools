@@ -1,0 +1,7 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "eta_coarse",
+        "xi_coarse"
+    ],
+    "coordinates": "lat_coarse lon_coarse"
+}

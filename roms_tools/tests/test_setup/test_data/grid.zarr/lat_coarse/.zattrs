@@ -2,5 +2,7 @@
     "_ARRAY_DIMENSIONS": [
         "eta_coarse",
         "xi_coarse"
-    ]
+    ],
+    "long_name": "latitude of rho-points on coarsened grid",
+    "units": "degrees North"
 }

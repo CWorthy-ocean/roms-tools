@@ -27,7 +27,7 @@ def _get_fname(name):
 )
 # this test will not be run by default
 # to run it and overwrite the test data, invoke pytest as follows
-# pytest --overwrite-test-data=tidal_forcing --overwrite-test-data=boundary_forcing
+# pytest --overwrite=tidal_forcing --overwrite=boundary_forcing
 @pytest.mark.overwrite
 def test_save_results(forcing_fixture, request):
 

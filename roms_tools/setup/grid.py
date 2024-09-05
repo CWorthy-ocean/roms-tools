@@ -282,8 +282,8 @@ class Grid:
             "interface_depth_rho",
             "interface_depth_u",
             "interface_depth_v",
-            "CS_w",
-            "CS_r",
+            "Cs_w",
+            "Cs_r",
         ]
 
         for var in vars_to_drop:
@@ -297,15 +297,13 @@ class Grid:
         cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
         zw = compute_depth(h * 0, h, hc, cs_w, sigma_w)
 
-        # use variable names CS_r and CS_w rather than Cs_r and Cs_w to get around bug
-        # in UCLA-ROMS code in grid check
-        ds["CS_r"] = cs_r.astype(np.float32)
-        ds["CS_r"].attrs["long_name"] = "S-coordinate stretching curves at rho-points"
-        ds["CS_r"].attrs["units"] = "nondimensional"
+        ds["Cs_r"] = cs_r.astype(np.float32)
+        ds["Cs_r"].attrs["long_name"] = "S-coordinate stretching curves at rho-points"
+        ds["Cs_r"].attrs["units"] = "nondimensional"
 
-        ds["CS_w"] = cs_w.astype(np.float32)
-        ds["CS_w"].attrs["long_name"] = "S-coordinate stretching curves at w-points"
-        ds["CS_w"].attrs["units"] = "nondimensional"
+        ds["Cs_w"] = cs_w.astype(np.float32)
+        ds["Cs_w"].attrs["long_name"] = "S-coordinate stretching curves at w-points"
+        ds["Cs_w"].attrs["units"] = "nondimensional"
 
         ds.attrs["theta_s"] = np.float32(theta_s)
         ds.attrs["theta_b"] = np.float32(theta_b)

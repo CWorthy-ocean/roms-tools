@@ -446,7 +446,7 @@ class SurfaceForcing(ROMSToolsMixins):
         if filepath.endswith(".nc"):
             filepath = filepath[:-3]
 
-        dataset_list, output_filenames = group_dataset(self.ds, filepath)
+        dataset_list, output_filenames = group_dataset(self.ds.load(), filepath)
         save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 
     def to_yaml(self, filepath: str) -> None:

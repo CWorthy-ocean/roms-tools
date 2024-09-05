@@ -236,9 +236,16 @@ class Grid:
                 object.__setattr__(self, "ds", ds)
             else:
                 self.ds[coarse_var] = coarse_field
+
         self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0).astype(
             np.int32
         )
+
+        for fine_var, coarse_var in d.items():
+            self.ds[coarse_var].attrs[
+                "long_name"
+            ] = f"{self.ds[fine_var].attrs['long_name']} on coarsened grid"
+            self.ds[coarse_var].attrs["units"] = self.ds[fine_var].attrs["units"]
 
     def update_vertical_coordinate(self, N, theta_s, theta_b, hc) -> None:
         """
@@ -275,7 +282,7 @@ class Grid:
             "interface_depth_rho",
             "interface_depth_u",
             "interface_depth_v",
-            "sc_r",
+            "Cs_w",
             "Cs_r",
         ]
 
@@ -290,13 +297,13 @@ class Grid:
         cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
         zw = compute_depth(h * 0, h, hc, cs_w, sigma_w)
 
-        ds["sc_r"] = sigma_r.astype(np.float32)
-        ds["sc_r"].attrs["long_name"] = "S-coordinate at rho-points"
-        ds["sc_r"].attrs["units"] = "nondimensional"
-
         ds["Cs_r"] = cs_r.astype(np.float32)
         ds["Cs_r"].attrs["long_name"] = "S-coordinate stretching curves at rho-points"
         ds["Cs_r"].attrs["units"] = "nondimensional"
+
+        ds["Cs_w"] = cs_w.astype(np.float32)
+        ds["Cs_w"].attrs["long_name"] = "S-coordinate stretching curves at w-points"
+        ds["Cs_w"].attrs["units"] = "nondimensional"
 
         ds.attrs["theta_s"] = np.float32(theta_s)
         ds.attrs["theta_b"] = np.float32(theta_b)
@@ -604,7 +611,7 @@ class Grid:
                 object.__setattr__(grid, "ds", ds)
 
         # Update vertical coordinate if necessary
-        if not all(var in grid.ds for var in ["sc_r", "Cs_r"]):
+        if not all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
             N = 100
             theta_s = 5.0
             theta_b = 2.0

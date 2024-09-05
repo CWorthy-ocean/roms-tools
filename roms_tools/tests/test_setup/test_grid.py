@@ -6,6 +6,7 @@ import tempfile
 import importlib.metadata
 import textwrap
 from roms_tools.setup.download import download_test_data
+from roms_tools.tests.test_setup.conftest import calculate_file_hash
 
 
 def test_grid_creation(grid):
@@ -192,18 +193,57 @@ def test_roundtrip_yaml():
         hmin=5.0,
     )
 
-    # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+        yaml_filepath = tmpfile.name
+    grid_init.to_yaml(yaml_filepath)
 
-    grid_init.to_yaml(filepath)
-
-    grid_from_file = Grid.from_yaml(filepath)
+    grid_from_file = Grid.from_yaml(yaml_filepath)
 
     # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
     assert grid_init == grid_from_file
 
-    os.remove(filepath)
+    os.remove(yaml_filepath)
+
+
+def test_files_have_same_hash():
+
+    # Initialize a Grid object using the initializer
+    grid_init = Grid(
+        nx=10,
+        ny=15,
+        size_x=100.0,
+        size_y=150.0,
+        center_lon=0.0,
+        center_lat=0.0,
+        rot=0.0,
+        topography_source="ETOPO5",
+        hmin=5.0,
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        yaml_filepath = tmpfile.name
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath1 = tmpfile.name
+    grid_init.to_yaml(yaml_filepath)
+    grid_init.save(filepath1)
+
+    grid_from_file = Grid.from_yaml(yaml_filepath)
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath2 = tmpfile.name
+    grid_from_file.save(filepath2)
+
+    for filepath in [filepath1, filepath2]:
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
+    hash1 = calculate_file_hash(f"{filepath1}.nc")
+    hash2 = calculate_file_hash(f"{filepath2}.nc")
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    os.remove(yaml_filepath)
+    os.remove(f"{filepath1}.nc")
+    os.remove(f"{filepath2}.nc")
 
 
 def test_from_yaml_missing_version():

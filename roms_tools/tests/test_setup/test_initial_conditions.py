@@ -8,6 +8,7 @@ import os
 import textwrap
 from roms_tools.setup.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset
+from roms_tools.tests.test_setup.conftest import calculate_file_hash
 
 
 @pytest.mark.parametrize(
@@ -239,6 +240,34 @@ def test_roundtrip_yaml(initial_conditions):
 
     finally:
         os.remove(filepath)
+
+
+def test_files_have_same_hash(initial_conditions):
+
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        yaml_filepath = tmpfile.name
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath1 = tmpfile.name
+    initial_conditions.to_yaml(yaml_filepath)
+    initial_conditions.save(filepath1)
+
+    ic_from_file = InitialConditions.from_yaml(yaml_filepath)
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath2 = tmpfile.name
+    ic_from_file.save(filepath2)
+
+    for filepath in [filepath1, filepath2]:
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
+    hash1 = calculate_file_hash(f"{filepath1}.nc")
+    hash2 = calculate_file_hash(f"{filepath2}.nc")
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    os.remove(yaml_filepath)
+    os.remove(f"{filepath1}.nc")
+    os.remove(f"{filepath2}.nc")
 
 
 def test_from_yaml_missing_initial_conditions():

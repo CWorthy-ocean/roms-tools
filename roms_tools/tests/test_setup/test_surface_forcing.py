@@ -5,6 +5,7 @@ from roms_tools.setup.download import download_test_data
 import tempfile
 import os
 import textwrap
+from roms_tools.tests.test_setup.conftest import calculate_file_hash
 
 
 @pytest.fixture
@@ -600,6 +601,73 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request):
 
     finally:
         os.remove(filepath)
+
+
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "surface_forcing",
+        "corrected_surface_forcing",
+        "coarse_surface_forcing",
+        "bgc_surface_forcing",
+    ],
+)
+def test_files_have_same_hash(sfc_forcing_fixture, request):
+
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        yaml_filepath = tmpfile.name
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath1 = tmpfile.name
+    sfc_forcing.to_yaml(yaml_filepath)
+    sfc_forcing.save(filepath1)
+
+    sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath)
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath2 = tmpfile.name
+    sfc_forcing_from_file.save(filepath2)
+
+    for filepath in [filepath1, filepath2]:
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
+    hash1 = calculate_file_hash(f"{filepath1}_202002.nc")
+    hash2 = calculate_file_hash(f"{filepath2}_202002.nc")
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    os.remove(yaml_filepath)
+    os.remove(f"{filepath1}_202002.nc")
+    os.remove(f"{filepath2}_202002.nc")
+
+
+def test_files_have_same_hash_clim(bgc_surface_forcing_from_climatology):
+
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        yaml_filepath = tmpfile.name
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath1 = tmpfile.name
+    bgc_surface_forcing_from_climatology.to_yaml(yaml_filepath)
+    bgc_surface_forcing_from_climatology.save(filepath1)
+
+    sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath)
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath2 = tmpfile.name
+    sfc_forcing_from_file.save(filepath2)
+
+    for filepath in [filepath1, filepath2]:
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
+    hash1 = calculate_file_hash(f"{filepath1}_clim.nc")
+    hash2 = calculate_file_hash(f"{filepath2}_clim.nc")
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    os.remove(yaml_filepath)
+    os.remove(f"{filepath1}_clim.nc")
+    os.remove(f"{filepath2}_clim.nc")
 
 
 def test_from_yaml_missing_surface_forcing():

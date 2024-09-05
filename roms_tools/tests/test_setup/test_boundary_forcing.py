@@ -5,6 +5,7 @@ import tempfile
 import os
 import textwrap
 from roms_tools.setup.download import download_test_data
+from roms_tools.tests.test_setup.conftest import calculate_file_hash
 
 
 def test_boundary_forcing_creation(boundary_forcing):
@@ -176,6 +177,62 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request):
 
     finally:
         os.remove(filepath)
+
+
+def test_files_have_same_hash(boundary_forcing):
+
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        yaml_filepath = tmpfile.name
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath1 = tmpfile.name
+    boundary_forcing.to_yaml(yaml_filepath)
+    boundary_forcing.save(filepath1)
+
+    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath)
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath2 = tmpfile.name
+    bdry_forcing_from_file.save(filepath2)
+
+    for filepath in [filepath1, filepath2]:
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
+    hash1 = calculate_file_hash(f"{filepath1}_202106.nc")
+    hash2 = calculate_file_hash(f"{filepath2}_202106.nc")
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    os.remove(yaml_filepath)
+    os.remove(f"{filepath1}_202106.nc")
+    os.remove(f"{filepath2}_202106.nc")
+
+
+def test_files_have_same_hash_clim(bgc_boundary_forcing_from_climatology):
+
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        yaml_filepath = tmpfile.name
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath1 = tmpfile.name
+    bgc_boundary_forcing_from_climatology.to_yaml(yaml_filepath)
+    bgc_boundary_forcing_from_climatology.save(filepath1)
+
+    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath)
+    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
+        filepath2 = tmpfile.name
+    bdry_forcing_from_file.save(filepath2)
+
+    for filepath in [filepath1, filepath2]:
+        if filepath.endswith(".nc"):
+            filepath = filepath[:-3]
+
+    hash1 = calculate_file_hash(f"{filepath1}_clim.nc")
+    hash2 = calculate_file_hash(f"{filepath2}_clim.nc")
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    os.remove(yaml_filepath)
+    os.remove(f"{filepath1}_clim.nc")
+    os.remove(f"{filepath2}_clim.nc")
 
 
 def test_from_yaml_missing_boundary_forcing():

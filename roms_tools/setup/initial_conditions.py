@@ -513,7 +513,7 @@ class InitialConditions(ROMSToolsMixins):
         if filepath.endswith(".nc"):
             filepath = filepath[:-3]
 
-        dataset_list = [self.ds]
+        dataset_list = [self.ds.load()]
         output_filenames = [filepath]
 
         save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)

@@ -202,11 +202,15 @@ def test_initial_conditions_plot_save(initial_conditions_with_bgc_from_climatolo
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
+
     initial_conditions_with_bgc_from_climatology.save(filepath)
+
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
     try:
-        assert os.path.exists(filepath)
+        assert os.path.exists(f"{filepath}.nc")
     finally:
-        os.remove(filepath)
+        os.remove(f"{filepath}.nc")
 
     initial_conditions_with_bgc_from_climatology.save(filepath, nx=2)
     expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(2)]

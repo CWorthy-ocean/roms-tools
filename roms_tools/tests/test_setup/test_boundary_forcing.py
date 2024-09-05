@@ -102,24 +102,20 @@ def test_boundary_forcing_plot_save(
         filepath = tmpfile.name
 
     boundary_forcing.save(filepath)
-    extended_filepath = filepath + "_20210629-29.nc"
 
-    try:
-        assert os.path.exists(extended_filepath)
-    finally:
-        os.remove(extended_filepath)
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
+    extended_filepath = filepath + "_202106.nc"
+
+    assert os.path.exists(extended_filepath)
+    os.remove(extended_filepath)
 
     boundary_forcing.save(filepath, nx=2)
-    expected_filepath_list = [
-        f"{filepath}_20210629-29.{index}.nc" for index in range(2)
-    ]
+    expected_filepath_list = [f"{filepath}_202106.{index}.nc" for index in range(2)]
 
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+    for expected_filepath in expected_filepath_list:
+        assert os.path.exists(expected_filepath)
+        os.remove(expected_filepath)
 
 
 def test_bgc_boundary_forcing_plot_save(
@@ -139,22 +135,20 @@ def test_bgc_boundary_forcing_plot_save(
         filepath = tmpfile.name
 
     bgc_boundary_forcing_from_climatology.save(filepath)
+
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
     extended_filepath = filepath + "_clim.nc"
 
-    try:
-        assert os.path.exists(extended_filepath)
-    finally:
-        os.remove(extended_filepath)
+    assert os.path.exists(extended_filepath)
+    os.remove(extended_filepath)
 
     bgc_boundary_forcing_from_climatology.save(filepath, ny=2)
     expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(2)]
 
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+    for expected_filepath in expected_filepath_list:
+        assert os.path.exists(expected_filepath)
+        os.remove(expected_filepath)
 
 
 @pytest.mark.parametrize(

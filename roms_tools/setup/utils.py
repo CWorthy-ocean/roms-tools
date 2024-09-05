@@ -3,6 +3,7 @@ import numpy as np
 from typing import Union
 import pandas as pd
 import cftime
+from roms_tools.utils import partition
 
 
 def nan_check(field, mask) -> None:
@@ -570,3 +571,173 @@ def extract_single_value(data):
         return data.item()
     else:
         raise ValueError("Data must be a single-element array or DataArray.")
+
+
+def group_dataset(ds, filepath):
+    """
+    Group the dataset into monthly or yearly subsets based on the frequency of the data.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset to be grouped.
+    filepath : str
+        The base filename for the output files.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the list of grouped datasets and corresponding output filenames.
+    """
+
+    if hasattr(ds, "climatology"):
+        output_filename = f"{filepath}_clim"
+        output_filenames = [output_filename]
+        dataset_list = [ds]
+    else:
+        if len(ds["abs_time"]) > 2:
+            # Determine the frequency of the data
+            abs_time_freq = pd.infer_freq(ds["abs_time"].to_index())
+
+            if abs_time_freq in ["D", "H", "T", "S"]:  # Daily or higher frequency
+                dataset_list, output_filenames = group_by_month(ds, filepath)
+            else:
+                dataset_list, output_filenames = group_by_year(ds, filepath)
+        else:
+            # Convert time index to datetime if not already
+            abs_time_index = ds["abs_time"].to_index()
+            # Determine if the entries are in the same month
+            first_entry = abs_time_index[0]
+            last_entry = abs_time_index[-1]
+
+            if (
+                first_entry.year == last_entry.year
+                and first_entry.month == last_entry.month
+            ):
+                # Same month
+                dataset_list, output_filenames = group_by_month(ds, filepath)
+            else:
+                # Different months, group by year
+                dataset_list, output_filenames = group_by_year(ds, filepath)
+
+    return dataset_list, output_filenames
+
+
+def group_by_month(ds, filepath):
+    """
+    Group the dataset by month and generate filenames with 'YYYYMM' format.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset to be grouped.
+    filepath : str
+        The base filename for the output files.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the list of monthly datasets and corresponding output filenames.
+    """
+
+    dataset_list = []
+    output_filenames = []
+
+    # Group dataset by year
+    grouped_by_year = ds.groupby("abs_time.year")
+
+    for year, yearly_dataset in grouped_by_year:
+        # Further group each yearly group by month
+        grouped_by_month = yearly_dataset.groupby("abs_time.month")
+
+        for month, monthly_dataset in grouped_by_month:
+            dataset_list.append(monthly_dataset)
+
+            # Format: "filepath_YYYYMM.nc"
+            year_month_str = f"{year}{month:02}"
+            output_filename = f"{filepath}_{year_month_str}"
+            output_filenames.append(output_filename)
+
+    return dataset_list, output_filenames
+
+
+def group_by_year(ds, filepath):
+    """
+    Group the dataset by year and generate filenames with 'YYYY' format.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset to be grouped.
+    filepath : str
+        The base filename for the output files.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the list of yearly datasets and corresponding output filenames.
+    """
+
+    dataset_list = []
+    output_filenames = []
+
+    # Group dataset by year
+    grouped_by_year = ds.groupby("abs_time.year")
+
+    for year, yearly_dataset in grouped_by_year:
+        dataset_list.append(yearly_dataset)
+
+        # Format: "filepath_YYYY.nc"
+        year_str = f"{year}"
+        output_filename = f"{filepath}_{year_str}"
+        output_filenames.append(output_filename)
+
+    return dataset_list, output_filenames
+
+
+def save_datasets(dataset_list, output_filenames, nx=None, ny=None):
+    """
+    Save the list of datasets to netCDF4 files, with optional spatial partitioning.
+
+    Parameters
+    ----------
+    dataset_list : list
+        List of datasets to be saved.
+    output_filenames : list
+        List of filenames for the output files.
+    nx : int, optional
+        Number of partitions along the x-axis. If None, no partitioning is applied.
+    ny : int, optional
+        Number of partitions along the y-axis. If None, no partitioning is applied.
+
+    Returns
+    -------
+    None
+    """
+
+    print("Saving the following files:")
+    if nx is None and ny is None:
+        # Save the dataset as a single file
+        output_filenames = [f"{filename}.nc" for filename in output_filenames]
+        for filename in output_filenames:
+            print(filename)
+        xr.save_mfdataset(dataset_list, output_filenames)
+    else:
+        # Partition the dataset and save each partition as a separate file
+        nx = nx or 1
+        ny = ny or 1
+
+        partitioned_datasets = []
+        partitioned_filenames = []
+        for dataset, base_filename in zip(dataset_list, output_filenames):
+            partition_indices, partitions = partition(dataset, nx=nx, ny=ny)
+            partition_filenames = [
+                f"{base_filename}.{index}.nc" for index in partition_indices
+            ]
+            partitioned_datasets.extend(partitions)
+            partitioned_filenames.extend(partition_filenames)
+
+        for filename in partitioned_filenames:
+            print(filename)
+
+        xr.save_mfdataset(partitioned_datasets, partitioned_filenames)

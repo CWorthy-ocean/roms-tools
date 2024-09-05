@@ -494,24 +494,20 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
         filepath = tmpfile.name
 
     sfc_forcing.save(filepath)
-    extended_filepath = filepath + "_20200201-01.nc"
 
-    try:
-        assert os.path.exists(extended_filepath)
-    finally:
-        os.remove(extended_filepath)
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
+    extended_filepath = filepath + "_202002.nc"
+
+    assert os.path.exists(extended_filepath)
+    os.remove(extended_filepath)
 
     sfc_forcing.save(filepath, nx=1)
-    expected_filepath_list = [
-        f"{filepath}_20200201-01.{index}.nc" for index in range(1)
-    ]
+    expected_filepath_list = [f"{filepath}_202002.{index}.nc" for index in range(1)]
 
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+    for expected_filepath in expected_filepath_list:
+        assert os.path.exists(expected_filepath)
+        os.remove(expected_filepath)
 
 
 def test_surface_forcing_bgc_plot_save(
@@ -529,24 +525,20 @@ def test_surface_forcing_bgc_plot_save(
         filepath = tmpfile.name
 
     bgc_surface_forcing.save(filepath)
-    extended_filepath = filepath + "_20200201-01.nc"
 
-    try:
-        assert os.path.exists(extended_filepath)
-    finally:
-        os.remove(extended_filepath)
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
+    extended_filepath = filepath + "_202002.nc"
+
+    assert os.path.exists(extended_filepath)
+    os.remove(extended_filepath)
 
     bgc_surface_forcing.save(filepath, ny=5)
-    expected_filepath_list = [
-        f"{filepath}_20200201-01.{index}.nc" for index in range(5)
-    ]
+    expected_filepath_list = [f"{filepath}_202002.{index}.nc" for index in range(5)]
 
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+    for expected_filepath in expected_filepath_list:
+        assert os.path.exists(expected_filepath)
+        os.remove(expected_filepath)
 
 
 def test_surface_forcing_bgc_from_clim_plot_save(
@@ -562,25 +554,22 @@ def test_surface_forcing_bgc_from_clim_plot_save(
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
         filepath = tmpfile.name
-        print(filepath)
 
     bgc_surface_forcing_from_climatology.save(filepath)
+
+    if filepath.endswith(".nc"):
+        filepath = filepath[:-3]
     extended_filepath = filepath + "_clim.nc"
 
-    try:
-        assert os.path.exists(extended_filepath)
-    finally:
-        os.remove(extended_filepath)
+    assert os.path.exists(extended_filepath)
+    os.remove(extended_filepath)
 
     bgc_surface_forcing_from_climatology.save(filepath, nx=5)
     expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(5)]
 
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+    for expected_filepath in expected_filepath_list:
+        assert os.path.exists(expected_filepath)
+        os.remove(expected_filepath)
 
 
 @pytest.mark.parametrize(

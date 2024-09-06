@@ -191,7 +191,7 @@ def partition(
     partitioned_datasets = []
     for j in range(ny):
         for i in range(nx):
-            file_number = i + (j * nx)
+            file_number = j + (i * ny)
             file_numbers.append(file_number)
 
             indexers = {}

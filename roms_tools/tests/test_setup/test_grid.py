@@ -4,6 +4,7 @@ from roms_tools import Grid
 import importlib.metadata
 import textwrap
 from roms_tools.setup.download import download_test_data
+from roms_tools.tests.test_setup.conftest import calculate_file_hash
 from pathlib import Path
 
 
@@ -226,6 +227,41 @@ def test_roundtrip_yaml(tmp_path):
 
         filepath = Path(filepath)
         filepath.unlink()
+
+
+def test_files_have_same_hash(tmp_path):
+
+    # Initialize a Grid object using the initializer
+    grid_init = Grid(
+        nx=10,
+        ny=15,
+        size_x=100.0,
+        size_y=150.0,
+        center_lon=0.0,
+        center_lat=0.0,
+        rot=0.0,
+        topography_source="ETOPO5",
+        hmin=5.0,
+    )
+
+    yaml_filepath = tmp_path / "test_yaml"
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+
+    grid_init.to_yaml(yaml_filepath)
+    grid_init.save(filepath1)
+
+    grid_from_file = Grid.from_yaml(yaml_filepath)
+    grid_from_file.save(filepath2)
+
+    hash1 = calculate_file_hash(filepath1)
+    hash2 = calculate_file_hash(filepath2)
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    filepath1.unlink()
+    filepath2.unlink()
 
 
 def test_from_yaml_missing_version(tmp_path):

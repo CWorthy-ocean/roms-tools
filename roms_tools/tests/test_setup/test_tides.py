@@ -3,6 +3,7 @@ from roms_tools import Grid, TidalForcing
 import xarray as xr
 from roms_tools.setup.download import download_test_data
 import textwrap
+from roms_tools.tests.test_setup.conftest import calculate_file_hash
 from pathlib import Path
 
 
@@ -217,6 +218,27 @@ def test_roundtrip_yaml(tidal_forcing, tmp_path):
 
         filepath = Path(filepath)
         filepath.unlink()
+
+
+def test_files_have_same_hash(tidal_forcing, tmp_path):
+
+    yaml_filepath = tmp_path / "test_yaml"
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+
+    tidal_forcing.to_yaml(yaml_filepath)
+    tidal_forcing.save(filepath1)
+    tidal_forcing_from_file = TidalForcing.from_yaml(yaml_filepath)
+    tidal_forcing_from_file.save(filepath2)
+
+    hash1 = calculate_file_hash(filepath1)
+    hash2 = calculate_file_hash(filepath2)
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    filepath1.unlink()
+    filepath2.unlink()
 
 
 def test_from_yaml_missing_tidal_forcing(tmp_path):

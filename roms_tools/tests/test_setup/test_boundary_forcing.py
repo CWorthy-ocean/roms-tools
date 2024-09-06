@@ -3,6 +3,7 @@ from datetime import datetime
 from roms_tools import BoundaryForcing
 import textwrap
 from roms_tools.setup.download import download_test_data
+from roms_tools.tests.test_setup.conftest import calculate_file_hash
 from pathlib import Path
 
 
@@ -182,6 +183,58 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path):
 
         filepath = Path(filepath)
         filepath.unlink()
+
+
+def test_files_have_same_hash(boundary_forcing, tmp_path):
+
+    yaml_filepath = tmp_path / "test_yaml"
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+
+    boundary_forcing.to_yaml(yaml_filepath)
+    boundary_forcing.save(filepath1)
+    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath)
+    bdry_forcing_from_file.save(filepath2)
+
+    filepath_str1 = str(Path(filepath1).with_suffix(""))
+    filepath_str2 = str(Path(filepath2).with_suffix(""))
+    expected_filepath1 = f"{filepath_str1}_202106.nc"
+    expected_filepath2 = f"{filepath_str2}_202106.nc"
+
+    hash1 = calculate_file_hash(expected_filepath1)
+    hash2 = calculate_file_hash(expected_filepath2)
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    Path(expected_filepath1).unlink()
+    Path(expected_filepath2).unlink()
+
+
+def test_files_have_same_hash_clim(bgc_boundary_forcing_from_climatology, tmp_path):
+
+    yaml_filepath = tmp_path / "test_yaml"
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+
+    bgc_boundary_forcing_from_climatology.to_yaml(yaml_filepath)
+    bgc_boundary_forcing_from_climatology.save(filepath1)
+    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath)
+    bdry_forcing_from_file.save(filepath2)
+
+    filepath_str1 = str(Path(filepath1).with_suffix(""))
+    filepath_str2 = str(Path(filepath2).with_suffix(""))
+    expected_filepath1 = f"{filepath_str1}_clim.nc"
+    expected_filepath2 = f"{filepath_str2}_clim.nc"
+
+    hash1 = calculate_file_hash(expected_filepath1)
+    hash2 = calculate_file_hash(expected_filepath2)
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    Path(expected_filepath1).unlink()
+    Path(expected_filepath2).unlink()
 
 
 def test_from_yaml_missing_boundary_forcing(tmp_path):

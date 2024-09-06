@@ -8,6 +8,7 @@ from roms_tools import (
     SurfaceForcing,
 )
 from roms_tools.setup.download import download_test_data
+import hashlib
 
 
 def pytest_addoption(parser):
@@ -23,6 +24,15 @@ def pytest_configure(config):
     if "all" in config.getoption("--overwrite"):
         # If 'all' is specified, overwrite everything
         config.option.overwrite = ["all"]
+
+
+def calculate_file_hash(filepath, hash_algorithm="sha256"):
+    """Calculate the hash of a file using the specified hash algorithm."""
+    hash_func = hashlib.new(hash_algorithm)
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_func.update(chunk)
+    return hash_func.hexdigest()
 
 
 @pytest.fixture(scope="session")

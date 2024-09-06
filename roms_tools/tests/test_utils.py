@@ -101,7 +101,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds2.sizes == {
+        assert ds4.sizes == {
             "eta_rho": 10,
             "xi_rho": 11,
             "xi_u": 10,
@@ -111,7 +111,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds3.sizes == {
+        assert ds7.sizes == {
             "eta_rho": 11,
             "xi_rho": 11,
             "xi_u": 10,
@@ -121,7 +121,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds4.sizes == {
+        assert ds2.sizes == {
             "eta_rho": 11,
             "xi_rho": 10,
             "xi_u": 10,
@@ -141,7 +141,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds6.sizes == {
+        assert ds8.sizes == {
             "eta_rho": 11,
             "xi_rho": 10,
             "xi_u": 10,
@@ -151,7 +151,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds7.sizes == {
+        assert ds3.sizes == {
             "eta_rho": 11,
             "xi_rho": 11,
             "xi_u": 11,
@@ -161,7 +161,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds8.sizes == {
+        assert ds6.sizes == {
             "eta_rho": 10,
             "xi_rho": 11,
             "xi_u": 11,

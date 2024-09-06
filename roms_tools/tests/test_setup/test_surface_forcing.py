@@ -636,8 +636,10 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path):
     sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath)
     sfc_forcing_from_file.save(filepath2)
 
-    expected_filepath1 = f"{str(Path(filepath1).with_suffix(" "))}_202002.nc"
-    expected_filepath2 = f"{str(Path(filepath2).with_suffix(" "))}_202002.nc"
+    filepath_str1 = str(Path(filepath1).with_suffix(""))
+    filepath_str2 = str(Path(filepath2).with_suffix(""))
+    expected_filepath1 = f"{filepath_str1}_202002.nc"
+    expected_filepath2 = f"{filepath_str2}_202002.nc"
 
     hash1 = calculate_file_hash(expected_filepath1)
     hash2 = calculate_file_hash(expected_filepath2)
@@ -660,8 +662,10 @@ def test_files_have_same_hash_clim(bgc_surface_forcing_from_climatology, tmp_pat
     sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath)
     sfc_forcing_from_file.save(filepath2)
 
-    expected_filepath1 = f"{str(Path(filepath1).with_suffix(" "))}_clim.nc"
-    expected_filepath2 = f"{str(Path(filepath2).with_suffix(" "))}_clim.nc"
+    filepath_str1 = str(Path(filepath1).with_suffix(""))
+    filepath_str2 = str(Path(filepath2).with_suffix(""))
+    expected_filepath1 = f"{filepath_str1}_clim.nc"
+    expected_filepath2 = f"{filepath_str2}_clim.nc"
 
     hash1 = calculate_file_hash(expected_filepath1)
     hash2 = calculate_file_hash(expected_filepath2)

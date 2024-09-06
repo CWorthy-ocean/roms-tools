@@ -37,7 +37,7 @@ def test_plot_save_methods(tmp_path):
             # Test saving without partitioning
             grid.save(filepath)
             # Test saving with partitioning
-            grid.save(filepath, nx=2, ny=5)
+            grid.save(filepath, np_eta=2, np_xi=5)
 
             # Check if the .nc file was created
             filepath = Path(filepath)

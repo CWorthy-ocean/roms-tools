@@ -264,27 +264,29 @@ class TidalForcing(ROMSToolsMixins):
             title=title,
         )
 
-    def save(self, filepath: Union[str, Path], nx: int = None, ny: int = None) -> None:
+    def save(
+        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
+    ) -> None:
         """
         Save the tidal forcing information to a netCDF4 file.
 
         This method supports saving the dataset in two modes:
 
         1. **Single File Mode (default)**:
-           - If both `nx` and `ny` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
+           - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
 
         2. **Partitioned Mode**:
-           - If either `nx` or `ny` is provided, the dataset is divided into `nx` by `ny` spatial tiles and each tile is saved as a separate file.
+           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
            - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path or filename where the dataset should be saved.
-        nx : int, optional
-            The number of partitions along the x-axis. If `None`, no partitioning is done.
-        ny : int, optional
-            The number of partitions along the y-axis. If `None`, no partitioning is done.
+        np_eta : int, optional
+            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
+        np_xi : int, optional
+            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
 
         Returns
         -------
@@ -302,7 +304,7 @@ class TidalForcing(ROMSToolsMixins):
         dataset_list = [self.ds.load()]
         output_filenames = [str(filepath)]
 
-        save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
+        save_datasets(dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi)
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
         """

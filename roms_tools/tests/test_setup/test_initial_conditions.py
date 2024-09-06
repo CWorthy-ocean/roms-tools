@@ -210,7 +210,7 @@ def test_initial_conditions_plot_save(
             # Test saving without partitioning
             initial_conditions_with_bgc_from_climatology.save(filepath)
             # Test saving with partitioning
-            initial_conditions_with_bgc_from_climatology.save(filepath, nx=2)
+            initial_conditions_with_bgc_from_climatology.save(filepath, np_eta=2)
 
             # Check if the .nc file was created
             filepath = Path(filepath)

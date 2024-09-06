@@ -498,7 +498,7 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
             # Test saving without partitioning
             sfc_forcing.save(filepath)
             # Test saving with partitioning
-            sfc_forcing.save(filepath, nx=1)
+            sfc_forcing.save(filepath, np_eta=1)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_202002.nc")
@@ -531,7 +531,7 @@ def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
             # Test saving without partitioning
             bgc_surface_forcing.save(filepath)
             # Test saving with partitioning
-            bgc_surface_forcing.save(filepath, ny=5)
+            bgc_surface_forcing.save(filepath, np_xi=5)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_202002.nc")
@@ -566,7 +566,7 @@ def test_surface_forcing_bgc_from_clim_plot_save(
             # Test saving without partitioning
             bgc_surface_forcing_from_climatology.save(filepath)
             # Test saving with partitioning
-            bgc_surface_forcing_from_climatology.save(filepath, nx=5)
+            bgc_surface_forcing_from_climatology.save(filepath, np_eta=5)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")

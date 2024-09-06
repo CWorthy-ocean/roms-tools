@@ -104,7 +104,7 @@ def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
             # Test saving without partitioning
             boundary_forcing.save(filepath)
             # Test saving with partitioning
-            boundary_forcing.save(filepath, nx=2)
+            boundary_forcing.save(filepath, np_eta=2)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_202106.nc")
@@ -141,7 +141,7 @@ def test_bgc_boundary_forcing_plot_save(
             # Test saving without partitioning
             bgc_boundary_forcing_from_climatology.save(filepath)
             # Test saving with partitioning
-            bgc_boundary_forcing_from_climatology.save(filepath, ny=2)
+            bgc_boundary_forcing_from_climatology.save(filepath, np_xi=2)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")

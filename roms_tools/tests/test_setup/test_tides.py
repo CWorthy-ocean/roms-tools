@@ -182,7 +182,7 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
             # Test saving without partitioning
             tidal_forcing.save(filepath)
             # Test saving with partitioning
-            tidal_forcing.save(filepath, nx=3, ny=3)
+            tidal_forcing.save(filepath, np_eta=3, np_xi=3)
 
             # Check if the .nc file was created
             filepath = Path(filepath)

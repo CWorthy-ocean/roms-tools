@@ -1,10 +1,9 @@
 import pytest
-import tempfile
-import os
 from roms_tools import Grid, TidalForcing
 import xarray as xr
 from roms_tools.setup.download import download_test_data
 import textwrap
+from pathlib import Path
 
 
 @pytest.fixture
@@ -173,45 +172,54 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
 
     tidal_forcing.plot(varname="ssh_Re", ntides=0)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_tides", "test_tides.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    tidal_forcing.save(filepath)
+            # Test saving without partitioning
+            tidal_forcing.save(filepath)
+            # Test saving with partitioning
+            tidal_forcing.save(filepath, nx=3, ny=3)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
+            # Check if the .nc file was created
+            filepath = Path(filepath)
+            assert (filepath.with_suffix(".nc")).exists()
+            # Clean up the .nc file
+            (filepath.with_suffix(".nc")).unlink()
 
-    assert os.path.exists(f"{filepath}.nc")
-    os.remove(f"{filepath}.nc")
-
-    tidal_forcing.save(filepath, nx=3, ny=3)
-    expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(9)]
-
-    for expected_filepath in expected_filepath_list:
-        assert os.path.exists(expected_filepath)
-        os.remove(expected_filepath)
+            filepath_str = str(filepath.with_suffix(""))
+            expected_filepath_list = [
+                (filepath_str + f".{index}.nc") for index in range(9)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
-def test_roundtrip_yaml(tidal_forcing):
+def test_roundtrip_yaml(tidal_forcing, tmp_path):
     """Test that creating a TidalForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    try:
         tidal_forcing.to_yaml(filepath)
 
         tidal_forcing_from_file = TidalForcing.from_yaml(filepath)
 
         assert tidal_forcing == tidal_forcing_from_file
 
-    finally:
-        os.remove(filepath)
+        filepath = Path(filepath)
+        filepath.unlink()
 
 
-def test_from_yaml_missing_tidal_forcing():
+def test_from_yaml_missing_tidal_forcing(tmp_path):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -232,14 +240,24 @@ def test_from_yaml_missing_tidal_forcing():
     """
     )
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for yaml_filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    try:
+        # Write YAML content to file
+        if isinstance(yaml_filepath, Path):
+            yaml_filepath.write_text(yaml_content)
+        else:
+            with open(yaml_filepath, "w") as f:
+                f.write(yaml_content)
+
         with pytest.raises(
             ValueError, match="No TidalForcing configuration found in the YAML file."
         ):
             TidalForcing.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+
+        yaml_filepath = Path(yaml_filepath)
+        yaml_filepath.unlink()

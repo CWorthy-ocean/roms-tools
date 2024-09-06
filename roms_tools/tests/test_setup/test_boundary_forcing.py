@@ -1,10 +1,9 @@
 import pytest
 from datetime import datetime
 from roms_tools import BoundaryForcing
-import tempfile
-import os
 import textwrap
 from roms_tools.setup.download import download_test_data
+from pathlib import Path
 
 
 def test_boundary_forcing_creation(boundary_forcing):
@@ -79,9 +78,7 @@ def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatolog
     assert hasattr(bgc_boundary_forcing_from_climatology.ds, "climatology")
 
 
-def test_boundary_forcing_plot_save(
-    boundary_forcing,
-):
+def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
     """
     Test plot and save methods.
     """
@@ -97,29 +94,33 @@ def test_boundary_forcing_plot_save(
     boundary_forcing.plot(varname="vbar_north")
     boundary_forcing.plot(varname="ubar_west")
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_bf", "test_bf.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    boundary_forcing.save(filepath)
+            # Test saving without partitioning
+            boundary_forcing.save(filepath)
+            # Test saving with partitioning
+            boundary_forcing.save(filepath, nx=2)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
-    extended_filepath = filepath + "_202106.nc"
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}_202106.nc")
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
 
-    assert os.path.exists(extended_filepath)
-    os.remove(extended_filepath)
-
-    boundary_forcing.save(filepath, nx=2)
-    expected_filepath_list = [f"{filepath}_202106.{index}.nc" for index in range(2)]
-
-    for expected_filepath in expected_filepath_list:
-        assert os.path.exists(expected_filepath)
-        os.remove(expected_filepath)
+            expected_filepath_list = [
+                (filepath_str + f"_202106.{index}.nc") for index in range(2)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
 def test_bgc_boundary_forcing_plot_save(
-    bgc_boundary_forcing_from_climatology,
+    bgc_boundary_forcing_from_climatology, tmp_path
 ):
     """
     Test plot and save methods.
@@ -130,25 +131,29 @@ def test_bgc_boundary_forcing_plot_save(
     bgc_boundary_forcing_from_climatology.plot(varname="ALK_north")
     bgc_boundary_forcing_from_climatology.plot(varname="ALK_west")
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_bf", "test_bf.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    bgc_boundary_forcing_from_climatology.save(filepath)
+            # Test saving without partitioning
+            bgc_boundary_forcing_from_climatology.save(filepath)
+            # Test saving with partitioning
+            bgc_boundary_forcing_from_climatology.save(filepath, ny=2)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
-    extended_filepath = filepath + "_clim.nc"
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}_clim.nc")
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
 
-    assert os.path.exists(extended_filepath)
-    os.remove(extended_filepath)
-
-    bgc_boundary_forcing_from_climatology.save(filepath, ny=2)
-    expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(2)]
-
-    for expected_filepath in expected_filepath_list:
-        assert os.path.exists(expected_filepath)
-        os.remove(expected_filepath)
+            expected_filepath_list = [
+                (filepath_str + f"_clim.{index}.nc") for index in range(2)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
 @pytest.mark.parametrize(
@@ -158,27 +163,28 @@ def test_bgc_boundary_forcing_plot_save(
         "bgc_boundary_forcing_from_climatology",
     ],
 )
-def test_roundtrip_yaml(bdry_forcing_fixture, request):
+def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path):
     """Test that creating a BoundaryForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
     bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-
-    try:
         bdry_forcing.to_yaml(filepath)
 
-        boundary_forcing_from_file = BoundaryForcing.from_yaml(filepath)
+        bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath)
 
-        assert bdry_forcing == boundary_forcing_from_file
+        assert bdry_forcing == bdry_forcing_from_file
 
-    finally:
-        os.remove(filepath)
+        filepath = Path(filepath)
+        filepath.unlink()
 
 
-def test_from_yaml_missing_boundary_forcing():
+def test_from_yaml_missing_boundary_forcing(tmp_path):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -199,14 +205,24 @@ def test_from_yaml_missing_boundary_forcing():
     """
     )
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for yaml_filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    try:
+        # Write YAML content to file
+        if isinstance(yaml_filepath, Path):
+            yaml_filepath.write_text(yaml_content)
+        else:
+            with open(yaml_filepath, "w") as f:
+                f.write(yaml_content)
+
         with pytest.raises(
             ValueError, match="No BoundaryForcing configuration found in the YAML file."
         ):
             BoundaryForcing.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+
+        yaml_filepath = Path(yaml_filepath)
+        yaml_filepath.unlink()

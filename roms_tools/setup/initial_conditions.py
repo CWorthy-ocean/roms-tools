@@ -483,9 +483,7 @@ class InitialConditions(ROMSToolsMixins):
                 else:
                     _line_plot(field, title=title)
 
-    def save(
-        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
-    ) -> None:
+    def save(self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None) -> None:
         """
         Save the initial conditions information to a netCDF4 file.
 
@@ -525,15 +523,17 @@ class InitialConditions(ROMSToolsMixins):
 
         save_datasets(dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi)
 
-    def to_yaml(self, filepath: str) -> None:
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
         """
         Export the parameters of the class to a YAML file, including the version of roms-tools.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
+        filepath = Path(filepath)
+
         # Serialize Grid data
         grid_data = asdict(self.grid)
         grid_data.pop("ds", None)  # Exclude non-serializable fields
@@ -566,20 +566,20 @@ class InitialConditions(ROMSToolsMixins):
             **initial_conditions_data,
         }
 
-        with open(filepath, "w") as file:
+        with filepath.open("w") as file:
             # Write header
             file.write(header)
             # Write YAML data
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: str) -> "InitialConditions":
+    def from_yaml(cls, filepath: Union[str, Path]) -> "InitialConditions":
         """
         Create an instance of the InitialConditions class from a YAML file.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
 
         Returns
@@ -587,8 +587,9 @@ class InitialConditions(ROMSToolsMixins):
         InitialConditions
             An instance of the InitialConditions class.
         """
+        filepath = Path(filepath)
         # Read the entire file content
-        with open(filepath, "r") as file:
+        with filepath.open("r") as file:
             file_content = file.read()
 
         # Split the content into YAML documents

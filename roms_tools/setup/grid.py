@@ -524,9 +524,7 @@ class Grid:
                 else:
                     _line_plot(field, title=title)
 
-    def save(
-        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
-    ) -> None:
+    def save(self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None) -> None:
         """
         Save the grid information to a netCDF4 file.
 
@@ -567,13 +565,13 @@ class Grid:
         save_datasets(dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi)
 
     @classmethod
-    def from_file(cls, filepath: str) -> "Grid":
+    def from_file(cls, filepath: Union[str, Path]) -> "Grid":
         """
         Create a Grid instance from an existing file.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             Path to the file containing the grid information.
 
         Returns
@@ -682,15 +680,18 @@ class Grid:
 
         return grid
 
-    def to_yaml(self, filepath: str) -> None:
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
         """
         Export the parameters of the class to a YAML file, including the version of roms-tools.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
+
+        filepath = Path(filepath)
+
         data = asdict(self)
         data.pop("ds", None)
         data.pop("straddle", None)
@@ -707,20 +708,20 @@ class Grid:
         # Use the class name as the top-level key
         yaml_data = {self.__class__.__name__: data}
 
-        with open(filepath, "w") as file:
+        with filepath.open("w") as file:
             # Write header
             file.write(header)
             # Write YAML data
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: str) -> "Grid":
+    def from_yaml(cls, filepath: Union[str, Path]) -> "Grid":
         """
         Create an instance of the class from a YAML file.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
 
         Returns
@@ -728,8 +729,10 @@ class Grid:
         Grid
             An instance of the Grid class.
         """
+
+        filepath = Path(filepath)
         # Read the entire file content
-        with open(filepath, "r") as file:
+        with filepath.open("r") as file:
             file_content = file.read()
 
         # Split the content into YAML documents

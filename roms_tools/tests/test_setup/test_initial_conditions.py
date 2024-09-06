@@ -3,11 +3,10 @@ from datetime import datetime
 from roms_tools import InitialConditions, Grid
 import xarray as xr
 import numpy as np
-import tempfile
-import os
 import textwrap
 from roms_tools.setup.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset
+from pathlib import Path
 
 
 @pytest.mark.parametrize(
@@ -162,7 +161,9 @@ def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climato
     )
 
 
-def test_initial_conditions_plot_save(initial_conditions_with_bgc_from_climatology):
+def test_initial_conditions_plot_save(
+    initial_conditions_with_bgc_from_climatology, tmp_path
+):
     """
     Test plot and save methods.
     """
@@ -199,49 +200,54 @@ def test_initial_conditions_plot_save(initial_conditions_with_bgc_from_climatolo
     initial_conditions_with_bgc_from_climatology.plot(varname="ALK", s=0, xi=0)
     initial_conditions_with_bgc_from_climatology.plot(varname="ALK", eta=0, xi=0)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_ic", "test_ic.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    initial_conditions_with_bgc_from_climatology.save(filepath)
+            # Test saving without partitioning
+            initial_conditions_with_bgc_from_climatology.save(filepath)
+            # Test saving with partitioning
+            initial_conditions_with_bgc_from_climatology.save(filepath, np_eta=2)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
-    try:
-        assert os.path.exists(f"{filepath}.nc")
-    finally:
-        os.remove(f"{filepath}.nc")
+            # Check if the .nc file was created
+            filepath = Path(filepath)
+            assert (filepath.with_suffix(".nc")).exists()
+            # Clean up the .nc file
+            (filepath.with_suffix(".nc")).unlink()
 
-    initial_conditions_with_bgc_from_climatology.save(filepath, np_eta=2)
-    expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(2)]
-
-    try:
-        for expected_filepath in expected_filepath_list:
-            assert os.path.exists(expected_filepath)
-    finally:
-        for expected_filepath in expected_filepath_list:
-            os.remove(expected_filepath)
+            filepath_str = str(filepath.with_suffix(""))
+            expected_filepath_list = [
+                (filepath_str + f".{index}.nc") for index in range(2)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
-def test_roundtrip_yaml(initial_conditions):
+def test_roundtrip_yaml(initial_conditions, tmp_path):
     """Test that creating an InitialConditions object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    try:
         initial_conditions.to_yaml(filepath)
 
         initial_conditions_from_file = InitialConditions.from_yaml(filepath)
 
         assert initial_conditions == initial_conditions_from_file
 
-    finally:
-        os.remove(filepath)
+        filepath = Path(filepath)
+        filepath.unlink()
 
 
-def test_from_yaml_missing_initial_conditions():
+def test_from_yaml_missing_initial_conditions(tmp_path):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -262,15 +268,25 @@ def test_from_yaml_missing_initial_conditions():
     """
     )
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for yaml_filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    try:
+        # Write YAML content to file
+        if isinstance(yaml_filepath, Path):
+            yaml_filepath.write_text(yaml_content)
+        else:
+            with open(yaml_filepath, "w") as f:
+                f.write(yaml_content)
+
         with pytest.raises(
             ValueError,
             match="No InitialConditions configuration found in the YAML file.",
         ):
             InitialConditions.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+
+        yaml_filepath = Path(yaml_filepath)
+        yaml_filepath.unlink()

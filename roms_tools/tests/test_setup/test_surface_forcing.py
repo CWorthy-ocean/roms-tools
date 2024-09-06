@@ -2,9 +2,8 @@ import pytest
 from datetime import datetime
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.setup.download import download_test_data
-import tempfile
-import os
 import textwrap
+from pathlib import Path
 
 
 @pytest.fixture
@@ -489,30 +488,32 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
     sfc_forcing.plot(varname="uwnd", time=0)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_sf", "test_sf.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    sfc_forcing.save(filepath)
+            # Test saving without partitioning
+            sfc_forcing.save(filepath)
+            # Test saving with partitioning
+            sfc_forcing.save(filepath, np_eta=1)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
-    extended_filepath = filepath + "_202002.nc"
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}_202002.nc")
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
 
-    assert os.path.exists(extended_filepath)
-    os.remove(extended_filepath)
-
-    sfc_forcing.save(filepath, np_eta=1)
-    expected_filepath_list = [f"{filepath}_202002.{index}.nc" for index in range(1)]
-
-    for expected_filepath in expected_filepath_list:
-        assert os.path.exists(expected_filepath)
-        os.remove(expected_filepath)
+            expected_filepath_list = [
+                (filepath_str + f"_202002.{index}.nc") for index in range(1)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
-def test_surface_forcing_bgc_plot_save(
-    bgc_surface_forcing,
-):
+def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
     """
     Test plot and save methods.
     """
@@ -520,29 +521,33 @@ def test_surface_forcing_bgc_plot_save(
     # Check the values in the dataset
     bgc_surface_forcing.plot(varname="pco2_air", time=0)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_sf", "test_sf.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    bgc_surface_forcing.save(filepath)
+            # Test saving without partitioning
+            bgc_surface_forcing.save(filepath)
+            # Test saving with partitioning
+            bgc_surface_forcing.save(filepath, np_xi=5)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
-    extended_filepath = filepath + "_202002.nc"
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}_202002.nc")
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
 
-    assert os.path.exists(extended_filepath)
-    os.remove(extended_filepath)
-
-    bgc_surface_forcing.save(filepath, np_xi=5)
-    expected_filepath_list = [f"{filepath}_202002.{index}.nc" for index in range(5)]
-
-    for expected_filepath in expected_filepath_list:
-        assert os.path.exists(expected_filepath)
-        os.remove(expected_filepath)
+            expected_filepath_list = [
+                (filepath_str + f"_202002.{index}.nc") for index in range(5)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
 def test_surface_forcing_bgc_from_clim_plot_save(
-    bgc_surface_forcing_from_climatology,
+    bgc_surface_forcing_from_climatology, tmp_path
 ):
     """
     Test plot and save methods.
@@ -551,25 +556,29 @@ def test_surface_forcing_bgc_from_clim_plot_save(
     # Check the values in the dataset
     bgc_surface_forcing_from_climatology.plot(varname="pco2_air", time=0)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_sf", "test_sf.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    bgc_surface_forcing_from_climatology.save(filepath)
+            # Test saving without partitioning
+            bgc_surface_forcing_from_climatology.save(filepath)
+            # Test saving with partitioning
+            bgc_surface_forcing_from_climatology.save(filepath, np_eta=5)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
-    extended_filepath = filepath + "_clim.nc"
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}_clim.nc")
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
 
-    assert os.path.exists(extended_filepath)
-    os.remove(extended_filepath)
-
-    bgc_surface_forcing_from_climatology.save(filepath, np_eta=5)
-    expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(5)]
-
-    for expected_filepath in expected_filepath_list:
-        assert os.path.exists(expected_filepath)
-        os.remove(expected_filepath)
+            expected_filepath_list = [
+                (filepath_str + f"_clim.{index}.nc") for index in range(5)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
 @pytest.mark.parametrize(
@@ -582,27 +591,29 @@ def test_surface_forcing_bgc_from_clim_plot_save(
         "bgc_surface_forcing_from_climatology",
     ],
 )
-def test_roundtrip_yaml(sfc_forcing_fixture, request):
+def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path):
     """Test that creating an SurfaceForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    try:
         sfc_forcing.to_yaml(filepath)
 
         sfc_forcing_from_file = SurfaceForcing.from_yaml(filepath)
 
         assert sfc_forcing == sfc_forcing_from_file
 
-    finally:
-        os.remove(filepath)
+        filepath = Path(filepath)
+        filepath.unlink()
 
 
-def test_from_yaml_missing_surface_forcing():
+def test_from_yaml_missing_surface_forcing(tmp_path):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -623,15 +634,24 @@ def test_from_yaml_missing_surface_forcing():
     """
     )
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for yaml_filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    try:
+        # Write YAML content to file
+        if isinstance(yaml_filepath, Path):
+            yaml_filepath.write_text(yaml_content)
+        else:
+            with open(yaml_filepath, "w") as f:
+                f.write(yaml_content)
+
         with pytest.raises(
             ValueError,
             match="No SurfaceForcing configuration found in the YAML file.",
         ):
             SurfaceForcing.from_yaml(yaml_filepath)
-    finally:
-        os.remove(yaml_filepath)
+        yaml_filepath = Path(yaml_filepath)
+        yaml_filepath.unlink()

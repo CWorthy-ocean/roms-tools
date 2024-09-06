@@ -1,11 +1,10 @@
 import pytest
 import xarray as xr
 from roms_tools import Grid
-import os
-import tempfile
 import importlib.metadata
 import textwrap
 from roms_tools.setup.download import download_test_data
+from pathlib import Path
 
 
 def test_grid_creation(grid):
@@ -20,28 +19,39 @@ def test_grid_creation(grid):
     assert isinstance(grid.ds, xr.Dataset)
 
 
-def test_plot_save_methods():
+def test_plot_save_methods(tmp_path):
 
     grid = Grid(
         nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
     )
 
     grid.plot(bathymetry=True)
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
-    grid.save(filepath)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
+    for file_str in ["test_grid", "test_grid.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    assert os.path.exists(f"{filepath}.nc")
-    os.remove(f"{filepath}.nc")
+            # Test saving without partitioning
+            grid.save(filepath)
+            # Test saving with partitioning
+            grid.save(filepath, nx=2, ny=5)
 
-    grid.save(filepath, nx=2, ny=5)
-    expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(10)]
-    for expected_filepath in expected_filepath_list:
-        assert os.path.exists(expected_filepath)
-        os.remove(expected_filepath)
+            # Check if the .nc file was created
+            filepath = Path(filepath)
+            assert (filepath.with_suffix(".nc")).exists()
+            # Clean up the .nc file
+            (filepath.with_suffix(".nc")).unlink()
+
+            filepath_str = str(filepath.with_suffix(""))
+            expected_filepath_list = [
+                (filepath_str + f".{index}.nc") for index in range(10)
+            ]
+            for expected_filepath in expected_filepath_list:
+                assert Path(expected_filepath).exists()
+                Path(expected_filepath).unlink()
 
 
 def test_raise_if_domain_too_large():
@@ -85,7 +95,7 @@ def test_grid_straddle_crosses_meridian():
     assert not grid.straddle
 
 
-def test_compatability_with_matlab_grid():
+def test_compatability_with_matlab_grid(tmp_path):
 
     fname = download_test_data("grid_created_with_matlab.nc")
 
@@ -124,25 +134,30 @@ def test_compatability_with_matlab_grid():
     assert actual_coords == expected_coords
 
     grid.plot(bathymetry=True)
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
-    # Save the grid to a file
-    grid.save(filepath)
 
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
+    for file_str in ["test_grid", "test_grid.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    # Load the grid from the file
-    grid_from_file = Grid.from_file(f"{filepath}.nc")
+            # Test saving without partitioning
+            grid.save(filepath)
 
-    # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
-    assert grid == grid_from_file
+            filepath = Path(filepath)
 
-    os.remove(f"{filepath}.nc")
+            # Load the grid from the file
+            grid_from_file = Grid.from_file(filepath.with_suffix(".nc"))
+
+            # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+            assert grid == grid_from_file
+
+            # Clean up the .nc file
+            (filepath.with_suffix(".nc")).unlink()
 
 
-def test_roundtrip_netcdf():
+def test_roundtrip_netcdf(tmp_path):
     """Test that creating a grid, saving it to file, and re-opening it is the same as just creating it."""
 
     # Initialize a Grid object using the initializer
@@ -158,25 +173,28 @@ def test_roundtrip_netcdf():
         hmin=5.0,
     )
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    for file_str in ["test_grid", "test_grid.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-    # Save the grid to a file
-    grid_init.save(filepath)
+            grid_init.save(filepath)
 
-    # Load the grid from the file
-    if filepath.endswith(".nc"):
-        filepath = filepath[:-3]
-    grid_from_file = Grid.from_file(f"{filepath}.nc")
+            filepath = Path(filepath)
 
-    # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
-    assert grid_init == grid_from_file
+            # Load the grid from the file
+            grid_from_file = Grid.from_file(filepath.with_suffix(".nc"))
 
-    os.remove(f"{filepath}.nc")
+            # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+            assert grid_init == grid_from_file
+
+            # Clean up the .nc file
+            (filepath.with_suffix(".nc")).unlink()
 
 
-def test_roundtrip_yaml():
+def test_roundtrip_yaml(tmp_path):
     """Test that creating a grid, saving its parameters to yaml file, and re-opening yaml file creates the same grid."""
 
     # Initialize a Grid object using the initializer
@@ -192,21 +210,25 @@ def test_roundtrip_yaml():
         hmin=5.0,
     )
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=True) as tmpfile:
-        filepath = tmpfile.name
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    grid_init.to_yaml(filepath)
+        grid_init.to_yaml(filepath)
 
-    grid_from_file = Grid.from_yaml(filepath)
+        grid_from_file = Grid.from_yaml(filepath)
 
-    # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
-    assert grid_init == grid_from_file
+        # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+        assert grid_init == grid_from_file
 
-    os.remove(filepath)
+        filepath = Path(filepath)
+        filepath.unlink()
 
 
-def test_from_yaml_missing_version():
+def test_from_yaml_missing_version(tmp_path):
 
     yaml_content = textwrap.dedent(
         """\
@@ -222,36 +244,58 @@ def test_from_yaml_missing_version():
       hmin: 5.0
     """
     )
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for yaml_filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    with pytest.raises(
-        ValueError, match="Version of ROMS-Tools not found in the YAML file."
-    ):
-        Grid.from_yaml(yaml_filepath)
+        # Write YAML content to file
+        if isinstance(yaml_filepath, Path):
+            yaml_filepath.write_text(yaml_content)
+        else:
+            with open(yaml_filepath, "w") as f:
+                f.write(yaml_content)
 
-    os.remove(yaml_filepath)
+        with pytest.raises(
+            ValueError, match="Version of ROMS-Tools not found in the YAML file."
+        ):
+            Grid.from_yaml(yaml_filepath)
+
+        yaml_filepath = Path(yaml_filepath)
+        yaml_filepath.unlink()
 
 
-def test_from_yaml_missing_grid():
+def test_from_yaml_missing_grid(tmp_path):
     roms_tools_version = importlib.metadata.version("roms-tools")
 
     yaml_content = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for yaml_filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    with pytest.raises(
-        ValueError, match="No Grid configuration found in the YAML file."
-    ):
-        Grid.from_yaml(yaml_filepath)
+        # Write YAML content to file
+        if isinstance(yaml_filepath, Path):
+            yaml_filepath.write_text(yaml_content)
+        else:
+            with open(yaml_filepath, "w") as f:
+                f.write(yaml_content)
 
-    os.remove(yaml_filepath)
+        with pytest.raises(
+            ValueError, match="No Grid configuration found in the YAML file."
+        ):
+            Grid.from_yaml(yaml_filepath)
+
+        yaml_filepath = Path(yaml_filepath)
+        yaml_filepath.unlink()
 
 
-def test_from_yaml_version_mismatch():
+def test_from_yaml_version_mismatch(tmp_path):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -270,14 +314,25 @@ def test_from_yaml_version_mismatch():
     """
     )
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        yaml_filepath = tmp_file.name
-        tmp_file.write(yaml_content.encode())
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for yaml_filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
 
-    with pytest.warns(
-        UserWarning,
-        match="Current roms-tools version.*does not match the version in the YAML header.*",
-    ):
-        Grid.from_yaml(yaml_filepath)
+        # Write YAML content to file
+        if isinstance(yaml_filepath, Path):
+            yaml_filepath.write_text(yaml_content)
+        else:
+            with open(yaml_filepath, "w") as f:
+                f.write(yaml_content)
 
-    os.remove(yaml_filepath)
+        with pytest.warns(
+            UserWarning,
+            match="Current roms-tools version.*does not match the version in the YAML header.*",
+        ):
+            Grid.from_yaml(yaml_filepath)
+
+        yaml_filepath = Path(yaml_filepath)
+        yaml_filepath.unlink()

@@ -20,6 +20,7 @@ from roms_tools.setup.utils import (
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -263,7 +264,7 @@ class TidalForcing(ROMSToolsMixins):
             title=title,
         )
 
-    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
+    def save(self, filepath: Union[str, Path], nx: int = None, ny: int = None) -> None:
         """
         Save the tidal forcing information to a netCDF4 file.
 
@@ -278,7 +279,7 @@ class TidalForcing(ROMSToolsMixins):
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The base path or filename where the dataset should be saved.
         nx : int, optional
             The number of partitions along the x-axis. If `None`, no partitioning is done.
@@ -291,23 +292,29 @@ class TidalForcing(ROMSToolsMixins):
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
-        if filepath.endswith(".nc"):
-            filepath = filepath[:-3]
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
 
         dataset_list = [self.ds.load()]
-        output_filenames = [filepath]
+        output_filenames = [str(filepath)]
 
         save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 
-    def to_yaml(self, filepath: str) -> None:
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
         """
         Export the parameters of the class to a YAML file, including the version of roms-tools.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
+        filepath = Path(filepath)
+
         grid_data = asdict(self.grid)
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
@@ -337,20 +344,20 @@ class TidalForcing(ROMSToolsMixins):
         # Combine both sections
         yaml_data = {**grid_yaml_data, **tidal_forcing_data}
 
-        with open(filepath, "w") as file:
+        with filepath.open("w") as file:
             # Write header
             file.write(header)
             # Write YAML data
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: str) -> "TidalForcing":
+    def from_yaml(cls, filepath: Union[str, Path]) -> "TidalForcing":
         """
         Create an instance of the TidalForcing class from a YAML file.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
 
         Returns
@@ -358,8 +365,9 @@ class TidalForcing(ROMSToolsMixins):
         TidalForcing
             An instance of the TidalForcing class.
         """
+        filepath = Path(filepath)
         # Read the entire file content
-        with open(filepath, "r") as file:
+        with filepath.open("r") as file:
             file_content = file.read()
 
         # Split the content into YAML documents

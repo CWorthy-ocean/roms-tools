@@ -20,6 +20,7 @@ from roms_tools.setup.utils import (
 )
 from roms_tools.setup.mixins import ROMSToolsMixins
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -291,11 +292,15 @@ class TidalForcing(ROMSToolsMixins):
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
-        if filepath.endswith(".nc"):
-            filepath = filepath[:-3]
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
 
         dataset_list = [self.ds.load()]
-        output_filenames = [filepath]
+        output_filenames = [str(filepath)]
 
         save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 

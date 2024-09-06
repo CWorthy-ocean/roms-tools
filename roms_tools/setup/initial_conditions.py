@@ -16,6 +16,7 @@ from roms_tools.setup.utils import (
 from roms_tools.setup.mixins import ROMSToolsMixins
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -482,7 +483,7 @@ class InitialConditions(ROMSToolsMixins):
                 else:
                     _line_plot(field, title=title)
 
-    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
+    def save(self, filepath: Union[str, Path], nx: int = None, ny: int = None) -> None:
         """
         Save the initial conditions information to a netCDF4 file.
 
@@ -497,7 +498,7 @@ class InitialConditions(ROMSToolsMixins):
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The base path or filename where the dataset should be saved.
         nx : int, optional
             The number of partitions along the x-axis. If `None`, no partitioning is done.
@@ -510,11 +511,15 @@ class InitialConditions(ROMSToolsMixins):
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
-        if filepath.endswith(".nc"):
-            filepath = filepath[:-3]
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
 
         dataset_list = [self.ds.load()]
-        output_filenames = [filepath]
+        output_filenames = [str(filepath)]
 
         save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 

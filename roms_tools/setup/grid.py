@@ -7,12 +7,14 @@ import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
 
+from typing import Union
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
 import warnings
+from pathlib import Path
 
 RADIUS_OF_EARTH = 6371315.0  # in m
 
@@ -522,7 +524,7 @@ class Grid:
                 else:
                     _line_plot(field, title=title)
 
-    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
+    def save(self, filepath: Union[str, Path], nx: int = None, ny: int = None) -> None:
         """
         Save the grid information to a netCDF4 file.
 
@@ -537,7 +539,7 @@ class Grid:
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The base path or filename where the dataset should be saved.
         nx : int, optional
             The number of partitions along the x-axis. If `None`, no partitioning is done.
@@ -550,11 +552,15 @@ class Grid:
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
-        if filepath.endswith(".nc"):
-            filepath = filepath[:-3]
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
 
         dataset_list = [self.ds.load()]
-        output_filenames = [filepath]
+        output_filenames = [str(filepath)]
 
         save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 

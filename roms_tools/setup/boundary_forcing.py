@@ -19,6 +19,7 @@ from roms_tools.setup.utils import (
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -460,7 +461,7 @@ class BoundaryForcing(ROMSToolsMixins):
         else:
             _line_plot(field, title=title)
 
-    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
+    def save(self, filepath: Union[str, Path], nx: int = None, ny: int = None) -> None:
         """
         Save the boundary forcing fields to netCDF4 files.
 
@@ -479,7 +480,7 @@ class BoundaryForcing(ROMSToolsMixins):
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The base path and filename for the output files. The format of the filenames depends on whether partitioning is used
             and the temporal range of the data. For partitioned datasets, files will be named with an additional index, e.g.,
             `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
@@ -494,10 +495,14 @@ class BoundaryForcing(ROMSToolsMixins):
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
-        if filepath.endswith(".nc"):
-            filepath = filepath[:-3]
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
 
-        dataset_list, output_filenames = group_dataset(self.ds.load(), filepath)
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
+
+        dataset_list, output_filenames = group_dataset(self.ds.load(), str(filepath))
         save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
 
     def to_yaml(self, filepath: str) -> None:

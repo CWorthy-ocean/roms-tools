@@ -196,8 +196,8 @@ def partition(
 
     file_numbers = []
     partitioned_datasets = []
-    for j in range(np_xi):
-        for i in range(np_eta):
+    for i in range(np_eta):
+        for j in range(np_xi):
             file_number = j + (i * np_xi)
             file_numbers.append(file_number)
 

@@ -695,7 +695,7 @@ def group_by_year(ds, filepath):
     return dataset_list, output_filenames
 
 
-def save_datasets(dataset_list, output_filenames, nx=None, ny=None):
+def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
     """
     Save the list of datasets to netCDF4 files, with optional spatial partitioning.
 
@@ -705,10 +705,10 @@ def save_datasets(dataset_list, output_filenames, nx=None, ny=None):
         List of datasets to be saved.
     output_filenames : list
         List of filenames for the output files.
-    nx : int, optional
-        Number of partitions along the x-axis. If None, no partitioning is applied.
-    ny : int, optional
-        Number of partitions along the y-axis. If None, no partitioning is applied.
+    np_eta : int, optional
+        The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
+    np_xi : int, optional
+        The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
 
     Returns
     -------
@@ -716,7 +716,7 @@ def save_datasets(dataset_list, output_filenames, nx=None, ny=None):
     """
 
     print("Saving the following files:")
-    if nx is None and ny is None:
+    if np_eta is None and np_xi is None:
         # Save the dataset as a single file
         output_filenames = [f"{filename}.nc" for filename in output_filenames]
         for filename in output_filenames:
@@ -724,13 +724,15 @@ def save_datasets(dataset_list, output_filenames, nx=None, ny=None):
         xr.save_mfdataset(dataset_list, output_filenames)
     else:
         # Partition the dataset and save each partition as a separate file
-        nx = nx or 1
-        ny = ny or 1
+        np_eta = np_eta or 1
+        np_xi = np_xi or 1
 
         partitioned_datasets = []
         partitioned_filenames = []
         for dataset, base_filename in zip(dataset_list, output_filenames):
-            partition_indices, partitions = partition(dataset, nx=nx, ny=ny)
+            partition_indices, partitions = partition(
+                dataset, np_eta=np_eta, np_xi=np_xi
+            )
             partition_filenames = [
                 f"{base_filename}.{index}.nc" for index in partition_indices
             ]

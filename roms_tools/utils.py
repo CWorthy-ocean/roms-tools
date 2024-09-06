@@ -5,12 +5,12 @@ import xarray as xr
 
 
 def partition(
-    ds: xr.Dataset, nx: int = 1, ny: int = 1
+    ds: xr.Dataset, np_eta: int = 1, np_xi: int = 1
 ) -> tuple[list[int], list[xr.Dataset]]:
     """
     Partition a ROMS (Regional Ocean Modeling System) dataset into smaller spatial tiles.
 
-    This function divides the input dataset into `nx` by `ny` tiles, where each tile
+    This function divides the input dataset into `np_eta` by `np_xi` tiles, where each tile
     represents a subdomain of the original dataset. The partitioning is performed along
     the spatial dimensions `eta_rho`, `xi_rho`, `eta_v`, `xi_u`, `eta_coarse`, and `xi_coarse`,
     depending on which dimensions are present in the dataset.
@@ -20,11 +20,11 @@ def partition(
     ds : xr.Dataset
         The input ROMS dataset that is to be partitioned.
 
-    nx : int, optional
-        The number of partitions along the `eta` (latitude) direction. Must be a positive integer. Default is 1.
+    np_eta : int, optional
+        The number of partitions along the `eta` direction. Must be a positive integer. Default is 1.
 
-    ny : int, optional
-        The number of partitions along the `xi` (longitude) direction. Must be a positive integer. Default is 1.
+    np_xi : int, optional
+        The number of partitions along the `xi` direction. Must be a positive integer. Default is 1.
 
     Returns
     -------
@@ -36,13 +36,15 @@ def partition(
     Raises
     ------
     ValueError
-        If `nx` or `ny` is not a positive integer, or if the dataset cannot be evenly partitioned
+        If `np_eta` or `np_xi` is not a positive integer, or if the dataset cannot be evenly partitioned
         into the specified number of tiles.
 
 
     Example
     -------
-    >>> partitioned_file_numbers, partitioned_datasets = partition(ds, nx=2, ny=3)
+    >>> partitioned_file_numbers, partitioned_datasets = partition(
+    ...     ds, np_eta=2, np_xi=3
+    ... )
     >>> print(partitioned_file_numbers)
     [0, 1, 2, 3, 4, 5]
     >>> print([ds.sizes for ds in partitioned_datasets])
@@ -52,8 +54,13 @@ def partition(
     along the `xi` direction, resulting in a total of 6 partitions.
     """
 
-    if not isinstance(nx, Integral) or nx < 1 or not isinstance(ny, Integral) or ny < 1:
-        raise ValueError("nx and ny must be positive integers")
+    if (
+        not isinstance(np_eta, Integral)
+        or np_eta < 1
+        or not isinstance(np_xi, Integral)
+        or np_xi < 1
+    ):
+        raise ValueError("np_eta and np_xi must be positive integers")
 
     partitionable_dims_maybe_present = [
         "eta_rho",
@@ -112,29 +119,29 @@ def partition(
 
     if "eta_rho" in dims_to_partition:
         eta_rho_domain_size = integer_division_or_raise(
-            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, nx, "eta_rho"
+            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, np_eta, "eta_rho"
         )
     if "xi_rho" in dims_to_partition:
         xi_rho_domain_size = integer_division_or_raise(
-            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, ny, "xi_rho"
+            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, np_xi, "xi_rho"
         )
 
     if "eta_v" in dims_to_partition:
         eta_v_domain_size = integer_division_or_raise(
-            ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, nx, "eta_v"
+            ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, np_eta, "eta_v"
         )
     if "xi_u" in dims_to_partition:
         xi_u_domain_size = integer_division_or_raise(
-            ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, ny, "xi_u"
+            ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, np_xi, "xi_u"
         )
 
     if "eta_coarse" in dims_to_partition:
         eta_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["eta_coarse"] - 2 * n_eta_ghost_cells, nx, "eta_coarse"
+            ds.sizes["eta_coarse"] - 2 * n_eta_ghost_cells, np_eta, "eta_coarse"
         )
     if "xi_coarse" in dims_to_partition:
         xi_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, ny, "xi_coarse"
+            ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, np_xi, "xi_coarse"
         )
 
     # unpartitioned dimensions should have sizes unchanged
@@ -144,39 +151,39 @@ def partition(
 
     # TODO refactor to use two functions for odd- and even-length dimensions
     if "eta_v" in dims_to_partition:
-        partitioned_sizes["eta_v"] = [eta_v_domain_size] * (nx - 1) + [
+        partitioned_sizes["eta_v"] = [eta_v_domain_size] * (np_eta - 1) + [
             eta_v_domain_size + n_eta_ghost_cells
         ]
     if "xi_u" in dims_to_partition:
-        partitioned_sizes["xi_u"] = [xi_u_domain_size] * (ny - 1) + [
+        partitioned_sizes["xi_u"] = [xi_u_domain_size] * (np_xi - 1) + [
             xi_u_domain_size + n_xi_ghost_cells
         ]
 
-    if nx > 1:
+    if np_eta > 1:
         partitioned_sizes["eta_rho"] = (
             [eta_rho_domain_size + n_eta_ghost_cells]
-            + [eta_rho_domain_size] * (nx - 2)
+            + [eta_rho_domain_size] * (np_eta - 2)
             + [eta_rho_domain_size + n_eta_ghost_cells]
         )
 
         if "eta_coarse" in dims_to_partition:
             partitioned_sizes["eta_coarse"] = (
                 [eta_coarse_domain_size + n_eta_ghost_cells]
-                + [eta_coarse_domain_size] * (nx - 2)
+                + [eta_coarse_domain_size] * (np_eta - 2)
                 + [eta_coarse_domain_size + n_eta_ghost_cells]
             )
 
-    if ny > 1:
+    if np_xi > 1:
         partitioned_sizes["xi_rho"] = (
             [xi_rho_domain_size + n_xi_ghost_cells]
-            + [xi_rho_domain_size] * (ny - 2)
+            + [xi_rho_domain_size] * (np_xi - 2)
             + [xi_rho_domain_size + n_xi_ghost_cells]
         )
 
         if "xi_coarse" in dims_to_partition:
             partitioned_sizes["xi_coarse"] = (
                 [xi_coarse_domain_size + n_xi_ghost_cells]
-                + [xi_coarse_domain_size] * (ny - 2)
+                + [xi_coarse_domain_size] * (np_xi - 2)
                 + [xi_coarse_domain_size + n_xi_ghost_cells]
             )
 
@@ -189,9 +196,9 @@ def partition(
 
     file_numbers = []
     partitioned_datasets = []
-    for j in range(ny):
-        for i in range(nx):
-            file_number = i + (j * nx)
+    for i in range(np_eta):
+        for j in range(np_xi):
+            file_number = j + (i * np_xi)
             file_numbers.append(file_number)
 
             indexers = {}

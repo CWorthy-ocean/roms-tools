@@ -45,6 +45,33 @@
             "long_name": "S-coordinate stretching curves at rho-points",
             "units": "nondimensional"
         },
+        "Cs_w/.zarray": {
+            "chunks": [
+                101
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                101
+            ],
+            "zarr_format": 2
+        },
+        "Cs_w/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "s_w"
+            ],
+            "long_name": "S-coordinate stretching curves at w-points",
+            "units": "nondimensional"
+        },
         "angle/.zarray": {
             "chunks": [
                 3,
@@ -103,7 +130,9 @@
                 "eta_coarse",
                 "xi_coarse"
             ],
-            "coordinates": "lat_coarse lon_coarse"
+            "coordinates": "lat_coarse lon_coarse",
+            "long_name": "Angle between xi axis and east on coarsened grid",
+            "units": "radians"
         },
         "f/.zarray": {
             "chunks": [
@@ -292,7 +321,9 @@
             "_ARRAY_DIMENSIONS": [
                 "eta_coarse",
                 "xi_coarse"
-            ]
+            ],
+            "long_name": "latitude of rho-points on coarsened grid",
+            "units": "degrees North"
         },
         "lat_rho/.zarray": {
             "chunks": [
@@ -509,7 +540,9 @@
             "_ARRAY_DIMENSIONS": [
                 "eta_coarse",
                 "xi_coarse"
-            ]
+            ],
+            "long_name": "longitude of rho-points on coarsened grid",
+            "units": "degrees East"
         },
         "lon_rho/.zarray": {
             "chunks": [
@@ -628,7 +661,9 @@
                 "eta_coarse",
                 "xi_coarse"
             ],
-            "coordinates": "lat_coarse lon_coarse"
+            "coordinates": "lat_coarse lon_coarse",
+            "long_name": "Mask at rho-points on coarsened grid",
+            "units": "land/water (0/1)"
         },
         "mask_rho/.zarray": {
             "chunks": [
@@ -784,33 +819,6 @@
             "coordinates": "lat_rho lon_rho",
             "long_name": "Curvilinear coordinate metric in eta-direction",
             "units": "meter-1"
-        },
-        "sc_r/.zarray": {
-            "chunks": [
-                100
-            ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<f4",
-            "fill_value": "NaN",
-            "filters": null,
-            "order": "C",
-            "shape": [
-                100
-            ],
-            "zarr_format": 2
-        },
-        "sc_r/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "s_rho"
-            ],
-            "long_name": "S-coordinate at rho-points",
-            "units": "nondimensional"
         },
         "spherical/.zarray": {
             "chunks": [],

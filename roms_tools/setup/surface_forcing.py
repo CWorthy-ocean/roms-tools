@@ -23,6 +23,7 @@ from roms_tools.setup.utils import (
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -409,7 +410,9 @@ class SurfaceForcing(ROMSToolsMixins):
             c="g",
         )
 
-    def save(self, filepath: str, nx: int = None, ny: int = None) -> None:
+    def save(
+        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
+    ) -> None:
         """
         Save the surface forcing fields to netCDF4 files.
 
@@ -419,23 +422,23 @@ class SurfaceForcing(ROMSToolsMixins):
         There are two modes of saving the dataset:
 
         1. **Single File Mode (default)**:
-           - If both `nx` and `ny` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
+           - If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
              with the base filename specified by `filepath.nc`.
 
         2. **Partitioned Mode**:
-           - If either `nx` or `ny` is specified, the dataset is divided into spatial tiles along the x-axis and y-axis.
-             Each spatial tile is saved as a separate netCDF4 file.
+           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+           - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The base path and filename for the output files. The format of the filenames depends on whether partitioning is used
             and the temporal range of the data. For partitioned datasets, files will be named with an additional index, e.g.,
             `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
-        nx : int, optional
-            The number of partitions along the x-axis. If `None`, no spatial partitioning is performed.
-        ny : int, optional
-            The number of partitions along the y-axis. If `None`, no spatial partitioning is performed.
+        np_eta : int, optional
+            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
+        np_xi : int, optional
+            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
 
         Returns
         -------
@@ -443,21 +446,27 @@ class SurfaceForcing(ROMSToolsMixins):
             This method does not return any value. It saves the dataset to netCDF4 files as specified.
         """
 
-        if filepath.endswith(".nc"):
-            filepath = filepath[:-3]
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
 
-        dataset_list, output_filenames = group_dataset(self.ds.load(), filepath)
-        save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
 
-    def to_yaml(self, filepath: str) -> None:
+        dataset_list, output_filenames = group_dataset(self.ds.load(), str(filepath))
+        save_datasets(dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi)
+
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
         """
         Export the parameters of the class to a YAML file, including the version of roms-tools.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
+        filepath = Path(filepath)
+
         # Serialize Grid data
         grid_data = asdict(self.grid)
         grid_data.pop("ds", None)  # Exclude non-serializable fields
@@ -494,20 +503,20 @@ class SurfaceForcing(ROMSToolsMixins):
             **surface_forcing_data,
         }
 
-        with open(filepath, "w") as file:
+        with filepath.open("w") as file:
             # Write header
             file.write(header)
             # Write YAML data
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: str) -> "SurfaceForcing":
+    def from_yaml(cls, filepath: Union[str, Path]) -> "SurfaceForcing":
         """
         Create an instance of the SurfaceForcing class from a YAML file.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
 
         Returns
@@ -515,8 +524,9 @@ class SurfaceForcing(ROMSToolsMixins):
         SurfaceForcing
             An instance of the SurfaceForcing class.
         """
+        filepath = Path(filepath)
         # Read the entire file content
-        with open(filepath, "r") as file:
+        with filepath.open("r") as file:
             file_content = file.read()
 
         # Split the content into YAML documents

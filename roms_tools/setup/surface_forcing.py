@@ -410,7 +410,9 @@ class SurfaceForcing(ROMSToolsMixins):
             c="g",
         )
 
-    def save(self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None) -> None:
+    def save(
+        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
+    ) -> None:
         """
         Save the surface forcing fields to netCDF4 files.
 

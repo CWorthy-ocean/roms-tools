@@ -264,7 +264,9 @@ class TidalForcing(ROMSToolsMixins):
             title=title,
         )
 
-    def save(self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None) -> None:
+    def save(
+        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
+    ) -> None:
         """
         Save the tidal forcing information to a netCDF4 file.
 

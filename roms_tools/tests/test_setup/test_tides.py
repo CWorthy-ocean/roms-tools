@@ -185,7 +185,7 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
     assert os.path.exists(f"{filepath}.nc")
     os.remove(f"{filepath}.nc")
 
-    tidal_forcing.save(filepath, nx=3, ny=3)
+    tidal_forcing.save(filepath, np_eta=3, np_xi=3)
     expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(9)]
 
     for expected_filepath in expected_filepath_list:

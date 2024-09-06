@@ -502,7 +502,7 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
     assert os.path.exists(extended_filepath)
     os.remove(extended_filepath)
 
-    sfc_forcing.save(filepath, nx=1)
+    sfc_forcing.save(filepath, np_eta=1)
     expected_filepath_list = [f"{filepath}_202002.{index}.nc" for index in range(1)]
 
     for expected_filepath in expected_filepath_list:
@@ -533,7 +533,7 @@ def test_surface_forcing_bgc_plot_save(
     assert os.path.exists(extended_filepath)
     os.remove(extended_filepath)
 
-    bgc_surface_forcing.save(filepath, ny=5)
+    bgc_surface_forcing.save(filepath, np_xi=5)
     expected_filepath_list = [f"{filepath}_202002.{index}.nc" for index in range(5)]
 
     for expected_filepath in expected_filepath_list:
@@ -564,7 +564,7 @@ def test_surface_forcing_bgc_from_clim_plot_save(
     assert os.path.exists(extended_filepath)
     os.remove(extended_filepath)
 
-    bgc_surface_forcing_from_climatology.save(filepath, nx=5)
+    bgc_surface_forcing_from_climatology.save(filepath, np_eta=5)
     expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(5)]
 
     for expected_filepath in expected_filepath_list:

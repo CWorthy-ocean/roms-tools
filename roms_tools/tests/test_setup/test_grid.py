@@ -37,7 +37,7 @@ def test_plot_save_methods():
     assert os.path.exists(f"{filepath}.nc")
     os.remove(f"{filepath}.nc")
 
-    grid.save(filepath, nx=2, ny=5)
+    grid.save(filepath, np_eta=2, np_xi=5)
     expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(10)]
     for expected_filepath in expected_filepath_list:
         assert os.path.exists(expected_filepath)

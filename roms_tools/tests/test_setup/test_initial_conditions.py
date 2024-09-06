@@ -212,7 +212,7 @@ def test_initial_conditions_plot_save(initial_conditions_with_bgc_from_climatolo
     finally:
         os.remove(f"{filepath}.nc")
 
-    initial_conditions_with_bgc_from_climatology.save(filepath, nx=2)
+    initial_conditions_with_bgc_from_climatology.save(filepath, np_eta=2)
     expected_filepath_list = [f"{filepath}.{index}.nc" for index in range(2)]
 
     try:

@@ -110,7 +110,7 @@ def test_boundary_forcing_plot_save(
     assert os.path.exists(extended_filepath)
     os.remove(extended_filepath)
 
-    boundary_forcing.save(filepath, nx=2)
+    boundary_forcing.save(filepath, np_eta=2)
     expected_filepath_list = [f"{filepath}_202106.{index}.nc" for index in range(2)]
 
     for expected_filepath in expected_filepath_list:
@@ -143,7 +143,7 @@ def test_bgc_boundary_forcing_plot_save(
     assert os.path.exists(extended_filepath)
     os.remove(extended_filepath)
 
-    bgc_boundary_forcing_from_climatology.save(filepath, ny=2)
+    bgc_boundary_forcing_from_climatology.save(filepath, np_xi=2)
     expected_filepath_list = [f"{filepath}_clim.{index}.nc" for index in range(2)]
 
     for expected_filepath in expected_filepath_list:

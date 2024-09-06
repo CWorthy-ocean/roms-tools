@@ -461,7 +461,9 @@ class BoundaryForcing(ROMSToolsMixins):
         else:
             _line_plot(field, title=title)
 
-    def save(self, filepath: Union[str, Path], nx: int = None, ny: int = None) -> None:
+    def save(
+        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
+    ) -> None:
         """
         Save the boundary forcing fields to netCDF4 files.
 
@@ -471,12 +473,12 @@ class BoundaryForcing(ROMSToolsMixins):
         There are two modes of saving the dataset:
 
         1. **Single File Mode (default)**:
-           - If both `nx` and `ny` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
+           - If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
              with the base filename specified by `filepath.nc`.
 
         2. **Partitioned Mode**:
-           - If either `nx` or `ny` is specified, the dataset is divided into spatial tiles along the x-axis and y-axis.
-             Each spatial tile is saved as a separate netCDF4 file.
+           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+           - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
@@ -484,10 +486,10 @@ class BoundaryForcing(ROMSToolsMixins):
             The base path and filename for the output files. The format of the filenames depends on whether partitioning is used
             and the temporal range of the data. For partitioned datasets, files will be named with an additional index, e.g.,
             `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
-        nx : int, optional
-            The number of partitions along the x-axis. If `None`, no spatial partitioning is performed.
-        ny : int, optional
-            The number of partitions along the y-axis. If `None`, no spatial partitioning is performed.
+        np_eta : int, optional
+            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
+        np_xi : int, optional
+            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
 
         Returns
         -------
@@ -503,7 +505,7 @@ class BoundaryForcing(ROMSToolsMixins):
             filepath = filepath.with_suffix("")
 
         dataset_list, output_filenames = group_dataset(self.ds.load(), str(filepath))
-        save_datasets(dataset_list, output_filenames, nx=nx, ny=ny)
+        save_datasets(dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi)
 
     def to_yaml(self, filepath: str) -> None:
         """

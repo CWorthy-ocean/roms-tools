@@ -1,3 +1,4 @@
+import re
 import xarray as xr
 from dataclasses import dataclass, field
 import glob
@@ -23,7 +24,7 @@ class Dataset:
     Parameters
     ----------
     filename : str
-        The path to the data files. Can contain wildcards.
+        The path to the data files. Can contain wildcards if use_dask is True.
     start_time : Optional[datetime], optional
         The start time for selecting relevant data. If not provided, the data is not filtered by start time.
     end_time : Optional[datetime], optional
@@ -122,7 +123,16 @@ class Dataset:
         ------
         FileNotFoundError
             If the specified file does not exist.
+        ValueError
+            If wildcards are found in the filename and use_dask=False.
         """
+
+        # Check for wildcards in the filename
+        if not self.use_dask and re.search(r"[\*\?\[\]]", self.filename):
+            raise ValueError(
+                "Wildcards detected in the filename but use_dask=False. "
+                "Wildcards can only be used when use_dask=True."
+            )
 
         # Check if the file exists
         matching_files = glob.glob(self.filename)

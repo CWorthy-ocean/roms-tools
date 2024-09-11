@@ -69,14 +69,14 @@ def grid_that_straddles_180_degree_meridian():
         "grid_that_straddles_180_degree_meridian",
     ],
 )
-def test_successful_initialization_with_global_data(grid_fixture, request):
+def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
 
     fname = download_test_data("TPXO_global_test_data.nc")
 
     grid = request.getfixturevalue(grid_fixture)
 
     tidal_forcing = TidalForcing(
-        grid=grid, source={"name": "TPXO", "path": fname}, ntides=2
+        grid=grid, source={"name": "TPXO", "path": fname}, ntides=2, use_dask=use_dask
     )
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
@@ -95,7 +95,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
 
 
 def test_successful_initialization_with_regional_data(
-    grid_that_lies_within_bounds_of_regional_tpxo_data,
+    grid_that_lies_within_bounds_of_regional_tpxo_data, use_dask
 ):
 
     fname = download_test_data("TPXO_regional_test_data.nc")
@@ -104,6 +104,7 @@ def test_successful_initialization_with_regional_data(
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
         source={"name": "TPXO", "path": fname},
         ntides=10,
+        use_dask=use_dask,
     )
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
@@ -122,7 +123,7 @@ def test_successful_initialization_with_regional_data(
 
 
 def test_unsuccessful_initialization_with_regional_data_due_to_nans(
-    grid_that_is_out_of_bounds_of_regional_tpxo_data,
+    grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask
 ):
 
     fname = download_test_data("TPXO_regional_test_data.nc")
@@ -132,6 +133,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
             grid=grid_that_is_out_of_bounds_of_regional_tpxo_data,
             source={"name": "TPXO", "path": fname},
             ntides=10,
+            use_dask=use_dask,
         )
 
 
@@ -140,7 +142,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
     ["grid_that_straddles_dateline", "grid_that_straddles_180_degree_meridian"],
 )
 def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
-    grid_fixture, request
+    grid_fixture, request, use_dask
 ):
 
     fname = download_test_data("TPXO_regional_test_data.nc")
@@ -150,10 +152,15 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
     with pytest.raises(
         ValueError, match="Selected longitude range does not intersect with dataset"
     ):
-        TidalForcing(grid=grid, source={"name": "TPXO", "path": fname}, ntides=10)
+        TidalForcing(
+            grid=grid,
+            source={"name": "TPXO", "path": fname},
+            ntides=10,
+            use_dask=use_dask,
+        )
 
 
-def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
+def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_dask):
 
     fname = download_test_data("TPXO_global_test_data.nc")
 
@@ -162,6 +169,7 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline):
             grid=grid_that_straddles_dateline,
             source={"name": "TPXO", "path": fname},
             ntides=10,
+            use_dask=use_dask,
         )
 
 
@@ -200,7 +208,7 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
                 Path(expected_filepath).unlink()
 
 
-def test_roundtrip_yaml(tidal_forcing, tmp_path):
+def test_roundtrip_yaml(tidal_forcing, tmp_path, use_dask):
     """Test that creating a TidalForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
     # Create a temporary filepath using the tmp_path fixture
@@ -212,7 +220,7 @@ def test_roundtrip_yaml(tidal_forcing, tmp_path):
 
         tidal_forcing.to_yaml(filepath)
 
-        tidal_forcing_from_file = TidalForcing.from_yaml(filepath)
+        tidal_forcing_from_file = TidalForcing.from_yaml(filepath, use_dask=use_dask)
 
         assert tidal_forcing == tidal_forcing_from_file
 
@@ -220,7 +228,7 @@ def test_roundtrip_yaml(tidal_forcing, tmp_path):
         filepath.unlink()
 
 
-def test_files_have_same_hash(tidal_forcing, tmp_path):
+def test_files_have_same_hash(tidal_forcing, tmp_path, use_dask):
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"
@@ -228,7 +236,7 @@ def test_files_have_same_hash(tidal_forcing, tmp_path):
 
     tidal_forcing.to_yaml(yaml_filepath)
     tidal_forcing.save(filepath1)
-    tidal_forcing_from_file = TidalForcing.from_yaml(yaml_filepath)
+    tidal_forcing_from_file = TidalForcing.from_yaml(yaml_filepath, use_dask=use_dask)
     tidal_forcing_from_file.save(filepath2)
 
     hash1 = calculate_file_hash(filepath1)
@@ -241,7 +249,7 @@ def test_files_have_same_hash(tidal_forcing, tmp_path):
     filepath2.unlink()
 
 
-def test_from_yaml_missing_tidal_forcing(tmp_path):
+def test_from_yaml_missing_tidal_forcing(tmp_path, use_dask):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -279,7 +287,7 @@ def test_from_yaml_missing_tidal_forcing(tmp_path):
         with pytest.raises(
             ValueError, match="No TidalForcing configuration found in the YAML file."
         ):
-            TidalForcing.from_yaml(yaml_filepath)
+            TidalForcing.from_yaml(yaml_filepath, use_dask=use_dask)
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()

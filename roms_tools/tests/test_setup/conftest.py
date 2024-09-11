@@ -18,6 +18,9 @@ def pytest_addoption(parser):
         default=[],
         help="Specify which fixtures to overwrite. Use 'all' to overwrite all fixtures.",
     )
+    parser.addoption(
+        "--use_dask", action="store_true", default=False, help="Run tests with Dask"
+    )
 
 
 def pytest_configure(config):
@@ -26,13 +29,9 @@ def pytest_configure(config):
         config.option.overwrite = ["all"]
 
 
-def calculate_file_hash(filepath, hash_algorithm="sha256"):
-    """Calculate the hash of a file using the specified hash algorithm."""
-    hash_func = hashlib.new(hash_algorithm)
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_func.update(chunk)
-    return hash_func.hexdigest()
+@pytest.fixture(scope="session")
+def use_dask(request):
+    return request.config.getoption("--use_dask")
 
 
 @pytest.fixture(scope="session")
@@ -52,7 +51,7 @@ def grid_that_straddles_dateline():
 
 
 @pytest.fixture(scope="session")
-def tidal_forcing():
+def tidal_forcing(request, use_dask):
 
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
@@ -60,14 +59,12 @@ def tidal_forcing():
     fname = download_test_data("TPXO_regional_test_data.nc")
 
     return TidalForcing(
-        grid=grid,
-        source={"name": "TPXO", "path": fname},
-        ntides=1,
+        grid=grid, source={"name": "TPXO", "path": fname}, ntides=1, use_dask=use_dask
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions():
+def initial_conditions(request, use_dask):
     """
     Fixture for creating an InitialConditions object.
     """
@@ -92,11 +89,12 @@ def initial_conditions():
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc():
+def initial_conditions_with_bgc(request):
     """
     Fixture for creating an InitialConditions object.
     """
@@ -123,11 +121,12 @@ def initial_conditions_with_bgc():
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc_from_climatology():
+def initial_conditions_with_bgc_from_climatology(request, use_dask):
     """
     Fixture for creating an InitialConditions object.
     """
@@ -158,11 +157,12 @@ def initial_conditions_with_bgc_from_climatology():
             "name": "CESM_REGRIDDED",
             "climatology": True,
         },
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing():
+def boundary_forcing(request, use_dask):
     """
     Fixture for creating a BoundaryForcing object.
     """
@@ -188,11 +188,12 @@ def boundary_forcing():
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
         source={"name": "GLORYS", "path": fname},
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_climatology():
+def bgc_boundary_forcing_from_climatology(request, use_dask):
     """
     Fixture for creating a BoundaryForcing object.
     """
@@ -219,11 +220,12 @@ def bgc_boundary_forcing_from_climatology():
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
         type="bgc",
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def surface_forcing():
+def surface_forcing(request, use_dask):
     """
     Fixture for creating a SurfaceForcing object.
     """
@@ -248,11 +250,12 @@ def surface_forcing():
         start_time=start_time,
         end_time=end_time,
         source={"name": "ERA5", "path": fname},
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def coarse_surface_forcing():
+def coarse_surface_forcing(request, use_dask):
     """
     Fixture for creating a SurfaceForcing object.
     """
@@ -278,11 +281,12 @@ def coarse_surface_forcing():
         end_time=end_time,
         use_coarse_grid=True,
         source={"name": "ERA5", "path": fname},
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def corrected_surface_forcing():
+def corrected_surface_forcing(request, use_dask):
     """
     Fixture for creating a SurfaceForcing object with shortwave radiation correction.
     """
@@ -308,11 +312,12 @@ def corrected_surface_forcing():
         end_time=end_time,
         source={"name": "ERA5", "path": fname},
         correct_radiation=True,
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def bgc_surface_forcing():
+def bgc_surface_forcing(request, use_dask):
     """
     Fixture for creating a SurfaceForcing object with BGC.
     """
@@ -337,11 +342,12 @@ def bgc_surface_forcing():
         end_time=end_time,
         source={"name": "CESM_REGRIDDED", "path": fname_bgc},
         type="bgc",
+        use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def bgc_surface_forcing_from_climatology():
+def bgc_surface_forcing_from_climatology(request, use_dask):
     """
     Fixture for creating a SurfaceForcing object with BGC from climatology.
     """
@@ -366,4 +372,14 @@ def bgc_surface_forcing_from_climatology():
         end_time=end_time,
         source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
         type="bgc",
+        use_dask=use_dask,
     )
+
+
+def calculate_file_hash(filepath, hash_algorithm="sha256"):
+    """Calculate the hash of a file using the specified hash algorithm."""
+    hash_func = hashlib.new(hash_algorithm)
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_func.update(chunk)
+    return hash_func.hexdigest()

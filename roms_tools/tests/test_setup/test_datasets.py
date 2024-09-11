@@ -119,7 +119,7 @@ def non_global_dataset():
         ),
     ],
 )
-def test_select_times(data_fixture, expected_time_values, request):
+def test_select_times(data_fixture, expected_time_values, request, use_dask):
     """
     Test selecting times with different datasets.
     """
@@ -140,6 +140,7 @@ def test_select_times(data_fixture, expected_time_values, request):
             var_names={"var": "var"},
             start_time=start_time,
             end_time=end_time,
+            use_dask=use_dask,
         )
 
         assert dataset.ds is not None
@@ -157,7 +158,9 @@ def test_select_times(data_fixture, expected_time_values, request):
         ("global_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
     ],
 )
-def test_select_times_no_end_time(data_fixture, expected_time_values, request):
+def test_select_times_no_end_time(
+    data_fixture, expected_time_values, request, use_dask
+):
     """
     Test selecting times with only start_time specified.
     """
@@ -173,7 +176,10 @@ def test_select_times_no_end_time(data_fixture, expected_time_values, request):
     try:
         # Instantiate Dataset object using the temporary file
         dataset = Dataset(
-            filename=filepath, var_names={"var": "var"}, start_time=start_time
+            filename=filepath,
+            var_names={"var": "var"},
+            start_time=start_time,
+            use_dask=use_dask,
         )
 
         assert dataset.ds is not None
@@ -184,7 +190,7 @@ def test_select_times_no_end_time(data_fixture, expected_time_values, request):
         os.remove(filepath)
 
 
-def test_multiple_matching_times(global_dataset_with_multiple_times_per_day):
+def test_multiple_matching_times(global_dataset_with_multiple_times_per_day, use_dask):
     """
     Test handling when multiple matching times are found when end_time is not specified.
     """
@@ -200,12 +206,17 @@ def test_multiple_matching_times(global_dataset_with_multiple_times_per_day):
             ValueError,
             match="There must be exactly one time matching the start_time. Found 2 matching times.",
         ):
-            Dataset(filename=filepath, var_names={"var": "var"}, start_time=start_time)
+            Dataset(
+                filename=filepath,
+                var_names={"var": "var"},
+                start_time=start_time,
+                use_dask=use_dask,
+            )
     finally:
         os.remove(filepath)
 
 
-def test_warnings_times(global_dataset):
+def test_warnings_times(global_dataset, use_dask):
     """
     Test handling when no matching times are found.
     """
@@ -226,6 +237,7 @@ def test_warnings_times(global_dataset):
                 var_names={"var": "var"},
                 start_time=start_time,
                 end_time=end_time,
+                use_dask=use_dask,
             )
 
         with pytest.warns(Warning, match="No records found at or after the end_time."):
@@ -237,12 +249,13 @@ def test_warnings_times(global_dataset):
                 var_names={"var": "var"},
                 start_time=start_time,
                 end_time=end_time,
+                use_dask=use_dask,
             )
     finally:
         os.remove(filepath)
 
 
-def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
+def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset, use_dask):
     """
     Test reversing latitude when it is not ascending, the choose_subdomain method, and the convert_to_negative_depth method of the Dataset class.
     """
@@ -265,6 +278,7 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
                 "depth": "depth",
             },
             start_time=start_time,
+            use_dask=use_dask,
         )
 
         assert np.all(np.diff(dataset.ds["latitude"]) > 0)
@@ -290,6 +304,7 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
                 "depth": "depth",
             },
             start_time=start_time,
+            use_dask=use_dask,
         )
         dataset.choose_subdomain(
             latitude_range=(-10, 10), longitude_range=(10, 20), margin=1, straddle=False
@@ -308,26 +323,30 @@ def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset):
         os.remove(filepath)
 
 
-def test_check_if_global_with_global_dataset(global_dataset):
+def test_check_if_global_with_global_dataset(global_dataset, use_dask):
 
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
         global_dataset.to_netcdf(filepath)
     try:
-        dataset = Dataset(filename=filepath, var_names={"var": "var"})
+        dataset = Dataset(
+            filename=filepath, var_names={"var": "var"}, use_dask=use_dask
+        )
         is_global = dataset.check_if_global(dataset.ds)
         assert is_global
     finally:
         os.remove(filepath)
 
 
-def test_check_if_global_with_non_global_dataset(non_global_dataset):
+def test_check_if_global_with_non_global_dataset(non_global_dataset, use_dask):
 
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         filepath = tmpfile.name
         non_global_dataset.to_netcdf(filepath)
     try:
-        dataset = Dataset(filename=filepath, var_names={"var": "var"})
+        dataset = Dataset(
+            filename=filepath, var_names={"var": "var"}, use_dask=use_dask
+        )
         is_global = dataset.check_if_global(dataset.ds)
 
         assert not is_global
@@ -335,7 +354,7 @@ def test_check_if_global_with_non_global_dataset(non_global_dataset):
         os.remove(filepath)
 
 
-def test_check_dataset(global_dataset):
+def test_check_dataset(global_dataset, use_dask):
 
     ds = global_dataset.copy()
     ds = ds.drop_vars("var")
@@ -357,6 +376,7 @@ def test_check_dataset(global_dataset):
                 var_names={"var": "var"},
                 start_time=start_time,
                 end_time=end_time,
+                use_dask=use_dask,
             )
     finally:
         os.remove(filepath)
@@ -381,14 +401,15 @@ def test_check_dataset(global_dataset):
                 var_names={"var": "var"},
                 start_time=start_time,
                 end_time=end_time,
+                use_dask=use_dask,
             )
     finally:
         os.remove(filepath)
 
 
-def test_era5_correction_choose_subdomain():
+def test_era5_correction_choose_subdomain(use_dask):
 
-    data = ERA5Correction()
+    data = ERA5Correction(use_dask=use_dask)
     lats = data.ds.latitude[10:20]
     lons = data.ds.longitude[10:20]
     coords = {"latitude": lats, "longitude": lons}

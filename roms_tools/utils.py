@@ -2,6 +2,8 @@ from numbers import Integral
 
 import numpy as np
 import xarray as xr
+from typing import Union
+from pathlib import Path
 
 
 def partition(
@@ -247,3 +249,51 @@ def partition(
             partitioned_datasets.append(partitioned_ds)
 
     return file_numbers, partitioned_datasets
+
+
+def partition_netcdf(
+    filepath: Union[str, Path], np_eta: int = 1, np_xi: int = 1
+) -> None:
+    """
+    Partition a ROMS NetCDF file into smaller spatial tiles and save them to disk.
+
+    This function divides the dataset in the specified NetCDF file into `np_eta` by `np_xi` tiles.
+    Each tile is saved as a separate NetCDF file.
+
+    Parameters
+    ----------
+    filepath : Union[str, Path]
+        The path to the input NetCDF file.
+
+    np_eta : int, optional
+        The number of partitions along the `eta` direction. Must be a positive integer. Default is 1.
+
+    np_xi : int, optional
+        The number of partitions along the `xi` direction. Must be a positive integer. Default is 1.
+
+    Returns
+    -------
+    None
+    """
+
+    # Ensure filepath is a Path object
+    filepath = Path(filepath)
+
+    # Open the dataset
+    ds = xr.open_dataset(filepath.with_suffix(".nc"))
+
+    # Partition the dataset
+    file_numbers, partitioned_datasets = partition(ds, np_eta=np_eta, np_xi=np_xi)
+
+    # Generate paths to the partitioned files
+    base_filepath = filepath.with_suffix("")
+    paths_to_partitioned_files = [
+        f"{base_filepath}.{file_number}.nc" for file_number in file_numbers
+    ]
+
+    print("Saving the following files:")
+    for file in paths_to_partitioned_files:
+        print(file)
+
+    # Save the partitioned datasets to files
+    xr.save_mfdataset(partitioned_datasets, paths_to_partitioned_files)

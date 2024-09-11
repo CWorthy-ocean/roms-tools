@@ -1,8 +1,8 @@
 import pytest
-
+from pathlib import Path
 import xarray.testing as xrt
 
-from roms_tools.utils import partition
+from roms_tools.utils import partition, partition_netcdf
 from roms_tools import Grid
 
 
@@ -234,3 +234,17 @@ class TestFileNumbers:
 
         # Check if file_numbers is a continuous range without gaps
         assert set(file_numbers) == set(expected_file_numbers)
+
+
+class TestPartitionNetcdf:
+    def test_partition_netcdf(self, grid, tmp_path):
+        filepath = tmp_path / "test_grid.nc"
+        grid.save(filepath)
+
+        partition_netcdf(filepath, np_eta=3, np_xi=3)
+
+        filepath_str = str(filepath.with_suffix(""))
+        expected_filepath_list = [(filepath_str + f".{index}.nc") for index in range(9)]
+        for expected_filepath in expected_filepath_list:
+            assert Path(expected_filepath).exists()
+            Path(expected_filepath).unlink()

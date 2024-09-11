@@ -54,6 +54,8 @@ class SurfaceForcing(ROMSToolsMixins):
         Whether to interpolate to coarsened grid. Default is False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
+    use_dask: bool
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
     Attributes
     ----------
@@ -81,6 +83,8 @@ class SurfaceForcing(ROMSToolsMixins):
     correct_radiation: bool = False
     use_coarse_grid: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
+    use_dask: bool = True
+
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -193,6 +197,7 @@ class SurfaceForcing(ROMSToolsMixins):
             "start_time": self.start_time,
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
+            "use_dask": self.use_dask,
         }
 
         if self.type == "physics":
@@ -510,7 +515,9 @@ class SurfaceForcing(ROMSToolsMixins):
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "SurfaceForcing":
+    def from_yaml(
+        cls, filepath: Union[str, Path], use_dask: bool = True
+    ) -> "SurfaceForcing":
         """
         Create an instance of the SurfaceForcing class from a YAML file.
 
@@ -518,6 +525,8 @@ class SurfaceForcing(ROMSToolsMixins):
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        use_dask: bool
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
         Returns
         -------
@@ -554,7 +563,4 @@ class SurfaceForcing(ROMSToolsMixins):
         grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of SurfaceForcing
-        return cls(
-            grid=grid,
-            **surface_forcing_data,
-        )
+        return cls(grid=grid, **surface_forcing_data, use_dask=use_dask)

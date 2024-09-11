@@ -35,6 +35,9 @@ class Dataset:
         Dictionary specifying the names of dimensions in the dataset.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
+    use_dask: bool
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to True.
+
 
     Attributes
     ----------
@@ -68,6 +71,7 @@ class Dataset:
         }
     )
     climatology: Optional[bool] = False
+    use_dask: Optional[bool] = True
 
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
@@ -128,31 +132,39 @@ class Dataset:
             )
 
         # Load the dataset
-        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-            # Define the chunk sizes
-            chunks = {
-                self.dim_names["latitude"]: -1,
-                self.dim_names["longitude"]: -1,
-            }
-            if "depth" in self.dim_names.keys():
-                chunks[self.dim_names["depth"]] = -1
-            if "time" in self.dim_names.keys():
-                chunks[self.dim_names["time"]] = 1
+        if self.use_dask:
+            with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+                # Define the chunk sizes
+                chunks = {
+                    self.dim_names["latitude"]: -1,
+                    self.dim_names["longitude"]: -1,
+                }
+                if "depth" in self.dim_names.keys():
+                    chunks[self.dim_names["depth"]] = -1
+                if "time" in self.dim_names.keys():
+                    chunks[self.dim_names["time"]] = 1
 
-                ds = xr.open_mfdataset(
-                    self.filename,
-                    combine="nested",
-                    concat_dim=self.dim_names["time"],
-                    coords="minimal",
-                    compat="override",
-                    chunks=chunks,
-                    engine="netcdf4",
-                )
-            else:
-                ds = xr.open_dataset(
-                    self.filename,
-                    chunks=chunks,
-                )
+                    ds = xr.open_mfdataset(
+                        self.filename,
+                        combine="nested",
+                        concat_dim=self.dim_names["time"],
+                        coords="minimal",
+                        compat="override",
+                        chunks=chunks,
+                        engine="netcdf4",
+                    )
+                else:
+                    ds = xr.open_dataset(
+                        self.filename,
+                        chunks=chunks,
+                    )
+        else:
+            ds = xr.open_dataset(self.filename, chunks=None)
+            if (
+                "time" in self.dim_names.keys()
+                and self.dim_names["time"] not in ds.dims
+            ):
+                ds = ds.expand_dims(self.dim_names["time"])
 
         return ds
 
@@ -416,7 +428,11 @@ class Dataset:
                 field = ds[var]
                 field_concatenated = xr.concat(
                     [field, field, field], dim=self.dim_names["longitude"]
-                ).chunk({self.dim_names["longitude"]: -1})
+                )
+                if self.use_dask:
+                    field_concatenated = field_concatenated.chunk(
+                        {self.dim_names["longitude"]: -1}
+                    )
                 field_concatenated[self.dim_names["longitude"]] = lon_concatenated
                 ds_concatenated[var] = field_concatenated
             else:
@@ -726,7 +742,7 @@ class CESMDataset(Dataset):
     Attributes
     ----------
     ds : xr.Dataset
-        The xarray Dataset containing the GLORYS data on its original grid.
+        The xarray Dataset containing the CESM data on its original grid.
     """
 
     # overwrite load_data method from parent class
@@ -745,38 +761,17 @@ class CESMDataset(Dataset):
             If the specified file does not exist.
         """
 
-        # Check if the file exists
-        matching_files = glob.glob(self.filename)
-        if not matching_files:
-            raise FileNotFoundError(
-                f"No files found matching the pattern '{self.filename}'."
-            )
+        ds = super().load_data()
 
-        # Load the dataset
-        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-            # Define the chunk sizes
-            chunks = {
-                self.dim_names["latitude"]: -1,
-                self.dim_names["longitude"]: -1,
-            }
-
-            ds = xr.open_mfdataset(
-                self.filename,
-                combine="nested",
-                coords="minimal",
-                compat="override",
-                chunks=chunks,
-                engine="netcdf4",
-            )
-            if "time" not in self.dim_names:
-                if "time" in ds.dims:
-                    self.dim_names["time"] = "time"
+        if "time" not in self.dim_names:
+            if "time" in ds.dims:
+                self.dim_names["time"] = "time"
+            else:
+                if "month" in ds.dims:
+                    self.dim_names["time"] = "month"
                 else:
-                    if "month" in ds.dims:
-                        self.dim_names["time"] = "month"
-                    else:
-                        ds = ds.expand_dims({"time": 1})
-                        self.dim_names["time"] = "time"
+                    ds = ds.expand_dims({"time": 1})
+                    self.dim_names["time"] = "time"
 
         return ds
 
@@ -840,7 +835,7 @@ class CESMBGCDataset(CESMDataset):
     Attributes
     ----------
     ds : xr.Dataset
-        The xarray Dataset containing the GLORYS data on its original grid.
+        The xarray Dataset containing the CESM data on its original grid.
     """
 
     var_names: Dict[str, str] = field(
@@ -907,7 +902,8 @@ class CESMBGCDataset(CESMDataset):
                 for var in self.var_names:
                     if "z_t_150m" in self.ds[var].dims:
                         self.ds[var] = self.ds[var].rename({"z_t_150m": "z_t"})
-                        self.ds[var] = self.ds[var].chunk({"z_t": -1})
+                        if self.use_dask:
+                            self.ds[var] = self.ds[var].chunk({"z_t": -1})
             # Convert depth from cm to m
             ds = self.ds.assign_coords({"depth": self.ds["z_t"] / 100})
             ds["depth"].attrs["long_name"] = "Depth"
@@ -950,7 +946,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
     Attributes
     ----------
     ds : xr.Dataset
-        The xarray Dataset containing the GLORYS data on its original grid.
+        The xarray Dataset containing the CESM data on its original grid.
     """
 
     var_names: Dict[str, str] = field(
@@ -1011,7 +1007,7 @@ class ERA5Dataset(Dataset):
     Attributes
     ----------
     ds : xr.Dataset
-        The xarray Dataset containing the GLORYS data on its original grid.
+        The xarray Dataset containing the ERA5 data on its original grid.
     """
 
     var_names: Dict[str, str] = field(

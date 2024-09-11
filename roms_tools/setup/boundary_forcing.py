@@ -45,6 +45,8 @@ class BoundaryForcing(ROMSToolsMixins):
         - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
+    use_dask: bool
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
     Attributes
     ----------
@@ -77,6 +79,7 @@ class BoundaryForcing(ROMSToolsMixins):
     source: Dict[str, Union[str, None]]
     type: str = "physics"
     model_reference_date: datetime = datetime(2000, 1, 1)
+    use_dask: bool = True
 
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -157,6 +160,7 @@ class BoundaryForcing(ROMSToolsMixins):
             "start_time": self.start_time,
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
+            "use_dask": self.use_dask,
         }
 
         if self.type == "physics":
@@ -557,7 +561,9 @@ class BoundaryForcing(ROMSToolsMixins):
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "BoundaryForcing":
+    def from_yaml(
+        cls, filepath: Union[str, Path], use_dask: bool = True
+    ) -> "BoundaryForcing":
         """
         Create an instance of the BoundaryForcing class from a YAML file.
 
@@ -565,6 +571,8 @@ class BoundaryForcing(ROMSToolsMixins):
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        use_dask: bool
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
         Returns
         -------
@@ -601,7 +609,4 @@ class BoundaryForcing(ROMSToolsMixins):
         grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of InitialConditions
-        return cls(
-            grid=grid,
-            **boundary_forcing_data,
-        )
+        return cls(grid=grid, **boundary_forcing_data, use_dask=use_dask)

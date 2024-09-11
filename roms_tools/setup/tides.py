@@ -42,6 +42,8 @@ class TidalForcing(ROMSToolsMixins):
         The Allan factor used in tidal model computation. Default is 2.0.
     model_reference_date : datetime, optional
         The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
+    use_dask: bool
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
     Attributes
     ----------
@@ -60,6 +62,7 @@ class TidalForcing(ROMSToolsMixins):
     ntides: int = 10
     allan_factor: float = 2.0
     model_reference_date: datetime = datetime(2000, 1, 1)
+    use_dask: bool = True
 
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -152,7 +155,7 @@ class TidalForcing(ROMSToolsMixins):
     def _get_data(self):
 
         if self.source["name"] == "TPXO":
-            data = TPXODataset(filename=self.source["path"])
+            data = TPXODataset(filename=self.source["path"], use_dask=self.use_dask)
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
         return data
@@ -353,7 +356,9 @@ class TidalForcing(ROMSToolsMixins):
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "TidalForcing":
+    def from_yaml(
+        cls, filepath: Union[str, Path], use_dask: bool = True
+    ) -> "TidalForcing":
         """
         Create an instance of the TidalForcing class from a YAML file.
 
@@ -361,6 +366,8 @@ class TidalForcing(ROMSToolsMixins):
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        use_dask: bool
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
         Returns
         -------
@@ -398,7 +405,7 @@ class TidalForcing(ROMSToolsMixins):
         grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of TidalForcing
-        return cls(grid=grid, **tidal_forcing_params)
+        return cls(grid=grid, **tidal_forcing_params, use_dask=use_dask)
 
     def _get_corrected_tides(self, data):
 

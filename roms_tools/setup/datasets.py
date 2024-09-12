@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 import glob
 from datetime import datetime, timedelta
 import numpy as np
-from typing import Dict, Optional
+from typing import Dict, Optional, Union, List
+from pathlib import Path
 import dask
 import warnings
 from roms_tools.setup.utils import (
@@ -23,8 +24,9 @@ class Dataset:
 
     Parameters
     ----------
-    filename : str
-        The path to the data files. Can contain wildcards if use_dask is True.
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards)
+        or a list of strings or Path objects containing multiple files.
     start_time : Optional[datetime], optional
         The start time for selecting relevant data. If not provided, the data is not filtered by start time.
     end_time : Optional[datetime], optional
@@ -60,7 +62,7 @@ class Dataset:
     Dimensions:  ...
     """
 
-    filename: str
+    filename: Union[str, Path, List[Union[str, Path]]]
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     var_names: Dict[str, str]
@@ -125,56 +127,79 @@ class Dataset:
             If the specified file does not exist.
         ValueError
             If wildcards are found in the filename and use_dask=False.
+            If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
 
-        # Check for wildcards in the filename
-        # xarray.open_mfdataset is currently only working with chunks, see https://github.com/pydata/xarray/issues/9038
-        if not self.use_dask and re.search(r"[\*\?\[\]]", self.filename):
+        # Convert Path objects to strings
+        if isinstance(self.filename, (str, Path)):
+            filename_str = str(self.filename)
+        elif isinstance(self.filename, list):
+            filename_str = [str(f) for f in self.filename]
+        else:
             raise ValueError(
-                "Wildcards detected in the filename but use_dask=False. "
-                "Wildcards can only be used when use_dask=True."
+                "filename must be a string, Path, or a list of strings/Paths."
             )
 
-        # Check if the file exists
-        matching_files = glob.glob(self.filename)
-        if not matching_files:
-            raise FileNotFoundError(
-                f"No files found matching the pattern '{self.filename}'."
+        # Handle the case when filename is a string
+        if isinstance(filename_str, str):
+            if re.search(r"[\*\?\[\]]", filename_str):
+                if not self.use_dask:
+                    raise ValueError(
+                        "Wildcards detected in the filename but use_dask=False. "
+                        "Wildcards can only be used when use_dask=True."
+                    )
+                matching_files = glob.glob(filename_str)
+                if not matching_files:
+                    raise FileNotFoundError(
+                        f"No files found matching the pattern '{filename_str}'."
+                    )
+            else:
+                matching_files = [filename_str]
+
+        # Handle the case when filename is a list
+        elif isinstance(filename_str, list):
+            if not self.use_dask:
+                raise ValueError(
+                    "A list of files is provided, but use_dask=False. "
+                    "Multiple files can only be loaded when use_dask=True."
+                )
+            matching_files = filename_str
+
+        # Check if time dimension is available when multiple files are provided
+        if isinstance(filename_str, list) and "time" not in self.dim_names:
+            raise ValueError(
+                "A list of files is provided, but time dimension is not available. "
+                "A time dimension must be available to concatenate the files."
             )
 
-        # Load the dataset
         if self.use_dask:
             with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-                # Define the chunk sizes
                 chunks = {
                     self.dim_names["latitude"]: -1,
                     self.dim_names["longitude"]: -1,
                 }
-                if "depth" in self.dim_names.keys():
+                if "depth" in self.dim_names:
                     chunks[self.dim_names["depth"]] = -1
-                if "time" in self.dim_names.keys():
+                if "time" in self.dim_names:
                     chunks[self.dim_names["time"]] = 1
 
-                    ds = xr.open_mfdataset(
-                        self.filename,
-                        combine="nested",
-                        concat_dim=self.dim_names["time"],
-                        coords="minimal",
-                        compat="override",
-                        chunks=chunks,
-                    )
+                if re.search(r"[\*\?\[\]]", filename_str) or len(matching_files) == 1:
+                    kwargs = {"combine": "by_coords"}
                 else:
-                    ds = xr.open_dataset(
-                        self.filename,
-                        chunks=chunks,
-                    )
+                    kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
+
+                ds = xr.open_mfdataset(
+                    matching_files,
+                    coords="minimal",
+                    compat="override",
+                    chunks=chunks,
+                    **kwargs,
+                )
         else:
-            ds = xr.open_dataset(self.filename, chunks=None)
-            if (
-                "time" in self.dim_names.keys()
-                and self.dim_names["time"] not in ds.dims
-            ):
-                ds = ds.expand_dims(self.dim_names["time"])
+            ds = xr.open_dataset(matching_files[0], chunks=None)
+
+        if "time" in self.dim_names and self.dim_names["time"] not in ds.dims:
+            ds = ds.expand_dims(self.dim_names["time"])
 
         return ds
 

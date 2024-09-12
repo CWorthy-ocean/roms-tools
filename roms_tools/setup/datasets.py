@@ -162,7 +162,6 @@ class Dataset:
                         coords="minimal",
                         compat="override",
                         chunks=chunks,
-                        engine="netcdf4",
                     )
                 else:
                     ds = xr.open_dataset(

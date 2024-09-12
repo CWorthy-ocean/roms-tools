@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import yaml
 import importlib.metadata
-from typing import Dict, Union
+from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.mixins import ROMSToolsMixins
@@ -40,8 +40,8 @@ class BoundaryForcing(ROMSToolsMixins):
     source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the boundary forcing data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "path" (str): Path to the raw data file. Wildcards
-          can be used to specify multiple files.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
@@ -76,7 +76,7 @@ class BoundaryForcing(ROMSToolsMixins):
             "west": True,
         }
     )
-    source: Dict[str, Union[str, None]]
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = True

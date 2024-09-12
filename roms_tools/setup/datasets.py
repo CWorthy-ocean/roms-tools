@@ -25,7 +25,7 @@ class Dataset:
     Parameters
     ----------
     filename : Union[str, Path, List[Union[str, Path]]]
-        The path to the data file(s). Can be a single string (with or without wildcards)
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
         or a list of strings or Path objects containing multiple files.
     start_time : Optional[datetime], optional
         The start time for selecting relevant data. If not provided, the data is not filtered by start time.

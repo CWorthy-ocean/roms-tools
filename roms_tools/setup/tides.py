@@ -3,7 +3,7 @@ import xarray as xr
 import numpy as np
 import yaml
 import importlib.metadata
-from typing import Dict, Union
+from typing import Dict, Union, List
 
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
@@ -35,7 +35,8 @@ class TidalForcing(ROMSToolsMixins):
     source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the tidal data:
         - "name" (str): Name of the data source (e.g., "TPXO").
-        - "path" (str): Path to the tidal data file. Can contain wildcards.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
     ntides : int, optional
         Number of constituents to consider. Maximum number is 14. Default is 10.
     allan_factor : float, optional
@@ -58,7 +59,7 @@ class TidalForcing(ROMSToolsMixins):
     """
 
     grid: Grid
-    source: Dict[str, Union[str, None]]
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     ntides: int = 10
     allan_factor: float = 2.0
     model_reference_date: datetime = datetime(2000, 1, 1)

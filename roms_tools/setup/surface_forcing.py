@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
-from typing import Dict, Union
+from typing import Dict, Union, List
 from roms_tools.setup.mixins import ROMSToolsMixins
 from roms_tools.setup.datasets import (
     ERA5Dataset,
@@ -42,8 +42,8 @@ class SurfaceForcing(ROMSToolsMixins):
     source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the surface forcing data:
         - "name" (str): Name of the data source (e.g., "ERA5").
-        - "path" (str): Path to the raw data file. Wildcards
-          can be used to specify multiple files.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
     type : str
         Specifies the type of forcing data, either "physics" for physical
@@ -78,7 +78,7 @@ class SurfaceForcing(ROMSToolsMixins):
     grid: Grid
     start_time: datetime
     end_time: datetime
-    source: Dict[str, Union[str, None]]
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     correct_radiation: bool = False
     use_coarse_grid: bool = False

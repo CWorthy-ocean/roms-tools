@@ -3,7 +3,7 @@ import numpy as np
 import yaml
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Union
+from typing import Dict, Union, List
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
@@ -33,12 +33,14 @@ class InitialConditions(ROMSToolsMixins):
     source : Dict[str, Union[str, None]]
         Dictionary specifying the source of the physical initial condition data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "path" (str): Path to the physical data file. Can contain wildcards.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
     bgc_source : Optional[Dict[str, Union[str, None]]]
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
         - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
-        - "path" (str): Path to the BGC data file. Can contain wildcards.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to True.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
@@ -66,8 +68,8 @@ class InitialConditions(ROMSToolsMixins):
 
     grid: Grid
     ini_time: datetime
-    source: Dict[str, Union[str, None]]
-    bgc_source: Optional[Dict[str, Union[str, None]]] = None
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    bgc_source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = True
 

@@ -39,11 +39,17 @@ jobs:
            python - V
            python -m pip install -e . --no-deps --force-reinstall
 
-      - name: Running Tests
+      - name: Running Tests (without Dask)
         shell: bash -l {0}
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/*
+
+      - name: Running Tests (with Dask)
+        shell: bash -l {0}
+        run: |
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
 
       - name: Get coverage report
         shell: bash -l {0}

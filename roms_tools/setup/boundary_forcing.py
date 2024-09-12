@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import yaml
 import importlib.metadata
-from typing import Dict, Union
+from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.mixins import ROMSToolsMixins
@@ -37,14 +37,16 @@ class BoundaryForcing(ROMSToolsMixins):
         End time of the desired boundary forcing data.
     boundaries : Dict[str, bool], optional
         Dictionary specifying which boundaries are forced (south, east, north, west). Default is all True.
-    source : Dict[str, Union[str, None]]
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the boundary forcing data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "path" (str): Path to the raw data file. Wildcards
-          can be used to specify multiple files.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
+    use_dask: bool
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
     Attributes
     ----------
@@ -74,9 +76,10 @@ class BoundaryForcing(ROMSToolsMixins):
             "west": True,
         }
     )
-    source: Dict[str, Union[str, None]]
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     model_reference_date: datetime = datetime(2000, 1, 1)
+    use_dask: bool = True
 
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -157,6 +160,7 @@ class BoundaryForcing(ROMSToolsMixins):
             "start_time": self.start_time,
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
+            "use_dask": self.use_dask,
         }
 
         if self.type == "physics":
@@ -561,7 +565,9 @@ class BoundaryForcing(ROMSToolsMixins):
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "BoundaryForcing":
+    def from_yaml(
+        cls, filepath: Union[str, Path], use_dask: bool = True
+    ) -> "BoundaryForcing":
         """
         Create an instance of the BoundaryForcing class from a YAML file.
 
@@ -569,6 +575,8 @@ class BoundaryForcing(ROMSToolsMixins):
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        use_dask: bool
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
         Returns
         -------
@@ -605,7 +613,4 @@ class BoundaryForcing(ROMSToolsMixins):
         grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of InitialConditions
-        return cls(
-            grid=grid,
-            **boundary_forcing_data,
-        )
+        return cls(grid=grid, **boundary_forcing_data, use_dask=use_dask)

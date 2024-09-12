@@ -61,27 +61,29 @@ def example_grid():
 
 
 # Test initialization with missing 'name' in source
-def test_initial_conditions_missing_physics_name(example_grid):
+def test_initial_conditions_missing_physics_name(example_grid, use_dask):
     with pytest.raises(ValueError, match="`source` must include a 'name'."):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
             source={"path": "physics_data.nc"},
+            use_dask=use_dask,
         )
 
 
 # Test initialization with missing 'path' in source
-def test_initial_conditions_missing_physics_path(example_grid):
+def test_initial_conditions_missing_physics_path(example_grid, use_dask):
     with pytest.raises(ValueError, match="`source` must include a 'path'."):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS"},
+            use_dask=use_dask,
         )
 
 
 # Test initialization with missing 'name' in bgc_source
-def test_initial_conditions_missing_bgc_name(example_grid):
+def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
 
     fname = download_test_data("GLORYS_coarse_test_data.nc")
     with pytest.raises(
@@ -92,11 +94,12 @@ def test_initial_conditions_missing_bgc_name(example_grid):
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"path": "bgc_data.nc"},
+            use_dask=use_dask,
         )
 
 
 # Test initialization with missing 'path' in bgc_source
-def test_initial_conditions_missing_bgc_path(example_grid):
+def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
 
     fname = download_test_data("GLORYS_coarse_test_data.nc")
     with pytest.raises(
@@ -107,11 +110,12 @@ def test_initial_conditions_missing_bgc_path(example_grid):
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "CESM_REGRIDDED"},
+            use_dask=use_dask,
         )
 
 
 # Test default climatology value
-def test_initial_conditions_default_climatology(example_grid):
+def test_initial_conditions_default_climatology(example_grid, use_dask):
 
     fname = download_test_data("GLORYS_coarse_test_data.nc")
 
@@ -119,13 +123,14 @@ def test_initial_conditions_default_climatology(example_grid):
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
+        use_dask=use_dask,
     )
 
     assert initial_conditions.source["climatology"] is False
     assert initial_conditions.bgc_source is None
 
 
-def test_initial_conditions_default_bgc_climatology(example_grid):
+def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
 
     fname = download_test_data("GLORYS_coarse_test_data.nc")
     fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")
@@ -135,25 +140,34 @@ def test_initial_conditions_default_bgc_climatology(example_grid):
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
         bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
+        use_dask=use_dask,
     )
 
     assert initial_conditions.bgc_source["climatology"] is True
 
 
-def test_interpolation_from_climatology(initial_conditions_with_bgc_from_climatology):
+def test_interpolation_from_climatology(
+    initial_conditions_with_bgc_from_climatology, use_dask
+):
 
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
     ds = xr.open_dataset(fname_bgc)
 
     # check if interpolated value for Jan 15 is indeed January value from climatology
     bgc_data = CESMBGCDataset(
-        filename=fname_bgc, start_time=datetime(2012, 1, 15), climatology=True
+        filename=fname_bgc,
+        start_time=datetime(2012, 1, 15),
+        climatology=True,
+        use_dask=use_dask,
     )
     assert np.allclose(ds["ALK"].sel(month=1), bgc_data.ds["ALK"], equal_nan=True)
 
     # check if interpolated value for Jan 30 is indeed average of January and February value from climatology
     bgc_data = CESMBGCDataset(
-        filename=fname_bgc, start_time=datetime(2012, 1, 30), climatology=True
+        filename=fname_bgc,
+        start_time=datetime(2012, 1, 30),
+        climatology=True,
+        use_dask=use_dask,
     )
     assert np.allclose(
         0.5 * (ds["ALK"].sel(month=1) + ds["ALK"].sel(month=2)),
@@ -234,7 +248,7 @@ def test_initial_conditions_plot_save(
                 expected_filepath.unlink()
 
 
-def test_roundtrip_yaml(initial_conditions, tmp_path):
+def test_roundtrip_yaml(initial_conditions, tmp_path, use_dask):
     """Test that creating an InitialConditions object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
     # Create a temporary filepath using the tmp_path fixture
@@ -246,7 +260,9 @@ def test_roundtrip_yaml(initial_conditions, tmp_path):
 
         initial_conditions.to_yaml(filepath)
 
-        initial_conditions_from_file = InitialConditions.from_yaml(filepath)
+        initial_conditions_from_file = InitialConditions.from_yaml(
+            filepath, use_dask=use_dask
+        )
 
         assert initial_conditions == initial_conditions_from_file
 
@@ -254,7 +270,7 @@ def test_roundtrip_yaml(initial_conditions, tmp_path):
         filepath.unlink()
 
 
-def test_files_have_same_hash(initial_conditions, tmp_path):
+def test_files_have_same_hash(initial_conditions, tmp_path, use_dask):
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"
@@ -262,7 +278,7 @@ def test_files_have_same_hash(initial_conditions, tmp_path):
 
     initial_conditions.to_yaml(yaml_filepath)
     initial_conditions.save(filepath1)
-    ic_from_file = InitialConditions.from_yaml(yaml_filepath)
+    ic_from_file = InitialConditions.from_yaml(yaml_filepath, use_dask)
     ic_from_file.save(filepath2)
 
     hash1 = calculate_file_hash(filepath1)
@@ -275,7 +291,7 @@ def test_files_have_same_hash(initial_conditions, tmp_path):
     filepath2.unlink()
 
 
-def test_from_yaml_missing_initial_conditions(tmp_path):
+def test_from_yaml_missing_initial_conditions(tmp_path, use_dask):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -314,7 +330,7 @@ def test_from_yaml_missing_initial_conditions(tmp_path):
             ValueError,
             match="No InitialConditions configuration found in the YAML file.",
         ):
-            InitialConditions.from_yaml(yaml_filepath)
+            InitialConditions.from_yaml(yaml_filepath, use_dask)
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()

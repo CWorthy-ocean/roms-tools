@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
-from typing import Dict, Union
+from typing import Dict, Union, List
 from roms_tools.setup.mixins import ROMSToolsMixins
 from roms_tools.setup.datasets import (
     ERA5Dataset,
@@ -39,11 +39,11 @@ class SurfaceForcing(ROMSToolsMixins):
         Start time of the desired surface forcing data.
     end_time : datetime
         End time of the desired surface forcing data.
-    source : Dict[str, Union[str, None]]
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data:
         - "name" (str): Name of the data source (e.g., "ERA5").
-        - "path" (str): Path to the raw data file. Wildcards
-          can be used to specify multiple files.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
     type : str
         Specifies the type of forcing data, either "physics" for physical
@@ -54,6 +54,8 @@ class SurfaceForcing(ROMSToolsMixins):
         Whether to interpolate to coarsened grid. Default is False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
+    use_dask: bool
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
     Attributes
     ----------
@@ -76,11 +78,13 @@ class SurfaceForcing(ROMSToolsMixins):
     grid: Grid
     start_time: datetime
     end_time: datetime
-    source: Dict[str, Union[str, None]]
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     correct_radiation: bool = False
     use_coarse_grid: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
+    use_dask: bool = True
+
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -193,6 +197,7 @@ class SurfaceForcing(ROMSToolsMixins):
             "start_time": self.start_time,
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
+            "use_dask": self.use_dask,
         }
 
         if self.type == "physics":
@@ -514,7 +519,9 @@ class SurfaceForcing(ROMSToolsMixins):
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "SurfaceForcing":
+    def from_yaml(
+        cls, filepath: Union[str, Path], use_dask: bool = True
+    ) -> "SurfaceForcing":
         """
         Create an instance of the SurfaceForcing class from a YAML file.
 
@@ -522,6 +529,8 @@ class SurfaceForcing(ROMSToolsMixins):
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        use_dask: bool
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
         Returns
         -------
@@ -558,7 +567,4 @@ class SurfaceForcing(ROMSToolsMixins):
         grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of SurfaceForcing
-        return cls(
-            grid=grid,
-            **surface_forcing_data,
-        )
+        return cls(grid=grid, **surface_forcing_data, use_dask=use_dask)

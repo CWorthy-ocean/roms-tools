@@ -171,7 +171,7 @@ def grid_that_straddles_180_degree_meridian():
         "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
     ],
 )
-def test_successful_initialization_with_regional_data(grid_fixture, request):
+def test_successful_initialization_with_regional_data(grid_fixture, request, use_dask):
     """
     Test the initialization of SurfaceForcing with regional ERA5 data.
 
@@ -200,6 +200,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
             start_time=start_time,
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
+            use_dask=use_dask,
         )
 
         assert sfc_forcing.ds is not None
@@ -238,7 +239,9 @@ def test_successful_initialization_with_regional_data(grid_fixture, request):
         "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
     ],
 )
-def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
+def test_nan_detection_initialization_with_regional_data(
+    grid_fixture, request, use_dask
+):
     """
     Test handling of NaN values during initialization with regional data.
 
@@ -260,11 +263,12 @@ def test_nan_detection_initialization_with_regional_data(grid_fixture, request):
                 start_time=start_time,
                 end_time=end_time,
                 source={"name": "ERA5", "path": fname},
+                use_dask=use_dask,
             )
 
 
 def test_no_longitude_intersection_initialization_with_regional_data(
-    grid_that_straddles_180_degree_meridian,
+    grid_that_straddles_180_degree_meridian, use_dask
 ):
     """
     Test initialization of SurfaceForcing with a grid that straddles the 180° meridian.
@@ -287,6 +291,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
                 start_time=start_time,
                 end_time=end_time,
                 source={"name": "ERA5", "path": fname},
+                use_dask=use_dask,
             )
 
 
@@ -303,7 +308,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
         "grid_that_straddles_180_degree_meridian",
     ],
 )
-def test_successful_initialization_with_global_data(grid_fixture, request):
+def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
     """
     Test initialization of SurfaceForcing with global data.
 
@@ -324,6 +329,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
             start_time=start_time,
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
+            use_dask=use_dask,
         )
         assert sfc_forcing.start_time == start_time
         assert sfc_forcing.end_time == end_time
@@ -350,7 +356,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request):
             assert not sfc_forcing.use_coarse_grid
 
 
-def test_nans_filled_in(grid_that_straddles_dateline):
+def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
     """
     Test that the surface forcing fields contain no NaNs.
 
@@ -372,6 +378,7 @@ def test_nans_filled_in(grid_that_straddles_dateline):
             start_time=start_time,
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
+            use_dask=use_dask,
         )
 
         # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
@@ -388,6 +395,7 @@ def test_nans_filled_in(grid_that_straddles_dateline):
             end_time=end_time,
             source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
             type="bgc",
+            use_dask=use_dask,
         )
 
         # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
@@ -600,7 +608,7 @@ def test_surface_forcing_bgc_from_clim_plot_save(
         "bgc_surface_forcing_from_climatology",
     ],
 )
-def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path):
+def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
     """Test that creating an SurfaceForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
@@ -614,7 +622,7 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path):
 
         sfc_forcing.to_yaml(filepath)
 
-        sfc_forcing_from_file = SurfaceForcing.from_yaml(filepath)
+        sfc_forcing_from_file = SurfaceForcing.from_yaml(filepath, use_dask)
 
         assert sfc_forcing == sfc_forcing_from_file
 
@@ -631,7 +639,7 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path):
         "bgc_surface_forcing",
     ],
 )
-def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path):
+def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
 
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
@@ -641,7 +649,7 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path):
 
     sfc_forcing.to_yaml(yaml_filepath)
     sfc_forcing.save(filepath1)
-    sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath)
+    sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath, use_dask=use_dask)
     sfc_forcing_from_file.save(filepath2)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -659,7 +667,9 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path):
     Path(expected_filepath2).unlink()
 
 
-def test_files_have_same_hash_clim(bgc_surface_forcing_from_climatology, tmp_path):
+def test_files_have_same_hash_clim(
+    bgc_surface_forcing_from_climatology, tmp_path, use_dask
+):
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"
@@ -667,7 +677,7 @@ def test_files_have_same_hash_clim(bgc_surface_forcing_from_climatology, tmp_pat
 
     bgc_surface_forcing_from_climatology.to_yaml(yaml_filepath)
     bgc_surface_forcing_from_climatology.save(filepath1)
-    sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath)
+    sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath, use_dask=use_dask)
     sfc_forcing_from_file.save(filepath2)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -685,7 +695,7 @@ def test_files_have_same_hash_clim(bgc_surface_forcing_from_climatology, tmp_pat
     Path(expected_filepath2).unlink()
 
 
-def test_from_yaml_missing_surface_forcing(tmp_path):
+def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -724,6 +734,6 @@ def test_from_yaml_missing_surface_forcing(tmp_path):
             ValueError,
             match="No SurfaceForcing configuration found in the YAML file.",
         ):
-            SurfaceForcing.from_yaml(yaml_filepath)
+            SurfaceForcing.from_yaml(yaml_filepath, use_dask=use_dask)
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()

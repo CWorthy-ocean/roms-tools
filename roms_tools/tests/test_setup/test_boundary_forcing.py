@@ -175,10 +175,11 @@ def test_bgc_boundary_forcing_plot_save(
         "bgc_boundary_forcing_from_climatology",
     ],
 )
-def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path):
+def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
     """Test that creating a BoundaryForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
 
     bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
+
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"
     for filepath in [
@@ -188,7 +189,7 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path):
 
         bdry_forcing.to_yaml(filepath)
 
-        bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath)
+        bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
 
         assert bdry_forcing == bdry_forcing_from_file
 
@@ -196,7 +197,7 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path):
         filepath.unlink()
 
 
-def test_files_have_same_hash(boundary_forcing, tmp_path):
+def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"
@@ -204,7 +205,7 @@ def test_files_have_same_hash(boundary_forcing, tmp_path):
 
     boundary_forcing.to_yaml(yaml_filepath)
     boundary_forcing.save(filepath1)
-    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath)
+    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
     bdry_forcing_from_file.save(filepath2)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -222,7 +223,9 @@ def test_files_have_same_hash(boundary_forcing, tmp_path):
     Path(expected_filepath2).unlink()
 
 
-def test_files_have_same_hash_clim(bgc_boundary_forcing_from_climatology, tmp_path):
+def test_files_have_same_hash_clim(
+    bgc_boundary_forcing_from_climatology, tmp_path, use_dask
+):
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"
@@ -230,7 +233,7 @@ def test_files_have_same_hash_clim(bgc_boundary_forcing_from_climatology, tmp_pa
 
     bgc_boundary_forcing_from_climatology.to_yaml(yaml_filepath)
     bgc_boundary_forcing_from_climatology.save(filepath1)
-    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath)
+    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
     bdry_forcing_from_file.save(filepath2)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
@@ -248,7 +251,7 @@ def test_files_have_same_hash_clim(bgc_boundary_forcing_from_climatology, tmp_pa
     Path(expected_filepath2).unlink()
 
 
-def test_from_yaml_missing_boundary_forcing(tmp_path):
+def test_from_yaml_missing_boundary_forcing(tmp_path, request, use_dask):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -268,7 +271,6 @@ def test_from_yaml_missing_boundary_forcing(tmp_path):
       rmax: 0.2
     """
     )
-
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"
     for yaml_filepath in [
@@ -286,7 +288,7 @@ def test_from_yaml_missing_boundary_forcing(tmp_path):
         with pytest.raises(
             ValueError, match="No BoundaryForcing configuration found in the YAML file."
         ):
-            BoundaryForcing.from_yaml(yaml_filepath)
+            BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()

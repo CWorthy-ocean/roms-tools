@@ -3,7 +3,7 @@ import numpy as np
 import yaml
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Union
+from typing import Dict, Union, List, Optional
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
@@ -30,18 +30,22 @@ class InitialConditions(ROMSToolsMixins):
         Object representing the grid information used for the model.
     ini_time : datetime
         The date and time at which the initial conditions are set.
-    source : Dict[str, Union[str, None]]
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the physical initial condition data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "path" (str): Path to the physical data file. Can contain wildcards.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
-    bgc_source : Optional[Dict[str, Union[str, None]]]
+    bgc_source : Optional[Dict[str, Union[str, Path, List[Union[str, Path]]], bool]]
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
         - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
-        - "path" (str): Path to the BGC data file. Can contain wildcards.
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
+          a single Path object, or a list of strings or Path objects containing multiple files.
         - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to True.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
+    use_dask: bool
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
     Attributes
     ----------
@@ -64,9 +68,10 @@ class InitialConditions(ROMSToolsMixins):
 
     grid: Grid
     ini_time: datetime
-    source: Dict[str, Union[str, None]]
-    bgc_source: Optional[Dict[str, Union[str, None]]] = None
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    bgc_source: Optional[Dict[str, Union[str, Path, List[Union[str, Path]]]]] = None
     model_reference_date: datetime = datetime(2000, 1, 1)
+    use_dask: bool = True
 
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -167,6 +172,7 @@ class InitialConditions(ROMSToolsMixins):
                 filename=self.source["path"],
                 start_time=self.ini_time,
                 climatology=self.source["climatology"],
+                use_dask=self.use_dask,
             )
         else:
             raise ValueError('Only "GLORYS" is a valid option for source["name"].')
@@ -180,6 +186,7 @@ class InitialConditions(ROMSToolsMixins):
                 filename=self.bgc_source["path"],
                 start_time=self.ini_time,
                 climatology=self.bgc_source["climatology"],
+                use_dask=self.use_dask,
             )
             data.post_process()
         else:
@@ -579,7 +586,9 @@ class InitialConditions(ROMSToolsMixins):
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "InitialConditions":
+    def from_yaml(
+        cls, filepath: Union[str, Path], use_dask: bool = True
+    ) -> "InitialConditions":
         """
         Create an instance of the InitialConditions class from a YAML file.
 
@@ -587,6 +596,8 @@ class InitialConditions(ROMSToolsMixins):
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        use_dask: bool
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
 
         Returns
         -------
@@ -625,7 +636,4 @@ class InitialConditions(ROMSToolsMixins):
         grid = Grid.from_yaml(filepath)
 
         # Create and return an instance of InitialConditions
-        return cls(
-            grid=grid,
-            **initial_conditions_data,
-        )
+        return cls(grid=grid, **initial_conditions_data, use_dask=use_dask)

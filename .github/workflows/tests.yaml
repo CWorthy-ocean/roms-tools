@@ -9,9 +9,8 @@ on:
       - main
 
 jobs:
-
-  test:
-    name: ${{ matrix.python-version }}-build
+  test-without-dask:
+    name: ${{ matrix.python-version }}-build-without-dask
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -28,7 +27,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}  # Add a unique cache key
+          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -36,10 +35,10 @@ jobs:
       - name: Install roms-tools
         shell: micromamba-shell {0}
         run: |
-           python - V
+           python -V
            python -m pip install -e . --no-deps --force-reinstall
 
-      - name: Running Tests
+      - name: Running Tests without Dask
         shell: bash -l {0}
         run: |
            python -V
@@ -48,7 +47,56 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m ; coverage xml
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests # optional
+
+  test-with-dask:
+    name: 3.12-build-with-dask
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]  # Only Python 3.12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: ci/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+
+      - name: Conda info
+        run: conda info
+
+      - name: Install roms-tools
+        shell: micromamba-shell {0}
+        run: |
+           python -V
+           python -m pip install -e . --no-deps --force-reinstall
+
+      - name: Running Tests with Dask
+        shell: bash -l {0}
+        run: |
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1

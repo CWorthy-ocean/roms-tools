@@ -12,7 +12,6 @@ def test_boundary_forcing_creation(boundary_forcing):
     Test the creation of the BoundaryForcing object.
     """
 
-    print(boundary_forcing)
     fname = download_test_data("GLORYS_coarse_test_data.nc")
 
     assert boundary_forcing.start_time == datetime(2021, 6, 29)

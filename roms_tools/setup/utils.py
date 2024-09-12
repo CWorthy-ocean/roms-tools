@@ -719,12 +719,9 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
 
     saved_filenames = []
 
-    print("Saving the following files:")
     if np_eta is None and np_xi is None:
         # Save the dataset as a single file
         output_filenames = [f"{filename}.nc" for filename in output_filenames]
-        for filename in output_filenames:
-            print(filename)
         xr.save_mfdataset(dataset_list, output_filenames)
 
         saved_filenames.extend(Path(f) for f in output_filenames)
@@ -745,9 +742,6 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
             ]
             partitioned_datasets.extend(partitions)
             partitioned_filenames.extend(partition_filenames)
-
-        for filename in partitioned_filenames:
-            print(filename)
 
         xr.save_mfdataset(partitioned_datasets, partitioned_filenames)
 

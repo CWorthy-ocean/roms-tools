@@ -509,8 +509,8 @@ class InitialConditions(ROMSToolsMixins):
 
         Returns
         -------
-        None
-            This method does not return any value. It saves the dataset to netCDF4 files as specified.
+        List[Path]
+            A list of Path objects for the filenames that were saved.
         """
 
         # Ensure filepath is a Path object
@@ -523,7 +523,11 @@ class InitialConditions(ROMSToolsMixins):
         dataset_list = [self.ds.load()]
         output_filenames = [str(filepath)]
 
-        save_datasets(dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi)
+        saved_filenames = save_datasets(
+            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
+        )
+
+        return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
         """

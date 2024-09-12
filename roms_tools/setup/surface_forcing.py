@@ -442,8 +442,8 @@ class SurfaceForcing(ROMSToolsMixins):
 
         Returns
         -------
-        None
-            This method does not return any value. It saves the dataset to netCDF4 files as specified.
+        List[Path]
+            A list of Path objects for the filenames that were saved.
         """
 
         # Ensure filepath is a Path object
@@ -454,7 +454,11 @@ class SurfaceForcing(ROMSToolsMixins):
             filepath = filepath.with_suffix("")
 
         dataset_list, output_filenames = group_dataset(self.ds.load(), str(filepath))
-        save_datasets(dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi)
+        saved_filenames = save_datasets(
+            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
+        )
+
+        return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
         """

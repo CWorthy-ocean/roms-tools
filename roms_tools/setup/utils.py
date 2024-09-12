@@ -4,6 +4,7 @@ from typing import Union
 import pandas as pd
 import cftime
 from roms_tools.utils import partition
+from pathlib import Path
 
 
 def nan_check(field, mask) -> None:
@@ -712,16 +713,19 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
 
     Returns
     -------
-    None
+    List[Path]
+        A list of Path objects for the filenames that were saved.
     """
 
-    print("Saving the following files:")
+    saved_filenames = []
+
     if np_eta is None and np_xi is None:
         # Save the dataset as a single file
         output_filenames = [f"{filename}.nc" for filename in output_filenames]
-        for filename in output_filenames:
-            print(filename)
         xr.save_mfdataset(dataset_list, output_filenames)
+
+        saved_filenames.extend(Path(f) for f in output_filenames)
+
     else:
         # Partition the dataset and save each partition as a separate file
         np_eta = np_eta or 1
@@ -739,7 +743,8 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
             partitioned_datasets.extend(partitions)
             partitioned_filenames.extend(partition_filenames)
 
-        for filename in partitioned_filenames:
-            print(filename)
-
         xr.save_mfdataset(partitioned_datasets, partitioned_filenames)
+
+        saved_filenames.extend(Path(f) for f in partitioned_filenames)
+
+    return saved_filenames

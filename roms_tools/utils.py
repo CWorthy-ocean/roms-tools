@@ -273,7 +273,8 @@ def partition_netcdf(
 
     Returns
     -------
-    None
+    List[Path]
+        A list of Path objects for the filenames that were saved.
     """
 
     # Ensure filepath is a Path object
@@ -288,12 +289,10 @@ def partition_netcdf(
     # Generate paths to the partitioned files
     base_filepath = filepath.with_suffix("")
     paths_to_partitioned_files = [
-        f"{base_filepath}.{file_number}.nc" for file_number in file_numbers
+        Path(f"{base_filepath}.{file_number}.nc") for file_number in file_numbers
     ]
-
-    print("Saving the following files:")
-    for file in paths_to_partitioned_files:
-        print(file)
 
     # Save the partitioned datasets to files
     xr.save_mfdataset(partitioned_datasets, paths_to_partitioned_files)
+
+    return paths_to_partitioned_files

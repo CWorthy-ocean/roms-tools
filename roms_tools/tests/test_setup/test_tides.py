@@ -181,23 +181,25 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
         ]:  # test for Path object and str
 
             # Test saving without partitioning
-            tidal_forcing.save(filepath)
-            # Test saving with partitioning
-            tidal_forcing.save(filepath, np_eta=3, np_xi=3)
-
+            saved_filenames = tidal_forcing.save(filepath)
             # Check if the .nc file was created
-            filepath = Path(filepath)
-            assert (filepath.with_suffix(".nc")).exists()
+            filepath = Path(filepath).with_suffix(".nc")
+            assert saved_filenames == [filepath]
+            assert filepath.exists()
             # Clean up the .nc file
-            (filepath.with_suffix(".nc")).unlink()
+            filepath.unlink()
+
+            # Test saving with partitioning
+            saved_filenames = tidal_forcing.save(filepath, np_eta=3, np_xi=3)
 
             filepath_str = str(filepath.with_suffix(""))
             expected_filepath_list = [
-                (filepath_str + f".{index}.nc") for index in range(9)
+                Path(filepath_str + f".{index}.nc") for index in range(9)
             ]
+            assert saved_filenames == expected_filepath_list
             for expected_filepath in expected_filepath_list:
-                assert Path(expected_filepath).exists()
-                Path(expected_filepath).unlink()
+                assert expected_filepath.exists()
+                expected_filepath.unlink()
 
 
 def test_roundtrip_yaml(tidal_forcing, tmp_path):

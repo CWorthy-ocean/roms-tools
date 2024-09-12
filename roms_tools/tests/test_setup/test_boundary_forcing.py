@@ -103,21 +103,26 @@ def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
         ]:  # test for Path object and str
 
             # Test saving without partitioning
-            boundary_forcing.save(filepath)
-            # Test saving with partitioning
-            boundary_forcing.save(filepath, np_eta=2)
+            saved_filenames = boundary_forcing.save(filepath)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_202106.nc")
+
+            assert saved_filenames == [expected_filepath]
             assert expected_filepath.exists()
             expected_filepath.unlink()
 
+            # Test saving with partitioning
+            saved_filenames = boundary_forcing.save(filepath, np_eta=2)
             expected_filepath_list = [
-                (filepath_str + f"_202106.{index}.nc") for index in range(2)
+                Path(filepath_str + f"_202106.{index}.nc") for index in range(2)
             ]
+
+            assert saved_filenames == expected_filepath_list
+
             for expected_filepath in expected_filepath_list:
-                assert Path(expected_filepath).exists()
-                Path(expected_filepath).unlink()
+                assert expected_filepath.exists()
+                expected_filepath.unlink()
 
 
 def test_bgc_boundary_forcing_plot_save(
@@ -140,21 +145,27 @@ def test_bgc_boundary_forcing_plot_save(
         ]:  # test for Path object and str
 
             # Test saving without partitioning
-            bgc_boundary_forcing_from_climatology.save(filepath)
-            # Test saving with partitioning
-            bgc_boundary_forcing_from_climatology.save(filepath, np_xi=2)
+            saved_filenames = bgc_boundary_forcing_from_climatology.save(filepath)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")
+            assert saved_filenames == [expected_filepath]
             assert expected_filepath.exists()
             expected_filepath.unlink()
 
+            # Test saving with partitioning
+            saved_filenames = bgc_boundary_forcing_from_climatology.save(
+                filepath, np_xi=2
+            )
+
             expected_filepath_list = [
-                (filepath_str + f"_clim.{index}.nc") for index in range(2)
+                Path(filepath_str + f"_clim.{index}.nc") for index in range(2)
             ]
+            assert saved_filenames == expected_filepath_list
+
             for expected_filepath in expected_filepath_list:
-                assert Path(expected_filepath).exists()
-                Path(expected_filepath).unlink()
+                assert expected_filepath.exists()
+                expected_filepath.unlink()
 
 
 @pytest.mark.parametrize(

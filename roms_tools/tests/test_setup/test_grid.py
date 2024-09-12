@@ -36,23 +36,26 @@ def test_plot_save_methods(tmp_path):
         ]:  # test for Path object and str
 
             # Test saving without partitioning
-            grid.save(filepath)
-            # Test saving with partitioning
-            grid.save(filepath, np_eta=2, np_xi=5)
-
+            saved_filenames = grid.save(filepath)
             # Check if the .nc file was created
-            filepath = Path(filepath)
-            assert (filepath.with_suffix(".nc")).exists()
+            filepath = Path(filepath).with_suffix(".nc")
+
+            assert saved_filenames == [filepath]
+            assert filepath.exists()
             # Clean up the .nc file
-            (filepath.with_suffix(".nc")).unlink()
+            filepath.unlink()
+
+            # Test saving with partitioning
+            saved_filenames = grid.save(filepath, np_eta=2, np_xi=5)
 
             filepath_str = str(filepath.with_suffix(""))
             expected_filepath_list = [
-                (filepath_str + f".{index}.nc") for index in range(10)
+                Path(filepath_str + f".{index}.nc") for index in range(10)
             ]
+            assert saved_filenames == expected_filepath_list
             for expected_filepath in expected_filepath_list:
-                assert Path(expected_filepath).exists()
-                Path(expected_filepath).unlink()
+                assert expected_filepath.exists()
+                expected_filepath.unlink()
 
 
 def test_raise_if_domain_too_large():
@@ -144,7 +147,7 @@ def test_compatability_with_matlab_grid(tmp_path):
         ]:  # test for Path object and str
 
             # Test saving without partitioning
-            grid.save(filepath)
+            _ = grid.save(filepath)
 
             filepath = Path(filepath)
 

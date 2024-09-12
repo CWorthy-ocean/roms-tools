@@ -37,7 +37,7 @@ class BoundaryForcing(ROMSToolsMixins):
         End time of the desired boundary forcing data.
     boundaries : Dict[str, bool], optional
         Dictionary specifying which boundaries are forced (south, east, north, west). Default is all True.
-    source : Dict[str, Union[str, None]]
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the boundary forcing data:
         - "name" (str): Name of the data source (e.g., "GLORYS").
         - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),

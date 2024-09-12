@@ -32,7 +32,7 @@ class TidalForcing(ROMSToolsMixins):
     ----------
     grid : Grid
         The grid object representing the ROMS grid associated with the tidal forcing data.
-    source : Dict[str, Union[str, None]]
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]]]
         Dictionary specifying the source of the tidal data:
         - "name" (str): Name of the data source (e.g., "TPXO").
         - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),

@@ -39,7 +39,7 @@ class SurfaceForcing(ROMSToolsMixins):
         Start time of the desired surface forcing data.
     end_time : datetime
         End time of the desired surface forcing data.
-    source : Dict[str, Union[str, None]]
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data:
         - "name" (str): Name of the data source (e.g., "ERA5").
         - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),

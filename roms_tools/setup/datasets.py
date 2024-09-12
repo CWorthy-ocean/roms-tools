@@ -128,6 +128,7 @@ class Dataset:
         """
 
         # Check for wildcards in the filename
+        # xarray.open_mfdataset is currently only working with chunks, see https://github.com/pydata/xarray/issues/9038
         if not self.use_dask and re.search(r"[\*\?\[\]]", self.filename):
             raise ValueError(
                 "Wildcards detected in the filename but use_dask=False. "

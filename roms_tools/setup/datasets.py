@@ -173,6 +173,7 @@ class Dataset:
 
         if self.use_dask:
             import dask
+
             with dask.config.set(**{"array.slicing.split_large_chunks": False}):
                 chunks = {
                     self.dim_names["latitude"]: -1,

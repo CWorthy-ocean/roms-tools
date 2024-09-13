@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import numpy as np
 from typing import Dict, Optional, Union, List
 from pathlib import Path
-import dask
 import warnings
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
@@ -173,6 +172,7 @@ class Dataset:
             )
 
         if self.use_dask:
+            import dask
             with dask.config.set(**{"array.slicing.split_large_chunks": False}):
                 chunks = {
                     self.dim_names["latitude"]: -1,

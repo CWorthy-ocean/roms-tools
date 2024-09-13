@@ -30,7 +30,8 @@ dependencies = [
     "packaging",
     "scipy",
     "gcm_filters",
-    "numba"
+    "numba",
+    "PyYAML"
 ]
 
 dynamic = ["version"]

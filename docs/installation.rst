@@ -12,29 +12,21 @@ ROMS-Tools can be installed using pip::
 Installation from GitHub
 ========================
 
-To obtain the latest development version, clone
-`the repository <https://github.com/CWorthy-ocean/roms-tools.git>`_
-and install it as follows::
+To obtain the latest development version, first clone
+`the source repository <https://github.com/CWorthy-ocean/roms-tools.git>`_::
 
     git clone https://github.com/CWorthy-ocean/roms-tools.git
     cd roms-tools
-    pip install -e .
 
+Next, install and activate the following conda environment::
 
-Conda environment
-=================
-
-You can install and activate the following conda environment::
-
-    cd roms-tools
     conda env create -f ci/environment.yml
     conda activate romstools
 
-This conda environment is useful for any of the following steps:
+Finally, install ROMS-Tools in the same environment:
 
-1. Running the example notebooks
-2. Contributing code and running the testing suite
-3. Building the documentation locally
+    pip install -e .
+
 
 Running the tests
 =================

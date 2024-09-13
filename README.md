@@ -20,14 +20,25 @@ pip install roms-tools
 
 ### Installation from GitHub
 
-To obtain the latest development version, clone the source repository and install it:
+To obtain the latest development version, first clone the source repository:
 
 ```bash
 git clone https://github.com/CWorthy-ocean/roms-tools.git
 cd roms-tools
-pip install -e .
 ```
 
+Next, install and activate the following conda environment:
+
+```bash
+conda env create -f ci/environment.yml
+conda activate romstools
+```
+
+Finally, install `ROMS-Tools` in the same environment:
+
+```bash
+pip install -e .
+```
 
 ### Run the tests
 

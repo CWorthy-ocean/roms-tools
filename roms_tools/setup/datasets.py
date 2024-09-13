@@ -172,30 +172,28 @@ class Dataset:
             )
 
         if self.use_dask:
-            import dask
 
-            with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-                chunks = {
-                    self.dim_names["latitude"]: -1,
-                    self.dim_names["longitude"]: -1,
-                }
-                if "depth" in self.dim_names:
-                    chunks[self.dim_names["depth"]] = -1
-                if "time" in self.dim_names:
-                    chunks[self.dim_names["time"]] = 1
+            chunks = {
+                self.dim_names["latitude"]: -1,
+                self.dim_names["longitude"]: -1,
+            }
+            if "depth" in self.dim_names:
+                chunks[self.dim_names["depth"]] = -1
+            if "time" in self.dim_names:
+                chunks[self.dim_names["time"]] = 1
 
-                if re.search(r"[\*\?\[\]]", filename_str) or len(matching_files) == 1:
-                    kwargs = {"combine": "by_coords"}
-                else:
-                    kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
+            if re.search(r"[\*\?\[\]]", filename_str) or len(matching_files) == 1:
+                kwargs = {"combine": "by_coords"}
+            else:
+                kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
 
-                ds = xr.open_mfdataset(
-                    matching_files,
-                    coords="minimal",
-                    compat="override",
-                    chunks=chunks,
-                    **kwargs,
-                )
+            ds = xr.open_mfdataset(
+                matching_files,
+                coords="minimal",
+                compat="override",
+                chunks=chunks,
+                **kwargs,
+            )
         else:
             ds = xr.open_dataset(matching_files[0], chunks=None)
 

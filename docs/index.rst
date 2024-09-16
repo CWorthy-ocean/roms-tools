@@ -8,8 +8,26 @@ Welcome to the ROMS-Tools documentation!
 
 **ROMS-Tools** is a python package for creating the input files that are necessary
 to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation.
-This includes creating a grid, tidal, boundary, and surface forcings, initial conditions, and more!
-This python package is strongly inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
+This includes creating:
+
+- a grid
+- tidal forcing
+- surface forcing:
+  - physical: e.g., wind, radiation
+  - biogeochemical: e.g., atmospheric pCO2
+- initial conditions:
+   - physical: e.g., temperature, velocities
+   - biogeochemical: e.g., alkalinity
+- boundary forcing
+   - physical: e.g., temperature, velocities
+   - biogeochemical: e.g., alkalinity
+
+ROMS-Tools does **not** (yet) handle
+
+- river forcing
+- nesting
+
+This python package is inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
 
 
 .. toctree::

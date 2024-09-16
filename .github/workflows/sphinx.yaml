@@ -23,7 +23,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python - V
-           python -m pip install -e . --no-deps --force-reinstall
+           python -m pip install -e . --force-reinstall
       - name: Build Docs
         shell: bash -l {0}
         run: |

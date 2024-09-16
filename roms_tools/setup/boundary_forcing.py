@@ -46,7 +46,7 @@ class BoundaryForcing(ROMSToolsMixins):
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool
-        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
     Attributes
     ----------
@@ -79,7 +79,7 @@ class BoundaryForcing(ROMSToolsMixins):
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     model_reference_date: datetime = datetime(2000, 1, 1)
-    use_dask: bool = True
+    use_dask: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
 

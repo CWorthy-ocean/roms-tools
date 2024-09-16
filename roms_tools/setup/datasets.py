@@ -38,7 +38,7 @@ class Dataset:
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
     use_dask: bool
-        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to True.
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
 
 
     Attributes

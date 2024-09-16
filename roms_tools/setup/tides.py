@@ -44,7 +44,7 @@ class TidalForcing(ROMSToolsMixins):
     model_reference_date : datetime, optional
         The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
     use_dask: bool
-        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
     Attributes
     ----------
@@ -63,7 +63,7 @@ class TidalForcing(ROMSToolsMixins):
     ntides: int = 10
     allan_factor: float = 2.0
     model_reference_date: datetime = datetime(2000, 1, 1)
-    use_dask: bool = True
+    use_dask: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
 

@@ -6,7 +6,7 @@ import numpy as np
 import textwrap
 from roms_tools.setup.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset
-from roms_tools.tests.test_setup.conftest import calculate_file_hash
+from conftest import calculate_file_hash
 from pathlib import Path
 
 

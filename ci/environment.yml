@@ -3,20 +3,11 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python>=3.9
-  - numpy
-  - scipy
-  - matplotlib
-  - cartopy
-  - xarray
-  - zarr
-  - netcdf4
-  - pooch
-  - packaging
-  - numba
-  - gcm_filters
+  - python>=3.10
   # testing
+  - zarr
   - pytest
+  - pytest-xdist
   - flake8
   - black
   - pre-commit

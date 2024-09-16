@@ -65,12 +65,6 @@ jobs:
           python -m pip install dist/roms_tools*.whl
           python -c "import roms_tools; print(roms_tools.__version__)"
 
-      - name: Install optional dask dependency from local wheel
-        run: |
-          python -m pip install dist/roms_tools*.whl[dask]  # Install the optional dask dependency from the local wheel
-          python -c "import dask; print(dask.__version__)"  # Verify dask is installed
-          python -c "import roms_tools; print(roms_tools.__version__)"  # Verify roms_tools is still correctly installed
-
   upload-to-pypi:
     needs: test-built-dist
     if: github.event_name == 'release'

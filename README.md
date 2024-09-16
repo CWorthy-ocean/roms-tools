@@ -20,27 +20,45 @@ pip install roms-tools
 
 ### Installation from GitHub
 
-To obtain the latest development version, clone the source repository and install it:
+To obtain the latest development version, first clone the source repository:
 
 ```bash
 git clone https://github.com/CWorthy-ocean/roms-tools.git
 cd roms-tools
+```
+
+Next, install and activate the following conda environment:
+
+```bash
+conda env create -f ci/environment.yml
+conda activate romstools
+```
+
+Finally, install `ROMS-Tools` in the same environment:
+
+```bash
 pip install -e .
+```
+
+If you want to use `ROMS-Tools` together with dask (which we recommend), you can
+install the additional dependency via:
+
+```bash
+pip install -e .[dask]
 ```
 
 
 ### Run the tests
 
-Before running the tests, you can install and activate the following conda environment:
+Before running the tests, you can activate the conda environment created in the previous section:
 
 ```bash
-cd roms-tools
-conda env create -f ci/environment.yml
 conda activate romstools
 ```
 
 Check the installation of `ROMS-Tools` has worked by running the test suite
 ```bash
+cd roms-tools
 pytest
 ```
 

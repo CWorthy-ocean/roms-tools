@@ -36,7 +36,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e . --no-deps --force-reinstall
+           python -m pip install -e . --force-reinstall
 
       - name: Running Tests without Dask
         shell: bash -l {0}
@@ -84,7 +84,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e . --no-deps --force-reinstall
+           python -m pip install -e .[dask]  --force-reinstall
 
       - name: Running Tests with Dask
         shell: bash -l {0}

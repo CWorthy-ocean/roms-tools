@@ -4,7 +4,7 @@ from roms_tools import Grid
 import importlib.metadata
 import textwrap
 from roms_tools.setup.download import download_test_data
-from roms_tools.tests.test_setup.conftest import calculate_file_hash
+from conftest import calculate_file_hash
 from pathlib import Path
 
 

@@ -40,18 +40,25 @@ Finally, install `ROMS-Tools` in the same environment:
 pip install -e .
 ```
 
-### Run the tests
-
-Before running the tests, you can install and activate the following conda environment:
+If you want to use `ROMS-Tools` together with dask (which we recommend), you can 
+install the additional dependency via:
 
 ```bash
-cd roms-tools
-conda env create -f ci/environment.yml
+pip install -e .[dask]
+```
+
+
+### Run the tests
+
+Before running the tests, you can activate the conda environment created in the previous section:
+
+```bash
 conda activate romstools
 ```
 
 Check the installation of `ROMS-Tools` has worked by running the test suite
 ```bash
+cd roms-tools
 pytest
 ```
 

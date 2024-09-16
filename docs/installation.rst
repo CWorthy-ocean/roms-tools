@@ -23,10 +23,14 @@ Next, install and activate the following conda environment::
     conda env create -f ci/environment.yml
     conda activate romstools
 
-Finally, install ROMS-Tools in the same environment:
+Finally, install ROMS-Tools in the same environment::
 
     pip install -e .
 
+If you want to use ROMS-Tools together with dask (which we recommend), you can 
+install the additional dependency via::
+
+    pip install -e .[dask]
 
 Running the tests
 =================

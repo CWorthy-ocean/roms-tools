@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import numpy as np
 from typing import Dict, Optional, Union, List
 from pathlib import Path
-import dask
 import warnings
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
@@ -39,7 +38,7 @@ class Dataset:
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
     use_dask: bool
-        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to True.
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
 
 
     Attributes
@@ -173,28 +172,28 @@ class Dataset:
             )
 
         if self.use_dask:
-            with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-                chunks = {
-                    self.dim_names["latitude"]: -1,
-                    self.dim_names["longitude"]: -1,
-                }
-                if "depth" in self.dim_names:
-                    chunks[self.dim_names["depth"]] = -1
-                if "time" in self.dim_names:
-                    chunks[self.dim_names["time"]] = 1
 
-                if re.search(r"[\*\?\[\]]", filename_str) or len(matching_files) == 1:
-                    kwargs = {"combine": "by_coords"}
-                else:
-                    kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
+            chunks = {
+                self.dim_names["latitude"]: -1,
+                self.dim_names["longitude"]: -1,
+            }
+            if "depth" in self.dim_names:
+                chunks[self.dim_names["depth"]] = -1
+            if "time" in self.dim_names:
+                chunks[self.dim_names["time"]] = 1
 
-                ds = xr.open_mfdataset(
-                    matching_files,
-                    coords="minimal",
-                    compat="override",
-                    chunks=chunks,
-                    **kwargs,
-                )
+            if re.search(r"[\*\?\[\]]", filename_str) or len(matching_files) == 1:
+                kwargs = {"combine": "by_coords"}
+            else:
+                kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
+
+            ds = xr.open_mfdataset(
+                matching_files,
+                coords="minimal",
+                compat="override",
+                chunks=chunks,
+                **kwargs,
+            )
         else:
             ds = xr.open_dataset(matching_files[0], chunks=None)
 

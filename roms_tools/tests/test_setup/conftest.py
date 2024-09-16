@@ -94,7 +94,7 @@ def initial_conditions(request, use_dask):
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc(request):
+def initial_conditions_with_bgc(request, use_dask):
     """
     Fixture for creating an InitialConditions object.
     """

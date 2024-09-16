@@ -54,7 +54,7 @@ class SurfaceForcing(ROMSToolsMixins):
         Whether to interpolate to coarsened grid. Default is False.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
-    use_dask: bool
+    use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
     Attributes
@@ -520,7 +520,7 @@ class SurfaceForcing(ROMSToolsMixins):
 
     @classmethod
     def from_yaml(
-        cls, filepath: Union[str, Path], use_dask: bool = True
+        cls, filepath: Union[str, Path], use_dask: bool = False
     ) -> "SurfaceForcing":
         """
         Create an instance of the SurfaceForcing class from a YAML file.
@@ -529,8 +529,8 @@ class SurfaceForcing(ROMSToolsMixins):
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
-        use_dask: bool
-            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to True.
+        use_dask: bool, optional
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
         Returns
         -------

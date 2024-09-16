@@ -29,7 +29,7 @@ dependencies = [
     "scipy",
     "gcm_filters",
     "numba",
-    "cftime",
+    "netcdf4",
     "PyYAML"
 ]
 dynamic = ["version"]

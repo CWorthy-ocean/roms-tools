@@ -18,6 +18,13 @@ A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla
 pip install roms-tools
 ```
 
+If you want to use `ROMS-Tools` together with dask (which we recommend), you can
+install `ROMS-Tools` along with the additional dependency via:
+
+```bash
+pip install roms-tools[dask]
+```
+
 ### Installation from GitHub
 
 To obtain the latest development version, first clone the source repository:
@@ -41,7 +48,7 @@ pip install -e .
 ```
 
 If you want to use `ROMS-Tools` together with dask (which we recommend), you can
-install the additional dependency via:
+install `ROMS-Tools` along with the additional dependency via:
 
 ```bash
 pip install -e .[dask]

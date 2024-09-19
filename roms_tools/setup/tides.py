@@ -8,7 +8,6 @@ from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
-from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.datasets import TPXODataset
 from roms_tools.setup.utils import (
     nan_check,
@@ -82,17 +81,12 @@ class TidalForcing(ROMSToolsMixins):
             straddle=straddle,
         )
 
-        tides = self._get_corrected_tides(data)
-
         # select desired number of constituents
-        for k in tides.keys():
-            tides[k] = tides[k].isel(ntides=slice(None, self.ntides))
+        object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
 
-        # interpolate onto desired grid
-        coords = {"latitude": lat, "longitude": lon}
-        mask = xr.where(data.ds.depth > 0, 1, 0)
+        self._correct_tides(data)
 
-        varnames = [
+        vars_2d = [
             "ssh_Re",
             "ssh_Im",
             "pot_Re",
@@ -102,16 +96,9 @@ class TidalForcing(ROMSToolsMixins):
             "v_Re",
             "v_Im",
         ]
-        data_vars = {}
+        vars_3d = []
 
-        for var in varnames:
-            data_vars[var] = fill_and_interpolate(
-                tides[var],
-                mask,
-                list(coords.keys()),
-                coords,
-                method="linear",
-            )
+        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
 
         data_vars = super().process_velocities(
             data_vars, angle, "u_Re", "v_Re", interpolate=False
@@ -132,7 +119,7 @@ class TidalForcing(ROMSToolsMixins):
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)
-        ds["omega"] = tides["omega"]
+        ds["omega"] = data.ds["omega"]
 
         ds = self._add_global_metadata(ds)
 
@@ -413,13 +400,28 @@ class TidalForcing(ROMSToolsMixins):
         # Create and return an instance of TidalForcing
         return cls(grid=grid, **tidal_forcing_params, use_dask=use_dask)
 
-    def _get_corrected_tides(self, data):
+    def _correct_tides(self, data):
+        """
+        Apply tidal corrections to the dataset.
+        This method corrects the dataset for equilibrium tides, self-attraction and loading (SAL) effects, and
+        adjusts phases and amplitudes of tidal elevations and transports using Egbert's correction.
+        Parameters
+        ----------
+        data : Dataset
+            The dataset containing tidal data, including variables for sea surface height (ssh), zonal and meridional
+            currents (u, v), and self-attraction and loading corrections (sal).
+        Returns
+        -------
+        None
+            The dataset is modified in-place with corrected real and imaginary components for ssh, u, v, and the
+            potential field ('pot_Re', 'pot_Im').
+        """
 
         # Get equilibrium tides
         tpc = compute_equilibrium_tide(
             data.ds[data.dim_names["longitude"]], data.ds[data.dim_names["latitude"]]
         )
-        tpc = tpc.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
+        tpc = tpc.isel(ntides=data.ds["ntides"])
         # Correct for SAL
         tsc = self.allan_factor * (
             data.ds[data.var_names["sal_Re"]] + 1j * data.ds[data.var_names["sal_Im"]]
@@ -433,9 +435,9 @@ class TidalForcing(ROMSToolsMixins):
 
         # Apply correction for phases and amplitudes
         pf, pu, aa = egbert_correction(self.model_reference_date)
-        pf = pf.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
-        pu = pu.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
-        aa = aa.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
+        pf = pf.isel(ntides=data.ds["ntides"])
+        pu = pu.isel(ntides=data.ds["ntides"])
+        aa = aa.isel(ntides=data.ds["ntides"])
 
         dt = (self.model_reference_date - data.reference_date).days * 3600 * 24
 
@@ -444,22 +446,18 @@ class TidalForcing(ROMSToolsMixins):
         tvc = pf * tvc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
         tpc = pf * tpc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
 
-        tides = {
-            "ssh_Re": thc.real,
-            "ssh_Im": thc.imag,
-            "u_Re": tuc.real,
-            "u_Im": tuc.imag,
-            "v_Re": tvc.real,
-            "v_Im": tvc.imag,
-            "pot_Re": tpc.real,
-            "pot_Im": tpc.imag,
-            "omega": data.ds["omega"],
-        }
+        data.ds[data.var_names["ssh_Re"]] = thc.real
+        data.ds[data.var_names["ssh_Im"]] = thc.imag
+        data.ds[data.var_names["u_Re"]] = tuc.real
+        data.ds[data.var_names["u_Im"]] = tuc.imag
+        data.ds[data.var_names["v_Re"]] = tvc.real
+        data.ds[data.var_names["v_Im"]] = tvc.imag
+        data.ds["pot_Re"] = tpc.real
+        data.ds["pot_Im"] = tpc.imag
 
-        for k in tides.keys():
-            tides[k] = tides[k].rename({data.dim_names["ntides"]: "ntides"})
-
-        return tides
+        # Update var_names dictionary
+        var_names = {**data.var_names, "pot_Re": "pot_Re", "pot_Im": "pot_Im"}
+        object.__setattr__(data, "var_names", var_names)
 
 
 def modified_julian_days(year, month, day, hour=0):
@@ -612,7 +610,7 @@ def egbert_correction(date):
     pf[12] = pftmp**2  # Ms4
     pf[13] = pftmp  # 2n2
     pf[14] = 1.0  # S1
-    pf = xr.DataArray(pf, dims="nc")
+    pf = xr.DataArray(pf, dims="ntides")
 
     putmp = (
         np.arctan(
@@ -648,7 +646,7 @@ def egbert_correction(date):
     pu[12] = putmp  # Ms4
     pu[13] = putmp  # 2n2
     pu[14] = 0.0  # S1
-    pu = xr.DataArray(pu, dims="nc")
+    pu = xr.DataArray(pu, dims="ntides")
     # convert from degrees to radians
     pu = pu * rad
 
@@ -672,7 +670,7 @@ def egbert_correction(date):
                 0.0,  # S1
             ]
         ),
-        dims="nc",
+        dims="ntides",
     )
 
     return pf, pu, aa
@@ -726,7 +724,7 @@ def compute_equilibrium_tide(lon, lat):
                 0.000764,  # S1
             ]
         ),
-        dims="nc",
+        dims="ntides",
     )
     B = xr.DataArray(
         data=np.array(
@@ -748,12 +746,12 @@ def compute_equilibrium_tide(lon, lat):
                 0.693,  # S1
             ]
         ),
-        dims="nc",
+        dims="ntides",
     )
 
     # types: 2 = semidiurnal, 1 = diurnal, 0 = long-term
     ityp = xr.DataArray(
-        data=np.array([2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 2, 1]), dims="nc"
+        data=np.array([2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 2, 1]), dims="ntides"
     )
 
     d2r = np.pi / 180

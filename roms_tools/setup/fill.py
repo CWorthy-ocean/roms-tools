@@ -3,115 +3,15 @@ import xarray as xr
 from numba import jit
 
 
-def fill_and_interpolate(
-    field,
-    mask,
-    fill_dims,
-    coords,
-    method="linear",
-    fillvalue_fill=0.0,
-    fillvalue_interp=np.nan,
-):
+def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0):
     """
-    Propagates ocean values into land areas and interpolates the data to specified coordinates using a given method.
-
-    Parameters
-    ----------
-    field : xr.DataArray
-        The data array to be interpolated, typically containing oceanographic or atmospheric data
-        with dimensions such as latitude and longitude.
-
-    mask : xr.DataArray
-        A data array with the same spatial dimensions as `field`, where `1` indicates ocean points
-        and `0` indicates land points. This mask is used to identify land and ocean areas in the dataset.
-
-    fill_dims : list of str
-        List specifying the dimensions along which to perform the lateral fill, typically the horizontal
-        dimensions such as latitude and longitude, e.g., ["latitude", "longitude"].
-
-    coords : dict
-        Dictionary specifying the target coordinates for interpolation. The keys should match the dimensions
-        of `field` (e.g., {"longitude": lon_values, "latitude": lat_values, "depth": depth_values}).
-        This dictionary provides the new coordinates onto which the data array will be interpolated.
-
-    method : str, optional, default='linear'
-        The interpolation method to use. Valid options are those supported by `xarray.DataArray.interp`,
-        such as 'linear' or 'nearest'.
-
-    fillvalue_fill : float, optional, default=0.0
-        Value to use in the fill step if an entire data slice along the fill dimensions contains only NaNs.
-
-    fillvalue_interp : float, optional, default=np.nan
-        Value to use in the interpolation step. `np.nan` means that no extrapolation is applied.
-        `None` means that extrapolation is applied, which often makes sense when interpolating in the
-        vertical direction to avoid NaNs at the surface if the lowest depth is greater than zero.
-
-    Returns
-    -------
-    xr.DataArray
-        The interpolated data array. This array has the same dimensions as the input `field` but with values
-        interpolated to the new coordinates specified in `coords`.
-
-    Notes
-    -----
-    This method performs the following steps:
-    1. Sets land values to NaN based on the provided mask to ensure that interpolation does not cross
-       the land-ocean boundary.
-    2. Uses the `lateral_fill` function to propagate ocean values into the land interior, helping to fill
-       gaps in the dataset.
-    3. Interpolates the filled data array over the specified coordinates using the selected interpolation method.
-
-    Example
-    -------
-    >>> import xarray as xr
-    >>> field = xr.DataArray(...)
-    >>> mask = xr.DataArray(...)
-    >>> fill_dims = ["latitude", "longitude"]
-    >>> coords = {"latitude": new_lat_values, "longitude": new_lon_values}
-    >>> interpolated_field = fill_and_interpolate(
-    ...     field, mask, fill_dims, coords, method="linear"
-    ... )
-    >>> print(interpolated_field)
-    """
-    if not isinstance(field, xr.DataArray):
-        raise TypeError("field must be an xarray.DataArray")
-    if not isinstance(mask, xr.DataArray):
-        raise TypeError("mask must be an xarray.DataArray")
-    if not isinstance(coords, dict):
-        raise TypeError("coords must be a dictionary")
-    if not all(dim in field.dims for dim in coords.keys()):
-        raise ValueError("All keys in coords must match dimensions of field")
-    if method not in ["linear", "nearest"]:
-        raise ValueError(
-            "Unsupported interpolation method. Choose from 'linear', 'nearest'"
-        )
-
-    # Set land values to NaN
-    field = field.where(mask)
-
-    # Propagate ocean values into land interior before interpolation
-    field = lateral_fill(field, 1 - mask, fill_dims, fillvalue_fill)
-
-    field_interpolated = field.interp(
-        coords, method=method, kwargs={"fill_value": fillvalue_interp}
-    ).drop_vars(list(coords.keys()))
-
-    return field_interpolated
-
-
-def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
-    """
-    Perform lateral fill on an xarray DataArray using a land mask.
+    Fills all NaN values in an xarray DataArray via a lateral fill, while leaving existing non-NaN values unchanged.
 
     Parameters
     ----------
     var : xarray.DataArray
         DataArray on which to fill NaNs. The fill is performed on the dimensions specified
         in `dims`.
-
-    land_mask : xarray.DataArray
-        Boolean DataArray indicating valid values: `True` where data should be filled. Must have the
-        same shape as `var` for the specified dimensions.
 
     dims : list of str, optional, default=['latitude', 'longitude']
         Dimensions along which to perform the fill. The default is ['latitude', 'longitude'].
@@ -130,8 +30,7 @@ def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
     var_filled = xr.apply_ufunc(
         _lateral_fill_np_array,
         var,
-        land_mask,
-        input_core_dims=[dims, dims],
+        input_core_dims=[dims],
         output_core_dims=[dims],
         output_dtypes=[var.dtype],
         dask="parallelized",
@@ -142,21 +41,15 @@ def lateral_fill(var, land_mask, dims=["latitude", "longitude"], fillvalue=0.0):
     return var_filled
 
 
-def _lateral_fill_np_array(
-    var, isvalid_mask, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000
-):
+def _lateral_fill_np_array(var, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000):
     """
-    Perform lateral fill on a numpy array.
+    Fills all NaN values in a NumPy array via a lateral fill, while leaving existing non-NaN values unchanged.
 
     Parameters
     ----------
     var : numpy.array
         Two-dimensional array on which to fill NaNs.Only NaNs where `isvalid_mask` is
         True will be filled.
-
-    isvalid_mask : numpy.array, boolean
-        Valid values mask: `True` where data should be filled. Must have same shape
-        as `var`.
 
     fillvalue: float
         Value to use if the full field `var` contains only  NaNs. Default is 0.0.
@@ -187,17 +80,14 @@ def _lateral_fill_np_array(
     -------
     >>> import numpy as np
     >>> var = np.array([[1, 2, np.nan], [4, np.nan, 6]])
-    >>> isvalid_mask = np.array([[True, True, True], [True, True, True]])
-    >>> filled_var = lateral_fill_np_array(var, isvalid_mask)
+    >>> filled_var = lateral_fill_np_array(var)
     >>> print(filled_var)
     """
     nlat, nlon = var.shape[-2:]
     var = var.copy()
 
     fillmask = np.isnan(var)  # Fill all NaNs
-    keepNaNs = ~isvalid_mask & np.isnan(var)
     var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue)
-    var[keepNaNs] = np.nan  # Replace NaNs in areas not designated for filling
 
     return var
 

@@ -110,7 +110,16 @@ class ROMSToolsMixins:
         fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
         coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
         for var in vars_2d:
-            mask = xr.where(data.ds[data.var_names[var]].isel(time=0).isnull(), 0, 1)
+            if "time" in data.dim_names:
+                mask = xr.where(
+                    data.ds[data.var_names[var]]
+                    .isel({data.dim_names["time"]: 0})
+                    .isnull(),
+                    0,
+                    1,
+                )
+            else:
+                mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
 
             data_vars[var] = fill_and_interpolate(
                 data.ds[data.var_names[var]].astype(np.float64),
@@ -132,7 +141,16 @@ class ROMSToolsMixins:
             data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
                 data.ds[data.var_names[var]], data.dim_names["depth"]
             )
-            mask = xr.where(data.ds[data.var_names[var]].isel(time=0).isnull(), 0, 1)
+            if "time" in data.dim_names:
+                mask = xr.where(
+                    data.ds[data.var_names[var]]
+                    .isel({data.dim_names["time"]: 0})
+                    .isnull(),
+                    0,
+                    1,
+                )
+            else:
+                mask = xr.where(data.ds[data.var_names[var]].isnull(), 0, 1)
 
             # setting fillvalue_interp to None means that we allow extrapolation in the
             # interpolation step to avoid NaNs at the surface if the lowest depth in original

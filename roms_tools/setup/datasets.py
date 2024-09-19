@@ -726,6 +726,7 @@ class TPXODataset(Dataset):
             for var in self.ds.data_vars:
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
+
 @dataclass(frozen=True, kw_only=True)
 class GLORYSDataset(Dataset):
     """

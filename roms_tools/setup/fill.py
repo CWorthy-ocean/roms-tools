@@ -1,266 +1,304 @@
 import numpy as np
 import xarray as xr
-from numba import jit
+import pyamg
+from scipy import sparse
 
 
-def lateral_fill(var, dims=["latitude", "longitude"], fillvalue=0.0):
+def lateral_fill(var, mask, dims=["latitude", "longitude"], tol=1.0e-4):
     """
-    Fills all NaN values in an xarray DataArray via a lateral fill, while leaving existing non-NaN values unchanged.
+    Fills NaN values in an xarray DataArray through an iterative lateral fill, 
+    while preserving non-NaN values and maintaining land boundaries defined by the mask.
+
+    This function uses a Poisson solver to propagate 
+    values from ocean points into NaN (land) regions, while preserving non-NaN values.
 
     Parameters
     ----------
     var : xarray.DataArray
-        DataArray on which to fill NaNs. The fill is performed on the dimensions specified
-        in `dims`.
-
-    dims : list of str, optional, default=['latitude', 'longitude']
-        Dimensions along which to perform the fill. The default is ['latitude', 'longitude'].
-
-    fillvalue : float, optional, default=0.0
-        Value to use if an entire data slice along the dims contains only NaNs.
+        The input DataArray with NaN values that need to be filled. The fill 
+        is performed across the dimensions specified in `dims`.
+    mask : xarray.DataArray or ndarray of bool
+        A boolean mask indicating valid points (True) and land points 
+        (False). The fill will not affect points where the mask is `False`.
+    dims : list of str, optional
+        The dimensions along which to perform the lateral fill. By default, 
+        these are ["latitude", "longitude"].
+    tol : float, optional
+        The tolerance for the iterative solver. It determines the convergence 
+        threshold for the fill. Default is 1.0e-4.
 
     Returns
     -------
     var_filled : xarray.DataArray
-        DataArray with NaNs filled by iterative smoothing, except for the regions
-        specified by `land_mask` where NaNs are preserved.
+        A DataArray with NaN values filled by iterative smoothing.
+
+    Raises
+    ------
+    NotImplementedError
+        If the input mask has more than two dimensions, which is not supported 
+        by the current implementation.
 
     """
 
+    # Set up the right-hand side (RHS) for the Poisson equation.
+    # The RHS should be the actual data values (var) for valid ocean points (mask=True),
+    # and zero for land points (mask=False). This results in standard Laplace diffusion.
+    b = xr.where(mask, var, 0)
+    # Initialize the starting guess (x0) for the iterative solver. 
+    # The initial guess is set to the actual data for valid points (mask=True) 
+    # and the mean value of the dataset for other points.
+    x0 = xr.where(mask, var, np.mean(var))
+
+    if len(mask.shape) > 2:
+        raise NotImplementedError("lateral_fill currently only supports 2D masks.")
+    else:
+        # Copy the mask and set boundary values to True (indicating land or boundary points)
+        # This ensures that the boundaries of the grid remain fixed during the filling process.
+        mask = mask.copy()
+        mask[ 0, :] = True
+        mask[-1, :] = True
+        mask[ :, 0] = True
+        mask[ :, -1] = True
+        # Flatten the mask for compatibility with the solver. 
+        mask_flat = mask.values.flatten()
+
+        # Create the sparse matrix representation of the Laplacian operator 
+        # for the given grid shape and mask. This matrix represents the diffusion process.
+        A = laplacian(mask.shape, mask_flat, format='csr')
+        # Use an algebraic multigrid (AMG) solver to efficiently solve the Poisson equation
+        # The solver will smooth and fill NaNs based on the diffusion operator.
+        ml = pyamg.smoothed_aggregation_solver(A, max_coarse=10)  
+
+    # Apply the lateral fill to the DataArray using a custom NumPy function (_lateral_fill_np_array)
+    # The ufunc applies the solver iteratively over the specified dimensions, parallelized using Dask.
     var_filled = xr.apply_ufunc(
         _lateral_fill_np_array,
-        var,
-        input_core_dims=[dims],
+        x0,
+        b,
+        input_core_dims=[dims, dims],
         output_core_dims=[dims],
-        output_dtypes=[var.dtype],
+        output_dtypes=[x0.dtype],
         dask="parallelized",
         vectorize=True,
-        kwargs={"fillvalue": fillvalue},
+        kwargs={"ml": ml, "tol": tol},
     )
 
     return var_filled
 
 
-def _lateral_fill_np_array(var, fillvalue=0.0, tol=1.0e-4, rc=1.8, max_iter=10000):
+def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):
     """
-    Fills all NaN values in a NumPy array via a lateral fill, while leaving existing non-NaN values unchanged.
+    Fills all NaN values in a 2D NumPy array using an iterative solver, 
+    while preserving the existing non-NaN values.
+    The filling process uses an AMG solver to efficiently perform smoothing 
+    based on the Laplace operator.
 
     Parameters
     ----------
-    var : numpy.array
-        Two-dimensional array on which to fill NaNs.Only NaNs where `isvalid_mask` is
-        True will be filled.
-
-    fillvalue: float
-        Value to use if the full field `var` contains only  NaNs. Default is 0.0.
-
+    x0 : numpy.ndarray
+        Initial guess for the fill operation.
+    b : numpy.ndarray
+        Right-hand side (RHS) of the equation representing the data values 
+        to be used in the fill process. Non-NaN values in `b` correspond to 
+        valid points, and zeros are used for masked (invalid) points.
+    ml : pyamg.MultilevelSolver
+        An algebraic multigrid (AMG) solver used to iteratively fill NaNs 
+        via a smoothing process.
     tol : float, optional, default=1.0e-4
-        Convergence criteria: stop filling when the value change is less than
-        or equal to `tol * var`, i.e., `delta <= tol * np.abs(var[j, i])`.
-
-    rc : float, optional, default=1.8
-        Over-relaxation coefficient to use in the Successive Over-Relaxation (SOR)
-        fill algorithm. Larger arrays (or extent of region to be filled if not global)
-        typically converge faster with larger coefficients. For completely
-        land-filling a 1-degree grid (360x180), a coefficient in the range 1.85-1.9
-        is near optimal. Valid bounds are (1.0, 2.0).
-
-    max_iter : int, optional, default=10000
-        Maximum number of iterations to perform before giving up if the tolerance
-        is not reached.
+        Convergence tolerance for the iterative solver. The filling process 
+        stops when the relative residual (change in values) is less than or 
+        equal to `tol`. Specifically, the process iterates until:
+        ``||Ax - b|| / ||Ax0 - b|| < tol``, where `A` is the system matrix, 
+        `x` is the solution, and `x0` is the initial guess.
 
     Returns
     -------
-    var : numpy.array
-        Array with NaNs filled by iterative smoothing, except for the regions
-        specified by `isvalid_mask` where NaNs are preserved.
-
-
-    Example
-    -------
-    >>> import numpy as np
-    >>> var = np.array([[1, 2, np.nan], [4, np.nan, 6]])
-    >>> filled_var = lateral_fill_np_array(var)
-    >>> print(filled_var)
+    x_2d : numpy.ndarray
+        The filled 2D array where NaN values have been replaced with iteratively 
+        computed values, and non-NaN values remain unchanged.
     """
-    nlat, nlon = var.shape[-2:]
-    var = var.copy()
 
-    fillmask = np.isnan(var)  # Fill all NaNs
-    var = _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue)
+    b_flat = b.flatten()
+    x0_flat = x0.flatten()
+    x = ml.solve(b_flat, x0_flat, tol=tol, residuals=[])
+    x_2d = x.reshape(b.shape)
 
-    return var
+    return x_2d
 
 
-@jit(nopython=True, parallel=True)
-def _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter, fillvalue=0.0):
+def laplacian(grid, mask, dtype=float, format=None):
     """
-    Perform an iterative land fill algorithm using the Successive Over-Relaxation (SOR)
-    solution of the Laplace Equation.
+    Return a sparse matrix for solving a 2-dimensional Poisson problem.
+
+    This function generates a finite difference approximation of the Laplacian operator 
+    on a 2-dimensional grid with unit grid spacing and Dirichlet boundary conditions. 
+    The matrix can be used to solve Poisson-like equations in grid-based numerical methods.
+
+    The computation iterates over the last dimension first (z, then y, then x), and 
+    the output matrix should be compatible with `np.mgrid()` or `np.ndenumerate()`.
 
     Parameters
     ----------
-    nlat : int
-        Number of latitude points in the array.
-
-    nlon : int
-        Number of longitude points in the array.
-
-    var : numpy.array
-        Two-dimensional array on which to fill NaNs.
-
-    fillmask : numpy.array, boolean
-        Mask indicating positions to be filled: `True` where data should be filled.
-
-    tol : float
-        Convergence criterion: the iterative process stops when the maximum residual change
-        is less than or equal to `tol`.
-
-    rc : float
-        Over-relaxation coefficient used in the SOR algorithm. Must be between 1.0 and 2.0.
-
-    max_iter : int
-        Maximum number of iterations allowed before the process is terminated.
-
-    fillvalue: float
-        Value to use if the full field is NaNs. Default is 0.0.
+    grid : tuple of int
+        Dimensions of the grid, e.g., (100, 100).
+    mask : 2D array of bool
+        A boolean mask of the same size as the grid, indicating valid grid points 
+        (True for valid points, False for masked points).
+    dtype : data-type, optional
+        The desired data type of the resulting matrix. Default is `float`.
+    format : str, optional
+        The format of the sparse matrix to return, such as "csr", "coo", etc. 
+        Default is None.
 
     Returns
     -------
-    None
-        The input array `var` is modified in-place with the NaN values filled.
+    sparse matrix
+        A sparse matrix representing the finite difference Laplacian operator for 
+        the given grid.
+
+    """
+    grid = tuple(grid)
+
+    # create 2-dimensional Laplacian stencil
+    N=2
+    stencil = np.zeros((3,) * N, dtype=dtype)
+    for i in range(N):
+        stencil[(1,)*i + (0,) + (1,)*(N-i-1)] = 1 
+        stencil[(1,)*i + (2,) + (1,)*(N-i-1)] = 1 
+    stencil[(1,)*N] = -2*N
+
+    return stencil_grid_mod(stencil, grid, mask, format=format)
+
+
+def stencil_grid_mod(S, grid, msk, dtype=None, format=None):
+    """
+    Construct a sparse matrix from a local matrix stencil.
+
+    This function generates a sparse matrix that represents an operator 
+    by applying the given stencil `S` at each vertex of a regular grid with 
+    the specified dimensions. The matrix is modified according to the provided 
+    mask to ensure that masked points are not affected during matrix operations.
+
+    Parameters
+    ----------
+    S : ndarray
+        An N-dimensional array representing the local matrix stencil. 
+        All dimensions of `S` must be odd.
+    grid : tuple of int
+        A tuple specifying the dimensions of the grid. The length of the tuple
+        should match the number of dimensions of the stencil `S`.
+    msk : ndarray of bool
+        A 1D boolean array where `True` indicates points that are masked 
+        (i.e., should not be affected by the matrix).
+    dtype : data-type, optional
+        The data type of the resulting sparse matrix. Default is `None`, which 
+        will infer the type from `S`.
+    format : str, optional
+        The sparse matrix format to return, such as "csr", "coo", etc. If not 
+        specified, the default is DIA (diagonal) format.
+
+    Returns
+    -------
+    A : sparse matrix
+        A sparse matrix representing the operator formed by applying the stencil 
+        `S` at each grid vertex. The matrix is modified based on the mask so that 
+        masked points are unaffected by the operator.
 
     Notes
     -----
-    This function performs the following steps:
-    1. Computes a zonal mean to use as an initial guess for the fill.
-    2. Replaces missing values in the input array with the computed zonal average.
-    3. Iteratively fills the missing values using the SOR algorithm until the specified
-       tolerance `tol` is reached or the maximum number of iterations `max_iter` is exceeded.
+    The grid vertices are enumerated as `arange(prod(grid)).reshape(grid)`.
+    This means the last grid dimension cycles fastest, while the first dimension 
+    cycles slowest. For example, if `grid=(2,3)`, then the grid vertices are ordered 
+    as (0,0), (0,1), (0,2), (1,0), (1,1), (1,2).
 
-    Example
-    -------
-    >>> nlat, nlon = 180, 360
-    >>> var = np.random.rand(nlat, nlon)
-    >>> fillmask = np.isnan(var)
-    >>> tol = 1.0e-4
-    >>> rc = 1.8
-    >>> max_iter = 10000
-    >>> _iterative_fill_sor(nlat, nlon, var, fillmask, tol, rc, max_iter)
+    This ordering is consistent with the NumPy functions `ndenumerate()` and `mgrid()`.
+
+    The stencil is applied in all directions, and boundary conditions are 
+    respected by zeroing out connections to boundary points.
     """
 
-    # If field consists only of zeros, fill NaNs in with zeros and all done
-    # Note: this will happen for shortwave downward radiation at night time
-    if np.max(np.fabs(var)) == 0.0:
-        var = np.zeros_like(var)
-        return var
-    # If field consists only of NaNs, fill NaNs with fill value
-    if np.isnan(var).all():
-        var = fillvalue * np.ones_like(var)
-        return var
+    S = np.asarray(S, dtype=dtype)
+    grid = tuple(grid)
 
-    # Compute a zonal mean to use as a first guess
-    zoncnt = np.zeros(nlat)
-    zonavg = np.zeros(nlat)
-    for j in range(0, nlat):
-        zoncnt[j] = np.sum(np.where(fillmask[j, :], 0, 1))
-        zonavg[j] = np.sum(np.where(fillmask[j, :], 0, var[j, :]))
-        if zoncnt[j] != 0:
-            zonavg[j] = zonavg[j] / zoncnt[j]
+    if not (np.asarray(S.shape) % 2 == 1).all():
+        raise ValueError('all stencil dimensions must be odd')
 
-    # Fill missing zonal averages for rows that are entirely land
-    for j in range(0, nlat - 1):  # northward pass
-        if zoncnt[j] > 0 and zoncnt[j + 1] == 0:
-            zoncnt[j + 1] = 1
-            zonavg[j + 1] = zonavg[j]
-    for j in range(nlat - 1, 0, -1):  # southward pass
-        if zoncnt[j] > 0 and zoncnt[j - 1] == 0:
-            zoncnt[j - 1] = 1
-            zonavg[j - 1] = zonavg[j]
+    if len(grid) != np.ndim(S):
+        raise ValueError('stencil dimension must equal number of grid\
+                          dimensions')
 
-    # Replace the input array missing values with zonal average as first guess
-    for j in range(0, nlat):
-        for i in range(0, nlon):
-            if fillmask[j, i]:
-                var[j, i] = zonavg[j]
+    if min(grid) < 1:
+        raise ValueError('grid dimensions must be positive')
 
-    # Now do the iterative 2D fill
-    res = np.zeros((nlat, nlon))  # work array hold residuals
-    res_max = tol
-    iter_cnt = 0
-    while iter_cnt < max_iter and res_max >= tol:
-        res[:] = 0.0  # reset the residual to zero for this iteration
+    N_v = np.prod(grid)  # number of vertices in the mesh
+    N_s = (S != 0).sum()    # number of nonzero stencil entries
 
-        for j in range(1, nlat - 1):
-            jm1 = j - 1
-            jp1 = j + 1
+    # diagonal offsets
+    diags = np.zeros(N_s, dtype=int)
+ 
+    # compute index offset of each dof within the stencil
+    strides = np.cumprod([1] + list(reversed(grid)))[:-1]  # noqa: RUF005
+    indices = tuple(i.copy() for i in S.nonzero())
+    for i, s in zip(indices, S.shape):
+        i -= s // 2
 
-            for i in range(1, nlon - 1):
-                if fillmask[j, i]:
-                    im1 = i - 1
-                    ip1 = i + 1
+    for stride, coords in zip(strides, reversed(indices)):
+        diags += stride * coords
+    
+    data = S[S != 0].repeat(N_v).reshape(N_s, N_v)
 
-                    # this is SOR
-                    res[j, i] = (
-                        var[j, ip1]
-                        + var[j, im1]
-                        + var[jm1, i]
-                        + var[jp1, i]
-                        - 4.0 * var[j, i]
-                    )
-                    var[j, i] = var[j, i] + rc * 0.25 * res[j, i]
 
-        # do 1D smooth on top and bottom row if there is some valid data there in the input
-        # otherwise leave it set to zonal average
-        for j in [0, nlat - 1]:
-            if zoncnt[j] > 1:
+    indices = np.vstack(indices).T
 
-                for i in range(1, nlon - 1):
-                    if fillmask[j, i]:
-                        im1 = i - 1
-                        ip1 = i + 1
+    # zero boundary connections
+    for index, diag in zip(indices, data):
+        diag = diag.reshape(grid)
+        for n, i in enumerate(index):
+            if i > 0:
+                s = [slice(None)] * len(grid)
+                s[n] = slice(0, i)
+                s = tuple(s)
+                diag[s] = 0
+            elif i < 0:
+                s = [slice(None)]*len(grid)
+                s[n] = slice(i, None)
+                s = tuple(s)
+                diag[s] = 0
 
-                        res[j, i] = var[j, ip1] + var[j, im1] - 2.0 * var[j, i]
-                        var[j, i] = var[j, i] + rc * 0.5 * res[j, i]
+    # remove diagonals that lie outside matrix
+    mask = abs(diags) < N_v
+    if not mask.all():
+        diags = diags[mask]
+        data = data[mask]
+    
+    # sum duplicate diagonals
+    if len(np.unique(diags)) != len(diags):
+        new_diags = np.unique(diags)
+        new_data = np.zeros((len(new_diags), data.shape[1]),
+                            dtype=data.dtype)
 
-        # do 1D smooth in the vertical on left and right column
-        for i in [0, nlon - 1]:
+        for dia, dat in zip(diags, data):
+            n = np.searchsorted(new_diags, dia)
+            new_data[n, :] += dat
 
-            for j in range(1, nlat - 1):
-                if fillmask[j, i]:
-                    jm1 = j - 1
-                    jp1 = j + 1
+        diags = new_diags
+        data = new_data
 
-                    res[j, i] = var[jp1, i] + var[jm1, i] - 2.0 * var[j, i]
-                    var[j, i] = var[j, i] + rc * 0.5 * res[j, i]
+    # Modify the data vectors so that masked points are not affected by the matrix solve.
+    # The modifications to the data vectors are offset by the elements of "diag" because 
+    # of the way sparse.dia_matrix sets the diagonals
+    for i in range(N_v):
+        if msk[i]:
+            if ((i+diags[0])>=0):
+                data[0,i+diags[0]] = 0
+            if ((i+diags[1])>=0):    
+                data[1,i+diags[1]] = 0
+            data[2,i] = 1
+            if ((i+diags[3])<(N_v)):
+                data[3,i+diags[3]] = 0
+            if ((i+diags[4])<(N_v)):
+                data[4,i+diags[4]] = 0
+                
+    return sparse.dia_matrix((data, diags),
+                             shape=(N_v, N_v)).asformat(format)
 
-        # four corners
-        for j in [0, nlat - 1]:
-            if j == 0:
-                jp1 = j + 1
-                jm1 = j
-            elif j == nlat - 1:
-                jp1 = j
-                jm1 = j - 1
-
-            for i in [0, nlon - 1]:
-                if i == 0:
-                    ip1 = i + 1
-                    im1 = i
-                elif i == nlon - 1:
-                    ip1 = i
-                    im1 = i - 1
-
-                res[j, i] = (
-                    var[j, ip1]
-                    + var[j, im1]
-                    + var[jm1, i]
-                    + var[jp1, i]
-                    - 4.0 * var[j, i]
-                )
-                var[j, i] = var[j, i] + rc * 0.25 * res[j, i]
-
-        res_max = np.max(np.fabs(res)) / np.max(np.fabs(var))
-        iter_cnt += 1
-
-    return var

@@ -709,15 +709,17 @@ class TPXODataset(Dataset):
 
     def post_process(self):
         """
-        Apply a depth-based mask to the dataset.
-        This method checks if the 'depth' variable is present in the dataset. If so, it creates a mask where
-        values of 'depth' greater than 0 are considered valid. The mask is applied to all data variables, setting
-        values at invalid depths (depth ≤ 0) to NaN.
-        This ensures that only data corresponding to positive depths is retained.
+        Apply a depth-based mask to the dataset, ensuring only positive depths are retained.
+
+        This method checks if the 'depth' variable is present in the dataset. If found, a mask is created where
+        depths greater than 0 are considered valid (mask value of 1). This mask is applied to all data variables
+        in the dataset, replacing values at invalid depths (depth ≤ 0) with NaN. The mask itself is also stored
+        in the dataset under the variable 'mask'.
+
         Returns
         -------
         None
-            The dataset is modified in-place.
+            The dataset is modified in-place by applying the mask to each variable.
         """
 
         if "depth" in self.var_names.keys():
@@ -725,6 +727,8 @@ class TPXODataset(Dataset):
 
             for var in self.ds.data_vars:
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
+            
+            self.ds["mask"] = mask
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -775,6 +779,28 @@ class GLORYSDataset(Dataset):
 
     climatology: Optional[bool] = False
 
+    def post_process(self):
+        """
+        Apply a mask to the dataset based on the 'zeta' variable, with 0 where 'zeta' is NaN.
+
+        This method creates a mask based on the
+        first time step (time=0) of 'zeta'. The mask has 1 for valid data and 0 where 'zeta' is NaN. This mask is applied
+        to all data variables, replacing values with NaN where 'zeta' is NaN at time=0.
+        The mask itself is stored in the dataset under the variable 'mask'.
+
+        Returns
+        -------
+        None
+            The dataset is modified in-place by applying the mask to each variable.
+
+        """
+
+        mask = xr.where(self.ds[self.var_names["zeta"]].isel({self.dim_names["time"]: 0}).isnull(), 0, 1)
+        
+        for var in self.ds.data_vars:
+            self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
+        
+        self.ds["mask"] = mask
 
 @dataclass(frozen=True, kw_only=True)
 class CESMDataset(Dataset):
@@ -947,6 +973,7 @@ class CESMBGCDataset(CESMDataset):
         """
         Processes and converts CESM data values as follows:
         - Convert depth values from cm to m.
+        - Apply a mask to the dataset based on the 'P04' variable at the surface.
         """
 
         if self.dim_names["depth"] == "z_t":
@@ -979,6 +1006,12 @@ class CESMBGCDataset(CESMDataset):
             updated_dim_names["depth"] = "depth"
             object.__setattr__(self, "dim_names", updated_dim_names)
 
+        mask = xr.where(self.ds[self.var_names["PO4"]].isel({self.dim_names["time"]: 0, self.dim_names["depth"]: 0}).isnull(), 0, 1)
+        
+        for var in self.ds.data_vars:
+            self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
+        
+        self.ds["mask"] = mask
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCSurfaceForcingDataset(CESMDataset):
@@ -1040,6 +1073,12 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
             ds = self.ds.drop_vars("z_t")
             object.__setattr__(self, "ds", ds)
 
+        mask = xr.where(self.ds[self.var_names["pco2_air"]].isel({self.dim_names["time"]: 0}).isnull(), 0, 1)
+        
+        for var in self.ds.data_vars:
+            self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
+        
+        self.ds["mask"] = mask
 
 @dataclass(frozen=True, kw_only=True)
 class ERA5Dataset(Dataset):
@@ -1098,6 +1137,7 @@ class ERA5Dataset(Dataset):
         - Convert rainfall from meters to cm/day.
         - Convert temperature from Kelvin to Celsius.
         - Compute relative humidity if not present, convert to absolute humidity.
+        - Use SST to create mask.
         """
         # Translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
         # Convert radiation from J/m^2 to W/m^2
@@ -1148,6 +1188,8 @@ class ERA5Dataset(Dataset):
 
             for var in self.ds.data_vars:
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
+            
+            self.ds["mask"] = mask
 
 
 @dataclass(frozen=True, kw_only=True)

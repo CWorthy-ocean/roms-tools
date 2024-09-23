@@ -5,6 +5,7 @@ from roms_tools.setup.download import download_test_data
 import textwrap
 from conftest import calculate_file_hash
 from pathlib import Path
+import uuid
 
 
 @pytest.fixture
@@ -643,9 +644,10 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
 
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
-    yaml_filepath = tmp_path / "test_yaml"
-    filepath1 = tmp_path / "test1.nc"
-    filepath2 = tmp_path / "test2.nc"
+    unique_id = uuid.uuid4()  # Generate a unique identifier
+    yaml_filepath = tmp_path / f"test_yaml_{unique_id}.yaml"
+    filepath1 = tmp_path / f"test1_{unique_id}.nc"
+    filepath2 = tmp_path / f"test2_{unique_id}.nc"
 
     sfc_forcing.to_yaml(yaml_filepath)
     sfc_forcing.save(filepath1)

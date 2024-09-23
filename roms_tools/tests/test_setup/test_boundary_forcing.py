@@ -5,6 +5,7 @@ import textwrap
 from roms_tools.setup.download import download_test_data
 from conftest import calculate_file_hash
 from pathlib import Path
+import uuid
 
 
 def test_boundary_forcing_creation(boundary_forcing):
@@ -199,9 +200,10 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
 
 def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
 
-    yaml_filepath = tmp_path / "test_yaml"
-    filepath1 = tmp_path / "test1.nc"
-    filepath2 = tmp_path / "test2.nc"
+    unique_id = uuid.uuid4()  # Generate a unique identifier
+    yaml_filepath = tmp_path / f"test_yaml_{unique_id}.yaml"
+    filepath1 = tmp_path / f"test1_{unique_id}.nc"
+    filepath2 = tmp_path / f"test2_{unique_id}.nc"
 
     boundary_forcing.to_yaml(yaml_filepath)
     boundary_forcing.save(filepath1)

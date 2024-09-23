@@ -727,7 +727,7 @@ class TPXODataset(Dataset):
 
             for var in self.ds.data_vars:
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
-            
+
             self.ds["mask"] = mask
 
 
@@ -795,12 +795,17 @@ class GLORYSDataset(Dataset):
 
         """
 
-        mask = xr.where(self.ds[self.var_names["zeta"]].isel({self.dim_names["time"]: 0}).isnull(), 0, 1)
-        
+        mask = xr.where(
+            self.ds[self.var_names["zeta"]].isel({self.dim_names["time"]: 0}).isnull(),
+            0,
+            1,
+        )
+
         for var in self.ds.data_vars:
             self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
-        
+
         self.ds["mask"] = mask
+
 
 @dataclass(frozen=True, kw_only=True)
 class CESMDataset(Dataset):
@@ -1006,12 +1011,19 @@ class CESMBGCDataset(CESMDataset):
             updated_dim_names["depth"] = "depth"
             object.__setattr__(self, "dim_names", updated_dim_names)
 
-        mask = xr.where(self.ds[self.var_names["PO4"]].isel({self.dim_names["time"]: 0, self.dim_names["depth"]: 0}).isnull(), 0, 1)
-        
+        mask = xr.where(
+            self.ds[self.var_names["PO4"]]
+            .isel({self.dim_names["time"]: 0, self.dim_names["depth"]: 0})
+            .isnull(),
+            0,
+            1,
+        )
+
         for var in self.ds.data_vars:
             self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
-        
+
         self.ds["mask"] = mask
+
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCSurfaceForcingDataset(CESMDataset):
@@ -1073,12 +1085,19 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
             ds = self.ds.drop_vars("z_t")
             object.__setattr__(self, "ds", ds)
 
-        mask = xr.where(self.ds[self.var_names["pco2_air"]].isel({self.dim_names["time"]: 0}).isnull(), 0, 1)
-        
+        mask = xr.where(
+            self.ds[self.var_names["pco2_air"]]
+            .isel({self.dim_names["time"]: 0})
+            .isnull(),
+            0,
+            1,
+        )
+
         for var in self.ds.data_vars:
             self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
-        
+
         self.ds["mask"] = mask
+
 
 @dataclass(frozen=True, kw_only=True)
 class ERA5Dataset(Dataset):
@@ -1188,7 +1207,7 @@ class ERA5Dataset(Dataset):
 
             for var in self.ds.data_vars:
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
-            
+
             self.ds["mask"] = mask
 
 

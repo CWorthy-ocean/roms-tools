@@ -127,7 +127,7 @@ class SurfaceForcing(ROMSToolsMixins):
                 correction_data.choose_subdomain(coords_correction, straddle=straddle)
                 # apply mask from ERA5 data
                 if "mask" in data.var_names.keys():
-                    mask =  data.ds["mask"]
+                    mask = data.ds["mask"]
                     for var in correction_data.ds.data_vars:
                         correction_data.ds[var] = xr.where(
                             mask == 1, correction_data.ds[var], np.nan

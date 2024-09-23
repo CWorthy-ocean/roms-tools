@@ -112,7 +112,9 @@ class ROMSToolsMixins:
         for var in vars_2d:
             # Propagate ocean values into land interior before interpolation
             data.ds[data.var_names[var]] = lateral_fill(
-                data.ds[data.var_names[var]].astype(np.float64), data.ds["mask"], fill_dims
+                data.ds[data.var_names[var]].astype(np.float64),
+                data.ds["mask"],
+                fill_dims,
             )
 
             # Regrid
@@ -136,7 +138,9 @@ class ROMSToolsMixins:
             )
             # Propagate ocean values into land interior before interpolation
             data.ds[data.var_names[var]] = lateral_fill(
-                data.ds[data.var_names[var]].astype(np.float64), data.ds["mask"], fill_dims
+                data.ds[data.var_names[var]].astype(np.float64),
+                data.ds["mask"],
+                fill_dims,
             )
 
             # Regrid

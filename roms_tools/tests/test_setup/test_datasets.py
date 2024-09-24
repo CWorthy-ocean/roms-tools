@@ -424,7 +424,10 @@ def test_data_concatenation(use_dask):
 
     fname = download_test_data("GLORYS_NA_2012.nc")
     data = GLORYSDataset(
-        filename=fname, start_time=datetime(2012, 1, 1), end_time=datetime(2013, 1, 1)
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        use_dask=use_dask,
     )
 
     # Concatenating the datasets at fname0 and fname1 should result in the dataset at fname
@@ -437,6 +440,7 @@ def test_data_concatenation(use_dask):
         filename=str(directory_path) + "/GLORYS_NA_2012????.nc",
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2013, 1, 1),
+        use_dask=use_dask,
     )
     assert data.ds.equals(data_concatenated.ds)
 
@@ -445,5 +449,6 @@ def test_data_concatenation(use_dask):
         filename=[fname0, fname1],
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2013, 1, 1),
+        use_dask=use_dask,
     )
     assert data.ds.equals(data_concatenated.ds)

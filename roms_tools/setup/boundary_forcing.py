@@ -166,6 +166,7 @@ class BoundaryForcing(ROMSToolsMixins):
         if self.type == "physics":
             if self.source["name"] == "GLORYS":
                 data = GLORYSDataset(**data_dict)
+                data.post_process()
             else:
                 raise ValueError(
                     'Only "GLORYS" is a valid option for source["name"] when type is "physics".'

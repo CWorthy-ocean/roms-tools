@@ -127,13 +127,12 @@ class SurfaceForcing(ROMSToolsMixins):
                 correction_data.choose_subdomain(coords_correction, straddle=straddle)
                 # apply mask from ERA5 data
                 if "mask" in data.var_names.keys():
-                    mask = xr.where(
-                        data.ds[data.var_names["mask"]].isel(time=0).isnull(), 0, 1
-                    )
+                    mask = data.ds["mask"]
                     for var in correction_data.ds.data_vars:
                         correction_data.ds[var] = xr.where(
                             mask == 1, correction_data.ds[var], np.nan
                         )
+                    correction_data.ds["mask"] = mask
                 vars_2d = ["swr_corr"]
                 vars_3d = []
                 # spatial interpolation

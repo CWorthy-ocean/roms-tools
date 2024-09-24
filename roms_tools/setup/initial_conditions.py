@@ -174,6 +174,7 @@ class InitialConditions(ROMSToolsMixins):
                 climatology=self.source["climatology"],
                 use_dask=self.use_dask,
             )
+            data.post_process()
         else:
             raise ValueError('Only "GLORYS" is a valid option for source["name"].')
         return data

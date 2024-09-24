@@ -131,6 +131,9 @@ class Dataset:
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
 
+        # Precompile the regex for matching wildcard characters
+        wildcard_regex = re.compile(r"[\*\?\[\]]")
+
         # Convert Path objects to strings
         if isinstance(self.filename, (str, Path)):
             filename_str = str(self.filename)
@@ -142,8 +145,10 @@ class Dataset:
             )
 
         # Handle the case when filename is a string
+        contains_wildcard = False
         if isinstance(filename_str, str):
-            if re.search(r"[\*\?\[\]]", filename_str):
+            contains_wildcard = bool(wildcard_regex.search(filename_str))
+            if contains_wildcard:
                 matching_files = glob.glob(filename_str)
                 if not matching_files:
                     raise FileNotFoundError(
@@ -154,8 +159,8 @@ class Dataset:
 
         # Handle the case when filename is a list
         elif isinstance(filename_str, list):
-            # Check if any element in the list contains wildcard characters
-            if any(re.search(r"[\*\?\[\]]", f) for f in filename_str):
+            contains_wildcard = any(wildcard_regex.search(f) for f in filename_str)
+            if contains_wildcard:
                 matching_files = []
                 for f in filename_str:
                     files = glob.glob(f)
@@ -175,7 +180,7 @@ class Dataset:
             )
 
         # Determine the kwargs for combining datasets
-        if re.search(r"[\*\?\[\]]", str(filename_str)) or len(matching_files) == 1:
+        if contains_wildcard or len(matching_files) == 1:
             # If there is a wildcard or just one file, use by_coords
             kwargs = {"combine": "by_coords"}
         else:

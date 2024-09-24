@@ -2,9 +2,11 @@ import pytest
 from datetime import datetime
 import numpy as np
 import xarray as xr
-from roms_tools.setup.datasets import Dataset, ERA5Correction
+from roms_tools.setup.datasets import Dataset, GLORYSDataset, ERA5Correction
+from roms_tools.setup.download import download_test_data
 import tempfile
 import os
+from pathlib import Path
 
 
 @pytest.fixture
@@ -416,3 +418,32 @@ def test_era5_correction_choose_subdomain(use_dask):
     data.choose_subdomain(coords, straddle=False)
     assert (data.ds["latitude"] == lats).all()
     assert (data.ds["longitude"] == lons).all()
+
+
+def test_data_concatenation(use_dask):
+
+    fname = download_test_data("GLORYS_NA_2012.nc")
+    data = GLORYSDataset(
+        filename=fname, start_time=datetime(2012, 1, 1), end_time=datetime(2013, 1, 1)
+    )
+
+    # Concatenating the datasets at fname0 and fname1 should result in the dataset at fname
+    fname0 = download_test_data("GLORYS_NA_20120101.nc")
+    fname1 = download_test_data("GLORYS_NA_20121231.nc")
+
+    # Test concatenation based on wildcards
+    directory_path = Path(fname0).parent
+    data_concatenated = GLORYSDataset(
+        filename=str(directory_path) + "/GLORYS_NA_2012????.nc",
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+    )
+    assert data.ds.equals(data_concatenated.ds)
+
+    # Test concatenation based on lists
+    data_concatenated = GLORYSDataset(
+        filename=[fname0, fname1],
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+    )
+    assert data.ds.equals(data_concatenated.ds)

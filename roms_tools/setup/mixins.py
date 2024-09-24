@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.fill import lateral_fill
+from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import (
     extrapolate_deepest_to_bottom,
     interpolate_from_rho_to_u,
@@ -106,15 +106,18 @@ class ROMSToolsMixins:
         # interpolate onto desired grid
         data_vars = {}
 
+        # Set up solver that does lateral fill
+        lateral_fill = LateralFill(
+            data.ds["mask"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
+
         # 2d interpolation
-        fill_dims = [data.dim_names["latitude"], data.dim_names["longitude"]]
         coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
         for var in vars_2d:
-            # Propagate ocean values into land interior before interpolation
-            data.ds[data.var_names[var]] = lateral_fill(
-                data.ds[data.var_names[var]].astype(np.float64),
-                data.ds["mask"],
-                fill_dims,
+            # Propagate ocean values into land via lateral fill
+            data.ds[data.var_names[var]] = lateral_fill.apply(
+                data.ds[data.var_names[var]].astype(np.float64)
             )
 
             # Regrid
@@ -136,11 +139,9 @@ class ROMSToolsMixins:
             data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
                 data.ds[data.var_names[var]], data.dim_names["depth"]
             )
-            # Propagate ocean values into land interior before interpolation
-            data.ds[data.var_names[var]] = lateral_fill(
-                data.ds[data.var_names[var]].astype(np.float64),
-                data.ds["mask"],
-                fill_dims,
+            # Propagate ocean values into land via lateral fill
+            data.ds[data.var_names[var]] = lateral_fill.apply(
+                data.ds[data.var_names[var]].astype(np.float64)
             )
 
             # Regrid

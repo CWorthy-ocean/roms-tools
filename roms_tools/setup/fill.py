@@ -4,86 +4,88 @@ import pyamg
 from scipy import sparse
 
 
-def lateral_fill(var, mask, dims=["latitude", "longitude"], tol=1.0e-4):
-    """
-    Fills NaN values in an xarray DataArray through an iterative lateral fill,
-    while preserving non-NaN values and maintaining land boundaries defined by the mask.
+class LateralFill:
+    def __init__(self, mask, dims, tol=1.0e-4):
+        """
+        Initializes the LateralFill class, which fills NaN values in a DataArray
+        by iteratively solving a Poisson equation using a lateral diffusion approach.
 
-    This function uses a Poisson solver to propagate
-    values from ocean points into NaN (land) regions, while preserving non-NaN values.
+        Parameters
+        ----------
+        mask : xarray.DataArray or ndarray of bool
+            A 2D boolean mask indicating valid points (True) and land points (False).
+            Boundary points are automatically set to land (True).
+        dims : list of str
+            Dimensions along which to perform the lateral fill. Defaults to ["latitude", "longitude"].
+        tol : float, optional
+            Tolerance for the iterative solver, determining convergence. Default is 1.0e-4.
 
-    Parameters
-    ----------
-    var : xarray.DataArray
-        The input DataArray with NaN values that need to be filled. The fill
-        is performed across the dimensions specified in `dims`.
-    mask : xarray.DataArray or ndarray of bool
-        A boolean mask indicating valid points (True) and land points
-        (False). The fill will not affect points where the mask is `False`.
-    dims : list of str, optional
-        The dimensions along which to perform the lateral fill. By default,
-        these are ["latitude", "longitude"].
-    tol : float, optional
-        The tolerance for the iterative solver. It determines the convergence
-        threshold for the fill. Default is 1.0e-4.
+        Raises
+        ------
+        NotImplementedError
+            If the input mask has more than two dimensions, which is not supported by the current implementation.
+        """
 
-    Returns
-    -------
-    var_filled : xarray.DataArray
-        A DataArray with NaN values filled by iterative smoothing.
+        if len(mask.shape) > 2:
+            raise NotImplementedError("LateralFill currently supports only 2D masks.")
 
-    Raises
-    ------
-    NotImplementedError
-        If the input mask has more than two dimensions, which is not supported
-        by the current implementation.
+        self.mask = mask
 
-    """
-
-    # Set up the right-hand side (RHS) for the Poisson equation.
-    # The RHS should be the actual data values (var) for valid ocean points (mask=True),
-    # and zero for land points (mask=False). This results in standard Laplace diffusion.
-    b = xr.where(mask, var, 0)
-    # Initialize the starting guess (x0) for the iterative solver.
-    # The initial guess is set to the actual data for valid points (mask=True)
-    # and the mean value of the dataset for other points.
-    x0 = xr.where(mask, var, np.mean(var))
-
-    if len(mask.shape) > 2:
-        raise NotImplementedError("lateral_fill currently only supports 2D masks.")
-    else:
-        # Copy the mask and set boundary values to True (indicating land or boundary points)
-        # This ensures that the boundaries of the grid remain fixed during the filling process.
+        # Ensure the mask is 2D, copy it and set boundary values to True
         mask = mask.copy()
         mask[0, :] = True
         mask[-1, :] = True
         mask[:, 0] = True
         mask[:, -1] = True
-        # Flatten the mask for compatibility with the solver.
+
+        # Flatten the mask for use in the sparse matrix solver
         mask_flat = mask.values.flatten()
 
-        # Create the sparse matrix representation of the Laplacian operator
-        # for the given grid shape and mask. This matrix represents the diffusion process.
+        # Create a sparse matrix representing the Laplacian operator for the diffusion process
         A = laplacian(mask.shape, mask_flat, format="csr")
-        # Use an algebraic multigrid (AMG) solver to efficiently solve the Poisson equation
-        # The solver will smooth and fill NaNs based on the diffusion operator.
-        ml = pyamg.smoothed_aggregation_solver(A, max_coarse=10)
 
-    # Apply the lateral fill to the DataArray using a custom NumPy function (_lateral_fill_np_array)
-    # The ufunc applies the solver iteratively over the specified dimensions, parallelized using Dask.
-    var_filled = xr.apply_ufunc(
-        _lateral_fill_np_array,
-        x0,
-        b,
-        input_core_dims=[dims, dims],
-        output_core_dims=[dims],
-        output_dtypes=[x0.dtype],
-        dask="parallelized",
-        vectorize=True,
-        kwargs={"ml": ml, "tol": tol},
-    )
+        # Use algebraic multigrid solver for solving the Poisson equation
+        self.ml = pyamg.smoothed_aggregation_solver(A, max_coarse=10)
+        self.dims = dims
+        self.tol = tol
 
-    return var_filled
+    def apply(self, var):
+        """
+        Fills NaN values in an xarray DataArray using iterative lateral diffusion.
+
+        Parameters
+        ----------
+        var : xarray.DataArray
+            Input DataArray with NaN values to be filled. The fill is performed
+            across the dimensions specified by `dims`.
+
+        Returns
+        -------
+        var_filled : xarray.DataArray
+            A DataArray with NaN values filled by iterative smoothing, while preserving
+            non-NaN values.
+
+        """
+        # Setup the right-hand side (RHS): ocean points take their original values, land points are set to 0
+        b = xr.where(self.mask, var, 0)
+
+        # Initial guess for the solver: same as the input for ocean points, mean of the array for others
+        x0 = xr.where(self.mask, var, np.mean(var))
+
+        # Apply the iterative solver using a custom NumPy function
+        var_filled = xr.apply_ufunc(
+            _lateral_fill_np_array,
+            x0,
+            b,
+            input_core_dims=[self.dims, self.dims],
+            output_core_dims=[self.dims],
+            output_dtypes=[x0.dtype],
+            dask="parallelized",
+            vectorize=True,
+            kwargs={"ml": self.ml, "tol": self.tol},
+        )
+
+        return var_filled
 
 
 def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):

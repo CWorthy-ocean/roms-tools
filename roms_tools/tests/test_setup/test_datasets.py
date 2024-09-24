@@ -452,3 +452,24 @@ def test_data_concatenation(use_dask):
         use_dask=use_dask,
     )
     assert data.ds.equals(data_concatenated.ds)
+
+
+def test_time_validation(use_dask):
+
+    fname = download_test_data("GLORYS_NA_2012.nc")
+
+    with pytest.raises(TypeError, match="start_time must be a datetime object"):
+        GLORYSDataset(
+            filename=fname,
+            start_time="dummy",
+            end_time=datetime(2013, 1, 1),
+            use_dask=use_dask,
+        )
+    with pytest.raises(TypeError, match="end_time must be a datetime object"):
+
+        GLORYSDataset(
+            filename=fname,
+            start_time=datetime(2012, 1, 1),
+            end_time="dummy",
+            use_dask=use_dask,
+        )

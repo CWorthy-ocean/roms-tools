@@ -145,11 +145,6 @@ class Dataset:
         # Handle the case when filename is a string
         if isinstance(filename_str, str):
             if re.search(r"[\*\?\[\]]", filename_str):
-                if not self.use_dask:
-                    raise ValueError(
-                        "Wildcards detected in the filename but use_dask=False. "
-                        "Wildcards can only be used when use_dask=True."
-                    )
                 matching_files = glob.glob(filename_str)
                 if not matching_files:
                     raise FileNotFoundError(
@@ -160,12 +155,18 @@ class Dataset:
 
         # Handle the case when filename is a list
         elif isinstance(filename_str, list):
-            if not self.use_dask:
-                raise ValueError(
-                    "A list of files is provided, but use_dask=False. "
-                    "Multiple files can only be loaded when use_dask=True."
-                )
-            matching_files = filename_str
+            # Check if any element in the list contains wildcard characters
+            if any(re.search(r"[\*\?\[\]]", f) for f in filename_str):
+                matching_files = []
+                for f in filename_str:
+                    files = glob.glob(f)
+                    if not files:
+                        raise FileNotFoundError(
+                            f"No files found matching the pattern '{f}'."
+                        )
+                    matching_files.extend(files)
+            else:
+                matching_files = filename_str
 
         # Check if time dimension is available when multiple files are provided
         if isinstance(filename_str, list) and "time" not in self.dim_names:
@@ -173,6 +174,17 @@ class Dataset:
                 "A list of files is provided, but time dimension is not available. "
                 "A time dimension must be available to concatenate the files."
             )
+
+        # Determine the kwargs for combining datasets
+        if re.search(r"[\*\?\[\]]", str(filename_str)) or len(matching_files) == 1:
+            # If there is a wildcard or just one file, use by_coords
+            kwargs = {"combine": "by_coords"}
+        else:
+            # Otherwise, use nested combine based on time
+            kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
+
+        # Base kwargs used for dataset combination
+        kwargs0 = {"coords": "minimal", "compat": "override"}
 
         if self.use_dask:
 
@@ -185,20 +197,24 @@ class Dataset:
             if "time" in self.dim_names:
                 chunks[self.dim_names["time"]] = 1
 
-            if re.search(r"[\*\?\[\]]", filename_str) or len(matching_files) == 1:
-                kwargs = {"combine": "by_coords"}
-            else:
-                kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
-
             ds = xr.open_mfdataset(
                 matching_files,
-                coords="minimal",
-                compat="override",
                 chunks=chunks,
+                **kwargs0,
                 **kwargs,
             )
         else:
-            ds = xr.open_dataset(matching_files[0], chunks=None)
+            ds_list = []
+            for file in matching_files:
+                ds = xr.open_dataset(file, chunks=None)
+                ds_list.append(ds)
+
+            if kwargs["combine"] == "by_coords":
+                ds = xr.combine_by_coords(ds_list, **kwargs0)
+            elif kwargs["combine"] == "nested":
+                ds = xr.combine_nested(
+                    ds_list, concat_dim=kwargs["concat_dim"], **kwargs0
+                )
 
         if "time" in self.dim_names and self.dim_names["time"] not in ds.dims:
             ds = ds.expand_dims(self.dim_names["time"])

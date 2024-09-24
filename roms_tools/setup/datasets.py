@@ -128,7 +128,6 @@ class Dataset:
         FileNotFoundError
             If the specified file does not exist.
         ValueError
-            If wildcards are found in the filename and use_dask=False.
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
 

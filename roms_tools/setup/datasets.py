@@ -183,7 +183,7 @@ class Dataset:
             kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
 
         # Base kwargs used for dataset combination
-        kwargs0 = {
+        combine_kwargs = {
             "coords": "minimal",
             "compat": "override",
             "combine_attrs": "override",
@@ -203,7 +203,7 @@ class Dataset:
             ds = xr.open_mfdataset(
                 matching_files,
                 chunks=chunks,
-                **kwargs0,
+                **combine_kwargs,
                 **kwargs,
             )
         else:
@@ -213,10 +213,10 @@ class Dataset:
                 ds_list.append(ds)
 
             if kwargs["combine"] == "by_coords":
-                ds = xr.combine_by_coords(ds_list, **kwargs0)
+                ds = xr.combine_by_coords(ds_list, **combine_kwargs)
             elif kwargs["combine"] == "nested":
                 ds = xr.combine_nested(
-                    ds_list, concat_dim=kwargs["concat_dim"], **kwargs0
+                    ds_list, concat_dim=kwargs["concat_dim"], **combine_kwargs
                 )
 
         if "time" in self.dim_names and self.dim_names["time"] not in ds.dims:

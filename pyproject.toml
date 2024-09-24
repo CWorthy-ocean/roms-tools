@@ -28,7 +28,6 @@ dependencies = [
     "packaging",
     "scipy",
     "gcm_filters",
-    "numba",
     "netcdf4",
     "PyYAML",
     "pyamg"

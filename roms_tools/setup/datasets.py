@@ -184,7 +184,11 @@ class Dataset:
             kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
 
         # Base kwargs used for dataset combination
-        kwargs0 = {"coords": "minimal", "compat": "override"}
+        kwargs0 = {
+            "coords": "minimal",
+            "compat": "override",
+            "combine_attrs": "override",
+        }
 
         if self.use_dask:
 

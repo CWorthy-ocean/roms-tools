@@ -88,6 +88,16 @@ class Dataset:
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
 
+        # Validate start_time and end_time
+        if self.start_time is not None and not isinstance(self.start_time, datetime):
+            raise TypeError(
+                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
+            )
+        if self.end_time is not None and not isinstance(self.end_time, datetime):
+            raise TypeError(
+                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
+            )
+
         ds = self.load_data()
         self.check_dataset(ds)
 

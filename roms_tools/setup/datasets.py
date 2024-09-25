@@ -414,7 +414,7 @@ class Dataset:
                         # Pick the time closest to self.start_time
                         ds = ds.isel({time_dim: 0})
                     print(
-                        f"Selected time entry closest to the specified start_time ({self.start_time}): {ds[time_dim].values}"
+                        f"Selected time entry closest to the specified start_time ({self.start_time}) within the range [{self.start_time}, {self.start_time + timedelta(hours=24)}]: {ds[time_dim].values}"
                     )
         else:
             warnings.warn(

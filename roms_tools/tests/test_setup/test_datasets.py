@@ -232,11 +232,11 @@ def test_multiple_matching_times(
     dataset = Dataset(
         filename=filepath,
         var_names={"var": "var"},
-        start_time=datetime(2022, 1, 1, 10, 0),
+        start_time=datetime(2022, 1, 31, 22, 0),
         use_dask=use_dask,
     )
 
-    assert dataset.ds["time"].values == np.datetime64(datetime(2022, 1, 1, 12, 0))
+    assert dataset.ds["time"].values == np.datetime64(datetime(2022, 2, 1, 0, 0))
 
 
 def test_warnings_times(global_dataset, use_dask):

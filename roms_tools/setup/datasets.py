@@ -397,6 +397,7 @@ class Dataset:
                     )
                     ds = ds.sel({time_dim: selected_times})
                 else:
+                    # Look in time range [self.start_time, self.start_time + 24h]
                     end_time = self.start_time + timedelta(days=1)
                     times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
                         ds[time_dim] < np.datetime64(end_time)

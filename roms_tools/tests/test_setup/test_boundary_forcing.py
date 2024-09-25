@@ -197,31 +197,30 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
         filepath.unlink()
 
 
-# TODO: Solve PyAMG reproducibility issue and uncomment this test
-# def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
-#
-#    yaml_filepath = tmp_path / "test_yaml_.yaml"
-#    filepath1 = tmp_path / "test1.nc"
-#    filepath2 = tmp_path / "test2.nc"
-#
-#    boundary_forcing.to_yaml(yaml_filepath)
-#    boundary_forcing.save(filepath1)
-#    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
-#    bdry_forcing_from_file.save(filepath2)
-#
-#    filepath_str1 = str(Path(filepath1).with_suffix(""))
-#    filepath_str2 = str(Path(filepath2).with_suffix(""))
-#    expected_filepath1 = f"{filepath_str1}_202106.nc"
-#    expected_filepath2 = f"{filepath_str2}_202106.nc"
-#
-#    hash1 = calculate_file_hash(expected_filepath1)
-#    hash2 = calculate_file_hash(expected_filepath2)
-#
-#    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
-#
-#    yaml_filepath.unlink()
-#    Path(expected_filepath1).unlink()
-#    Path(expected_filepath2).unlink()
+def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
+
+    yaml_filepath = tmp_path / "test_yaml_.yaml"
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+
+    boundary_forcing.to_yaml(yaml_filepath)
+    boundary_forcing.save(filepath1)
+    bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
+    bdry_forcing_from_file.save(filepath2)
+
+    filepath_str1 = str(Path(filepath1).with_suffix(""))
+    filepath_str2 = str(Path(filepath2).with_suffix(""))
+    expected_filepath1 = f"{filepath_str1}_202106.nc"
+    expected_filepath2 = f"{filepath_str2}_202106.nc"
+
+    hash1 = calculate_file_hash(expected_filepath1)
+    hash2 = calculate_file_hash(expected_filepath2)
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    Path(expected_filepath1).unlink()
+    Path(expected_filepath2).unlink()
 
 
 def test_files_have_same_hash_clim(

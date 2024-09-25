@@ -44,7 +44,8 @@ class LateralFill:
         # Create a sparse matrix representing the Laplacian operator for the diffusion process
         A = laplacian(mask.shape, mask_flat, format="csr")
 
-        # Use algebraic multigrid solver for solving the Poisson equation
+        # Use algebraic multigrid solver for solving the Poisson equation with set seed to ensure reproducibility
+        np.random.seed(123089)
         self.ml = pyamg.smoothed_aggregation_solver(A, max_coarse=10)
         self.dims = dims
         self.tol = tol
@@ -122,7 +123,7 @@ def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):
 
     b_flat = b.flatten()
     x0_flat = x0.flatten()
-    x = ml.solve(b_flat, x0_flat, tol=tol, residuals=[])
+    x = ml.solve(b_flat, x0_flat, tol=tol)
     x_2d = x.reshape(b.shape)
 
     return x_2d

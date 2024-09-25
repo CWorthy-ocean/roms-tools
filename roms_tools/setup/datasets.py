@@ -401,14 +401,20 @@ class Dataset:
                     times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
                         ds[time_dim] < np.datetime64(end_time)
                     )
-                    ds = ds.where(times, drop=True)
-
-                    if ds.sizes[time_dim] != 1:
-                        found_times = ds.sizes[time_dim]
+                    if np.all(~times):
                         raise ValueError(
-                            f"There must be exactly one time matching the start_time. Found {found_times} matching times."
+                            f"The dataset does not contain any time entries between the specified start_time: {self.start_time} "
+                            f"and {self.start_time + timedelta(hours=24)}. "
+                            "Please ensure the dataset includes time entries for that range."
                         )
 
+                    ds = ds.where(times, drop=True)
+                    if ds.sizes[time_dim] > 1:
+                        # Pick the time closest to self.start_time
+                        ds = ds.isel(time_dim=0)
+                    print(
+                        f"Selected time entry closest to the specified start_time ({self.start_time}): {ds[time_dim].values}"
+                    )
         else:
             warnings.warn(
                 "Dataset does not contain any time information. Please check if the time dimension "

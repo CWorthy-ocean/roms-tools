@@ -30,6 +30,7 @@ class InitialConditions(ROMSToolsMixins):
         Object representing the grid information used for the model.
     ini_time : datetime
         The date and time at which the initial conditions are set.
+        If no exact match is found, the closest time entry to `ini_time` within the time range [ini_time, ini_time + 24 hours] is selected.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the physical initial condition data:
         - "name" (str): Name of the data source (e.g., "GLORYS").

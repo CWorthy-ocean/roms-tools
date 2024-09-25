@@ -160,8 +160,8 @@ def test_select_times(data_fixture, expected_time_values, request, use_dask):
         ("global_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
     ],
 )
-def test_select_times_no_end_time(
-    data_fixture, expected_time_values, request, use_dask
+def test_select_times_valid_start_no_end_time(
+    data_fixture, expected_time_values, request, tmp_path, use_dask
 ):
     """
     Test selecting times with only start_time specified.
@@ -172,50 +172,71 @@ def test_select_times_no_end_time(
     dataset = request.getfixturevalue(data_fixture)
 
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        dataset.to_netcdf(filepath)
-    try:
-        # Instantiate Dataset object using the temporary file
+    filepath = tmp_path / "test.nc"
+    dataset.to_netcdf(filepath)
+
+    # Instantiate Dataset object using the temporary file
+    dataset = Dataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        start_time=start_time,
+        use_dask=use_dask,
+    )
+
+    assert dataset.ds is not None
+    assert len(dataset.ds.time) == len(expected_time_values)
+    for expected_time in expected_time_values:
+        assert expected_time in dataset.ds.time.values
+
+
+@pytest.mark.parametrize(
+    "data_fixture, expected_time_values",
+    [
+        ("global_dataset", [np.datetime64("2022-02-01T00:00:00")]),
+        ("global_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
+    ],
+)
+def test_select_times_invalid_start_no_end_time(
+    data_fixture, expected_time_values, request, tmp_path, use_dask
+):
+    """
+    Test selecting times with only start_time specified.
+    """
+    # Get the fixture dynamically based on the parameter
+    dataset = request.getfixturevalue(data_fixture)
+
+    # Create a temporary file
+    filepath = tmp_path / "test.nc"
+    dataset.to_netcdf(filepath)
+
+    with pytest.raises(
+        ValueError,
+        match="The dataset does not contain any time entries between the specified start_time",
+    ):
         dataset = Dataset(
             filename=filepath,
             var_names={"var": "var"},
-            start_time=start_time,
+            start_time=datetime(2022, 5, 1),
             use_dask=use_dask,
         )
 
-        assert dataset.ds is not None
-        assert len(dataset.ds.time) == len(expected_time_values)
-        for expected_time in expected_time_values:
-            assert expected_time in dataset.ds.time.values
-    finally:
-        os.remove(filepath)
 
-
-def test_multiple_matching_times(global_dataset_with_multiple_times_per_day, use_dask):
+def test_multiple_matching_times(
+    global_dataset_with_multiple_times_per_day, tmp_path, use_dask
+):
     """
     Test handling when multiple matching times are found when end_time is not specified.
     """
-    start_time = datetime(2022, 1, 1)
+    filepath = tmp_path / "test.nc"
+    global_dataset_with_multiple_times_per_day.to_netcdf(filepath)
+    dataset = Dataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        start_time=datetime(2022, 1, 31, 22, 0),
+        use_dask=use_dask,
+    )
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        global_dataset_with_multiple_times_per_day.to_netcdf(filepath)
-    try:
-        # Instantiate Dataset object using the temporary file
-        with pytest.raises(
-            ValueError,
-            match="There must be exactly one time matching the start_time. Found 2 matching times.",
-        ):
-            Dataset(
-                filename=filepath,
-                var_names={"var": "var"},
-                start_time=start_time,
-                use_dask=use_dask,
-            )
-    finally:
-        os.remove(filepath)
+    assert dataset.ds["time"].values == np.datetime64(datetime(2022, 2, 1, 0, 0))
 
 
 def test_warnings_times(global_dataset, use_dask):

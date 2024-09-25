@@ -312,25 +312,30 @@ class Dataset:
 
     def select_relevant_times(self, ds) -> xr.Dataset:
         """
-        Selects and returns the subset of the dataset corresponding to the specified time range.
+        Select a subset of the dataset based on the specified time range.
 
-        This function filters the dataset to include all times between `start_time` and `end_time`,
-        plus exactly one record at or before `start_time`, and exactly one record at or after `end_time`.
+        This method filters the dataset to include all records between `start_time` and `end_time`.
+        Additionally, it ensures that one record at or before `start_time` and one record at or
+        after `end_time` are included, even if they fall outside the strict time range.
+
+        If no `end_time` is specified, the method will select the time range of
+        [start_time, start_time + 24 hours] and return the closest time entry to `start_time` within that range.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The input dataset to be filtered.
+            The input dataset to be filtered. Must contain a time dimension.
 
         Returns
         -------
         xr.Dataset
-            A dataset containing the filtered time range.
+            A dataset filtered to the specified time range, including the closest entries
+            at or before `start_time` and at or after `end_time` if applicable.
 
         Raises
         ------
         ValueError
-            If no matching times are found.
+            If no matching times are found between `start_time` and `start_time + 24 hours`.
 
         Warns
         -----
@@ -339,8 +344,17 @@ class Dataset:
             This may indicate that the dataset represents climatology data.
 
         UserWarning
-            If no records at or before `self.start_time` or no records at or after `self.end_time` are found.
+            If no records at or before `start_time` or no records at or after `end_time` are found.
 
+        UserWarning
+            If the dataset does not contain any time dimension or the time dimension is incorrectly named.
+
+        Notes
+        -----
+        - If the `climatology` flag is set and `end_time` is not provided, the method will
+          interpolate initial conditions from climatology data.
+        - If the dataset uses `cftime` datetime objects, these will be converted to standard
+          `np.datetime64` objects before filtering.
         """
 
         time_dim = self.dim_names["time"]
@@ -397,18 +411,25 @@ class Dataset:
                     )
                     ds = ds.sel({time_dim: selected_times})
                 else:
+                    # Look in time range [self.start_time, self.start_time + 24h]
                     end_time = self.start_time + timedelta(days=1)
                     times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
                         ds[time_dim] < np.datetime64(end_time)
                     )
-                    ds = ds.where(times, drop=True)
-
-                    if ds.sizes[time_dim] != 1:
-                        found_times = ds.sizes[time_dim]
+                    if np.all(~times):
                         raise ValueError(
-                            f"There must be exactly one time matching the start_time. Found {found_times} matching times."
+                            f"The dataset does not contain any time entries between the specified start_time: {self.start_time} "
+                            f"and {self.start_time + timedelta(hours=24)}. "
+                            "Please ensure the dataset includes time entries for that range."
                         )
 
+                    ds = ds.where(times, drop=True)
+                    if ds.sizes[time_dim] > 1:
+                        # Pick the time closest to self.start_time
+                        ds = ds.isel({time_dim: 0})
+                    print(
+                        f"Selected time entry closest to the specified start_time ({self.start_time}) within the range [{self.start_time}, {self.start_time + timedelta(hours=24)}]: {ds[time_dim].values}"
+                    )
         else:
             warnings.warn(
                 "Dataset does not contain any time information. Please check if the time dimension "

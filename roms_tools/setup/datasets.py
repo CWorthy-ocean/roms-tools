@@ -412,7 +412,7 @@ class Dataset:
                     ds = ds.where(times, drop=True)
                     if ds.sizes[time_dim] > 1:
                         # Pick the time closest to self.start_time
-                        ds = ds.isel(time_dim=0)
+                        ds = ds.isel({time_dim: 0})
                     print(
                         f"Selected time entry closest to the specified start_time ({self.start_time}): {ds[time_dim].values}"
                     )

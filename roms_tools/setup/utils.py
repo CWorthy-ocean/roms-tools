@@ -165,27 +165,31 @@ def interpolate_from_rho_to_v(field, method="additive"):
 
 def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
     """
-    Extrapolate the deepest non-NaN values to the bottom along a specified dimension.
+    Extrapolates the deepest non-NaN values to the bottom along the specified dimension using forward fill.
+
+    This function assumes that the specified dimension is ordered from top to bottom (e.g., a vertical dimension like 'depth').
+    It fills `NaN` values below the deepest valid (non-NaN) entry along the given dimension by carrying forward the last valid value.
 
     Parameters
     ----------
     field : xr.DataArray
-        The input data array containing NaN values that need to be filled. This array
-        should have at least one dimension named by `dim`.
+        The input `xarray.DataArray` containing potential `NaN` values to be filled.
+        This array must have at least one dimension corresponding to `dim`, typically
+        a vertical axis such as 'depth' or 'height'.
     dim : str
-        The name of the dimension along which to perform the interpolation and extrapolation.
-        Typically, this would be a vertical dimension such as 'depth' or 's_rho'.
+        The name of the dimension along which to perform the forward fill operation.
+        The function assumes that this dimension is ordered from top to bottom, with
+        larger index values representing deeper or lower levels.
 
     Returns
     -------
-    field_interpolated : xr.DataArray
-        A new data array with NaN values along the specified dimension filled by nearest
-        neighbor interpolation and extrapolation to the bottom. The original data array is not modified.
+    xr.DataArray
+        A new `xarray.DataArray` with the `NaN` values along the specified dimension
+        filled by forward filling the deepest valid values down to the bottom.
+        The original input data remains unmodified.
 
     """
-    field_interpolated = field.interpolate_na(
-        dim=dim, method="nearest", fill_value="extrapolate"
-    )
+    field_interpolated = field.ffill(dim=dim)
 
     return field_interpolated
 

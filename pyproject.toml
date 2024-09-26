@@ -30,7 +30,8 @@ dependencies = [
     "gcm_filters",
     "netcdf4",
     "PyYAML",
-    "pyamg"
+    "pyamg",
+    "bottleneck" # required for xr.ffill
 ]
 dynamic = ["version"]
 

@@ -1064,7 +1064,6 @@ class CESMBGCDataset(CESMDataset):
         - Convert depth values from cm to m.
         - Apply a mask to the dataset based on the 'P04' variable at the surface.
         """
-        print(self.ds)
         if self.dim_names["depth"] == "z_t":
             # Fill variables that only have data in upper 150m with NaNs below
             if (
@@ -1107,7 +1106,6 @@ class CESMBGCDataset(CESMDataset):
             self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
         self.ds["mask"] = mask
-        print(self.ds)
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCSurfaceForcingDataset(CESMDataset):

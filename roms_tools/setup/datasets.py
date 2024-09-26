@@ -629,20 +629,6 @@ class Dataset:
         else:
             object.__setattr__(self, "ds", subdomain)
 
-    def convert_to_negative_depth(self):
-        """
-        Converts the depth values in the dataset to negative if they are non-negative.
-
-        This method checks the values in the depth dimension of the dataset (`self.ds[self.dim_names["depth"]]`).
-        If all values are greater than or equal to zero, it negates them and updates the dataset accordingly.
-
-        """
-        depth = self.ds[self.dim_names["depth"]]
-
-        if (depth >= 0).all():
-            self.ds[self.dim_names["depth"]] = -depth
-
-
 @dataclass(frozen=True, kw_only=True)
 class TPXODataset(Dataset):
     """

@@ -5,6 +5,7 @@ from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import extrapolate_deepest_to_bottom
 from datetime import datetime
 import numpy as np
+import xarray as xr
 
 
 @pytest.fixture()
@@ -33,7 +34,6 @@ def glorys_data(request, use_dask):
     )
     data.post_process()
 
-    print(data.var_names)
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
         if var != "zeta":
@@ -111,6 +111,29 @@ def test_lateral_fill_no_nans(data_fixture, request, use_dask):
     for var in data.var_names:
         filled = lateral_fill.apply(data.ds[data.var_names[var]].astype(np.float64))
         assert not filled.isnull().any()
+
+def test_lateral_fill_correct_order_of_magnitude(cesm_bgc_data):
+    
+    lateral_fill = LateralFill(
+        cesm_bgc_data.ds["mask"],
+        [cesm_bgc_data.dim_names["latitude"], cesm_bgc_data.dim_names["longitude"]],
+    )
+
+    ALK = cesm_bgc_data.ds["ALK"]
+
+    # zero out alkalinity field in all depth levels but the uppermost 
+    ALK = xr.where(cesm_bgc_data.ds.ALK.depth > 25, 0, cesm_bgc_data.ds.ALK)
+    ALK = ALK.where(cesm_bgc_data.ds.mask)
+
+    filled = lateral_fill.apply(ALK.astype(np.float64))
+
+    # check that alkalinity values in the uppermost values are of the correct order of magnitude
+    # and that no new minima and maxima are introduced
+    assert filled.isel(depth=0).min() == ALK.isel(depth=0).min()
+    assert filled.isel(depth=0).max() == ALK.isel(depth=0).max()
+
+    # check that the filled alkalinity values are zero in all deeper layers
+    assert filled.isel(depth=slice(1, None)).equals(xr.zeros_like(filled.isel(depth=slice(1, None))))
 
 @pytest.mark.parametrize(
     "data_fixture",

@@ -109,9 +109,9 @@ class InitialConditions(ROMSToolsMixins):
 
             # Ensure time coordinate matches that of physical variables
             for var in bgc_data_vars.keys():
-               bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
-                   {"time": data_vars["temp"]["time"]}
-               )
+                bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
+                    {"time": data_vars["temp"]["time"]}
+                )
 
             # Combine data variables from physical and biogeochemical sources
             data_vars.update(bgc_data_vars)

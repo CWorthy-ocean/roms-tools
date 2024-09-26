@@ -39,7 +39,8 @@ class Dataset:
         Indicates whether the dataset is climatological. Defaults to False.
     use_dask: bool
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
-
+    apply_post_processing: bool
+        Indicates whether to post-process the dataset for futher use. Defaults to True.
 
     Attributes
     ----------
@@ -55,10 +56,6 @@ class Dataset:
     ...     start_time=datetime(2022, 1, 1),
     ...     end_time=datetime(2022, 12, 31),
     ... )
-    >>> dataset.load_data()
-    >>> print(dataset.ds)
-    <xarray.Dataset>
-    Dimensions:  ...
     """
 
     filename: Union[str, Path, List[Union[str, Path]]]
@@ -74,6 +71,7 @@ class Dataset:
     )
     climatology: Optional[bool] = False
     use_dask: Optional[bool] = True
+    apply_post_processing: Optional[bool] = True
 
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
@@ -84,7 +82,7 @@ class Dataset:
         1. Loads the dataset from the specified filename.
         2. Applies time filtering based on start_time and end_time if provided.
         3. Selects relevant fields as specified by var_names.
-        4. Ensures latitude values are in ascending order.
+        4. Ensures latitude values and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
 
@@ -99,6 +97,7 @@ class Dataset:
             )
 
         ds = self.load_data()
+        ds = self.clean_up(ds)
         self.check_dataset(ds)
 
         # Select relevant times
@@ -113,7 +112,11 @@ class Dataset:
         ds = self.select_relevant_fields(ds)
 
         # Make sure that latitude is ascending
-        ds = self.ensure_latitude_ascending(ds)
+        ds = self.ensure_dimension_is_ascending(ds, dim="latitude")
+
+        if "depth" in self.dim_names:
+            # Make sure that depth is ascending
+            ds = self.ensure_dimension_is_ascending(ds, dim="depth")
 
         # Check whether the data covers the entire globe
         object.__setattr__(self, "is_global", self.check_if_global(ds))
@@ -123,6 +126,9 @@ class Dataset:
             ds = self.concatenate_longitudes(ds)
 
         object.__setattr__(self, "ds", ds)
+
+        if self.apply_post_processing:
+            self.post_process()
 
     def load_data(self) -> xr.Dataset:
         """
@@ -239,6 +245,25 @@ class Dataset:
 
         return ds
 
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Dummy method to be overridden by child classes to clean up the dataset.
+
+        This method is intended as a placeholder and should be implemented in subclasses
+        to provide specific functionality.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to be cleaned up.
+
+        Returns
+        -------
+        xr.Dataset
+            The xarray Dataset cleaned up (as implemented by child classes).
+        """
+        return ds
+
     def check_dataset(self, ds: xr.Dataset) -> None:
         """
         Check if the dataset contains the specified variables and dimensions.
@@ -288,8 +313,6 @@ class Dataset:
                 ds = ds.drop_vars(var)
 
         return ds
-
-    import xarray as xr
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -438,24 +461,34 @@ class Dataset:
 
         return ds
 
-    def ensure_latitude_ascending(self, ds: xr.Dataset) -> xr.Dataset:
+    def ensure_dimension_is_ascending(
+        self, ds: xr.Dataset, dim="latitude"
+    ) -> xr.Dataset:
         """
-        Ensure that the latitude dimension is in ascending order.
+        Ensure that the specified dimension in the dataset is in ascending order.
+
+        If the values along the specified dimension are in descending order, this function reverses the order of the dimension to make it ascending.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The xarray Dataset to check.
+            The input `xarray.Dataset` whose dimension is to be checked and, if necessary, reordered.
+        dim : str, optional
+            The name of the dimension to check for ascending order.
+            Defaults to "latitude". The dimension is expected to be one of the keys in `self.dim_names`.
 
         Returns
         -------
-        ds : xr.Dataset
-            The xarray Dataset with latitude in ascending order.
+        xr.Dataset
+            A new `xarray.Dataset` with the specified dimension in ascending order.
+            If the dimension was already in ascending order, the original dataset is returned unchanged.
+            If the dimension was in descending order, the dataset is returned with the dimension reversed.
+
         """
         # Make sure that latitude is ascending
-        lat_diff = np.diff(ds[self.dim_names["latitude"]])
-        if np.all(lat_diff < 0):
-            ds = ds.isel(**{self.dim_names["latitude"]: slice(None, None, -1)})
+        diff = np.diff(ds[self.dim_names[dim]])
+        if np.all(diff < 0):
+            ds = ds.isel(**{self.dim_names[dim]: slice(None, None, -1)})
 
         return ds
 
@@ -531,6 +564,17 @@ class Dataset:
                 ds_concatenated[var] = ds[var]
 
         return ds_concatenated
+
+    def post_process(self):
+        """
+        Placeholder method to be overridden by subclasses for dataset post-processing.
+
+        Returns
+        -------
+        None
+            This method does not return any value. Subclasses are expected to modify the dataset in-place.
+        """
+        pass
 
     def choose_subdomain(
         self, latitude_range, longitude_range, margin, straddle, return_subdomain=False
@@ -629,19 +673,6 @@ class Dataset:
         else:
             object.__setattr__(self, "ds", subdomain)
 
-    def convert_to_negative_depth(self):
-        """
-        Converts the depth values in the dataset to negative if they are non-negative.
-
-        This method checks the values in the depth dimension of the dataset (`self.ds[self.dim_names["depth"]]`).
-        If all values are greater than or equal to zero, it negates them and updates the dataset accordingly.
-
-        """
-        depth = self.ds[self.dim_names["depth"]]
-
-        if (depth >= 0).all():
-            self.ds[self.dim_names["depth"]] = -depth
-
 
 @dataclass(frozen=True, kw_only=True)
 class TPXODataset(Dataset):
@@ -697,11 +728,29 @@ class TPXODataset(Dataset):
     ds: xr.Dataset = field(init=False, repr=False)
     reference_date: datetime = datetime(1992, 1, 1)
 
-    def __post_init__(self):
-        # Perform any necessary dataset initialization or modifications here
-        ds = super().load_data()
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Clean up and standardize the dimensions and coordinates of the dataset for further processing.
 
-        # Clean up dataset
+        This method performs the following operations:
+        - Assigns new coordinate variables for 'omega', 'longitude', and 'latitude' based on existing dataset variables.
+          - 'omega' is retained as it is.
+          - 'longitude' is derived from 'lon_r', assuming it is constant along the 'ny' dimension.
+          - 'latitude' is derived from 'lat_r', assuming it is constant along the 'nx' dimension.
+        - Renames the dimensions 'nx' and 'ny' to 'longitude' and 'latitude', respectively, for consistency.
+        - Renames the tidal dimension to 'ntides' for standardization.
+        - Updates the `dim_names` attribute of the object to reflect the new dimension names: 'longitude', 'latitude', and 'ntides'.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset to be cleaned and standardized. It should contain the coordinates 'omega', 'lon_r', 'lat_r', and the tidal dimension.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            A cleaned and standardized `xarray.Dataset` with updated coordinates and dimensions.
+        """
         ds = ds.assign_coords(
             {
                 "omega": ds["omega"],
@@ -726,22 +775,8 @@ class TPXODataset(Dataset):
                 "ntides": "ntides",
             },
         )
-        self.check_dataset(ds)
 
-        # Select relevant fields
-        ds = super().select_relevant_fields(ds)
-
-        # Make sure that latitude is ascending
-        ds = super().ensure_latitude_ascending(ds)
-
-        # Check whether the data covers the entire globe
-        object.__setattr__(self, "is_global", super().check_if_global(ds))
-
-        # If dataset is global concatenate three copies of field along longitude dimension
-        if self.is_global:
-            ds = super().concatenate_longitudes(ds)
-
-        object.__setattr__(self, "ds", ds)
+        return ds
 
     def check_number_constituents(self, ntides: int):
         """
@@ -889,23 +924,19 @@ class CESMDataset(Dataset):
         The xarray Dataset containing the CESM data on its original grid.
     """
 
-    # overwrite load_data method from parent class
-    def load_data(self) -> xr.Dataset:
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """
-        Load dataset from the specified file.
+        Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method verifies that the time dimension exists in the dataset and assigns it appropriately. If the "time" dimension is missing, the method attempts to assign an existing "time" or "month" dimension. If neither exists, it expands the dataset to include a "time" dimension with a size of one.
 
         Returns
         -------
         ds : xr.Dataset
-            The loaded xarray Dataset containing the forcing data.
+            The xarray Dataset with the correct time dimension assigned or added.
 
-        Raises
-        ------
-        FileNotFoundError
-            If the specified file does not exist.
         """
-
-        ds = super().load_data()
 
         if "time" not in self.dim_names:
             if "time" in ds.dims:
@@ -1035,7 +1066,6 @@ class CESMBGCDataset(CESMDataset):
         - Convert depth values from cm to m.
         - Apply a mask to the dataset based on the 'P04' variable at the surface.
         """
-
         if self.dim_names["depth"] == "z_t":
             # Fill variables that only have data in upper 150m with NaNs below
             if (

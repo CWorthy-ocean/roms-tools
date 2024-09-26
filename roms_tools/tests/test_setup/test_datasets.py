@@ -4,8 +4,6 @@ import numpy as np
 import xarray as xr
 from roms_tools.setup.datasets import Dataset, GLORYSDataset, ERA5Correction
 from roms_tools.setup.download import download_test_data
-import tempfile
-import os
 from pathlib import Path
 
 
@@ -121,7 +119,7 @@ def non_global_dataset():
         ),
     ],
 )
-def test_select_times(data_fixture, expected_time_values, request, use_dask):
+def test_select_times(data_fixture, expected_time_values, request, tmp_path, use_dask):
     """
     Test selecting times with different datasets.
     """
@@ -131,26 +129,20 @@ def test_select_times(data_fixture, expected_time_values, request, use_dask):
     # Get the fixture dynamically based on the parameter
     dataset = request.getfixturevalue(data_fixture)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        dataset.to_netcdf(filepath)
-    try:
-        # Instantiate Dataset object using the temporary file
-        dataset = Dataset(
-            filename=filepath,
-            var_names={"var": "var"},
-            start_time=start_time,
-            end_time=end_time,
-            use_dask=use_dask,
-        )
+    filepath = tmp_path / "test.nc"
+    dataset.to_netcdf(filepath)
+    dataset = Dataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=use_dask,
+    )
 
-        assert dataset.ds is not None
-        assert len(dataset.ds.time) == len(expected_time_values)
-        for expected_time in expected_time_values:
-            assert expected_time in dataset.ds.time.values
-    finally:
-        os.remove(filepath)
+    assert dataset.ds is not None
+    assert len(dataset.ds.time) == len(expected_time_values)
+    for expected_time in expected_time_values:
+        assert expected_time in dataset.ds.time.values
 
 
 @pytest.mark.parametrize(
@@ -239,195 +231,157 @@ def test_multiple_matching_times(
     assert dataset.ds["time"].values == np.datetime64(datetime(2022, 2, 1, 0, 0))
 
 
-def test_warnings_times(global_dataset, use_dask):
+def test_warnings_times(global_dataset, tmp_path, use_dask):
     """
     Test handling when no matching times are found.
     """
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        global_dataset.to_netcdf(filepath)
-    try:
-        # Instantiate Dataset object using the temporary file
-        with pytest.warns(
-            Warning, match="No records found at or before the start_time."
-        ):
-            start_time = datetime(2021, 1, 1)
-            end_time = datetime(2021, 2, 1)
+    filepath = tmp_path / "test.nc"
+    global_dataset.to_netcdf(filepath)
+    with pytest.warns(Warning, match="No records found at or before the start_time."):
+        start_time = datetime(2021, 1, 1)
+        end_time = datetime(2021, 2, 1)
 
-            Dataset(
-                filename=filepath,
-                var_names={"var": "var"},
-                start_time=start_time,
-                end_time=end_time,
-                use_dask=use_dask,
-            )
+        Dataset(
+            filename=filepath,
+            var_names={"var": "var"},
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=use_dask,
+        )
 
-        with pytest.warns(Warning, match="No records found at or after the end_time."):
-            start_time = datetime(2024, 1, 1)
-            end_time = datetime(2024, 2, 1)
+    with pytest.warns(Warning, match="No records found at or after the end_time."):
+        start_time = datetime(2024, 1, 1)
+        end_time = datetime(2024, 2, 1)
 
-            Dataset(
-                filename=filepath,
-                var_names={"var": "var"},
-                start_time=start_time,
-                end_time=end_time,
-                use_dask=use_dask,
-            )
-    finally:
-        os.remove(filepath)
+        Dataset(
+            filename=filepath,
+            var_names={"var": "var"},
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=use_dask,
+        )
 
 
-def test_reverse_latitude_choose_subdomain_negative_depth(global_dataset, use_dask):
+def test_reverse_latitude_reverse_depth_choose_subdomain(
+    global_dataset, tmp_path, use_dask
+):
     """
     Test reversing latitude when it is not ascending, the choose_subdomain method, and the convert_to_negative_depth method of the Dataset class.
     """
     start_time = datetime(2022, 1, 1)
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        global_dataset["latitude"] = global_dataset["latitude"][::-1]
-        global_dataset.to_netcdf(filepath)
-    try:
-        # Instantiate Dataset object using the temporary file
-        dataset = Dataset(
-            filename=filepath,
-            var_names={"var": "var"},
-            dim_names={
-                "latitude": "latitude",
-                "longitude": "longitude",
-                "time": "time",
-                "depth": "depth",
-            },
-            start_time=start_time,
-            use_dask=use_dask,
-        )
+    filepath = tmp_path / "test.nc"
+    global_dataset["latitude"] = global_dataset["latitude"][::-1]
+    global_dataset["depth"] = global_dataset["depth"][::-1]
+    global_dataset.to_netcdf(filepath)
 
-        assert np.all(np.diff(dataset.ds["latitude"]) > 0)
+    dataset = Dataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        dim_names={
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "time": "time",
+            "depth": "depth",
+        },
+        start_time=start_time,
+        use_dask=use_dask,
+    )
 
-        # test choosing subdomain for domain that straddles the dateline
-        dataset.choose_subdomain(
-            latitude_range=(-10, 10), longitude_range=(-10, 10), margin=1, straddle=True
-        )
+    assert np.all(np.diff(dataset.ds["latitude"]) > 0)
+    assert np.all(np.diff(dataset.ds["depth"]) > 0)
 
-        assert -11 <= dataset.ds["latitude"].min() <= 11
-        assert -11 <= dataset.ds["latitude"].max() <= 11
-        assert -11 <= dataset.ds["longitude"].min() <= 11
-        assert -11 <= dataset.ds["longitude"].max() <= 11
+    # test choosing subdomain for domain that straddles the dateline
+    ds = dataset.choose_subdomain(
+        latitude_range=(-10, 10),
+        longitude_range=(-10, 10),
+        margin=1,
+        straddle=True,
+        return_subdomain=True,
+    )
 
-        # test choosing subdomain for domain that does not straddle the dateline
-        dataset = Dataset(
-            filename=filepath,
-            var_names={"var": "var"},
-            dim_names={
-                "latitude": "latitude",
-                "longitude": "longitude",
-                "time": "time",
-                "depth": "depth",
-            },
-            start_time=start_time,
-            use_dask=use_dask,
-        )
-        dataset.choose_subdomain(
-            latitude_range=(-10, 10), longitude_range=(10, 20), margin=1, straddle=False
-        )
+    assert -11 <= ds["latitude"].min() <= 11
+    assert -11 <= ds["latitude"].max() <= 11
+    assert -11 <= ds["longitude"].min() <= 11
+    assert -11 <= ds["longitude"].max() <= 11
 
-        assert -11 <= dataset.ds["latitude"].min() <= 11
-        assert -11 <= dataset.ds["latitude"].max() <= 11
-        assert 9 <= dataset.ds["longitude"].min() <= 21
-        assert 9 <= dataset.ds["longitude"].max() <= 21
+    ds = dataset.choose_subdomain(
+        latitude_range=(-10, 10),
+        longitude_range=(10, 20),
+        margin=1,
+        straddle=False,
+        return_subdomain=True,
+    )
 
-        dataset.convert_to_negative_depth()
-
-        assert (dataset.ds["depth"] <= 0).all()
-
-    finally:
-        os.remove(filepath)
+    assert -11 <= ds["latitude"].min() <= 11
+    assert -11 <= ds["latitude"].max() <= 11
+    assert 9 <= ds["longitude"].min() <= 21
+    assert 9 <= ds["longitude"].max() <= 21
 
 
-def test_check_if_global_with_global_dataset(global_dataset, use_dask):
+def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask):
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        global_dataset.to_netcdf(filepath)
-    try:
-        dataset = Dataset(
-            filename=filepath, var_names={"var": "var"}, use_dask=use_dask
-        )
-        is_global = dataset.check_if_global(dataset.ds)
-        assert is_global
-    finally:
-        os.remove(filepath)
+    filepath = tmp_path / "test.nc"
+    global_dataset.to_netcdf(filepath)
+    dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
+    is_global = dataset.check_if_global(dataset.ds)
+    assert is_global
 
 
-def test_check_if_global_with_non_global_dataset(non_global_dataset, use_dask):
+def test_check_if_global_with_non_global_dataset(
+    non_global_dataset, tmp_path, use_dask
+):
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        non_global_dataset.to_netcdf(filepath)
-    try:
-        dataset = Dataset(
-            filename=filepath, var_names={"var": "var"}, use_dask=use_dask
-        )
-        is_global = dataset.check_if_global(dataset.ds)
+    filepath = tmp_path / "test.nc"
+    non_global_dataset.to_netcdf(filepath)
+    dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
+    is_global = dataset.check_if_global(dataset.ds)
 
-        assert not is_global
-    finally:
-        os.remove(filepath)
+    assert not is_global
 
 
-def test_check_dataset(global_dataset, use_dask):
+def test_check_dataset(global_dataset, tmp_path, use_dask):
 
     ds = global_dataset.copy()
     ds = ds.drop_vars("var")
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        ds.to_netcdf(filepath)
-    try:
-        # Instantiate Dataset object using the temporary file
-        start_time = datetime(2022, 2, 1)
-        end_time = datetime(2022, 3, 1)
-        with pytest.raises(
-            ValueError, match="Dataset does not contain all required variables."
-        ):
+    filepath = tmp_path / "test.nc"
+    ds.to_netcdf(filepath)
 
-            Dataset(
-                filename=filepath,
-                var_names={"var": "var"},
-                start_time=start_time,
-                end_time=end_time,
-                use_dask=use_dask,
-            )
-    finally:
-        os.remove(filepath)
+    start_time = datetime(2022, 2, 1)
+    end_time = datetime(2022, 3, 1)
+    with pytest.raises(
+        ValueError, match="Dataset does not contain all required variables."
+    ):
+
+        Dataset(
+            filename=filepath,
+            var_names={"var": "var"},
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=use_dask,
+        )
 
     ds = global_dataset.copy()
     ds = ds.rename({"latitude": "lat", "longitude": "long"})
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        filepath = tmpfile.name
-        ds.to_netcdf(filepath)
-    try:
-        # Instantiate Dataset object using the temporary file
-        start_time = datetime(2022, 2, 1)
-        end_time = datetime(2022, 3, 1)
-        with pytest.raises(
-            ValueError, match="Dataset does not contain all required dimensions."
-        ):
+    filepath = tmp_path / "test2.nc"
+    ds.to_netcdf(filepath)
 
-            Dataset(
-                filename=filepath,
-                var_names={"var": "var"},
-                start_time=start_time,
-                end_time=end_time,
-                use_dask=use_dask,
-            )
-    finally:
-        os.remove(filepath)
+    start_time = datetime(2022, 2, 1)
+    end_time = datetime(2022, 3, 1)
+    with pytest.raises(
+        ValueError, match="Dataset does not contain all required dimensions."
+    ):
+
+        Dataset(
+            filename=filepath,
+            var_names={"var": "var"},
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=use_dask,
+        )
 
 
 def test_era5_correction_choose_subdomain(use_dask):

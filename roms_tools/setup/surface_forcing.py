@@ -202,7 +202,6 @@ class SurfaceForcing(ROMSToolsMixins):
         if self.type == "physics":
             if self.source["name"] == "ERA5":
                 data = ERA5Dataset(**data_dict)
-                data.post_process()
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -212,7 +211,6 @@ class SurfaceForcing(ROMSToolsMixins):
             if self.source["name"] == "CESM_REGRIDDED":
 
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
-                data.post_process()
             else:
                 raise ValueError(
                     'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'

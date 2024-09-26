@@ -144,7 +144,6 @@ class TidalForcing(ROMSToolsMixins):
 
         if self.source["name"] == "TPXO":
             data = TPXODataset(filename=self.source["path"], use_dask=self.use_dask)
-            data.post_process()
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
         return data

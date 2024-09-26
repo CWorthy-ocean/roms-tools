@@ -67,11 +67,15 @@ class LateralFill:
             non-NaN values.
 
         """
+        # Apply fill to anomaly field
+        mean = var.mean(dim=self.dims, skipna=True)
+        var = var - mean
+
         # Setup the right-hand side (RHS): ocean points take their original values, land points are set to 0
         b = xr.where(self.mask, var, 0)
 
-        # Initial guess for the solver: same as the input for ocean points, mean of the array for others
-        x0 = xr.where(self.mask, var, np.mean(var))
+        # Initial guess: ocean points take their original values, land points are set to 0
+        x0 = xr.where(self.mask, var, 0)
 
         # Apply the iterative solver using a custom NumPy function
         var_filled = xr.apply_ufunc(
@@ -85,6 +89,8 @@ class LateralFill:
             vectorize=True,
             kwargs={"ml": self.ml, "tol": self.tol},
         )
+
+        var_filled = var_filled + mean
 
         return var_filled
 

@@ -107,12 +107,11 @@ class InitialConditions(ROMSToolsMixins):
             vars_3d = bgc_data.var_names.keys()
             bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
 
-            # Ensure time coordinate matches if climatology is applied in one case but not the other
-            if not self.source["climatology"] and self.bgc_source["climatology"]:
-                for var in bgc_data_vars.keys():
-                    bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
-                        {"time": data_vars["temp"]["time"]}
-                    )
+            # Ensure time coordinate matches that of physical variables
+            for var in bgc_data_vars.keys():
+                bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
+                    {"time": data_vars["temp"]["time"]}
+                )
 
             # Combine data variables from physical and biogeochemical sources
             data_vars.update(bgc_data_vars)
@@ -175,7 +174,6 @@ class InitialConditions(ROMSToolsMixins):
                 climatology=self.source["climatology"],
                 use_dask=self.use_dask,
             )
-            data.post_process()
         else:
             raise ValueError('Only "GLORYS" is a valid option for source["name"].')
         return data
@@ -190,7 +188,6 @@ class InitialConditions(ROMSToolsMixins):
                 climatology=self.bgc_source["climatology"],
                 use_dask=self.use_dask,
             )
-            data.post_process()
         else:
             raise ValueError(
                 'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'

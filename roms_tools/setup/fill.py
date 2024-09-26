@@ -74,7 +74,7 @@ class LateralFill:
         # Setup the right-hand side (RHS): ocean points take their original values, land points are set to 0
         b = xr.where(self.mask, var, 0)
 
-        # Initial guess: ocean points take their original values, land points are set to 0  
+        # Initial guess: ocean points take their original values, land points are set to 0
         x0 = xr.where(self.mask, var, 0)
 
         # Apply the iterative solver using a custom NumPy function

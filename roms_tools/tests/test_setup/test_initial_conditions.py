@@ -159,7 +159,7 @@ def test_interpolation_from_climatology(
         start_time=datetime(2012, 1, 15),
         climatology=True,
         use_dask=use_dask,
-        apply_post_processing=False
+        apply_post_processing=False,
     )
     assert np.allclose(ds["ALK"].sel(month=1), bgc_data.ds["ALK"], equal_nan=True)
 
@@ -169,7 +169,7 @@ def test_interpolation_from_climatology(
         start_time=datetime(2012, 1, 30),
         climatology=True,
         use_dask=use_dask,
-        apply_post_processing=False
+        apply_post_processing=False,
     )
     assert np.allclose(
         0.5 * (ds["ALK"].sel(month=1) + ds["ALK"].sel(month=2)),

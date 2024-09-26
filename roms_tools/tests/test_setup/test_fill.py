@@ -1,5 +1,11 @@
 import pytest
-from roms_tools.setup.datasets import GLORYSDataset, ERA5Dataset, CESMBGCDataset, CESMBGCSurfaceForcingDataset, TPXODataset
+from roms_tools.setup.datasets import (
+    GLORYSDataset,
+    ERA5Dataset,
+    CESMBGCDataset,
+    CESMBGCSurfaceForcingDataset,
+    TPXODataset,
+)
 from roms_tools.setup.download import download_test_data
 from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import extrapolate_deepest_to_bottom
@@ -39,9 +45,10 @@ def glorys_data(request, use_dask):
         if var != "zeta":
             data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
                 data.ds[data.var_names[var]], data.dim_names["depth"]
-                )
+            )
 
     return data
+
 
 @pytest.fixture()
 def tpxo_data(request, use_dask):
@@ -55,6 +62,7 @@ def tpxo_data(request, use_dask):
 
     return data
 
+
 @pytest.fixture()
 def cesm_bgc_data(request, use_dask):
     fname = download_test_data("CESM_BGC_2012.nc")
@@ -67,14 +75,15 @@ def cesm_bgc_data(request, use_dask):
         use_dask=use_dask,
     )
     data.post_process()
-    
+
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
         data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
             data.ds[data.var_names[var]], data.dim_names["depth"]
-            )
+        )
 
     return data
+
 
 @pytest.fixture()
 def cesm_surface_bgc_data(request, use_dask):
@@ -91,15 +100,10 @@ def cesm_surface_bgc_data(request, use_dask):
 
     return data
 
+
 @pytest.mark.parametrize(
     "data_fixture",
-    [
-        "era5_data",
-        "glorys_data",
-        "tpxo_data",
-        "cesm_bgc_data",
-        "cesm_surface_bgc_data"
-    ],
+    ["era5_data", "glorys_data", "tpxo_data", "cesm_bgc_data", "cesm_surface_bgc_data"],
 )
 def test_lateral_fill_no_nans(data_fixture, request, use_dask):
     data = request.getfixturevalue(data_fixture)
@@ -112,8 +116,9 @@ def test_lateral_fill_no_nans(data_fixture, request, use_dask):
         filled = lateral_fill.apply(data.ds[data.var_names[var]].astype(np.float64))
         assert not filled.isnull().any()
 
+
 def test_lateral_fill_correct_order_of_magnitude(cesm_bgc_data):
-    
+
     lateral_fill = LateralFill(
         cesm_bgc_data.ds["mask"],
         [cesm_bgc_data.dim_names["latitude"], cesm_bgc_data.dim_names["longitude"]],
@@ -121,7 +126,7 @@ def test_lateral_fill_correct_order_of_magnitude(cesm_bgc_data):
 
     ALK = cesm_bgc_data.ds["ALK"]
 
-    # zero out alkalinity field in all depth levels but the uppermost 
+    # zero out alkalinity field in all depth levels but the uppermost
     ALK = xr.where(cesm_bgc_data.ds.ALK.depth > 25, 0, cesm_bgc_data.ds.ALK)
     ALK = ALK.where(cesm_bgc_data.ds.mask)
 
@@ -133,7 +138,10 @@ def test_lateral_fill_correct_order_of_magnitude(cesm_bgc_data):
     assert filled.isel(depth=0).max() == ALK.isel(depth=0).max()
 
     # check that the filled alkalinity values are zero in all deeper layers
-    assert filled.isel(depth=slice(1, None)).equals(xr.zeros_like(filled.isel(depth=slice(1, None))))
+    assert filled.isel(depth=slice(1, None)).equals(
+        xr.zeros_like(filled.isel(depth=slice(1, None)))
+    )
+
 
 @pytest.mark.parametrize(
     "data_fixture",

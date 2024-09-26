@@ -4,7 +4,6 @@ import numpy as np
 import xarray as xr
 from roms_tools.setup.datasets import Dataset, GLORYSDataset, ERA5Correction
 from roms_tools.setup.download import download_test_data
-import os
 from pathlib import Path
 
 
@@ -239,9 +238,7 @@ def test_warnings_times(global_dataset, tmp_path, use_dask):
     # Create a temporary file
     filepath = tmp_path / "test.nc"
     global_dataset.to_netcdf(filepath)
-    with pytest.warns(
-        Warning, match="No records found at or before the start_time."
-    ):
+    with pytest.warns(Warning, match="No records found at or before the start_time."):
         start_time = datetime(2021, 1, 1)
         end_time = datetime(2021, 2, 1)
 
@@ -266,7 +263,9 @@ def test_warnings_times(global_dataset, tmp_path, use_dask):
         )
 
 
-def test_reverse_latitude_reverse_depth_choose_subdomain(global_dataset, tmp_path, use_dask):
+def test_reverse_latitude_reverse_depth_choose_subdomain(
+    global_dataset, tmp_path, use_dask
+):
     """
     Test reversing latitude when it is not ascending, the choose_subdomain method, and the convert_to_negative_depth method of the Dataset class.
     """
@@ -276,7 +275,7 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(global_dataset, tmp_pat
     global_dataset["latitude"] = global_dataset["latitude"][::-1]
     global_dataset["depth"] = global_dataset["depth"][::-1]
     global_dataset.to_netcdf(filepath)
-        
+
     dataset = Dataset(
         filename=filepath,
         var_names={"var": "var"},
@@ -326,25 +325,22 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(global_dataset, tmp_pat
     assert 9 <= dataset.ds["longitude"].max() <= 21
 
 
-
 def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask):
 
     filepath = tmp_path / "test.nc"
     global_dataset.to_netcdf(filepath)
-    dataset = Dataset(
-        filename=filepath, var_names={"var": "var"}, use_dask=use_dask
-    )
+    dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
     is_global = dataset.check_if_global(dataset.ds)
     assert is_global
 
 
-def test_check_if_global_with_non_global_dataset(non_global_dataset, tmp_path, use_dask):
+def test_check_if_global_with_non_global_dataset(
+    non_global_dataset, tmp_path, use_dask
+):
 
     filepath = tmp_path / "test.nc"
     non_global_dataset.to_netcdf(filepath)
-    dataset = Dataset(
-        filename=filepath, var_names={"var": "var"}, use_dask=use_dask
-    )
+    dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
     is_global = dataset.check_if_global(dataset.ds)
 
     assert not is_global
@@ -357,7 +353,7 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
 
     filepath = tmp_path / "test.nc"
     ds.to_netcdf(filepath)
-        
+
     start_time = datetime(2022, 2, 1)
     end_time = datetime(2022, 3, 1)
     with pytest.raises(
@@ -377,7 +373,7 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
 
     filepath = tmp_path / "test2.nc"
     ds.to_netcdf(filepath)
-        
+
     start_time = datetime(2022, 2, 1)
     end_time = datetime(2022, 3, 1)
     with pytest.raises(

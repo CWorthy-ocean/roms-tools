@@ -85,7 +85,7 @@ class Dataset:
         4. Ensures latitude values and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
-    
+
         # Validate start_time and end_time
         if self.start_time is not None and not isinstance(self.start_time, datetime):
             raise TypeError(
@@ -117,7 +117,6 @@ class Dataset:
         if "depth" in self.dim_names:
             # Make sure that depth is ascending
             ds = self.ensure_dimension_is_ascending(ds, dim="depth")
-
 
         # Check whether the data covers the entire globe
         object.__setattr__(self, "is_global", self.check_if_global(ds))
@@ -245,7 +244,7 @@ class Dataset:
             ds = ds.expand_dims(self.dim_names["time"])
 
         return ds
-    
+
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Dummy method to be overridden by child classes to clean up the dataset.
@@ -462,7 +461,9 @@ class Dataset:
 
         return ds
 
-    def ensure_dimension_is_ascending(self, ds: xr.Dataset, dim="latitude") -> xr.Dataset:
+    def ensure_dimension_is_ascending(
+        self, ds: xr.Dataset, dim="latitude"
+    ) -> xr.Dataset:
         """
         Ensure that the specified dimension in the dataset is in ascending order.
 
@@ -473,7 +474,7 @@ class Dataset:
         ds : xr.Dataset
             The input `xarray.Dataset` whose dimension is to be checked and, if necessary, reordered.
         dim : str, optional
-            The name of the dimension to check for ascending order. 
+            The name of the dimension to check for ascending order.
             Defaults to "latitude". The dimension is expected to be one of the keys in `self.dim_names`.
 
         Returns
@@ -563,7 +564,7 @@ class Dataset:
                 ds_concatenated[var] = ds[var]
 
         return ds_concatenated
-    
+
     def post_process(self):
         """
         Placeholder method to be overridden by subclasses for dataset post-processing.
@@ -672,6 +673,7 @@ class Dataset:
         else:
             object.__setattr__(self, "ds", subdomain)
 
+
 @dataclass(frozen=True, kw_only=True)
 class TPXODataset(Dataset):
     """
@@ -729,7 +731,7 @@ class TPXODataset(Dataset):
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Clean up and standardize the dimensions and coordinates of the dataset for further processing.
-    
+
         This method performs the following operations:
         - Assigns new coordinate variables for 'omega', 'longitude', and 'latitude' based on existing dataset variables.
           - 'omega' is retained as it is.
@@ -738,12 +740,12 @@ class TPXODataset(Dataset):
         - Renames the dimensions 'nx' and 'ny' to 'longitude' and 'latitude', respectively, for consistency.
         - Renames the tidal dimension to 'ntides' for standardization.
         - Updates the `dim_names` attribute of the object to reflect the new dimension names: 'longitude', 'latitude', and 'ntides'.
-    
+
         Parameters
         ----------
         ds : xr.Dataset
             The input dataset to be cleaned and standardized. It should contain the coordinates 'omega', 'lon_r', 'lat_r', and the tidal dimension.
-    
+
         Returns
         -------
         ds : xr.Dataset
@@ -1106,6 +1108,7 @@ class CESMBGCDataset(CESMDataset):
             self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
         self.ds["mask"] = mask
+
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCSurfaceForcingDataset(CESMDataset):

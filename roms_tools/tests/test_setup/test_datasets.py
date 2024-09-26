@@ -293,36 +293,31 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
     assert np.all(np.diff(dataset.ds["depth"]) > 0)
 
     # test choosing subdomain for domain that straddles the dateline
-    dataset.choose_subdomain(
-        latitude_range=(-10, 10), longitude_range=(-10, 10), margin=1, straddle=True
+    ds = dataset.choose_subdomain(
+        latitude_range=(-10, 10),
+        longitude_range=(-10, 10),
+        margin=1,
+        straddle=True,
+        return_subdomain=True,
     )
 
-    assert -11 <= dataset.ds["latitude"].min() <= 11
-    assert -11 <= dataset.ds["latitude"].max() <= 11
-    assert -11 <= dataset.ds["longitude"].min() <= 11
-    assert -11 <= dataset.ds["longitude"].max() <= 11
+    assert -11 <= ds["latitude"].min() <= 11
+    assert -11 <= ds["latitude"].max() <= 11
+    assert -11 <= ds["longitude"].min() <= 11
+    assert -11 <= ds["longitude"].max() <= 11
 
-    # test choosing subdomain for domain that does not straddle the dateline
-    dataset = Dataset(
-        filename=filepath,
-        var_names={"var": "var"},
-        dim_names={
-            "latitude": "latitude",
-            "longitude": "longitude",
-            "time": "time",
-            "depth": "depth",
-        },
-        start_time=start_time,
-        use_dask=use_dask,
-    )
-    dataset.choose_subdomain(
-        latitude_range=(-10, 10), longitude_range=(10, 20), margin=1, straddle=False
+    ds = dataset.choose_subdomain(
+        latitude_range=(-10, 10),
+        longitude_range=(10, 20),
+        margin=1,
+        straddle=False,
+        return_subdomain=True,
     )
 
-    assert -11 <= dataset.ds["latitude"].min() <= 11
-    assert -11 <= dataset.ds["latitude"].max() <= 11
-    assert 9 <= dataset.ds["longitude"].min() <= 21
-    assert 9 <= dataset.ds["longitude"].max() <= 21
+    assert -11 <= ds["latitude"].min() <= 11
+    assert -11 <= ds["latitude"].max() <= 11
+    assert 9 <= ds["longitude"].min() <= 21
+    assert 9 <= ds["longitude"].max() <= 21
 
 
 def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask):

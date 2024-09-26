@@ -6,7 +6,7 @@
             "coordinates": "interface_depth_rho interface_depth_u interface_depth_v layer_depth_rho layer_depth_u layer_depth_v",
             "hc": 300.0,
             "hmin": 5.0,
-            "roms_tools_version": "0.1.dev136+dirty",
+            "roms_tools_version": "0.1.dev152+dirty",
             "rot": 0,
             "size_x": 100,
             "size_y": 100,

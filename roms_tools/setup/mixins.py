@@ -134,7 +134,7 @@ class ROMSToolsMixins:
                 data.dim_names["latitude"]: lat,
                 data.dim_names["longitude"]: lon,
             }
-        # extrapolate deepest value all the way to bottom ("flooding")
+        # extrapolate deepest value all the way to bottom
         for var in vars_3d:
             data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
                 data.ds[data.var_names[var]], data.dim_names["depth"]

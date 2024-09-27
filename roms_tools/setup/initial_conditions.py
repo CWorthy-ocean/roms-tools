@@ -42,7 +42,7 @@ class InitialConditions(ROMSToolsMixins):
         - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
         - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
           a single Path object, or a list of strings or Path objects containing multiple files.
-        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to True.
+        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
@@ -62,7 +62,7 @@ class InitialConditions(ROMSToolsMixins):
     ...     bgc_source={
     ...         "name": "CESM_REGRIDDED",
     ...         "path": "bgc_data.nc",
-    ...         "climatology": True,
+    ...         "climatology": False,
     ...     },
     ... )
     """
@@ -155,13 +155,13 @@ class InitialConditions(ROMSToolsMixins):
                 raise ValueError(
                     "`bgc_source` must include a 'path' if it is provided."
                 )
-            # set self.bgc_source["climatology"] to True if not provided
+            # set self.bgc_source["climatology"] to False if not provided
             object.__setattr__(
                 self,
                 "bgc_source",
                 {
                     **self.bgc_source,
-                    "climatology": self.bgc_source.get("climatology", True),
+                    "climatology": self.bgc_source.get("climatology", False),
                 },
             )
 

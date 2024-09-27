@@ -916,7 +916,7 @@ class CESMDataset(Dataset):
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
     climatology : bool
-        Indicates whether the dataset is climatological. Defaults to True.
+        Indicates whether the dataset is climatological. Defaults to False.
 
     Attributes
     ----------
@@ -1005,7 +1005,7 @@ class CESMBGCDataset(CESMDataset):
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
     climatology : bool
-        Indicates whether the dataset is climatological. Defaults to True.
+        Indicates whether the dataset is climatological. Defaults to False.
 
     Attributes
     ----------
@@ -1058,7 +1058,7 @@ class CESMBGCDataset(CESMDataset):
         }
     )
 
-    climatology: Optional[bool] = True
+    climatology: Optional[bool] = False
 
     def post_process(self):
         """

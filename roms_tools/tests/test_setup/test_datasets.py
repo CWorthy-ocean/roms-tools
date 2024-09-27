@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime
 import numpy as np
 import xarray as xr
-from roms_tools.setup.datasets import Dataset, GLORYSDataset, ERA5Correction
+from roms_tools.setup.datasets import Dataset, GLORYSDataset, ERA5Correction, CESMBGCDataset
 from roms_tools.setup.download import download_test_data
 from pathlib import Path
 
@@ -448,3 +448,29 @@ def test_time_validation(use_dask):
             end_time="dummy",
             use_dask=use_dask,
         )
+
+def test_climatology_error(use_dask):
+    
+    fname = download_test_data("GLORYS_NA_2012.nc")
+
+    with pytest.raises(ValueError, match=f"The dataset contains 2 time steps, but the climatology flag is set to True, which requires exactly 12 time steps."):
+        GLORYSDataset(
+            filename=fname,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2013, 1, 1),
+            climatology=True,
+            use_dask=use_dask,
+        )
+
+    fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+    
+    with pytest.raises(ValueError, match=f"The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."):
+    
+        CESMBGCDataset(
+            filename=fname_bgc,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2013, 1, 1),
+            climatology=False,
+            use_dask=use_dask,
+        )
+

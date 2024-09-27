@@ -329,7 +329,7 @@ def get_time_type(data_array: xr.DataArray) -> str:
         cftime.DatetimeJulian,
         cftime.DatetimeGregorian,
         cftime.Datetime360Day,
-        cftime.DatetimeProlepticGregorian
+        cftime.DatetimeProlepticGregorian,
     )
 
     # Check if any of the coordinate values are of cftime, datetime, or integer type
@@ -351,6 +351,7 @@ def get_time_type(data_array: xr.DataArray) -> str:
 
     # Handle unexpected types
     raise TypeError("DataArray values must be of type numpy.ndarray or list.")
+
 
 def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:
     """

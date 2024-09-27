@@ -93,7 +93,7 @@ def cesm_surface_bgc_data(request, use_dask):
         filename=fname,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2013, 1, 1),
-        climatology=True,
+        climatology=False,
         use_dask=use_dask,
     )
     data.post_process()

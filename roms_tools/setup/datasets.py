@@ -10,7 +10,7 @@ import warnings
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
     interpolate_from_climatology,
-    is_cftime_datetime,
+    get_time_type,
     convert_cftime_to_datetime,
 )
 from roms_tools.setup.download import download_correction_data
@@ -383,19 +383,22 @@ class Dataset:
         time_dim = self.dim_names["time"]
         if time_dim in ds.variables:
             if self.climatology:
+                if len(ds[time_dim]) != 12:
+                    raise ValueError(
+                        f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
+                    )
                 if not self.end_time:
                     # Interpolate from climatology for initial conditions
                     ds = interpolate_from_climatology(
                         ds, self.dim_names["time"], self.start_time
                     )
             else:
-                if len(ds[time_dim]) == 12:
-                    warnings.warn(
-                        "The dataset contains exactly 12 time steps. This may indicate that it is "
-                        "climatological data. Please verify if climatology is appropriate for your "
-                        "analysis and set the climatology flag to True."
+                time_type = get_time_type(ds[time_dim])
+                if time_type == "int":
+                    raise ValueError(
+                        "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
                     )
-                if is_cftime_datetime(ds[time_dim]):
+                if time_type == "cftime":
                     ds = ds.assign_coords(
                         {time_dim: convert_cftime_to_datetime(ds[time_dim])}
                     )

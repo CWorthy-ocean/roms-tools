@@ -304,19 +304,19 @@ def interpolate_from_climatology(
         raise TypeError("Input 'field' must be an xarray.DataArray or xarray.Dataset.")
 
 
-def is_cftime_datetime(data_array: xr.DataArray) -> bool:
+def get_time_type(data_array: xr.DataArray) -> str:
     """
-    Checks if the xarray DataArray contains cftime datetime objects.
+    Determines the type of time values in the xarray DataArray.
 
     Parameters
     ----------
     data_array : xr.DataArray
-        The xarray DataArray to be checked for cftime datetime objects.
+        The xarray DataArray to be checked for time data types.
 
     Returns
     -------
-    bool
-        True if the DataArray contains cftime datetime objects, False otherwise.
+    str
+        A string indicating the type of the time data: 'cftime', 'datetime', or 'int'.
 
     Raises
     ------
@@ -328,20 +328,29 @@ def is_cftime_datetime(data_array: xr.DataArray) -> bool:
         cftime.DatetimeNoLeap,
         cftime.DatetimeJulian,
         cftime.DatetimeGregorian,
+        cftime.Datetime360Day,
+        cftime.DatetimeProlepticGregorian
     )
 
-    # Check if any of the coordinate values are of cftime type
+    # Check if any of the coordinate values are of cftime, datetime, or integer type
     if isinstance(data_array.values, (np.ndarray, list)):
-        # Check the dtype of the array; numpy datetime64 indicates it's not cftime
+        # Check if the data type is numpy datetime64, indicating standard datetime objects
         if data_array.values.dtype == "datetime64[ns]":
-            return False
+            return "datetime"
 
-        # Check if any of the values in the array are instances of cftime types
-        return any(isinstance(value, cftime_types) for value in data_array.values)
+        # Check if any values in the array are instances of cftime types
+        if any(isinstance(value, cftime_types) for value in data_array.values):
+            return "cftime"
+
+        # Check if all values are of integer type (e.g., for indices or time steps)
+        if np.issubdtype(data_array.values.dtype, np.integer):
+            return "int"
+
+        # If none of the above conditions are met, raise a ValueError
+        raise ValueError("Unsupported data type for time values in input dataset.")
 
     # Handle unexpected types
     raise TypeError("DataArray values must be of type numpy.ndarray or list.")
-
 
 def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:
     """

@@ -298,6 +298,7 @@ class SurfaceForcing(ROMSToolsMixins):
             ds[time_coord].attrs["units"] = "days"
             if data.climatology:
                 ds[time_coord].attrs["cycle_length"] = 365.25
+        ds.encoding["unlimited_dims"] = "time"
 
         if self.type == "bgc":
             ds = ds.drop_vars(["time"])

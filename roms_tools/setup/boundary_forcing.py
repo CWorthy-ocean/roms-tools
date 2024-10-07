@@ -278,6 +278,7 @@ class BoundaryForcing(ROMSToolsMixins):
         ds["bry_time"].attrs["units"] = "days"
         ds = ds.swap_dims({"time": "bry_time"})
         ds = ds.drop_vars("time")
+        ds.encoding["unlimited_dims"] = "bry_time"
 
         if data.climatology:
             ds["bry_time"].attrs["cycle_length"] = 365.25

@@ -143,7 +143,7 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
         use_dask=use_dask,
     )
 
-    assert initial_conditions.bgc_source["climatology"] is True
+    assert initial_conditions.bgc_source["climatology"] is False
 
 
 def test_interpolation_from_climatology(

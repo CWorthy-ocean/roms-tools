@@ -8,6 +8,26 @@ from conftest import calculate_file_hash
 from pathlib import Path
 
 
+@pytest.fixture()
+def counter_clockwise_rotated_grid():
+
+    grid = Grid(
+        nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=20
+    )
+
+    return grid
+
+
+@pytest.fixture()
+def clockwise_rotated_grid():
+
+    grid = Grid(
+        nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=-20
+    )
+
+    return grid
+
+
 def test_grid_creation(grid):
 
     assert grid.nx == 1
@@ -18,6 +38,42 @@ def test_grid_creation(grid):
     assert grid.center_lat == 0
     assert grid.rot == 0
     assert isinstance(grid.ds, xr.Dataset)
+
+
+@pytest.mark.parametrize(
+    "grid_fixture",
+    ["grid", "counter_clockwise_rotated_grid", "clockwise_rotated_grid"],
+)
+def test_coords_relation(grid_fixture, request):
+    """
+    Test that the coordinates satisfy the expected relations on a C-grid.
+    """
+    grid = request.getfixturevalue(grid_fixture)
+
+    # psi versus rho
+    assert grid.ds.lon_psi.min() < grid.ds.lon_rho.min()
+    assert grid.ds.lon_psi.max() > grid.ds.lon_rho.max()
+    assert grid.ds.lat_psi.min() < grid.ds.lat_rho.min()
+    assert grid.ds.lat_psi.max() > grid.ds.lat_rho.max()
+
+    # Assertion with tolerance is necessary for non-rotated grids
+    def assert_larger_equal_than_with_tolerance(value1, value2, tolerance=1e-5):
+        assert value1 >= value2 - tolerance
+
+    def assert_smaller_equal_than_with_tolerance(value1, value2, tolerance=1e-5):
+        assert value1 <= value2 + tolerance
+
+    # u versus rho
+    assert_larger_equal_than_with_tolerance(grid.ds.lon_u.min(), grid.ds.lon_rho.min())
+    assert_larger_equal_than_with_tolerance(grid.ds.lat_u.min(), grid.ds.lat_rho.min())
+    assert_smaller_equal_than_with_tolerance(grid.ds.lon_u.max(), grid.ds.lon_rho.max())
+    assert_smaller_equal_than_with_tolerance(grid.ds.lon_u.max(), grid.ds.lon_rho.max())
+
+    # v versus rho
+    assert_larger_equal_than_with_tolerance(grid.ds.lon_v.min(), grid.ds.lon_rho.min())
+    assert_larger_equal_than_with_tolerance(grid.ds.lat_v.min(), grid.ds.lat_rho.min())
+    assert_smaller_equal_than_with_tolerance(grid.ds.lon_v.max(), grid.ds.lon_rho.max())
+    assert_smaller_equal_than_with_tolerance(grid.ds.lon_v.max(), grid.ds.lon_rho.max())
 
 
 def test_plot_save_methods(tmp_path):

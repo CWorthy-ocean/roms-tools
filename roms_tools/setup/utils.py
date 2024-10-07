@@ -766,3 +766,130 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
         saved_filenames.extend(Path(f) for f in partitioned_filenames)
 
     return saved_filenames
+
+def get_target_coords(grid, use_coarse_grid=False):
+    """
+    Retrieves longitude and latitude coordinates from the grid, adjusting them based on longitude range.
+
+    Parameters
+    ----------
+    grid : Grid
+        Object representing the grid information used for the model.
+    use_coarse_grid : bool, optional
+        Use coarse grid data if True. Defaults to False.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the longitude, latitude, and angle arrays, along with a boolean indicating
+        if the grid straddles the meridian.
+    """
+    # Select grid variables based on whether the coarse grid is used
+    if use_coarse_grid:
+        lat, lon, angle = (
+            grid.ds.lat_coarse,
+            grid.ds.lon_coarse,
+            grid.ds.angle_coarse,
+        )
+        lat_psi = grid.ds.get("lat_psi_coarse")
+        lon_psi = grid.ds.get("lon_psi_coarse")
+    else:
+        lat, lon, angle = (
+            grid.ds.lat_rho,
+            grid.ds.lon_rho,
+            grid.ds.angle,
+        )
+        lat_psi = grid.ds.get("lat_psi")
+        lon_psi = grid.ds.get("lon_psi")
+
+    # Operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
+    lon = xr.where(lon > 180, lon - 360, lon)
+    if lon_psi is not None:
+        lon_psi = xr.where(lon_psi > 180, lon_psi - 360, lon_psi)
+
+    straddle = True
+    if not grid.straddle and abs(lon).min() > 5:
+        lon = xr.where(lon < 0, lon + 360, lon)
+        if lon_psi is not None:
+            lon_psi = xr.where(lon_psi < 0, lon_psi + 360, lon_psi)
+        straddle = False
+
+    target_coords = {
+        "lat": lat,
+        "lon": lon,
+        "lat_psi": lat_psi,
+        "lon_psi": lon_psi,
+        "angle": angle,
+        "straddle": straddle,
+    }
+
+    return target_coords
+
+def process_velocities(grid, data_vars, angle, uname, vname, interpolate=True):
+    """
+    Process and rotate velocity components to align with the grid orientation and optionally interpolate
+    them to the appropriate grid points.
+
+    This method performs the following steps:
+
+    1. **Rotation**: Rotates the velocity components (e.g., `u`, `v`) to align with the grid orientation
+       using the provided angle data.
+    2. **Interpolation**: Optionally interpolates the rotated velocities from rho-points to u- and v-points
+       of the grid.
+    3. **Barotropic Velocity Calculation**: If the velocity components are 3D (with vertical coordinates),
+       computes the barotropic (depth-averaged) velocities.
+
+    Parameters
+    ----------
+    grid : Grid
+        Object representing the grid information used for the model.
+    data_vars : dict of str: xarray.DataArray
+        Dictionary containing the velocity components to be processed. The dictionary should include keys
+        corresponding to the velocity component names (e.g., `uname`, `vname`).
+    angle : xarray.DataArray
+        DataArray containing the grid angle values used to rotate the velocity components to the correct
+        orientation on the grid.
+    uname : str
+        The key corresponding to the zonal (east-west) velocity component in `data_vars`.
+    vname : str
+        The key corresponding to the meridional (north-south) velocity component in `data_vars`.
+    interpolate : bool, optional
+        If True, interpolates the rotated velocity components to the u- and v-points of the grid.
+        Defaults to True.
+
+    Returns
+    -------
+    dict of str: xarray.DataArray
+        A dictionary of the processed velocity components. The returned dictionary includes the rotated and,
+        if applicable, interpolated velocity components. If the input velocities are 3D (having a vertical
+        dimension), the dictionary also includes the barotropic (depth-averaged) velocities (`ubar` and `vbar`).
+    """
+
+    # Rotate velocities to grid orientation
+    u_rot = data_vars[uname] * np.cos(angle) + data_vars[vname] * np.sin(angle)
+    v_rot = data_vars[vname] * np.cos(angle) - data_vars[uname] * np.sin(angle)
+
+    # Interpolate to u- and v-points
+    if interpolate:
+        data_vars[uname] = interpolate_from_rho_to_u(u_rot)
+        data_vars[vname] = interpolate_from_rho_to_v(v_rot)
+    else:
+        data_vars[uname] = u_rot
+        data_vars[vname] = v_rot
+
+    if "s_rho" in data_vars[uname].dims and "s_rho" in data_vars[vname].dims:
+        # Compute barotropic velocity
+        dz = -grid.ds["interface_depth_rho"].diff(dim="s_w")
+        dz = dz.rename({"s_w": "s_rho"})
+        dzu = interpolate_from_rho_to_u(dz)
+        dzv = interpolate_from_rho_to_v(dz)
+
+        data_vars["ubar"] = (
+            (dzu * data_vars[uname]).sum(dim="s_rho") / dzu.sum(dim="s_rho")
+        ).transpose("time", "eta_rho", "xi_u")
+        data_vars["vbar"] = (
+            (dzv * data_vars[vname]).sum(dim="s_rho") / dzv.sum(dim="s_rho")
+        ).transpose("time", "eta_v", "xi_rho")
+
+    return data_vars
+

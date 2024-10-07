@@ -12,15 +12,17 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
     get_variable_metadata,
     save_datasets,
+    get_target_coords,
+    process_velocities
 )
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.regrid import regrid_data 
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class InitialConditions(ROMSToolsMixins):
+class InitialConditions():
     """
     Represents initial conditions for ROMS, including physical and biogeochemical data.
 
@@ -79,33 +81,33 @@ class InitialConditions(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat()
+        target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
+            longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
 
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle, "u", "v")
+        data_vars = regrid_data(self.grid, data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
+        data_vars = process_velocities(self.grid, data_vars, target_coords["angle"], "u", "v")
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
             bgc_data.choose_subdomain(
-                latitude_range=[lat.min().values, lat.max().values],
-                longitude_range=[lon.min().values, lon.max().values],
+                latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
+                longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
                 margin=2,
-                straddle=straddle,
+                straddle=target_coords["straddle"],
             )
 
             vars_2d = []
             vars_3d = bgc_data.var_names.keys()
-            bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
+            bgc_data_vars = regrid_data(self.grid, bgc_data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
 
             # Ensure time coordinate matches that of physical variables
             for var in bgc_data_vars.keys():

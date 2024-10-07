@@ -7,7 +7,7 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
 from typing import Dict, Union, List
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.regrid import regrid_data 
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
@@ -20,6 +20,8 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     save_datasets,
+    get_target_coords,
+    process_velocities
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
@@ -27,7 +29,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class SurfaceForcing(ROMSToolsMixins):
+class SurfaceForcing():
     """
     Represents surface forcing input data for ROMS.
 
@@ -90,16 +92,16 @@ class SurfaceForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat(self.use_coarse_grid)
-        object.__setattr__(self, "target_lon", lon)
-        object.__setattr__(self, "target_lat", lat)
+        target_coords = get_target_coords(self.grid, self.use_coarse_grid)
+        object.__setattr__(self, "target_lon", target_coords["lon"])
+        object.__setattr__(self, "target_lat", target_coords["lat"])
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
+            longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
         if self.type == "physics":
             vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
@@ -107,11 +109,11 @@ class SurfaceForcing(ROMSToolsMixins):
             vars_2d = data.var_names.keys()
         vars_3d = []
 
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = regrid_data(self.grid, data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
 
         if self.type == "physics":
-            data_vars = super().process_velocities(
-                data_vars, angle, "uwnd", "vwnd", interpolate=False
+            data_vars = process_velocities(
+                self.grid, data_vars, target_coords["angle"], "uwnd", "vwnd", interpolate=False
             )
             if self.correct_radiation:
                 correction_data = self._get_correction_data()
@@ -124,7 +126,7 @@ class SurfaceForcing(ROMSToolsMixins):
                         data.dim_names["longitude"]
                     ],
                 }
-                correction_data.choose_subdomain(coords_correction, straddle=straddle)
+                correction_data.choose_subdomain(coords_correction, straddle=target_coords["straddle"])
                 # apply mask from ERA5 data
                 if "mask" in data.var_names.keys():
                     mask = data.ds["mask"]
@@ -136,8 +138,8 @@ class SurfaceForcing(ROMSToolsMixins):
                 vars_2d = ["swr_corr"]
                 vars_3d = []
                 # spatial interpolation
-                data_vars_corr = super().regrid_data(
-                    correction_data, vars_2d, vars_3d, lon, lat
+                data_vars_corr = regrid_data(
+                    self.grid, correction_data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"]
                 )
                 # temporal interpolation
                 corr_factor = interpolate_from_climatology(

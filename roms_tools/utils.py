@@ -140,7 +140,7 @@ def partition(
         xi_u_domain_size = integer_division_or_raise(
             ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, np_xi, "xi_u"
         )
-    
+
     if "eta_psi" in dims_to_partition:
         eta_psi_domain_size = integer_division_or_raise(
             ds.sizes["eta_psi"] - 3 * n_eta_ghost_cells, np_eta, "eta_psi"
@@ -262,7 +262,8 @@ def partition(
             if "xi_psi" in dims_to_partition:
                 xi_psi_partition_indices = cumsum(partitioned_sizes["xi_psi"])
                 indexers["xi_psi"] = slice(
-                    int(xi_psi_partition_indices[j]), int(xi_psi_partition_indices[j + 1])
+                    int(xi_psi_partition_indices[j]),
+                    int(xi_psi_partition_indices[j + 1]),
                 )
 
             if "eta_coarse" in dims_to_partition:

@@ -11,19 +11,33 @@ import numpy as np
 
 
 class LateralRegrid:
+    """
+    Applies lateral fill and regridding to data.
+
+    This class fills missing values in ocean data and interpolates it onto a new grid 
+    defined by the provided longitude and latitude.
+
+    Parameters
+    ----------
+    data : DataContainer
+        Container with variables to be interpolated, including a `mask` and dimension names.
+    lon : xarray.DataArray
+        Target longitude coordinates.
+    lat : xarray.DataArray
+        Target latitude coordinates.
+    """
     def __init__(self, data, lon, lat):
         """
-        Initializes the LateralRegrid class.
-    
+        Initializes the lateral fill and target grid coordinates.
+
         Parameters
         ----------
         data : DataContainer
-            The container holding the variables to be interpolated. It must include attributes such as
-            `dim_names` and `var_names`.
+            Data with dimensions and mask for filling.
         lon : xarray.DataArray
-            Longitude coordinates for interpolation.
+            Longitude for new grid.
         lat : xarray.DataArray
-            Latitude coordinates for interpolation.
+            Latitude for new grid.
         """
         
         # Set up solver that does lateral fill before regridding
@@ -31,73 +45,69 @@ class LateralRegrid:
             data.ds["mask"],
             [data.dim_names["latitude"], data.dim_names["longitude"]],
         )
-        self.data = data
         self.coords = {data.dim_names["latitude"]: lat, data.dim_names["longitude"]: lon}
-        self.target_lon = lon
-        self.target_lat = lat
-
 
     def apply(self, var):
-    
         """
-        Interpolates data onto the desired grid.
-    
-        This method interpolates the specified variable onto a new grid defined by the provided
-        longitude and latitude coordinates. 
-    
+        Fills missing values and regrids the variable.
+
         Parameters
         ----------
         var : xarray.DataArray
-            Input DataArray to be regridded.
-    
+            Input data to fill and regrid.
+
+        Returns
+        -------
+        xarray.DataArray
+            Regridded data with filled values.
         """
     
         # Propagate ocean values into land via lateral fill
-        filled = lateral_fill.apply(
-            self.data.ds[self.data.var_names[var]].astype(np.float64)
-        )
+        filled = self.lateral_fill.apply(var.astype(np.float64))
     
         # Regrid
-        regridded = filled.interp(coords, method="linear").drop_vars(list(coords.keys()))
+        regridded = filled.interp(self.coords, method="linear").drop_vars(list(self.coords.keys()))
  
         return regridded
 
-        if vars_3d:
-        # extrapolate deepest value all the way to bottom
-        for var in vars_3d:
-            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
-                data.ds[data.var_names[var]], data.dim_names["depth"]
-            )
-            # Propagate ocean values into land via lateral fill
-            data.ds[data.var_names[var]] = lateral_fill.apply(
-                data.ds[data.var_names[var]].astype(np.float64)
-            )
-    
-            # Regrid
-            # setting the fill value to None means that we allow extrapolation in the
-            # interpolation step to avoid NaNs at the surface if the lowest depth in original
-            # data is greater than zero
-            data_vars[var] = (
-                data.ds[data.var_names[var]]
-                .interp(coords, method="linear", kwargs={"fill_value": None})
-                .drop_vars(list(self.coords.keys()))
-            )
-    
-            if data.dim_names["time"] != "time":
-                data_vars[var] = data_vars[var].rename({data.dim_names["time"]: "time"})
-    
-            # transpose to correct order (time, s_rho, eta_rho, xi_rho)
-            data_vars[var] = data_vars[var].transpose(
-                "time", "s_rho", "eta_rho", "xi_rho"
-            )
-    
-        return data_vars
+class VerticalRegrid:
+    """
+    Performs vertical interpolation of data onto new depth coordinates.
 
-#class VerticalRegrid:
-#            # 3d interpolation
-#            coords = {
-#                data.dim_names["depth"]: grid.ds["layer_depth_rho"],
-#                data.dim_names["latitude"]: lat,
-#                data.dim_names["longitude"]: lon,
-#            }
+    Parameters
+    ----------
+    data : DataContainer
+        Container holding the data to be regridded, with relevant dimension names.
+    depth : xarray.DataArray
+        Target depth coordinates for interpolation.
+    """
 
+    def __init__(self, data, depth):
+        """
+        Initializes vertical regridding with specified depth coordinates.
+
+        Parameters
+        ----------
+        data : DataContainer
+            Data with dimension names required for regridding.
+        depth : xarray.DataArray
+            New depth coordinates for interpolation.
+        """
+        self.coords = {data.dim_names["depth"]: depth}
+
+    def apply(self, var):
+        """
+        Interpolates the variable onto the new depth grid.
+
+        Parameters
+        ----------
+        var : xarray.DataArray
+            Input data to be regridded.
+
+        Returns
+        -------
+        xarray.DataArray
+            Regridded data with extrapolation allowed to avoid NaNs at the surface.
+        """    
+        return var.interp(self.coords, method="linear", kwargs={"fill_value": None}).drop_vars(list(self.coords.keys()))
+ 

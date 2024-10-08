@@ -19,7 +19,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     process_velocities
 )
-from roms_tools.setup.regrid import regrid_data 
+from roms_tools.setup.regrid import LateralRegrid
 import matplotlib.pyplot as plt
 from pathlib import Path
 
@@ -88,7 +88,9 @@ class TidalForcing():
 
         self._correct_tides(data)
 
-        # regridding
+        data_vars = {}
+
+        # regrid
         lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
         varnames = [
             "ssh_Re",
@@ -100,12 +102,10 @@ class TidalForcing():
             "v_Re",
             "v_Im",
         ]
-        data_vars = {}
         for var in varnames:
-            data_vars[var] = lateral_regrid.apply(var)
+            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
 
-        data_vars = regrid_data(self.grid, data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
-
+        # rotate velocities
         data_vars = process_velocities(
             self.grid, data_vars, target_coords["angle"], "u_Re", "v_Re", interpolate=False
         )
@@ -113,11 +113,11 @@ class TidalForcing():
             self.grid, data_vars, target_coords["angle"], "u_Im", "v_Im", interpolate=False
         )
 
-        # Convert to barotropic velocity
+        # convert to barotropic velocity
         for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
             data_vars[varname] = data_vars[varname] / self.grid.ds.h
 
-        # Interpolate from rho- to velocity points
+        # interpolate from rho- to velocity points
         for uname in ["u_Re", "u_Im"]:
             data_vars[uname] = interpolate_from_rho_to_u(data_vars[uname])
         for vname in ["v_Re", "v_Im"]:

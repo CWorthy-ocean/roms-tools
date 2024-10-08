@@ -7,7 +7,7 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
 from typing import Dict, Union, List
-from roms_tools.setup.regrid import regrid_data 
+from roms_tools.setup.regrid import LateralRegrid
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
@@ -93,8 +93,7 @@ class SurfaceForcing():
 
         self._input_checks()
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
-        object.__setattr__(self, "target_lon", target_coords["lon"])
-        object.__setattr__(self, "target_lat", target_coords["lat"])
+        object.__setattr__(self, "target_coords", target_coords)
 
         data = self._get_data()
         data.choose_subdomain(
@@ -103,52 +102,29 @@ class SurfaceForcing():
             margin=2,
             straddle=target_coords["straddle"],
         )
+
+        data_vars = {}
+
+        # regrid
+        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
+
         if self.type == "physics":
-            vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
+            varnames = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
         elif self.type == "bgc":
-            vars_2d = data.var_names.keys()
-        vars_3d = []
+            varnames = data.var_names.keys()
 
-        data_vars = regrid_data(self.grid, data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
+        for var in varnames:
+            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
 
         if self.type == "physics":
+            # rotate velocities
             data_vars = process_velocities(
                 self.grid, data_vars, target_coords["angle"], "uwnd", "vwnd", interpolate=False
             )
-            if self.correct_radiation:
-                correction_data = self._get_correction_data()
-                # choose same subdomain as forcing data so that we can use same mask
-                coords_correction = {
-                    correction_data.dim_names["latitude"]: data.ds[
-                        data.dim_names["latitude"]
-                    ],
-                    correction_data.dim_names["longitude"]: data.ds[
-                        data.dim_names["longitude"]
-                    ],
-                }
-                correction_data.choose_subdomain(coords_correction, straddle=target_coords["straddle"])
-                # apply mask from ERA5 data
-                if "mask" in data.var_names.keys():
-                    mask = data.ds["mask"]
-                    for var in correction_data.ds.data_vars:
-                        correction_data.ds[var] = xr.where(
-                            mask == 1, correction_data.ds[var], np.nan
-                        )
-                    correction_data.ds["mask"] = mask
-                vars_2d = ["swr_corr"]
-                vars_3d = []
-                # spatial interpolation
-                data_vars_corr = regrid_data(
-                    self.grid, correction_data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"]
-                )
-                # temporal interpolation
-                corr_factor = interpolate_from_climatology(
-                    data_vars_corr["swr_corr"],
-                    correction_data.dim_names["time"],
-                    time=data_vars["swrad"].time,
-                )
 
-                data_vars["swrad"] = data_vars["swrad"] * corr_factor
+            # correct radiation if necessary
+            if self.correct_radiation:
+                data_vars = self._apply_correction(data_vars, data)
 
         object.__setattr__(data, "data_vars", data_vars)
 
@@ -231,6 +207,44 @@ class SurfaceForcing():
             )
 
         return correction_data
+
+    def _apply_correction(self, data_vars, data):
+
+        correction_data = self._get_correction_data()
+        # choose same subdomain as forcing data so that we can use same mask
+        coords_correction = {
+            correction_data.dim_names["latitude"]: data.ds[
+                data.dim_names["latitude"]
+            ],
+            correction_data.dim_names["longitude"]: data.ds[
+                data.dim_names["longitude"]
+            ],
+        }
+        correction_data.choose_subdomain(coords_correction, straddle=self.target_coords["straddle"])
+        # apply mask from ERA5 data
+        if "mask" in data.var_names.keys():
+            mask = data.ds["mask"]
+            for var in correction_data.ds.data_vars:
+                correction_data.ds[var] = xr.where(
+                    mask == 1, correction_data.ds[var], np.nan
+                )
+            correction_data.ds["mask"] = mask
+
+        data_vars_corr = {}
+        # regrid
+        lateral_regrid = LateralRegrid(correction_data, self.target_coords["lon"], self.target_coords["lat"])
+        corr_factor = lateral_regrid.apply(correction_data.ds[correction_data.var_names["swr_corr"]]) 
+        
+        # temporal interpolation
+        corr_factor = interpolate_from_climatology(
+            corr_factor,
+            correction_data.dim_names["time"],
+            time=data_vars["swrad"].time,
+        )
+
+        data_vars["swrad"] = data_vars["swrad"] * corr_factor
+
+        return data_vars
 
     def _write_into_dataset(self, data, d_meta):
 
@@ -388,7 +402,7 @@ class SurfaceForcing():
         else:
             field = field.where(self.grid.ds.mask_rho)
 
-        field = field.assign_coords({"lon": self.target_lon, "lat": self.target_lat})
+        field = field.assign_coords({"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]})
 
         # choose colorbar
         if varname in ["uwnd", "vwnd"]:

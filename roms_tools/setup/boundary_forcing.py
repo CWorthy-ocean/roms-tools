@@ -6,7 +6,7 @@ import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.regrid import regrid_data
+from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
@@ -17,7 +17,8 @@ from roms_tools.setup.utils import (
     group_dataset,
     save_datasets,
     get_target_coords,
-    process_velocities
+    process_velocities,
+    extrapolate_deepest_to_bottom
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -87,6 +88,8 @@ class BoundaryForcing():
 
     def __post_init__(self):
 
+        data_vars = {}
+
         self._input_checks()
         target_coords = get_target_coords(self.grid)
 
@@ -99,16 +102,40 @@ class BoundaryForcing():
         )
 
         if self.type == "physics":
-            vars_2d = ["zeta"]
-            vars_3d = ["temp", "salt", "u", "v"]
+            varnames = ["temp", "salt", "u", "v"]
         elif self.type == "bgc":
-            vars_2d = []
-            vars_3d = data.var_names.keys()
+            varnames = data.var_names.keys()
+        
+        # extrapolate deepest value all the way to bottom
+        for var in varnames:
+            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+                data.ds[data.var_names[var]], data.dim_names["depth"]
+            )
+        
+        # regrid laterally
+        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
+        if self.type == "physics":
+            varnames = ["zeta", "temp", "salt", "u", "v"]
 
-        data_vars = regrid_data(self.grid, data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
+        for var in varnames:
+            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
+
+        # regrid vertically
+        vertical_regrid = VerticalRegrid(data, self.grid.ds["layer_depth_rho"])
+        if self.type == "physics":
+            varnames = ["temp", "salt", "u", "v"]
+        for var in varnames:
+            data_vars[var] = vertical_regrid.apply(data.ds[data.var_names[var]])
+        
+        # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
+        for var in varnames:
+            data_vars[var] = data_vars[var].transpose(
+                "time", "s_rho", "eta_rho", "xi_rho"
+            )
 
         if self.type == "physics":
             data_vars = process_velocities(self.grid, data_vars, target_coords["angle"], "u", "v")
+
         object.__setattr__(data, "data_vars", data_vars)
 
         d_meta = get_variable_metadata()

@@ -13,9 +13,10 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     save_datasets,
     get_target_coords,
-    process_velocities
+    process_velocities,
+    extrapolate_deepest_to_bottom
 )
-from roms_tools.setup.regrid import regrid_data 
+from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -79,6 +80,8 @@ class InitialConditions():
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
+        
+        data_vars = {}
 
         self._input_checks()
         target_coords = get_target_coords(self.grid)
@@ -91,9 +94,32 @@ class InitialConditions():
             straddle=target_coords["straddle"],
         )
 
-        vars_2d = ["zeta"]
-        vars_3d = ["temp", "salt", "u", "v"]
-        data_vars = regrid_data(self.grid, data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
+        # extrapolate deepest value all the way to bottom
+        varnames = ["temp", "salt", "u", "v"]
+        for var in varnames:
+            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+                data.ds[data.var_names[var]], data.dim_names["depth"]
+            )
+
+        # regrid laterally
+        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
+        varnames = ["zeta", "temp", "salt", "u", "v"]
+        for var in varnames:
+            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
+
+        # regrid vertically
+        vertical_regrid = VerticalRegrid(data, self.grid.ds["layer_depth_rho"])
+        varnames = ["temp", "salt", "u", "v"]
+        for var in varnames:
+            data_vars[var] = vertical_regrid.apply(data.ds[data.var_names[var]])
+        
+        # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
+        for var in varnames:
+            data_vars[var] = data_vars[var].transpose(
+                "time", "s_rho", "eta_rho", "xi_rho"
+            )
+
+        # rotate velocities
         data_vars = process_velocities(self.grid, data_vars, target_coords["angle"], "u", "v")
 
         if self.bgc_source is not None:
@@ -105,18 +131,34 @@ class InitialConditions():
                 straddle=target_coords["straddle"],
             )
 
-            vars_2d = []
-            vars_3d = bgc_data.var_names.keys()
-            bgc_data_vars = regrid_data(self.grid, bgc_data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
-
-            # Ensure time coordinate matches that of physical variables
-            for var in bgc_data_vars.keys():
-                bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
-                    {"time": data_vars["temp"]["time"]}
+            # extrapolate deepest value all the way to bottom
+            varnames = bgc_data.var_names.keys()
+            for var in varnames:
+                bgc_data.ds[bgc_data.var_names[var]] = extrapolate_deepest_to_bottom(
+                    bgc_data.ds[bgc_data.var_names[var]], bgc_data.dim_names["depth"]
                 )
 
-            # Combine data variables from physical and biogeochemical sources
-            data_vars.update(bgc_data_vars)
+            # regrid laterally
+            lateral_regrid = LateralRegrid(bgc_data, target_coords["lon"], target_coords["lat"])
+            for var in varnames:
+                data_vars[var] = lateral_regrid.apply(var)
+
+            # regrid vertically
+            vertical_regrid = VerticalRegrid(bgc_data, self.grid.ds["layer_depth_rho"])
+            for var in varnames:
+                data_vars[var] = vertical_regrid.apply(bgc_data.ds[bgc_data.var_names[var]])
+            
+            # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
+            for var in varnames:
+                data_vars[var] = data_vars[var].transpose(
+                    "time", "s_rho", "eta_rho", "xi_rho"
+                )
+
+            # Ensure time coordinate matches that of physical variables
+            for var in varnames:
+                data_vars[var] = data_vars[var].assign_coords(
+                    {"time": data_vars["temp"]["time"]}
+                )
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)

@@ -1,5 +1,6 @@
 import pytest
 from datetime import datetime
+import xarray as xr
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.setup.download import download_test_data
 import textwrap
@@ -481,6 +482,23 @@ def test_surface_forcing_creation(
 
     sfc_forcing.plot("pco2_air", time=0)
 
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+            "bgc_surface_forcing",
+            "bgc_surface_forcing_from_climatology",
+    ],
+)
+def test_surface_forcing_pco2_replication(
+    sfc_forcing_fixture, request
+):
+    """
+    Test whether pco2_air and pco2_air_alt is the same after processing.
+    """
+
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+    
+    xr.testing.assert_allclose(sfc_forcing.ds.pco2_air, sfc_forcing.ds.pco2_air_alt, rtol=1.0e-5)
 
 @pytest.mark.parametrize(
     "sfc_forcing_fixture",

@@ -88,7 +88,9 @@ class TidalForcing():
 
         self._correct_tides(data)
 
-        vars_2d = [
+        # regridding
+        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
+        varnames = [
             "ssh_Re",
             "ssh_Im",
             "pot_Re",
@@ -98,7 +100,9 @@ class TidalForcing():
             "v_Re",
             "v_Im",
         ]
-        vars_3d = []
+        data_vars = {}
+        for var in varnames:
+            data_vars[var] = lateral_regrid.apply(var)
 
         data_vars = regrid_data(self.grid, data, vars_2d, vars_3d, target_coords["lon"], target_coords["lat"])
 

@@ -17,8 +17,8 @@ jobs:
           cache-environment: true
           micromamba-version: 'latest'
           environment-file: ci/environment.yml
-          create-args: |
-            python=${{ matrix.python-version }}
+      - name: Conda info
+        run: conda info
       - name: Install roms-tools
         shell: micromamba-shell {0}
         run: |

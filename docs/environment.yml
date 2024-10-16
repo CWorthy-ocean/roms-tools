@@ -1,0 +1,12 @@
+name: romstools-docs
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - sphinx
+  - nbsphinx
+  - sphinx-book-theme
+  - sphinxcontrib-bibtex
+  # for running jupyter notebooks
+  - ipykernel

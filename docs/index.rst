@@ -55,9 +55,9 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
 
 .. toctree::
    :maxdepth: 1
-   :caption: Community
+   :caption: Contributor Guide
 
-   support
+   contributing
 
 .. toctree::
    :maxdepth: 1

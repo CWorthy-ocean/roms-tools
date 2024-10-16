@@ -42,9 +42,10 @@ Install and activate the following conda environment::
     conda activate romstools-docs
     pip install -e ".[dask]"
 
-Then navigate to the docs folder and build the docs via::
+Navigate to the docs folder and build the docs with the activated environment::
 
     cd docs
+    conda activate romstools-docs
     make fresh
     make html
 

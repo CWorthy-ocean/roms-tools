@@ -61,6 +61,10 @@ def _add_topography_and_mask(
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
+
+    # adjust mask boundaries by copying values from adjacent cells
+    mask = _handle_boundaries(mask)
+
     ds["mask_rho"] = xr.DataArray(mask.astype(np.int32), dims=("eta_rho", "xi_rho"))
     ds["mask_rho"].attrs = {
         "long_name": "Mask at rho-points",
@@ -233,10 +237,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         )
 
         # No gradient at the domain boundaries
-        h_log[0, :] = h_log[1, :]
-        h_log[-1, :] = h_log[-2, :]
-        h_log[:, 0] = h_log[:, 1]
-        h_log[:, -1] = h_log[:, -2]
+        h_log = _handle_boundaries(h_log)
 
         # Update h
         h = hmin * np.exp(h_log)
@@ -250,6 +251,31 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
             break
 
     return h
+
+
+def _handle_boundaries(field):
+    """
+    Adjust the boundaries of a 2D field by copying values from adjacent cells.
+
+    Parameters
+    ----------
+    field : numpy.ndarray or xarray.DataArray
+        A 2D array representing a field (e.g., topography or mask) whose boundary values
+        need to be adjusted.
+
+    Returns
+    -------
+    field : numpy.ndarray or xarray.DataArray
+        The input field with adjusted boundary values.
+
+    """
+
+    field[0, :] = field[1, :]
+    field[-1, :] = field[-2, :]
+    field[:, 0] = field[:, 1]
+    field[:, -1] = field[:, -2]
+
+    return field
 
 
 def _compute_rfactor(h):

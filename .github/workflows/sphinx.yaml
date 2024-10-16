@@ -20,7 +20,7 @@ jobs:
           cache-downloads: true
           cache-environment: true
           micromamba-version: 'latest'
-          environment-file: ci/environment.yml
+          environment-file: docs/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
           cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}

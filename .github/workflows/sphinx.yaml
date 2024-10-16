@@ -7,7 +7,7 @@ on:
 
 jobs:
   docs:
-    name: ${{ matrix.python-version }}-build-without-dask
+    name: ${{ matrix.python-version }}-build-docs
     runs-on: ubuntu-latest
     strategy:
       matrix:

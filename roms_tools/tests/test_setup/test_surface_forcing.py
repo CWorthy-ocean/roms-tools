@@ -13,8 +13,8 @@ def grid_that_straddles_dateline():
     Fixture for creating a domain that straddles the dateline and lies within the bounds of the regional ERA5 data.
     """
     grid = Grid(
-        nx=5,
-        ny=5,
+        nx=20,
+        ny=20,
         size_x=1800,
         size_y=2400,
         center_lon=-10,

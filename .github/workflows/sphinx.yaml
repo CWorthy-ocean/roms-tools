@@ -7,7 +7,11 @@ on:
 
 jobs:
   docs:
+    name: ${{ matrix.python-version }}-build-without-dask
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
       - name: Create conda environment
@@ -17,6 +21,9 @@ jobs:
           cache-environment: true
           micromamba-version: 'latest'
           environment-file: ci/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
       - name: Conda info
         run: conda info
       - name: Install roms-tools

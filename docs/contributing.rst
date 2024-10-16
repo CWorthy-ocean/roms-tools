@@ -49,4 +49,3 @@ Then navigate to the docs folder and build the docs via::
     make html
 
 You can now open ``docs/_build/html/index.html`` in a web browser.
-

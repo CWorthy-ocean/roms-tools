@@ -18,8 +18,7 @@ from roms_tools.setup.download import download_correction_data
 
 @dataclass(frozen=True, kw_only=True)
 class Dataset:
-    """
-    Represents forcing data on original grid.
+    """Represents forcing data on original grid.
 
     Parameters
     ----------
@@ -131,8 +130,7 @@ class Dataset:
             self.post_process()
 
     def load_data(self) -> xr.Dataset:
-        """
-        Load dataset from the specified file.
+        """Load dataset from the specified file.
 
         Returns
         -------
@@ -246,8 +244,7 @@ class Dataset:
         return ds
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Dummy method to be overridden by child classes to clean up the dataset.
+        """Dummy method to be overridden by child classes to clean up the dataset.
 
         This method is intended as a placeholder and should be implemented in subclasses
         to provide specific functionality.
@@ -265,8 +262,7 @@ class Dataset:
         return ds
 
     def check_dataset(self, ds: xr.Dataset) -> None:
-        """
-        Check if the dataset contains the specified variables and dimensions.
+        """Check if the dataset contains the specified variables and dimensions.
 
         Parameters
         ----------
@@ -293,8 +289,8 @@ class Dataset:
             )
 
     def select_relevant_fields(self, ds) -> xr.Dataset:
-        """
-        Selects and returns a subset of the dataset containing only the variables specified in `self.var_names`.
+        """Selects and returns a subset of the dataset containing only the variables
+        specified in `self.var_names`.
 
         Parameters
         ----------
@@ -305,7 +301,6 @@ class Dataset:
         -------
         xr.Dataset
             A dataset containing only the variables specified in `self.var_names`.
-
         """
 
         for var in ds.data_vars:
@@ -315,8 +310,8 @@ class Dataset:
         return ds
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Dummy method to be overridden by child classes to add time information to the dataset.
+        """Dummy method to be overridden by child classes to add time information to the
+        dataset.
 
         This method is intended as a placeholder and should be implemented in subclasses
         to provide specific functionality for adding time-related information to the dataset.
@@ -334,8 +329,7 @@ class Dataset:
         return ds
 
     def select_relevant_times(self, ds) -> xr.Dataset:
-        """
-        Select a subset of the dataset based on the specified time range.
+        """Select a subset of the dataset based on the specified time range.
 
         This method filters the dataset to include all records between `start_time` and `end_time`.
         Additionally, it ensures that one record at or before `start_time` and one record at or
@@ -467,8 +461,7 @@ class Dataset:
     def ensure_dimension_is_ascending(
         self, ds: xr.Dataset, dim="latitude"
     ) -> xr.Dataset:
-        """
-        Ensure that the specified dimension in the dataset is in ascending order.
+        """Ensure that the specified dimension in the dataset is in ascending order.
 
         If the values along the specified dimension are in descending order, this function reverses the order of the dimension to make it ascending.
 
@@ -486,7 +479,6 @@ class Dataset:
             A new `xarray.Dataset` with the specified dimension in ascending order.
             If the dimension was already in ascending order, the original dataset is returned unchanged.
             If the dimension was in descending order, the dataset is returned with the dimension reversed.
-
         """
         # Make sure that latitude is ascending
         diff = np.diff(ds[self.dim_names[dim]])
@@ -496,8 +488,7 @@ class Dataset:
         return ds
 
     def check_if_global(self, ds) -> bool:
-        """
-        Checks if the dataset covers the entire globe in the longitude dimension.
+        """Checks if the dataset covers the entire globe in the longitude dimension.
 
         This function calculates the mean difference between consecutive longitude values.
         It then checks if the difference between the first and last longitude values (plus 360 degrees)
@@ -508,7 +499,6 @@ class Dataset:
         -------
         bool
             True if the dataset covers the entire globe in the longitude dimension, False otherwise.
-
         """
         dlon_mean = (
             ds[self.dim_names["longitude"]].diff(dim=self.dim_names["longitude"]).mean()
@@ -569,8 +559,8 @@ class Dataset:
         return ds_concatenated
 
     def post_process(self):
-        """
-        Placeholder method to be overridden by subclasses for dataset post-processing.
+        """Placeholder method to be overridden by subclasses for dataset post-
+        processing.
 
         Returns
         -------
@@ -582,10 +572,9 @@ class Dataset:
     def choose_subdomain(
         self, latitude_range, longitude_range, margin, straddle, return_subdomain=False
     ):
-        """
-        Selects a subdomain from the xarray Dataset based on specified latitude and longitude ranges,
-        extending the selection by a specified margin. Handles longitude conversions to accommodate different
-        longitude ranges.
+        """Selects a subdomain from the xarray Dataset based on specified latitude and
+        longitude ranges, extending the selection by a specified margin. Handles
+        longitude conversions to accommodate different longitude ranges.
 
         Parameters
         ----------
@@ -679,8 +668,7 @@ class Dataset:
 
 @dataclass(frozen=True, kw_only=True)
 class TPXODataset(Dataset):
-    """
-    Represents tidal data on the original grid from the TPXO dataset.
+    """Represents tidal data on the original grid from the TPXO dataset.
 
     Parameters
     ----------
@@ -732,8 +720,8 @@ class TPXODataset(Dataset):
     reference_date: datetime = datetime(1992, 1, 1)
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Clean up and standardize the dimensions and coordinates of the dataset for further processing.
+        """Clean up and standardize the dimensions and coordinates of the dataset for
+        further processing.
 
         This method performs the following operations:
         - Assigns new coordinate variables for 'omega', 'longitude', and 'latitude' based on existing dataset variables.
@@ -782,8 +770,7 @@ class TPXODataset(Dataset):
         return ds
 
     def check_number_constituents(self, ntides: int):
-        """
-        Checks if the number of constituents in the dataset is at least `ntides`.
+        """Checks if the number of constituents in the dataset is at least `ntides`.
 
         Parameters
         ----------
@@ -801,8 +788,8 @@ class TPXODataset(Dataset):
             )
 
     def post_process(self):
-        """
-        Apply a depth-based mask to the dataset, ensuring only positive depths are retained.
+        """Apply a depth-based mask to the dataset, ensuring only positive depths are
+        retained.
 
         This method checks if the 'depth' variable is present in the dataset. If found, a mask is created where
         depths greater than 0 are considered valid (mask value of 1). This mask is applied to all data variables
@@ -826,8 +813,7 @@ class TPXODataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class GLORYSDataset(Dataset):
-    """
-    Represents GLORYS data on original grid.
+    """Represents GLORYS data on original grid.
 
     Parameters
     ----------
@@ -873,8 +859,8 @@ class GLORYSDataset(Dataset):
     climatology: Optional[bool] = False
 
     def post_process(self):
-        """
-        Apply a mask to the dataset based on the 'zeta' variable, with 0 where 'zeta' is NaN.
+        """Apply a mask to the dataset based on the 'zeta' variable, with 0 where 'zeta'
+        is NaN.
 
         This method creates a mask based on the
         first time step (time=0) of 'zeta'. The mask has 1 for valid data and 0 where 'zeta' is NaN. This mask is applied
@@ -885,7 +871,6 @@ class GLORYSDataset(Dataset):
         -------
         None
             The dataset is modified in-place by applying the mask to each variable.
-
         """
 
         mask = xr.where(
@@ -902,8 +887,7 @@ class GLORYSDataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class CESMDataset(Dataset):
-    """
-    Represents CESM data on original grid.
+    """Represents CESM data on original grid.
 
     Parameters
     ----------
@@ -929,8 +913,7 @@ class CESMDataset(Dataset):
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Ensure the dataset's time dimension is correctly defined and standardized.
+        """Ensure the dataset's time dimension is correctly defined and standardized.
 
         This method verifies that the time dimension exists in the dataset and assigns it appropriately. If the "time" dimension is missing, the method attempts to assign an existing "time" or "month" dimension. If neither exists, it expands the dataset to include a "time" dimension with a size of one.
 
@@ -938,7 +921,6 @@ class CESMDataset(Dataset):
         -------
         ds : xr.Dataset
             The xarray Dataset with the correct time dimension assigned or added.
-
         """
 
         if "time" not in self.dim_names:
@@ -954,8 +936,8 @@ class CESMDataset(Dataset):
         return ds
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Adds time information to the dataset based on the climatology flag and dimension names.
+        """Adds time information to the dataset based on the climatology flag and
+        dimension names.
 
         This method processes the dataset to include time information according to the climatology
         setting. If the dataset represents climatology data and the time dimension is labeled as
@@ -991,8 +973,7 @@ class CESMDataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCDataset(CESMDataset):
-    """
-    Represents CESM BGC data on original grid.
+    """Represents CESM BGC data on original grid.
 
     Parameters
     ----------
@@ -1115,8 +1096,7 @@ class CESMBGCDataset(CESMDataset):
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCSurfaceForcingDataset(CESMDataset):
-    """
-    Represents CESM BGC surface forcing data on original grid.
+    """Represents CESM BGC surface forcing data on original grid.
 
     Parameters
     ----------
@@ -1161,8 +1141,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
     climatology: Optional[bool] = False
 
     def post_process(self):
-        """
-        Perform post-processing on the dataset to remove specific variables.
+        """Perform post-processing on the dataset to remove specific variables.
 
         This method checks if the variable "z_t" exists in the dataset. If it does,
         the variable is removed from the dataset. The modified dataset is then
@@ -1189,8 +1168,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
 @dataclass(frozen=True, kw_only=True)
 class ERA5Dataset(Dataset):
-    """
-    Represents ERA5 data on original grid.
+    """Represents ERA5 data on original grid.
 
     Parameters
     ----------
@@ -1301,8 +1279,9 @@ class ERA5Dataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class ERA5Correction(Dataset):
-    """
-    Global dataset to correct ERA5 radiation. The dataset contains multiplicative correction factors for the ERA5 shortwave radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
+    """Global dataset to correct ERA5 radiation. The dataset contains multiplicative
+    correction factors for the ERA5 shortwave radiation, obtained by comparing the
+    COREv2 climatology to the ERA5 climatology.
 
     Parameters
     ----------
@@ -1352,8 +1331,8 @@ class ERA5Correction(Dataset):
         super().__post_init__()
 
     def choose_subdomain(self, coords, straddle: bool):
-        """
-        Converts longitude values in the dataset if necessary and selects a subdomain based on the specified coordinates.
+        """Converts longitude values in the dataset if necessary and selects a subdomain
+        based on the specified coordinates.
 
         This method converts longitude values between different ranges if required and then extracts a subset of the
         dataset according to the given coordinates. It updates the dataset in place to reflect the selected subdomain.

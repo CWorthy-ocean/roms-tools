@@ -65,9 +65,7 @@ def tidal_forcing(request, use_dask):
 
 @pytest.fixture(scope="session")
 def initial_conditions(request, use_dask):
-    """
-    Fixture for creating an InitialConditions object.
-    """
+    """Fixture for creating an InitialConditions object."""
 
     grid = Grid(
         nx=2,
@@ -95,9 +93,7 @@ def initial_conditions(request, use_dask):
 
 @pytest.fixture(scope="session")
 def initial_conditions_with_bgc(request, use_dask):
-    """
-    Fixture for creating an InitialConditions object.
-    """
+    """Fixture for creating an InitialConditions object."""
 
     grid = Grid(
         nx=2,
@@ -127,9 +123,7 @@ def initial_conditions_with_bgc(request, use_dask):
 
 @pytest.fixture(scope="session")
 def initial_conditions_with_bgc_from_climatology(request, use_dask):
-    """
-    Fixture for creating an InitialConditions object.
-    """
+    """Fixture for creating an InitialConditions object."""
 
     grid = Grid(
         nx=2,
@@ -163,9 +157,7 @@ def initial_conditions_with_bgc_from_climatology(request, use_dask):
 
 @pytest.fixture(scope="session")
 def boundary_forcing(request, use_dask):
-    """
-    Fixture for creating a BoundaryForcing object.
-    """
+    """Fixture for creating a BoundaryForcing object."""
 
     grid = Grid(
         nx=2,
@@ -194,9 +186,7 @@ def boundary_forcing(request, use_dask):
 
 @pytest.fixture(scope="session")
 def bgc_boundary_forcing_from_climatology(request, use_dask):
-    """
-    Fixture for creating a BoundaryForcing object.
-    """
+    """Fixture for creating a BoundaryForcing object."""
 
     grid = Grid(
         nx=2,
@@ -226,9 +216,7 @@ def bgc_boundary_forcing_from_climatology(request, use_dask):
 
 @pytest.fixture(scope="session")
 def surface_forcing(request, use_dask):
-    """
-    Fixture for creating a SurfaceForcing object.
-    """
+    """Fixture for creating a SurfaceForcing object."""
 
     grid = Grid(
         nx=5,
@@ -256,9 +244,7 @@ def surface_forcing(request, use_dask):
 
 @pytest.fixture(scope="session")
 def coarse_surface_forcing(request, use_dask):
-    """
-    Fixture for creating a SurfaceForcing object.
-    """
+    """Fixture for creating a SurfaceForcing object."""
 
     grid = Grid(
         nx=5,
@@ -287,9 +273,8 @@ def coarse_surface_forcing(request, use_dask):
 
 @pytest.fixture(scope="session")
 def corrected_surface_forcing(request, use_dask):
-    """
-    Fixture for creating a SurfaceForcing object with shortwave radiation correction.
-    """
+    """Fixture for creating a SurfaceForcing object with shortwave radiation
+    correction."""
 
     grid = Grid(
         nx=5,
@@ -318,9 +303,7 @@ def corrected_surface_forcing(request, use_dask):
 
 @pytest.fixture(scope="session")
 def bgc_surface_forcing(request, use_dask):
-    """
-    Fixture for creating a SurfaceForcing object with BGC.
-    """
+    """Fixture for creating a SurfaceForcing object with BGC."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -348,9 +331,7 @@ def bgc_surface_forcing(request, use_dask):
 
 @pytest.fixture(scope="session")
 def bgc_surface_forcing_from_climatology(request, use_dask):
-    """
-    Fixture for creating a SurfaceForcing object with BGC from climatology.
-    """
+    """Fixture for creating a SurfaceForcing object with BGC from climatology."""
     grid = Grid(
         nx=5,
         ny=5,

@@ -8,8 +8,7 @@ from pathlib import Path
 
 
 def nan_check(field, mask) -> None:
-    """
-    Checks for NaN values at wet points in the field.
+    """Checks for NaN values at wet points in the field.
 
     This function examines the interpolated input field for NaN values at positions indicated as wet points by the mask.
     If any NaN values are found at these wet points, a ValueError is raised.
@@ -28,7 +27,6 @@ def nan_check(field, mask) -> None:
     ValueError
         If the field contains NaN values at any of the wet points indicated by the mask.
         The error message will explain the potential cause and suggest ensuring the dataset's coverage.
-
     """
 
     # Replace values in field with 0 where mask is not 1
@@ -44,8 +42,7 @@ def nan_check(field, mask) -> None:
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
-    """
-    Replace NaN values in the field with a specified fill value.
+    """Replace NaN values in the field with a specified fill value.
 
     This function replaces any NaN values in the input field with the provided fill value.
 
@@ -66,9 +63,7 @@ def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
 
 
 def interpolate_from_rho_to_u(field, method="additive"):
-
-    """
-    Interpolates the given field from rho points to u points.
+    """Interpolates the given field from rho points to u points.
 
     This function performs an interpolation from the rho grid (cell centers) to the u grid
     (cell edges in the xi direction). Depending on the chosen method, it either averages
@@ -114,9 +109,7 @@ def interpolate_from_rho_to_u(field, method="additive"):
 
 
 def interpolate_from_rho_to_v(field, method="additive"):
-
-    """
-    Interpolates the given field from rho points to v points.
+    """Interpolates the given field from rho points to v points.
 
     This function performs an interpolation from the rho grid (cell centers) to the v grid
     (cell edges in the eta direction). Depending on the chosen method, it either averages
@@ -164,8 +157,8 @@ def interpolate_from_rho_to_v(field, method="additive"):
 
 
 def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
-    """
-    Extrapolates the deepest non-NaN values to the bottom along the specified dimension using forward fill.
+    """Extrapolates the deepest non-NaN values to the bottom along the specified
+    dimension using forward fill.
 
     This function assumes that the specified dimension is ordered from top to bottom (e.g., a vertical dimension like 'depth').
     It fills `NaN` values below the deepest valid (non-NaN) entry along the given dimension by carrying forward the last valid value.
@@ -187,7 +180,6 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
         A new `xarray.DataArray` with the `NaN` values along the specified dimension
         filled by forward filling the deepest valid values down to the bottom.
         The original input data remains unmodified.
-
     """
     field_interpolated = field.ffill(dim=dim)
 
@@ -195,8 +187,7 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
 
 
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
-    """
-    Assigns climatology dates to the dataset's time dimension.
+    """Assigns climatology dates to the dataset's time dimension.
 
     This function updates the dataset's time coordinates to reflect climatological dates.
     It defines fixed day increments for each month and assigns these to the specified time dimension.
@@ -213,7 +204,6 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     -------
     xr.Dataset
         The updated xarray Dataset with climatological dates assigned to the specified time dimension.
-
     """
     # Define the days in each month and convert to timedelta
     increments = [15, 30, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30]
@@ -229,8 +219,7 @@ def interpolate_from_climatology(
     time_dim_name: str,
     time: Union[xr.DataArray, pd.DatetimeIndex],
 ) -> Union[xr.DataArray, xr.Dataset]:
-    """
-    Interpolates the given field temporally based on the specified time points.
+    """Interpolates the given field temporally based on the specified time points.
 
     If `field` is an xarray.Dataset, this function applies the interpolation to all data variables in the dataset.
 
@@ -305,8 +294,7 @@ def interpolate_from_climatology(
 
 
 def get_time_type(data_array: xr.DataArray) -> str:
-    """
-    Determines the type of time values in the xarray DataArray.
+    """Determines the type of time values in the xarray DataArray.
 
     Parameters
     ----------
@@ -354,8 +342,7 @@ def get_time_type(data_array: xr.DataArray) -> str:
 
 
 def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:
-    """
-    Converts cftime datetime objects to numpy datetime64 objects in a numpy ndarray.
+    """Converts cftime datetime objects to numpy datetime64 objects in a numpy ndarray.
 
     Parameters
     ----------
@@ -391,8 +378,7 @@ def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:
 
 
 def get_variable_metadata():
-    """
-    Retrieves metadata for commonly used variables in the dataset.
+    """Retrieves metadata for commonly used variables in the dataset.
 
     This function returns a dictionary containing the metadata for various variables, including long names
     and units for each variable.
@@ -401,7 +387,6 @@ def get_variable_metadata():
     -------
     dict of str: dict
         Dictionary where keys are variable names and values are dictionaries with "long_name" and "units" keys.
-
     """
 
     d = {
@@ -519,10 +504,8 @@ def get_variable_metadata():
 
 
 def get_boundary_info():
-
-    """
-    This function provides information about the boundary points for the rho, u, and v
-    variables on the grid, specifying the indices for the south, east, north, and west
+    """This function provides information about the boundary points for the rho, u, and
+    v variables on the grid, specifying the indices for the south, east, north, and west
     boundaries.
 
     Returns
@@ -559,8 +542,7 @@ def get_boundary_info():
 
 
 def extract_single_value(data):
-    """
-    Extracts a single value from an xarray.DataArray or numpy array.
+    """Extracts a single value from an xarray.DataArray or numpy array.
 
     Parameters
     ----------
@@ -589,8 +571,8 @@ def extract_single_value(data):
 
 
 def group_dataset(ds, filepath):
-    """
-    Group the dataset into monthly or yearly subsets based on the frequency of the data.
+    """Group the dataset into monthly or yearly subsets based on the frequency of the
+    data.
 
     Parameters
     ----------
@@ -643,8 +625,7 @@ def group_dataset(ds, filepath):
 
 
 def group_by_month(ds, filepath):
-    """
-    Group the dataset by month and generate filenames with 'YYYYMM' format.
+    """Group the dataset by month and generate filenames with 'YYYYMM' format.
 
     Parameters
     ----------
@@ -681,8 +662,7 @@ def group_by_month(ds, filepath):
 
 
 def group_by_year(ds, filepath):
-    """
-    Group the dataset by year and generate filenames with 'YYYY' format.
+    """Group the dataset by year and generate filenames with 'YYYY' format.
 
     Parameters
     ----------
@@ -715,8 +695,7 @@ def group_by_year(ds, filepath):
 
 
 def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
-    """
-    Save the list of datasets to netCDF4 files, with optional spatial partitioning.
+    """Save the list of datasets to netCDF4 files, with optional spatial partitioning.
 
     Parameters
     ----------

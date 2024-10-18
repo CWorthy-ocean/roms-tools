@@ -6,8 +6,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
-
-from typing import Union
+from typing import Dict, Union, List
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
@@ -22,28 +21,28 @@ RADIUS_OF_EARTH = 6371315.0  # in m
 @dataclass(frozen=True, kw_only=True)
 class Grid:
     """
-     A single ROMS grid.
+    A single ROMS grid.
 
-     Used for creating, plotting, and then saving a new ROMS domain grid.
+    Used for creating, plotting, and then saving a new ROMS domain grid.
 
-     Parameters
-     ----------
-     nx : int
-         Number of grid points in the x-direction.
-     ny : int
-         Number of grid points in the y-direction.
-     size_x : float
-         Domain size in the x-direction (in kilometers).
-     size_y : float
-         Domain size in the y-direction (in kilometers).
-     center_lon : float
-         Longitude of grid center.
-     center_lat : float
-         Latitude of grid center.
-     rot : float, optional
-         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
-         Positive values represent a counterclockwise rotation.
-         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    Parameters
+    ----------
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float, optional
+        Rotation of grid x-direction from lines of constant latitude, measured in degrees.
+        Positive values represent a counterclockwise rotation.
+        The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
     N : int, optional
         The number of vertical levels. The default is 100.
     theta_s : float, optional
@@ -52,50 +51,28 @@ class Grid:
         The bottom control parameter. Must satisfy 0 < theta_b <= 4. The default is 2.0.
     hc : float, optional
         The critical depth (in meters). The default is 300.0.
-    topography_source : str, optional
-        Specifies the data source to use for the topography. Options are
-        "ETOPO5". The default is "ETOPO5".
+    topography_source : Dict[str, Union[str, Path]], optional
+        Dictionary specifying the source of the topography data:
+
+        - "name" (str): The name of the topography data source (e.g., "SRTM15").
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
+
+        The default is "ETOPO5", which does not require a path.
     hmin : float, optional
-        The minimum ocean depth (in meters). The default is 5.0.
+       The minimum ocean depth (in meters). The default is 5.0.
 
-     Attributes
-     ----------
-     nx : int
-         Number of grid points in the x-direction.
-     ny : int
-         Number of grid points in the y-direction.
-     size_x : float
-         Domain size in the x-direction (in kilometers).
-     size_y : float
-         Domain size in the y-direction (in kilometers).
-     center_lon : float
-         Longitude of grid center.
-     center_lat : float
-         Latitude of grid center.
-     rot : float
-         Rotation of grid x-direction from lines of constant latitude.
-    N : int
-        The number of vertical levels.
-    theta_s : float
-        The surface control parameter.
-    theta_b : float
-        The bottom control parameter.
-    hc : float
-        The critical depth (in meters).
-     topography_source : str
-         Data source used for the topography.
-     hmin : float
-         Minimum ocean depth (in meters).
-     ds : xr.Dataset
-         The xarray Dataset containing the grid data.
-     straddle : bool
-         Indicates if the Greenwich meridian (0° longitude) intersects the domain.
-         `True` if it does, `False` otherwise.
+    Attributes
+    -----------
+    ds : xr.Dataset
+        The xarray Dataset containing the grid data.
+    straddle : bool
+        Indicates if the Greenwich meridian (0° longitude) intersects the domain.
+        `True` if it does, `False` otherwise.
 
-     Raises
-     ------
-     ValueError
-         If you try to create a grid with domain size larger than 20000 km.
+    Raises
+    ------
+    ValueError
+        If you try to create a grid with domain size larger than 20000 km.
     """
 
     nx: int
@@ -109,12 +86,15 @@ class Grid:
     theta_s: float = 5.0
     theta_b: float = 2.0
     hc: float = 300.0
-    topography_source: str = "ETOPO5"
+    topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     hmin: float = 5.0
     ds: xr.Dataset = field(init=False, repr=False)
     straddle: bool = field(init=False, repr=False)
 
     def __post_init__(self):
+
+        self._input_checks()
+
         ds = _make_grid_ds(
             nx=self.nx,
             ny=self.ny,
@@ -146,7 +126,24 @@ class Grid:
             N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
         )
 
-    def update_topography_and_mask(self, hmin, topography_source="ETOPO5") -> None:
+    def _input_checks(self):
+        if self.topography_source is None:
+            object.__setattr__(self, "topography_source", {"name": "ETOPO5"})
+
+        if "name" not in self.topography_source:
+            raise ValueError(
+                "`topography_source` must include a 'name' key specifying the data source."
+            )
+
+        if self.topography_source["name"] != "ETOPO5":
+            if "path" not in self.topography_source:
+                raise ValueError(
+                    "`topography_source` must include a 'path' key when the 'name' is not 'ETOPO5'."
+                )
+
+    def update_topography_and_mask(
+        self, hmin, topography_source={"name": "ETOPO5"}
+    ) -> None:
         """
         Update the grid dataset by adding or overwriting the topography and land/sea mask.
 
@@ -159,9 +156,13 @@ class Grid:
         ----------
         hmin : float
             The minimum ocean depth (in meters).
-        topography_source : str
-            Specifies the data source to use for the topography. Options are
-            "ETOPO5". Default is "ETOPO5".
+        topography_source : Dict[str, Union[str, Path]], optional
+            Dictionary specifying the source of the topography data:
+
+            - "name" (str): The name of the topography data source (e.g., "SRTM15").
+            - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
+
+            The default is "ETOPO5", which does not require a path.
 
         Returns
         -------
@@ -169,7 +170,7 @@ class Grid:
             This method modifies the dataset in place and does not return a value.
         """
 
-        ds = _add_topography_and_mask(self.ds, topography_source, hmin)
+        ds = _add_topography_and_mask(self.ds, topography_source["name"], hmin)
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)
@@ -678,7 +679,10 @@ class Grid:
             "hmin",
         ]:
             if attr in ds.attrs:
-                a = ds.attrs[attr]
+                if attr == "topography_source":
+                    a = {"name": ds.attrs[attr]}
+                else:
+                    a = ds.attrs[attr]
             else:
                 a = None
             object.__setattr__(grid, attr, a)

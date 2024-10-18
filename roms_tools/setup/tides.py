@@ -32,10 +32,13 @@ class TidalForcing(ROMSToolsMixins):
     grid : Grid
         The grid object representing the ROMS grid associated with the tidal forcing data.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]]]
-        Dictionary specifying the source of the tidal data:
-        - "name" (str): Name of the data source (e.g., "TPXO").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
+        Dictionary specifying the source of the tidal data. Keys include:
+        - **name** (str): Name of the data source (e.g., "TPXO").
+        - **path** (Union[str, Path, List[Union[str, Path]]]):
+          The path to the raw data file(s). This can be:
+          - A single string (with or without wildcards).
+          - A single Path object.
+          - A list of strings or Path objects containing multiple files.
     ntides : int, optional
         Number of constituents to consider. Maximum number is 14. Default is 10.
     allan_factor : float, optional

@@ -135,8 +135,8 @@ class Grid:
     def update_topography_and_mask(
         self, hmin, topography_source={"name": "ETOPO5"}
     ) -> None:
-        """
-        Update the grid dataset by adding or overwriting the topography and land/sea mask.
+        """Update the grid dataset by adding or overwriting the topography and land/sea
+        mask.
 
         This method processes the topography data and generates a land/sea mask.
         It applies several steps, including interpolating topography, smoothing

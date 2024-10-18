@@ -186,6 +186,7 @@ class TidalForcing(ROMSToolsMixins):
         ----------
         varname : str
             The tidal forcing variable to plot. Options include:
+
             - "ssh_Re": Real part of tidal elevation.
             - "ssh_Im": Imaginary part of tidal elevation.
             - "pot_Re": Real part of tidal potential.
@@ -194,6 +195,7 @@ class TidalForcing(ROMSToolsMixins):
             - "u_Im": Imaginary part of tidal velocity in the x-direction.
             - "v_Re": Real part of tidal velocity in the y-direction.
             - "v_Im": Imaginary part of tidal velocity in the y-direction.
+
         ntides : int, optional
             The index of the tidal constituent to plot. Default is 0, which corresponds
             to the first constituent.
@@ -261,12 +263,15 @@ class TidalForcing(ROMSToolsMixins):
 
         This method supports saving the dataset in two modes:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------

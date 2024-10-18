@@ -32,6 +32,7 @@ def partition(
     -------
     tuple[list[int], list[xr.Dataset]]
         A tuple containing two elements:
+
         - A list of integers representing the file numbers associated with each partition.
         - A list of `xarray.Dataset` objects, each representing a partitioned subdomain of the original dataset.
 

@@ -340,6 +340,7 @@ class SurfaceForcing(ROMSToolsMixins):
         ----------
         varname : str
             The name of the surface forcing field to plot. Options include:
+
             - "uwnd": 10 meter wind in x-direction.
             - "vwnd": 10 meter wind in y-direction.
             - "swrad": Downward short-wave (solar) radiation.
@@ -353,6 +354,7 @@ class SurfaceForcing(ROMSToolsMixins):
             - "dust": Dust decomposition.
             - "nox": NOx decomposition.
             - "nhy": NHy decomposition.
+
         time : int, optional
             The time index to plot. Default is 0, which corresponds to the first
             time slice.

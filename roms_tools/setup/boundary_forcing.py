@@ -360,45 +360,49 @@ class BoundaryForcing(ROMSToolsMixins):
         ----------
         varname : str
             The name of the boundary forcing field to plot. Options include:
-            - "temp_{direction}": Potential temperature, where {direction} can be one of ["south", "east", "north", "west"].
-            - "salt_{direction}": Salinity, where {direction} can be one of ["south", "east", "north", "west"].
-            - "zeta_{direction}": Sea surface height, where {direction} can be one of ["south", "east", "north", "west"].
-            - "u_{direction}": u-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "v_{direction}": v-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "ubar_{direction}": Vertically integrated u-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "vbar_{direction}": Vertically integrated v-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "PO4_{direction}": Dissolved Inorganic Phosphate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "NO3_{direction}": Dissolved Inorganic Nitrate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "SiO3_{direction}": Dissolved Inorganic Silicate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "NH4_{direction}": Dissolved Ammonia (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "Fe_{direction}": Dissolved Inorganic Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "Lig_{direction}": Iron Binding Ligand (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "O2_{direction}": Dissolved Oxygen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DIC_{direction}": Dissolved Inorganic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DIC_ALT_CO2_{direction}": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "ALK_{direction}": Alkalinity (meq/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "ALK_ALT_CO2_{direction}": Alkalinity, Alternative CO2 (meq/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOC_{direction}": Dissolved Organic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DON_{direction}": Dissolved Organic Nitrogen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOP_{direction}": Dissolved Organic Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOPr_{direction}": Refractory Dissolved Organic Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DONr_{direction}": Refractory Dissolved Organic Nitrogen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOCr_{direction}": Refractory Dissolved Organic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "zooC_{direction}": Zooplankton Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spChl_{direction}": Small Phytoplankton Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spC_{direction}": Small Phytoplankton Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spP_{direction}": Small Phytoplankton Phosphorous (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spFe_{direction}": Small Phytoplankton Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spCaCO3_{direction}": Small Phytoplankton CaCO3 (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatChl_{direction}": Diatom Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatC_{direction}": Diatom Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatP_{direction}": Diatom Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatFe_{direction}": Diatom Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatSi_{direction}": Diatom Silicate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazChl_{direction}": Diazotroph Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazC_{direction}": Diazotroph Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazP_{direction}": Diazotroph Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazFe_{direction}": Diazotroph Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+
+            - "temp_{direction}": Potential temperature,
+            - "salt_{direction}": Salinity,
+            - "zeta_{direction}": Sea surface height,
+            - "u_{direction}": u-flux component,
+            - "v_{direction}": v-flux component,
+            - "ubar_{direction}": Vertically integrated u-flux component,
+            - "vbar_{direction}": Vertically integrated v-flux component,
+            - "PO4_{direction}": Dissolved Inorganic Phosphate (mmol/m³),
+            - "NO3_{direction}": Dissolved Inorganic Nitrate (mmol/m³),
+            - "SiO3_{direction}": Dissolved Inorganic Silicate (mmol/m³),
+            - "NH4_{direction}": Dissolved Ammonia (mmol/m³),
+            - "Fe_{direction}": Dissolved Inorganic Iron (mmol/m³),
+            - "Lig_{direction}": Iron Binding Ligand (mmol/m³),
+            - "O2_{direction}": Dissolved Oxygen (mmol/m³),
+            - "DIC_{direction}": Dissolved Inorganic Carbon (mmol/m³),
+            - "DIC_ALT_CO2_{direction}": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³),
+            - "ALK_{direction}": Alkalinity (meq/m³),
+            - "ALK_ALT_CO2_{direction}": Alkalinity, Alternative CO2 (meq/m³),
+            - "DOC_{direction}": Dissolved Organic Carbon (mmol/m³),
+            - "DON_{direction}": Dissolved Organic Nitrogen (mmol/m³),
+            - "DOP_{direction}": Dissolved Organic Phosphorus (mmol/m³),
+            - "DOPr_{direction}": Refractory Dissolved Organic Phosphorus (mmol/m³),
+            - "DONr_{direction}": Refractory Dissolved Organic Nitrogen (mmol/m³),
+            - "DOCr_{direction}": Refractory Dissolved Organic Carbon (mmol/m³),
+            - "zooC_{direction}": Zooplankton Carbon (mmol/m³),
+            - "spChl_{direction}": Small Phytoplankton Chlorophyll (mg/m³),
+            - "spC_{direction}": Small Phytoplankton Carbon (mmol/m³),
+            - "spP_{direction}": Small Phytoplankton Phosphorous (mmol/m³),
+            - "spFe_{direction}": Small Phytoplankton Iron (mmol/m³),
+            - "spCaCO3_{direction}": Small Phytoplankton CaCO3 (mmol/m³),
+            - "diatChl_{direction}": Diatom Chlorophyll (mg/m³),
+            - "diatC_{direction}": Diatom Carbon (mmol/m³),
+            - "diatP_{direction}": Diatom Phosphorus (mmol/m³),
+            - "diatFe_{direction}": Diatom Iron (mmol/m³),
+            - "diatSi_{direction}": Diatom Silicate (mmol/m³),
+            - "diazChl_{direction}": Diazotroph Chlorophyll (mg/m³),
+            - "diazC_{direction}": Diazotroph Carbon (mmol/m³),
+            - "diazP_{direction}": Diazotroph Phosphorus (mmol/m³),
+            - "diazFe_{direction}": Diazotroph Iron (mmol/m³), 
+
+            where {direction} can be one of ["south", "east", "north", "west"].
+
         time : int, optional
             The time index to plot. Default is 0.
         layer_contours : bool, optional

@@ -290,6 +290,7 @@ class InitialConditions(ROMSToolsMixins):
         ----------
         varname : str
             The name of the initial conditions field to plot. Options include:
+
             - "temp": Potential temperature.
             - "salt": Salinity.
             - "zeta": Free surface.
@@ -330,6 +331,7 @@ class InitialConditions(ROMSToolsMixins):
             - "diazC": Diazotroph Carbon (mmol/m³).
             - "diazP": Diazotroph Phosphorus (mmol/m³).
             - "diazFe": Diazotroph Iron (mmol/m³).
+
         s : int, optional
             The index of the vertical layer (`s_rho`) to plot. If not specified, the plot
             will represent a horizontal slice (eta- or xi- plane). Default is None.

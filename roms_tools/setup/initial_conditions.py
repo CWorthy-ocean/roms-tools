@@ -48,11 +48,6 @@ class InitialConditions(ROMSToolsMixins):
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
-    Attributes
-    ----------
-    ds : xr.Dataset
-        Xarray Dataset containing the initial condition data loaded from the specified files.
-
     Examples
     --------
     >>> initial_conditions = InitialConditions(

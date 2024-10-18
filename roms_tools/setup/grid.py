@@ -58,40 +58,6 @@ class Grid:
     hmin : float, optional
         The minimum ocean depth (in meters). The default is 5.0.
 
-    Attributes
-    ----------
-    nx : int
-        Number of grid points in the x-direction.
-    ny : int
-        Number of grid points in the y-direction.
-    size_x : float
-        Domain size in the x-direction (in kilometers).
-    size_y : float
-        Domain size in the y-direction (in kilometers).
-    center_lon : float
-        Longitude of grid center.
-    center_lat : float
-        Latitude of grid center.
-    rot : float
-        Rotation of grid x-direction from lines of constant latitude.
-     : int
-       The number of vertical levels.
-    heta_s : float
-       The surface control parameter.
-    heta_b : float
-       The bottom control parameter.
-    c : float
-       The critical depth (in meters).
-    topography_source : str
-        Data source used for the topography.
-    hmin : float
-        Minimum ocean depth (in meters).
-    ds : xr.Dataset
-        The xarray Dataset containing the grid data.
-    straddle : bool
-        Indicates if the Greenwich meridian (0° longitude) intersects the domain.
-        `True` if it does, `False` otherwise.
-
     Raises
     ------
     ValueError

@@ -291,8 +291,7 @@ class BoundaryForcing(ROMSToolsMixins):
         return ds
 
     def _get_coordinates(self, direction, point):
-        """Retrieve layer and interface depth coordinates for a specified grid
-        boundary.
+        """Retrieve layer and interface depth coordinates for a specified grid boundary.
 
         This method extracts the layer depth and interface depth coordinates along
         a specified boundary (north, south, east, or west) and for a specified point
@@ -525,8 +524,8 @@ class BoundaryForcing(ROMSToolsMixins):
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """Export the parameters of the class to a YAML file, including the
-        version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------

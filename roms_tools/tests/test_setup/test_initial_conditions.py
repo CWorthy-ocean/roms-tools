@@ -247,8 +247,8 @@ def test_initial_conditions_plot_save(
 
 
 def test_roundtrip_yaml(initial_conditions, tmp_path, use_dask):
-    """Test that creating an InitialConditions object, saving its parameters to
-    yaml file, and re-opening yaml file creates the same object."""
+    """Test that creating an InitialConditions object, saving its parameters to yaml
+    file, and re-opening yaml file creates the same object."""
 
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"

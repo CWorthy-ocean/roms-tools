@@ -331,8 +331,7 @@ def bgc_surface_forcing(request, use_dask):
 
 @pytest.fixture(scope="session")
 def bgc_surface_forcing_from_climatology(request, use_dask):
-    """Fixture for creating a SurfaceForcing object with BGC from
-    climatology."""
+    """Fixture for creating a SurfaceForcing object with BGC from climatology."""
     grid = Grid(
         nx=5,
         ny=5,

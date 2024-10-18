@@ -112,8 +112,8 @@ class Grid:
         )
 
     def update_topography_and_mask(self, hmin, topography_source="ETOPO5") -> None:
-        """Update the grid dataset by adding or overwriting the topography and
-        land/sea mask.
+        """Update the grid dataset by adding or overwriting the topography and land/sea
+        mask.
 
         This method processes the topography data and generates a land/sea mask.
         It applies several steps, including interpolating topography, smoothing
@@ -160,9 +160,8 @@ class Grid:
             object.__setattr__(self, "straddle", False)
 
     def _coarsen(self):
-        """Update the grid by adding grid variables that are coarsened versions
-        of the original fine-resoluion grid variables. The coarsening is by a
-        factor of two.
+        """Update the grid by adding grid variables that are coarsened versions of the
+        original fine-resoluion grid variables. The coarsening is by a factor of two.
 
         The specific variables being coarsened are:
         - `lon_rho` -> `lon_coarse`: Longitude at rho points.
@@ -357,8 +356,7 @@ class Grid:
         eta=None,
         xi=None,
     ) -> None:
-        """Plot the vertical coordinate system for a given eta-, xi-, or
-        s-slice.
+        """Plot the vertical coordinate system for a given eta-, xi-, or s-slice.
 
         Parameters
         ----------
@@ -650,8 +648,8 @@ class Grid:
         return grid
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """Export the parameters of the class to a YAML file, including the
-        version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------
@@ -878,8 +876,7 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
 
 
 def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
-    """Rotate grid counterclockwise relative to surface of Earth by rot
-    degrees."""
+    """Rotate grid counterclockwise relative to surface of Earth by rot degrees."""
 
     (lon, lat) = _rot_sphere(lon, lat, rot)
     (lonu, latu) = _rot_sphere(lonu, latu, rot)
@@ -890,8 +887,7 @@ def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
 
 
 def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
-    """Translate grid so that the centre lies at the position (tra_lat,
-    tra_lon)"""
+    """Translate grid so that the centre lies at the position (tra_lat, tra_lon)"""
 
     (lon, lat) = _tra_sphere(lon, lat, tra_lat)
     (lonu, latu) = _tra_sphere(lonu, latu, tra_lat)
@@ -1269,12 +1265,12 @@ def _f2c_xdir(f):
 
 
 def _add_lat_lon_at_velocity_points(ds, straddle):
-    """Adds latitude and longitude coordinates at velocity points (u and v
-    points) to the dataset. This function computes approximate latitude and
-    longitude values at u and v velocity points based on the rho points (cell
-    centers). If the grid straddles the Greenwich meridian, it adjusts the
-    longitudes to avoid jumps from 360 to 0 degrees. The computed coordinates
-    are added to the dataset as new variables with appropriate metadata.
+    """Adds latitude and longitude coordinates at velocity points (u and v points) to
+    the dataset. This function computes approximate latitude and longitude values at u
+    and v velocity points based on the rho points (cell centers). If the grid straddles
+    the Greenwich meridian, it adjusts the longitudes to avoid jumps from 360 to 0
+    degrees. The computed coordinates are added to the dataset as new variables with
+    appropriate metadata.
 
     Parameters
     ----------

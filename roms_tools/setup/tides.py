@@ -179,8 +179,7 @@ class TidalForcing(ROMSToolsMixins):
         return ds
 
     def plot(self, varname, ntides=0) -> None:
-        """Plot the specified tidal forcing variable for a given tidal
-        constituent.
+        """Plot the specified tidal forcing variable for a given tidal constituent.
 
         Parameters
         ----------
@@ -305,8 +304,8 @@ class TidalForcing(ROMSToolsMixins):
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """Export the parameters of the class to a YAML file, including the
-        version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------
@@ -402,10 +401,9 @@ class TidalForcing(ROMSToolsMixins):
         return cls(grid=grid, **tidal_forcing_params, use_dask=use_dask)
 
     def _correct_tides(self, data):
-        """Apply tidal corrections to the dataset. This method corrects the
-        dataset for equilibrium tides, self-attraction and loading (SAL)
-        effects, and adjusts phases and amplitudes of tidal elevations and
-        transports using Egbert's correction.
+        """Apply tidal corrections to the dataset. This method corrects the dataset for
+        equilibrium tides, self-attraction and loading (SAL) effects, and adjusts phases
+        and amplitudes of tidal elevations and transports using Egbert's correction.
 
         Parameters
         ----------
@@ -521,8 +519,8 @@ def modified_julian_days(year, month, day, hour=0):
 
 
 def egbert_correction(date):
-    """Correct phases and amplitudes for real-time runs using parts of the
-    post-processing code from Egbert's & Erofeeva's (OSU) TPXO model.
+    """Correct phases and amplitudes for real-time runs using parts of the post-
+    processing code from Egbert's & Erofeeva's (OSU) TPXO model.
 
     Parameters
     ----------

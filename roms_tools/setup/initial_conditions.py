@@ -21,8 +21,8 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions(ROMSToolsMixins):
-    """Represents initial conditions for ROMS, including physical and
-    biogeochemical data.
+    """Represents initial conditions for ROMS, including physical and biogeochemical
+    data.
 
     Parameters
     ----------
@@ -283,8 +283,7 @@ class InitialConditions(ROMSToolsMixins):
         depth_contours=False,
         layer_contours=False,
     ) -> None:
-        """Plot the initial conditions field for a given eta-, xi-, or s_rho-
-        slice.
+        """Plot the initial conditions field for a given eta-, xi-, or s_rho- slice.
 
         Parameters
         ----------
@@ -545,8 +544,8 @@ class InitialConditions(ROMSToolsMixins):
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """Export the parameters of the class to a YAML file, including the
-        version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------

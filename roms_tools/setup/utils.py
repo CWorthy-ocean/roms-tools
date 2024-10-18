@@ -157,8 +157,8 @@ def interpolate_from_rho_to_v(field, method="additive"):
 
 
 def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
-    """Extrapolates the deepest non-NaN values to the bottom along the
-    specified dimension using forward fill.
+    """Extrapolates the deepest non-NaN values to the bottom along the specified
+    dimension using forward fill.
 
     This function assumes that the specified dimension is ordered from top to bottom (e.g., a vertical dimension like 'depth').
     It fills `NaN` values below the deepest valid (non-NaN) entry along the given dimension by carrying forward the last valid value.
@@ -219,8 +219,7 @@ def interpolate_from_climatology(
     time_dim_name: str,
     time: Union[xr.DataArray, pd.DatetimeIndex],
 ) -> Union[xr.DataArray, xr.Dataset]:
-    """Interpolates the given field temporally based on the specified time
-    points.
+    """Interpolates the given field temporally based on the specified time points.
 
     If `field` is an xarray.Dataset, this function applies the interpolation to all data variables in the dataset.
 
@@ -343,8 +342,7 @@ def get_time_type(data_array: xr.DataArray) -> str:
 
 
 def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:
-    """Converts cftime datetime objects to numpy datetime64 objects in a numpy
-    ndarray.
+    """Converts cftime datetime objects to numpy datetime64 objects in a numpy ndarray.
 
     Parameters
     ----------
@@ -506,9 +504,9 @@ def get_variable_metadata():
 
 
 def get_boundary_info():
-    """This function provides information about the boundary points for the
-    rho, u, and v variables on the grid, specifying the indices for the south,
-    east, north, and west boundaries.
+    """This function provides information about the boundary points for the rho, u, and
+    v variables on the grid, specifying the indices for the south, east, north, and west
+    boundaries.
 
     Returns
     -------
@@ -573,8 +571,8 @@ def extract_single_value(data):
 
 
 def group_dataset(ds, filepath):
-    """Group the dataset into monthly or yearly subsets based on the frequency
-    of the data.
+    """Group the dataset into monthly or yearly subsets based on the frequency of the
+    data.
 
     Parameters
     ----------
@@ -697,8 +695,7 @@ def group_by_year(ds, filepath):
 
 
 def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
-    """Save the list of datasets to netCDF4 files, with optional spatial
-    partitioning.
+    """Save the list of datasets to netCDF4 files, with optional spatial partitioning.
 
     Parameters
     ----------

@@ -12,8 +12,8 @@ from itertools import count
 def _add_topography_and_mask(
     ds, topography_source, hmin, smooth_factor=8.0, rmax=0.2
 ) -> xr.Dataset:
-    """Adds topography and a land/water mask to the dataset based on the
-    provided topography source.
+    """Adds topography and a land/water mask to the dataset based on the provided
+    topography source.
 
     This function performs the following operations:
     1. Interpolates topography data onto the desired grid.
@@ -86,8 +86,8 @@ def _add_topography_and_mask(
 
 
 def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
-    """Given a grid of (lon, lat) points, fetch the topography file and
-    interpolate height values onto the desired grid."""
+    """Given a grid of (lon, lat) points, fetch the topography file and interpolate
+    height values onto the desired grid."""
 
     topo_ds = fetch_topo(topography_source)
 
@@ -249,8 +249,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
 
 
 def _handle_boundaries(field):
-    """Adjust the boundaries of a 2D field by copying values from adjacent
-    cells.
+    """Adjust the boundaries of a 2D field by copying values from adjacent cells.
 
     Parameters
     ----------
@@ -273,8 +272,8 @@ def _handle_boundaries(field):
 
 
 def _compute_rfactor(h):
-    """Computes slope parameter (or r-factor) r = |Delta h| / 2h in both
-    horizontal grid directions."""
+    """Computes slope parameter (or r-factor) r = |Delta h| / 2h in both horizontal grid
+    directions."""
     # compute r_{i-1/2} = |h_i - h_{i-1}| / (h_i + h_{i+1})
     r_eta = np.abs(h.diff("eta_rho")) / (h + h.shift(eta_rho=1)).isel(
         eta_rho=slice(1, None)

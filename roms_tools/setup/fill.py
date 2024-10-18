@@ -6,9 +6,8 @@ from scipy import sparse
 
 class LateralFill:
     def __init__(self, mask, dims, tol=1.0e-4):
-        """Initializes the LateralFill class, which fills NaN values in a
-        DataArray by iteratively solving a Poisson equation using a lateral
-        diffusion approach.
+        """Initializes the LateralFill class, which fills NaN values in a DataArray by
+        iteratively solving a Poisson equation using a lateral diffusion approach.
 
         Parameters
         ----------
@@ -51,8 +50,7 @@ class LateralFill:
         self.tol = tol
 
     def apply(self, var):
-        """Fills NaN values in an xarray DataArray using iterative lateral
-        diffusion.
+        """Fills NaN values in an xarray DataArray using iterative lateral diffusion.
 
         Parameters
         ----------
@@ -95,9 +93,9 @@ class LateralFill:
 
 
 def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):
-    """Fills all NaN values in a 2D NumPy array using an iterative solver,
-    while preserving the existing non-NaN values. The filling process uses an
-    AMG solver to efficiently perform smoothing based on the Laplace operator.
+    """Fills all NaN values in a 2D NumPy array using an iterative solver, while
+    preserving the existing non-NaN values. The filling process uses an AMG solver to
+    efficiently perform smoothing based on the Laplace operator.
 
     Parameters
     ----------

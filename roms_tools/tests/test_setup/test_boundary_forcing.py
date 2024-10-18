@@ -168,8 +168,8 @@ def test_bgc_boundary_forcing_plot_save(
     ],
 )
 def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
-    """Test that creating a BoundaryForcing object, saving its parameters to
-    yaml file, and re-opening yaml file creates the same object."""
+    """Test that creating a BoundaryForcing object, saving its parameters to yaml file,
+    and re-opening yaml file creates the same object."""
 
     bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
 

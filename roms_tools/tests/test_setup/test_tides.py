@@ -170,8 +170,8 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_da
 
 
 def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
-    """Test plot and save methods in the same test since we dask arrays are
-    already computed."""
+    """Test plot and save methods in the same test since we dask arrays are already
+    computed."""
     tidal_forcing.ds.load()
 
     tidal_forcing.plot(varname="ssh_Re", ntides=0)
@@ -206,8 +206,8 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
 
 
 def test_roundtrip_yaml(tidal_forcing, tmp_path, use_dask):
-    """Test that creating a TidalForcing object, saving its parameters to yaml
-    file, and re-opening yaml file creates the same object."""
+    """Test that creating a TidalForcing object, saving its parameters to yaml file, and
+    re-opening yaml file creates the same object."""
 
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"

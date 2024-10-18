@@ -399,7 +399,7 @@ class BoundaryForcing(ROMSToolsMixins):
             - "diazChl_{direction}": Diazotroph Chlorophyll (mg/m³),
             - "diazC_{direction}": Diazotroph Carbon (mmol/m³),
             - "diazP_{direction}": Diazotroph Phosphorus (mmol/m³),
-            - "diazFe_{direction}": Diazotroph Iron (mmol/m³), 
+            - "diazFe_{direction}": Diazotroph Iron (mmol/m³),
 
             where {direction} can be one of ["south", "east", "north", "west"].
 

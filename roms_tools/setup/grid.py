@@ -22,28 +22,28 @@ RADIUS_OF_EARTH = 6371315.0  # in m
 @dataclass(frozen=True, kw_only=True)
 class Grid:
     """
-     A single ROMS grid.
+    A single ROMS grid.
 
-     Used for creating, plotting, and then saving a new ROMS domain grid.
+    Used for creating, plotting, and then saving a new ROMS domain grid.
 
-     Parameters
-     ----------
-     nx : int
-         Number of grid points in the x-direction.
-     ny : int
-         Number of grid points in the y-direction.
-     size_x : float
-         Domain size in the x-direction (in kilometers).
-     size_y : float
-         Domain size in the y-direction (in kilometers).
-     center_lon : float
-         Longitude of grid center.
-     center_lat : float
-         Latitude of grid center.
-     rot : float, optional
-         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
-         Positive values represent a counterclockwise rotation.
-         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    Parameters
+    ----------
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float, optional
+        Rotation of grid x-direction from lines of constant latitude, measured in degrees.
+        Positive values represent a counterclockwise rotation.
+        The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
     N : int, optional
         The number of vertical levels. The default is 100.
     theta_s : float, optional
@@ -58,44 +58,44 @@ class Grid:
     hmin : float, optional
         The minimum ocean depth (in meters). The default is 5.0.
 
-     Attributes
-     ----------
-     nx : int
-         Number of grid points in the x-direction.
-     ny : int
-         Number of grid points in the y-direction.
-     size_x : float
-         Domain size in the x-direction (in kilometers).
-     size_y : float
-         Domain size in the y-direction (in kilometers).
-     center_lon : float
-         Longitude of grid center.
-     center_lat : float
-         Latitude of grid center.
-     rot : float
-         Rotation of grid x-direction from lines of constant latitude.
-    N : int
-        The number of vertical levels.
-    theta_s : float
-        The surface control parameter.
-    theta_b : float
-        The bottom control parameter.
-    hc : float
-        The critical depth (in meters).
-     topography_source : str
-         Data source used for the topography.
-     hmin : float
-         Minimum ocean depth (in meters).
-     ds : xr.Dataset
-         The xarray Dataset containing the grid data.
-     straddle : bool
-         Indicates if the Greenwich meridian (0° longitude) intersects the domain.
-         `True` if it does, `False` otherwise.
+    Attributes
+    ----------
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float
+        Rotation of grid x-direction from lines of constant latitude.
+     : int
+       The number of vertical levels.
+    heta_s : float
+       The surface control parameter.
+    heta_b : float
+       The bottom control parameter.
+    c : float
+       The critical depth (in meters).
+    topography_source : str
+        Data source used for the topography.
+    hmin : float
+        Minimum ocean depth (in meters).
+    ds : xr.Dataset
+        The xarray Dataset containing the grid data.
+    straddle : bool
+        Indicates if the Greenwich meridian (0° longitude) intersects the domain.
+        `True` if it does, `False` otherwise.
 
-     Raises
-     ------
-     ValueError
-         If you try to create a grid with domain size larger than 20000 km.
+    Raises
+    ------
+    ValueError
+        If you try to create a grid with domain size larger than 20000 km.
     """
 
     nx: int

@@ -19,9 +19,7 @@ from conftest import calculate_file_hash
     ],
 )
 def test_initial_conditions_creation(ic_fixture, request):
-    """
-    Test the creation of the InitialConditions object.
-    """
+    """Test the creation of the InitialConditions object."""
 
     ic = request.getfixturevalue(ic_fixture)
 
@@ -181,9 +179,7 @@ def test_interpolation_from_climatology(
 def test_initial_conditions_plot_save(
     initial_conditions_with_bgc_from_climatology, tmp_path
 ):
-    """
-    Test plot and save methods.
-    """
+    """Test plot and save methods."""
 
     initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0)
     initial_conditions_with_bgc_from_climatology.plot(
@@ -251,7 +247,8 @@ def test_initial_conditions_plot_save(
 
 
 def test_roundtrip_yaml(initial_conditions, tmp_path, use_dask):
-    """Test that creating an InitialConditions object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+    """Test that creating an InitialConditions object, saving its parameters to
+    yaml file, and re-opening yaml file creates the same object."""
 
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"

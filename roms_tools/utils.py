@@ -9,8 +9,8 @@ from pathlib import Path
 def partition(
     ds: xr.Dataset, np_eta: int = 1, np_xi: int = 1
 ) -> tuple[list[int], list[xr.Dataset]]:
-    """
-    Partition a ROMS (Regional Ocean Modeling System) dataset into smaller spatial tiles.
+    """Partition a ROMS (Regional Ocean Modeling System) dataset into smaller
+    spatial tiles.
 
     This function divides the input dataset into `np_eta` by `np_xi` tiles, where each tile
     represents a subdomain of the original dataset. The partitioning is performed along
@@ -90,8 +90,7 @@ def partition(
         n_xi_ghost_cells = 1
 
     def integer_division_or_raise(a: int, b: int, dimension: str) -> int:
-        """
-        Perform integer division and ensure that the division is exact.
+        """Perform integer division and ensure that the division is exact.
 
         Parameters
         ----------
@@ -214,7 +213,8 @@ def partition(
             )
 
     def cumsum(pmf):
-        """Implementation of cumsum which ensures the result starts with zero"""
+        """Implementation of cumsum which ensures the result starts with
+        zero."""
         cdf = np.empty(len(pmf) + 1, dtype=int)
         cdf[0] = 0
         np.cumsum(pmf, out=cdf[1:])
@@ -290,8 +290,8 @@ def partition(
 def partition_netcdf(
     filepath: Union[str, Path], np_eta: int = 1, np_xi: int = 1
 ) -> None:
-    """
-    Partition a ROMS NetCDF file into smaller spatial tiles and save them to disk.
+    """Partition a ROMS NetCDF file into smaller spatial tiles and save them to
+    disk.
 
     This function divides the dataset in the specified NetCDF file into `np_eta` by `np_xi` tiles.
     Each tile is saved as a separate NetCDF file.

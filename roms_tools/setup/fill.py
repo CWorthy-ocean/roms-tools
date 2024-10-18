@@ -6,9 +6,9 @@ from scipy import sparse
 
 class LateralFill:
     def __init__(self, mask, dims, tol=1.0e-4):
-        """
-        Initializes the LateralFill class, which fills NaN values in a DataArray
-        by iteratively solving a Poisson equation using a lateral diffusion approach.
+        """Initializes the LateralFill class, which fills NaN values in a
+        DataArray by iteratively solving a Poisson equation using a lateral
+        diffusion approach.
 
         Parameters
         ----------
@@ -51,8 +51,8 @@ class LateralFill:
         self.tol = tol
 
     def apply(self, var):
-        """
-        Fills NaN values in an xarray DataArray using iterative lateral diffusion.
+        """Fills NaN values in an xarray DataArray using iterative lateral
+        diffusion.
 
         Parameters
         ----------
@@ -65,7 +65,6 @@ class LateralFill:
         var_filled : xarray.DataArray
             A DataArray with NaN values filled by iterative smoothing, while preserving
             non-NaN values.
-
         """
         # Apply fill to anomaly field
         mean = var.mean(dim=self.dims, skipna=True)
@@ -96,11 +95,9 @@ class LateralFill:
 
 
 def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):
-    """
-    Fills all NaN values in a 2D NumPy array using an iterative solver,
-    while preserving the existing non-NaN values.
-    The filling process uses an AMG solver to efficiently perform smoothing
-    based on the Laplace operator.
+    """Fills all NaN values in a 2D NumPy array using an iterative solver,
+    while preserving the existing non-NaN values. The filling process uses an
+    AMG solver to efficiently perform smoothing based on the Laplace operator.
 
     Parameters
     ----------
@@ -136,8 +133,7 @@ def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):
 
 
 def laplacian(grid, mask, dtype=float, format=None):
-    """
-    Return a sparse matrix for solving a 2-dimensional Poisson problem.
+    """Return a sparse matrix for solving a 2-dimensional Poisson problem.
 
     This function generates a finite difference approximation of the Laplacian operator
     on a 2-dimensional grid with unit grid spacing and Dirichlet boundary conditions.
@@ -164,7 +160,6 @@ def laplacian(grid, mask, dtype=float, format=None):
     sparse matrix
         A sparse matrix representing the finite difference Laplacian operator for
         the given grid.
-
     """
     grid = tuple(grid)
 
@@ -180,8 +175,7 @@ def laplacian(grid, mask, dtype=float, format=None):
 
 
 def stencil_grid_mod(S, grid, msk, dtype=None, format=None):
-    """
-    Construct a sparse matrix from a local matrix stencil.
+    """Construct a sparse matrix from a local matrix stencil.
 
     This function generates a sparse matrix that represents an operator
     by applying the given stencil `S` at each vertex of a regular grid with

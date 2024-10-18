@@ -28,8 +28,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class SurfaceForcing(ROMSToolsMixins):
-    """
-    Represents surface forcing input data for ROMS.
+    """Represents surface forcing input data for ROMS.
 
     Parameters
     ----------
@@ -40,14 +39,23 @@ class SurfaceForcing(ROMSToolsMixins):
     end_time : datetime
         End time of the desired surface forcing data.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
-        Dictionary specifying the source of the surface forcing data:
-        - "name" (str): Name of the data source (e.g., "ERA5").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
-        - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+        Dictionary specifying the source of the surface forcing data. Keys include:
+
+          - name (str): Name of the data source (e.g., "ERA5").
+          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+
+        - climatology (bool): Indicates if the data is climatology data. Defaults to False.
+
     type : str
-        Specifies the type of forcing data, either "physics" for physical
-        atmospheric forcing or "bgc" for biogeochemical forcing.
+        Specifies the type of forcing data. Options are:
+
+          - physics (str): for physical atmospheric forcing.
+          - bgc (str): for biogeochemical forcing.
+
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is False.
     use_coarse_grid: bool
@@ -327,8 +335,7 @@ class SurfaceForcing(ROMSToolsMixins):
         return ds
 
     def plot(self, varname, time=0) -> None:
-        """
-        Plot the specified surface forcing field for a given time slice.
+        """Plot the specified surface forcing field for a given time slice.
 
         Parameters
         ----------
@@ -410,8 +417,7 @@ class SurfaceForcing(ROMSToolsMixins):
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
     ) -> None:
-        """
-        Save the surface forcing fields to netCDF4 files.
+        """Save the surface forcing fields to netCDF4 files.
 
         This method saves the dataset by grouping it into subsets based on the data frequency. The subsets are then written
         to one or more netCDF4 files. The filenames of the output files reflect the temporal coverage of the data.
@@ -458,8 +464,8 @@ class SurfaceForcing(ROMSToolsMixins):
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the
+        version of roms-tools.
 
         Parameters
         ----------
@@ -514,8 +520,7 @@ class SurfaceForcing(ROMSToolsMixins):
     def from_yaml(
         cls, filepath: Union[str, Path], use_dask: bool = False
     ) -> "SurfaceForcing":
-        """
-        Create an instance of the SurfaceForcing class from a YAML file.
+        """Create an instance of the SurfaceForcing class from a YAML file.
 
         Parameters
         ----------

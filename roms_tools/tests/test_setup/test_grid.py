@@ -45,9 +45,7 @@ def test_grid_creation(grid):
     ["grid", "counter_clockwise_rotated_grid", "clockwise_rotated_grid"],
 )
 def test_coords_relation(grid_fixture, request):
-    """
-    Test that the coordinates satisfy the expected relations on a C-grid.
-    """
+    """Test that the coordinates satisfy the expected relations on a C-grid."""
     grid = request.getfixturevalue(grid_fixture)
 
     # psi versus rho
@@ -218,7 +216,8 @@ def test_compatability_with_matlab_grid(tmp_path):
 
 
 def test_roundtrip_netcdf(tmp_path):
-    """Test that creating a grid, saving it to file, and re-opening it is the same as just creating it."""
+    """Test that creating a grid, saving it to file, and re-opening it is the
+    same as just creating it."""
 
     # Initialize a Grid object using the initializer
     grid_init = Grid(
@@ -255,7 +254,8 @@ def test_roundtrip_netcdf(tmp_path):
 
 
 def test_roundtrip_yaml(tmp_path):
-    """Test that creating a grid, saving its parameters to yaml file, and re-opening yaml file creates the same grid."""
+    """Test that creating a grid, saving its parameters to yaml file, and re-
+    opening yaml file creates the same grid."""
 
     # Initialize a Grid object using the initializer
     grid_init = Grid(

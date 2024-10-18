@@ -24,8 +24,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class BoundaryForcing(ROMSToolsMixins):
-    """
-    Represents boundary forcing input data for ROMS.
+    """Represents boundary forcing input data for ROMS.
 
     Parameters
     ----------
@@ -38,11 +37,23 @@ class BoundaryForcing(ROMSToolsMixins):
     boundaries : Dict[str, bool], optional
         Dictionary specifying which boundaries are forced (south, east, north, west). Default is all True.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
-        Dictionary specifying the source of the boundary forcing data:
-        - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
-        - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+        Dictionary specifying the source of the boundary forcing data. Keys include:
+
+          - name (str): Name of the data source (e.g., "GLORYS").
+          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+
+        - climatology (bool): Indicates if the data is climatology data. Defaults to False.
+
+    type : str
+        Specifies the type of forcing data. Options are:
+
+          - physics (str): for physical atmospheric forcing.
+          - bgc (str): for biogeochemical forcing.
+
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
@@ -281,8 +292,8 @@ class BoundaryForcing(ROMSToolsMixins):
         return ds
 
     def _get_coordinates(self, direction, point):
-        """
-        Retrieve layer and interface depth coordinates for a specified grid boundary.
+        """Retrieve layer and interface depth coordinates for a specified grid
+        boundary.
 
         This method extracts the layer depth and interface depth coordinates along
         a specified boundary (north, south, east, or west) and for a specified point
@@ -344,8 +355,7 @@ class BoundaryForcing(ROMSToolsMixins):
         time=0,
         layer_contours=False,
     ) -> None:
-        """
-        Plot the boundary forcing field for a given time-slice.
+        """Plot the boundary forcing field for a given time-slice.
 
         Parameters
         ----------
@@ -463,8 +473,7 @@ class BoundaryForcing(ROMSToolsMixins):
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
     ) -> None:
-        """
-        Save the boundary forcing fields to netCDF4 files.
+        """Save the boundary forcing fields to netCDF4 files.
 
         This method saves the dataset by grouping it into subsets based on the data frequency. The subsets are then written
         to one or more netCDF4 files. The filenames of the output files reflect the temporal coverage of the data.
@@ -511,8 +520,8 @@ class BoundaryForcing(ROMSToolsMixins):
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the
+        version of roms-tools.
 
         Parameters
         ----------
@@ -563,8 +572,7 @@ class BoundaryForcing(ROMSToolsMixins):
     def from_yaml(
         cls, filepath: Union[str, Path], use_dask: bool = False
     ) -> "BoundaryForcing":
-        """
-        Create an instance of the BoundaryForcing class from a YAML file.
+        """Create an instance of the BoundaryForcing class from a YAML file.
 
         Parameters
         ----------

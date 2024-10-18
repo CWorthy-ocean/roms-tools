@@ -8,9 +8,7 @@ from pathlib import Path
 
 
 def test_boundary_forcing_creation(boundary_forcing):
-    """
-    Test the creation of the BoundaryForcing object.
-    """
+    """Test the creation of the BoundaryForcing object."""
 
     fname = download_test_data("GLORYS_coarse_test_data.nc")
 
@@ -43,9 +41,7 @@ def test_boundary_forcing_creation(boundary_forcing):
 
 
 def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatology):
-    """
-    Test the creation of the BoundaryForcing object.
-    """
+    """Test the creation of the BoundaryForcing object."""
 
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
 
@@ -80,9 +76,7 @@ def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatolog
 
 
 def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
-    """
-    Test plot and save methods.
-    """
+    """Test plot and save methods."""
 
     boundary_forcing.plot(varname="temp_south", layer_contours=True)
     boundary_forcing.plot(varname="temp_east", layer_contours=True)
@@ -128,9 +122,7 @@ def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
 def test_bgc_boundary_forcing_plot_save(
     bgc_boundary_forcing_from_climatology, tmp_path
 ):
-    """
-    Test plot and save methods.
-    """
+    """Test plot and save methods."""
 
     bgc_boundary_forcing_from_climatology.plot(varname="ALK_south")
     bgc_boundary_forcing_from_climatology.plot(varname="ALK_east")
@@ -176,7 +168,8 @@ def test_bgc_boundary_forcing_plot_save(
     ],
 )
 def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
-    """Test that creating a BoundaryForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+    """Test that creating a BoundaryForcing object, saving its parameters to
+    yaml file, and re-opening yaml file creates the same object."""
 
     bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
 

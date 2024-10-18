@@ -21,8 +21,8 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions(ROMSToolsMixins):
-    """
-    Represents initial conditions for ROMS, including physical and biogeochemical data.
+    """Represents initial conditions for ROMS, including physical and
+    biogeochemical data.
 
     Parameters
     ----------
@@ -32,17 +32,29 @@ class InitialConditions(ROMSToolsMixins):
         The date and time at which the initial conditions are set.
         If no exact match is found, the closest time entry to `ini_time` within the time range [ini_time, ini_time + 24 hours] is selected.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
-        Dictionary specifying the source of the physical initial condition data:
-        - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
-        - "climatology" (bool): Indicates if the physical data is climatology data. Defaults to False.
-    bgc_source : Optional[Dict[str, Union[str, Path, List[Union[str, Path]]], bool]]
-        Dictionary specifying the source of the biogeochemical (BGC) initial condition data:
-        - "name" (str): Name of the BGC data source (e.g., "CESM_REGRIDDED").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
-        - "climatology" (bool): Indicates if the BGC data is climatology data. Defaults to False.
+        Dictionary specifying the source of the physical initial condition data. Keys include:
+
+          - name (str): Name of the data source (e.g., "GLORYS").
+          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+
+        - climatology (bool): Indicates if the data is climatology data. Defaults to False.
+    
+    bgc_source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+        Dictionary specifying the source of the biogeochemical (BGC) initial condition data. Keys include:
+
+          - name (str): Name of the data source (e.g., "CESM_REGRIDDED").
+          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+
+        - climatology (bool): Indicates if the data is climatology data. Defaults to False.
+
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
@@ -272,8 +284,8 @@ class InitialConditions(ROMSToolsMixins):
         depth_contours=False,
         layer_contours=False,
     ) -> None:
-        """
-        Plot the initial conditions field for a given eta-, xi-, or s_rho-slice.
+        """Plot the initial conditions field for a given eta-, xi-, or s_rho-
+        slice.
 
         Parameters
         ----------
@@ -349,7 +361,6 @@ class InitialConditions(ROMSToolsMixins):
             If the specified `varname` is not one of the valid options.
             If the field specified by `varname` is 3D and none of `s`, `eta`, or `xi` are specified.
             If the field specified by `varname` is 2D and both `eta` and `xi` are specified.
-
         """
 
         if len(self.ds[varname].squeeze().dims) == 3 and not any(
@@ -487,8 +498,7 @@ class InitialConditions(ROMSToolsMixins):
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
     ) -> None:
-        """
-        Save the initial conditions information to a netCDF4 file.
+        """Save the initial conditions information to a netCDF4 file.
 
         This method supports saving the dataset in two modes:
 
@@ -531,8 +541,8 @@ class InitialConditions(ROMSToolsMixins):
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the
+        version of roms-tools.
 
         Parameters
         ----------
@@ -583,8 +593,7 @@ class InitialConditions(ROMSToolsMixins):
     def from_yaml(
         cls, filepath: Union[str, Path], use_dask: bool = False
     ) -> "InitialConditions":
-        """
-        Create an instance of the InitialConditions class from a YAML file.
+        """Create an instance of the InitialConditions class from a YAML file.
 
         Parameters
         ----------

@@ -9,9 +9,8 @@ from conftest import calculate_file_hash
 
 @pytest.fixture
 def grid_that_straddles_dateline():
-    """
-    Fixture for creating a domain that straddles the dateline and lies within the bounds of the regional ERA5 data.
-    """
+    """Fixture for creating a domain that straddles the dateline and lies
+    within the bounds of the regional ERA5 data."""
     grid = Grid(
         nx=20,
         ny=20,
@@ -27,8 +26,9 @@ def grid_that_straddles_dateline():
 
 @pytest.fixture
 def grid_that_straddles_dateline_but_is_too_big_for_regional_test_data():
-    """
-    Fixture for creating a domain that straddles the dateline but exceeds the bounds of the regional ERA5 data.
+    """Fixture for creating a domain that straddles the dateline but exceeds
+    the bounds of the regional ERA5 data.
+
     Centered east of dateline.
     """
     grid = Grid(
@@ -46,9 +46,11 @@ def grid_that_straddles_dateline_but_is_too_big_for_regional_test_data():
 
 @pytest.fixture
 def another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data():
-    """
-    Fixture for creating a domain that straddles the dateline but exceeds the bounds of the regional ERA5 data.
-    Centered west of dateline. This one was hard to catch for the nan_check for a long time, but should work now.
+    """Fixture for creating a domain that straddles the dateline but exceeds
+    the bounds of the regional ERA5 data.
+
+    Centered west of dateline. This one was hard to catch for the
+    nan_check for a long time, but should work now.
     """
     grid = Grid(
         nx=5,
@@ -65,9 +67,11 @@ def another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data()
 
 @pytest.fixture
 def grid_that_lies_east_of_dateline_less_than_five_degrees_away():
-    """
-    Fixture for creating a domain that lies east of Greenwich meridian, but less than 5 degrees away.
-    We care about the 5 degree mark because it decides whether the code handles the longitudes as straddling the dateline or not.
+    """Fixture for creating a domain that lies east of Greenwich meridian, but
+    less than 5 degrees away.
+
+    We care about the 5 degree mark because it decides whether the code
+    handles the longitudes as straddling the dateline or not.
     """
 
     grid = Grid(
@@ -85,9 +89,11 @@ def grid_that_lies_east_of_dateline_less_than_five_degrees_away():
 
 @pytest.fixture
 def grid_that_lies_east_of_dateline_more_than_five_degrees_away():
-    """
-    Fixture for creating a domain that lies east of Greenwich meridian, more than 5 degrees away.
-    We care about the 5 degree mark because it decides whether the code handles the longitudes as straddling the dateline or not.
+    """Fixture for creating a domain that lies east of Greenwich meridian, more
+    than 5 degrees away.
+
+    We care about the 5 degree mark because it decides whether the code
+    handles the longitudes as straddling the dateline or not.
     """
     grid = Grid(
         nx=5,
@@ -104,9 +110,11 @@ def grid_that_lies_east_of_dateline_more_than_five_degrees_away():
 
 @pytest.fixture
 def grid_that_lies_west_of_dateline_less_than_five_degrees_away():
-    """
-    Fixture for creating a domain that lies west of Greenwich meridian, less than 5 degrees away.
-    We care about the 5 degree mark because it decides whether the code handles the longitudes as straddling the dateline or not.
+    """Fixture for creating a domain that lies west of Greenwich meridian, less
+    than 5 degrees away.
+
+    We care about the 5 degree mark because it decides whether the code
+    handles the longitudes as straddling the dateline or not.
     """
 
     grid = Grid(
@@ -124,9 +132,11 @@ def grid_that_lies_west_of_dateline_less_than_five_degrees_away():
 
 @pytest.fixture
 def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
-    """
-    Fixture for creating a domain that lies west of Greenwich meridian, more than 5 degrees away.
-    We care about the 5 degree mark because it decides whether the code handles the longitudes as straddling the dateline or not.
+    """Fixture for creating a domain that lies west of Greenwich meridian, more
+    than 5 degrees away.
+
+    We care about the 5 degree mark because it decides whether the code
+    handles the longitudes as straddling the dateline or not.
     """
 
     grid = Grid(
@@ -144,8 +154,10 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
 
 @pytest.fixture
 def grid_that_straddles_180_degree_meridian():
-    """
-    Fixture for creating a domain that straddles 180 degree meridian. This is a good test grid for the global ERA5 data, which comes on an [-180, 180] longitude grid.
+    """Fixture for creating a domain that straddles 180 degree meridian.
+
+    This is a good test grid for the global ERA5 data, which comes on an
+    [-180, 180] longitude grid.
     """
 
     grid = Grid(
@@ -172,8 +184,7 @@ def grid_that_straddles_180_degree_meridian():
     ],
 )
 def test_successful_initialization_with_regional_data(grid_fixture, request, use_dask):
-    """
-    Test the initialization of SurfaceForcing with regional ERA5 data.
+    """Test the initialization of SurfaceForcing with regional ERA5 data.
 
     This test checks the following:
     1. SurfaceForcing object initializes successfully with provided regional data.
@@ -242,10 +253,10 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
 def test_nan_detection_initialization_with_regional_data(
     grid_fixture, request, use_dask
 ):
-    """
-    Test handling of NaN values during initialization with regional data.
+    """Test handling of NaN values during initialization with regional data.
 
-    Ensures ValueError is raised if NaN values are detected in the dataset.
+    Ensures ValueError is raised if NaN values are detected in the
+    dataset.
     """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
@@ -270,10 +281,11 @@ def test_nan_detection_initialization_with_regional_data(
 def test_no_longitude_intersection_initialization_with_regional_data(
     grid_that_straddles_180_degree_meridian, use_dask
 ):
-    """
-    Test initialization of SurfaceForcing with a grid that straddles the 180° meridian.
+    """Test initialization of SurfaceForcing with a grid that straddles the
+    180° meridian.
 
-    Ensures ValueError is raised when the longitude range does not intersect with the dataset.
+    Ensures ValueError is raised when the longitude range does not
+    intersect with the dataset.
     """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
@@ -309,11 +321,11 @@ def test_no_longitude_intersection_initialization_with_regional_data(
     ],
 )
 def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
-    """
-    Test initialization of SurfaceForcing with global data.
+    """Test initialization of SurfaceForcing with global data.
 
-    Verifies that the SurfaceForcing object is correctly initialized with global data,
-    including the correct handling of the grid and physics data. Checks both coarse and fine grid initialization.
+    Verifies that the SurfaceForcing object is correctly initialized
+    with global data, including the correct handling of the grid and
+    physics data. Checks both coarse and fine grid initialization.
     """
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
@@ -357,8 +369,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
 
 
 def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
-    """
-    Test that the surface forcing fields contain no NaNs.
+    """Test that the surface forcing fields contain no NaNs.
 
     The test is performed twice:
     - First with the default fine grid.
@@ -405,10 +416,8 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
 
 
 def test_time_attr_climatology(bgc_surface_forcing_from_climatology):
-    """
-    Test that the 'cycle_length' attribute is present in the time coordinate of the BGC dataset
-    when using climatology data.
-    """
+    """Test that the 'cycle_length' attribute is present in the time coordinate
+    of the BGC dataset when using climatology data."""
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert hasattr(
             bgc_surface_forcing_from_climatology.ds[time_coord],
@@ -418,10 +427,8 @@ def test_time_attr_climatology(bgc_surface_forcing_from_climatology):
 
 
 def test_time_attr(bgc_surface_forcing):
-    """
-    Test that the 'cycle_length' attribute is not present in the time coordinate of the BGC dataset
-    when not using climatology data.
-    """
+    """Test that the 'cycle_length' attribute is not present in the time
+    coordinate of the BGC dataset when not using climatology data."""
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert not hasattr(
             bgc_surface_forcing.ds[time_coord],
@@ -448,12 +455,12 @@ def test_time_attr(bgc_surface_forcing):
 def test_surface_forcing_creation(
     sfc_forcing_fixture, expected_climatology, expected_fname, request
 ):
-    """
-    Test the creation and initialization of the SurfaceForcing object with BGC.
+    """Test the creation and initialization of the SurfaceForcing object with
+    BGC.
 
-    Verifies that the SurfaceForcing object is properly created with correct attributes.
-    Ensures that expected variables are present in the dataset
-    and that attributes match the given configurations.
+    Verifies that the SurfaceForcing object is properly created with
+    correct attributes. Ensures that expected variables are present in
+    the dataset and that attributes match the given configurations.
     """
 
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
@@ -491,9 +498,7 @@ def test_surface_forcing_creation(
     ],
 )
 def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
-    """
-    Test plot and save methods.
-    """
+    """Test plot and save methods."""
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
     sfc_forcing.plot(varname="uwnd", time=0)
 
@@ -525,9 +530,7 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
 
 
 def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
-    """
-    Test plot and save methods.
-    """
+    """Test plot and save methods."""
 
     # Check the values in the dataset
     bgc_surface_forcing.plot(varname="pco2_air", time=0)
@@ -562,9 +565,7 @@ def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
 def test_surface_forcing_bgc_from_clim_plot_save(
     bgc_surface_forcing_from_climatology, tmp_path
 ):
-    """
-    Test plot and save methods.
-    """
+    """Test plot and save methods."""
 
     # Check the values in the dataset
     bgc_surface_forcing_from_climatology.plot(varname="pco2_air", time=0)
@@ -609,7 +610,8 @@ def test_surface_forcing_bgc_from_clim_plot_save(
     ],
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
-    """Test that creating an SurfaceForcing object, saving its parameters to yaml file, and re-opening yaml file creates the same object."""
+    """Test that creating an SurfaceForcing object, saving its parameters to
+    yaml file, and re-opening yaml file creates the same object."""
 
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 

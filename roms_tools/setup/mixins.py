@@ -12,22 +12,20 @@ import numpy as np
 
 @dataclass(frozen=True, kw_only=True)
 class ROMSToolsMixins:
-    """
-    Represents a mixin tool for ROMS-Tools with capabilities shared by the various
-    ROMS-Tools dataclasses.
+    """Represents a mixin tool for ROMS-Tools with capabilities shared by the
+    various ROMS-Tools dataclasses.
 
     Parameters
     ----------
     grid : Grid
         Object representing the grid information used for the model.
-
     """
 
     grid: Grid
 
     def get_target_lon_lat(self, use_coarse_grid=False):
-        """
-        Retrieves the longitude and latitude arrays from the grid and adjusts them based on the grid's orientation.
+        """Retrieves the longitude and latitude arrays from the grid and
+        adjusts them based on the grid's orientation.
 
         This method provides longitude and latitude coordinates, with options for using a coarse grid
         if specified. It also handles longitudes to ensure they are between -180 and 180 degrees and adjusts
@@ -68,9 +66,8 @@ class ROMSToolsMixins:
         return lon, lat, angle, straddle
 
     def regrid_data(self, data, vars_2d, vars_3d, lon, lat):
-
-        """
-        Interpolates data onto the desired grid and processes it for 2D and 3D variables.
+        """Interpolates data onto the desired grid and processes it for 2D and
+        3D variables.
 
         This method interpolates the specified 2D and 3D variables onto a new grid defined by the provided
         longitude and latitude coordinates. It handles both 2D and 3D data, performing extrapolation for 3D
@@ -165,9 +162,9 @@ class ROMSToolsMixins:
         return data_vars
 
     def process_velocities(self, data_vars, angle, uname, vname, interpolate=True):
-        """
-        Process and rotate velocity components to align with the grid orientation and optionally interpolate
-        them to the appropriate grid points.
+        """Process and rotate velocity components to align with the grid
+        orientation and optionally interpolate them to the appropriate grid
+        points.
 
         This method performs the following steps:
 

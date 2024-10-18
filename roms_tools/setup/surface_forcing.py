@@ -91,7 +91,7 @@ class SurfaceForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat(self.use_coarse_grid)
+        lon, lat, angle, straddle = super()._get_target_lon_lat(self.use_coarse_grid)
         object.__setattr__(self, "target_lon", lon)
         object.__setattr__(self, "target_lat", lat)
 
@@ -108,10 +108,10 @@ class SurfaceForcing(ROMSToolsMixins):
             vars_2d = data.var_names.keys()
         vars_3d = []
 
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
 
         if self.type == "physics":
-            data_vars = super().process_velocities(
+            data_vars = super()._process_velocities(
                 data_vars, angle, "uwnd", "vwnd", interpolate=False
             )
             if self.correct_radiation:
@@ -137,7 +137,7 @@ class SurfaceForcing(ROMSToolsMixins):
                 vars_2d = ["swr_corr"]
                 vars_3d = []
                 # spatial interpolation
-                data_vars_corr = super().regrid_data(
+                data_vars_corr = super()._regrid_data(
                     correction_data, vars_2d, vars_3d, lon, lat
                 )
                 # temporal interpolation

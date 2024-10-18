@@ -85,7 +85,7 @@ class InitialConditions(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat()
+        lon, lat, angle, straddle = super()._get_target_lon_lat()
 
         data = self._get_data()
         data.choose_subdomain(
@@ -97,8 +97,8 @@ class InitialConditions(ROMSToolsMixins):
 
         vars_2d = ["zeta"]
         vars_3d = ["temp", "salt", "u", "v"]
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super().process_velocities(data_vars, angle, "u", "v")
+        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super()._process_velocities(data_vars, angle, "u", "v")
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
@@ -111,7 +111,7 @@ class InitialConditions(ROMSToolsMixins):
 
             vars_2d = []
             vars_3d = bgc_data.var_names.keys()
-            bgc_data_vars = super().regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
+            bgc_data_vars = super()._regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
 
             # Ensure time coordinate matches that of physical variables
             for var in bgc_data_vars.keys():

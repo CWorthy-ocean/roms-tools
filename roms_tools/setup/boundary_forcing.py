@@ -91,7 +91,7 @@ class BoundaryForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat()
+        lon, lat, angle, straddle = super()._get_target_lon_lat()
 
         data = self._get_data()
         data.choose_subdomain(
@@ -108,10 +108,10 @@ class BoundaryForcing(ROMSToolsMixins):
             vars_2d = []
             vars_3d = data.var_names.keys()
 
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
 
         if self.type == "physics":
-            data_vars = super().process_velocities(data_vars, angle, "u", "v")
+            data_vars = super()._process_velocities(data_vars, angle, "u", "v")
         object.__setattr__(data, "data_vars", data_vars)
 
         d_meta = get_variable_metadata()

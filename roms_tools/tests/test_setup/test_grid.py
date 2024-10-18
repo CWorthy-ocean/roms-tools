@@ -229,7 +229,7 @@ def test_roundtrip_netcdf(tmp_path):
         center_lon=0.0,
         center_lat=0.0,
         rot=0.0,
-        topography_source="ETOPO5",
+        topography_source={"name": "ETOPO5"},
         hmin=5.0,
     )
 
@@ -266,7 +266,7 @@ def test_roundtrip_yaml(tmp_path):
         center_lon=0.0,
         center_lat=0.0,
         rot=0.0,
-        topography_source="ETOPO5",
+        topography_source={"name": "ETOPO5"},
         hmin=5.0,
     )
 
@@ -299,7 +299,7 @@ def test_files_have_same_hash(tmp_path):
         center_lon=0.0,
         center_lat=0.0,
         rot=0.0,
-        topography_source="ETOPO5",
+        topography_source={"name": "ETOPO5"},
         hmin=5.0,
     )
 
@@ -335,7 +335,8 @@ def test_from_yaml_missing_version(tmp_path):
       center_lon: -10
       center_lat: 61
       rot: -20
-      topography_source: ETOPO5
+      topography_source:
+        name: ETOPO5
       hmin: 5.0
     """
     )
@@ -404,7 +405,8 @@ def test_from_yaml_version_mismatch(tmp_path):
       center_lon: -10
       center_lat: 61
       rot: -20
-      topography_source: ETOPO5
+      topography_source:
+        name: ETOPO5
       hmin: 5.0
     """
     )

@@ -45,6 +45,5 @@ repos:
     rev: v1.7.5
     hooks:
       - id: docformatter
-        language: python
         args: ["--in-place", "--recursive", "--wrap-summaries=88", "--wrap-descriptions=88"]
         files: \.pyi?$

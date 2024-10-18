@@ -46,7 +46,7 @@ class TidalForcing(ROMSToolsMixins):
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
     Attributes
-    ----------
+    -----------
     ds : xr.Dataset
         The xarray Dataset containing the tidal forcing data.
 

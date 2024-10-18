@@ -33,8 +33,8 @@ class TidalForcing(ROMSToolsMixins):
     source : Dict[str, Union[str, Path, List[Union[str, Path]]]]
         Dictionary specifying the source of the tidal data. Keys include:
 
-          - name (str): Name of the data source (e.g., "TPXO").
-          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source (e.g., "TPXO").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
 
             - A single string (with or without wildcards).
             - A single Path object.

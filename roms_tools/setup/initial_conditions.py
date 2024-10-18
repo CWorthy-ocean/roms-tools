@@ -32,28 +32,27 @@ class InitialConditions(ROMSToolsMixins):
         The date and time at which the initial conditions are set.
         If no exact match is found, the closest time entry to `ini_time` within the time range [ini_time, ini_time + 24 hours] is selected.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+
         Dictionary specifying the source of the physical initial condition data. Keys include:
 
-          - name (str): Name of the data source (e.g., "GLORYS").
-          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source (e.g., "GLORYS").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
 
             - A single string (with or without wildcards).
             - A single Path object.
             - A list of strings or Path objects containing multiple files.
+          - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
-        - climatology (bool): Indicates if the data is climatology data. Defaults to False.
-    
     bgc_source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data. Keys include:
 
-          - name (str): Name of the data source (e.g., "CESM_REGRIDDED").
-          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source (e.g., "CESM_REGRIDDED").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
 
             - A single string (with or without wildcards).
             - A single Path object.
             - A list of strings or Path objects containing multiple files.
-
-        - climatology (bool): Indicates if the data is climatology data. Defaults to False.
+          - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
@@ -502,12 +501,15 @@ class InitialConditions(ROMSToolsMixins):
 
         This method supports saving the dataset in two modes:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------

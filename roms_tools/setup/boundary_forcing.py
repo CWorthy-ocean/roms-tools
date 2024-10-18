@@ -39,20 +39,19 @@ class BoundaryForcing(ROMSToolsMixins):
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the boundary forcing data. Keys include:
 
-          - name (str): Name of the data source (e.g., "GLORYS").
-          - path (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source (e.g., "GLORYS").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
 
             - A single string (with or without wildcards).
             - A single Path object.
             - A list of strings or Path objects containing multiple files.
-
-        - climatology (bool): Indicates if the data is climatology data. Defaults to False.
+          - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str
         Specifies the type of forcing data. Options are:
 
-          - physics (str): for physical atmospheric forcing.
-          - bgc (str): for biogeochemical forcing.
+          - "physics": for physical atmospheric forcing.
+          - "bgc": for biogeochemical forcing.
 
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
@@ -480,13 +479,15 @@ class BoundaryForcing(ROMSToolsMixins):
 
         There are two modes of saving the dataset:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
-             with the base filename specified by `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - Each spatial tile is saved as a separate netCDF4 file.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------

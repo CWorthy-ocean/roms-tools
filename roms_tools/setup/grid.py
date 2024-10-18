@@ -364,12 +364,14 @@ class Grid:
         ----------
         varname : str, optional
             The vertical coordinate field to plot. Options include:
+
             - "layer_depth_rho": Layer depth at rho-points.
             - "layer_depth_u": Layer depth at u-points.
             - "layer_depth_v": Layer depth at v-points.
             - "interface_depth_rho": Interface depth at rho-points.
             - "interface_depth_u": Interface depth at u-points.
             - "interface_depth_v": Interface depth at v-points.
+
         s: int, optional
             The s-index to plot. Default is None.
         eta : int, optional
@@ -491,12 +493,15 @@ class Grid:
 
         This method supports saving the dataset in two modes:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------

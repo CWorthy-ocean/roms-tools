@@ -24,8 +24,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class BoundaryForcing(ROMSToolsMixins):
-    """
-    Represents boundary forcing input data for ROMS.
+    """Represents boundary forcing input data for ROMS.
 
     Parameters
     ----------
@@ -38,20 +37,26 @@ class BoundaryForcing(ROMSToolsMixins):
     boundaries : Dict[str, bool], optional
         Dictionary specifying which boundaries are forced (south, east, north, west). Default is all True.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
-        Dictionary specifying the source of the boundary forcing data:
-        - "name" (str): Name of the data source (e.g., "GLORYS").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
-        - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+        Dictionary specifying the source of the boundary forcing data. Keys include:
+
+          - "name" (str): Name of the data source (e.g., "GLORYS").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+          - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+
+    type : str
+        Specifies the type of forcing data. Options are:
+
+          - "physics": for physical atmospheric forcing.
+          - "bgc": for biogeochemical forcing.
+
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-
-    Attributes
-    -----------
-    ds : xr.Dataset
-        Xarray Dataset containing the boundary forcing data.
 
     Examples
     --------
@@ -86,7 +91,7 @@ class BoundaryForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat()
+        lon, lat, angle, straddle = super()._get_target_lon_lat()
 
         data = self._get_data()
         data.choose_subdomain(
@@ -103,10 +108,10 @@ class BoundaryForcing(ROMSToolsMixins):
             vars_2d = []
             vars_3d = data.var_names.keys()
 
-        data_vars = super().regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
 
         if self.type == "physics":
-            data_vars = super().process_velocities(data_vars, angle, "u", "v")
+            data_vars = super()._process_velocities(data_vars, angle, "u", "v")
         object.__setattr__(data, "data_vars", data_vars)
 
         d_meta = get_variable_metadata()
@@ -286,8 +291,7 @@ class BoundaryForcing(ROMSToolsMixins):
         return ds
 
     def _get_coordinates(self, direction, point):
-        """
-        Retrieve layer and interface depth coordinates for a specified grid boundary.
+        """Retrieve layer and interface depth coordinates for a specified grid boundary.
 
         This method extracts the layer depth and interface depth coordinates along
         a specified boundary (north, south, east, or west) and for a specified point
@@ -349,52 +353,55 @@ class BoundaryForcing(ROMSToolsMixins):
         time=0,
         layer_contours=False,
     ) -> None:
-        """
-        Plot the boundary forcing field for a given time-slice.
+        """Plot the boundary forcing field for a given time-slice.
 
         Parameters
         ----------
         varname : str
             The name of the boundary forcing field to plot. Options include:
-            - "temp_{direction}": Potential temperature, where {direction} can be one of ["south", "east", "north", "west"].
-            - "salt_{direction}": Salinity, where {direction} can be one of ["south", "east", "north", "west"].
-            - "zeta_{direction}": Sea surface height, where {direction} can be one of ["south", "east", "north", "west"].
-            - "u_{direction}": u-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "v_{direction}": v-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "ubar_{direction}": Vertically integrated u-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "vbar_{direction}": Vertically integrated v-flux component, where {direction} can be one of ["south", "east", "north", "west"].
-            - "PO4_{direction}": Dissolved Inorganic Phosphate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "NO3_{direction}": Dissolved Inorganic Nitrate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "SiO3_{direction}": Dissolved Inorganic Silicate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "NH4_{direction}": Dissolved Ammonia (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "Fe_{direction}": Dissolved Inorganic Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "Lig_{direction}": Iron Binding Ligand (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "O2_{direction}": Dissolved Oxygen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DIC_{direction}": Dissolved Inorganic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DIC_ALT_CO2_{direction}": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "ALK_{direction}": Alkalinity (meq/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "ALK_ALT_CO2_{direction}": Alkalinity, Alternative CO2 (meq/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOC_{direction}": Dissolved Organic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DON_{direction}": Dissolved Organic Nitrogen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOP_{direction}": Dissolved Organic Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOPr_{direction}": Refractory Dissolved Organic Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DONr_{direction}": Refractory Dissolved Organic Nitrogen (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "DOCr_{direction}": Refractory Dissolved Organic Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "zooC_{direction}": Zooplankton Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spChl_{direction}": Small Phytoplankton Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spC_{direction}": Small Phytoplankton Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spP_{direction}": Small Phytoplankton Phosphorous (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spFe_{direction}": Small Phytoplankton Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "spCaCO3_{direction}": Small Phytoplankton CaCO3 (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatChl_{direction}": Diatom Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatC_{direction}": Diatom Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatP_{direction}": Diatom Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatFe_{direction}": Diatom Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diatSi_{direction}": Diatom Silicate (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazChl_{direction}": Diazotroph Chlorophyll (mg/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazC_{direction}": Diazotroph Carbon (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazP_{direction}": Diazotroph Phosphorus (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
-            - "diazFe_{direction}": Diazotroph Iron (mmol/m³), where {direction} can be one of ["south", "east", "north", "west"].
+
+            - "temp_{direction}": Potential temperature,
+            - "salt_{direction}": Salinity,
+            - "zeta_{direction}": Sea surface height,
+            - "u_{direction}": u-flux component,
+            - "v_{direction}": v-flux component,
+            - "ubar_{direction}": Vertically integrated u-flux component,
+            - "vbar_{direction}": Vertically integrated v-flux component,
+            - "PO4_{direction}": Dissolved Inorganic Phosphate (mmol/m³),
+            - "NO3_{direction}": Dissolved Inorganic Nitrate (mmol/m³),
+            - "SiO3_{direction}": Dissolved Inorganic Silicate (mmol/m³),
+            - "NH4_{direction}": Dissolved Ammonia (mmol/m³),
+            - "Fe_{direction}": Dissolved Inorganic Iron (mmol/m³),
+            - "Lig_{direction}": Iron Binding Ligand (mmol/m³),
+            - "O2_{direction}": Dissolved Oxygen (mmol/m³),
+            - "DIC_{direction}": Dissolved Inorganic Carbon (mmol/m³),
+            - "DIC_ALT_CO2_{direction}": Dissolved Inorganic Carbon, Alternative CO2 (mmol/m³),
+            - "ALK_{direction}": Alkalinity (meq/m³),
+            - "ALK_ALT_CO2_{direction}": Alkalinity, Alternative CO2 (meq/m³),
+            - "DOC_{direction}": Dissolved Organic Carbon (mmol/m³),
+            - "DON_{direction}": Dissolved Organic Nitrogen (mmol/m³),
+            - "DOP_{direction}": Dissolved Organic Phosphorus (mmol/m³),
+            - "DOPr_{direction}": Refractory Dissolved Organic Phosphorus (mmol/m³),
+            - "DONr_{direction}": Refractory Dissolved Organic Nitrogen (mmol/m³),
+            - "DOCr_{direction}": Refractory Dissolved Organic Carbon (mmol/m³),
+            - "zooC_{direction}": Zooplankton Carbon (mmol/m³),
+            - "spChl_{direction}": Small Phytoplankton Chlorophyll (mg/m³),
+            - "spC_{direction}": Small Phytoplankton Carbon (mmol/m³),
+            - "spP_{direction}": Small Phytoplankton Phosphorous (mmol/m³),
+            - "spFe_{direction}": Small Phytoplankton Iron (mmol/m³),
+            - "spCaCO3_{direction}": Small Phytoplankton CaCO3 (mmol/m³),
+            - "diatChl_{direction}": Diatom Chlorophyll (mg/m³),
+            - "diatC_{direction}": Diatom Carbon (mmol/m³),
+            - "diatP_{direction}": Diatom Phosphorus (mmol/m³),
+            - "diatFe_{direction}": Diatom Iron (mmol/m³),
+            - "diatSi_{direction}": Diatom Silicate (mmol/m³),
+            - "diazChl_{direction}": Diazotroph Chlorophyll (mg/m³),
+            - "diazC_{direction}": Diazotroph Carbon (mmol/m³),
+            - "diazP_{direction}": Diazotroph Phosphorus (mmol/m³),
+            - "diazFe_{direction}": Diazotroph Iron (mmol/m³),
+
+            where {direction} can be one of ["south", "east", "north", "west"].
+
         time : int, optional
             The time index to plot. Default is 0.
         layer_contours : bool, optional
@@ -468,21 +475,22 @@ class BoundaryForcing(ROMSToolsMixins):
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
     ) -> None:
-        """
-        Save the boundary forcing fields to netCDF4 files.
+        """Save the boundary forcing fields to netCDF4 files.
 
         This method saves the dataset by grouping it into subsets based on the data frequency. The subsets are then written
         to one or more netCDF4 files. The filenames of the output files reflect the temporal coverage of the data.
 
         There are two modes of saving the dataset:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
-             with the base filename specified by `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - Each spatial tile is saved as a separate netCDF4 file.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
@@ -516,8 +524,8 @@ class BoundaryForcing(ROMSToolsMixins):
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------
@@ -568,8 +576,7 @@ class BoundaryForcing(ROMSToolsMixins):
     def from_yaml(
         cls, filepath: Union[str, Path], use_dask: bool = False
     ) -> "BoundaryForcing":
-        """
-        Create an instance of the BoundaryForcing class from a YAML file.
+        """Create an instance of the BoundaryForcing class from a YAML file.
 
         Parameters
         ----------

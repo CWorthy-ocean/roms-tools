@@ -3,7 +3,6 @@
 .. currentmodule:: {{ module }}
 
 .. autoclass:: {{ objname }}
-   :special-members:
 
    {% block methods %}
    {% if methods %}

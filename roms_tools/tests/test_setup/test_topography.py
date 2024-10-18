@@ -59,10 +59,8 @@ def test_hmin_criterion():
 
 
 def test_mask_topography_boundary():
-    """
-    Test that the mask and topography along the grid boundaries (north, south, east, west)
-    are identical to the adjacent inland cells.
-    """
+    """Test that the mask and topography along the grid boundaries (north, south, east,
+    west) are identical to the adjacent inland cells."""
 
     # Create a grid with some land along the northern boundary
     grid = Grid(

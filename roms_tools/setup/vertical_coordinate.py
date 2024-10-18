@@ -3,8 +3,8 @@ import xarray as xr
 
 
 def compute_cs(sigma, theta_s, theta_b):
-    """
-    Compute the S-coordinate stretching curves according to Shchepetkin and McWilliams (2009).
+    """Compute the S-coordinate stretching curves according to Shchepetkin and
+    McWilliams (2009).
 
     Parameters
     ----------
@@ -37,8 +37,7 @@ def compute_cs(sigma, theta_s, theta_b):
 
 
 def sigma_stretch(theta_s, theta_b, N, type):
-    """
-    Compute sigma and stretching curves based on the type and parameters.
+    """Compute sigma and stretching curves based on the type and parameters.
 
     Parameters
     ----------
@@ -80,8 +79,7 @@ def sigma_stretch(theta_s, theta_b, N, type):
 
 
 def compute_depth(zeta, h, hc, cs, sigma):
-    """
-    Compute the depth at different sigma levels.
+    """Compute the depth at different sigma levels.
 
     Parameters
     ----------

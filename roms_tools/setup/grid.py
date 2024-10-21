@@ -1147,8 +1147,8 @@ def _create_grid_ds(
             "lon_u": lon_u,
             "lat_v": lat_v,
             "lon_v": lon_v,
-            "lat_psi": lat_q,
-            "lon_psi": lon_q,
+            #"lat_psi": lat_q,
+            #"lon_psi": lon_q,
         }
     )
 

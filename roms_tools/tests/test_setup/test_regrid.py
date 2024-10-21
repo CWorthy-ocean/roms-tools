@@ -61,7 +61,7 @@ def test_vertical_regrid_no_nans(midocean_glorys_data):
         regridded = lateral_regrid.apply(
             midocean_glorys_data.ds[midocean_glorys_data.var_names[var]]
         )
-        regridded = vertical_regrid.apply(regridded)
+        regridded = vertical_regrid.apply(regridded, fill_nans=True)
 
         assert not regridded.isnull().any()
 
@@ -98,17 +98,30 @@ def vertical_regridder(depth_values, layer_depth_rho_values):
     return VerticalRegrid(mock_data, mock_grid)
 
 
-def test_vertical_regrid():
-
-    depth_values = np.array([5, 50, 100, 150])
-    layer_depth_rho_values = [130, 100, 70, 30, 10]
-    temp_data = [30, 25, 10, 2]
+@pytest.mark.parametrize(
+    "depth_values, layer_depth_rho_values, temp_data",
+    [
+        ([5, 50, 100, 150], [130, 100, 70, 30, 10], [30, 25, 10, 2]),
+        ([5, 50, 100, 150], [130, 100, 70, 30, 2], [30, 25, 10, 2]),
+        ([5, 50, 100, 150], [200, 100, 70, 30, 10], [30, 25, 10, 2]),
+        ([5, 50, 100, 150], [200, 100, 70, 30, 1], [30, 25, 10, 2]),
+    ],
+)
+def test_vertical_regrid(request, depth_values, layer_depth_rho_values, temp_data):
 
     vertical_regrid = vertical_regridder(
         depth_values=depth_values, layer_depth_rho_values=layer_depth_rho_values
     )
     data = xr.Dataset({"temp_data": (["depth"], temp_data)})
-    regridded = vertical_regrid.apply(data.temp_data)
 
+    # without filling in NaNs
+    regridded = vertical_regrid.apply(data.temp_data, fill_nans=False)
+    expected = np.interp(
+        layer_depth_rho_values, depth_values, temp_data, left=np.nan, right=np.nan
+    )
+    assert np.allclose(expected, regridded.data, equal_nan=True)
+
+    # with filling in NaNs
+    regridded = vertical_regrid.apply(data.temp_data, fill_nans=True)
     expected = np.interp(layer_depth_rho_values, depth_values, temp_data)
-    assert np.equal(expected, regridded.data).all()
+    assert np.allclose(expected, regridded.data, equal_nan=True)

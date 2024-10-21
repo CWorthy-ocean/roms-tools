@@ -49,10 +49,10 @@ def test_coords_relation(grid_fixture, request):
     grid = request.getfixturevalue(grid_fixture)
 
     # psi versus rho
-    #assert grid.ds.lon_psi.min() < grid.ds.lon_rho.min()
-    #assert grid.ds.lon_psi.max() > grid.ds.lon_rho.max()
-    #assert grid.ds.lat_psi.min() < grid.ds.lat_rho.min()
-    #assert grid.ds.lat_psi.max() > grid.ds.lat_rho.max()
+    # assert grid.ds.lon_psi.min() < grid.ds.lon_rho.min()
+    # assert grid.ds.lon_psi.max() > grid.ds.lon_rho.max()
+    # assert grid.ds.lat_psi.min() < grid.ds.lat_rho.min()
+    # assert grid.ds.lat_psi.max() > grid.ds.lat_rho.max()
 
     # Assertion with tolerance is necessary for non-rotated grids
     def assert_larger_equal_than_with_tolerance(value1, value2, tolerance=1e-5):

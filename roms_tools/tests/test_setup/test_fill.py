@@ -105,7 +105,7 @@ def cesm_surface_bgc_data(request, use_dask):
     "data_fixture",
     ["era5_data", "glorys_data", "tpxo_data", "cesm_bgc_data", "cesm_surface_bgc_data"],
 )
-def test_lateral_fill_no_nans(data_fixture, request, use_dask):
+def test_lateral_fill_no_nans(data_fixture, request):
     data = request.getfixturevalue(data_fixture)
     lateral_fill = LateralFill(
         data.ds["mask"],
@@ -150,7 +150,7 @@ def test_lateral_fill_correct_order_of_magnitude(cesm_bgc_data):
         "glorys_data",
     ],
 )
-def test_lateral_fill_reproducibility(data_fixture, request, use_dask):
+def test_lateral_fill_reproducibility(data_fixture, request):
 
     data = request.getfixturevalue(data_fixture)
     lateral_fill0 = LateralFill(

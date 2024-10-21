@@ -189,9 +189,10 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
         The original input data remains unmodified.
 
     """
-    field_interpolated = field.ffill(dim=dim)
-
-    return field_interpolated
+    if dim in field.dims:
+        return field.ffill(dim=dim)
+    else:
+        return field
 
 
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:

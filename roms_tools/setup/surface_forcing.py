@@ -42,14 +42,22 @@ class SurfaceForcing:
     end_time : datetime
         End time of the desired surface forcing data.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
-        Dictionary specifying the source of the surface forcing data:
-        - "name" (str): Name of the data source (e.g., "ERA5").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
-        - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+        Dictionary specifying the source of the surface forcing data. Keys include:
+
+          - "name" (str): Name of the data source (e.g., "ERA5").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+          - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+
     type : str
-        Specifies the type of forcing data, either "physics" for physical
-        atmospheric forcing or "bgc" for biogeochemical forcing.
+        Specifies the type of forcing data. Options are:
+
+          - "physics": for physical atmospheric forcing.
+          - "bgc": for biogeochemical forcing.
+
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is False.
     use_coarse_grid: bool
@@ -58,12 +66,6 @@ class SurfaceForcing:
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        Xarray Dataset containing the surface forcing data.
-
 
     Examples
     --------
@@ -363,13 +365,13 @@ class SurfaceForcing:
         return ds
 
     def plot(self, varname, time=0) -> None:
-        """
-        Plot the specified surface forcing field for a given time slice.
+        """Plot the specified surface forcing field for a given time slice.
 
         Parameters
         ----------
         varname : str
             The name of the surface forcing field to plot. Options include:
+
             - "uwnd": 10 meter wind in x-direction.
             - "vwnd": 10 meter wind in y-direction.
             - "swrad": Downward short-wave (solar) radiation.
@@ -383,6 +385,7 @@ class SurfaceForcing:
             - "dust": Dust decomposition.
             - "nox": NOx decomposition.
             - "nhy": NHy decomposition.
+
         time : int, optional
             The time index to plot. Default is 0, which corresponds to the first
             time slice.
@@ -448,21 +451,22 @@ class SurfaceForcing:
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
     ) -> None:
-        """
-        Save the surface forcing fields to netCDF4 files.
+        """Save the surface forcing fields to netCDF4 files.
 
         This method saves the dataset by grouping it into subsets based on the data frequency. The subsets are then written
         to one or more netCDF4 files. The filenames of the output files reflect the temporal coverage of the data.
 
         There are two modes of saving the dataset:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
-             with the base filename specified by `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - Each spatial tile is saved as a separate netCDF4 file.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
@@ -496,8 +500,8 @@ class SurfaceForcing:
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------
@@ -552,8 +556,7 @@ class SurfaceForcing:
     def from_yaml(
         cls, filepath: Union[str, Path], use_dask: bool = False
     ) -> "SurfaceForcing":
-        """
-        Create an instance of the SurfaceForcing class from a YAML file.
+        """Create an instance of the SurfaceForcing class from a YAML file.
 
         Parameters
         ----------

@@ -12,7 +12,7 @@ A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla
 
 <mark>**DISCLAIMER**: This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout Fall 2024. We do not recommend to use this software before this ALPHA development and test phase is completed.</mark>
 
-## Installation instructions
+## Installation
 
 ### Installation from pip
 

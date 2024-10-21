@@ -3,9 +3,7 @@ from roms_tools import Grid
 
 
 def test_invalid_theta_s_value():
-    """
-    Test the validation of the theta_s value.
-    """
+    """Test the validation of the theta_s value."""
     with pytest.raises(ValueError):
 
         Grid(
@@ -24,9 +22,7 @@ def test_invalid_theta_s_value():
 
 
 def test_invalid_theta_b_value():
-    """
-    Test the validation of the theta_b value.
-    """
+    """Test the validation of the theta_b value."""
     with pytest.raises(ValueError):
         Grid(
             nx=2,

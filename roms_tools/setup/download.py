@@ -53,8 +53,7 @@ pup_test_data = pooch.create(
 
 
 def fetch_topo(topography_source: str) -> xr.Dataset:
-    """
-    Load the global topography data as an xarray Dataset.
+    """Load the global topography data as an xarray Dataset.
 
     Parameters
     ----------
@@ -79,8 +78,7 @@ def fetch_topo(topography_source: str) -> xr.Dataset:
 
 
 def download_correction_data(filename: str) -> str:
-    """
-    Download the correction data file.
+    """Download the correction data file.
 
     Parameters
     ----------
@@ -100,8 +98,7 @@ def download_correction_data(filename: str) -> str:
 
 
 def download_test_data(filename: str) -> str:
-    """
-    Download the test data file.
+    """Download the test data file.
 
     Parameters
     ----------

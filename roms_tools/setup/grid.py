@@ -21,29 +21,28 @@ RADIUS_OF_EARTH = 6371315.0  # in m
 
 @dataclass(frozen=True, kw_only=True)
 class Grid:
-    """
-     A single ROMS grid.
+    """A single ROMS grid.
 
-     Used for creating, plotting, and then saving a new ROMS domain grid.
+    Used for creating, plotting, and then saving a new ROMS domain grid.
 
-     Parameters
-     ----------
-     nx : int
-         Number of grid points in the x-direction.
-     ny : int
-         Number of grid points in the y-direction.
-     size_x : float
-         Domain size in the x-direction (in kilometers).
-     size_y : float
-         Domain size in the y-direction (in kilometers).
-     center_lon : float
-         Longitude of grid center.
-     center_lat : float
-         Latitude of grid center.
-     rot : float, optional
-         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
-         Positive values represent a counterclockwise rotation.
-         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    Parameters
+    ----------
+    nx : int
+        Number of grid points in the x-direction.
+    ny : int
+        Number of grid points in the y-direction.
+    size_x : float
+        Domain size in the x-direction (in kilometers).
+    size_y : float
+        Domain size in the y-direction (in kilometers).
+    center_lon : float
+        Longitude of grid center.
+    center_lat : float
+        Latitude of grid center.
+    rot : float, optional
+        Rotation of grid x-direction from lines of constant latitude, measured in degrees.
+        Positive values represent a counterclockwise rotation.
+        The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
     N : int, optional
         The number of vertical levels. The default is 100.
     theta_s : float, optional
@@ -58,44 +57,10 @@ class Grid:
     hmin : float, optional
         The minimum ocean depth (in meters). The default is 5.0.
 
-     Attributes
-     ----------
-     nx : int
-         Number of grid points in the x-direction.
-     ny : int
-         Number of grid points in the y-direction.
-     size_x : float
-         Domain size in the x-direction (in kilometers).
-     size_y : float
-         Domain size in the y-direction (in kilometers).
-     center_lon : float
-         Longitude of grid center.
-     center_lat : float
-         Latitude of grid center.
-     rot : float
-         Rotation of grid x-direction from lines of constant latitude.
-    N : int
-        The number of vertical levels.
-    theta_s : float
-        The surface control parameter.
-    theta_b : float
-        The bottom control parameter.
-    hc : float
-        The critical depth (in meters).
-     topography_source : str
-         Data source used for the topography.
-     hmin : float
-         Minimum ocean depth (in meters).
-     ds : xr.Dataset
-         The xarray Dataset containing the grid data.
-     straddle : bool
-         Indicates if the Greenwich meridian (0° longitude) intersects the domain.
-         `True` if it does, `False` otherwise.
-
-     Raises
-     ------
-     ValueError
-         If you try to create a grid with domain size larger than 20000 km.
+    Raises
+    ------
+    ValueError
+        If you try to create a grid with domain size larger than 20000 km.
     """
 
     nx: int
@@ -147,8 +112,8 @@ class Grid:
         )
 
     def update_topography_and_mask(self, hmin, topography_source="ETOPO5") -> None:
-        """
-        Update the grid dataset by adding or overwriting the topography and land/sea mask.
+        """Update the grid dataset by adding or overwriting the topography and land/sea
+        mask.
 
         This method processes the topography data and generates a land/sea mask.
         It applies several steps, including interpolating topography, smoothing
@@ -176,8 +141,7 @@ class Grid:
         object.__setattr__(self, "hmin", hmin)
 
     def _straddle(self) -> None:
-        """
-        Check if the Greenwich meridian goes through the domain.
+        """Check if the Greenwich meridian goes through the domain.
 
         This method sets the `straddle` attribute to `True` if the Greenwich meridian
         (0° longitude) intersects the domain defined by `lon_rho`. Otherwise, it sets
@@ -196,9 +160,8 @@ class Grid:
             object.__setattr__(self, "straddle", False)
 
     def _coarsen(self):
-        """
-        Update the grid by adding grid variables that are coarsened versions of the original
-        fine-resoluion grid variables. The coarsening is by a factor of two.
+        """Update the grid by adding grid variables that are coarsened versions of the
+        original fine-resoluion grid variables. The coarsening is by a factor of two.
 
         The specific variables being coarsened are:
         - `lon_rho` -> `lon_coarse`: Longitude at rho points.
@@ -249,8 +212,7 @@ class Grid:
             self.ds[coarse_var].attrs["units"] = self.ds[fine_var].attrs["units"]
 
     def update_vertical_coordinate(self, N, theta_s, theta_b, hc) -> None:
-        """
-        Create vertical coordinate variables for the ROMS grid.
+        """Create vertical coordinate variables for the ROMS grid.
 
         This method computes the S-coordinate stretching curves and depths
         at various grid points (rho, u, v) using the specified parameters.
@@ -353,8 +315,7 @@ class Grid:
         object.__setattr__(self, "N", N)
 
     def plot(self, bathymetry: bool = False) -> None:
-        """
-        Plot the grid.
+        """Plot the grid.
 
         Parameters
         ----------
@@ -365,7 +326,6 @@ class Grid:
         -------
         None
             This method does not return any value. It generates and displays a plot.
-
         """
 
         if bathymetry:
@@ -396,19 +356,20 @@ class Grid:
         eta=None,
         xi=None,
     ) -> None:
-        """
-        Plot the vertical coordinate system for a given eta-, xi-, or s-slice.
+        """Plot the vertical coordinate system for a given eta-, xi-, or s-slice.
 
         Parameters
         ----------
         varname : str, optional
             The vertical coordinate field to plot. Options include:
+
             - "layer_depth_rho": Layer depth at rho-points.
             - "layer_depth_u": Layer depth at u-points.
             - "layer_depth_v": Layer depth at v-points.
             - "interface_depth_rho": Interface depth at rho-points.
             - "interface_depth_u": Interface depth at u-points.
             - "interface_depth_v": Interface depth at v-points.
+
         s: int, optional
             The s-index to plot. Default is None.
         eta : int, optional
@@ -526,17 +487,19 @@ class Grid:
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
     ) -> None:
-        """
-        Save the grid information to a netCDF4 file.
+        """Save the grid information to a netCDF4 file.
 
         This method supports saving the dataset in two modes:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
@@ -571,8 +534,7 @@ class Grid:
 
     @classmethod
     def from_file(cls, filepath: Union[str, Path]) -> "Grid":
-        """
-        Create a Grid instance from an existing file.
+        """Create a Grid instance from an existing file.
 
         Parameters
         ----------
@@ -686,8 +648,8 @@ class Grid:
         return grid
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------
@@ -721,8 +683,7 @@ class Grid:
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "Grid":
-        """
-        Create an instance of the class from a YAML file.
+        """Create an instance of the class from a YAML file.
 
         Parameters
         ----------
@@ -915,7 +876,7 @@ def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
 
 
 def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
-    """Rotate grid counterclockwise relative to surface of Earth by rot degrees"""
+    """Rotate grid counterclockwise relative to surface of Earth by rot degrees."""
 
     (lon, lat) = _rot_sphere(lon, lat, rot)
     (lonu, latu) = _rot_sphere(lonu, latu, rot)
@@ -1055,7 +1016,8 @@ def _tra_sphere(lon, lat, tra):
 
 
 def _compute_coordinate_metrics(lon, lonu, latu, lonv, latv):
-    """Compute the curvilinear coordinate metrics pn and pm, defined as 1/grid spacing"""
+    """Compute the curvilinear coordinate metrics pn and pm, defined as 1/grid
+    spacing."""
 
     # pm = 1/dx
     pmu = gc_dist(lonu[:, :-1], latu[:, :-1], lonu[:, 1:], latu[:, 1:])
@@ -1096,7 +1058,7 @@ def gc_dist(lon1, lat1, lon2, lat2):
 
 
 def _compute_angle(lon, lonu, latu, lonq):
-    """Compute angles of local grid positive x-axis relative to east"""
+    """Compute angles of local grid positive x-axis relative to east."""
 
     dellat = latu[:, 1:] - latu[:, :-1]
     dellon = lonu[:, 1:] - lonu[:, :-1]
@@ -1166,16 +1128,16 @@ def _create_grid_ds(
         dims=["eta_v", "xi_rho"],
         attrs={"long_name": "latitude of v-points", "units": "degrees North"},
     )
-    lon_q = xr.Variable(
-        data=lonq * 180 / np.pi,
-        dims=["eta_psi", "xi_psi"],
-        attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
-    )
-    lat_q = xr.Variable(
-        data=latq * 180 / np.pi,
-        dims=["eta_psi", "xi_psi"],
-        attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
-    )
+    # lon_q = xr.Variable(
+    #    data=lonq * 180 / np.pi,
+    #    dims=["eta_psi", "xi_psi"],
+    #    attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
+    # )
+    # lat_q = xr.Variable(
+    #    data=latq * 180 / np.pi,
+    #    dims=["eta_psi", "xi_psi"],
+    #    attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
+    # )
 
     ds = ds.assign_coords(
         {
@@ -1185,8 +1147,8 @@ def _create_grid_ds(
             "lon_u": lon_u,
             "lat_v": lat_v,
             "lon_v": lon_v,
-            "lat_psi": lat_q,
-            "lon_psi": lon_q,
+            # "lat_psi": lat_q,
+            # "lon_psi": lon_q,
         }
     )
 
@@ -1250,8 +1212,7 @@ def _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot):
 
 
 def _f2c(f):
-    """
-    Coarsen input xarray DataArray f in both x- and y-direction.
+    """Coarsen input xarray DataArray f in both x- and y-direction.
 
     Parameters
     ----------
@@ -1274,8 +1235,7 @@ def _f2c(f):
 
 
 def _f2c_xdir(f):
-    """
-    Coarsen input xarray DataArray f in x-direction.
+    """Coarsen input xarray DataArray f in x-direction.
 
     Parameters
     ----------
@@ -1305,12 +1265,13 @@ def _f2c_xdir(f):
 
 
 def _add_lat_lon_at_velocity_points(ds, straddle):
-    """
-    Adds latitude and longitude coordinates at velocity points (u and v points) to the dataset.
-    This function computes approximate latitude and longitude values at u and v velocity points
-    based on the rho points (cell centers). If the grid straddles the Greenwich meridian, it adjusts
-    the longitudes to avoid jumps from 360 to 0 degrees. The computed coordinates are added to the
-    dataset as new variables with appropriate metadata.
+    """Adds latitude and longitude coordinates at velocity points (u and v points) to
+    the dataset. This function computes approximate latitude and longitude values at u
+    and v velocity points based on the rho points (cell centers). If the grid straddles
+    the Greenwich meridian, it adjusts the longitudes to avoid jumps from 360 to 0
+    degrees. The computed coordinates are added to the dataset as new variables with
+    appropriate metadata.
+
     Parameters
     ----------
     ds : xarray.Dataset

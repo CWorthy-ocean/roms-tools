@@ -27,17 +27,22 @@ from pathlib import Path
 @dataclass(frozen=True, kw_only=True)
 class TidalForcing:
     """
-    Represents tidal forcing data used in ocean modeling.
+    Represents tidal forcing for ROMS.
 
     Parameters
     ----------
     grid : Grid
         The grid object representing the ROMS grid associated with the tidal forcing data.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]]]
-        Dictionary specifying the source of the tidal data:
-        - "name" (str): Name of the data source (e.g., "TPXO").
-        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). Can be a single string (with or without wildcards),
-          a single Path object, or a list of strings or Path objects containing multiple files.
+        Dictionary specifying the source of the tidal data. Keys include:
+
+          - "name" (str): Name of the data source (e.g., "TPXO").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+
     ntides : int, optional
         Number of constituents to consider. Maximum number is 14. Default is 10.
     allan_factor : float, optional
@@ -46,11 +51,6 @@ class TidalForcing:
         The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the tidal forcing data.
 
     Examples
     --------
@@ -202,13 +202,13 @@ class TidalForcing:
         return ds
 
     def plot(self, varname, ntides=0) -> None:
-        """
-        Plot the specified tidal forcing variable for a given tidal constituent.
+        """Plot the specified tidal forcing variable for a given tidal constituent.
 
         Parameters
         ----------
         varname : str
             The tidal forcing variable to plot. Options include:
+
             - "ssh_Re": Real part of tidal elevation.
             - "ssh_Im": Imaginary part of tidal elevation.
             - "pot_Re": Real part of tidal potential.
@@ -217,6 +217,7 @@ class TidalForcing:
             - "u_Im": Imaginary part of tidal velocity in the x-direction.
             - "v_Re": Real part of tidal velocity in the y-direction.
             - "v_Im": Imaginary part of tidal velocity in the y-direction.
+
         ntides : int, optional
             The index of the tidal constituent to plot. Default is 0, which corresponds
             to the first constituent.
@@ -280,17 +281,19 @@ class TidalForcing:
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
     ) -> None:
-        """
-        Save the tidal forcing information to a netCDF4 file.
+        """Save the tidal forcing information to a netCDF4 file.
 
         This method supports saving the dataset in two modes:
 
-        1. **Single File Mode (default)**:
-           - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single file at the specified `filepath.nc`.
+          1. **Single File Mode (default)**:
 
-        2. **Partitioned Mode**:
-           - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-           - The files are saved as `filepath.0.nc`, `filepath.1.nc`, ..., where the numbering corresponds to the partition index.
+            If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
@@ -324,8 +327,8 @@ class TidalForcing:
         return saved_filenames
 
     def to_yaml(self, filepath: Union[str, Path]) -> None:
-        """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------
@@ -373,8 +376,7 @@ class TidalForcing:
     def from_yaml(
         cls, filepath: Union[str, Path], use_dask: bool = False
     ) -> "TidalForcing":
-        """
-        Create an instance of the TidalForcing class from a YAML file.
+        """Create an instance of the TidalForcing class from a YAML file.
 
         Parameters
         ----------
@@ -422,10 +424,10 @@ class TidalForcing:
         return cls(grid=grid, **tidal_forcing_params, use_dask=use_dask)
 
     def _correct_tides(self, data):
-        """
-        Apply tidal corrections to the dataset.
-        This method corrects the dataset for equilibrium tides, self-attraction and loading (SAL) effects, and
-        adjusts phases and amplitudes of tidal elevations and transports using Egbert's correction.
+        """Apply tidal corrections to the dataset. This method corrects the dataset for
+        equilibrium tides, self-attraction and loading (SAL) effects, and adjusts phases
+        and amplitudes of tidal elevations and transports using Egbert's correction.
+
         Parameters
         ----------
         data : Dataset
@@ -482,8 +484,7 @@ class TidalForcing:
 
 
 def modified_julian_days(year, month, day, hour=0):
-    """
-    Calculate the Modified Julian Day (MJD) for a given date and time.
+    """Calculate the Modified Julian Day (MJD) for a given date and time.
 
     The Modified Julian Day (MJD) is a modified Julian day count starting from
     November 17, 1858 AD. It is commonly used in astronomy and geodesy.
@@ -541,9 +542,8 @@ def modified_julian_days(year, month, day, hour=0):
 
 
 def egbert_correction(date):
-    """
-    Correct phases and amplitudes for real-time runs using parts of the
-    post-processing code from Egbert's & Erofeeva's (OSU) TPXO model.
+    """Correct phases and amplitudes for real-time runs using parts of the post-
+    processing code from Egbert's & Erofeeva's (OSU) TPXO model.
 
     Parameters
     ----------
@@ -563,7 +563,6 @@ def egbert_correction(date):
     ----------
     - Egbert, G.D., and S.Y. Erofeeva. "Efficient inverse modeling of barotropic ocean
       tides." Journal of Atmospheric and Oceanic Technology 19, no. 2 (2002): 183-204.
-
     """
 
     year = date.year
@@ -698,8 +697,7 @@ def egbert_correction(date):
 
 
 def compute_equilibrium_tide(lon, lat):
-    """
-    Compute equilibrium tide for given longitudes and latitudes.
+    """Compute equilibrium tide for given longitudes and latitudes.
 
     Parameters
     ----------
@@ -721,7 +719,6 @@ def compute_equilibrium_tide(lon, lat):
         - 2: semidiurnal
         - 1: diurnal
         - 0: long-term
-
     """
 
     # Amplitudes and elasticity factors for 15 tidal constituents

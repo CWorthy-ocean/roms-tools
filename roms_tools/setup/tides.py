@@ -17,7 +17,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     save_datasets,
     get_target_coords,
-    process_velocities
+    process_velocities,
 )
 from roms_tools.setup.regrid import LateralRegrid
 import matplotlib.pyplot as plt
@@ -25,7 +25,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class TidalForcing():
+class TidalForcing:
     """
     Represents tidal forcing data used in ocean modeling.
 
@@ -77,8 +77,14 @@ class TidalForcing():
 
         data.check_number_constituents(self.ntides)
         data.choose_subdomain(
-            latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
-            longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
             straddle=target_coords["straddle"],
         )
@@ -107,10 +113,20 @@ class TidalForcing():
 
         # rotate velocities
         data_vars = process_velocities(
-            self.grid, data_vars, target_coords["angle"], "u_Re", "v_Re", interpolate=False
+            self.grid,
+            data_vars,
+            target_coords["angle"],
+            "u_Re",
+            "v_Re",
+            interpolate=False,
         )
         data_vars = process_velocities(
-            self.grid, data_vars, target_coords["angle"], "u_Im", "v_Im", interpolate=False
+            self.grid,
+            data_vars,
+            target_coords["angle"],
+            "u_Im",
+            "v_Im",
+            interpolate=False,
         )
 
         # convert to barotropic velocity

@@ -14,7 +14,7 @@ from roms_tools.setup.utils import (
     save_datasets,
     get_target_coords,
     process_velocities,
-    extrapolate_deepest_to_bottom
+    extrapolate_deepest_to_bottom,
 )
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class InitialConditions():
+class InitialConditions:
     """
     Represents initial conditions for ROMS, including physical and biogeochemical data.
 
@@ -80,7 +80,7 @@ class InitialConditions():
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        
+
         data_vars = {}
 
         self._input_checks()
@@ -88,8 +88,14 @@ class InitialConditions():
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
-            longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
             straddle=target_coords["straddle"],
         )
@@ -112,7 +118,7 @@ class InitialConditions():
         for var in varnames:
             if var != "zeta":
                 data_vars[var] = vertical_regrid.apply(data_vars[var])
-        
+
         # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
         for var in varnames:
             if var != "zeta":
@@ -121,13 +127,21 @@ class InitialConditions():
                 )
 
         # rotate velocities
-        data_vars = process_velocities(self.grid, data_vars, target_coords["angle"], "u", "v")
+        data_vars = process_velocities(
+            self.grid, data_vars, target_coords["angle"], "u", "v"
+        )
 
         if self.bgc_source is not None:
             bgc_data = self._get_bgc_data()
             bgc_data.choose_subdomain(
-                latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
-                longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
+                latitude_range=[
+                    target_coords["lat"].min().values,
+                    target_coords["lat"].max().values,
+                ],
+                longitude_range=[
+                    target_coords["lon"].min().values,
+                    target_coords["lon"].max().values,
+                ],
                 margin=2,
                 straddle=target_coords["straddle"],
             )
@@ -140,7 +154,9 @@ class InitialConditions():
                 )
 
             # regrid laterally
-            lateral_regrid = LateralRegrid(bgc_data, target_coords["lon"], target_coords["lat"])
+            lateral_regrid = LateralRegrid(
+                bgc_data, target_coords["lon"], target_coords["lat"]
+            )
             for var in varnames:
                 data_vars[var] = lateral_regrid.apply(data_vars[var])
 
@@ -148,7 +164,7 @@ class InitialConditions():
             vertical_regrid = VerticalRegrid(bgc_data, self.grid)
             for var in varnames:
                 data_vars[var] = vertical_regrid.apply(data_vars[var])
-            
+
             # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
             for var in varnames:
                 data_vars[var] = data_vars[var].transpose(

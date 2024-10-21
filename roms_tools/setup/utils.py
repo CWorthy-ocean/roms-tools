@@ -768,6 +768,7 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
 
     return saved_filenames
 
+
 def get_target_coords(grid, use_coarse_grid=False):
     """
     Retrieves longitude and latitude coordinates from the grid, adjusting them based on longitude range.
@@ -825,6 +826,7 @@ def get_target_coords(grid, use_coarse_grid=False):
     }
 
     return target_coords
+
 
 def process_velocities(grid, data_vars, angle, uname, vname, interpolate=True):
     """
@@ -893,4 +895,3 @@ def process_velocities(grid, data_vars, angle, uname, vname, interpolate=True):
         ).transpose("time", "eta_v", "xi_rho")
 
     return data_vars
-

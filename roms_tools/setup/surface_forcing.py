@@ -21,7 +21,7 @@ from roms_tools.setup.utils import (
     group_dataset,
     save_datasets,
     get_target_coords,
-    process_velocities
+    process_velocities,
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
@@ -29,7 +29,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class SurfaceForcing():
+class SurfaceForcing:
     """
     Represents surface forcing input data for ROMS.
 
@@ -97,8 +97,14 @@ class SurfaceForcing():
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
-            longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
             straddle=target_coords["straddle"],
         )
@@ -119,7 +125,12 @@ class SurfaceForcing():
         if self.type == "physics":
             # rotate velocities
             data_vars = process_velocities(
-                self.grid, data_vars, target_coords["angle"], "uwnd", "vwnd", interpolate=False
+                self.grid,
+                data_vars,
+                target_coords["angle"],
+                "uwnd",
+                "vwnd",
+                interpolate=False,
             )
 
             # correct radiation if necessary
@@ -213,14 +224,14 @@ class SurfaceForcing():
         correction_data = self._get_correction_data()
         # choose same subdomain as forcing data so that we can use same mask
         coords_correction = {
-            correction_data.dim_names["latitude"]: data.ds[
-                data.dim_names["latitude"]
-            ],
+            correction_data.dim_names["latitude"]: data.ds[data.dim_names["latitude"]],
             correction_data.dim_names["longitude"]: data.ds[
                 data.dim_names["longitude"]
             ],
         }
-        correction_data.choose_subdomain(coords_correction, straddle=self.target_coords["straddle"])
+        correction_data.choose_subdomain(
+            coords_correction, straddle=self.target_coords["straddle"]
+        )
         # apply mask from ERA5 data
         if "mask" in data.var_names.keys():
             mask = data.ds["mask"]
@@ -230,11 +241,14 @@ class SurfaceForcing():
                 )
             correction_data.ds["mask"] = mask
 
-        data_vars_corr = {}
         # regrid
-        lateral_regrid = LateralRegrid(correction_data, self.target_coords["lon"], self.target_coords["lat"])
-        corr_factor = lateral_regrid.apply(correction_data.ds[correction_data.var_names["swr_corr"]]) 
-        
+        lateral_regrid = LateralRegrid(
+            correction_data, self.target_coords["lon"], self.target_coords["lat"]
+        )
+        corr_factor = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["swr_corr"]]
+        )
+
         # temporal interpolation
         corr_factor = interpolate_from_climatology(
             corr_factor,
@@ -402,7 +416,9 @@ class SurfaceForcing():
         else:
             field = field.where(self.grid.ds.mask_rho)
 
-        field = field.assign_coords({"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]})
+        field = field.assign_coords(
+            {"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]}
+        )
 
         # choose colorbar
         if varname in ["uwnd", "vwnd"]:

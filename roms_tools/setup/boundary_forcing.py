@@ -18,7 +18,7 @@ from roms_tools.setup.utils import (
     save_datasets,
     get_target_coords,
     process_velocities,
-    extrapolate_deepest_to_bottom
+    extrapolate_deepest_to_bottom,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -26,7 +26,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class BoundaryForcing():
+class BoundaryForcing:
     """
     Represents boundary forcing input data for ROMS.
 
@@ -95,8 +95,14 @@ class BoundaryForcing():
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[target_coords["lat"].min().values, target_coords["lat"].max().values],
-            longitude_range=[target_coords["lon"].min().values, target_coords["lon"].max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
             straddle=target_coords["straddle"],
         )
@@ -105,13 +111,13 @@ class BoundaryForcing():
             varnames = ["zeta", "temp", "salt", "u", "v"]
         elif self.type == "bgc":
             varnames = data.var_names.keys()
-        
+
         # extrapolate deepest value all the way to bottom
         for var in varnames:
             data_vars[var] = extrapolate_deepest_to_bottom(
                 data.ds[data.var_names[var]], data.dim_names["depth"]
             )
-        
+
         # regrid laterally
         lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
 
@@ -123,7 +129,7 @@ class BoundaryForcing():
         for var in varnames:
             if var != "zeta":
                 data_vars[var] = vertical_regrid.apply(data_vars[var])
-        
+
         # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
         for var in varnames:
             if var != "zeta":
@@ -132,7 +138,9 @@ class BoundaryForcing():
                 )
 
         if self.type == "physics":
-            data_vars = process_velocities(self.grid, data_vars, target_coords["angle"], "u", "v")
+            data_vars = process_velocities(
+                self.grid, data_vars, target_coords["angle"], "u", "v"
+            )
 
         object.__setattr__(data, "data_vars", data_vars)
 

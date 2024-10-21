@@ -1,8 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "eta_psi",
-        "xi_psi"
-    ],
-    "long_name": "latitude of psi-points",
-    "units": "degrees North"
-}

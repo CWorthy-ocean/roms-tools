@@ -105,27 +105,40 @@ class VerticalRegrid:
         denominator = denominator.where(denominator > 1e-6, 1e-6)
         factor = p_below / denominator
 
+        upper_mask = is_above.sum(**dims) > 0
+        lower_mask = is_below.sum(**dims) > 0
+
         self.coeff = xr.Dataset(
             {
                 "is_below": is_below,
                 "is_above": is_above,
+                "upper_mask": upper_mask,
+                "lower_mask": lower_mask,
                 "factor": factor,
             }
         )
 
-    def apply(self, var):
+    def apply(self, var, fill_nans=True):
         """
-        Interpolates the variable onto the new depth grid.
+        Interpolates the variable onto the new depth grid using precomputed
+        coefficients for linear interpolation between layers.
 
         Parameters
         ----------
         var : xarray.DataArray
-            Input data to be regridded.
+            The input data to be regridded along the depth dimension. This should be
+            an array with the same depth coordinates as the original grid.
+        fill_nans : bool, optional
+            Whether to fill NaN values in the regridded data. If True (default),
+            forward-fill and backward-fill are applied along the 's_rho' dimension to
+            ensure there are no NaNs after interpolation.
 
         Returns
         -------
         xarray.DataArray
-            Regridded data with extrapolation allowed to avoid NaNs at the surface.
+            The regridded data array, interpolated onto the new depth grid. NaN values
+            are replaced if `fill_nans=True`, with extrapolation allowed at the surface
+            and bottom layers to minimize gaps.
         """
 
         dims = {"dim": self.depth_dim}
@@ -134,10 +147,12 @@ class VerticalRegrid:
         var_above = var.where(self.coeff["is_above"]).sum(**dims)
 
         result = var_below + (var_above - var_below) * self.coeff["factor"]
-        mask = (self.coeff["is_above"].sum(**dims) > 0) & (
-            self.coeff["is_below"].sum(**dims) > 0
-        )
-
-        result = result.where(mask).ffill(**{"dim": "s_rho"}).bfill(**{"dim": "s_rho"})
+        if fill_nans:
+            result = result.where(self.coeff["upper_mask"], var.isel({dims["dim"]: 0}))
+            result = result.where(self.coeff["lower_mask"], var.isel({dims["dim"]: -1}))
+        else:
+            result = result.where(self.coeff["upper_mask"]).where(
+                self.coeff["lower_mask"]
+            )
 
         return result

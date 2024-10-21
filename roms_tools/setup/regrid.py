@@ -82,7 +82,7 @@ class VerticalRegrid:
         Target depth coordinates for interpolation.
     """
 
-    def __init__(self, data, depth):
+    def __init__(self, data, grid):
         """
         Initializes vertical regridding with specified depth coordinates.
 
@@ -90,10 +90,27 @@ class VerticalRegrid:
         ----------
         data : DataContainer
             Data with dimension names required for regridding.
-        depth : xarray.DataArray
-            New depth coordinates for interpolation.
+        grid : Grid Object
         """
-        self.coords = {data.dim_names["depth"]: depth}
+
+        self.depth_dim = data.dim_names["depth"]
+        dims = {"dim": self.depth_dim}
+
+        dlev = data.ds[data.dim_names["depth"]] - grid.ds.layer_depth_rho
+        is_below = dlev == dlev.where(dlev>=0).min(**dims)
+        is_above = dlev == dlev.where(dlev<=0).max(**dims)
+        p_below = dlev.where(is_below).sum(**dims)
+        p_above = -dlev.where(is_above).sum(**dims)
+        denominator = p_below + p_above
+        denominator = denominator.where(denominator > 1e-6, 1e-6)
+        factor = p_below / denominator
+
+        self.coeff = xr.Dataset({
+            "is_below": is_below,
+            "is_above": is_above,
+            "factor": factor,
+        })
+
 
     def apply(self, var):
         """
@@ -109,5 +126,16 @@ class VerticalRegrid:
         xarray.DataArray
             Regridded data with extrapolation allowed to avoid NaNs at the surface.
         """    
-        return var.interp(self.coords, method="linear", kwargs={"fill_value": None}).drop_vars(list(self.coords.keys()))
+        
+        dims = {"dim": self.depth_dim}
+
+        var_below = var.where(self.coeff["is_below"]).sum(**dims)
+        var_above = var.where(self.coeff["is_above"]).sum(**dims)
+
+        result = var_below + (var_above - var_below) * self.coeff["factor"]
+        mask = (self.coeff["is_above"].sum(**dims) > 0) & (self.coeff["is_below"].sum(**dims) > 0)
+
+        result = result.where(mask).ffill(**{"dim": "s_rho"}).bfill(**{"dim": "s_rho"})
+
+        return result
  

@@ -21,6 +21,10 @@ def midocean_glorys_data(request, use_dask):
     )
     data.post_process()
 
+    # transform longitude to [-180, 180 range]; this is usually handled by data.choose_subdomain()
+    lon = data.ds["longitude"]
+    data.ds[data.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
+
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
         if var != "zeta":

@@ -102,36 +102,34 @@ class BoundaryForcing():
         )
 
         if self.type == "physics":
-            varnames = ["temp", "salt", "u", "v"]
+            varnames = ["zeta", "temp", "salt", "u", "v"]
         elif self.type == "bgc":
             varnames = data.var_names.keys()
         
         # extrapolate deepest value all the way to bottom
         for var in varnames:
-            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+            data_vars[var] = extrapolate_deepest_to_bottom(
                 data.ds[data.var_names[var]], data.dim_names["depth"]
             )
         
         # regrid laterally
         lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
-        if self.type == "physics":
-            varnames = ["zeta", "temp", "salt", "u", "v"]
 
         for var in varnames:
-            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
+            data_vars[var] = lateral_regrid.apply(data_vars[var])
 
         # regrid vertically
-        vertical_regrid = VerticalRegrid(data, self.grid.ds["layer_depth_rho"])
-        if self.type == "physics":
-            varnames = ["temp", "salt", "u", "v"]
+        vertical_regrid = VerticalRegrid(data, self.grid)
         for var in varnames:
-            data_vars[var] = vertical_regrid.apply(data.ds[data.var_names[var]])
+            if var != "zeta":
+                data_vars[var] = vertical_regrid.apply(data_vars[var])
         
         # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
         for var in varnames:
-            data_vars[var] = data_vars[var].transpose(
-                "time", "s_rho", "eta_rho", "xi_rho"
-            )
+            if var != "zeta":
+                data_vars[var] = data_vars[var].transpose(
+                    "time", "s_rho", "eta_rho", "xi_rho"
+                )
 
         if self.type == "physics":
             data_vars = process_velocities(self.grid, data_vars, target_coords["angle"], "u", "v")

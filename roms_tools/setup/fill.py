@@ -15,7 +15,7 @@ class LateralFill:
             A 2D boolean mask indicating valid points (True) and land points (False).
             Boundary points are automatically set to land (True).
         dims : list of str
-            Dimensions along which to perform the lateral fill. Defaults to ["latitude", "longitude"].
+            Dimensions along which to perform the lateral fill.
         tol : float, optional
             Tolerance for the iterative solver, determining convergence. Default is 1.0e-4.
 

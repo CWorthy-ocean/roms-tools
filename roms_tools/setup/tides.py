@@ -16,15 +16,17 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_v,
     get_variable_metadata,
     save_datasets,
+    get_target_coords,
+    process_velocities,
 )
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.regrid import LateralRegrid
 import matplotlib.pyplot as plt
 from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class TidalForcing(ROMSToolsMixins):
-    """Represents tidal forcing data used in ocean modeling.
+class TidalForcing:
+    """Represents tidal forcing for ROMS.
 
     Parameters
     ----------
@@ -68,16 +70,22 @@ class TidalForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super()._get_target_lon_lat()
+        target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
 
         data.check_number_constituents(self.ntides)
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
 
         # select desired number of constituents
@@ -85,7 +93,11 @@ class TidalForcing(ROMSToolsMixins):
 
         self._correct_tides(data)
 
-        vars_2d = [
+        data_vars = {}
+
+        # regrid
+        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
+        varnames = [
             "ssh_Re",
             "ssh_Im",
             "pot_Re",
@@ -95,22 +107,32 @@ class TidalForcing(ROMSToolsMixins):
             "v_Re",
             "v_Im",
         ]
-        vars_3d = []
+        for var in varnames:
+            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
 
-        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
-
-        data_vars = super()._process_velocities(
-            data_vars, angle, "u_Re", "v_Re", interpolate=False
+        # rotate velocities
+        data_vars = process_velocities(
+            self.grid,
+            data_vars,
+            target_coords["angle"],
+            "u_Re",
+            "v_Re",
+            interpolate=False,
         )
-        data_vars = super()._process_velocities(
-            data_vars, angle, "u_Im", "v_Im", interpolate=False
+        data_vars = process_velocities(
+            self.grid,
+            data_vars,
+            target_coords["angle"],
+            "u_Im",
+            "v_Im",
+            interpolate=False,
         )
 
-        # Convert to barotropic velocity
+        # convert to barotropic velocity
         for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
             data_vars[varname] = data_vars[varname] / self.grid.ds.h
 
-        # Interpolate from rho- to velocity points
+        # interpolate from rho- to velocity points
         for uname in ["u_Re", "u_Im"]:
             data_vars[uname] = interpolate_from_rho_to_u(data_vars[uname])
         for vname in ["v_Re", "v_Im"]:

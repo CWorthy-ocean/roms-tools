@@ -6,7 +6,7 @@ import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
@@ -16,6 +16,9 @@ from roms_tools.setup.utils import (
     get_boundary_info,
     group_dataset,
     save_datasets,
+    get_target_coords,
+    process_velocities,
+    extrapolate_deepest_to_bottom,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -23,7 +26,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class BoundaryForcing(ROMSToolsMixins):
+class BoundaryForcing:
     """Represents boundary forcing input data for ROMS.
 
     Parameters
@@ -90,28 +93,60 @@ class BoundaryForcing(ROMSToolsMixins):
 
     def __post_init__(self):
 
+        data_vars = {}
+
         self._input_checks()
-        lon, lat, angle, straddle = super()._get_target_lon_lat()
+        target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
 
         if self.type == "physics":
-            vars_2d = ["zeta"]
-            vars_3d = ["temp", "salt", "u", "v"]
+            varnames = ["zeta", "temp", "salt", "u", "v"]
         elif self.type == "bgc":
-            vars_2d = []
-            vars_3d = data.var_names.keys()
+            varnames = data.var_names.keys()
 
-        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
+        # extrapolate deepest value all the way to bottom
+        for var in varnames:
+            data_vars[var] = extrapolate_deepest_to_bottom(
+                data.ds[data.var_names[var]], data.dim_names["depth"]
+            )
+
+        # regrid laterally
+        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
+
+        for var in varnames:
+            data_vars[var] = lateral_regrid.apply(data_vars[var])
+
+        # regrid vertically
+        vertical_regrid = VerticalRegrid(data, self.grid)
+        for var in varnames:
+            if var != "zeta":
+                data_vars[var] = vertical_regrid.apply(data_vars[var])
+
+        # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
+        for var in varnames:
+            if var != "zeta":
+                data_vars[var] = data_vars[var].transpose(
+                    "time", "s_rho", "eta_rho", "xi_rho"
+                )
 
         if self.type == "physics":
-            data_vars = super()._process_velocities(data_vars, angle, "u", "v")
+            data_vars = process_velocities(
+                self.grid, data_vars, target_coords["angle"], "u", "v"
+            )
+
         object.__setattr__(data, "data_vars", data_vars)
 
         d_meta = get_variable_metadata()

@@ -5,7 +5,7 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.setup.datasets import GLORYSDataset
 from roms_tools.setup.download import download_test_data
-from roms_tools.setup.utils import extrapolate_deepest_to_bottom
+from roms_tools.setup.utils import extrapolate_deepest_to_bottom, get_target_coords
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 
 
@@ -22,8 +22,10 @@ def midocean_glorys_data(request, use_dask):
     data.post_process()
 
     # transform longitude to [-180, 180 range]; this is usually handled by data.choose_subdomain()
-    lon = data.ds["longitude"]
-    data.ds[data.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
+    ds = data.ds
+    lon = ds["longitude"]
+    ds[data.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
+    object.__setattr__(data, "ds", ds)
 
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
@@ -44,19 +46,21 @@ def test_vertical_regrid_no_nans(midocean_glorys_data):
     grid = Grid(
         nx=4,
         ny=4,
-        size_x=1000,
-        size_y=1000,
-        center_lon=-10,
-        center_lat=55,
-        rot=10,
+        size_x=300,
+        size_y=300,
+        center_lon=-8,
+        center_lat=60,
+        rot=0,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
         hc=250.0,  # critical depth
     )
 
+    target_coords = get_target_coords(grid)
+
     lateral_regrid = LateralRegrid(
-        midocean_glorys_data, grid.ds.lon_rho, grid.ds.lat_rho
+        midocean_glorys_data, target_coords["lon"], target_coords["lat"]
     )
     vertical_regrid = VerticalRegrid(midocean_glorys_data, grid)
 
@@ -72,18 +76,14 @@ def test_vertical_regrid_no_nans(midocean_glorys_data):
 
 def vertical_regridder(depth_values, layer_depth_rho_values):
     class DataContainer:
-        """
-        Mock class for holding data and dimension names.
-        """
+        """Mock class for holding data and dimension names."""
 
         def __init__(self, ds):
             self.ds = ds
             self.dim_names = {"depth": "depth"}
 
     class Grid:
-        """
-        Mock class representing the grid object with layer depth information.
-        """
+        """Mock class representing the grid object with layer depth information."""
 
         def __init__(self, ds):
             self.ds = ds

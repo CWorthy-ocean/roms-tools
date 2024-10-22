@@ -27,8 +27,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class BoundaryForcing:
-    """
-    Represents boundary forcing input data for ROMS.
+    """Represents boundary forcing input data for ROMS.
 
     Parameters
     ----------

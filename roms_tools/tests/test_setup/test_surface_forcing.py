@@ -496,9 +496,7 @@ def test_surface_forcing_creation(
     ],
 )
 def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
-    """
-    Test whether pco2_air and pco2_air_alt is the same after processing.
-    """
+    """Test whether pco2_air and pco2_air_alt is the same after processing."""
 
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 

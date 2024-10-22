@@ -24,8 +24,8 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class InitialConditions:
-    """
-    Represents initial conditions for ROMS, including physical and biogeochemical data.
+    """Represents initial conditions for ROMS, including physical and biogeochemical
+    data.
 
     Parameters
     ----------

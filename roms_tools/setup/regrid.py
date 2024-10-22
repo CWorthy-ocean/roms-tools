@@ -4,8 +4,7 @@ import numpy as np
 
 
 class LateralRegrid:
-    """
-    Applies lateral fill and regridding to data.
+    """Applies lateral fill and regridding to data.
 
     This class fills missing values in ocean data and interpolates it onto a new grid
     defined by the provided longitude and latitude.
@@ -21,8 +20,7 @@ class LateralRegrid:
     """
 
     def __init__(self, data, lon, lat):
-        """
-        Initializes the lateral fill and target grid coordinates.
+        """Initializes the lateral fill and target grid coordinates.
 
         Parameters
         ----------
@@ -45,8 +43,7 @@ class LateralRegrid:
         }
 
     def apply(self, var):
-        """
-        Fills missing values and regrids the variable.
+        """Fills missing values and regrids the variable.
 
         Parameters
         ----------
@@ -71,8 +68,7 @@ class LateralRegrid:
 
 
 class VerticalRegrid:
-    """
-    Performs vertical interpolation of data onto new depth coordinates.
+    """Performs vertical interpolation of data onto new depth coordinates.
 
     Parameters
     ----------
@@ -83,8 +79,7 @@ class VerticalRegrid:
     """
 
     def __init__(self, data, grid):
-        """
-        Initializes vertical regridding with specified depth coordinates.
+        """Initializes vertical regridding with specified depth coordinates.
 
         Parameters
         ----------
@@ -119,8 +114,7 @@ class VerticalRegrid:
         )
 
     def apply(self, var, fill_nans=True):
-        """
-        Interpolates the variable onto the new depth grid using precomputed
+        """Interpolates the variable onto the new depth grid using precomputed
         coefficients for linear interpolation between layers.
 
         Parameters

@@ -749,8 +749,8 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
 
 
 def get_target_coords(grid, use_coarse_grid=False):
-    """
-    Retrieves longitude and latitude coordinates from the grid, adjusting them based on longitude range.
+    """Retrieves longitude and latitude coordinates from the grid, adjusting them based
+    on longitude range.
 
     Parameters
     ----------
@@ -808,9 +808,8 @@ def get_target_coords(grid, use_coarse_grid=False):
 
 
 def process_velocities(grid, data_vars, angle, uname, vname, interpolate=True):
-    """
-    Process and rotate velocity components to align with the grid orientation and optionally interpolate
-    them to the appropriate grid points.
+    """Process and rotate velocity components to align with the grid orientation and
+    optionally interpolate them to the appropriate grid points.
 
     This method performs the following steps:
 

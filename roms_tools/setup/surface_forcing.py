@@ -30,8 +30,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class SurfaceForcing:
-    """
-    Represents surface forcing input data for ROMS.
+    """Represents surface forcing input data for ROMS.
 
     Parameters
     ----------

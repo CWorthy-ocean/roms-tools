@@ -26,8 +26,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, kw_only=True)
 class TidalForcing:
-    """
-    Represents tidal forcing for ROMS.
+    """Represents tidal forcing for ROMS.
 
     Parameters
     ----------

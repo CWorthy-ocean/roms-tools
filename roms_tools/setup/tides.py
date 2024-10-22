@@ -19,6 +19,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     process_velocities,
 )
+from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.regrid import LateralRegrid
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -96,6 +97,10 @@ class TidalForcing:
         data_vars = {}
 
         # regrid
+        lateral_fill = LateralFill(
+            data.ds["mask"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
         lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
         varnames = [
             "ssh_Re",
@@ -108,7 +113,10 @@ class TidalForcing:
             "v_Im",
         ]
         for var in varnames:
-            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
+            # Propagate ocean values into land via lateral fill
+            filled = lateral_fill.apply(data.ds[data.var_names[var]])
+            # Lateral regridding
+            data_vars[var] = lateral_regrid.apply(filled)
 
         # rotate velocities
         data_vars = process_velocities(

@@ -32,11 +32,6 @@ class LateralRegrid:
             Latitude for new grid.
         """
 
-        # Set up solver that does lateral fill before regridding
-        self.lateral_fill = LateralFill(
-            data.ds["mask"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
-        )
         self.coords = {
             data.dim_names["latitude"]: lat,
             data.dim_names["longitude"]: lon,
@@ -55,12 +50,7 @@ class LateralRegrid:
         xarray.DataArray
             Regridded data with filled values.
         """
-
-        # Propagate ocean values into land via lateral fill
-        filled = self.lateral_fill.apply(var.astype(np.float64))
-
-        # Regrid
-        regridded = filled.interp(self.coords, method="linear").drop_vars(
+        regridded = var.interp(self.coords, method="linear").drop_vars(
             list(self.coords.keys())
         )
 

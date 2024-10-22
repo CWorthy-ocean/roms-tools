@@ -16,6 +16,7 @@ from roms_tools.setup.utils import (
     process_velocities,
     extrapolate_deepest_to_bottom,
 )
+from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -115,9 +116,16 @@ class InitialConditions:
             )
 
         # regrid laterally
+        lateral_fill = LateralFill(
+            data.ds["mask"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
         lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
         for var in varnames:
-            data_vars[var] = lateral_regrid.apply(data_vars[var])
+            # Propagate ocean values into land via lateral fill
+            filled = lateral_fill.apply(data_vars[var])
+            # Lateral regridding
+            data_vars[var] = lateral_regrid.apply(filled)
 
         # regrid vertically
         vertical_regrid = VerticalRegrid(data, self.grid)
@@ -160,11 +168,18 @@ class InitialConditions:
                 )
 
             # regrid laterally
+            lateral_fill = LateralFill(
+                bgc_data.ds["mask"],
+                [bgc_data.dim_names["latitude"], bgc_data.dim_names["longitude"]],
+            )
             lateral_regrid = LateralRegrid(
                 bgc_data, target_coords["lon"], target_coords["lat"]
             )
             for var in varnames:
-                data_vars[var] = lateral_regrid.apply(data_vars[var])
+                # Propagate ocean values into land via lateral fill
+                filled = lateral_fill.apply(data_vars[var])
+                # Lateral regridding
+                data_vars[var] = lateral_regrid.apply(filled)
 
             # regrid vertically
             vertical_regrid = VerticalRegrid(bgc_data, self.grid)

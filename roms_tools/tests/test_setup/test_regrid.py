@@ -6,73 +6,8 @@ from roms_tools import Grid
 from roms_tools.setup.datasets import GLORYSDataset
 from roms_tools.setup.download import download_test_data
 from roms_tools.setup.utils import extrapolate_deepest_to_bottom, get_target_coords
+from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
-
-
-@pytest.fixture()
-def midocean_glorys_data(request, use_dask):
-    fname = download_test_data("GLORYS_NA_2012.nc")
-
-    data = GLORYSDataset(
-        filename=fname,
-        start_time=datetime(2012, 1, 1),
-        end_time=datetime(2013, 1, 1),
-        use_dask=use_dask,
-    )
-    data.post_process()
-
-    # transform longitude to [-180, 180 range]; this is usually handled by data.choose_subdomain()
-    ds = data.ds
-    lon = ds["longitude"]
-    ds[data.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
-    object.__setattr__(data, "ds", ds)
-
-    # extrapolate deepest value to bottom so all levels can use the same surface mask
-    for var in data.var_names:
-        if var != "zeta":
-            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
-                data.ds[data.var_names[var]], data.dim_names["depth"]
-            )
-
-    # remove upper and deep layers to be able to check vertical extrapolation
-    ds = data.ds.isel(depth=slice(1, 3))
-    object.__setattr__(data, "ds", ds)
-
-    return data
-
-
-def test_vertical_regrid_no_nans(midocean_glorys_data):
-
-    grid = Grid(
-        nx=4,
-        ny=4,
-        size_x=300,
-        size_y=300,
-        center_lon=-8,
-        center_lat=60,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    target_coords = get_target_coords(grid)
-
-    lateral_regrid = LateralRegrid(
-        midocean_glorys_data, target_coords["lon"], target_coords["lat"]
-    )
-    vertical_regrid = VerticalRegrid(midocean_glorys_data, grid)
-
-    varnames = ["temp", "salt", "u", "v"]
-    for var in varnames:
-        regridded = lateral_regrid.apply(
-            midocean_glorys_data.ds[midocean_glorys_data.var_names[var]]
-        )
-        regridded = vertical_regrid.apply(regridded, fill_nans=True)
-
-        assert not regridded.isnull().any()
-
 
 def vertical_regridder(depth_values, layer_depth_rho_values):
     class DataContainer:

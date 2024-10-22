@@ -6,6 +6,7 @@ import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
+from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
@@ -124,10 +125,17 @@ class BoundaryForcing:
             )
 
         # regrid laterally
+        lateral_fill = LateralFill(
+            data.ds["mask"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
         lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
 
         for var in varnames:
-            data_vars[var] = lateral_regrid.apply(data_vars[var])
+            # Propagate ocean values into land via lateral fill
+            filled = lateral_fill.apply(data_vars[var])
+            # Lateral regridding
+            data_vars[var] = lateral_regrid.apply(filled)
 
         # regrid vertically
         vertical_regrid = VerticalRegrid(data, self.grid)

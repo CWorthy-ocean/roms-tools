@@ -7,6 +7,7 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
 from typing import Dict, Union, List
+from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.regrid import LateralRegrid
 from roms_tools.setup.datasets import (
     ERA5Dataset,
@@ -113,6 +114,10 @@ class SurfaceForcing:
         data_vars = {}
 
         # regrid
+        lateral_fill = LateralFill(
+            data.ds["mask"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
         lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
 
         if self.type == "physics":
@@ -121,7 +126,10 @@ class SurfaceForcing:
             varnames = data.var_names.keys()
 
         for var in varnames:
-            data_vars[var] = lateral_regrid.apply(data.ds[data.var_names[var]])
+            # Propagate ocean values into land via lateral fill
+            filled = lateral_fill.apply(data.ds[data.var_names[var]])
+            # Lateral regridding
+            data_vars[var] = lateral_regrid.apply(filled)
 
         if self.type == "physics":
             # rotate velocities
@@ -243,12 +251,18 @@ class SurfaceForcing:
             correction_data.ds["mask"] = mask
 
         # regrid
+        lateral_fill = LateralFill(
+            correction_data.ds["mask"],
+            [correction_data.dim_names["latitude"], correction_data.dim_names["longitude"]],
+        )
         lateral_regrid = LateralRegrid(
             correction_data, self.target_coords["lon"], self.target_coords["lat"]
         )
-        corr_factor = lateral_regrid.apply(
+
+        filled = lateral_fill.apply(
             correction_data.ds[correction_data.var_names["swr_corr"]]
         )
+        corr_factor = lateral_regrid.apply(filled)
 
         # temporal interpolation
         corr_factor = interpolate_from_climatology(

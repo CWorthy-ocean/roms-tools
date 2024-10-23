@@ -537,6 +537,12 @@ def get_boundary_info():
             "north": {"eta_v": -1},
             "west": {"xi_rho": 0},
         },
+        "vector": {
+            "south": {"eta_rho": [0, 1]},
+            "east": {"xi_rho": [-2, -1]},
+            "north": {"eta_rho": [-2, -1]},
+            "west": {"xi_rho": [0, 1]},
+        },
     }
 
     return bdry_coords
@@ -807,69 +813,146 @@ def get_target_coords(grid, use_coarse_grid=False):
     return target_coords
 
 
-def process_velocities(grid, data_vars, angle, uname, vname, interpolate=True):
-    """Process and rotate velocity components to align with the grid orientation and
-    optionally interpolate them to the appropriate grid points.
-
-    This method performs the following steps:
-
-    1. **Rotation**: Rotates the velocity components (e.g., `u`, `v`) to align with the grid orientation
-       using the provided angle data.
-    2. **Interpolation**: Optionally interpolates the rotated velocities from rho-points to u- and v-points
-       of the grid.
-    3. **Barotropic Velocity Calculation**: If the velocity components are 3D (with vertical coordinates),
-       computes the barotropic (depth-averaged) velocities.
+def rotate_velocities(
+    u: xr.DataArray, v: xr.DataArray, angle: xr.DataArray, interpolate: bool = True
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Rotate and optionally interpolate velocity components to align with grid
+    orientation.
 
     Parameters
     ----------
-    grid : Grid
-        Object representing the grid information used for the model.
-    data_vars : dict of str: xarray.DataArray
-        Dictionary containing the velocity components to be processed. The dictionary should include keys
-        corresponding to the velocity component names (e.g., `uname`, `vname`).
+    u : xarray.DataArray
+        Zonal (east-west) velocity component at u-points.
+    v : xarray.DataArray
+        Meridional (north-south) velocity component at v-points.
     angle : xarray.DataArray
-        DataArray containing the grid angle values used to rotate the velocity components to the correct
-        orientation on the grid.
-    uname : str
-        The key corresponding to the zonal (east-west) velocity component in `data_vars`.
-    vname : str
-        The key corresponding to the meridional (north-south) velocity component in `data_vars`.
+        Grid angle values for rotation.
     interpolate : bool, optional
-        If True, interpolates the rotated velocity components to the u- and v-points of the grid.
-        Defaults to True.
+        If True, interpolates rotated velocities to grid points (default is True).
 
     Returns
     -------
-    dict of str: xarray.DataArray
-        A dictionary of the processed velocity components. The returned dictionary includes the rotated and,
-        if applicable, interpolated velocity components. If the input velocities are 3D (having a vertical
-        dimension), the dictionary also includes the barotropic (depth-averaged) velocities (`ubar` and `vbar`).
+    tuple of xarray.DataArray
+        Rotated velocity components (u_rot, v_rot).
+
+    Notes
+    -----
+    - Rotation formulas:
+      - u_rot = u * cos(angle) + v * sin(angle)
+      - v_rot = v * cos(angle) - u * sin(angle)
     """
 
     # Rotate velocities to grid orientation
-    u_rot = data_vars[uname] * np.cos(angle) + data_vars[vname] * np.sin(angle)
-    v_rot = data_vars[vname] * np.cos(angle) - data_vars[uname] * np.sin(angle)
+    u_rot = u * np.cos(angle) + v * np.sin(angle)
+    v_rot = v * np.cos(angle) - u * np.sin(angle)
 
     # Interpolate to u- and v-points
     if interpolate:
-        data_vars[uname] = interpolate_from_rho_to_u(u_rot)
-        data_vars[vname] = interpolate_from_rho_to_v(v_rot)
-    else:
-        data_vars[uname] = u_rot
-        data_vars[vname] = v_rot
+        u_rot = interpolate_from_rho_to_u(u_rot)
+        v_rot = interpolate_from_rho_to_v(v_rot)
 
-    if "s_rho" in data_vars[uname].dims and "s_rho" in data_vars[vname].dims:
-        # Compute barotropic velocity
-        dz = -grid.ds["interface_depth_rho"].diff(dim="s_w")
-        dz = dz.rename({"s_w": "s_rho"})
-        dzu = interpolate_from_rho_to_u(dz)
-        dzv = interpolate_from_rho_to_v(dz)
+    return u_rot, v_rot
 
-        data_vars["ubar"] = (
-            (dzu * data_vars[uname]).sum(dim="s_rho") / dzu.sum(dim="s_rho")
-        ).transpose("time", "eta_rho", "xi_u")
-        data_vars["vbar"] = (
-            (dzv * data_vars[vname]).sum(dim="s_rho") / dzv.sum(dim="s_rho")
-        ).transpose("time", "eta_v", "xi_rho")
 
-    return data_vars
+def compute_barotropic_velocity(
+    vel: xr.DataArray, interface_depth: xr.DataArray
+) -> xr.DataArray:
+    """Compute barotropic (depth-averaged) velocity from 3D velocity.
+
+    Assumes `vel` and `interface_depth` are at the same horizontal grid location.
+
+    Parameters
+    ----------
+    vel : xarray.DataArray
+        Velocity components (zonal and meridional) at u- and v-points.
+    interface_depth : xarray.DataArray
+        Depth values for computing layer thickness.
+
+    Returns
+    -------
+    xarray.DataArray
+        Depth-averaged velocity (`vel_bar`).
+
+    Notes
+    -----
+    Computed as:
+      - `vel_bar` = sum(dz * vel) / sum(dz)
+    """
+
+    # Layer thickness
+    dz = -interface_depth.diff(dim="s_w")
+    dz = dz.rename({"s_w": "s_rho"})
+
+    vel_bar = (dz * vel).sum(dim="s_rho") / dz.sum(dim="s_rho")
+
+    return vel_bar
+
+
+def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
+    """Transpose the dimensions of an xarray.DataArray to ensure that 'time', any
+    dimension starting with 's_', 'eta_', and 'xi_' are ordered first, followed by the
+    remaining dimensions in their original order.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The input DataArray whose dimensions are to be reordered.
+
+    Returns
+    -------
+    xarray.DataArray
+        The DataArray with dimensions reordered so that 'time', 's_*', 'eta_*',
+        and 'xi_*' are first, in that order, if they exist.
+    """
+
+    # List of preferred dimension patterns
+    preferred_order = ["time", "s_", "eta_", "xi_"]
+
+    # Get the existing dimensions in the DataArray
+    dims = list(da.dims)
+
+    # Collect dimensions that match any of the preferred patterns
+    matched_dims = []
+    for pattern in preferred_order:
+        # Find dimensions that start with the pattern
+        matched_dims += [dim for dim in dims if dim.startswith(pattern)]
+
+    # Create a new order: first the matched dimensions, then the rest
+    remaining_dims = [dim for dim in dims if dim not in matched_dims]
+    new_order = matched_dims + remaining_dims
+
+    # Transpose the DataArray to the new order
+    transposed_da = da.transpose(*new_order)
+
+    return transposed_da
+
+
+def get_vector_pairs(variable_info):
+    """Extracts all unique vector pairs from the variable_info dictionary.
+
+    Parameters
+    ----------
+    variable_info : dict
+        Dictionary containing variable information, including location,
+        whether it's a vector, and its vector pair.
+
+    Returns
+    -------
+    list of tuples
+        List of unique vector pairs, where each tuple contains the names of
+        the two vector components (e.g., ("u", "v")).
+    """
+    vector_pairs = []
+    processed = set()  # Track variables that have already been paired
+
+    for var_name, var_info in variable_info.items():
+        if var_info["is_vector"] and var_name not in processed:
+            vector_pair = var_info["vector_pair"]
+
+            # Ensure the vector_pair exists in the dictionary and has not been processed
+            if vector_pair and vector_pair in variable_info:
+                vector_pairs.append((var_name, vector_pair))
+                # Mark both the variable and its pair as processed
+                processed.update([var_name, vector_pair])
+
+    return vector_pairs

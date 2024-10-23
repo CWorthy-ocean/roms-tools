@@ -20,7 +20,6 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     compute_barotropic_velocity,
     _extrapolate_deepest_to_bottom,
-    get_vector_pairs,
     transpose_dimensions,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
@@ -97,9 +96,9 @@ class BoundaryForcing:
     def __post_init__(self):
 
         self._input_checks()
-        data = self._get_data()
         target_coords = get_target_coords(self.grid)
 
+        data = self._get_data()
         data.choose_subdomain(
             latitude_range=[
                 target_coords["lat"].min().values,
@@ -115,7 +114,8 @@ class BoundaryForcing:
 
         variable_info = self._set_variable_info(data)
 
-        data_vars = _extrapolate_deepest_to_bottom(data)
+        data_vars = {}
+        data_vars = _extrapolate_deepest_to_bottom(data_vars, data)
         data_vars = _lateral_fill(data_vars, data)
 
         bdry_coords = get_boundary_info()
@@ -149,25 +149,18 @@ class BoundaryForcing:
                     )
 
                 # rotation of velocities and interpolation to u/v points
-                vector_pairs = get_vector_pairs(variable_info)
-                for pair in vector_pairs:
-                    u_component = pair[0]
-                    v_component = pair[1]
-                    if u_component in bdry_data_vars and v_component in bdry_data_vars:
-                        angle = target_coords["angle"].isel(
-                            **bdry_coords["vector"][direction]
-                        )
-                        (
-                            bdry_data_vars[u_component],
-                            bdry_data_vars[v_component],
-                        ) = rotate_velocities(
-                            bdry_data_vars[u_component],
-                            bdry_data_vars[v_component],
-                            angle,
-                            interpolate=True,
-                        )
+                if "u" in variable_info and "v" in variable_info:
+                    angle = target_coords["angle"].isel(
+                        **bdry_coords["vector"][direction]
+                    )
+                    (bdry_data_vars["u"], bdry_data_vars["v"],) = rotate_velocities(
+                        bdry_data_vars["u"],
+                        bdry_data_vars["v"],
+                        angle,
+                        interpolate=True,
+                    )
 
-                # Select outermost margin for u/v variables
+                # selection of outermost margin for u/v variables
                 for var in variable_info.keys():
                     if var in bdry_data_vars:
                         location = variable_info[var]["location"]
@@ -176,7 +169,7 @@ class BoundaryForcing:
                                 **bdry_coords[location][direction]
                             )
 
-                # Vertical regridding
+                # vertical regridding
                 for location in ["rho", "u", "v"]:
                     var_names = [
                         name
@@ -193,9 +186,9 @@ class BoundaryForcing:
                             var_names,
                         )
 
-                # Compute barotropic velocities
-                for var in ["u", "v"]:
-                    if var in bdry_data_vars:
+                # compute barotropic velocities
+                if "u" in variable_info and "v" in variable_info:
+                    for var in ["u", "v"]:
                         bdry_data_vars[f"{var}bar"] = compute_barotropic_velocity(
                             bdry_data_vars[var],
                             self.grid.ds[f"interface_depth_{var}"].isel(

@@ -22,7 +22,7 @@ from roms_tools.setup.utils import (
     group_dataset,
     save_datasets,
     get_target_coords,
-    process_velocities,
+    rotate_velocities,
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
@@ -133,12 +133,10 @@ class SurfaceForcing:
 
         if self.type == "physics":
             # rotate velocities
-            data_vars = process_velocities(
-                self.grid,
-                data_vars,
+            data_vars["uwnd"], data_vars["vwnd"] = rotate_velocities(
+                data_vars["uwnd"],
+                data_vars["vwnd"],
                 target_coords["angle"],
-                "uwnd",
-                "vwnd",
                 interpolate=False,
             )
 
@@ -253,7 +251,10 @@ class SurfaceForcing:
         # regrid
         lateral_fill = LateralFill(
             correction_data.ds["mask"],
-            [correction_data.dim_names["latitude"], correction_data.dim_names["longitude"]],
+            [
+                correction_data.dim_names["latitude"],
+                correction_data.dim_names["longitude"],
+            ],
         )
         lateral_regrid = LateralRegrid(
             correction_data, self.target_coords["lon"], self.target_coords["lat"]

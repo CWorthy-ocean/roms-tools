@@ -13,8 +13,10 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     save_datasets,
     get_target_coords,
-    process_velocities,
+    rotate_velocities,
+    compute_barotropic_velocity,
     extrapolate_deepest_to_bottom,
+    transpose_dimensions,
 )
 from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
@@ -128,21 +130,20 @@ class InitialConditions:
             data_vars[var] = lateral_regrid.apply(filled)
 
         # regrid vertically
-        vertical_regrid = VerticalRegrid(data, self.grid)
+        vertical_regrid = VerticalRegrid(data, self.grid.ds.layer_depth_rho)
         for var in varnames:
             if var != "zeta":
                 data_vars[var] = vertical_regrid.apply(data_vars[var])
 
-        # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
-        for var in varnames:
-            if var != "zeta":
-                data_vars[var] = data_vars[var].transpose(
-                    "time", "s_rho", "eta_rho", "xi_rho"
-                )
-
         # rotate velocities
-        data_vars = process_velocities(
-            self.grid, data_vars, target_coords["angle"], "u", "v"
+        data_vars["u"], data_vars["v"] = rotate_velocities(
+            data_vars["u"], data_vars["v"], target_coords["angle"], interpolate=True
+        )
+        data_vars["ubar"] = compute_barotropic_velocity(
+            data_vars["u"], self.grid.ds.interface_depth_u
+        )
+        data_vars["vbar"] = compute_barotropic_velocity(
+            data_vars["v"], self.grid.ds.interface_depth_v
         )
 
         if self.bgc_source is not None:
@@ -182,21 +183,18 @@ class InitialConditions:
                 data_vars[var] = lateral_regrid.apply(filled)
 
             # regrid vertically
-            vertical_regrid = VerticalRegrid(bgc_data, self.grid)
+            vertical_regrid = VerticalRegrid(bgc_data, self.grid.ds.layer_depth_rho)
             for var in varnames:
                 data_vars[var] = vertical_regrid.apply(data_vars[var])
-
-            # transpose 4D variables to correct order (time, s_rho, eta_rho, xi_rho)
-            for var in varnames:
-                data_vars[var] = data_vars[var].transpose(
-                    "time", "s_rho", "eta_rho", "xi_rho"
-                )
 
             # Ensure time coordinate matches that of physical variables
             for var in varnames:
                 data_vars[var] = data_vars[var].assign_coords(
                     {"time": data_vars["temp"]["time"]}
                 )
+
+        for var in data_vars.keys():
+            data_vars[var] = transpose_dimensions(data_vars[var])
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)

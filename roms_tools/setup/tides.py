@@ -17,7 +17,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     save_datasets,
     get_target_coords,
-    process_velocities,
+    rotate_velocities,
 )
 from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.regrid import LateralRegrid
@@ -119,20 +119,16 @@ class TidalForcing:
             data_vars[var] = lateral_regrid.apply(filled)
 
         # rotate velocities
-        data_vars = process_velocities(
-            self.grid,
-            data_vars,
+        data_vars["u_Re"], data_vars["v_Re"] = rotate_velocities(
+            data_vars["u_Re"],
+            data_vars["v_Re"],
             target_coords["angle"],
-            "u_Re",
-            "v_Re",
             interpolate=False,
         )
-        data_vars = process_velocities(
-            self.grid,
-            data_vars,
+        data_vars["u_Im"], data_vars["v_Im"] = rotate_velocities(
+            data_vars["u_Im"],
+            data_vars["v_Im"],
             target_coords["angle"],
-            "u_Im",
-            "v_Im",
             interpolate=False,
         )
 

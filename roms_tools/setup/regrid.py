@@ -1,6 +1,4 @@
-from roms_tools.setup.fill import LateralFill
 import xarray as xr
-import numpy as np
 
 
 class LateralRegrid:
@@ -53,7 +51,6 @@ class LateralRegrid:
         regridded = var.interp(self.coords, method="linear").drop_vars(
             list(self.coords.keys())
         )
-
         return regridded
 
 
@@ -64,24 +61,25 @@ class VerticalRegrid:
     ----------
     data : DataContainer
         Container holding the data to be regridded, with relevant dimension names.
-    depth : xarray.DataArray
+    target_depth : xarray.DataArray
         Target depth coordinates for interpolation.
     """
 
-    def __init__(self, data, grid):
+    def __init__(self, data, target_depth):
         """Initializes vertical regridding with specified depth coordinates.
 
         Parameters
         ----------
         data : DataContainer
-            Data with dimension names required for regridding.
-        grid : Grid Object
+            Container holding the data to be regridded, with relevant dimension names.
+        target_depth : xarray.DataArray
+            Target depth coordinates for interpolation.
         """
 
         self.depth_dim = data.dim_names["depth"]
         dims = {"dim": self.depth_dim}
 
-        dlev = data.ds[data.dim_names["depth"]] - grid.ds.layer_depth_rho
+        dlev = data.ds[data.dim_names["depth"]] - target_depth
         is_below = dlev == dlev.where(dlev >= 0).min(**dims)
         is_above = dlev == dlev.where(dlev <= 0).max(**dims)
         p_below = dlev.where(is_below).sum(**dims)

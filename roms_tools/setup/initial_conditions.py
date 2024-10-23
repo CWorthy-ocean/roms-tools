@@ -493,14 +493,16 @@ class InitialConditions:
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
                 layer_depth = layer_depth.isel(eta_rho=eta)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_rho=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             elif "eta_v" in field.dims:
                 title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
                 layer_depth = layer_depth.isel(eta_v=eta)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_v=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
                     f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
@@ -510,14 +512,16 @@ class InitialConditions:
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
                 layer_depth = layer_depth.isel(xi_rho=xi)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_rho=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             elif "xi_u" in field.dims:
                 title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
                 layer_depth = layer_depth.isel(xi_u=xi)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_u=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
                     f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."

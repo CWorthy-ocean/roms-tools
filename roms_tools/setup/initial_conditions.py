@@ -15,11 +15,11 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    extrapolate_deepest_to_bottom,
+    _extrapolate_deepest_to_bottom,
     transpose_dimensions,
 )
-from roms_tools.setup.fill import LateralFill
-from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.setup.fill import _lateral_fill
+from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -90,108 +90,13 @@ class InitialConditions:
 
     def __post_init__(self):
 
-        data_vars = {}
-
         self._input_checks()
-        target_coords = get_target_coords(self.grid)
 
-        data = self._get_data()
-        data.choose_subdomain(
-            latitude_range=[
-                target_coords["lat"].min().values,
-                target_coords["lat"].max().values,
-            ],
-            longitude_range=[
-                target_coords["lon"].min().values,
-                target_coords["lon"].max().values,
-            ],
-            margin=2,
-            straddle=target_coords["straddle"],
-        )
-
-        varnames = ["zeta", "temp", "salt", "u", "v"]
-
-        # extrapolate deepest value all the way to bottom
-        for var in varnames:
-            data_vars[var] = extrapolate_deepest_to_bottom(
-                data.ds[data.var_names[var]], data.dim_names["depth"]
-            )
-
-        # regrid laterally
-        lateral_fill = LateralFill(
-            data.ds["mask"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
-        )
-        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
-        for var in varnames:
-            # Propagate ocean values into land via lateral fill
-            filled = lateral_fill.apply(data_vars[var])
-            # Lateral regridding
-            data_vars[var] = lateral_regrid.apply(filled)
-
-        # regrid vertically
-        vertical_regrid = VerticalRegrid(data, self.grid.ds.layer_depth_rho)
-        for var in varnames:
-            if var != "zeta":
-                data_vars[var] = vertical_regrid.apply(data_vars[var])
-
-        # rotate velocities
-        data_vars["u"], data_vars["v"] = rotate_velocities(
-            data_vars["u"], data_vars["v"], target_coords["angle"], interpolate=True
-        )
-        data_vars["ubar"] = compute_barotropic_velocity(
-            data_vars["u"], self.grid.ds.interface_depth_u
-        )
-        data_vars["vbar"] = compute_barotropic_velocity(
-            data_vars["v"], self.grid.ds.interface_depth_v
-        )
+        data_vars = {}
+        data_vars = self._process_data(data_vars, type="physics")
 
         if self.bgc_source is not None:
-            bgc_data = self._get_bgc_data()
-            bgc_data.choose_subdomain(
-                latitude_range=[
-                    target_coords["lat"].min().values,
-                    target_coords["lat"].max().values,
-                ],
-                longitude_range=[
-                    target_coords["lon"].min().values,
-                    target_coords["lon"].max().values,
-                ],
-                margin=2,
-                straddle=target_coords["straddle"],
-            )
-
-            # extrapolate deepest value all the way to bottom
-            varnames = bgc_data.var_names.keys()
-            for var in varnames:
-                data_vars[var] = extrapolate_deepest_to_bottom(
-                    bgc_data.ds[bgc_data.var_names[var]], bgc_data.dim_names["depth"]
-                )
-
-            # regrid laterally
-            lateral_fill = LateralFill(
-                bgc_data.ds["mask"],
-                [bgc_data.dim_names["latitude"], bgc_data.dim_names["longitude"]],
-            )
-            lateral_regrid = LateralRegrid(
-                bgc_data, target_coords["lon"], target_coords["lat"]
-            )
-            for var in varnames:
-                # Propagate ocean values into land via lateral fill
-                filled = lateral_fill.apply(data_vars[var])
-                # Lateral regridding
-                data_vars[var] = lateral_regrid.apply(filled)
-
-            # regrid vertically
-            vertical_regrid = VerticalRegrid(bgc_data, self.grid.ds.layer_depth_rho)
-            for var in varnames:
-                data_vars[var] = vertical_regrid.apply(data_vars[var])
-
-            # Ensure time coordinate matches that of physical variables
-            for var in varnames:
-                data_vars[var] = data_vars[var].assign_coords(
-                    {"time": data_vars["temp"]["time"]}
-                )
+            data_vars = self._process_data(data_vars, type="bgc")
 
         for var in data_vars.keys():
             data_vars[var] = transpose_dimensions(data_vars[var])
@@ -210,6 +115,145 @@ class InitialConditions:
             ds[var] = substitute_nans_by_fillvalue(ds[var])
 
         object.__setattr__(self, "ds", ds)
+
+    def _process_data(self, data_vars, type="physics"):
+
+        target_coords = get_target_coords(self.grid)
+
+        if type == "physics":
+            data = self._get_data()
+        else:
+            data = self._get_bgc_data()
+
+        data.choose_subdomain(
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
+            margin=2,
+            straddle=target_coords["straddle"],
+        )
+
+        variable_info = self._set_variable_info(data, type=type)
+
+        data_vars = _extrapolate_deepest_to_bottom(data_vars, data)
+
+        data_vars = _lateral_fill(data_vars, data)
+
+        # lateral regridding
+        var_names = variable_info.keys()
+        data_vars = _lateral_regrid(
+            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
+        )
+
+        # rotation of velocities and interpolation to u/v points
+        if "u" in variable_info and "v" in variable_info:
+            (data_vars["u"], data_vars["v"],) = rotate_velocities(
+                data_vars["u"],
+                data_vars["v"],
+                target_coords["angle"],
+                interpolate=True,
+            )
+
+        # vertical regridding
+        for location in ["rho", "u", "v"]:
+            var_names = [
+                name
+                for name, info in variable_info.items()
+                if info["location"] == location and info["is_3d"]
+            ]
+            if len(var_names) > 0:
+                data_vars = _vertical_regrid(
+                    data,
+                    self.grid.ds[f"layer_depth_{location}"],
+                    data_vars,
+                    var_names,
+                )
+
+        # compute barotropic velocities
+        if "u" in variable_info and "v" in variable_info:
+            for var in ["u", "v"]:
+                data_vars[f"{var}bar"] = compute_barotropic_velocity(
+                    data_vars[var], self.grid.ds[f"interface_depth_{var}"]
+                )
+
+        if type == "bgc":
+            # Ensure time coordinate matches that of physical variables
+            for var in variable_info.keys():
+                data_vars[var] = data_vars[var].assign_coords(
+                    {"time": data_vars["temp"]["time"]}
+                )
+
+        return data_vars
+
+    def _set_variable_info(self, data, type="physics"):
+        """Sets up a dictionary with metadata for variables based on the type.
+
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": True,
+        }
+
+        # Define a dictionary for variable names and their associated information
+        if type == "physics":
+            variable_info = {
+                "zeta": {
+                    "location": "rho",
+                    "is_vector": False,
+                    "vector_pair": None,
+                    "is_3d": False,
+                },
+                "temp": default_info,
+                "salt": default_info,
+                "u": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "v",
+                    "is_3d": True,
+                },
+                "v": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "u",
+                    "is_3d": True,
+                },
+                "ubar": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "vbar",
+                    "is_3d": False,
+                },
+                "vbar": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "ubar",
+                    "is_3d": False,
+                },
+            }
+        elif type == "bgc":
+            variable_info = {}
+            for var in data.var_names.keys():
+                variable_info[var] = default_info
+
+        return variable_info
 
     def _input_checks(self):
 

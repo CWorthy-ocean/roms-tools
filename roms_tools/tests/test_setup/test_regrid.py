@@ -1,13 +1,8 @@
 import pytest
-from datetime import datetime
 import numpy as np
 import xarray as xr
-from roms_tools import Grid
-from roms_tools.setup.datasets import GLORYSDataset
-from roms_tools.setup.download import download_test_data
-from roms_tools.setup.utils import extrapolate_deepest_to_bottom, get_target_coords
-from roms_tools.setup.fill import LateralFill
-from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.setup.regrid import VerticalRegrid
+
 
 def vertical_regridder(depth_values, layer_depth_rho_values):
     class DataContainer:
@@ -28,13 +23,11 @@ def vertical_regridder(depth_values, layer_depth_rho_values):
 
     # Create mock datasets for DataContainer and Grid
     data_ds = xr.Dataset({"depth": (["depth"], depth_values)})
-    grid_ds = xr.Dataset({"layer_depth_rho": (["s_rho"], layer_depth_rho_values)})
-
+    target_depth = xr.DataArray(data=layer_depth_rho_values, dims=["s_rho"])
     # Instantiate DataContainer and Grid objects with mock datasets
     mock_data = DataContainer(data_ds)
-    mock_grid = Grid(grid_ds)
 
-    return VerticalRegrid(mock_data, mock_grid)
+    return VerticalRegrid(mock_data, target_depth)
 
 
 @pytest.mark.parametrize(

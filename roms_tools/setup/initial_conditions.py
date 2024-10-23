@@ -340,12 +340,16 @@ class InitialConditions:
             "s_rho",
             "lat_rho",
             "lon_rho",
-            "layer_depth_rho",
-            "interface_depth_rho",
             "lat_u",
             "lon_u",
             "lat_v",
             "lon_v",
+            "layer_depth_rho",
+            "interface_depth_rho",
+            "layer_depth_u",
+            "interface_depth_u",
+            "layer_depth_v",
+            "interface_depth_v",
         ]
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)

@@ -323,7 +323,7 @@ def _lateral_fill(data_vars, data):
         data.ds["mask"],
         [data.dim_names["latitude"], data.dim_names["longitude"]],
     )
-    for var in data_vars:
+    for var in data.var_names:
         data_vars[var] = lateral_fill.apply(data_vars[var])
 
     return data_vars

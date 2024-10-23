@@ -187,12 +187,17 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
         return field
 
 
-def _extrapolate_deepest_to_bottom(data) -> dict:
+def _extrapolate_deepest_to_bottom(data_vars, data) -> dict:
     """Extrapolate the deepest value to the bottom for variables using the dataset's
     depth dimension.
 
+    This function fills in missing values at the bottom of each variable by
+    carrying forward the deepest available value, ensuring a complete depth profile.
+
     Parameters
     ----------
+    data_vars : dict
+        Existing dictionary of variables to be updated.
     data : Dataset
         Dataset containing variables and depth information.
 
@@ -201,8 +206,6 @@ def _extrapolate_deepest_to_bottom(data) -> dict:
     dict of str : xarray.DataArray
         Dictionary of variables with the deepest value extrapolated to the bottom.
     """
-
-    data_vars = {}
 
     for var in data.var_names.keys():
         data_vars[var] = extrapolate_deepest_to_bottom(

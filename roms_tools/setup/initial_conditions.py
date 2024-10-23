@@ -503,7 +503,7 @@ class InitialConditions:
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             interface_depth = self.grid.ds.interface_depth_rho
             layer_depth = self.grid.ds.layer_depth_rho
-            field = field.where(self.grid.ds.mask_rho)
+            mask = self.grid.ds.mask_rho
             field = field.assign_coords(
                 {"lon": self.grid.ds.lon_rho, "lat": self.grid.ds.lat_rho}
             )
@@ -511,7 +511,7 @@ class InitialConditions:
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
             interface_depth = self.grid.ds.interface_depth_u
             layer_depth = self.grid.ds.layer_depth_u
-            field = field.where(self.grid.ds.mask_u)
+            mask = self.grid.ds.mask_u
             field = field.assign_coords(
                 {"lon": self.grid.ds.lon_u, "lat": self.grid.ds.lat_u}
             )
@@ -519,7 +519,7 @@ class InitialConditions:
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
             interface_depth = self.grid.ds.interface_depth_v
             layer_depth = self.grid.ds.layer_depth_v
-            field = field.where(self.grid.ds.mask_v)
+            mask = self.grid.ds.mask_v
             field = field.assign_coords(
                 {"lon": self.grid.ds.lon_v, "lat": self.grid.ds.lat_v}
             )
@@ -541,14 +541,16 @@ class InitialConditions:
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
                 layer_depth = layer_depth.isel(eta_rho=eta)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_rho=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             elif "eta_v" in field.dims:
                 title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
                 layer_depth = layer_depth.isel(eta_v=eta)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_v=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
                     f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
@@ -558,14 +560,16 @@ class InitialConditions:
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
                 layer_depth = layer_depth.isel(xi_rho=xi)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_rho=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             elif "xi_u" in field.dims:
                 title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
                 layer_depth = layer_depth.isel(xi_u=xi)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_u=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
                     f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
@@ -589,7 +593,7 @@ class InitialConditions:
         if eta is None and xi is None:
             _plot(
                 self.grid.ds,
-                field=field,
+                field=field.where(mask),
                 straddle=self.grid.straddle,
                 depth_contours=depth_contours,
                 title=title,

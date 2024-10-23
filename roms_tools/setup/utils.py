@@ -187,6 +187,31 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
         return field
 
 
+def _extrapolate_deepest_to_bottom(data) -> dict:
+    """Extrapolate the deepest value to the bottom for variables using the dataset's
+    depth dimension.
+
+    Parameters
+    ----------
+    data : Dataset
+        Dataset containing variables and depth information.
+
+    Returns
+    -------
+    dict of str : xarray.DataArray
+        Dictionary of variables with the deepest value extrapolated to the bottom.
+    """
+
+    data_vars = {}
+
+    for var in data.var_names.keys():
+        data_vars[var] = extrapolate_deepest_to_bottom(
+            data.ds[data.var_names[var]], data.dim_names["depth"]
+        )
+
+    return data_vars
+
+
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     """Assigns climatology dates to the dataset's time dimension.
 
@@ -502,50 +527,6 @@ def get_variable_metadata():
         "nhy": {"long_name": "NHy decomposition", "units": "kg/m^2/s"},
     }
     return d
-
-
-def get_boundary_info():
-    """This function provides information about the boundary points for the rho, u, and
-    v variables on the grid, specifying the indices for the south, east, north, and west
-    boundaries.
-
-    Returns
-    -------
-    dict
-        A dictionary where keys are variable types ("rho", "u", "v"), and values
-        are nested dictionaries mapping directions ("south", "east", "north", "west")
-        to the corresponding boundary coordinates.
-    """
-
-    # Boundary coordinates
-    bdry_coords = {
-        "rho": {
-            "south": {"eta_rho": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_rho": 0},
-        },
-        "u": {
-            "south": {"eta_rho": 0},
-            "east": {"xi_u": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_u": 0},
-        },
-        "v": {
-            "south": {"eta_v": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_v": -1},
-            "west": {"xi_rho": 0},
-        },
-        "vector": {
-            "south": {"eta_rho": [0, 1]},
-            "east": {"xi_rho": [-2, -1]},
-            "north": {"eta_rho": [-2, -1]},
-            "west": {"xi_rho": [0, 1]},
-        },
-    }
-
-    return bdry_coords
 
 
 def extract_single_value(data):

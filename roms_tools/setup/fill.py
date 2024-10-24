@@ -323,7 +323,11 @@ def _lateral_fill(data_vars, data):
         data.ds["mask"],
         [data.dim_names["latitude"], data.dim_names["longitude"]],
     )
+
     for var in data.var_names:
+        if var in ["u", "v"]:
+            # fill velocity fields simply with zero over land
+            data_vars[var] = data_vars[var].fillna(0.0)
         data_vars[var] = lateral_fill.apply(data_vars[var])
 
     return data_vars

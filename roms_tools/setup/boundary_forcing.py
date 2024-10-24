@@ -227,6 +227,53 @@ class BoundaryForcing:
 
         object.__setattr__(self, "ds", ds)
 
+    def _input_checks(self):
+        # Validate the 'type' parameter
+        if self.type not in ["physics", "bgc"]:
+            raise ValueError("`type` must be either 'physics' or 'bgc'.")
+
+        # Ensure 'source' dictionary contains required keys
+        if "name" not in self.source:
+            raise ValueError("`source` must include a 'name'.")
+        if "path" not in self.source:
+            raise ValueError("`source` must include a 'path'.")
+
+        # Set 'climatology' to False if not provided in 'source'
+        object.__setattr__(
+            self,
+            "source",
+            {**self.source, "climatology": self.source.get("climatology", False)},
+        )
+
+    def _get_data(self):
+
+        data_dict = {
+            "filename": self.source["path"],
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "climatology": self.source["climatology"],
+            "use_dask": self.use_dask,
+        }
+
+        if self.type == "physics":
+            if self.source["name"] == "GLORYS":
+                data = GLORYSDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "GLORYS" is a valid option for source["name"] when type is "physics".'
+                )
+
+        elif self.type == "bgc":
+            if self.source["name"] == "CESM_REGRIDDED":
+
+                data = CESMBGCDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                )
+
+        return data
+
     def _set_variable_info(self, data):
         """Sets up a dictionary with metadata for variables based on the type of data
         (physics or BGC).
@@ -292,53 +339,6 @@ class BoundaryForcing:
                 variable_info[var] = default_info
 
         return variable_info
-
-    def _input_checks(self):
-        # Validate the 'type' parameter
-        if self.type not in ["physics", "bgc"]:
-            raise ValueError("`type` must be either 'physics' or 'bgc'.")
-
-        # Ensure 'source' dictionary contains required keys
-        if "name" not in self.source:
-            raise ValueError("`source` must include a 'name'.")
-        if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
-
-        # Set 'climatology' to False if not provided in 'source'
-        object.__setattr__(
-            self,
-            "source",
-            {**self.source, "climatology": self.source.get("climatology", False)},
-        )
-
-    def _get_data(self):
-
-        data_dict = {
-            "filename": self.source["path"],
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-            "use_dask": self.use_dask,
-        }
-
-        if self.type == "physics":
-            if self.source["name"] == "GLORYS":
-                data = GLORYSDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "GLORYS" is a valid option for source["name"] when type is "physics".'
-                )
-
-        elif self.type == "bgc":
-            if self.source["name"] == "CESM_REGRIDDED":
-
-                data = CESMBGCDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
-                )
-
-        return data
 
     def _write_into_dataset(self, direction, data_vars, ds=None):
         if ds is None:

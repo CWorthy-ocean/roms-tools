@@ -190,6 +190,70 @@ class InitialConditions:
 
         return data_vars
 
+    def _input_checks(self):
+
+        if "name" not in self.source.keys():
+            raise ValueError("`source` must include a 'name'.")
+        if "path" not in self.source.keys():
+            raise ValueError("`source` must include a 'path'.")
+        # set self.source["climatology"] to False if not provided
+        object.__setattr__(
+            self,
+            "source",
+            {
+                **self.source,
+                "climatology": self.source.get("climatology", False),
+            },
+        )
+        if self.bgc_source is not None:
+            if "name" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'name' if it is provided."
+                )
+            if "path" not in self.bgc_source.keys():
+                raise ValueError(
+                    "`bgc_source` must include a 'path' if it is provided."
+                )
+            # set self.bgc_source["climatology"] to False if not provided
+            object.__setattr__(
+                self,
+                "bgc_source",
+                {
+                    **self.bgc_source,
+                    "climatology": self.bgc_source.get("climatology", False),
+                },
+            )
+
+    def _get_data(self):
+
+        if self.source["name"] == "GLORYS":
+            data = GLORYSDataset(
+                filename=self.source["path"],
+                start_time=self.ini_time,
+                climatology=self.source["climatology"],
+                use_dask=self.use_dask,
+            )
+        else:
+            raise ValueError('Only "GLORYS" is a valid option for source["name"].')
+        return data
+
+    def _get_bgc_data(self):
+
+        if self.bgc_source["name"] == "CESM_REGRIDDED":
+
+            data = CESMBGCDataset(
+                filename=self.bgc_source["path"],
+                start_time=self.ini_time,
+                climatology=self.bgc_source["climatology"],
+                use_dask=self.use_dask,
+            )
+        else:
+            raise ValueError(
+                'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
+            )
+
+        return data
+
     def _set_variable_info(self, data, type="physics"):
         """Sets up a dictionary with metadata for variables based on the type.
 
@@ -254,70 +318,6 @@ class InitialConditions:
                 variable_info[var] = default_info
 
         return variable_info
-
-    def _input_checks(self):
-
-        if "name" not in self.source.keys():
-            raise ValueError("`source` must include a 'name'.")
-        if "path" not in self.source.keys():
-            raise ValueError("`source` must include a 'path'.")
-        # set self.source["climatology"] to False if not provided
-        object.__setattr__(
-            self,
-            "source",
-            {
-                **self.source,
-                "climatology": self.source.get("climatology", False),
-            },
-        )
-        if self.bgc_source is not None:
-            if "name" not in self.bgc_source.keys():
-                raise ValueError(
-                    "`bgc_source` must include a 'name' if it is provided."
-                )
-            if "path" not in self.bgc_source.keys():
-                raise ValueError(
-                    "`bgc_source` must include a 'path' if it is provided."
-                )
-            # set self.bgc_source["climatology"] to False if not provided
-            object.__setattr__(
-                self,
-                "bgc_source",
-                {
-                    **self.bgc_source,
-                    "climatology": self.bgc_source.get("climatology", False),
-                },
-            )
-
-    def _get_data(self):
-
-        if self.source["name"] == "GLORYS":
-            data = GLORYSDataset(
-                filename=self.source["path"],
-                start_time=self.ini_time,
-                climatology=self.source["climatology"],
-                use_dask=self.use_dask,
-            )
-        else:
-            raise ValueError('Only "GLORYS" is a valid option for source["name"].')
-        return data
-
-    def _get_bgc_data(self):
-
-        if self.bgc_source["name"] == "CESM_REGRIDDED":
-
-            data = CESMBGCDataset(
-                filename=self.bgc_source["path"],
-                start_time=self.ini_time,
-                climatology=self.bgc_source["climatology"],
-                use_dask=self.use_dask,
-            )
-        else:
-            raise ValueError(
-                'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
-            )
-
-        return data
 
     def _write_into_dataset(self, data_vars, d_meta):
 

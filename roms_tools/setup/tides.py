@@ -152,6 +152,14 @@ class TidalForcing:
         if "path" not in self.source.keys():
             raise ValueError("`source` must include a 'path'.")
 
+    def _get_data(self):
+
+        if self.source["name"] == "TPXO":
+            data = TPXODataset(filename=self.source["path"], use_dask=self.use_dask)
+        else:
+            raise ValueError('Only "TPXO" is a valid option for source["name"].')
+        return data
+
     def _set_variable_info(self):
         """Sets up a dictionary with metadata for variables based on the type.
 
@@ -207,14 +215,6 @@ class TidalForcing:
         }
 
         return variable_info
-
-    def _get_data(self):
-
-        if self.source["name"] == "TPXO":
-            data = TPXODataset(filename=self.source["path"], use_dask=self.use_dask)
-        else:
-            raise ValueError('Only "TPXO" is a valid option for source["name"].')
-        return data
 
     def _write_into_dataset(self, data_vars, d_meta):
 

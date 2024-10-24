@@ -180,6 +180,47 @@ class SurfaceForcing:
             {**self.source, "climatology": self.source.get("climatology", False)},
         )
 
+    def _get_data(self):
+
+        data_dict = {
+            "filename": self.source["path"],
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "climatology": self.source["climatology"],
+            "use_dask": self.use_dask,
+        }
+
+        if self.type == "physics":
+            if self.source["name"] == "ERA5":
+                data = ERA5Dataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "ERA5" is a valid option for source["name"] when type is "physics".'
+                )
+
+        elif self.type == "bgc":
+            if self.source["name"] == "CESM_REGRIDDED":
+
+                data = CESMBGCSurfaceForcingDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                )
+
+        return data
+
+    def _get_correction_data(self):
+
+        if self.source["name"] == "ERA5":
+            correction_data = ERA5Correction(use_dask=self.use_dask)
+        else:
+            raise ValueError(
+                "The 'correct_radiation' feature is currently only supported for 'ERA5' as the source. "
+                "Please ensure your 'source' is set to 'ERA5' or implement additional handling for other sources."
+            )
+
+        return correction_data
+
     def _set_variable_info(self, data):
         """Sets up a dictionary with metadata for variables based on the type of data
         (physics or BGC).
@@ -230,47 +271,6 @@ class SurfaceForcing:
                 variable_info[var] = default_info
 
         return variable_info
-
-    def _get_data(self):
-
-        data_dict = {
-            "filename": self.source["path"],
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-            "use_dask": self.use_dask,
-        }
-
-        if self.type == "physics":
-            if self.source["name"] == "ERA5":
-                data = ERA5Dataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "ERA5" is a valid option for source["name"] when type is "physics".'
-                )
-
-        elif self.type == "bgc":
-            if self.source["name"] == "CESM_REGRIDDED":
-
-                data = CESMBGCSurfaceForcingDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
-                )
-
-        return data
-
-    def _get_correction_data(self):
-
-        if self.source["name"] == "ERA5":
-            correction_data = ERA5Correction(use_dask=self.use_dask)
-        else:
-            raise ValueError(
-                "The 'correct_radiation' feature is currently only supported for 'ERA5' as the source. "
-                "Please ensure your 'source' is set to 'ERA5' or implement additional handling for other sources."
-            )
-
-        return correction_data
 
     def _apply_correction(self, data_vars, data):
 

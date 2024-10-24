@@ -18,9 +18,10 @@ from roms_tools.setup.utils import (
     save_datasets,
     get_target_coords,
     rotate_velocities,
+    get_vector_pairs,
 )
-from roms_tools.setup.fill import LateralFill
-from roms_tools.setup.regrid import LateralRegrid
+from roms_tools.setup.fill import _lateral_fill
+from roms_tools.setup.regrid import _lateral_regrid
 import matplotlib.pyplot as plt
 from pathlib import Path
 
@@ -74,7 +75,6 @@ class TidalForcing:
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
-
         data.check_number_constituents(self.ntides)
         data.choose_subdomain(
             latitude_range=[
@@ -88,49 +88,36 @@ class TidalForcing:
             margin=2,
             straddle=target_coords["straddle"],
         )
-
         # select desired number of constituents
         object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
-
         self._correct_tides(data)
 
+        variable_info = self._set_variable_info()
+
         data_vars = {}
+        for var_name in data.var_names:
+            data_vars[var_name] = data.ds[data.var_names[var_name]]
 
-        # regrid
-        lateral_fill = LateralFill(
-            data.ds["mask"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
-        )
-        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
-        varnames = [
-            "ssh_Re",
-            "ssh_Im",
-            "pot_Re",
-            "pot_Im",
-            "u_Re",
-            "u_Im",
-            "v_Re",
-            "v_Im",
-        ]
-        for var in varnames:
-            # Propagate ocean values into land via lateral fill
-            filled = lateral_fill.apply(data.ds[data.var_names[var]])
-            # Lateral regridding
-            data_vars[var] = lateral_regrid.apply(filled)
+        data_vars = _lateral_fill(data_vars, data)
 
-        # rotate velocities
-        data_vars["u_Re"], data_vars["v_Re"] = rotate_velocities(
-            data_vars["u_Re"],
-            data_vars["v_Re"],
-            target_coords["angle"],
-            interpolate=False,
+        # lateral regridding
+        var_names = variable_info.keys()
+        data_vars = _lateral_regrid(
+            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
         )
-        data_vars["u_Im"], data_vars["v_Im"] = rotate_velocities(
-            data_vars["u_Im"],
-            data_vars["v_Im"],
-            target_coords["angle"],
-            interpolate=False,
-        )
+
+        # rotation of velocities and interpolation to u/v points
+        vector_pairs = get_vector_pairs(variable_info)
+        for pair in vector_pairs:
+            u_component = pair[0]
+            v_component = pair[1]
+            if u_component in data_vars and v_component in data_vars:
+                (data_vars[u_component], data_vars[v_component],) = rotate_velocities(
+                    data_vars[u_component],
+                    data_vars[v_component],
+                    target_coords["angle"],
+                    interpolate=False,
+                )
 
         # convert to barotropic velocity
         for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
@@ -164,6 +151,62 @@ class TidalForcing:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source.keys():
             raise ValueError("`source` must include a 'path'.")
+
+    def _set_variable_info(self):
+        """Sets up a dictionary with metadata for variables based on the type.
+
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": False,
+        }
+
+        # Define a dictionary for variable names and their associated information
+        variable_info = {
+            "ssh_Re": default_info,
+            "ssh_Im": default_info,
+            "pot_Re": default_info,
+            "pot_Im": default_info,
+            "u_Re": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "v_Re",
+                "is_3d": False,
+            },
+            "v_Re": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "u_Re",
+                "is_3d": False,
+            },
+            "u_Im": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "v_Im",
+                "is_3d": False,
+            },
+            "v_Im": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "u_Im",
+                "is_3d": False,
+            },
+        }
+
+        return variable_info
 
     def _get_data(self):
 
@@ -483,6 +526,9 @@ class TidalForcing:
 
         # Update var_names dictionary
         var_names = {**data.var_names, "pot_Re": "pot_Re", "pot_Im": "pot_Im"}
+        var_names.pop("sal_Re", None)  # Remove "sal_Re" if it exists
+        var_names.pop("sal_Im", None)  # Remove "sal_Im" if it exists
+
         object.__setattr__(data, "var_names", var_names)
 
 

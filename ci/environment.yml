@@ -10,5 +10,5 @@ dependencies:
   - pytest-xdist
   - flake8
   - black
-  - pre-commit
+  - pre-commit==3.8.0
   - coverage

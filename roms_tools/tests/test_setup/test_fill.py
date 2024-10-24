@@ -29,7 +29,9 @@ def era5_data(request, use_dask):
 
 @pytest.fixture()
 def glorys_data(request, use_dask):
-    fname = download_test_data("GLORYS_NA_2012.nc")
+    # the following GLORYS data has a wide enough domain
+    # to have different masks for tracers vs. velocities
+    fname = download_test_data("GLORYS_test_data.nc")
 
     data = GLORYSDataset(
         filename=fname,
@@ -37,6 +39,9 @@ def glorys_data(request, use_dask):
         end_time=datetime(2013, 1, 1),
         use_dask=use_dask,
     )
+
+    ds = data.ds.isel(depth=[0, 10, 30])
+    object.__setattr__(data, "ds", ds)
 
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
@@ -107,10 +112,19 @@ def test_lateral_fill_no_nans(data_fixture, request):
         data.ds["mask"],
         [data.dim_names["latitude"], data.dim_names["longitude"]],
     )
+    if "mask_vel" in data.ds.data_vars:
+        lateral_fill_vel = LateralFill(
+            data.ds["mask_vel"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
 
-    print(data.var_names)
     for var in data.var_names:
-        filled = lateral_fill.apply(data.ds[data.var_names[var]].astype(np.float64))
+        if var in ["u", "v"]:
+            filled = lateral_fill_vel.apply(
+                data.ds[data.var_names[var]].astype(np.float64)
+            )
+        else:
+            filled = lateral_fill.apply(data.ds[data.var_names[var]].astype(np.float64))
         assert not filled.isnull().any()
 
 
@@ -154,21 +168,39 @@ def test_lateral_fill_reproducibility(data_fixture, request):
         data.ds["mask"],
         [data.dim_names["latitude"], data.dim_names["longitude"]],
     )
+    if "mask_vel" in data.ds.data_vars:
+        lateral_fill_vel0 = LateralFill(
+            data.ds["mask_vel"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
     lateral_fill1 = LateralFill(
         data.ds["mask"],
         [data.dim_names["latitude"], data.dim_names["longitude"]],
     )
+    if "mask_vel" in data.ds.data_vars:
+        lateral_fill_vel1 = LateralFill(
+            data.ds["mask_vel"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
 
     ds0 = data.ds.copy()
     ds1 = data.ds.copy()
 
     for var in data.var_names:
+        if var in ["u", "v"]:
+            ds0[data.var_names[var]] = lateral_fill_vel0.apply(
+                ds0[data.var_names[var]].astype(np.float64)
+            )
+            ds1[data.var_names[var]] = lateral_fill_vel1.apply(
+                ds1[data.var_names[var]].astype(np.float64)
+            )
 
-        ds0[data.var_names[var]] = lateral_fill0.apply(
-            ds0[data.var_names[var]].astype(np.float64)
-        )
-        ds1[data.var_names[var]] = lateral_fill1.apply(
-            ds1[data.var_names[var]].astype(np.float64)
-        )
+        else:
+            ds0[data.var_names[var]] = lateral_fill0.apply(
+                ds0[data.var_names[var]].astype(np.float64)
+            )
+            ds1[data.var_names[var]] = lateral_fill1.apply(
+                ds1[data.var_names[var]].astype(np.float64)
+            )
 
     assert ds0.equals(ds1)

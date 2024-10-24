@@ -285,18 +285,10 @@ class SurfaceForcing:
         correction_data.choose_subdomain(
             coords_correction, straddle=self.target_coords["straddle"]
         )
-        # apply mask from ERA5 data
-        if "mask" in data.ds.data_vars:
-            mask = data.ds["mask"]
-            for var in correction_data.ds.data_vars:
-                correction_data.ds[var] = xr.where(
-                    mask == 1, correction_data.ds[var], np.nan
-                )
-            correction_data.ds["mask"] = mask
 
         # regrid
         lateral_fill = LateralFill(
-            correction_data.ds["mask"],
+            data.ds["mask"],  # use mask from ERA5 data
             [
                 correction_data.dim_names["latitude"],
                 correction_data.dim_names["longitude"],

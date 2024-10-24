@@ -65,7 +65,7 @@ class LateralFill:
             non-NaN values.
         """
         # Apply fill to anomaly field
-        mean = var.mean(dim=self.dims, skipna=True)
+        mean = var.where(self.mask).mean(dim=self.dims, skipna=True)
         var = var - mean
 
         # Setup the right-hand side (RHS): ocean points take their original values, land points are set to 0
@@ -323,7 +323,17 @@ def _lateral_fill(data_vars, data):
         data.ds["mask"],
         [data.dim_names["latitude"], data.dim_names["longitude"]],
     )
+
+    if "mask_vel" in data.ds.data_vars:
+        lateral_fill_vel = LateralFill(
+            data.ds["mask_vel"],
+            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        )
+
     for var in data.var_names:
-        data_vars[var] = lateral_fill.apply(data_vars[var])
+        if var in ["u", "v"]:
+            data_vars[var] = lateral_fill_vel.apply(data_vars[var])
+        else:
+            data_vars[var] = lateral_fill.apply(data_vars[var])
 
     return data_vars

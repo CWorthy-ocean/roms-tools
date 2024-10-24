@@ -810,6 +810,11 @@ class TPXODataset(Dataset):
 
             self.ds["mask"] = mask
 
+        # Remove "depth" from var_names
+        updated_var_names = {**self.var_names}  # Create a copy of the dictionary
+        updated_var_names.pop("depth", None)  # Remove "depth" if it exists
+        object.__setattr__(self, "var_names", updated_var_names)
+
 
 @dataclass(frozen=True, kw_only=True)
 class GLORYSDataset(Dataset):

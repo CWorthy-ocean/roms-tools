@@ -12,15 +12,21 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
     get_variable_metadata,
     save_datasets,
+    get_target_coords,
+    rotate_velocities,
+    compute_barotropic_velocity,
+    _extrapolate_deepest_to_bottom,
+    transpose_dimensions,
 )
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.fill import _lateral_fill
+from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class InitialConditions(ROMSToolsMixins):
+class InitialConditions:
     """Represents initial conditions for ROMS, including physical and biogeochemical
     data.
 
@@ -85,42 +91,15 @@ class InitialConditions(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super()._get_target_lon_lat()
 
-        data = self._get_data()
-        data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
-            margin=2,
-            straddle=straddle,
-        )
-
-        vars_2d = ["zeta"]
-        vars_3d = ["temp", "salt", "u", "v"]
-        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
-        data_vars = super()._process_velocities(data_vars, angle, "u", "v")
+        data_vars = {}
+        data_vars = self._process_data(data_vars, type="physics")
 
         if self.bgc_source is not None:
-            bgc_data = self._get_bgc_data()
-            bgc_data.choose_subdomain(
-                latitude_range=[lat.min().values, lat.max().values],
-                longitude_range=[lon.min().values, lon.max().values],
-                margin=2,
-                straddle=straddle,
-            )
+            data_vars = self._process_data(data_vars, type="bgc")
 
-            vars_2d = []
-            vars_3d = bgc_data.var_names.keys()
-            bgc_data_vars = super()._regrid_data(bgc_data, vars_2d, vars_3d, lon, lat)
-
-            # Ensure time coordinate matches that of physical variables
-            for var in bgc_data_vars.keys():
-                bgc_data_vars[var] = bgc_data_vars[var].assign_coords(
-                    {"time": data_vars["temp"]["time"]}
-                )
-
-            # Combine data variables from physical and biogeochemical sources
-            data_vars.update(bgc_data_vars)
+        for var in data_vars.keys():
+            data_vars[var] = transpose_dimensions(data_vars[var])
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(data_vars, d_meta)
@@ -136,6 +115,80 @@ class InitialConditions(ROMSToolsMixins):
             ds[var] = substitute_nans_by_fillvalue(ds[var])
 
         object.__setattr__(self, "ds", ds)
+
+    def _process_data(self, data_vars, type="physics"):
+
+        target_coords = get_target_coords(self.grid)
+
+        if type == "physics":
+            data = self._get_data()
+        else:
+            data = self._get_bgc_data()
+
+        data.choose_subdomain(
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
+            margin=2,
+            straddle=target_coords["straddle"],
+        )
+
+        variable_info = self._set_variable_info(data, type=type)
+
+        data_vars = _extrapolate_deepest_to_bottom(data_vars, data)
+
+        data_vars = _lateral_fill(data_vars, data)
+
+        # lateral regridding
+        var_names = variable_info.keys()
+        data_vars = _lateral_regrid(
+            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
+        )
+
+        # rotation of velocities and interpolation to u/v points
+        if "u" in variable_info and "v" in variable_info:
+            (data_vars["u"], data_vars["v"],) = rotate_velocities(
+                data_vars["u"],
+                data_vars["v"],
+                target_coords["angle"],
+                interpolate=True,
+            )
+
+        # vertical regridding
+        for location in ["rho", "u", "v"]:
+            var_names = [
+                name
+                for name, info in variable_info.items()
+                if info["location"] == location and info["is_3d"]
+            ]
+            if len(var_names) > 0:
+                data_vars = _vertical_regrid(
+                    data,
+                    self.grid.ds[f"layer_depth_{location}"],
+                    data_vars,
+                    var_names,
+                )
+
+        # compute barotropic velocities
+        if "u" in variable_info and "v" in variable_info:
+            for var in ["u", "v"]:
+                data_vars[f"{var}bar"] = compute_barotropic_velocity(
+                    data_vars[var], self.grid.ds[f"interface_depth_{var}"]
+                )
+
+        if type == "bgc":
+            # Ensure time coordinate matches that of physical variables
+            for var in variable_info.keys():
+                data_vars[var] = data_vars[var].assign_coords(
+                    {"time": data_vars["temp"]["time"]}
+                )
+
+        return data_vars
 
     def _input_checks(self):
 
@@ -201,6 +254,71 @@ class InitialConditions(ROMSToolsMixins):
 
         return data
 
+    def _set_variable_info(self, data, type="physics"):
+        """Sets up a dictionary with metadata for variables based on the type.
+
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": True,
+        }
+
+        # Define a dictionary for variable names and their associated information
+        if type == "physics":
+            variable_info = {
+                "zeta": {
+                    "location": "rho",
+                    "is_vector": False,
+                    "vector_pair": None,
+                    "is_3d": False,
+                },
+                "temp": default_info,
+                "salt": default_info,
+                "u": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "v",
+                    "is_3d": True,
+                },
+                "v": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "u",
+                    "is_3d": True,
+                },
+                "ubar": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "vbar",
+                    "is_3d": False,
+                },
+                "vbar": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "ubar",
+                    "is_3d": False,
+                },
+            }
+        elif type == "bgc":
+            variable_info = {}
+            for var in data.var_names.keys():
+                variable_info[var] = default_info
+
+        return variable_info
+
     def _write_into_dataset(self, data_vars, d_meta):
 
         # save in new dataset
@@ -222,12 +340,16 @@ class InitialConditions(ROMSToolsMixins):
             "s_rho",
             "lat_rho",
             "lon_rho",
-            "layer_depth_rho",
-            "interface_depth_rho",
             "lat_u",
             "lon_u",
             "lat_v",
             "lon_v",
+            "layer_depth_rho",
+            "interface_depth_rho",
+            "layer_depth_u",
+            "interface_depth_u",
+            "layer_depth_v",
+            "interface_depth_v",
         ]
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
@@ -381,7 +503,7 @@ class InitialConditions(ROMSToolsMixins):
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             interface_depth = self.grid.ds.interface_depth_rho
             layer_depth = self.grid.ds.layer_depth_rho
-            field = field.where(self.grid.ds.mask_rho)
+            mask = self.grid.ds.mask_rho
             field = field.assign_coords(
                 {"lon": self.grid.ds.lon_rho, "lat": self.grid.ds.lat_rho}
             )
@@ -389,7 +511,7 @@ class InitialConditions(ROMSToolsMixins):
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
             interface_depth = self.grid.ds.interface_depth_u
             layer_depth = self.grid.ds.layer_depth_u
-            field = field.where(self.grid.ds.mask_u)
+            mask = self.grid.ds.mask_u
             field = field.assign_coords(
                 {"lon": self.grid.ds.lon_u, "lat": self.grid.ds.lat_u}
             )
@@ -397,7 +519,7 @@ class InitialConditions(ROMSToolsMixins):
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
             interface_depth = self.grid.ds.interface_depth_v
             layer_depth = self.grid.ds.layer_depth_v
-            field = field.where(self.grid.ds.mask_v)
+            mask = self.grid.ds.mask_v
             field = field.assign_coords(
                 {"lon": self.grid.ds.lon_v, "lat": self.grid.ds.lat_v}
             )
@@ -419,14 +541,16 @@ class InitialConditions(ROMSToolsMixins):
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
                 layer_depth = layer_depth.isel(eta_rho=eta)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_rho=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             elif "eta_v" in field.dims:
                 title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
                 layer_depth = layer_depth.isel(eta_v=eta)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(eta_v=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
                     f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
@@ -436,14 +560,16 @@ class InitialConditions(ROMSToolsMixins):
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
                 layer_depth = layer_depth.isel(xi_rho=xi)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_rho=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             elif "xi_u" in field.dims:
                 title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
                 layer_depth = layer_depth.isel(xi_u=xi)
-                field = field.assign_coords({"layer_depth": layer_depth})
                 interface_depth = interface_depth.isel(xi_u=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
                     f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
@@ -467,7 +593,7 @@ class InitialConditions(ROMSToolsMixins):
         if eta is None and xi is None:
             _plot(
                 self.grid.ds,
-                field=field,
+                field=field.where(mask),
                 straddle=self.grid.straddle,
                 depth_contours=depth_contours,
                 title=title,

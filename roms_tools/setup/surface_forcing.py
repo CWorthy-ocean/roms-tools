@@ -7,7 +7,8 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
 from typing import Dict, Union, List
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.fill import _lateral_fill, LateralFill
+from roms_tools.setup.regrid import _lateral_regrid, LateralRegrid
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
@@ -20,6 +21,8 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     save_datasets,
+    get_target_coords,
+    rotate_velocities,
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
@@ -27,7 +30,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class SurfaceForcing(ROMSToolsMixins):
+class SurfaceForcing:
     """Represents surface forcing input data for ROMS.
 
     Parameters
@@ -91,63 +94,50 @@ class SurfaceForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super()._get_target_lon_lat(self.use_coarse_grid)
-        object.__setattr__(self, "target_lon", lon)
-        object.__setattr__(self, "target_lat", lat)
+        target_coords = get_target_coords(self.grid, self.use_coarse_grid)
+        object.__setattr__(self, "target_coords", target_coords)
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
-        if self.type == "physics":
-            vars_2d = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
-        elif self.type == "bgc":
-            vars_2d = data.var_names.keys()
-        vars_3d = []
 
-        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
+        variable_info = self._set_variable_info(data)
 
-        if self.type == "physics":
-            data_vars = super()._process_velocities(
-                data_vars, angle, "uwnd", "vwnd", interpolate=False
+        data_vars = {}
+        for var_name in data.var_names:
+            if var_name != "mask":
+                data_vars[var_name] = data.ds[data.var_names[var_name]]
+
+        data_vars = _lateral_fill(data_vars, data)
+
+        # lateral regridding
+        var_names = variable_info.keys()
+        data_vars = _lateral_regrid(
+            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
+        )
+
+        # rotation of velocities and interpolation to u/v points
+        if "uwnd" in variable_info and "vwnd" in variable_info:
+            data_vars["uwnd"], data_vars["vwnd"] = rotate_velocities(
+                data_vars["uwnd"],
+                data_vars["vwnd"],
+                target_coords["angle"],
+                interpolate=False,
             )
-            if self.correct_radiation:
-                correction_data = self._get_correction_data()
-                # choose same subdomain as forcing data so that we can use same mask
-                coords_correction = {
-                    correction_data.dim_names["latitude"]: data.ds[
-                        data.dim_names["latitude"]
-                    ],
-                    correction_data.dim_names["longitude"]: data.ds[
-                        data.dim_names["longitude"]
-                    ],
-                }
-                correction_data.choose_subdomain(coords_correction, straddle=straddle)
-                # apply mask from ERA5 data
-                if "mask" in data.var_names.keys():
-                    mask = data.ds["mask"]
-                    for var in correction_data.ds.data_vars:
-                        correction_data.ds[var] = xr.where(
-                            mask == 1, correction_data.ds[var], np.nan
-                        )
-                    correction_data.ds["mask"] = mask
-                vars_2d = ["swr_corr"]
-                vars_3d = []
-                # spatial interpolation
-                data_vars_corr = super()._regrid_data(
-                    correction_data, vars_2d, vars_3d, lon, lat
-                )
-                # temporal interpolation
-                corr_factor = interpolate_from_climatology(
-                    data_vars_corr["swr_corr"],
-                    correction_data.dim_names["time"],
-                    time=data_vars["swrad"].time,
-                )
 
-                data_vars["swrad"] = data_vars["swrad"] * corr_factor
+        # correct radiation
+        if self.type == "physics" and self.correct_radiation:
+            data_vars = self._apply_correction(data_vars, data)
 
         object.__setattr__(data, "data_vars", data_vars)
 
@@ -230,6 +220,107 @@ class SurfaceForcing(ROMSToolsMixins):
             )
 
         return correction_data
+
+    def _set_variable_info(self, data):
+        """Sets up a dictionary with metadata for variables based on the type of data
+        (physics or BGC).
+
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": False,
+        }
+
+        # Define a dictionary for variable names and their associated information
+        if self.type == "physics":
+            variable_info = {
+                "swrad": default_info,
+                "lwrad": default_info,
+                "Tair": default_info,
+                "qair": default_info,
+                "rain": default_info,
+                "uwnd": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "vwnd",
+                    "is_3d": False,
+                },
+                "vwnd": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "uwnd",
+                    "is_3d": False,
+                },
+            }
+        elif self.type == "bgc":
+            variable_info = {}
+            for var in data.var_names.keys():
+                variable_info[var] = default_info
+
+        return variable_info
+
+    def _apply_correction(self, data_vars, data):
+
+        correction_data = self._get_correction_data()
+        # choose same subdomain as forcing data so that we can use same mask
+        coords_correction = {
+            correction_data.dim_names["latitude"]: data.ds[data.dim_names["latitude"]],
+            correction_data.dim_names["longitude"]: data.ds[
+                data.dim_names["longitude"]
+            ],
+        }
+        correction_data.choose_subdomain(
+            coords_correction, straddle=self.target_coords["straddle"]
+        )
+        # apply mask from ERA5 data
+        if "mask" in data.ds.data_vars:
+            mask = data.ds["mask"]
+            for var in correction_data.ds.data_vars:
+                correction_data.ds[var] = xr.where(
+                    mask == 1, correction_data.ds[var], np.nan
+                )
+            correction_data.ds["mask"] = mask
+
+        # regrid
+        lateral_fill = LateralFill(
+            correction_data.ds["mask"],
+            [
+                correction_data.dim_names["latitude"],
+                correction_data.dim_names["longitude"],
+            ],
+        )
+        lateral_regrid = LateralRegrid(
+            correction_data, self.target_coords["lon"], self.target_coords["lat"]
+        )
+
+        filled = lateral_fill.apply(
+            correction_data.ds[correction_data.var_names["swr_corr"]]
+        )
+        corr_factor = lateral_regrid.apply(filled)
+
+        # temporal interpolation
+        corr_factor = interpolate_from_climatology(
+            corr_factor,
+            correction_data.dim_names["time"],
+            time=data_vars["swrad"].time,
+        )
+
+        data_vars["swrad"] = data_vars["swrad"] * corr_factor
+
+        return data_vars
 
     def _write_into_dataset(self, data, d_meta):
 
@@ -388,7 +479,9 @@ class SurfaceForcing(ROMSToolsMixins):
         else:
             field = field.where(self.grid.ds.mask_rho)
 
-        field = field.assign_coords({"lon": self.target_lon, "lat": self.target_lat})
+        field = field.assign_coords(
+            {"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]}
+        )
 
         # choose colorbar
         if varname in ["uwnd", "vwnd"]:

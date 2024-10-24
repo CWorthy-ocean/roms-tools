@@ -16,15 +16,19 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_v,
     get_variable_metadata,
     save_datasets,
+    get_target_coords,
+    rotate_velocities,
+    get_vector_pairs,
 )
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.fill import _lateral_fill
+from roms_tools.setup.regrid import _lateral_regrid
 import matplotlib.pyplot as plt
 from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class TidalForcing(ROMSToolsMixins):
-    """Represents tidal forcing data used in ocean modeling.
+class TidalForcing:
+    """Represents tidal forcing for ROMS.
 
     Parameters
     ----------
@@ -68,49 +72,58 @@ class TidalForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super()._get_target_lon_lat()
+        target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
-
         data.check_number_constituents(self.ntides)
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
-
         # select desired number of constituents
         object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
-
         self._correct_tides(data)
 
-        vars_2d = [
-            "ssh_Re",
-            "ssh_Im",
-            "pot_Re",
-            "pot_Im",
-            "u_Re",
-            "u_Im",
-            "v_Re",
-            "v_Im",
-        ]
-        vars_3d = []
+        variable_info = self._set_variable_info()
 
-        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = {}
+        for var_name in data.var_names:
+            data_vars[var_name] = data.ds[data.var_names[var_name]]
 
-        data_vars = super()._process_velocities(
-            data_vars, angle, "u_Re", "v_Re", interpolate=False
-        )
-        data_vars = super()._process_velocities(
-            data_vars, angle, "u_Im", "v_Im", interpolate=False
+        data_vars = _lateral_fill(data_vars, data)
+
+        # lateral regridding
+        var_names = variable_info.keys()
+        data_vars = _lateral_regrid(
+            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
         )
 
-        # Convert to barotropic velocity
+        # rotation of velocities and interpolation to u/v points
+        vector_pairs = get_vector_pairs(variable_info)
+        for pair in vector_pairs:
+            u_component = pair[0]
+            v_component = pair[1]
+            if u_component in data_vars and v_component in data_vars:
+                (data_vars[u_component], data_vars[v_component],) = rotate_velocities(
+                    data_vars[u_component],
+                    data_vars[v_component],
+                    target_coords["angle"],
+                    interpolate=False,
+                )
+
+        # convert to barotropic velocity
         for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
             data_vars[varname] = data_vars[varname] / self.grid.ds.h
 
-        # Interpolate from rho- to velocity points
+        # interpolate from rho- to velocity points
         for uname in ["u_Re", "u_Im"]:
             data_vars[uname] = interpolate_from_rho_to_u(data_vars[uname])
         for vname in ["v_Re", "v_Im"]:
@@ -146,6 +159,62 @@ class TidalForcing(ROMSToolsMixins):
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
         return data
+
+    def _set_variable_info(self):
+        """Sets up a dictionary with metadata for variables based on the type.
+
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": False,
+        }
+
+        # Define a dictionary for variable names and their associated information
+        variable_info = {
+            "ssh_Re": default_info,
+            "ssh_Im": default_info,
+            "pot_Re": default_info,
+            "pot_Im": default_info,
+            "u_Re": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "v_Re",
+                "is_3d": False,
+            },
+            "v_Re": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "u_Re",
+                "is_3d": False,
+            },
+            "u_Im": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "v_Im",
+                "is_3d": False,
+            },
+            "v_Im": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "u_Im",
+                "is_3d": False,
+            },
+        }
+
+        return variable_info
 
     def _write_into_dataset(self, data_vars, d_meta):
 
@@ -457,6 +526,9 @@ class TidalForcing(ROMSToolsMixins):
 
         # Update var_names dictionary
         var_names = {**data.var_names, "pot_Re": "pot_Re", "pot_Im": "pot_Im"}
+        var_names.pop("sal_Re", None)  # Remove "sal_Re" if it exists
+        var_names.pop("sal_Im", None)  # Remove "sal_Im" if it exists
+
         object.__setattr__(data, "var_names", var_names)
 
 

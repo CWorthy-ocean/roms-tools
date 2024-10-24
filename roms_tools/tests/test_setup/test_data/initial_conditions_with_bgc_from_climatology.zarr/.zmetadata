@@ -5,7 +5,7 @@
             "hc": 250.0,
             "ini_time": "2021-06-29 00:00:00",
             "model_reference_date": "2000-01-01 00:00:00",
-            "roms_tools_version": "0.1.dev152+dirty",
+            "roms_tools_version": "0.1.dev157+dirty",
             "source": "GLORYS",
             "theta_b": 2.0,
             "theta_s": 5.0,

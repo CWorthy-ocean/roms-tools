@@ -181,9 +181,38 @@ def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray
         filled by forward filling the deepest valid values down to the bottom.
         The original input data remains unmodified.
     """
-    field_interpolated = field.ffill(dim=dim)
+    if dim in field.dims:
+        return field.ffill(dim=dim)
+    else:
+        return field
 
-    return field_interpolated
+
+def _extrapolate_deepest_to_bottom(data_vars, data) -> dict:
+    """Extrapolate the deepest value to the bottom for variables using the dataset's
+    depth dimension.
+
+    This function fills in missing values at the bottom of each variable by
+    carrying forward the deepest available value, ensuring a complete depth profile.
+
+    Parameters
+    ----------
+    data_vars : dict
+        Existing dictionary of variables to be updated.
+    data : Dataset
+        Dataset containing variables and depth information.
+
+    Returns
+    -------
+    dict of str : xarray.DataArray
+        Dictionary of variables with the deepest value extrapolated to the bottom.
+    """
+
+    for var in data.var_names.keys():
+        data_vars[var] = extrapolate_deepest_to_bottom(
+            data.ds[data.var_names[var]], data.dim_names["depth"]
+        )
+
+    return data_vars
 
 
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
@@ -503,44 +532,6 @@ def get_variable_metadata():
     return d
 
 
-def get_boundary_info():
-    """This function provides information about the boundary points for the rho, u, and
-    v variables on the grid, specifying the indices for the south, east, north, and west
-    boundaries.
-
-    Returns
-    -------
-    dict
-        A dictionary where keys are variable types ("rho", "u", "v"), and values
-        are nested dictionaries mapping directions ("south", "east", "north", "west")
-        to the corresponding boundary coordinates.
-    """
-
-    # Boundary coordinates
-    bdry_coords = {
-        "rho": {
-            "south": {"eta_rho": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_rho": 0},
-        },
-        "u": {
-            "south": {"eta_rho": 0},
-            "east": {"xi_u": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_u": 0},
-        },
-        "v": {
-            "south": {"eta_v": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_v": -1},
-            "west": {"xi_rho": 0},
-        },
-    }
-
-    return bdry_coords
-
-
 def extract_single_value(data):
     """Extracts a single value from an xarray.DataArray or numpy array.
 
@@ -745,3 +736,207 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
         saved_filenames.extend(Path(f) for f in partitioned_filenames)
 
     return saved_filenames
+
+
+def get_target_coords(grid, use_coarse_grid=False):
+    """Retrieves longitude and latitude coordinates from the grid, adjusting them based
+    on longitude range.
+
+    Parameters
+    ----------
+    grid : Grid
+        Object representing the grid information used for the model.
+    use_coarse_grid : bool, optional
+        Use coarse grid data if True. Defaults to False.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the longitude, latitude, and angle arrays, along with a boolean indicating
+        if the grid straddles the meridian.
+    """
+    # Select grid variables based on whether the coarse grid is used
+    if use_coarse_grid:
+        lat, lon, angle = (
+            grid.ds.lat_coarse,
+            grid.ds.lon_coarse,
+            grid.ds.angle_coarse,
+        )
+        lat_psi = grid.ds.get("lat_psi_coarse")
+        lon_psi = grid.ds.get("lon_psi_coarse")
+    else:
+        lat, lon, angle = (
+            grid.ds.lat_rho,
+            grid.ds.lon_rho,
+            grid.ds.angle,
+        )
+        lat_psi = grid.ds.get("lat_psi")
+        lon_psi = grid.ds.get("lon_psi")
+
+    # Operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
+    lon = xr.where(lon > 180, lon - 360, lon)
+    if lon_psi is not None:
+        lon_psi = xr.where(lon_psi > 180, lon_psi - 360, lon_psi)
+
+    straddle = True
+    if not grid.straddle and abs(lon).min() > 5:
+        lon = xr.where(lon < 0, lon + 360, lon)
+        if lon_psi is not None:
+            lon_psi = xr.where(lon_psi < 0, lon_psi + 360, lon_psi)
+        straddle = False
+
+    target_coords = {
+        "lat": lat,
+        "lon": lon,
+        "lat_psi": lat_psi,
+        "lon_psi": lon_psi,
+        "angle": angle,
+        "straddle": straddle,
+    }
+
+    return target_coords
+
+
+def rotate_velocities(
+    u: xr.DataArray, v: xr.DataArray, angle: xr.DataArray, interpolate: bool = True
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Rotate and optionally interpolate velocity components to align with grid
+    orientation.
+
+    Parameters
+    ----------
+    u : xarray.DataArray
+        Zonal (east-west) velocity component at u-points.
+    v : xarray.DataArray
+        Meridional (north-south) velocity component at v-points.
+    angle : xarray.DataArray
+        Grid angle values for rotation.
+    interpolate : bool, optional
+        If True, interpolates rotated velocities to grid points (default is True).
+
+    Returns
+    -------
+    tuple of xarray.DataArray
+        Rotated velocity components (u_rot, v_rot).
+
+    Notes
+    -----
+    - Rotation formulas:
+      - u_rot = u * cos(angle) + v * sin(angle)
+      - v_rot = v * cos(angle) - u * sin(angle)
+    """
+
+    # Rotate velocities to grid orientation
+    u_rot = u * np.cos(angle) + v * np.sin(angle)
+    v_rot = v * np.cos(angle) - u * np.sin(angle)
+
+    # Interpolate to u- and v-points
+    if interpolate:
+        u_rot = interpolate_from_rho_to_u(u_rot)
+        v_rot = interpolate_from_rho_to_v(v_rot)
+
+    return u_rot, v_rot
+
+
+def compute_barotropic_velocity(
+    vel: xr.DataArray, interface_depth: xr.DataArray
+) -> xr.DataArray:
+    """Compute barotropic (depth-averaged) velocity from 3D velocity.
+
+    Assumes `vel` and `interface_depth` are at the same horizontal grid location.
+
+    Parameters
+    ----------
+    vel : xarray.DataArray
+        Velocity components (zonal and meridional) at u- and v-points.
+    interface_depth : xarray.DataArray
+        Depth values for computing layer thickness.
+
+    Returns
+    -------
+    xarray.DataArray
+        Depth-averaged velocity (`vel_bar`).
+
+    Notes
+    -----
+    Computed as:
+      - `vel_bar` = sum(dz * vel) / sum(dz)
+    """
+
+    # Layer thickness
+    dz = -interface_depth.diff(dim="s_w")
+    dz = dz.rename({"s_w": "s_rho"})
+
+    vel_bar = (dz * vel).sum(dim="s_rho") / dz.sum(dim="s_rho")
+
+    return vel_bar
+
+
+def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
+    """Transpose the dimensions of an xarray.DataArray to ensure that 'time', any
+    dimension starting with 's_', 'eta_', and 'xi_' are ordered first, followed by the
+    remaining dimensions in their original order.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The input DataArray whose dimensions are to be reordered.
+
+    Returns
+    -------
+    xarray.DataArray
+        The DataArray with dimensions reordered so that 'time', 's_*', 'eta_*',
+        and 'xi_*' are first, in that order, if they exist.
+    """
+
+    # List of preferred dimension patterns
+    preferred_order = ["time", "s_", "eta_", "xi_"]
+
+    # Get the existing dimensions in the DataArray
+    dims = list(da.dims)
+
+    # Collect dimensions that match any of the preferred patterns
+    matched_dims = []
+    for pattern in preferred_order:
+        # Find dimensions that start with the pattern
+        matched_dims += [dim for dim in dims if dim.startswith(pattern)]
+
+    # Create a new order: first the matched dimensions, then the rest
+    remaining_dims = [dim for dim in dims if dim not in matched_dims]
+    new_order = matched_dims + remaining_dims
+
+    # Transpose the DataArray to the new order
+    transposed_da = da.transpose(*new_order)
+
+    return transposed_da
+
+
+def get_vector_pairs(variable_info):
+    """Extracts all unique vector pairs from the variable_info dictionary.
+
+    Parameters
+    ----------
+    variable_info : dict
+        Dictionary containing variable information, including location,
+        whether it's a vector, and its vector pair.
+
+    Returns
+    -------
+    list of tuples
+        List of unique vector pairs, where each tuple contains the names of
+        the two vector components (e.g., ("u", "v")).
+    """
+    vector_pairs = []
+    processed = set()  # Track variables that have already been paired
+
+    for var_name, var_info in variable_info.items():
+        if var_info["is_vector"] and var_name not in processed:
+            vector_pair = var_info["vector_pair"]
+
+            # Ensure the vector_pair exists in the dictionary and has not been processed
+            if vector_pair and vector_pair in variable_info:
+                vector_pairs.append((var_name, vector_pair))
+                # Mark both the variable and its pair as processed
+                processed.update([var_name, vector_pair])
+
+    return vector_pairs

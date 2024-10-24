@@ -1158,16 +1158,16 @@ def _create_grid_ds(
         dims=["eta_v", "xi_rho"],
         attrs={"long_name": "latitude of v-points", "units": "degrees North"},
     )
-    lon_q = xr.Variable(
-        data=lonq * 180 / np.pi,
-        dims=["eta_psi", "xi_psi"],
-        attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
-    )
-    lat_q = xr.Variable(
-        data=latq * 180 / np.pi,
-        dims=["eta_psi", "xi_psi"],
-        attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
-    )
+    # lon_q = xr.Variable(
+    #    data=lonq * 180 / np.pi,
+    #    dims=["eta_psi", "xi_psi"],
+    #    attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
+    # )
+    # lat_q = xr.Variable(
+    #    data=latq * 180 / np.pi,
+    #    dims=["eta_psi", "xi_psi"],
+    #    attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
+    # )
 
     ds = ds.assign_coords(
         {
@@ -1177,8 +1177,8 @@ def _create_grid_ds(
             "lon_u": lon_u,
             "lat_v": lat_v,
             "lon_v": lon_v,
-            "lat_psi": lat_q,
-            "lon_psi": lon_q,
+            # "lat_psi": lat_q,
+            # "lon_psi": lon_q,
         }
     )
 

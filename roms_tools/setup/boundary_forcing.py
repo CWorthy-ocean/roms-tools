@@ -6,16 +6,21 @@ import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.fill import _lateral_fill
+from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
     get_variable_metadata,
-    get_boundary_info,
     group_dataset,
     save_datasets,
+    get_target_coords,
+    rotate_velocities,
+    compute_barotropic_velocity,
+    _extrapolate_deepest_to_bottom,
+    transpose_dimensions,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -23,7 +28,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class BoundaryForcing(ROMSToolsMixins):
+class BoundaryForcing:
     """Represents boundary forcing input data for ROMS.
 
     Parameters
@@ -91,33 +96,115 @@ class BoundaryForcing(ROMSToolsMixins):
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super()._get_target_lon_lat()
+        target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
+            latitude_range=[
+                target_coords["lat"].min().values,
+                target_coords["lat"].max().values,
+            ],
+            longitude_range=[
+                target_coords["lon"].min().values,
+                target_coords["lon"].max().values,
+            ],
             margin=2,
-            straddle=straddle,
+            straddle=target_coords["straddle"],
         )
 
-        if self.type == "physics":
-            vars_2d = ["zeta"]
-            vars_3d = ["temp", "salt", "u", "v"]
-        elif self.type == "bgc":
-            vars_2d = []
-            vars_3d = data.var_names.keys()
+        variable_info = self._set_variable_info(data)
 
-        data_vars = super()._regrid_data(data, vars_2d, vars_3d, lon, lat)
+        data_vars = {}
+        data_vars = _extrapolate_deepest_to_bottom(data_vars, data)
+        data_vars = _lateral_fill(data_vars, data)
 
-        if self.type == "physics":
-            data_vars = super()._process_velocities(data_vars, angle, "u", "v")
-        object.__setattr__(data, "data_vars", data_vars)
-
-        d_meta = get_variable_metadata()
         bdry_coords = get_boundary_info()
+        ds = xr.Dataset()
+        for direction in ["south", "east", "north", "west"]:
+            if self.boundaries[direction]:
 
-        ds = self._write_into_dataset(data, d_meta, bdry_coords)
+                bdry_data_vars = data_vars.copy()
+
+                # lateral regridding of vector fields
+                vector_var_names = [
+                    name for name, info in variable_info.items() if info["is_vector"]
+                ]
+                if len(vector_var_names) > 0:
+                    lon = target_coords["lon"].isel(**bdry_coords["vector"][direction])
+                    lat = target_coords["lat"].isel(**bdry_coords["vector"][direction])
+                    bdry_data_vars = _lateral_regrid(
+                        data, lon, lat, bdry_data_vars, vector_var_names
+                    )
+                # lateral regridding of tracer fields
+                tracer_var_names = [
+                    name
+                    for name, info in variable_info.items()
+                    if not info["is_vector"]
+                ]
+                if len(tracer_var_names) > 0:
+                    lon = target_coords["lon"].isel(**bdry_coords["rho"][direction])
+                    lat = target_coords["lat"].isel(**bdry_coords["rho"][direction])
+                    bdry_data_vars = _lateral_regrid(
+                        data, lon, lat, bdry_data_vars, tracer_var_names
+                    )
+
+                # rotation of velocities and interpolation to u/v points
+                if "u" in variable_info and "v" in variable_info:
+                    angle = target_coords["angle"].isel(
+                        **bdry_coords["vector"][direction]
+                    )
+                    (bdry_data_vars["u"], bdry_data_vars["v"],) = rotate_velocities(
+                        bdry_data_vars["u"],
+                        bdry_data_vars["v"],
+                        angle,
+                        interpolate=True,
+                    )
+
+                # selection of outermost margin for u/v variables
+                for var in variable_info.keys():
+                    if var in bdry_data_vars:
+                        location = variable_info[var]["location"]
+                        if location in ["u", "v"]:
+                            bdry_data_vars[var] = bdry_data_vars[var].isel(
+                                **bdry_coords[location][direction]
+                            )
+
+                # vertical regridding
+                for location in ["rho", "u", "v"]:
+                    var_names = [
+                        name
+                        for name, info in variable_info.items()
+                        if info["location"] == location and info["is_3d"]
+                    ]
+                    if len(var_names) > 0:
+                        bdry_data_vars = _vertical_regrid(
+                            data,
+                            self.grid.ds[f"layer_depth_{location}"].isel(
+                                **bdry_coords[location][direction],
+                            ),
+                            bdry_data_vars,
+                            var_names,
+                        )
+
+                # compute barotropic velocities
+                if "u" in variable_info and "v" in variable_info:
+                    for var in ["u", "v"]:
+                        bdry_data_vars[f"{var}bar"] = compute_barotropic_velocity(
+                            bdry_data_vars[var],
+                            self.grid.ds[f"interface_depth_{var}"].isel(
+                                **bdry_coords[var][direction]
+                            ),
+                        )
+
+                # Reorder dimensions
+                for var in bdry_data_vars.keys():
+                    bdry_data_vars[var] = transpose_dimensions(bdry_data_vars[var])
+
+                # Write the boundary data into dataset
+                ds = self._write_into_dataset(direction, bdry_data_vars, ds)
+
+        # Add global information
+        ds = self._add_global_metadata(data, ds)
 
         # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
         # this check works only for 2D fields because for 3D I extrapolate to bottom which eliminates NaNs
@@ -187,37 +274,86 @@ class BoundaryForcing(ROMSToolsMixins):
 
         return data
 
-    def _write_into_dataset(self, data, d_meta, bdry_coords):
+    def _set_variable_info(self, data):
+        """Sets up a dictionary with metadata for variables based on the type of data
+        (physics or BGC).
 
-        # save in new dataset
-        ds = xr.Dataset()
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
 
-        for direction in ["south", "east", "north", "west"]:
-            if self.boundaries[direction]:
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": True,
+        }
 
-                for var in data.data_vars.keys():
-                    if var in ["u", "ubar"]:
-                        ds[f"{var}_{direction}"] = (
-                            data.data_vars[var]
-                            .isel(**bdry_coords["u"][direction])
-                            .astype(np.float32)
-                        )
-                    elif var in ["v", "vbar"]:
-                        ds[f"{var}_{direction}"] = (
-                            data.data_vars[var]
-                            .isel(**bdry_coords["v"][direction])
-                            .astype(np.float32)
-                        )
-                    else:
-                        ds[f"{var}_{direction}"] = (
-                            data.data_vars[var]
-                            .isel(**bdry_coords["rho"][direction])
-                            .astype(np.float32)
-                        )
-                    ds[f"{var}_{direction}"].attrs[
-                        "long_name"
-                    ] = f"{direction}ern boundary {d_meta[var]['long_name']}"
-                    ds[f"{var}_{direction}"].attrs["units"] = d_meta[var]["units"]
+        # Define a dictionary for variable names and their associated information
+        if self.type == "physics":
+            variable_info = {
+                "zeta": {
+                    "location": "rho",
+                    "is_vector": False,
+                    "vector_pair": None,
+                    "is_3d": False,
+                },
+                "temp": default_info,
+                "salt": default_info,
+                "u": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "v",
+                    "is_3d": True,
+                },
+                "v": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "u",
+                    "is_3d": True,
+                },
+                "ubar": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "vbar",
+                    "is_3d": False,
+                },
+                "vbar": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "ubar",
+                    "is_3d": False,
+                },
+            }
+        elif self.type == "bgc":
+            variable_info = {}
+            for var in data.var_names.keys():
+                variable_info[var] = default_info
+
+        return variable_info
+
+    def _write_into_dataset(self, direction, data_vars, ds=None):
+        if ds is None:
+            ds = xr.Dataset()
+
+        d_meta = get_variable_metadata()
+
+        for var in data_vars.keys():
+            ds[f"{var}_{direction}"] = data_vars[var].astype(np.float32)
+
+            ds[f"{var}_{direction}"].attrs[
+                "long_name"
+            ] = f"{direction}ern boundary {d_meta[var]['long_name']}"
+
+            ds[f"{var}_{direction}"].attrs["units"] = d_meta[var]["units"]
 
         # Gracefully handle dropping variables that might not be present
         variables_to_drop = [
@@ -237,56 +373,6 @@ class BoundaryForcing(ROMSToolsMixins):
         ]
         existing_vars = [var for var in variables_to_drop if var in ds]
         ds = ds.drop_vars(existing_vars)
-
-        ds = self._add_global_metadata(ds)
-
-        # Convert the time coordinate to the format expected by ROMS
-        if data.climatology:
-            ds.attrs["climatology"] = str(True)
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords(
-                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
-            )
-            # Convert to pandas TimedeltaIndex
-            timedelta_index = pd.to_timedelta(ds["time"].values)
-
-            # Determine the start of the year for the base_datetime
-            start_of_year = datetime(self.model_reference_date.year, 1, 1)
-
-            # Calculate the offset from midnight of the new year
-            offset = self.model_reference_date - start_of_year
-
-            # Convert the timedelta to nanoseconds first, then to days
-            bry_time = xr.DataArray(
-                (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
-                dims="time",
-            )
-
-        else:
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords({"abs_time": ds["time"]})
-            # TODO: Check if we need to convert from 12:00:00 to 00:00:00 as in matlab scripts
-            bry_time = (
-                (ds["time"] - np.datetime64(self.model_reference_date)).astype(
-                    "float64"
-                )
-                / 3600
-                / 24
-                * 1e-9
-            )
-
-        ds = ds.assign_coords({"bry_time": bry_time})
-        ds["bry_time"].attrs[
-            "long_name"
-        ] = f"days since {str(self.model_reference_date)}"
-        ds["bry_time"].encoding["units"] = "days"
-        ds["bry_time"].attrs["units"] = "days"
-        ds = ds.swap_dims({"time": "bry_time"})
-        ds = ds.drop_vars("time")
-        ds.encoding["unlimited_dims"] = "bry_time"
-
-        if data.climatology:
-            ds["bry_time"].attrs["cycle_length"] = 365.25
 
         return ds
 
@@ -325,7 +411,7 @@ class BoundaryForcing(ROMSToolsMixins):
 
         return layer_depth, interface_depth
 
-    def _add_global_metadata(self, ds=None):
+    def _add_global_metadata(self, data, ds=None):
 
         if ds is None:
             ds = xr.Dataset()
@@ -344,6 +430,53 @@ class BoundaryForcing(ROMSToolsMixins):
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
+
+        # Convert the time coordinate to the format expected by ROMS
+        if data.climatology:
+            ds.attrs["climatology"] = str(True)
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords(
+                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
+            )
+            # Convert to pandas TimedeltaIndex
+            timedelta_index = pd.to_timedelta(ds["time"].values)
+
+            # Determine the start of the year for the base_datetime
+            start_of_year = datetime(self.model_reference_date.year, 1, 1)
+
+            # Calculate the offset from midnight of the new year
+            offset = self.model_reference_date - start_of_year
+
+            # Convert the timedelta to nanoseconds first, then to days
+            bry_time = xr.DataArray(
+                (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
+                dims="time",
+            )
+
+        else:
+            # Preserve absolute time coordinate for readability
+            ds = ds.assign_coords({"abs_time": ds["time"]})
+            bry_time = (
+                (ds["time"] - np.datetime64(self.model_reference_date)).astype(
+                    "float64"
+                )
+                / 3600
+                / 24
+                * 1e-9
+            )
+
+        ds = ds.assign_coords({"bry_time": bry_time})
+        ds["bry_time"].attrs[
+            "long_name"
+        ] = f"days since {str(self.model_reference_date)}"
+        ds["bry_time"].encoding["units"] = "days"
+        ds["bry_time"].attrs["units"] = "days"
+        ds = ds.swap_dims({"time": "bry_time"})
+        ds = ds.drop_vars("time")
+        ds.encoding["unlimited_dims"] = "bry_time"
+
+        if data.climatology:
+            ds["bry_time"].attrs["cycle_length"] = 365.25
 
         return ds
 
@@ -621,3 +754,47 @@ class BoundaryForcing(ROMSToolsMixins):
 
         # Create and return an instance of InitialConditions
         return cls(grid=grid, **boundary_forcing_data, use_dask=use_dask)
+
+
+def get_boundary_info():
+    """This function provides information about the boundary points for the rho, u, and
+    v variables on the grid, specifying the indices for the south, east, north, and west
+    boundaries.
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are variable types ("rho", "u", "v"), and values
+        are nested dictionaries mapping directions ("south", "east", "north", "west")
+        to the corresponding boundary coordinates.
+    """
+
+    # Boundary coordinates
+    bdry_coords = {
+        "rho": {
+            "south": {"eta_rho": 0},
+            "east": {"xi_rho": -1},
+            "north": {"eta_rho": -1},
+            "west": {"xi_rho": 0},
+        },
+        "u": {
+            "south": {"eta_rho": 0},
+            "east": {"xi_u": -1},
+            "north": {"eta_rho": -1},
+            "west": {"xi_u": 0},
+        },
+        "v": {
+            "south": {"eta_v": 0},
+            "east": {"xi_rho": -1},
+            "north": {"eta_v": -1},
+            "west": {"xi_rho": 0},
+        },
+        "vector": {
+            "south": {"eta_rho": [0, 1]},
+            "east": {"xi_rho": [-2, -1]},
+            "north": {"eta_rho": [-2, -1]},
+            "west": {"xi_rho": [0, 1]},
+        },
+    }
+
+    return bdry_coords

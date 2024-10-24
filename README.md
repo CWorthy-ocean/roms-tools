@@ -40,7 +40,7 @@ Next, install and activate the following conda environment:
 
 ```bash
 conda env create -f ci/environment.yml
-conda activate romstools
+conda activate romstools-test
 ```
 
 Finally, install `ROMS-Tools` in the same environment:
@@ -62,7 +62,7 @@ pip install -e .[dask]
 Before running the tests, you can activate the conda environment created in the previous section:
 
 ```bash
-conda activate romstools
+conda activate romstools-test
 ```
 
 Check the installation of `ROMS-Tools` has worked by running the test suite

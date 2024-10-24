@@ -805,9 +805,6 @@ class TPXODataset(Dataset):
         if "depth" in self.var_names.keys():
             mask = xr.where(self.ds["depth"] > 0, 1, 0)
 
-            for var in self.ds.data_vars:
-                self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
-
             self.ds["mask"] = mask
 
         # Remove "depth" from var_names
@@ -883,11 +880,16 @@ class GLORYSDataset(Dataset):
             0,
             1,
         )
-
-        for var in self.ds.data_vars:
-            self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
+        mask_vel = xr.where(
+            self.ds[self.var_names["u"]]
+            .isel({self.dim_names["time"]: 0, self.dim_names["depth"]: 0})
+            .isnull(),
+            0,
+            1,
+        )
 
         self.ds["mask"] = mask
+        self.ds["mask_vel"] = mask_vel
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1093,9 +1095,6 @@ class CESMBGCDataset(CESMDataset):
             1,
         )
 
-        for var in self.ds.data_vars:
-            self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
-
         self.ds["mask"] = mask
 
 
@@ -1164,9 +1163,6 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
             0,
             1,
         )
-
-        for var in self.ds.data_vars:
-            self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
         self.ds["mask"] = mask
 
@@ -1276,9 +1272,6 @@ class ERA5Dataset(Dataset):
 
         if "mask" in self.var_names.keys():
             mask = xr.where(self.ds[self.var_names["mask"]].isel(time=0).isnull(), 0, 1)
-
-            for var in self.ds.data_vars:
-                self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
             self.ds["mask"] = mask
 

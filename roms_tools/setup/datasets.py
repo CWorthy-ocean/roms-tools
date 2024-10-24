@@ -810,6 +810,11 @@ class TPXODataset(Dataset):
 
             self.ds["mask"] = mask
 
+        # Remove "depth" from var_names
+        updated_var_names = {**self.var_names}  # Create a copy of the dictionary
+        updated_var_names.pop("depth", None)  # Remove "depth" if it exists
+        object.__setattr__(self, "var_names", updated_var_names)
+
 
 @dataclass(frozen=True, kw_only=True)
 class GLORYSDataset(Dataset):
@@ -1266,6 +1271,7 @@ class ERA5Dataset(Dataset):
 
             # Update var_names dictionary
             var_names = {**self.var_names, "qair": "qair"}
+            var_names.pop("d2m")
             object.__setattr__(self, "var_names", var_names)
 
         if "mask" in self.var_names.keys():
@@ -1275,6 +1281,11 @@ class ERA5Dataset(Dataset):
                 self.ds[var] = xr.where(mask == 1, self.ds[var], np.nan)
 
             self.ds["mask"] = mask
+
+            # Remove mask from var_names dictionary
+            var_names = self.var_names
+            var_names.pop("mask")
+            object.__setattr__(self, "var_names", var_names)
 
 
 @dataclass(frozen=True, kw_only=True)

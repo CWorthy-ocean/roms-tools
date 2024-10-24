@@ -301,3 +301,29 @@ def stencil_grid_mod(S, grid, msk, dtype=None, format=None):
                 data[4, i + diags[4]] = 0
 
     return sparse.dia_matrix((data, diags), shape=(N_v, N_v)).asformat(format)
+
+
+def _lateral_fill(data_vars, data):
+    """Wrapper function to apply lateral fill to variables using the dataset's mask and
+    grid dimensions.
+
+    Parameters
+    ----------
+    data_vars : dict of str : xarray.DataArray
+        Dictionary of variables to be filled.
+    data : Dataset
+        Dataset containing the mask and grid dimensions.
+
+    Returns
+    -------
+    dict of str : xarray.DataArray
+        Dictionary of filled variables.
+    """
+    lateral_fill = LateralFill(
+        data.ds["mask"],
+        [data.dim_names["latitude"], data.dim_names["longitude"]],
+    )
+    for var in data.var_names:
+        data_vars[var] = lateral_fill.apply(data_vars[var])
+
+    return data_vars

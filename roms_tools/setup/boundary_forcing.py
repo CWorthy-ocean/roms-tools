@@ -6,22 +6,20 @@ import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.fill import LateralFill
-from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.setup.fill import _lateral_fill
+from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
     get_variable_metadata,
-    get_boundary_info,
     group_dataset,
     save_datasets,
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    extrapolate_deepest_to_bottom,
-    get_vector_pairs,
+    _extrapolate_deepest_to_bottom,
     transpose_dimensions,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
@@ -97,7 +95,6 @@ class BoundaryForcing:
 
     def __post_init__(self):
 
-        data_vars = {}
         self._input_checks()
         target_coords = get_target_coords(self.grid)
 
@@ -117,73 +114,53 @@ class BoundaryForcing:
 
         variable_info = self._set_variable_info(data)
 
-        # extrapolate deepest value all the way to bottom
-        for var in variable_info.keys():
-            if var in data.var_names:
-                data_vars[var] = extrapolate_deepest_to_bottom(
-                    data.ds[data.var_names[var]], data.dim_names["depth"]
-                )
-
-        # fill laterally
-        lateral_fill = LateralFill(
-            data.ds["mask"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
-        )
-        for var in variable_info.keys():
-            if var in data_vars:
-                # Propagate ocean values into land via lateral fill
-                data_vars[var] = lateral_fill.apply(data_vars[var])
+        data_vars = {}
+        data_vars = _extrapolate_deepest_to_bottom(data_vars, data)
+        data_vars = _lateral_fill(data_vars, data)
 
         bdry_coords = get_boundary_info()
         ds = xr.Dataset()
-
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
 
-                bdry_data_vars = {}
+                bdry_data_vars = data_vars.copy()
 
-                # Lateral regridding
-                lateral_regridders = {}
-                if any(info["is_vector"] for info in variable_info.values()):
+                # lateral regridding of vector fields
+                vector_var_names = [
+                    name for name, info in variable_info.items() if info["is_vector"]
+                ]
+                if len(vector_var_names) > 0:
                     lon = target_coords["lon"].isel(**bdry_coords["vector"][direction])
                     lat = target_coords["lat"].isel(**bdry_coords["vector"][direction])
-                    lateral_regridders["vector"] = LateralRegrid(data, lon, lat)
-                if any(not info["is_vector"] for info in variable_info.values()):
+                    bdry_data_vars = _lateral_regrid(
+                        data, lon, lat, bdry_data_vars, vector_var_names
+                    )
+                # lateral regridding of tracer fields
+                tracer_var_names = [
+                    name
+                    for name, info in variable_info.items()
+                    if not info["is_vector"]
+                ]
+                if len(tracer_var_names) > 0:
                     lon = target_coords["lon"].isel(**bdry_coords["rho"][direction])
                     lat = target_coords["lat"].isel(**bdry_coords["rho"][direction])
-                    lateral_regridders["rho"] = LateralRegrid(data, lon, lat)
+                    bdry_data_vars = _lateral_regrid(
+                        data, lon, lat, bdry_data_vars, tracer_var_names
+                    )
 
-                for var in variable_info.keys():
-                    if var in data_vars:
-                        if variable_info[var]["is_vector"]:
-                            bdry_data_vars[var] = lateral_regridders["vector"].apply(
-                                data_vars[var]
-                            )
-                        else:
-                            bdry_data_vars[var] = lateral_regridders["rho"].apply(
-                                data_vars[var]
-                            )
+                # rotation of velocities and interpolation to u/v points
+                if "u" in variable_info and "v" in variable_info:
+                    angle = target_coords["angle"].isel(
+                        **bdry_coords["vector"][direction]
+                    )
+                    (bdry_data_vars["u"], bdry_data_vars["v"],) = rotate_velocities(
+                        bdry_data_vars["u"],
+                        bdry_data_vars["v"],
+                        angle,
+                        interpolate=True,
+                    )
 
-                # Rotation of velocities and interpolation to u/v points
-                vector_pairs = get_vector_pairs(variable_info)
-                for pair in vector_pairs:
-                    u_component = pair[0]
-                    v_component = pair[1]
-                    if u_component in bdry_data_vars and v_component in bdry_data_vars:
-                        angle = target_coords["angle"].isel(
-                            **bdry_coords["vector"][direction]
-                        )
-                        (
-                            bdry_data_vars[u_component],
-                            bdry_data_vars[v_component],
-                        ) = rotate_velocities(
-                            bdry_data_vars[u_component],
-                            bdry_data_vars[v_component],
-                            angle,
-                            interpolate=True,
-                        )
-
-                # Select outermost margin for u/v variables
+                # selection of outermost margin for u/v variables
                 for var in variable_info.keys():
                     if var in bdry_data_vars:
                         location = variable_info[var]["location"]
@@ -192,30 +169,26 @@ class BoundaryForcing:
                                 **bdry_coords[location][direction]
                             )
 
-                # Vertical regridding
-                vertical_regridders = {}
+                # vertical regridding
                 for location in ["rho", "u", "v"]:
-                    if any(
-                        info["location"] == location and info["is_3d"]
-                        for info in variable_info.values()
-                    ):
-                        vertical_regridders[location] = VerticalRegrid(
+                    var_names = [
+                        name
+                        for name, info in variable_info.items()
+                        if info["location"] == location and info["is_3d"]
+                    ]
+                    if len(var_names) > 0:
+                        bdry_data_vars = _vertical_regrid(
                             data,
                             self.grid.ds[f"layer_depth_{location}"].isel(
-                                **bdry_coords[location][direction]
+                                **bdry_coords[location][direction],
                             ),
+                            bdry_data_vars,
+                            var_names,
                         )
 
-                for var in variable_info.keys():
-                    if variable_info[var]["is_3d"] and var in bdry_data_vars:
-                        location = variable_info[var]["location"]
-                        bdry_data_vars[var] = vertical_regridders[location].apply(
-                            bdry_data_vars[var]
-                        )
-
-                # Compute barotropic velocities
-                for var in ["u", "v"]:
-                    if var in bdry_data_vars:
+                # compute barotropic velocities
+                if "u" in variable_info and "v" in variable_info:
+                    for var in ["u", "v"]:
                         bdry_data_vars[f"{var}bar"] = compute_barotropic_velocity(
                             bdry_data_vars[var],
                             self.grid.ds[f"interface_depth_{var}"].isel(
@@ -253,6 +226,53 @@ class BoundaryForcing:
             ds[var] = substitute_nans_by_fillvalue(ds[var])
 
         object.__setattr__(self, "ds", ds)
+
+    def _input_checks(self):
+        # Validate the 'type' parameter
+        if self.type not in ["physics", "bgc"]:
+            raise ValueError("`type` must be either 'physics' or 'bgc'.")
+
+        # Ensure 'source' dictionary contains required keys
+        if "name" not in self.source:
+            raise ValueError("`source` must include a 'name'.")
+        if "path" not in self.source:
+            raise ValueError("`source` must include a 'path'.")
+
+        # Set 'climatology' to False if not provided in 'source'
+        object.__setattr__(
+            self,
+            "source",
+            {**self.source, "climatology": self.source.get("climatology", False)},
+        )
+
+    def _get_data(self):
+
+        data_dict = {
+            "filename": self.source["path"],
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "climatology": self.source["climatology"],
+            "use_dask": self.use_dask,
+        }
+
+        if self.type == "physics":
+            if self.source["name"] == "GLORYS":
+                data = GLORYSDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "GLORYS" is a valid option for source["name"] when type is "physics".'
+                )
+
+        elif self.type == "bgc":
+            if self.source["name"] == "CESM_REGRIDDED":
+
+                data = CESMBGCDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                )
+
+        return data
 
     def _set_variable_info(self, data):
         """Sets up a dictionary with metadata for variables based on the type of data
@@ -319,53 +339,6 @@ class BoundaryForcing:
                 variable_info[var] = default_info
 
         return variable_info
-
-    def _input_checks(self):
-        # Validate the 'type' parameter
-        if self.type not in ["physics", "bgc"]:
-            raise ValueError("`type` must be either 'physics' or 'bgc'.")
-
-        # Ensure 'source' dictionary contains required keys
-        if "name" not in self.source:
-            raise ValueError("`source` must include a 'name'.")
-        if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
-
-        # Set 'climatology' to False if not provided in 'source'
-        object.__setattr__(
-            self,
-            "source",
-            {**self.source, "climatology": self.source.get("climatology", False)},
-        )
-
-    def _get_data(self):
-
-        data_dict = {
-            "filename": self.source["path"],
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-            "use_dask": self.use_dask,
-        }
-
-        if self.type == "physics":
-            if self.source["name"] == "GLORYS":
-                data = GLORYSDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "GLORYS" is a valid option for source["name"] when type is "physics".'
-                )
-
-        elif self.type == "bgc":
-            if self.source["name"] == "CESM_REGRIDDED":
-
-                data = CESMBGCDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
-                )
-
-        return data
 
     def _write_into_dataset(self, direction, data_vars, ds=None):
         if ds is None:
@@ -781,3 +754,47 @@ class BoundaryForcing:
 
         # Create and return an instance of InitialConditions
         return cls(grid=grid, **boundary_forcing_data, use_dask=use_dask)
+
+
+def get_boundary_info():
+    """This function provides information about the boundary points for the rho, u, and
+    v variables on the grid, specifying the indices for the south, east, north, and west
+    boundaries.
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are variable types ("rho", "u", "v"), and values
+        are nested dictionaries mapping directions ("south", "east", "north", "west")
+        to the corresponding boundary coordinates.
+    """
+
+    # Boundary coordinates
+    bdry_coords = {
+        "rho": {
+            "south": {"eta_rho": 0},
+            "east": {"xi_rho": -1},
+            "north": {"eta_rho": -1},
+            "west": {"xi_rho": 0},
+        },
+        "u": {
+            "south": {"eta_rho": 0},
+            "east": {"xi_u": -1},
+            "north": {"eta_rho": -1},
+            "west": {"xi_u": 0},
+        },
+        "v": {
+            "south": {"eta_v": 0},
+            "east": {"xi_rho": -1},
+            "north": {"eta_v": -1},
+            "west": {"xi_rho": 0},
+        },
+        "vector": {
+            "south": {"eta_rho": [0, 1]},
+            "east": {"xi_rho": [-2, -1]},
+            "north": {"eta_rho": [-2, -1]},
+            "west": {"xi_rho": [0, 1]},
+        },
+    }
+
+    return bdry_coords

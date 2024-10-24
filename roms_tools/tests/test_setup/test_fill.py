@@ -23,7 +23,6 @@ def era5_data(request, use_dask):
         end_time=datetime(2020, 2, 2),
         use_dask=use_dask,
     )
-    data.post_process()
 
     return data
 
@@ -38,7 +37,6 @@ def glorys_data(request, use_dask):
         end_time=datetime(2013, 1, 1),
         use_dask=use_dask,
     )
-    data.post_process()
 
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
@@ -58,7 +56,6 @@ def tpxo_data(request, use_dask):
         filename=fname,
         use_dask=use_dask,
     )
-    data.post_process()
 
     return data
 
@@ -74,7 +71,6 @@ def cesm_bgc_data(request, use_dask):
         climatology=False,
         use_dask=use_dask,
     )
-    data.post_process()
 
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
@@ -112,6 +108,7 @@ def test_lateral_fill_no_nans(data_fixture, request):
         [data.dim_names["latitude"], data.dim_names["longitude"]],
     )
 
+    print(data.var_names)
     for var in data.var_names:
         filled = lateral_fill.apply(data.ds[data.var_names[var]].astype(np.float64))
         assert not filled.isnull().any()

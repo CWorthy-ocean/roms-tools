@@ -7,8 +7,8 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
 from typing import Dict, Union, List
-from roms_tools.setup.fill import LateralFill
-from roms_tools.setup.regrid import LateralRegrid
+from roms_tools.setup.fill import _lateral_fill, LateralFill
+from roms_tools.setup.regrid import _lateral_regrid, LateralRegrid
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
@@ -111,28 +111,23 @@ class SurfaceForcing:
             straddle=target_coords["straddle"],
         )
 
+        variable_info = self._set_variable_info(data)
+
         data_vars = {}
+        for var_name in data.var_names:
+            if var_name != "mask":
+                data_vars[var_name] = data.ds[data.var_names[var_name]]
 
-        # regrid
-        lateral_fill = LateralFill(
-            data.ds["mask"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
+        data_vars = _lateral_fill(data_vars, data)
+
+        # lateral regridding
+        var_names = variable_info.keys()
+        data_vars = _lateral_regrid(
+            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
         )
-        lateral_regrid = LateralRegrid(data, target_coords["lon"], target_coords["lat"])
 
-        if self.type == "physics":
-            varnames = ["uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", "rain"]
-        elif self.type == "bgc":
-            varnames = data.var_names.keys()
-
-        for var in varnames:
-            # Propagate ocean values into land via lateral fill
-            filled = lateral_fill.apply(data.ds[data.var_names[var]])
-            # Lateral regridding
-            data_vars[var] = lateral_regrid.apply(filled)
-
-        if self.type == "physics":
-            # rotate velocities
+        # rotation of velocities and interpolation to u/v points
+        if "uwnd" in variable_info and "vwnd" in variable_info:
             data_vars["uwnd"], data_vars["vwnd"] = rotate_velocities(
                 data_vars["uwnd"],
                 data_vars["vwnd"],
@@ -140,9 +135,9 @@ class SurfaceForcing:
                 interpolate=False,
             )
 
-            # correct radiation if necessary
-            if self.correct_radiation:
-                data_vars = self._apply_correction(data_vars, data)
+        # correct radiation
+        if self.type == "physics" and self.correct_radiation:
+            data_vars = self._apply_correction(data_vars, data)
 
         object.__setattr__(data, "data_vars", data_vars)
 
@@ -226,6 +221,57 @@ class SurfaceForcing:
 
         return correction_data
 
+    def _set_variable_info(self, data):
+        """Sets up a dictionary with metadata for variables based on the type of data
+        (physics or BGC).
+
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": False,
+        }
+
+        # Define a dictionary for variable names and their associated information
+        if self.type == "physics":
+            variable_info = {
+                "swrad": default_info,
+                "lwrad": default_info,
+                "Tair": default_info,
+                "qair": default_info,
+                "rain": default_info,
+                "uwnd": {
+                    "location": "u",
+                    "is_vector": True,
+                    "vector_pair": "vwnd",
+                    "is_3d": False,
+                },
+                "vwnd": {
+                    "location": "v",
+                    "is_vector": True,
+                    "vector_pair": "uwnd",
+                    "is_3d": False,
+                },
+            }
+        elif self.type == "bgc":
+            variable_info = {}
+            for var in data.var_names.keys():
+                variable_info[var] = default_info
+
+        return variable_info
+
     def _apply_correction(self, data_vars, data):
 
         correction_data = self._get_correction_data()
@@ -240,7 +286,7 @@ class SurfaceForcing:
             coords_correction, straddle=self.target_coords["straddle"]
         )
         # apply mask from ERA5 data
-        if "mask" in data.var_names.keys():
+        if "mask" in data.ds.data_vars:
             mask = data.ds["mask"]
             for var in correction_data.ds.data_vars:
                 correction_data.ds[var] = xr.where(

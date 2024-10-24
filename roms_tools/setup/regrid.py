@@ -138,3 +138,61 @@ class VerticalRegrid:
             )
 
         return result
+
+
+def _lateral_regrid(data, lon, lat, data_vars, var_names):
+    """Laterally regrid specified variables onto new latitude and longitude coordinates.
+
+    Parameters
+    ----------
+    data : Dataset
+        Input data containing the information about source dimensions.
+    lon : xarray.DataArray
+        Target longitude coordinates.
+    lat : xarray.DataArray
+        Target latitude coordinates.
+    data_vars : dict of str : xarray.DataArray
+        Dictionary of variables to regrid.
+    var_names : list of str
+        Names of variables to regrid.
+
+    Returns
+    -------
+    dict of str : xarray.DataArray
+        Updated data_vars with regridded variables.
+    """
+    lateral_regrid = LateralRegrid(data, lon, lat)
+
+    for var_name in var_names:
+        if var_name in data_vars:
+            data_vars[var_name] = lateral_regrid.apply(data_vars[var_name])
+
+    return data_vars
+
+
+def _vertical_regrid(data, target_depth, data_vars, var_names):
+    """Vertically regrid specified variables onto new depth coordinates.
+
+    Parameters
+    ----------
+    data : Dataset
+        Input dataset containing the variables and source depth information.
+    target_depth : xarray.DataArray
+        Target depth coordinates for regridding.
+    data_vars : dict of str : xarray.DataArray
+        Dictionary of variables to be regridded.
+    var_names : list of str
+        Names of variables to regrid.
+
+    Returns
+    -------
+    dict of str : xarray.DataArray
+        Updated data_vars with variables regridded onto the target depth coordinates.
+    """
+    vertical_regrid = VerticalRegrid(data, target_depth)
+
+    for var_name in var_names:
+        if var_name in data_vars:
+            data_vars[var_name] = vertical_regrid.apply(data_vars[var_name])
+
+    return data_vars

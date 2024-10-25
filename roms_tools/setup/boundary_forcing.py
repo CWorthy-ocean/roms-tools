@@ -6,7 +6,6 @@ import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.fill import _lateral_fill
 from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
@@ -19,7 +18,6 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    _extrapolate_deepest_to_bottom,
     transpose_dimensions,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
@@ -99,23 +97,22 @@ class BoundaryForcing:
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
-        data.choose_subdomain(
-            target_coords,
-            buffer_points=20,
-        )
-
         variable_info = self._set_variable_info(data)
-
-        data_vars = {}
-        data_vars = _extrapolate_deepest_to_bottom(data_vars, data)
-        data_vars = _lateral_fill(data_vars, data)
 
         bdry_coords = get_boundary_info()
         ds = xr.Dataset()
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
 
-                bdry_data_vars = data_vars.copy()
+                ds_source = data.choose_subdomain(
+                    target_coords,
+                    buffer_points=3,  # we won't do lateral fill, so chosen pretty minimally
+                    return_subdomain=True,
+                )
+
+                data_vars = {}
+                for var_name in data.var_names.keys():
+                    data_vars[var_name] = ds_source[data.var_names[var_name]]
 
                 # lateral regridding of vector fields
                 vector_var_names = [
@@ -124,8 +121,11 @@ class BoundaryForcing:
                 if len(vector_var_names) > 0:
                     lon = target_coords["lon"].isel(**bdry_coords["vector"][direction])
                     lat = target_coords["lat"].isel(**bdry_coords["vector"][direction])
-                    bdry_data_vars = _lateral_regrid(
-                        data, lon, lat, bdry_data_vars, vector_var_names
+                    data_vars = _lateral_regrid(
+                        {"lat": lat, "lon": lon},
+                        data.dim_names,
+                        data_vars,
+                        vector_var_names,
                     )
                 # lateral regridding of tracer fields
                 tracer_var_names = [
@@ -136,8 +136,11 @@ class BoundaryForcing:
                 if len(tracer_var_names) > 0:
                     lon = target_coords["lon"].isel(**bdry_coords["rho"][direction])
                     lat = target_coords["lat"].isel(**bdry_coords["rho"][direction])
-                    bdry_data_vars = _lateral_regrid(
-                        data, lon, lat, bdry_data_vars, tracer_var_names
+                    data_vars = _lateral_regrid(
+                        {"lat": lat, "lon": lon},
+                        data.dim_names,
+                        data_vars,
+                        tracer_var_names,
                     )
 
                 # rotation of velocities and interpolation to u/v points
@@ -145,19 +148,19 @@ class BoundaryForcing:
                     angle = target_coords["angle"].isel(
                         **bdry_coords["vector"][direction]
                     )
-                    (bdry_data_vars["u"], bdry_data_vars["v"],) = rotate_velocities(
-                        bdry_data_vars["u"],
-                        bdry_data_vars["v"],
+                    (data_vars["u"], data_vars["v"],) = rotate_velocities(
+                        data_vars["u"],
+                        data_vars["v"],
                         angle,
                         interpolate=True,
                     )
 
                 # selection of outermost margin for u/v variables
                 for var in variable_info.keys():
-                    if var in bdry_data_vars:
+                    if var in data_vars:
                         location = variable_info[var]["location"]
                         if location in ["u", "v"]:
-                            bdry_data_vars[var] = bdry_data_vars[var].isel(
+                            data_vars[var] = data_vars[var].isel(
                                 **bdry_coords[location][direction]
                             )
 
@@ -169,31 +172,31 @@ class BoundaryForcing:
                         if info["location"] == location and info["is_3d"]
                     ]
                     if len(var_names) > 0:
-                        bdry_data_vars = _vertical_regrid(
-                            data,
+                        data_vars = _vertical_regrid(
                             self.grid.ds[f"layer_depth_{location}"].isel(
                                 **bdry_coords[location][direction],
                             ),
-                            bdry_data_vars,
+                            ds_source[data.dim_names["depth"]],
+                            data_vars,
                             var_names,
                         )
 
                 # compute barotropic velocities
                 if "u" in variable_info and "v" in variable_info:
                     for var in ["u", "v"]:
-                        bdry_data_vars[f"{var}bar"] = compute_barotropic_velocity(
-                            bdry_data_vars[var],
+                        data_vars[f"{var}bar"] = compute_barotropic_velocity(
+                            data_vars[var],
                             self.grid.ds[f"interface_depth_{var}"].isel(
                                 **bdry_coords[var][direction]
                             ),
                         )
 
                 # Reorder dimensions
-                for var in bdry_data_vars.keys():
-                    bdry_data_vars[var] = transpose_dimensions(bdry_data_vars[var])
+                for var in data_vars.keys():
+                    data_vars[var] = transpose_dimensions(data_vars[var])
 
                 # Write the boundary data into dataset
-                ds = self._write_into_dataset(direction, bdry_data_vars, ds)
+                ds = self._write_into_dataset(direction, data_vars, ds)
 
         # Add global information
         ds = self._add_global_metadata(data, ds)

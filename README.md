@@ -14,6 +14,14 @@ A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla
 
 ## Installation
 
+### Installation from conda forge
+
+```bash
+conda install -c conda-forge roms-tools
+```
+
+This command installs `ROMS-Tools` along with its `dask` dependency.
+
 ### Installation from pip
 
 ```bash

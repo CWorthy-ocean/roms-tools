@@ -155,39 +155,32 @@ def interpolate_from_rho_to_v(field, method="additive"):
 
     return field_interpolated
 
-
-def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
-    """Extrapolates the deepest non-NaN values to the bottom along the specified
-    dimension using forward fill.
-
-    This function assumes that the specified dimension is ordered from top to bottom (e.g., a vertical dimension like 'depth').
-    It fills `NaN` values below the deepest valid (non-NaN) entry along the given dimension by carrying forward the last valid value.
+def fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
+    """Fill NaN values in a DataArray along a specified dimension.
 
     Parameters
     ----------
-    field : xr.DataArray
-        The input `xarray.DataArray` containing potential `NaN` values to be filled.
-        This array must have at least one dimension corresponding to `dim`, typically
-        a vertical axis such as 'depth' or 'height'.
+    da : xr.DataArray
+        The input DataArray with NaN values to be filled, which must include the specified dimension.
     dim : str
-        The name of the dimension along which to perform the forward fill operation.
-        The function assumes that this dimension is ordered from top to bottom, with
-        larger index values representing deeper or lower levels.
+        The name of the dimension along which to fill NaN values (e.g., 'depth' or 'time').
+    direction : str, optional
+        The filling direction; either "forward" to propagate non-NaN values downward or "backward" to propagate them upward.
+        Defaults to "forward".
 
     Returns
     -------
     xr.DataArray
-        A new `xarray.DataArray` with the `NaN` values along the specified dimension
-        filled by forward filling the deepest valid values down to the bottom.
-        The original input data remains unmodified.
+        A new DataArray with NaN values filled in the specified direction, leaving the original data unchanged.
     """
-    if dim in field.dims:
-        return field.ffill(dim=dim)
-    else:
-        return field
+    if dim in da.dims:
+        if direction == "forward":
+            return da.ffill(dim=dim)
+        elif direction == "backward":
+            return da.bfill(dim=dim)
+    return da
 
-
-def _extrapolate_deepest_to_bottom(data_vars, data) -> dict:
+def extrapolate_deepest_to_bottom(data_vars, dim: str) -> dict:
     """Extrapolate the deepest value to the bottom for variables using the dataset's
     depth dimension.
 
@@ -198,8 +191,8 @@ def _extrapolate_deepest_to_bottom(data_vars, data) -> dict:
     ----------
     data_vars : dict
         Existing dictionary of variables to be updated.
-    data : Dataset
-        Dataset containing variables and depth information.
+    dim : str
+        Name of dimension along which to perform the fill.
 
     Returns
     -------
@@ -208,12 +201,60 @@ def _extrapolate_deepest_to_bottom(data_vars, data) -> dict:
     """
 
     for var in data.var_names.keys():
-        data_vars[var] = extrapolate_deepest_to_bottom(
-            data.ds[data.var_names[var]], data.dim_names["depth"]
+        data_vars[var] = fill(
+            data.ds[data.var_names[var]], dim, direction="forward"
         )
 
     return data_vars
 
+
+def extrapolate_nans_in_open_boundaries(data_vars, direction="horizontal") -> dict:
+    """Forward fill NaN values in horizontal or vertical direction for open boundaries.
+
+    Parameters
+    ----------
+    data_vars : dict
+        A dictionary of variables to be updated, where each value is an 
+        `xarray.DataArray`.
+
+    Returns
+    -------
+    dict of str : xarray.DataArray
+        The updated dictionary of variables, with NaN values filled in both 
+        horizontal and vertical directions.
+    
+    Raises
+    ------
+    ValueError
+        If more than one horizontal dimension is specified or none at all.
+    """
+
+    if direction == "horizontal":
+        horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
+
+        for var_name in data_vars.keys():
+            selected_horizontal_dim = None
+            # Determine the horizontal dimension to fill
+            for dim in horizontal_dims:
+                if dim in data_vars[var_name].dims:
+                    if selected_horizontal_dim is not None:
+                        raise ValueError(f"More than one horizontal dimension found in variable '{var_name}'.")
+                    selected_horizontal_dim = dim
+
+            if selected_horizontal_dim is None:
+                raise ValueError(f"No valid horizontal dimension found for variable '{var_name}'.")
+
+            # Forward and backward fill in the horizontal direction
+            filled = fill(data_vars[var_name], selected_horizontal_dim, direction="forward")
+            data_vars[var_name] = fill(filled, selected_horizontal_dim, direction="backward")
+
+    elif direction == "vertical":
+        # Forward and backward fill in the vertical direction if applicable
+        if "s_rho" in data_vars[var_name].dims:
+            filled = fill(data_vars[var_name], "s_rho", direction="forward")
+            data_vars[var_name] = fill(filled, "s_rho", direction="backward")
+
+    return data_vars
 
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     """Assigns climatology dates to the dataset's time dimension.

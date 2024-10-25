@@ -15,7 +15,7 @@ from roms_tools.setup.datasets import (
     TPXODataset,
 )
 from roms_tools.setup.download import download_test_data
-from roms_tools.setup.utils import extrapolate_deepest_to_bottom
+from roms_tools.setup.utils import fill
 import hashlib
 
 
@@ -396,10 +396,9 @@ def glorys_data(request, use_dask):
 
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
-        if var != "zeta":
-            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
-                data.ds[data.var_names[var]], data.dim_names["depth"]
-            )
+        data.ds[data.var_names[var]] = fill(
+            data.ds[data.var_names[var]], data.dim_names["depth"], direction="forward"
+        )
 
     return data
 
@@ -445,8 +444,8 @@ def coarsened_cesm_bgc_data(request, use_dask):
 
     # extrapolate deepest value to bottom so all levels can use the same surface mask
     for var in data.var_names:
-        data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
-            data.ds[data.var_names[var]], data.dim_names["depth"]
+        data.ds[data.var_names[var]] = fill(
+            data.ds[data.var_names[var]], data.dim_names["depth"], direction="forward"
         )
 
     return data

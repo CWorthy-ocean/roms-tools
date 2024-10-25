@@ -599,40 +599,31 @@ class Dataset:
         """
         pass
 
-    def choose_subdomain(
-        self, latitude_range, longitude_range, margin, straddle, return_subdomain=False
-    ):
-        """Selects a subdomain from the xarray Dataset based on specified latitude and
-        longitude ranges, extending the selection by a specified margin. Handles
-        longitude conversions to accommodate different longitude ranges.
+    def choose_subdomain(self, target_coords, buffer_points, return_subdomain=False):
+        """Selects a subdomain from the xarray Dataset based on specified target
+        coordinates, extending the selection by a defined buffer. Adjusts longitude
+        ranges as necessary to accommodate the dataset's expected range and handles
+        potential discontinuities.
 
         Parameters
         ----------
-        latitude_range : tuple of float
-            A tuple (lat_min, lat_max) specifying the minimum and maximum latitude values of the subdomain.
-        longitude_range : tuple of float
-            A tuple (lon_min, lon_max) specifying the minimum and maximum longitude values of the subdomain.
-        margin : float
-            Margin in degrees to extend beyond the specified latitude and longitude ranges when selecting the subdomain.
-        straddle : bool
-            If True, target longitudes are expected in the range [-180, 180].
-            If False, target longitudes are expected in the range [0, 360].
+        target_coords : dict
+            A dictionary containing the target latitude and longitude coordinates, typically
+            with keys "lat", "lon", and "straddle".
+        buffer_points : int
+            The number of grid points to extend beyond the specified latitude and longitude
+            ranges when selecting the subdomain.
         return_subdomain : bool, optional
-            If True, returns the subset of the original dataset as an xarray Dataset. If False, assigns the subset to `self.ds`.
-            Defaults to False.
+            If True, returns the subset of the original dataset representing the chosen
+            subdomain. If False, assigns the subset to `self.ds`. Defaults to False.
 
         Returns
         -------
         xr.Dataset or None
-            If `return_subdomain` is True, returns the subset of the original dataset representing the chosen subdomain,
-            including an extended area to cover one extra grid point beyond the specified ranges. If `return_subdomain` is False,
-            returns None as the subset is assigned to `self.ds`.
-
-        Notes
-        -----
-        This method adjusts the longitude range if necessary to ensure it matches the expected range for the dataset.
-        It also handles longitude discontinuities that can occur when converting to different longitude ranges.
-        This is important for avoiding artifacts in the interpolation process.
+            Returns the subset of the original dataset as an xarray Dataset if
+            `return_subdomain` is True, including an extended area covering additional
+            grid points beyond the specified ranges. Returns None if `return_subdomain`
+            is False, as the subset is assigned to `self.ds`.
 
         Raises
         ------
@@ -640,13 +631,17 @@ class Dataset:
             If the selected latitude or longitude range does not intersect with the dataset.
         """
 
-        lat_min, lat_max = latitude_range
-        lon_min, lon_max = longitude_range
+        lat_min = target_coords["lat"].min().values
+        lat_max = target_coords["lat"].max().values
+        lon_min = target_coords["lon"].min().values
+        lon_max = target_coords["lon"].max().values
+
+        margin = self.resolution * buffer_points
 
         if not self.is_global:
             # Adjust longitude range if needed to match the expected range
             lon = self.ds[self.dim_names["longitude"]]
-            if not straddle:
+            if not target_coords["straddle"]:
                 if lon.min() < -180:
                     if lon_max + margin > 0:
                         lon_min -= 360
@@ -656,7 +651,7 @@ class Dataset:
                         lon_min -= 360
                         lon_max -= 360
 
-            if straddle:
+            if target_coords["straddle"]:
                 if lon.max() > 360:
                     if lon_min - margin < 180:
                         lon_min += 360
@@ -667,6 +662,7 @@ class Dataset:
                         lon_max += 360
 
         # Select the subdomain
+
         subdomain = self.ds.sel(
             **{
                 self.dim_names["latitude"]: slice(lat_min - margin, lat_max + margin),
@@ -685,7 +681,7 @@ class Dataset:
 
         # Adjust longitudes to expected range if needed
         lon = subdomain[self.dim_names["longitude"]]
-        if straddle:
+        if target_coords["straddle"]:
             subdomain[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
         else:
             subdomain[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)

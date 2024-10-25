@@ -599,7 +599,7 @@ class Dataset:
         """
         pass
 
-    def choose_subdomain(self, target_coords, buffer_points, return_subdomain=False):
+    def choose_subdomain(self, target_coords, buffer_points=20, return_subdomain=False):
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
         ranges as necessary to accommodate the dataset's expected range and handles
@@ -612,7 +612,7 @@ class Dataset:
             with keys "lat", "lon", and "straddle".
         buffer_points : int
             The number of grid points to extend beyond the specified latitude and longitude
-            ranges when selecting the subdomain.
+            ranges when selecting the subdomain. Defaults to 20.
         return_subdomain : bool, optional
             If True, returns the subset of the original dataset representing the chosen
             subdomain. If False, assigns the subset to `self.ds`. Defaults to False.

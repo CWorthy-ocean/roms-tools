@@ -105,7 +105,7 @@ class InitialConditions:
         ds = self._write_into_dataset(data_vars, d_meta)
 
         ds = self._add_global_metadata(ds)
-        
+
         self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
@@ -362,10 +362,10 @@ class InitialConditions:
         ds = ds.drop_vars("time")
 
         return ds
-    
+
     def _validate(self, ds):
-        """Validates the dataset by checking for NaN values in SSH at wet points, which would indicate 
-        missing raw data coverage over the target domain.
+        """Validates the dataset by checking for NaN values in SSH at wet points, which
+        would indicate missing raw data coverage over the target domain.
 
         Parameters
         ----------
@@ -382,7 +382,7 @@ class InitialConditions:
         -----
         This check is only applied to the 2D variable SSH to improve performance.
         """
-        
+
         ds["zeta"].load()
         nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
 

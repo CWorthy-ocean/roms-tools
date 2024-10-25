@@ -155,6 +155,7 @@ def interpolate_from_rho_to_v(field, method="additive"):
 
     return field_interpolated
 
+
 def fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
     """Fill NaN values in a DataArray along a specified dimension.
 
@@ -180,6 +181,7 @@ def fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
             return da.bfill(dim=dim)
     return da
 
+
 def extrapolate_deepest_to_bottom(data_vars, dim: str) -> dict:
     """Extrapolate the deepest value to the bottom for variables using the dataset's
     depth dimension.
@@ -201,9 +203,7 @@ def extrapolate_deepest_to_bottom(data_vars, dim: str) -> dict:
     """
 
     for var in data.var_names.keys():
-        data_vars[var] = fill(
-            data.ds[data.var_names[var]], dim, direction="forward"
-        )
+        data_vars[var] = fill(data.ds[data.var_names[var]], dim, direction="forward")
 
     return data_vars
 
@@ -214,15 +214,15 @@ def extrapolate_nans_in_open_boundaries(data_vars, direction="horizontal") -> di
     Parameters
     ----------
     data_vars : dict
-        A dictionary of variables to be updated, where each value is an 
+        A dictionary of variables to be updated, where each value is an
         `xarray.DataArray`.
 
     Returns
     -------
     dict of str : xarray.DataArray
-        The updated dictionary of variables, with NaN values filled in both 
+        The updated dictionary of variables, with NaN values filled in both
         horizontal and vertical directions.
-    
+
     Raises
     ------
     ValueError
@@ -238,15 +238,23 @@ def extrapolate_nans_in_open_boundaries(data_vars, direction="horizontal") -> di
             for dim in horizontal_dims:
                 if dim in data_vars[var_name].dims:
                     if selected_horizontal_dim is not None:
-                        raise ValueError(f"More than one horizontal dimension found in variable '{var_name}'.")
+                        raise ValueError(
+                            f"More than one horizontal dimension found in variable '{var_name}'."
+                        )
                     selected_horizontal_dim = dim
 
             if selected_horizontal_dim is None:
-                raise ValueError(f"No valid horizontal dimension found for variable '{var_name}'.")
+                raise ValueError(
+                    f"No valid horizontal dimension found for variable '{var_name}'."
+                )
 
             # Forward and backward fill in the horizontal direction
-            filled = fill(data_vars[var_name], selected_horizontal_dim, direction="forward")
-            data_vars[var_name] = fill(filled, selected_horizontal_dim, direction="backward")
+            filled = fill(
+                data_vars[var_name], selected_horizontal_dim, direction="forward"
+            )
+            data_vars[var_name] = fill(
+                filled, selected_horizontal_dim, direction="backward"
+            )
 
     elif direction == "vertical":
         # Forward and backward fill in the vertical direction if applicable
@@ -255,6 +263,7 @@ def extrapolate_nans_in_open_boundaries(data_vars, direction="horizontal") -> di
             data_vars[var_name] = fill(filled, "s_rho", direction="backward")
 
     return data_vars
+
 
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     """Assigns climatology dates to the dataset's time dimension.

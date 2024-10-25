@@ -378,10 +378,10 @@ class SurfaceForcing:
         ds = ds.drop_vars(existing_vars)
 
         return ds
-        
+
     def _validate(self, ds, mask):
-        """Validates the dataset by checking for NaN values at wet points, which would indicate 
-        missing raw data coverage over the target domain.
+        """Validates the dataset by checking for NaN values at wet points, which would
+        indicate missing raw data coverage over the target domain.
 
         Parameters
         ----------

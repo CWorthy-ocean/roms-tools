@@ -236,8 +236,8 @@ class TidalForcing:
         return ds
 
     def _validate(self, ds):
-        """Validates the dataset by checking for NaN values at wet points, which would indicate 
-        missing raw data coverage over the target domain.
+        """Validates the dataset by checking for NaN values at wet points, which would
+        indicate missing raw data coverage over the target domain.
 
         Parameters
         ----------

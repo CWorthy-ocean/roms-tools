@@ -10,8 +10,6 @@ from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
-    nan_check,
-    substitute_nans_by_fillvalue,
     get_variable_metadata,
     group_dataset,
     save_datasets,
@@ -19,6 +17,8 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     compute_barotropic_velocity,
     transpose_dimensions,
+    extrapolate_deepest_to_bottom,
+    extrapolate_nans_in_open_boundaries,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -97,6 +97,7 @@ class BoundaryForcing:
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
+
         variable_info = self._set_variable_info(data)
 
         bdry_coords = get_boundary_info()
@@ -113,6 +114,10 @@ class BoundaryForcing:
                 data_vars = {}
                 for var_name in data.var_names.keys():
                     data_vars[var_name] = ds_source[data.var_names[var_name]]
+
+                data_vars = extrapolate_deepest_to_bottom(
+                    data_vars, data.dim_names["depth"]
+                )
 
                 # lateral regridding of vector fields
                 vector_var_names = [
@@ -142,6 +147,10 @@ class BoundaryForcing:
                         data_vars,
                         tracer_var_names,
                     )
+
+                data_vars = extrapolate_nans_in_open_boundaries(
+                    data_vars, direction="horizontal"
+                )
 
                 # rotation of velocities and interpolation to u/v points
                 if "u" in variable_info and "v" in variable_info:
@@ -181,6 +190,8 @@ class BoundaryForcing:
                             var_names,
                         )
 
+                # data_vars = extrapolate_nans_in_open_boundaries(data_vars, direction="horizontal")
+
                 # compute barotropic velocities
                 if "u" in variable_info and "v" in variable_info:
                     for var in ["u", "v"]:
@@ -201,24 +212,7 @@ class BoundaryForcing:
         # Add global information
         ds = self._add_global_metadata(data, ds)
 
-        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
-        # this check works only for 2D fields because for 3D I extrapolate to bottom which eliminates NaNs
-        for direction in ["south", "east", "north", "west"]:
-            if self.boundaries[direction]:
-                if type == "physics":
-                    nan_check(
-                        ds[f"zeta_{direction}"].isel(bry_time=0),
-                        self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
-                    )
-                elif type == "bgc":
-                    nan_check(
-                        ds[f"ALK_{direction}"].isel(bry_time=0, s_rho=-1),
-                        self.grid.ds.mask_rho.isel(**bdry_coords["rho"][direction]),
-                    )
-
-        # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var in ds.data_vars:
-            ds[var] = substitute_nans_by_fillvalue(ds[var])
+        # self._validate(ds)
 
         object.__setattr__(self, "ds", ds)
 
@@ -474,6 +468,34 @@ class BoundaryForcing:
             ds["bry_time"].attrs["cycle_length"] = 365.25
 
         return ds
+
+    def _validate(self, ds):
+        """Validate the dataset for NaN values at the first time step.
+
+        This method checks if any variables contain NaN values, which may indicate
+        that the entire boundary is located on land.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to validate.
+
+        Raises
+        ------
+        ValueError
+            If NaN values are detected in any variable, indicating that the
+            corresponding boundary is entirely on land.
+
+        Notes
+        -----
+        Validation is performed on the initial boundary time step (`bry_time=0`) for each
+        variable in the dataset.
+        """
+        for var_name in ds.data_vars:
+            if ds[var_name].isel(bry_time=0).isnull().any().values:
+                raise ValueError(
+                    f"NaN values found in {var_name}. This likely occurs because the entire boundary is on land in the source data."
+                )
 
     def plot(
         self,

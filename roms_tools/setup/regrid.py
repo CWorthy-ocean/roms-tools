@@ -2,45 +2,38 @@ import xarray as xr
 
 
 class LateralRegrid:
-    """Applies lateral fill and regridding to data.
+    """Handles lateral regridding of data onto a new spatial grid."""
 
-    This class fills missing values in ocean data and interpolates it onto a new grid
-    defined by the provided longitude and latitude.
-
-    Parameters
-    ----------
-    data : DataContainer
-        Container with variables to be interpolated, including a `mask` and dimension names.
-    lon : xarray.DataArray
-        Target longitude coordinates.
-    lat : xarray.DataArray
-        Target latitude coordinates.
-    """
-
-    def __init__(self, data, lon, lat):
-        """Initializes the lateral fill and target grid coordinates.
+    def __init__(self, target_coords, source_dim_names):
+        """Initialize target grid coordinates and names for grid dimensions.
 
         Parameters
         ----------
-        data : DataContainer
-            Data with dimensions and mask for filling.
-        lon : xarray.DataArray
-            Longitude for new grid.
-        lat : xarray.DataArray
-            Latitude for new grid.
+        target_coords : dict
+            Dictionary containing 'lon' and 'lat' as xarray.DataArrays representing
+            the longitude and latitude values of the target grid.
+        source_dim_names : dict
+            Dictionary specifying names for the latitude and longitude dimensions,
+            typically using keys like "latitude" and "longitude" to align with the dataset conventions.
+
+        Attributes
+        ----------
+        coords : dict
+            Maps the dimension names to the corresponding latitude and longitude
+            DataArrays, providing easy access to target grid coordinates.
         """
 
         self.coords = {
-            data.dim_names["latitude"]: lat,
-            data.dim_names["longitude"]: lon,
+            source_dim_names["latitude"]: target_coords["lat"],
+            source_dim_names["longitude"]: target_coords["lon"],
         }
 
-    def apply(self, var):
+    def apply(self, da):
         """Fills missing values and regrids the variable.
 
         Parameters
         ----------
-        var : xarray.DataArray
+        da : xarray.DataArray
             Input data to fill and regrid.
 
         Returns
@@ -48,38 +41,48 @@ class LateralRegrid:
         xarray.DataArray
             Regridded data with filled values.
         """
-        regridded = var.interp(self.coords, method="linear").drop_vars(
+        regridded = da.interp(self.coords, method="linear").drop_vars(
             list(self.coords.keys())
         )
         return regridded
 
 
 class VerticalRegrid:
-    """Performs vertical interpolation of data onto new depth coordinates.
+    """Interpolates data onto new vertical (depth) coordinates.
 
     Parameters
     ----------
-    data : DataContainer
-        Container holding the data to be regridded, with relevant dimension names.
-    target_depth : xarray.DataArray
-        Target depth coordinates for interpolation.
+    target_depth_coords : xarray.DataArray
+        Depth coordinates for the target grid.
+    source_depth_coords : xarray.DataArray
+        Depth coordinates for the source grid.
     """
 
-    def __init__(self, data, target_depth):
-        """Initializes vertical regridding with specified depth coordinates.
+    def __init__(self, target_depth_coords, source_depth_coords):
+        """Initialize regridding factors for interpolation.
 
         Parameters
         ----------
-        data : DataContainer
-            Container holding the data to be regridded, with relevant dimension names.
-        target_depth : xarray.DataArray
-            Target depth coordinates for interpolation.
+        target_depth_coords : xarray.DataArray
+            Depth coordinates for the target grid.
+        source_depth_coords : xarray.DataArray
+            Depth coordinates for the source grid.
+
+        Attributes
+        ----------
+        coeff : xarray.Dataset
+            Dataset containing:
+            - `is_below` : Boolean mask for depths just below target.
+            - `is_above` : Boolean mask for depths just above target.
+            - `upper_mask`, `lower_mask` : Masks for valid interpolation bounds.
+            - `factor` : Weight for blending values between levels.
         """
 
-        self.depth_dim = data.dim_names["depth"]
+        self.depth_dim = source_depth_coords.dims[0]
+        source_depth = source_depth_coords
         dims = {"dim": self.depth_dim}
 
-        dlev = data.ds[data.dim_names["depth"]] - target_depth
+        dlev = source_depth - target_depth_coords
         is_below = dlev == dlev.where(dlev >= 0).min(**dims)
         is_above = dlev == dlev.where(dlev <= 0).max(**dims)
         p_below = dlev.where(is_below).sum(**dims)
@@ -140,17 +143,17 @@ class VerticalRegrid:
         return result
 
 
-def _lateral_regrid(data, lon, lat, data_vars, var_names):
+def _lateral_regrid(target_coords, source_dim_names, data_vars, var_names):
     """Laterally regrid specified variables onto new latitude and longitude coordinates.
 
     Parameters
     ----------
-    data : Dataset
-        Input data containing the information about source dimensions.
-    lon : xarray.DataArray
-        Target longitude coordinates.
-    lat : xarray.DataArray
-        Target latitude coordinates.
+    target_coords : dict
+        Dictionary containing 'lon' and 'lat' as xarray.DataArrays representing
+        the longitude and latitude values of the target grid.
+    source_dim_names : dict
+        Dictionary specifying names for the latitude and longitude dimensions,
+        typically using keys like "latitude" and "longitude" to align with the dataset conventions.
     data_vars : dict of str : xarray.DataArray
         Dictionary of variables to regrid.
     var_names : list of str
@@ -161,8 +164,7 @@ def _lateral_regrid(data, lon, lat, data_vars, var_names):
     dict of str : xarray.DataArray
         Updated data_vars with regridded variables.
     """
-    lateral_regrid = LateralRegrid(data, lon, lat)
-
+    lateral_regrid = LateralRegrid(target_coords, source_dim_names)
     for var_name in var_names:
         if var_name in data_vars:
             data_vars[var_name] = lateral_regrid.apply(data_vars[var_name])
@@ -170,15 +172,15 @@ def _lateral_regrid(data, lon, lat, data_vars, var_names):
     return data_vars
 
 
-def _vertical_regrid(data, target_depth, data_vars, var_names):
+def _vertical_regrid(target_depth_coords, source_depth_coords, data_vars, var_names):
     """Vertically regrid specified variables onto new depth coordinates.
 
     Parameters
     ----------
-    data : Dataset
-        Input dataset containing the variables and source depth information.
-    target_depth : xarray.DataArray
-        Target depth coordinates for regridding.
+    target_depth_coords : xarray.DataArray
+        Depth coordinates to interpolate onto.
+    source_depth_coords : xarray.DataArray
+        Depth coordinates to interpolate from.
     data_vars : dict of str : xarray.DataArray
         Dictionary of variables to be regridded.
     var_names : list of str
@@ -189,7 +191,7 @@ def _vertical_regrid(data, target_depth, data_vars, var_names):
     dict of str : xarray.DataArray
         Updated data_vars with variables regridded onto the target depth coordinates.
     """
-    vertical_regrid = VerticalRegrid(data, target_depth)
+    vertical_regrid = VerticalRegrid(target_depth_coords, source_depth_coords)
 
     for var_name in var_names:
         if var_name in data_vars:

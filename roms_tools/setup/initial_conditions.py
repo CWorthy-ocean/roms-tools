@@ -15,7 +15,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    _extrapolate_deepest_to_bottom,
+    extrapolate_deepest_to_bottom,
     transpose_dimensions,
 )
 from roms_tools.setup.fill import _lateral_fill
@@ -105,10 +105,8 @@ class InitialConditions:
         ds = self._write_into_dataset(data_vars, d_meta)
 
         ds = self._add_global_metadata(ds)
-
-        ds["zeta"].load()
-        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
-        nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
+        
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var in ds.data_vars:
@@ -132,7 +130,7 @@ class InitialConditions:
 
         variable_info = self._set_variable_info(data, type=type)
 
-        data_vars = _extrapolate_deepest_to_bottom(data_vars, data)
+        data_vars = extrapolate_deepest_to_bottom(data_vars, data.dim_names["depth"])
 
         data_vars = _lateral_fill(data_vars, data)
 
@@ -364,6 +362,29 @@ class InitialConditions:
         ds = ds.drop_vars("time")
 
         return ds
+    
+    def _validate(self, ds):
+        """Validates the dataset by checking for NaN values in SSH at wet points, which would indicate 
+        missing raw data coverage over the target domain.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to validate.
+
+        Raises
+        ------
+        ValueError
+            If NaN values are found in any of the specified variables at wet points,
+            indicating incomplete data coverage.
+
+        Notes
+        -----
+        This check is only applied to the 2D variable SSH to improve performance.
+        """
+        
+        ds["zeta"].load()
+        nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
 
     def _add_global_metadata(self, ds):
 

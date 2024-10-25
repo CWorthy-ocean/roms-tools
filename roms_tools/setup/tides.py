@@ -125,9 +125,7 @@ class TidalForcing:
 
         ds = self._add_global_metadata(ds)
 
-        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
-        for var in ["ssh_Re", "u_Re", "v_Im"]:
-            nan_check(ds[var].isel(ntides=0), self.grid.ds.mask_rho)
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var in ds.data_vars:
@@ -236,6 +234,29 @@ class TidalForcing:
         ds.attrs["allan_factor"] = self.allan_factor
 
         return ds
+
+    def _validate(self, ds):
+        """Validates the dataset by checking for NaN values at wet points, which would indicate 
+        missing raw data coverage over the target domain.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to validate, containing tidal variables and a mask for wet points.
+
+        Raises
+        ------
+        ValueError
+            If NaN values are found in any of the specified variables at wet points,
+            indicating incomplete data coverage.
+
+        Notes
+        -----
+        This check is applied to the first constituent (`ntides=0`) of each variable in the provided dataset.
+        The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
+        """
+        for var in ds.data_vars:
+            nan_check(ds[var].isel(ntides=0), self.grid.ds.mask_rho)
 
     def plot(self, varname, ntides=0) -> None:
         """Plot the specified tidal forcing variable for a given tidal constituent.

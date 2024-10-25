@@ -142,9 +142,7 @@ class SurfaceForcing:
         else:
             mask = self.grid.ds["mask_rho"]
 
-        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
-        for var in ds.data_vars:
-            nan_check(ds[var].isel(time=0), mask)
+        self._validate(ds, mask)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var in ds.data_vars:
@@ -380,6 +378,31 @@ class SurfaceForcing:
         ds = ds.drop_vars(existing_vars)
 
         return ds
+        
+    def _validate(self, ds, mask):
+        """Validates the dataset by checking for NaN values at wet points, which would indicate 
+        missing raw data coverage over the target domain.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to validate.
+        mask : xarray.DataArray
+            Land mask (1=ocean, 0=land) to determine wet points in the domain.
+
+        Raises
+        ------
+        ValueError
+            If NaN values are found in any of the specified variables at wet points,
+            indicating incomplete data coverage.
+
+        Notes
+        -----
+        This check is applied to the first time step (`time=0`) of each variable in the provided dataset.
+        """
+
+        for var in ds.data_vars:
+            nan_check(ds[var].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):
 

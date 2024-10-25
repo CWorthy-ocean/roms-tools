@@ -99,16 +99,8 @@ class SurfaceForcing:
 
         data = self._get_data()
         data.choose_subdomain(
-            latitude_range=[
-                target_coords["lat"].min().values,
-                target_coords["lat"].max().values,
-            ],
-            longitude_range=[
-                target_coords["lon"].min().values,
-                target_coords["lon"].max().values,
-            ],
-            margin=2,
-            straddle=target_coords["straddle"],
+            target_coords,
+            buffer_points=20,  # lateral fill needs some buffer from data margin
         )
 
         variable_info = self._set_variable_info(data)

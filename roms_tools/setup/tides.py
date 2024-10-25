@@ -77,16 +77,8 @@ class TidalForcing:
         data = self._get_data()
         data.check_number_constituents(self.ntides)
         data.choose_subdomain(
-            latitude_range=[
-                target_coords["lat"].min().values,
-                target_coords["lat"].max().values,
-            ],
-            longitude_range=[
-                target_coords["lon"].min().values,
-                target_coords["lon"].max().values,
-            ],
-            margin=2,
-            straddle=target_coords["straddle"],
+            target_coords,
+            buffer_points=20,
         )
         # select desired number of constituents
         object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))

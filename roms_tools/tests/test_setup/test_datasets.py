@@ -288,11 +288,14 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
     assert np.all(np.diff(dataset.ds["depth"]) > 0)
 
     # test choosing subdomain for domain that straddles the dateline
+    target_coords = {
+        "lat": xr.DataArray(np.linspace(-10, 10, 100)),
+        "lon": xr.DataArray(np.linspace(-10, 10, 100)),
+        "straddle": True,
+    }
     ds = dataset.choose_subdomain(
-        latitude_range=(-10, 10),
-        longitude_range=(-10, 10),
-        margin=1,
-        straddle=True,
+        target_coords,
+        buffer_points=1,
         return_subdomain=True,
     )
 
@@ -301,11 +304,14 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
     assert -11 <= ds["longitude"].min() <= 11
     assert -11 <= ds["longitude"].max() <= 11
 
+    target_coords = {
+        "lat": xr.DataArray(np.linspace(-10, 10, 100)),
+        "lon": xr.DataArray(np.linspace(10, 20, 100)),
+        "straddle": False,
+    }
     ds = dataset.choose_subdomain(
-        latitude_range=(-10, 10),
-        longitude_range=(10, 20),
-        margin=1,
-        straddle=False,
+        target_coords,
+        buffer_points=1,
         return_subdomain=True,
     )
 

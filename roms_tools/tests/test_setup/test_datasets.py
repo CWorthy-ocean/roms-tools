@@ -475,3 +475,19 @@ def test_climatology_error(use_dask):
             climatology=False,
             use_dask=use_dask,
         )
+
+
+@pytest.mark.parametrize(
+    "data_fixture, expected_resolution",
+    [
+        ("era5_data", 0.25),
+        ("glorys_data", 1 / 12),
+        ("tpxo_data", 1 / 6),
+        ("cesm_bgc_data", 1.0),
+        ("cesm_surface_bgc_data", 1.0),
+    ],
+)
+def test_horizontal_resolution(data_fixture, expected_resolution, request):
+
+    data = request.getfixturevalue(data_fixture)
+    assert np.isclose(data.resolution, expected_resolution)

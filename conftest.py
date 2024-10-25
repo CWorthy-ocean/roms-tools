@@ -7,7 +7,15 @@ from roms_tools import (
     BoundaryForcing,
     SurfaceForcing,
 )
+from roms_tools.setup.datasets import (
+    GLORYSDataset,
+    ERA5Dataset,
+    CESMBGCDataset,
+    CESMBGCSurfaceForcingDataset,
+    TPXODataset,
+)
 from roms_tools.setup.download import download_test_data
+from roms_tools.setup.utils import extrapolate_deepest_to_bottom
 import hashlib
 
 
@@ -355,6 +363,109 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
         type="bgc",
         use_dask=use_dask,
     )
+
+
+@pytest.fixture(scope="session")
+def era5_data(request, use_dask):
+    fname = download_test_data("ERA5_regional_test_data.nc")
+    data = ERA5Dataset(
+        filename=fname,
+        start_time=datetime(2020, 1, 31),
+        end_time=datetime(2020, 2, 2),
+        use_dask=use_dask,
+    )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def glorys_data(request, use_dask):
+    # the following GLORYS data has a wide enough domain
+    # to have different masks for tracers vs. velocities
+    fname = download_test_data("GLORYS_test_data.nc")
+
+    data = GLORYSDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        use_dask=use_dask,
+    )
+
+    ds = data.ds.isel(depth=[0, 10, 30])
+    object.__setattr__(data, "ds", ds)
+
+    # extrapolate deepest value to bottom so all levels can use the same surface mask
+    for var in data.var_names:
+        if var != "zeta":
+            data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+                data.ds[data.var_names[var]], data.dim_names["depth"]
+            )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def tpxo_data(request, use_dask):
+    fname = download_test_data("TPXO_regional_test_data.nc")
+
+    data = TPXODataset(
+        filename=fname,
+        use_dask=use_dask,
+    )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def cesm_bgc_data(request, use_dask):
+    fname = download_test_data("CESM_regional_test_data_one_time_slice.nc")
+
+    data = CESMBGCDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=False,
+        use_dask=use_dask,
+    )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def coarsened_cesm_bgc_data(request, use_dask):
+    fname = download_test_data("CESM_BGC_2012.nc")
+
+    data = CESMBGCDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=False,
+        use_dask=use_dask,
+    )
+
+    # extrapolate deepest value to bottom so all levels can use the same surface mask
+    for var in data.var_names:
+        data.ds[data.var_names[var]] = extrapolate_deepest_to_bottom(
+            data.ds[data.var_names[var]], data.dim_names["depth"]
+        )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def cesm_surface_bgc_data(request, use_dask):
+    fname = download_test_data("CESM_BGC_SURFACE_2012.nc")
+
+    data = CESMBGCSurfaceForcingDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=False,
+        use_dask=use_dask,
+    )
+    data.post_process()
+
+    return data
 
 
 def calculate_file_hash(filepath, hash_algorithm="sha256"):

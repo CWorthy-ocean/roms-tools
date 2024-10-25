@@ -114,9 +114,7 @@ class SurfaceForcing:
 
         # lateral regridding
         var_names = variable_info.keys()
-        data_vars = _lateral_regrid(
-            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
-        )
+        data_vars = _lateral_regrid(target_coords, data.dim_names, data_vars, var_names)
 
         # rotation of velocities and interpolation to u/v points
         if "uwnd" in variable_info and "vwnd" in variable_info:
@@ -286,9 +284,7 @@ class SurfaceForcing:
                 correction_data.dim_names["longitude"],
             ],
         )
-        lateral_regrid = LateralRegrid(
-            correction_data, self.target_coords["lon"], self.target_coords["lat"]
-        )
+        lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
 
         filled = lateral_fill.apply(
             correction_data.ds[correction_data.var_names["swr_corr"]]

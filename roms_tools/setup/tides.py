@@ -94,9 +94,7 @@ class TidalForcing:
 
         # lateral regridding
         var_names = variable_info.keys()
-        data_vars = _lateral_regrid(
-            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
-        )
+        data_vars = _lateral_regrid(target_coords, data.dim_names, data_vars, var_names)
 
         # rotation of velocities and interpolation to u/v points
         vector_pairs = get_vector_pairs(variable_info)

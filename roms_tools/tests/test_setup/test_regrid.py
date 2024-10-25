@@ -18,16 +18,10 @@ def vertical_regridder(depth_values, layer_depth_rho_values):
         def __init__(self, ds):
             self.ds = ds
 
-    # Creating minimal mock data for testing
-    # Depth levels in meters
-
-    # Create mock datasets for DataContainer and Grid
-    data_ds = xr.Dataset({"depth": (["depth"], depth_values)})
     target_depth = xr.DataArray(data=layer_depth_rho_values, dims=["s_rho"])
-    # Instantiate DataContainer and Grid objects with mock datasets
-    mock_data = DataContainer(data_ds)
+    source_depth = xr.DataArray(data=depth_values, dims=["depth"])
 
-    return VerticalRegrid(mock_data, target_depth)
+    return VerticalRegrid(target_depth, source_depth)
 
 
 @pytest.mark.parametrize(

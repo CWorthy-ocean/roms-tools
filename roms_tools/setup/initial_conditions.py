@@ -138,9 +138,7 @@ class InitialConditions:
 
         # lateral regridding
         var_names = variable_info.keys()
-        data_vars = _lateral_regrid(
-            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
-        )
+        data_vars = _lateral_regrid(target_coords, data.dim_names, data_vars, var_names)
 
         # rotation of velocities and interpolation to u/v points
         if "u" in variable_info and "v" in variable_info:
@@ -160,8 +158,8 @@ class InitialConditions:
             ]
             if len(var_names) > 0:
                 data_vars = _vertical_regrid(
-                    data,
                     self.grid.ds[f"layer_depth_{location}"],
+                    data.ds[data.dim_names["depth"]],
                     data_vars,
                     var_names,
                 )

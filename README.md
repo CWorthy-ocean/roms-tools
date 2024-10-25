@@ -1,5 +1,5 @@
 # ROMS-Tools
-[![Conda version](https://anaconda.org/conda-forge/roms-tools/badges/version.svg)](https://anaconda.org/conda-forge/roms-tools)
+[![Conda version](https://img.shields.io/conda/vn/conda-forge/roms-tools.svg)](https://anaconda.org/conda-forge/roms-tools)
 [![PyPI version](https://img.shields.io/pypi/v/roms-tools.svg)](https://pypi.org/project/roms-tools/)
 [![codecov](https://codecov.io/gh/CWorthy-ocean/roms-tools/graph/badge.svg?token=5S1oNu39xE)](https://codecov.io/gh/CWorthy-ocean/roms-tools)
 [![Documentation Status](https://readthedocs.org/projects/roms-tools/badge/?version=latest)](https://roms-tools.readthedocs.io/en/latest/?badge=latest)

@@ -117,6 +117,8 @@ class Dataset:
             # Make sure that depth is ascending
             ds = self.ensure_dimension_is_ascending(ds, dim="depth")
 
+        self.infer_horizontal_resolution(ds)
+
         # Check whether the data covers the entire globe
         object.__setattr__(self, "is_global", self.check_if_global(ds))
 
@@ -486,6 +488,34 @@ class Dataset:
             ds = ds.isel(**{self.dim_names[dim]: slice(None, None, -1)})
 
         return ds
+
+    def infer_horizontal_resolution(self, ds: xr.Dataset):
+        """Estimate and set the average horizontal resolution of a dataset based on
+        latitude and longitude spacing.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing latitude and longitude dimensions.
+
+        Sets
+        ----
+        resolution : float
+            The average horizontal resolution, derived from the mean spacing
+            between points in latitude and longitude.
+        """
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+
+        # Calculate mean difference along latitude and longitude
+        lat_resolution = ds[lat_dim].diff(dim=lat_dim).mean(dim=lat_dim)
+        lon_resolution = ds[lon_dim].diff(dim=lon_dim).mean(dim=lon_dim)
+
+        # Compute the average horizontal resolution
+        resolution = np.mean([lat_resolution, lon_resolution])
+
+        # Set the computed resolution as an attribute
+        object.__setattr__(self, "resolution", resolution)
 
     def check_if_global(self, ds) -> bool:
         """Checks if the dataset covers the entire globe in the longitude dimension.

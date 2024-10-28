@@ -1,6 +1,6 @@
 import xarray as xr
 import numpy as np
-from typing import Union
+from typing import Union, Dict, List
 import pandas as pd
 import cftime
 from roms_tools.utils import partition
@@ -182,28 +182,33 @@ def fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
     return da
 
 
-def extrapolate_deepest_to_bottom(data_vars, dim: str) -> dict:
-    """Extrapolate the deepest value to the bottom for variables using the dataset's
-    depth dimension.
+def extrapolate_deepest_to_bottom(
+    data_vars: Dict[str, xr.DataArray], dim: str, var_names: List[str]
+) -> Dict[str, xr.DataArray]:
+    """Extrapolate the deepest value to the bottom along a specified dimension for
+    selected variables.
 
-    This function fills in missing values at the bottom of each variable by
-    carrying forward the deepest available value, ensuring a complete depth profile.
+    This function fills missing values at the bottom of each specified variable by
+    carrying forward the deepest non-NaN value, ensuring each depth profile is fully populated.
 
     Parameters
     ----------
-    data_vars : dict
-        Existing dictionary of variables to be updated.
+    data_vars : dict of str : xarray.DataArray
+        Dictionary of variables to be updated with NaN values filled.
     dim : str
-        Name of dimension along which to perform the fill.
+        Name of the dimension along which to perform the fill, typically the depth dimension.
+    var_names : list of str
+        List of variable names to apply the extrapolation on.
 
     Returns
     -------
     dict of str : xarray.DataArray
-        Dictionary of variables with the deepest value extrapolated to the bottom.
+        Updated dictionary with the specified variables having their deepest values extrapolated to the bottom.
     """
 
-    for var in data.var_names.keys():
-        data_vars[var] = fill(data.ds[data.var_names[var]], dim, direction="forward")
+    for var_name in var_names:
+        if var_name in data_vars:
+            data_vars[var_name] = fill(data_vars[var_name], dim, direction="forward")
 
     return data_vars
 

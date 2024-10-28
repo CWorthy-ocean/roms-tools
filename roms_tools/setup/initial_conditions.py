@@ -129,13 +129,19 @@ class InitialConditions:
         )
 
         variable_info = self._set_variable_info(data, type=type)
+        var_names = variable_info.keys()
 
-        data_vars = extrapolate_deepest_to_bottom(data_vars, data.dim_names["depth"])
+        for var_name in var_names:
+            if var_name in data.var_names:
+                data_vars[var_name] = data.ds[data.var_names[var_name]]
+        data_vars = extrapolate_deepest_to_bottom(
+            data_vars, data.dim_names["depth"], var_names
+        )
 
+        print(data_vars.keys())
         data_vars = _lateral_fill(data_vars, data)
 
         # lateral regridding
-        var_names = variable_info.keys()
         data_vars = _lateral_regrid(target_coords, data.dim_names, data_vars, var_names)
 
         # rotation of velocities and interpolation to u/v points

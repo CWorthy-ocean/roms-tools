@@ -12,8 +12,10 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     get_time_type,
     convert_cftime_to_datetime,
+    one_dim_fill,
 )
 from roms_tools.setup.download import download_correction_data
+from roms_tools.setup.fill import LateralFill
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -599,7 +601,7 @@ class Dataset:
         """
         pass
 
-    def choose_subdomain(self, target_coords, buffer_points=20, return_subdomain=False):
+    def choose_subdomain(self, target_coords, buffer_points=20, return_copy=False):
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
         ranges as necessary to accommodate the dataset's expected range and handles
@@ -686,10 +688,103 @@ class Dataset:
         else:
             subdomain[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
 
-        if return_subdomain:
-            return subdomain
+        if return_copy:
+            return Dataset.from_ds(self, subdomain)
         else:
             object.__setattr__(self, "ds", subdomain)
+
+    def apply_lateral_fill(self):
+        """Apply lateral fill to variables using the dataset's mask and grid dimensions.
+
+        This method fills masked values in `self.ds` using `LateralFill` based on
+        the horizontal grid dimensions. A separate mask (`mask_vel`) is used for
+        velocity variables (e.g., `u`, `v`) if available in the dataset.
+
+        Notes
+        -----
+        Looping over `self.ds.data_vars` instead of `self.var_names` ensures that each
+        dataset variable is filled only once, even if multiple entries in `self.var_names`
+        point to the same variable in the dataset.
+        """
+        lateral_fill = LateralFill(
+            self.ds["mask"],
+            [self.dim_names["latitude"], self.dim_names["longitude"]],
+        )
+
+        separate_fill_for_velocities = False
+        if "mask_vel" in self.ds.data_vars:
+            lateral_fill_vel = LateralFill(
+                self.ds["mask_vel"],
+                [self.dim_names["latitude"], self.dim_names["longitude"]],
+            )
+            separate_fill_for_velocities = True
+
+        for var_name in self.ds.data_vars:
+            if var_name.startswith("mask"):
+                # Skip variables that are mask types
+                continue
+            elif (
+                separate_fill_for_velocities
+                and "u" in self.var_names
+                and "v" in self.var_names
+                and var_name in [self.var_names["u"], self.var_names["v"]]
+            ):
+                # Apply lateral fill with velocity mask for velocity variables if present
+                self.ds[var_name] = lateral_fill_vel.apply(self.ds[var_name])
+            else:
+                # Apply standard lateral fill for other variables
+                self.ds[var_name] = lateral_fill.apply(self.ds[var_name])
+
+    def extrapolate_deepest_to_bottom(self):
+        """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth
+        dimension.
+
+        For each variable with a depth dimension, fills missing values at the bottom by
+        propagating the deepest available data downward.
+        """
+
+        if "depth" in self.dim_names:
+            for var_name in self.ds.data_vars:
+                if self.dim_names["depth"] in self.ds[var_name].dims:
+                    self.ds[var_name] = one_dim_fill(
+                        self.ds[var_name], self.dim_names["depth"], direction="forward"
+                    )
+
+    @classmethod
+    def from_ds(cls, original_dataset: "Dataset", ds: xr.Dataset) -> "Dataset":
+        """Substitute the internal dataset of a Dataset object with a new xarray
+        Dataset.
+
+        This method creates a new Dataset instance, bypassing the usual `__init__`
+        and `__post_init__` processes. It allows for the direct assignment of the
+        provided xarray Dataset (`ds`) to the new instance's `ds` attribute. All
+        other attributes from the original dataset instance are copied to the new one.
+
+        Parameters
+        ----------
+        original_dataset : Dataset
+            The original Dataset instance from which attributes will be copied.
+        ds : xarray.Dataset
+            The new xarray Dataset to assign to the `ds` attribute of the new instance.
+
+        Returns
+        -------
+        Dataset
+            A new Dataset instance with the `ds` attribute set to the provided dataset
+            and other attributes copied from the original instance.
+        """
+        # Create a new Dataset instance without calling __init__ or __post_init__
+        dataset = cls.__new__(cls)
+
+        # Directly set the provided dataset as the 'ds' attribute
+        object.__setattr__(dataset, "ds", ds)
+
+        # Copy all other attributes from the original data instance
+        for attr in vars(original_dataset):
+            if attr != "ds":
+                object.__setattr__(dataset, attr, getattr(original_dataset, attr))
+
+        return dataset
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -829,9 +924,12 @@ class TPXODataset(Dataset):
         """
 
         if "depth" in self.var_names.keys():
+            ds = self.ds
             mask = xr.where(self.ds["depth"] > 0, 1, 0)
+            ds["mask"] = mask
+            ds = ds.drop_vars(["depth"])
 
-            self.ds["mask"] = mask
+            object.__setattr__(self, "ds", ds)
 
         # Remove "depth" from var_names
         updated_var_names = {**self.var_names}  # Create a copy of the dictionary
@@ -1287,9 +1385,13 @@ class ERA5Dataset(Dataset):
                 )
             )
             cff = cff * qair
-            self.ds["qair"] = 0.62197 * (cff / (patm - 0.378 * cff))
-            self.ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
-            self.ds["qair"].attrs["units"] = "kg/kg"
+
+            ds = self.ds
+            ds["qair"] = 0.62197 * (cff / (patm - 0.378 * cff))
+            ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
+            ds["qair"].attrs["units"] = "kg/kg"
+            ds = ds.drop_vars([self.var_names["d2m"]])
+            object.__setattr__(self, "ds", ds)
 
             # Update var_names dictionary
             var_names = {**self.var_names, "qair": "qair"}
@@ -1297,9 +1399,11 @@ class ERA5Dataset(Dataset):
             object.__setattr__(self, "var_names", var_names)
 
         if "mask" in self.var_names.keys():
+            ds = self.ds
             mask = xr.where(self.ds[self.var_names["mask"]].isel(time=0).isnull(), 0, 1)
-
-            self.ds["mask"] = mask
+            ds["mask"] = mask
+            ds = ds.drop_vars([self.var_names["mask"]])
+            object.__setattr__(self, "ds", ds)
 
             # Remove mask from var_names dictionary
             var_names = self.var_names

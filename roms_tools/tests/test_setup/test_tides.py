@@ -174,7 +174,7 @@ def test_tidal_forcing_plot_save(tidal_forcing, tmp_path):
     computed."""
     tidal_forcing.ds.load()
 
-    tidal_forcing.plot(varname="ssh_Re", ntides=0)
+    tidal_forcing.plot(var_name="ssh_Re", ntides=0)
 
     for file_str in ["test_tides", "test_tides.nc"]:
         # Create a temporary filepath using the tmp_path fixture

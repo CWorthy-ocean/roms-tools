@@ -1,6 +1,6 @@
 import xarray as xr
 import numpy as np
-from typing import Union, Dict, List
+from typing import Union
 import pandas as pd
 import cftime
 from roms_tools.utils import partition
@@ -156,7 +156,7 @@ def interpolate_from_rho_to_v(field, method="additive"):
     return field_interpolated
 
 
-def fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
+def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
     """Fill NaN values in a DataArray along a specified dimension.
 
     Parameters
@@ -180,94 +180,6 @@ def fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
         elif direction == "backward":
             return da.bfill(dim=dim)
     return da
-
-
-def extrapolate_deepest_to_bottom(
-    data_vars: Dict[str, xr.DataArray], dim: str, var_names: List[str]
-) -> Dict[str, xr.DataArray]:
-    """Extrapolate the deepest value to the bottom along a specified dimension for
-    selected variables.
-
-    This function fills missing values at the bottom of each specified variable by
-    carrying forward the deepest non-NaN value, ensuring each depth profile is fully populated.
-
-    Parameters
-    ----------
-    data_vars : dict of str : xarray.DataArray
-        Dictionary of variables to be updated with NaN values filled.
-    dim : str
-        Name of the dimension along which to perform the fill, typically the depth dimension.
-    var_names : list of str
-        List of variable names to apply the extrapolation on.
-
-    Returns
-    -------
-    dict of str : xarray.DataArray
-        Updated dictionary with the specified variables having their deepest values extrapolated to the bottom.
-    """
-
-    for var_name in var_names:
-        if var_name in data_vars:
-            data_vars[var_name] = fill(data_vars[var_name], dim, direction="forward")
-
-    return data_vars
-
-
-def extrapolate_nans_in_open_boundaries(data_vars, direction="horizontal") -> dict:
-    """Forward fill NaN values in horizontal or vertical direction for open boundaries.
-
-    Parameters
-    ----------
-    data_vars : dict
-        A dictionary of variables to be updated, where each value is an
-        `xarray.DataArray`.
-
-    Returns
-    -------
-    dict of str : xarray.DataArray
-        The updated dictionary of variables, with NaN values filled in both
-        horizontal and vertical directions.
-
-    Raises
-    ------
-    ValueError
-        If more than one horizontal dimension is specified or none at all.
-    """
-
-    if direction == "horizontal":
-        horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
-
-        for var_name in data_vars.keys():
-            selected_horizontal_dim = None
-            # Determine the horizontal dimension to fill
-            for dim in horizontal_dims:
-                if dim in data_vars[var_name].dims:
-                    if selected_horizontal_dim is not None:
-                        raise ValueError(
-                            f"More than one horizontal dimension found in variable '{var_name}'."
-                        )
-                    selected_horizontal_dim = dim
-
-            if selected_horizontal_dim is None:
-                raise ValueError(
-                    f"No valid horizontal dimension found for variable '{var_name}'."
-                )
-
-            # Forward and backward fill in the horizontal direction
-            filled = fill(
-                data_vars[var_name], selected_horizontal_dim, direction="forward"
-            )
-            data_vars[var_name] = fill(
-                filled, selected_horizontal_dim, direction="backward"
-            )
-
-    elif direction == "vertical":
-        # Forward and backward fill in the vertical direction if applicable
-        if "s_rho" in data_vars[var_name].dims:
-            filled = fill(data_vars[var_name], "s_rho", direction="forward")
-            data_vars[var_name] = fill(filled, "s_rho", direction="backward")
-
-    return data_vars
 
 
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:

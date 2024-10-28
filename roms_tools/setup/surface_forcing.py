@@ -7,8 +7,7 @@ from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
 from typing import Dict, Union, List
-from roms_tools.setup.fill import _lateral_fill, LateralFill
-from roms_tools.setup.regrid import _lateral_regrid, LateralRegrid
+from roms_tools.setup.regrid import LateralRegrid
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
@@ -103,37 +102,36 @@ class SurfaceForcing:
             buffer_points=20,  # lateral fill needs some buffer from data margin
         )
 
+        data.apply_lateral_fill()
+
         variable_info = self._set_variable_info(data)
-
-        data_vars = {}
-        for var_name in data.var_names:
-            if var_name != "mask":
-                data_vars[var_name] = data.ds[data.var_names[var_name]]
-
-        data_vars = _lateral_fill(data_vars, data)
-
-        # lateral regridding
         var_names = variable_info.keys()
-        data_vars = _lateral_regrid(target_coords, data.dim_names, data_vars, var_names)
+
+        processed_fields = {}
+        # lateral regridding
+        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        for var_name in var_names:
+            if var_name in data.var_names.keys():
+                processed_fields[var_name] = lateral_regrid.apply(
+                    data.ds[data.var_names[var_name]]
+                )
 
         # rotation of velocities and interpolation to u/v points
         if "uwnd" in variable_info and "vwnd" in variable_info:
-            data_vars["uwnd"], data_vars["vwnd"] = rotate_velocities(
-                data_vars["uwnd"],
-                data_vars["vwnd"],
+            processed_fields["uwnd"], processed_fields["vwnd"] = rotate_velocities(
+                processed_fields["uwnd"],
+                processed_fields["vwnd"],
                 target_coords["angle"],
                 interpolate=False,
             )
 
         # correct radiation
         if self.type == "physics" and self.correct_radiation:
-            data_vars = self._apply_correction(data_vars, data)
-
-        object.__setattr__(data, "data_vars", data_vars)
+            processed_fields = self._apply_correction(processed_fields, data)
 
         d_meta = get_variable_metadata()
 
-        ds = self._write_into_dataset(data, d_meta)
+        ds = self._write_into_dataset(processed_fields, data, d_meta)
 
         if self.use_coarse_grid:
             mask = self.grid.ds["mask_coarse"].rename(
@@ -145,8 +143,8 @@ class SurfaceForcing:
         self._validate(ds, mask)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var in ds.data_vars:
-            ds[var] = substitute_nans_by_fillvalue(ds[var])
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         object.__setattr__(self, "ds", ds)
 
@@ -260,7 +258,7 @@ class SurfaceForcing:
 
         return variable_info
 
-    def _apply_correction(self, data_vars, data):
+    def _apply_correction(self, processed_fields, data):
 
         correction_data = self._get_correction_data()
         # choose same subdomain as forcing data so that we can use same mask
@@ -273,42 +271,34 @@ class SurfaceForcing:
         correction_data.choose_subdomain(
             coords_correction, straddle=self.target_coords["straddle"]
         )
-
+        correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
+        correction_data.apply_lateral_fill()
         # regrid
-        lateral_fill = LateralFill(
-            data.ds["mask"],  # use mask from ERA5 data
-            [
-                correction_data.dim_names["latitude"],
-                correction_data.dim_names["longitude"],
-            ],
-        )
         lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
-
-        filled = lateral_fill.apply(
+        corr_factor = lateral_regrid.apply(
             correction_data.ds[correction_data.var_names["swr_corr"]]
         )
-        corr_factor = lateral_regrid.apply(filled)
 
         # temporal interpolation
         corr_factor = interpolate_from_climatology(
             corr_factor,
             correction_data.dim_names["time"],
-            time=data_vars["swrad"].time,
+            time=processed_fields["swrad"].time,
         )
 
-        data_vars["swrad"] = data_vars["swrad"] * corr_factor
+        processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
 
-        return data_vars
+        return processed_fields
 
-    def _write_into_dataset(self, data, d_meta):
+    def _write_into_dataset(self, processed_fields, data, d_meta):
 
         # save in new dataset
         ds = xr.Dataset()
 
-        for var in data.data_vars.keys():
-            ds[var] = data.data_vars[var].astype(np.float32)
-            ds[var].attrs["long_name"] = d_meta[var]["long_name"]
-            ds[var].attrs["units"] = d_meta[var]["units"]
+        for var_name in processed_fields.keys():
+            ds[var_name] = processed_fields[var_name].astype(np.float32)
+            ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
+            ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
         if self.use_coarse_grid:
             ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
@@ -374,7 +364,7 @@ class SurfaceForcing:
             ds = ds.drop_vars(["time"])
 
         variables_to_drop = ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]
-        existing_vars = [var for var in variables_to_drop if var in ds]
+        existing_vars = [var_name for var_name in variables_to_drop if var_name in ds]
         ds = ds.drop_vars(existing_vars)
 
         return ds
@@ -401,8 +391,8 @@ class SurfaceForcing:
         This check is applied to the first time step (`time=0`) of each variable in the provided dataset.
         """
 
-        for var in ds.data_vars:
-            nan_check(ds[var].isel(time=0), mask)
+        for var_name in ds.data_vars:
+            nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):
 
@@ -427,12 +417,12 @@ class SurfaceForcing:
 
         return ds
 
-    def plot(self, varname, time=0) -> None:
+    def plot(self, var_name, time=0) -> None:
         """Plot the specified surface forcing field for a given time slice.
 
         Parameters
         ----------
-        varname : str
+        var_name : str
             The name of the surface forcing field to plot. Options include:
 
             - "uwnd": 10 meter wind in x-direction.
@@ -461,7 +451,7 @@ class SurfaceForcing:
         Raises
         ------
         ValueError
-            If the specified varname is not found in dataset.
+            If the specified var_name is not found in dataset.
 
 
         Examples
@@ -469,10 +459,10 @@ class SurfaceForcing:
         >>> atm_forcing.plot("uwnd", time=0)
         """
 
-        if varname not in self.ds:
-            raise ValueError(f"Variable '{varname}' is not found in dataset.")
+        if var_name not in self.ds:
+            raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        field = self.ds[varname].isel(time=time).load()
+        field = self.ds[var_name].isel(time=time).load()
         title = field.long_name
 
         # assign lat / lon
@@ -487,14 +477,14 @@ class SurfaceForcing:
         )
 
         # choose colorbar
-        if varname in ["uwnd", "vwnd"]:
+        if var_name in ["uwnd", "vwnd"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
             cmap = plt.colormaps.get_cmap("RdBu_r")
         else:
             vmax = field.max().values
             vmin = field.min().values
-            if varname in ["swrad", "lwrad", "Tair", "qair"]:
+            if var_name in ["swrad", "lwrad", "Tair", "qair"]:
                 cmap = plt.colormaps.get_cmap("YlOrRd")
             else:
                 cmap = plt.colormaps.get_cmap("YlGnBu")

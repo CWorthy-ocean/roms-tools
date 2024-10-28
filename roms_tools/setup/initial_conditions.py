@@ -15,11 +15,9 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    extrapolate_deepest_to_bottom,
     transpose_dimensions,
 )
-from roms_tools.setup.fill import _lateral_fill
-from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
+from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -92,29 +90,31 @@ class InitialConditions:
 
         self._input_checks()
 
-        data_vars = {}
-        data_vars = self._process_data(data_vars, type="physics")
+        processed_fields = {}
+        processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
-            data_vars = self._process_data(data_vars, type="bgc")
+            processed_fields = self._process_data(processed_fields, type="bgc")
 
-        for var in data_vars.keys():
-            data_vars[var] = transpose_dimensions(data_vars[var])
+        for var_name in processed_fields.keys():
+            processed_fields[var_name] = transpose_dimensions(
+                processed_fields[var_name]
+            )
 
         d_meta = get_variable_metadata()
-        ds = self._write_into_dataset(data_vars, d_meta)
+        ds = self._write_into_dataset(processed_fields, d_meta)
 
         ds = self._add_global_metadata(ds)
 
         self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var in ds.data_vars:
-            ds[var] = substitute_nans_by_fillvalue(ds[var])
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         object.__setattr__(self, "ds", ds)
 
-    def _process_data(self, data_vars, type="physics"):
+    def _process_data(self, processed_fields, type="physics"):
 
         target_coords = get_target_coords(self.grid)
 
@@ -128,27 +128,25 @@ class InitialConditions:
             buffer_points=20,  # lateral fill needs good buffer from data margin
         )
 
+        data.extrapolate_deepest_to_bottom()
+        data.apply_lateral_fill()
+
         variable_info = self._set_variable_info(data, type=type)
         var_names = variable_info.keys()
 
-        for var_name in var_names:
-            if var_name in data.var_names:
-                data_vars[var_name] = data.ds[data.var_names[var_name]]
-        data_vars = extrapolate_deepest_to_bottom(
-            data_vars, data.dim_names["depth"], var_names
-        )
-
-        print(data_vars.keys())
-        data_vars = _lateral_fill(data_vars, data)
-
         # lateral regridding
-        data_vars = _lateral_regrid(target_coords, data.dim_names, data_vars, var_names)
+        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        for var_name in var_names:
+            if var_name in data.var_names.keys():
+                processed_fields[var_name] = lateral_regrid.apply(
+                    data.ds[data.var_names[var_name]]
+                )
 
         # rotation of velocities and interpolation to u/v points
         if "u" in variable_info and "v" in variable_info:
-            (data_vars["u"], data_vars["v"],) = rotate_velocities(
-                data_vars["u"],
-                data_vars["v"],
+            (processed_fields["u"], processed_fields["v"],) = rotate_velocities(
+                processed_fields["u"],
+                processed_fields["v"],
                 target_coords["angle"],
                 interpolate=True,
             )
@@ -161,28 +159,32 @@ class InitialConditions:
                 if info["location"] == location and info["is_3d"]
             ]
             if len(var_names) > 0:
-                data_vars = _vertical_regrid(
+                vertical_regrid = VerticalRegrid(
                     self.grid.ds[f"layer_depth_{location}"],
                     data.ds[data.dim_names["depth"]],
-                    data_vars,
-                    var_names,
                 )
+                for var_name in var_names:
+                    if var_name in processed_fields:
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name]
+                        )
 
         # compute barotropic velocities
         if "u" in variable_info and "v" in variable_info:
-            for var in ["u", "v"]:
-                data_vars[f"{var}bar"] = compute_barotropic_velocity(
-                    data_vars[var], self.grid.ds[f"interface_depth_{var}"]
+            for var_name in ["u", "v"]:
+                processed_fields[f"{var_name}bar"] = compute_barotropic_velocity(
+                    processed_fields[var_name],
+                    self.grid.ds[f"interface_depth_{var_name}"],
                 )
 
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
-            for var in variable_info.keys():
-                data_vars[var] = data_vars[var].assign_coords(
-                    {"time": data_vars["temp"]["time"]}
+            for var_name in variable_info.keys():
+                processed_fields[var_name] = processed_fields[var_name].assign_coords(
+                    {"time": processed_fields["temp"]["time"]}
                 )
 
-        return data_vars
+        return processed_fields
 
     def _input_checks(self):
 
@@ -308,24 +310,26 @@ class InitialConditions:
             }
         elif type == "bgc":
             variable_info = {}
-            for var in data.var_names.keys():
-                variable_info[var] = default_info
+            for var_name in data.var_names.keys():
+                variable_info[var_name] = default_info
 
         return variable_info
 
-    def _write_into_dataset(self, data_vars, d_meta):
+    def _write_into_dataset(self, processed_fields, d_meta):
 
         # save in new dataset
         ds = xr.Dataset()
 
-        for var in data_vars.keys():
-            ds[var] = data_vars[var].astype(np.float32)
-            ds[var].attrs["long_name"] = d_meta[var]["long_name"]
-            ds[var].attrs["units"] = d_meta[var]["units"]
+        for var_name in processed_fields.keys():
+            ds[var_name] = processed_fields[var_name].astype(np.float32)
+            ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
+            ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
         # initialize vertical velocity to zero
         ds["w"] = xr.zeros_like(
-            self.grid.ds["interface_depth_rho"].expand_dims(time=data_vars["u"].time)
+            self.grid.ds["interface_depth_rho"].expand_dims(
+                time=processed_fields["u"].time
+            )
         ).astype(np.float32)
         ds["w"].attrs["long_name"] = d_meta["w"]["long_name"]
         ds["w"].attrs["units"] = d_meta["w"]["units"]
@@ -345,7 +349,7 @@ class InitialConditions:
             "layer_depth_v",
             "interface_depth_v",
         ]
-        existing_vars = [var for var in variables_to_drop if var in ds]
+        existing_vars = [var_name for var_name in variables_to_drop if var_name in ds]
         ds = ds.drop_vars(existing_vars)
 
         ds["Cs_r"] = self.grid.ds["Cs_r"]
@@ -415,7 +419,7 @@ class InitialConditions:
 
     def plot(
         self,
-        varname,
+        var_name,
         s=None,
         eta=None,
         xi=None,
@@ -426,7 +430,7 @@ class InitialConditions:
 
         Parameters
         ----------
-        varname : str
+        var_name : str
             The name of the initial conditions field to plot. Options include:
 
             - "temp": Potential temperature.
@@ -497,25 +501,25 @@ class InitialConditions:
         Raises
         ------
         ValueError
-            If the specified `varname` is not one of the valid options.
-            If the field specified by `varname` is 3D and none of `s`, `eta`, or `xi` are specified.
-            If the field specified by `varname` is 2D and both `eta` and `xi` are specified.
+            If the specified `var_name` is not one of the valid options.
+            If the field specified by `var_name` is 3D and none of `s`, `eta`, or `xi` are specified.
+            If the field specified by `var_name` is 2D and both `eta` and `xi` are specified.
         """
 
-        if len(self.ds[varname].squeeze().dims) == 3 and not any(
+        if len(self.ds[var_name].squeeze().dims) == 3 and not any(
             [s is not None, eta is not None, xi is not None]
         ):
             raise ValueError(
                 "For 3D fields, at least one of s, eta, or xi must be specified."
             )
 
-        if len(self.ds[varname].squeeze().dims) == 2 and all(
+        if len(self.ds[var_name].squeeze().dims) == 2 and all(
             [eta is not None, xi is not None]
         ):
             raise ValueError("For 2D fields, specify either eta or xi, not both.")
 
-        self.ds[varname].load()
-        field = self.ds[varname].squeeze()
+        self.ds[var_name].load()
+        field = self.ds[var_name].squeeze()
 
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             interface_depth = self.grid.ds.interface_depth_rho
@@ -570,7 +574,7 @@ class InitialConditions:
                     field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
-                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
+                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{var_name}]."
                 )
         if xi is not None:
             if "xi_rho" in field.dims:
@@ -589,18 +593,18 @@ class InitialConditions:
                     field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
-                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
+                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{var_name}]."
                 )
 
         # chose colorbar
-        if varname in ["u", "v", "w", "ubar", "vbar", "zeta"]:
+        if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
             cmap = plt.colormaps.get_cmap("RdBu_r")
         else:
             vmax = field.max().values
             vmin = field.min().values
-            if varname in ["temp", "salt"]:
+            if var_name in ["temp", "salt"]:
                 cmap = plt.colormaps.get_cmap("YlOrRd")
             else:
                 cmap = plt.colormaps.get_cmap("YlGn")

@@ -516,7 +516,7 @@ def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
 def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
     """Test plot and save methods."""
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
-    sfc_forcing.plot(varname="uwnd", time=0)
+    sfc_forcing.plot(var_name="uwnd", time=0)
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -549,7 +549,7 @@ def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
     """Test plot and save methods."""
 
     # Check the values in the dataset
-    bgc_surface_forcing.plot(varname="pco2_air", time=0)
+    bgc_surface_forcing.plot(var_name="pco2_air", time=0)
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -584,7 +584,7 @@ def test_surface_forcing_bgc_from_clim_plot_save(
     """Test plot and save methods."""
 
     # Check the values in the dataset
-    bgc_surface_forcing_from_climatology.plot(varname="pco2_air", time=0)
+    bgc_surface_forcing_from_climatology.plot(var_name="pco2_air", time=0)
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture

@@ -78,16 +78,16 @@ def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatolog
 def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
     """Test plot and save methods."""
 
-    boundary_forcing.plot(varname="temp_south", layer_contours=True)
-    boundary_forcing.plot(varname="temp_east", layer_contours=True)
-    boundary_forcing.plot(varname="temp_north", layer_contours=True)
-    boundary_forcing.plot(varname="temp_west", layer_contours=True)
-    boundary_forcing.plot(varname="zeta_south")
-    boundary_forcing.plot(varname="zeta_east")
-    boundary_forcing.plot(varname="zeta_north")
-    boundary_forcing.plot(varname="zeta_west")
-    boundary_forcing.plot(varname="vbar_north")
-    boundary_forcing.plot(varname="ubar_west")
+    boundary_forcing.plot(var_name="temp_south", layer_contours=True)
+    boundary_forcing.plot(var_name="temp_east", layer_contours=True)
+    boundary_forcing.plot(var_name="temp_north", layer_contours=True)
+    boundary_forcing.plot(var_name="temp_west", layer_contours=True)
+    boundary_forcing.plot(var_name="zeta_south")
+    boundary_forcing.plot(var_name="zeta_east")
+    boundary_forcing.plot(var_name="zeta_north")
+    boundary_forcing.plot(var_name="zeta_west")
+    boundary_forcing.plot(var_name="vbar_north")
+    boundary_forcing.plot(var_name="ubar_west")
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -124,10 +124,10 @@ def test_bgc_boundary_forcing_plot_save(
 ):
     """Test plot and save methods."""
 
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_south")
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_east")
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_north")
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_west")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_south")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_north")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west")
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture

@@ -181,37 +181,37 @@ def test_initial_conditions_plot_save(
 ):
     """Test plot and save methods."""
 
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", s=0)
     initial_conditions_with_bgc_from_climatology.plot(
-        varname="temp", s=0, depth_contours=True
+        var_name="temp", s=0, depth_contours=True
     )
     initial_conditions_with_bgc_from_climatology.plot(
-        varname="temp", eta=0, layer_contours=True
+        var_name="temp", eta=0, layer_contours=True
     )
     initial_conditions_with_bgc_from_climatology.plot(
-        varname="temp", xi=0, layer_contours=True
+        var_name="temp", xi=0, layer_contours=True
     )
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", s=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="temp", eta=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", eta=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", s=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", eta=0, xi=0)
     initial_conditions_with_bgc_from_climatology.plot(
-        varname="u", s=0, layer_contours=True
+        var_name="u", s=0, layer_contours=True
     )
-    initial_conditions_with_bgc_from_climatology.plot(varname="u", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="u", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="u", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="u", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="u", eta=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="u", xi=0)
     initial_conditions_with_bgc_from_climatology.plot(
-        varname="v", s=0, layer_contours=True
+        var_name="v", s=0, layer_contours=True
     )
-    initial_conditions_with_bgc_from_climatology.plot(varname="v", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="v", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="v", xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="zeta")
-    initial_conditions_with_bgc_from_climatology.plot(varname="ubar")
-    initial_conditions_with_bgc_from_climatology.plot(varname="vbar")
-    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", s=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(varname="ALK", eta=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="v", s=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="v", eta=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="v", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="zeta")
+    initial_conditions_with_bgc_from_climatology.plot(var_name="ubar")
+    initial_conditions_with_bgc_from_climatology.plot(var_name="vbar")
+    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", s=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", eta=0, xi=0)
 
     for file_str in ["test_ic", "test_ic.nc"]:
         # Create a temporary filepath using the tmp_path fixture

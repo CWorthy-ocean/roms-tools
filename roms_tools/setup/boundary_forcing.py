@@ -6,7 +6,7 @@ import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
-from roms_tools.setup.regrid import _lateral_regrid, _vertical_regrid
+from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
@@ -17,8 +17,7 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     compute_barotropic_velocity,
     transpose_dimensions,
-    extrapolate_deepest_to_bottom,
-    extrapolate_nans_in_open_boundaries,
+    one_dim_fill,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -58,6 +57,10 @@ class BoundaryForcing:
 
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
+    apply_2d_horizontal_fill: bool, optional
+        Indicates whether to perform a two-dimensional horizontal fill on the source data prior to regridding to boundaries.
+        If `False`, a one-dimensional horizontal fill is performed separately on each of the four regridded boundaries.
+        Defaults to `False`.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
@@ -87,6 +90,7 @@ class BoundaryForcing:
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     model_reference_date: datetime = datetime(2000, 1, 1)
+    apply_2d_horizontal_fill: bool = False
     use_dask: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -98,28 +102,31 @@ class BoundaryForcing:
 
         data = self._get_data()
 
-        variable_info = self._set_variable_info(data)
+        if self.apply_2d_horizontal_fill:
+            data.choose_subdomain(
+                target_coords,
+                buffer_points=20,  # lateral fill needs good buffer from data margin
+            )
+            data.extrapolate_deepest_to_bottom()
+            data.apply_lateral_fill()
 
+        variable_info = self._set_variable_info(data)
         bdry_coords = get_boundary_info()
         ds = xr.Dataset()
+
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
 
-                ds_source = data.choose_subdomain(
+                bdry_data = data.choose_subdomain(
                     target_coords,
-                    buffer_points=3,  # we won't do lateral fill, so chosen pretty minimally
-                    return_subdomain=True,
+                    buffer_points=3,
+                    return_copy=True,
                 )
 
-                data_vars = {}
-                for var_name in data.var_names.keys():
-                    data_vars[var_name] = ds_source[data.var_names[var_name]]
+                if not self.apply_2d_horizontal_fill:
+                    bdry_data.extrapolate_deepest_to_bottom()
 
-                # extrapolate source data to bottom
-                var_names = variable_info.keys()
-                data_vars = extrapolate_deepest_to_bottom(
-                    data_vars, data.dim_names["depth"], var_names
-                )
+                processed_fields = {}
 
                 # lateral regridding of vector fields
                 vector_var_names = [
@@ -128,12 +135,15 @@ class BoundaryForcing:
                 if len(vector_var_names) > 0:
                     lon = target_coords["lon"].isel(**bdry_coords["vector"][direction])
                     lat = target_coords["lat"].isel(**bdry_coords["vector"][direction])
-                    data_vars = _lateral_regrid(
-                        {"lat": lat, "lon": lon},
-                        data.dim_names,
-                        data_vars,
-                        vector_var_names,
+                    lateral_regrid = LateralRegrid(
+                        {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
+                    for var_name in vector_var_names:
+                        if var_name in bdry_data.var_names.keys():
+                            processed_fields[var_name] = lateral_regrid.apply(
+                                bdry_data.ds[bdry_data.var_names[var_name]]
+                            )
+
                 # lateral regridding of tracer fields
                 tracer_var_names = [
                     name
@@ -143,38 +153,38 @@ class BoundaryForcing:
                 if len(tracer_var_names) > 0:
                     lon = target_coords["lon"].isel(**bdry_coords["rho"][direction])
                     lat = target_coords["lat"].isel(**bdry_coords["rho"][direction])
-                    data_vars = _lateral_regrid(
-                        {"lat": lat, "lon": lon},
-                        data.dim_names,
-                        data_vars,
-                        tracer_var_names,
+                    lateral_regrid = LateralRegrid(
+                        {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
+                    for var_name in tracer_var_names:
+                        if var_name in bdry_data.var_names.keys():
+                            processed_fields[var_name] = lateral_regrid.apply(
+                                bdry_data.ds[bdry_data.var_names[var_name]]
+                            )
 
                 # rotation of velocities and interpolation to u/v points
                 if "u" in variable_info and "v" in variable_info:
                     angle = target_coords["angle"].isel(
                         **bdry_coords["vector"][direction]
                     )
-                    (data_vars["u"], data_vars["v"],) = rotate_velocities(
-                        data_vars["u"],
-                        data_vars["v"],
+                    (processed_fields["u"], processed_fields["v"],) = rotate_velocities(
+                        processed_fields["u"],
+                        processed_fields["v"],
                         angle,
                         interpolate=True,
                     )
 
                 # selection of outermost margin for u/v variables
-                for var in variable_info.keys():
-                    if var in data_vars:
-                        location = variable_info[var]["location"]
+                for var_name in variable_info.keys():
+                    if var_name in processed_fields:
+                        location = variable_info[var_name]["location"]
                         if location in ["u", "v"]:
-                            data_vars[var] = data_vars[var].isel(
-                                **bdry_coords[location][direction]
-                            )
+                            processed_fields[var_name] = processed_fields[
+                                var_name
+                            ].isel(**bdry_coords[location][direction])
 
-                # fill in lateral direction (1d)
-                data_vars = extrapolate_nans_in_open_boundaries(
-                    data_vars, direction="horizontal"
-                )
+                if not self.apply_2d_horizontal_fill:
+                    processed_fields = apply_1d_horizontal_fill(processed_fields)
 
                 # vertical regridding
                 for location in ["rho", "u", "v"]:
@@ -184,36 +194,43 @@ class BoundaryForcing:
                         if info["location"] == location and info["is_3d"]
                     ]
                     if len(var_names) > 0:
-                        data_vars = _vertical_regrid(
+                        vertical_regrid = VerticalRegrid(
                             self.grid.ds[f"layer_depth_{location}"].isel(
-                                **bdry_coords[location][direction],
+                                **bdry_coords[location][direction]
                             ),
-                            ds_source[data.dim_names["depth"]],
-                            data_vars,
-                            var_names,
+                            bdry_data.ds[bdry_data.dim_names["depth"]],
                         )
+                        for var_name in var_names:
+                            if var_name in processed_fields:
+                                processed_fields[var_name] = vertical_regrid.apply(
+                                    processed_fields[var_name]
+                                )
 
                 # compute barotropic velocities
                 if "u" in variable_info and "v" in variable_info:
-                    for var in ["u", "v"]:
-                        data_vars[f"{var}bar"] = compute_barotropic_velocity(
-                            data_vars[var],
-                            self.grid.ds[f"interface_depth_{var}"].isel(
-                                **bdry_coords[var][direction]
+                    for var_name in ["u", "v"]:
+                        processed_fields[
+                            f"{var_name}bar"
+                        ] = compute_barotropic_velocity(
+                            processed_fields[var_name],
+                            self.grid.ds[f"interface_depth_{var_name}"].isel(
+                                **bdry_coords[var_name][direction]
                             ),
                         )
 
                 # Reorder dimensions
-                for var in data_vars.keys():
-                    data_vars[var] = transpose_dimensions(data_vars[var])
+                for var_name in processed_fields.keys():
+                    processed_fields[var_name] = transpose_dimensions(
+                        processed_fields[var_name]
+                    )
 
                 # Write the boundary data into dataset
-                ds = self._write_into_dataset(direction, data_vars, ds)
+                ds = self._write_into_dataset(direction, processed_fields, ds)
 
         # Add global information
         ds = self._add_global_metadata(data, ds)
 
-        # self._validate(ds)
+        self._validate(ds)
 
         object.__setattr__(self, "ds", ds)
 
@@ -325,25 +342,27 @@ class BoundaryForcing:
             }
         elif self.type == "bgc":
             variable_info = {}
-            for var in data.var_names.keys():
-                variable_info[var] = default_info
+            for var_name in data.var_names.keys():
+                variable_info[var_name] = default_info
 
         return variable_info
 
-    def _write_into_dataset(self, direction, data_vars, ds=None):
+    def _write_into_dataset(self, direction, processed_fields, ds=None):
         if ds is None:
             ds = xr.Dataset()
 
         d_meta = get_variable_metadata()
 
-        for var in data_vars.keys():
-            ds[f"{var}_{direction}"] = data_vars[var].astype(np.float32)
+        for var_name in processed_fields.keys():
+            ds[f"{var_name}_{direction}"] = processed_fields[var_name].astype(
+                np.float32
+            )
 
-            ds[f"{var}_{direction}"].attrs[
+            ds[f"{var_name}_{direction}"].attrs[
                 "long_name"
-            ] = f"{direction}ern boundary {d_meta[var]['long_name']}"
+            ] = f"{direction}ern boundary {d_meta[var_name]['long_name']}"
 
-            ds[f"{var}_{direction}"].attrs["units"] = d_meta[var]["units"]
+            ds[f"{var_name}_{direction}"].attrs["units"] = d_meta[var_name]["units"]
 
         # Gracefully handle dropping variables that might not be present
         variables_to_drop = [
@@ -361,7 +380,7 @@ class BoundaryForcing:
             "lat_v",
             "lon_v",
         ]
-        existing_vars = [var for var in variables_to_drop if var in ds]
+        existing_vars = [var_name for var_name in variables_to_drop if var_name in ds]
         ds = ds.drop_vars(existing_vars)
 
         return ds
@@ -500,7 +519,7 @@ class BoundaryForcing:
 
     def plot(
         self,
-        varname,
+        var_name,
         time=0,
         layer_contours=False,
     ) -> None:
@@ -508,7 +527,7 @@ class BoundaryForcing:
 
         Parameters
         ----------
-        varname : str
+        var_name : str
             The name of the boundary forcing field to plot. Options include:
 
             - "temp_{direction}": Potential temperature,
@@ -568,37 +587,37 @@ class BoundaryForcing:
         Raises
         ------
         ValueError
-            If the specified varname is not one of the valid options.
+            If the specified var_name is not one of the valid options.
         """
 
-        if varname not in self.ds:
-            raise ValueError(f"Variable '{varname}' is not found in dataset.")
+        if var_name not in self.ds:
+            raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        field = self.ds[varname].isel(bry_time=time).load()
+        field = self.ds[var_name].isel(bry_time=time).load()
         title = field.long_name
 
         if "s_rho" in field.dims:
-            if varname.startswith(("u_", "ubar_")):
+            if var_name.startswith(("u_", "ubar_")):
                 point = "u"
-            elif varname.startswith(("v_", "vbar_")):
+            elif var_name.startswith(("v_", "vbar_")):
                 point = "v"
             else:
                 point = "rho"
-            direction = varname.split("_")[-1]
+            direction = var_name.split("_")[-1]
 
             layer_depth, interface_depth = self._get_coordinates(direction, point)
 
             field = field.assign_coords({"layer_depth": layer_depth})
 
         # chose colorbar
-        if varname.startswith(("u", "v", "ubar", "vbar", "zeta")):
+        if var_name.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
             cmap = plt.colormaps.get_cmap("RdBu_r")
         else:
             vmax = field.max().values
             vmin = field.min().values
-            if varname.startswith(("temp", "salt")):
+            if var_name.startswith(("temp", "salt")):
                 cmap = plt.colormaps.get_cmap("YlOrRd")
             else:
                 cmap = plt.colormaps.get_cmap("YlGn")
@@ -816,3 +835,51 @@ def get_boundary_info():
     }
 
     return bdry_coords
+
+
+def apply_1d_horizontal_fill(processed_fields: dict) -> dict:
+    """Forward and backward fill NaN values in horizontal direction for open boundaries.
+
+    Parameters
+    ----------
+    processed_fields : dict
+        A dictionary of variables to be updated, where each value is an
+        `xarray.DataArray`.
+
+    Returns
+    -------
+    dict of str : xarray.DataArray
+        The updated dictionary of variables, with NaN values filled.
+
+    Raises
+    ------
+    ValueError
+        If more than one horizontal dimension is found or none at all.
+    """
+
+    horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
+
+    for var_name in processed_fields.keys():
+        selected_horizontal_dim = None
+        # Determine the horizontal dimension to fill
+        for dim in horizontal_dims:
+            if dim in processed_fields[var_name].dims:
+                if selected_horizontal_dim is not None:
+                    raise ValueError(
+                        f"More than one horizontal dimension found in variable '{var_name}'."
+                    )
+                selected_horizontal_dim = dim
+
+        if selected_horizontal_dim is None:
+            raise ValueError(
+                f"No valid horizontal dimension found for variable '{var_name}'."
+            )
+        # Forward and backward fill in the horizontal direction
+        filled = one_dim_fill(
+            processed_fields[var_name], selected_horizontal_dim, direction="forward"
+        )
+        processed_fields[var_name] = one_dim_fill(
+            filled, selected_horizontal_dim, direction="backward"
+        )
+
+    return processed_fields

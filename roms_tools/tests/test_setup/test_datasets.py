@@ -259,6 +259,42 @@ def test_warnings_times(global_dataset, tmp_path, use_dask):
         )
 
 
+def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):
+    """Test the from_ds method of the Dataset class."""
+
+    start_time = datetime(2022, 1, 1)
+
+    filepath = tmp_path / "test.nc"
+    global_dataset.to_netcdf(filepath)
+
+    dataset = Dataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        dim_names={
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "time": "time",
+            "depth": "depth",
+        },
+        start_time=start_time,
+        use_dask=use_dask,
+    )
+
+    new_dataset = Dataset.from_ds(dataset, global_dataset_with_noon_times)
+
+    assert isinstance(new_dataset, Dataset)  # Check that the new instance is a Dataset
+    assert new_dataset.ds.equals(
+        global_dataset_with_noon_times
+    )  # Verify the new ds attribute is set correctly
+
+    # Ensure other attributes are copied correctly
+    for attr in vars(dataset):
+        if attr != "ds":
+            assert getattr(new_dataset, attr) == getattr(
+                dataset, attr
+            ), f"Attribute {attr} not copied correctly."
+
+
 def test_reverse_latitude_reverse_depth_choose_subdomain(
     global_dataset, tmp_path, use_dask
 ):
@@ -293,32 +329,32 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
         "lon": xr.DataArray(np.linspace(-10, 10, 100)),
         "straddle": True,
     }
-    ds = dataset.choose_subdomain(
+    sub_dataset = dataset.choose_subdomain(
         target_coords,
         buffer_points=1,
-        return_subdomain=True,
+        return_copy=True,
     )
 
-    assert -11 <= ds["latitude"].min() <= 11
-    assert -11 <= ds["latitude"].max() <= 11
-    assert -11 <= ds["longitude"].min() <= 11
-    assert -11 <= ds["longitude"].max() <= 11
+    assert -11 <= sub_dataset.ds["latitude"].min() <= 11
+    assert -11 <= sub_dataset.ds["latitude"].max() <= 11
+    assert -11 <= sub_dataset.ds["longitude"].min() <= 11
+    assert -11 <= sub_dataset.ds["longitude"].max() <= 11
 
     target_coords = {
         "lat": xr.DataArray(np.linspace(-10, 10, 100)),
         "lon": xr.DataArray(np.linspace(10, 20, 100)),
         "straddle": False,
     }
-    ds = dataset.choose_subdomain(
+    sub_dataset = dataset.choose_subdomain(
         target_coords,
         buffer_points=1,
-        return_subdomain=True,
+        return_copy=True,
     )
 
-    assert -11 <= ds["latitude"].min() <= 11
-    assert -11 <= ds["latitude"].max() <= 11
-    assert 9 <= ds["longitude"].min() <= 21
-    assert 9 <= ds["longitude"].max() <= 21
+    assert -11 <= sub_dataset.ds["latitude"].min() <= 11
+    assert -11 <= sub_dataset.ds["latitude"].max() <= 11
+    assert 9 <= sub_dataset.ds["longitude"].min() <= 21
+    assert 9 <= sub_dataset.ds["longitude"].max() <= 21
 
 
 def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask):

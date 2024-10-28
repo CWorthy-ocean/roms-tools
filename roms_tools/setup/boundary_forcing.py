@@ -115,8 +115,10 @@ class BoundaryForcing:
                 for var_name in data.var_names.keys():
                     data_vars[var_name] = ds_source[data.var_names[var_name]]
 
+                # extrapolate source data to bottom
+                var_names = variable_info.keys()
                 data_vars = extrapolate_deepest_to_bottom(
-                    data_vars, data.dim_names["depth"]
+                    data_vars, data.dim_names["depth"], var_names
                 )
 
                 # lateral regridding of vector fields
@@ -148,10 +150,6 @@ class BoundaryForcing:
                         tracer_var_names,
                     )
 
-                data_vars = extrapolate_nans_in_open_boundaries(
-                    data_vars, direction="horizontal"
-                )
-
                 # rotation of velocities and interpolation to u/v points
                 if "u" in variable_info and "v" in variable_info:
                     angle = target_coords["angle"].isel(
@@ -173,6 +171,11 @@ class BoundaryForcing:
                                 **bdry_coords[location][direction]
                             )
 
+                # fill in lateral direction (1d)
+                data_vars = extrapolate_nans_in_open_boundaries(
+                    data_vars, direction="horizontal"
+                )
+
                 # vertical regridding
                 for location in ["rho", "u", "v"]:
                     var_names = [
@@ -189,8 +192,6 @@ class BoundaryForcing:
                             data_vars,
                             var_names,
                         )
-
-                # data_vars = extrapolate_nans_in_open_boundaries(data_vars, direction="horizontal")
 
                 # compute barotropic velocities
                 if "u" in variable_info and "v" in variable_info:

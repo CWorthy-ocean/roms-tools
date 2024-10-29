@@ -7,7 +7,7 @@ from roms_tools.utils import partition
 from pathlib import Path
 
 
-def nan_check(field, mask) -> None:
+def nan_check(field, mask, error_message=None) -> None:
     """Checks for NaN values at wet points in the field.
 
     This function examines the interpolated input field for NaN values at positions indicated as wet points by the mask.
@@ -22,6 +22,10 @@ def nan_check(field, mask) -> None:
         A boolean mask or data array with the same shape as `field`. The wet points (usually ocean points)
         are indicated by `1` or `True`, and land points by `0` or `False`.
 
+    error_message : str, optional
+        A custom error message to be included in the ValueError if NaN values are detected. If not provided,
+        a default message will explain the potential cause and suggest ensuring the dataset's coverage.
+
     Raises
     ------
     ValueError
@@ -31,14 +35,15 @@ def nan_check(field, mask) -> None:
 
     # Replace values in field with 0 where mask is not 1
     da = xr.where(mask == 1, field, 0)
-
-    # Check if any NaN values exist in the modified field
-    if da.isnull().any().values:
-        raise ValueError(
+    if error_message is None:
+        error_message = (
             "NaN values found in interpolated field. This likely occurs because the ROMS grid, including "
             "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
             "dataset covers the entire area required by the ROMS grid."
         )
+    # Check if any NaN values exist in the modified field
+    if da.isnull().any().values:
+        raise ValueError(error_message)
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
@@ -156,63 +161,30 @@ def interpolate_from_rho_to_v(field, method="additive"):
     return field_interpolated
 
 
-def extrapolate_deepest_to_bottom(field: xr.DataArray, dim: str) -> xr.DataArray:
-    """Extrapolates the deepest non-NaN values to the bottom along the specified
-    dimension using forward fill.
-
-    This function assumes that the specified dimension is ordered from top to bottom (e.g., a vertical dimension like 'depth').
-    It fills `NaN` values below the deepest valid (non-NaN) entry along the given dimension by carrying forward the last valid value.
+def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
+    """Fill NaN values in a DataArray along a specified dimension.
 
     Parameters
     ----------
-    field : xr.DataArray
-        The input `xarray.DataArray` containing potential `NaN` values to be filled.
-        This array must have at least one dimension corresponding to `dim`, typically
-        a vertical axis such as 'depth' or 'height'.
+    da : xr.DataArray
+        The input DataArray with NaN values to be filled, which must include the specified dimension.
     dim : str
-        The name of the dimension along which to perform the forward fill operation.
-        The function assumes that this dimension is ordered from top to bottom, with
-        larger index values representing deeper or lower levels.
+        The name of the dimension along which to fill NaN values (e.g., 'depth' or 'time').
+    direction : str, optional
+        The filling direction; either "forward" to propagate non-NaN values downward or "backward" to propagate them upward.
+        Defaults to "forward".
 
     Returns
     -------
     xr.DataArray
-        A new `xarray.DataArray` with the `NaN` values along the specified dimension
-        filled by forward filling the deepest valid values down to the bottom.
-        The original input data remains unmodified.
+        A new DataArray with NaN values filled in the specified direction, leaving the original data unchanged.
     """
-    if dim in field.dims:
-        return field.ffill(dim=dim)
-    else:
-        return field
-
-
-def _extrapolate_deepest_to_bottom(data_vars, data) -> dict:
-    """Extrapolate the deepest value to the bottom for variables using the dataset's
-    depth dimension.
-
-    This function fills in missing values at the bottom of each variable by
-    carrying forward the deepest available value, ensuring a complete depth profile.
-
-    Parameters
-    ----------
-    data_vars : dict
-        Existing dictionary of variables to be updated.
-    data : Dataset
-        Dataset containing variables and depth information.
-
-    Returns
-    -------
-    dict of str : xarray.DataArray
-        Dictionary of variables with the deepest value extrapolated to the bottom.
-    """
-
-    for var in data.var_names.keys():
-        data_vars[var] = extrapolate_deepest_to_bottom(
-            data.ds[data.var_names[var]], data.dim_names["depth"]
-        )
-
-    return data_vars
+    if dim in da.dims:
+        if direction == "forward":
+            return da.ffill(dim=dim)
+        elif direction == "backward":
+            return da.bfill(dim=dim)
+    return da
 
 
 def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:

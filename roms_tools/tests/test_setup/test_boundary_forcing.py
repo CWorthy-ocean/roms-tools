@@ -7,11 +7,18 @@ from conftest import calculate_file_hash
 from pathlib import Path
 
 
-def test_boundary_forcing_creation(boundary_forcing):
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "boundary_forcing",
+        "boundary_forcing_with_2d_fill",
+    ],
+)
+def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
 
     fname = download_test_data("GLORYS_coarse_test_data.nc")
-
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
     assert boundary_forcing.end_time == datetime(2021, 6, 30)
     assert boundary_forcing.source == {
@@ -40,54 +47,57 @@ def test_boundary_forcing_creation(boundary_forcing):
     assert not hasattr(boundary_forcing.ds, "climatology")
 
 
-def test_boundary_forcing_creation_with_bgc(bgc_boundary_forcing_from_climatology):
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_climatology_with_2d_fill",
+    ],
+)
+def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
 
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
-    assert bgc_boundary_forcing_from_climatology.start_time == datetime(2021, 6, 29)
-    assert bgc_boundary_forcing_from_climatology.end_time == datetime(2021, 6, 30)
-    assert bgc_boundary_forcing_from_climatology.source == {
+    assert boundary_forcing.start_time == datetime(2021, 6, 29)
+    assert boundary_forcing.end_time == datetime(2021, 6, 30)
+    assert boundary_forcing.source == {
         "path": fname_bgc,
         "name": "CESM_REGRIDDED",
         "climatology": True,
     }
-    assert bgc_boundary_forcing_from_climatology.model_reference_date == datetime(
-        2000, 1, 1
-    )
-    assert bgc_boundary_forcing_from_climatology.boundaries == {
+    assert boundary_forcing.model_reference_date == datetime(2000, 1, 1)
+    assert boundary_forcing.boundaries == {
         "south": True,
         "east": True,
         "north": True,
         "west": True,
     }
 
-    assert bgc_boundary_forcing_from_climatology.ds.source == "CESM_REGRIDDED"
+    assert boundary_forcing.ds.source == "CESM_REGRIDDED"
     for direction in ["south", "east", "north", "west"]:
         for var in ["ALK", "PO4"]:
-            assert f"{var}_{direction}" in bgc_boundary_forcing_from_climatology.ds
+            assert f"{var}_{direction}" in boundary_forcing.ds
 
-    assert len(bgc_boundary_forcing_from_climatology.ds.bry_time) == 12
-    assert (
-        bgc_boundary_forcing_from_climatology.ds.coords["bry_time"].attrs["units"]
-        == "days"
-    )
-    assert hasattr(bgc_boundary_forcing_from_climatology.ds, "climatology")
+    assert len(boundary_forcing.ds.bry_time) == 12
+    assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
+    assert hasattr(boundary_forcing.ds, "climatology")
 
 
 def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
     """Test plot and save methods."""
 
-    boundary_forcing.plot(varname="temp_south", layer_contours=True)
-    boundary_forcing.plot(varname="temp_east", layer_contours=True)
-    boundary_forcing.plot(varname="temp_north", layer_contours=True)
-    boundary_forcing.plot(varname="temp_west", layer_contours=True)
-    boundary_forcing.plot(varname="zeta_south")
-    boundary_forcing.plot(varname="zeta_east")
-    boundary_forcing.plot(varname="zeta_north")
-    boundary_forcing.plot(varname="zeta_west")
-    boundary_forcing.plot(varname="vbar_north")
-    boundary_forcing.plot(varname="ubar_west")
+    boundary_forcing.plot(var_name="temp_south", layer_contours=True)
+    boundary_forcing.plot(var_name="temp_east", layer_contours=True)
+    boundary_forcing.plot(var_name="temp_north", layer_contours=True)
+    boundary_forcing.plot(var_name="temp_west", layer_contours=True)
+    boundary_forcing.plot(var_name="zeta_south")
+    boundary_forcing.plot(var_name="zeta_east")
+    boundary_forcing.plot(var_name="zeta_north")
+    boundary_forcing.plot(var_name="zeta_west")
+    boundary_forcing.plot(var_name="vbar_north")
+    boundary_forcing.plot(var_name="ubar_west")
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -124,10 +134,10 @@ def test_bgc_boundary_forcing_plot_save(
 ):
     """Test plot and save methods."""
 
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_south")
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_east")
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_north")
-    bgc_boundary_forcing_from_climatology.plot(varname="ALK_west")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_south")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_north")
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west")
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture

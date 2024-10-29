@@ -7,6 +7,13 @@ from roms_tools import (
     BoundaryForcing,
     SurfaceForcing,
 )
+from roms_tools.setup.datasets import (
+    GLORYSDataset,
+    ERA5Dataset,
+    CESMBGCDataset,
+    CESMBGCSurfaceForcingDataset,
+    TPXODataset,
+)
 from roms_tools.setup.download import download_test_data
 import hashlib
 
@@ -185,6 +192,36 @@ def boundary_forcing(request, use_dask):
 
 
 @pytest.fixture(scope="session")
+def boundary_forcing_with_2d_fill(request, use_dask):
+    """Fixture for creating a BoundaryForcing object with 2d horizontal fill."""
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = download_test_data("GLORYS_coarse_test_data.nc")
+
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"name": "GLORYS", "path": fname},
+        use_dask=use_dask,
+        apply_2d_horizontal_fill=True,
+    )
+
+
+@pytest.fixture(scope="session")
 def bgc_boundary_forcing_from_climatology(request, use_dask):
     """Fixture for creating a BoundaryForcing object."""
 
@@ -211,6 +248,37 @@ def bgc_boundary_forcing_from_climatology(request, use_dask):
         source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
         type="bgc",
         use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def bgc_boundary_forcing_from_climatology_with_2d_fill(request, use_dask):
+    """Fixture for creating a BoundaryForcing object with 2d horizontal fill."""
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+        type="bgc",
+        use_dask=use_dask,
+        apply_2d_horizontal_fill=True,
     )
 
 
@@ -355,6 +423,100 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
         type="bgc",
         use_dask=use_dask,
     )
+
+
+@pytest.fixture(scope="session")
+def era5_data(request, use_dask):
+    fname = download_test_data("ERA5_regional_test_data.nc")
+    data = ERA5Dataset(
+        filename=fname,
+        start_time=datetime(2020, 1, 31),
+        end_time=datetime(2020, 2, 2),
+        use_dask=use_dask,
+    )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def glorys_data(request, use_dask):
+    # the following GLORYS data has a wide enough domain
+    # to have different masks for tracers vs. velocities
+    fname = download_test_data("GLORYS_test_data.nc")
+
+    data = GLORYSDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        use_dask=use_dask,
+    )
+
+    ds = data.ds.isel(depth=[0, 10, 30])
+    object.__setattr__(data, "ds", ds)
+
+    data.extrapolate_deepest_to_bottom()
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def tpxo_data(request, use_dask):
+    fname = download_test_data("TPXO_regional_test_data.nc")
+
+    data = TPXODataset(
+        filename=fname,
+        use_dask=use_dask,
+    )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def cesm_bgc_data(request, use_dask):
+    fname = download_test_data("CESM_regional_test_data_one_time_slice.nc")
+
+    data = CESMBGCDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=False,
+        use_dask=use_dask,
+    )
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def coarsened_cesm_bgc_data(request, use_dask):
+    fname = download_test_data("CESM_BGC_2012.nc")
+
+    data = CESMBGCDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=False,
+        use_dask=use_dask,
+    )
+
+    data.extrapolate_deepest_to_bottom()
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def cesm_surface_bgc_data(request, use_dask):
+    fname = download_test_data("CESM_BGC_SURFACE_2012.nc")
+
+    data = CESMBGCSurfaceForcingDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=False,
+        use_dask=use_dask,
+    )
+    data.post_process()
+
+    return data
 
 
 def calculate_file_hash(filepath, hash_algorithm="sha256"):

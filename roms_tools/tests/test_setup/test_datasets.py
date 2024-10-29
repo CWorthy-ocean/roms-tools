@@ -259,6 +259,42 @@ def test_warnings_times(global_dataset, tmp_path, use_dask):
         )
 
 
+def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):
+    """Test the from_ds method of the Dataset class."""
+
+    start_time = datetime(2022, 1, 1)
+
+    filepath = tmp_path / "test.nc"
+    global_dataset.to_netcdf(filepath)
+
+    dataset = Dataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        dim_names={
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "time": "time",
+            "depth": "depth",
+        },
+        start_time=start_time,
+        use_dask=use_dask,
+    )
+
+    new_dataset = Dataset.from_ds(dataset, global_dataset_with_noon_times)
+
+    assert isinstance(new_dataset, Dataset)  # Check that the new instance is a Dataset
+    assert new_dataset.ds.equals(
+        global_dataset_with_noon_times
+    )  # Verify the new ds attribute is set correctly
+
+    # Ensure other attributes are copied correctly
+    for attr in vars(dataset):
+        if attr != "ds":
+            assert getattr(new_dataset, attr) == getattr(
+                dataset, attr
+            ), f"Attribute {attr} not copied correctly."
+
+
 def test_reverse_latitude_reverse_depth_choose_subdomain(
     global_dataset, tmp_path, use_dask
 ):
@@ -288,31 +324,37 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
     assert np.all(np.diff(dataset.ds["depth"]) > 0)
 
     # test choosing subdomain for domain that straddles the dateline
-    ds = dataset.choose_subdomain(
-        latitude_range=(-10, 10),
-        longitude_range=(-10, 10),
-        margin=1,
-        straddle=True,
-        return_subdomain=True,
+    target_coords = {
+        "lat": xr.DataArray(np.linspace(-10, 10, 100)),
+        "lon": xr.DataArray(np.linspace(-10, 10, 100)),
+        "straddle": True,
+    }
+    sub_dataset = dataset.choose_subdomain(
+        target_coords,
+        buffer_points=1,
+        return_copy=True,
     )
 
-    assert -11 <= ds["latitude"].min() <= 11
-    assert -11 <= ds["latitude"].max() <= 11
-    assert -11 <= ds["longitude"].min() <= 11
-    assert -11 <= ds["longitude"].max() <= 11
+    assert -11 <= sub_dataset.ds["latitude"].min() <= 11
+    assert -11 <= sub_dataset.ds["latitude"].max() <= 11
+    assert -11 <= sub_dataset.ds["longitude"].min() <= 11
+    assert -11 <= sub_dataset.ds["longitude"].max() <= 11
 
-    ds = dataset.choose_subdomain(
-        latitude_range=(-10, 10),
-        longitude_range=(10, 20),
-        margin=1,
-        straddle=False,
-        return_subdomain=True,
+    target_coords = {
+        "lat": xr.DataArray(np.linspace(-10, 10, 100)),
+        "lon": xr.DataArray(np.linspace(10, 20, 100)),
+        "straddle": False,
+    }
+    sub_dataset = dataset.choose_subdomain(
+        target_coords,
+        buffer_points=1,
+        return_copy=True,
     )
 
-    assert -11 <= ds["latitude"].min() <= 11
-    assert -11 <= ds["latitude"].max() <= 11
-    assert 9 <= ds["longitude"].min() <= 21
-    assert 9 <= ds["longitude"].max() <= 21
+    assert -11 <= sub_dataset.ds["latitude"].min() <= 11
+    assert -11 <= sub_dataset.ds["latitude"].max() <= 11
+    assert 9 <= sub_dataset.ds["longitude"].min() <= 21
+    assert 9 <= sub_dataset.ds["longitude"].max() <= 21
 
 
 def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask):
@@ -475,3 +517,19 @@ def test_climatology_error(use_dask):
             climatology=False,
             use_dask=use_dask,
         )
+
+
+@pytest.mark.parametrize(
+    "data_fixture, expected_resolution",
+    [
+        ("era5_data", 0.25),
+        ("glorys_data", 1 / 12),
+        ("tpxo_data", 1 / 6),
+        ("cesm_bgc_data", 1.0),
+        ("cesm_surface_bgc_data", 1.0),
+    ],
+)
+def test_horizontal_resolution(data_fixture, expected_resolution, request):
+
+    data = request.getfixturevalue(data_fixture)
+    assert np.isclose(data.resolution, expected_resolution)

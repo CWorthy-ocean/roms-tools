@@ -7,7 +7,7 @@ from roms_tools.utils import partition
 from pathlib import Path
 
 
-def nan_check(field, mask) -> None:
+def nan_check(field, mask, error_message=None) -> None:
     """Checks for NaN values at wet points in the field.
 
     This function examines the interpolated input field for NaN values at positions indicated as wet points by the mask.
@@ -22,6 +22,10 @@ def nan_check(field, mask) -> None:
         A boolean mask or data array with the same shape as `field`. The wet points (usually ocean points)
         are indicated by `1` or `True`, and land points by `0` or `False`.
 
+    error_message : str, optional
+        A custom error message to be included in the ValueError if NaN values are detected. If not provided,
+        a default message will explain the potential cause and suggest ensuring the dataset's coverage.
+
     Raises
     ------
     ValueError
@@ -31,14 +35,15 @@ def nan_check(field, mask) -> None:
 
     # Replace values in field with 0 where mask is not 1
     da = xr.where(mask == 1, field, 0)
-
-    # Check if any NaN values exist in the modified field
-    if da.isnull().any().values:
-        raise ValueError(
+    if error_message is None:
+        error_message = (
             "NaN values found in interpolated field. This likely occurs because the ROMS grid, including "
             "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
             "dataset covers the entire area required by the ROMS grid."
         )
+    # Check if any NaN values exist in the modified field
+    if da.isnull().any().values:
+        raise ValueError(error_message)
 
 
 def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:

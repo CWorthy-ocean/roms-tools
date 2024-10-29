@@ -117,8 +117,18 @@ class BoundaryForcing:
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
 
+                bdry_target_coords = {
+                    "lat": target_coords["lat"].isel(
+                        **bdry_coords["vector"][direction]
+                    ),
+                    "lon": target_coords["lon"].isel(
+                        **bdry_coords["vector"][direction]
+                    ),
+                    "straddle": target_coords["straddle"],
+                }
+
                 bdry_data = data.choose_subdomain(
-                    target_coords,
+                    bdry_target_coords,
                     buffer_points=3,
                     return_copy=True,
                 )

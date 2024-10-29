@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import yaml
 import importlib.metadata
+import warnings
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
@@ -18,6 +19,8 @@ from roms_tools.setup.utils import (
     compute_barotropic_velocity,
     transpose_dimensions,
     one_dim_fill,
+    nan_check,
+    substitute_nans_by_fillvalue,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -240,7 +243,11 @@ class BoundaryForcing:
         # Add global information
         ds = self._add_global_metadata(data, ds)
 
-        self._validate(ds)
+        self._validate(ds, variable_info, bdry_coords)
+
+        # substitute NaNs over land by a fill value to avoid blow-up of ROMS
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         object.__setattr__(self, "ds", ds)
 
@@ -499,33 +506,72 @@ class BoundaryForcing:
 
         return ds
 
-    def _validate(self, ds):
-        """Validate the dataset for NaN values at the first time step.
-
-        This method checks if any variables contain NaN values, which may indicate
-        that the entire boundary is located on land.
+    def _validate(self, ds, variable_info, bdry_coords):
+        """Validate the dataset for NaN values at the first time step based on the fill
+        method used.
 
         Parameters
         ----------
         ds : xarray.Dataset
             The dataset to validate.
 
+        variable_info : dict
+            A dictionary containing metadata about the variables, including their locations (e.g., 'rho', 'u', 'v').
+
+        bdry_coords : dict
+            A dictionary containing the boundary coordinates for each variable location.
+
         Raises
         ------
         ValueError
-            If NaN values are detected in any variable, indicating that the
-            corresponding boundary is entirely on land.
+            If NaN values are found in any of the specified variables at wet points,
+            indicating incomplete data coverage.
 
         Notes
         -----
         Validation is performed on the initial boundary time step (`bry_time=0`) for each
-        variable in the dataset.
+        variable in the dataset. If the `apply_2d_horizontal_fill` attribute is set to False,
+        a warning is issued instead of a strict NaN check, as the data may not be reliably validated.
+        Conversely, if `apply_2d_horizontal_fill` is True, a strict NaN check is performed, raising
+        a ValueError if any NaN values are detected.
         """
-        for var_name in ds.data_vars:
-            if ds[var_name].isel(bry_time=0).isnull().any().values:
-                raise ValueError(
-                    f"NaN values found in {var_name}. This likely occurs because the entire boundary is on land in the source data."
-                )
+        if self.apply_2d_horizontal_fill:
+            # Strict NaN check with ValueError makes sense to be applied
+            for var_name in variable_info:
+                location = variable_info[var_name]["location"]
+
+                # Select the appropriate mask based on variable location
+                if location == "rho":
+                    mask = self.grid.ds.mask_rho
+                elif location == "u":
+                    mask = self.grid.ds.mask_u
+                elif location == "v":
+                    mask = self.grid.ds.mask_v
+                else:
+                    continue  # Skip if location is not recognized
+
+                for direction in ["south", "east", "north", "west"]:
+                    if self.boundaries[direction]:
+                        bdry_var_name = f"{var_name}_{direction}"
+
+                        # Check for NaN values at the first time step using the nan_check function
+                        nan_check(
+                            ds[bdry_var_name].isel(bry_time=0),
+                            mask.isel(**bdry_coords[location][direction]),
+                        )
+        else:
+            # Can't apply strict NaN check because land values haven't been filled before regridding step; instead warn user
+            for direction in ["south", "east", "north", "west"]:
+                if self.boundaries[direction]:
+                    for var_name in variable_info:
+                        bdry_var_name = f"{var_name}_{direction}"
+                        if ds[bdry_var_name].isel(bry_time=0).isnull().any().values:
+                            warnings.warn(
+                                f"NaN values detected in regridded variables along the {direction}ern boundary. This may indicate that the entire boundary is on land in the source data, or that the source data does not cover this boundary.",
+                                UserWarning,
+                            )
+                            # Break after the first warning for this direction to avoid duplicates
+                            break
 
     def plot(
         self,

@@ -20,8 +20,7 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     get_vector_pairs,
 )
-from roms_tools.setup.fill import _lateral_fill
-from roms_tools.setup.regrid import _lateral_regrid
+from roms_tools.setup.regrid import LateralRegrid
 import matplotlib.pyplot as plt
 from pathlib import Path
 
@@ -77,71 +76,64 @@ class TidalForcing:
         data = self._get_data()
         data.check_number_constituents(self.ntides)
         data.choose_subdomain(
-            latitude_range=[
-                target_coords["lat"].min().values,
-                target_coords["lat"].max().values,
-            ],
-            longitude_range=[
-                target_coords["lon"].min().values,
-                target_coords["lon"].max().values,
-            ],
-            margin=2,
-            straddle=target_coords["straddle"],
+            target_coords,
+            buffer_points=20,
         )
         # select desired number of constituents
         object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
         self._correct_tides(data)
 
+        data.apply_lateral_fill()
+
         variable_info = self._set_variable_info()
-
-        data_vars = {}
-        for var_name in data.var_names:
-            data_vars[var_name] = data.ds[data.var_names[var_name]]
-
-        data_vars = _lateral_fill(data_vars, data)
-
-        # lateral regridding
         var_names = variable_info.keys()
-        data_vars = _lateral_regrid(
-            data, target_coords["lon"], target_coords["lat"], data_vars, var_names
-        )
+
+        processed_fields = {}
+        # lateral regridding
+        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        for var_name in var_names:
+            if var_name in data.var_names.keys():
+                processed_fields[var_name] = lateral_regrid.apply(
+                    data.ds[data.var_names[var_name]]
+                )
 
         # rotation of velocities and interpolation to u/v points
         vector_pairs = get_vector_pairs(variable_info)
         for pair in vector_pairs:
             u_component = pair[0]
             v_component = pair[1]
-            if u_component in data_vars and v_component in data_vars:
-                (data_vars[u_component], data_vars[v_component],) = rotate_velocities(
-                    data_vars[u_component],
-                    data_vars[v_component],
+            if u_component in processed_fields and v_component in processed_fields:
+                (
+                    processed_fields[u_component],
+                    processed_fields[v_component],
+                ) = rotate_velocities(
+                    processed_fields[u_component],
+                    processed_fields[v_component],
                     target_coords["angle"],
                     interpolate=False,
                 )
 
         # convert to barotropic velocity
-        for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
-            data_vars[varname] = data_vars[varname] / self.grid.ds.h
+        for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+            processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
 
         # interpolate from rho- to velocity points
         for uname in ["u_Re", "u_Im"]:
-            data_vars[uname] = interpolate_from_rho_to_u(data_vars[uname])
+            processed_fields[uname] = interpolate_from_rho_to_u(processed_fields[uname])
         for vname in ["v_Re", "v_Im"]:
-            data_vars[vname] = interpolate_from_rho_to_v(data_vars[vname])
+            processed_fields[vname] = interpolate_from_rho_to_v(processed_fields[vname])
 
         d_meta = get_variable_metadata()
-        ds = self._write_into_dataset(data_vars, d_meta)
+        ds = self._write_into_dataset(processed_fields, d_meta)
         ds["omega"] = data.ds["omega"]
 
         ds = self._add_global_metadata(ds)
 
-        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
-        for var in ["ssh_Re", "u_Re", "v_Im"]:
-            nan_check(ds[var].isel(ntides=0), self.grid.ds.mask_rho)
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var in ds.data_vars:
-            ds[var] = substitute_nans_by_fillvalue(ds[var])
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         object.__setattr__(self, "ds", ds)
 
@@ -216,15 +208,15 @@ class TidalForcing:
 
         return variable_info
 
-    def _write_into_dataset(self, data_vars, d_meta):
+    def _write_into_dataset(self, processed_fields, d_meta):
 
         # save in new dataset
         ds = xr.Dataset()
 
-        for var in data_vars.keys():
-            ds[var] = data_vars[var].astype(np.float32)
-            ds[var].attrs["long_name"] = d_meta[var]["long_name"]
-            ds[var].attrs["units"] = d_meta[var]["units"]
+        for var_name in processed_fields.keys():
+            ds[var_name] = processed_fields[var_name].astype(np.float32)
+            ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
+            ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
         ds = ds.drop_vars(["lat_rho", "lon_rho"])
 
@@ -247,12 +239,35 @@ class TidalForcing:
 
         return ds
 
-    def plot(self, varname, ntides=0) -> None:
+    def _validate(self, ds):
+        """Validates the dataset by checking for NaN values at wet points, which would
+        indicate missing raw data coverage over the target domain.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to validate, containing tidal variables and a mask for wet points.
+
+        Raises
+        ------
+        ValueError
+            If NaN values are found in any of the specified variables at wet points,
+            indicating incomplete data coverage.
+
+        Notes
+        -----
+        This check is applied to the first constituent (`ntides=0`) of each variable in the dataset.
+        The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
+        """
+        for var_name in ds.data_vars:
+            nan_check(ds[var_name].isel(ntides=0), self.grid.ds.mask_rho)
+
+    def plot(self, var_name, ntides=0) -> None:
         """Plot the specified tidal forcing variable for a given tidal constituent.
 
         Parameters
         ----------
-        varname : str
+        var_name : str
             The tidal forcing variable to plot. Options include:
 
             - "ssh_Re": Real part of tidal elevation.
@@ -285,7 +300,7 @@ class TidalForcing:
         >>> tidal_forcing.plot("ssh_Re", nc=0)
         """
 
-        field = self.ds[varname].isel(ntides=ntides).compute()
+        field = self.ds[var_name].isel(ntides=ntides).compute()
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             field = field.where(self.grid.ds.mask_rho)
             field = field.assign_coords(
@@ -306,7 +321,7 @@ class TidalForcing:
         else:
             ValueError("provided field does not have two horizontal dimension")
 
-        title = "%s, ntides = %i" % (field.long_name, self.ds[varname].ntides[ntides])
+        title = "%s, ntides = %i" % (field.long_name, self.ds[var_name].ntides[ntides])
 
         vmax = max(field.max(), -field.min())
         vmin = -vmax

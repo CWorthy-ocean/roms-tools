@@ -1,6 +1,15 @@
 Installation
 ############
 
+Installation from conda forge
+=============================
+
+ROMS-Tools can be installed via conda forge::
+
+    conda install -c conda-forge roms-tools
+
+This command installs ROMS-Tools along with its dask dependency.
+
 Installation from pip
 =====================
 

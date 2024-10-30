@@ -1,4 +1,5 @@
 # ROMS-Tools
+[![Conda version](https://img.shields.io/conda/vn/conda-forge/roms-tools.svg)](https://anaconda.org/conda-forge/roms-tools)
 [![PyPI version](https://img.shields.io/pypi/v/roms-tools.svg)](https://pypi.org/project/roms-tools/)
 [![codecov](https://codecov.io/gh/CWorthy-ocean/roms-tools/graph/badge.svg?token=5S1oNu39xE)](https://codecov.io/gh/CWorthy-ocean/roms-tools)
 [![Documentation Status](https://readthedocs.org/projects/roms-tools/badge/?version=latest)](https://roms-tools.readthedocs.io/en/latest/?badge=latest)
@@ -13,6 +14,14 @@ A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla
 <mark>**DISCLAIMER**: This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout Fall 2024. We do not recommend to use this software before this ALPHA development and test phase is completed.</mark>
 
 ## Installation
+
+### Installation from conda forge
+
+```bash
+conda install -c conda-forge roms-tools
+```
+
+This command installs `ROMS-Tools` along with its `dask` dependency.
 
 ### Installation from pip
 

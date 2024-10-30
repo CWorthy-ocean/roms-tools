@@ -86,15 +86,8 @@ class Grid:
 
         self._input_checks()
 
-        ds = _make_grid_ds(
-            nx=self.nx,
-            ny=self.ny,
-            size_x=self.size_x,
-            size_y=self.size_y,
-            center_lon=self.center_lon,
-            center_lat=self.center_lat,
-            rot=self.rot,
-        )
+        ds = self._make_grid_ds()
+
         # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
         object.__setattr__(self, "ds", ds)
@@ -779,150 +772,253 @@ class Grid:
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
+    def _make_grid_ds(self) -> xr.Dataset():
+        self._raise_if_domain_size_too_large()
 
-def _make_grid_ds(
-    nx: int,
-    ny: int,
-    size_x: float,
-    size_y: float,
-    center_lon: float,
-    center_lat: float,
-    rot: float,
-) -> xr.Dataset:
-    _raise_if_domain_size_too_large(size_x, size_y)
+        coords = self._make_initial_lon_lat_ds()
 
-    initial_lon_lat_vars = _make_initial_lon_lat_ds(size_x, size_y, nx, ny)
+        # rotate coordinate system
+        coords = _rotate(coords, self.rot)
 
-    # rotate coordinate system
-    rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
+        # translate coordinate system
+        coords = _translate(coords, self.center_lat, self.center_lon)
 
-    # translate coordinate system
-    translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
-    lon, lat, lonu, latu, lonv, latv, lonq, latq = translated_lon_lat_vars
+        # compute 1/dx and 1/dy
+        coords["pm"], coords["pn"] = _compute_coordinate_metrics(coords)
 
-    # compute 1/dx and 1/dy
-    pm, pn = _compute_coordinate_metrics(lon, lonu, latu, lonv, latv)
+        # compute angle of local grid positive x-axis relative to east
+        coords["angle"] = _compute_angle(coords)
 
-    # compute angle of local grid positive x-axis relative to east
-    ang = _compute_angle(lon, lonu, latu, lonq)
+        # make sure lons are in [0, 360] range
+        for lon in ["lon", "lonu", "lonv", "lonq"]:
+            coords[lon][coords[lon] < 0] = coords[lon][coords[lon] < 0] + 2 * np.pi
 
-    # make sure lons are in [0, 360] range
-    lon[lon < 0] = lon[lon < 0] + 2 * np.pi
-    lonu[lonu < 0] = lonu[lonu < 0] + 2 * np.pi
-    lonv[lonv < 0] = lonv[lonv < 0] + 2 * np.pi
-    lonq[lonq < 0] = lonq[lonq < 0] + 2 * np.pi
+        ds = self._create_grid_ds(coords)
 
-    ds = _create_grid_ds(
-        lon,
-        lat,
-        lonu,
-        latu,
-        lonv,
-        latv,
-        lonq,
-        latq,
-        pm,
-        pn,
-        ang,
-        rot,
-        center_lon,
-        center_lat,
-    )
+        ds = self._add_global_metadata(ds)
 
-    ds = _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot)
+        return ds
 
-    return ds
+    def _add_global_metadata(self, ds):
+
+        ds["spherical"] = xr.DataArray(np.array("T", dtype="S1"))
+        ds["spherical"].attrs["Long_name"] = "Grid type logical switch"
+        ds["spherical"].attrs["option_T"] = "spherical"
+
+        ds.attrs["title"] = "ROMS grid created by ROMS-Tools"
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        ds.attrs["roms_tools_version"] = roms_tools_version
+        ds.attrs["size_x"] = self.size_x
+        ds.attrs["size_y"] = self.size_y
+        ds.attrs["center_lon"] = self.center_lon
+        ds.attrs["center_lat"] = self.center_lat
+        ds.attrs["rot"] = self.rot
+
+        return ds
+
+    def _raise_if_domain_size_too_large(self):
+        threshold = 20000
+        if self.size_x > threshold or self.size_y > threshold:
+            raise ValueError(
+                f"Domain size exceeds the allowable limit of {threshold} km. "
+                f"Received dimensions: size_x = {self.size_x} km, size_y = {self.size_y} km. "
+                "Please reduce the domain size to meet the threshold."
+            )
+
+    def _make_initial_lon_lat_ds(self):
+        # Mercator projection around the equator
+
+        # initially define the domain to be longer in x-direction (dimension "length")
+        # than in y-direction (dimension "width") to keep grid distortion minimal
+        if self.size_y > self.size_x:
+            domain_length, domain_width = self.size_y * 1e3, self.size_x * 1e3  # in m
+            nl, nw = self.ny, self.nx
+        else:
+            domain_length, domain_width = self.size_x * 1e3, self.size_y * 1e3  # in m
+            nl, nw = self.nx, self.ny
+
+        domain_length_in_degrees = domain_length / RADIUS_OF_EARTH
+        domain_width_in_degrees = domain_width / RADIUS_OF_EARTH
+
+        # 1d array describing the longitudes at cell centers
+        x = np.arange(-0.5, nl + 1.5, 1)
+        lon_array_1d_in_degrees = (
+            domain_length_in_degrees * x / nl - domain_length_in_degrees / 2
+        )
+        # 1d array describing the longitudes at cell corners (or vorticity points "q")
+        xq = np.arange(-1, nl + 2, 1)
+        lonq_array_1d_in_degrees_q = (
+            domain_length_in_degrees * xq / nl - domain_length_in_degrees / 2
+        )
+
+        # convert degrees latitude to y-coordinate using Mercator projection
+        y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
+        y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
+
+        # linearly space points in y-space
+        y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
+        yq = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
+
+        # inverse Mercator projections
+        lat_array_1d_in_degrees = np.arctan(np.sinh(y))
+        latq_array_1d_in_degrees = np.arctan(np.sinh(yq))
+
+        # 2d grid at cell centers
+        lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
+        # 2d grid at cell corners
+        lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
+
+        if self.size_y > self.size_x:
+            # Rotate grid by 90 degrees because until here the grid has been defined
+            # to be longer in x-direction than in y-direction
+
+            lon, lat = _rot_sphere(lon, lat, 90)
+            lonq, latq = _rot_sphere(lonq, latq, 90)
+
+            lon = np.transpose(np.flip(lon, 0))
+            lat = np.transpose(np.flip(lat, 0))
+            lonq = np.transpose(np.flip(lonq, 0))
+            latq = np.transpose(np.flip(latq, 0))
+
+        # infer longitudes and latitudes at u- and v-points
+        lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
+        latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
+        lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
+        latv = 0.5 * (lat[:-1, :] + lat[1:, :])
+
+        coords = {
+            "lon": lon,
+            "lat": lat,
+            "lonu": lonu,
+            "latu": latu,
+            "lonv": lonv,
+            "latv": latv,
+            "lonq": lonq,
+            "latq": latq,
+        }
+
+        return coords
+
+    def _create_grid_ds(self, coords):
+
+        ds = xr.Dataset()
+
+        lon_rho = xr.Variable(
+            data=coords["lon"] * 180 / np.pi,
+            dims=["eta_rho", "xi_rho"],
+            attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
+        )
+        lat_rho = xr.Variable(
+            data=coords["lat"] * 180 / np.pi,
+            dims=["eta_rho", "xi_rho"],
+            attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
+        )
+        lon_u = xr.Variable(
+            data=coords["lonu"] * 180 / np.pi,
+            dims=["eta_rho", "xi_u"],
+            attrs={"long_name": "longitude of u-points", "units": "degrees East"},
+        )
+        lat_u = xr.Variable(
+            data=coords["latu"] * 180 / np.pi,
+            dims=["eta_rho", "xi_u"],
+            attrs={"long_name": "latitude of u-points", "units": "degrees North"},
+        )
+        lon_v = xr.Variable(
+            data=coords["lonv"] * 180 / np.pi,
+            dims=["eta_v", "xi_rho"],
+            attrs={"long_name": "longitude of v-points", "units": "degrees East"},
+        )
+        lat_v = xr.Variable(
+            data=coords["latv"] * 180 / np.pi,
+            dims=["eta_v", "xi_rho"],
+            attrs={"long_name": "latitude of v-points", "units": "degrees North"},
+        )
+        # lon_q = xr.Variable(
+        #    data=coords["lonq"] * 180 / np.pi,
+        #    dims=["eta_psi", "xi_psi"],
+        #    attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
+        # )
+        # lat_q = xr.Variable(
+        #    data=coords["latq"] * 180 / np.pi,
+        #    dims=["eta_psi", "xi_psi"],
+        #    attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
+        # )
+
+        ds = ds.assign_coords(
+            {
+                "lat_rho": lat_rho,
+                "lon_rho": lon_rho,
+                "lat_u": lat_u,
+                "lon_u": lon_u,
+                "lat_v": lat_v,
+                "lon_v": lon_v,
+                # "lat_psi": lat_q,
+                # "lon_psi": lon_q,
+            }
+        )
+
+        ds["angle"] = xr.Variable(
+            data=coords["angle"],
+            dims=["eta_rho", "xi_rho"],
+            attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
+        )
+
+        # Coriolis frequency
+        f0 = 4 * np.pi * np.sin(coords["lat"]) / (24 * 3600)
+
+        ds["f"] = xr.Variable(
+            data=f0,
+            dims=["eta_rho", "xi_rho"],
+            attrs={
+                "long_name": "Coriolis parameter at rho-points",
+                "units": "second-1",
+            },
+        )
+
+        ds["pm"] = xr.Variable(
+            data=coords["pm"],
+            dims=["eta_rho", "xi_rho"],
+            attrs={
+                "long_name": "Curvilinear coordinate metric in xi-direction",
+                "units": "meter-1",
+            },
+        )
+        ds["pn"] = xr.Variable(
+            data=coords["pn"],
+            dims=["eta_rho", "xi_rho"],
+            attrs={
+                "long_name": "Curvilinear coordinate metric in eta-direction",
+                "units": "meter-1",
+            },
+        )
+
+        return ds
 
 
-def _raise_if_domain_size_too_large(size_x, size_y):
-    threshold = 20000
-    if size_x > threshold or size_y > threshold:
-        raise ValueError("Domain size has to be smaller than %g km" % threshold)
-
-
-def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
-    # Mercator projection around the equator
-
-    # initially define the domain to be longer in x-direction (dimension "length")
-    # than in y-direction (dimension "width") to keep grid distortion minimal
-    if size_y > size_x:
-        domain_length, domain_width = size_y * 1e3, size_x * 1e3  # in m
-        nl, nw = ny, nx
-    else:
-        domain_length, domain_width = size_x * 1e3, size_y * 1e3  # in m
-        nl, nw = nx, ny
-
-    domain_length_in_degrees = domain_length / RADIUS_OF_EARTH
-    domain_width_in_degrees = domain_width / RADIUS_OF_EARTH
-
-    # 1d array describing the longitudes at cell centers
-    x = np.arange(-0.5, nl + 1.5, 1)
-    lon_array_1d_in_degrees = (
-        domain_length_in_degrees * x / nl - domain_length_in_degrees / 2
-    )
-    # 1d array describing the longitudes at cell corners (or vorticity points "q")
-    xq = np.arange(-1, nl + 2, 1)
-    lonq_array_1d_in_degrees_q = (
-        domain_length_in_degrees * xq / nl - domain_length_in_degrees / 2
-    )
-
-    # convert degrees latitude to y-coordinate using Mercator projection
-    y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
-    y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
-
-    # linearly space points in y-space
-    y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
-    yq = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
-
-    # inverse Mercator projections
-    lat_array_1d_in_degrees = np.arctan(np.sinh(y))
-    latq_array_1d_in_degrees = np.arctan(np.sinh(yq))
-
-    # 2d grid at cell centers
-    lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
-    # 2d grid at cell corners
-    lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
-
-    if size_y > size_x:
-        # Rotate grid by 90 degrees because until here the grid has been defined
-        # to be longer in x-direction than in y-direction
-
-        lon, lat = _rot_sphere(lon, lat, 90)
-        lonq, latq = _rot_sphere(lonq, latq, 90)
-
-        lon = np.transpose(np.flip(lon, 0))
-        lat = np.transpose(np.flip(lat, 0))
-        lonq = np.transpose(np.flip(lonq, 0))
-        latq = np.transpose(np.flip(latq, 0))
-
-    # infer longitudes and latitudes at u- and v-points
-    lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
-    latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
-    lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
-    latv = 0.5 * (lat[:-1, :] + lat[1:, :])
-
-    # TODO wrap up into temporary container Dataset object?
-    return lon, lat, lonu, latu, lonv, latv, lonq, latq
-
-
-def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
+def _rotate(coords, rot):
     """Rotate grid counterclockwise relative to surface of Earth by rot degrees."""
 
-    (lon, lat) = _rot_sphere(lon, lat, rot)
-    (lonu, latu) = _rot_sphere(lonu, latu, rot)
-    (lonv, latv) = _rot_sphere(lonv, latv, rot)
-    (lonq, latq) = _rot_sphere(lonq, latq, rot)
+    (coords["lon"], coords["lat"]) = _rot_sphere(coords["lon"], coords["lat"], rot)
+    (coords["lonu"], coords["latu"]) = _rot_sphere(coords["lonu"], coords["latu"], rot)
+    (coords["lonv"], coords["latv"]) = _rot_sphere(coords["lonv"], coords["latv"], rot)
+    (coords["lonq"], coords["latq"]) = _rot_sphere(coords["lonq"], coords["latq"], rot)
 
-    return lon, lat, lonu, latu, lonv, latv, lonq, latq
+    return coords
 
 
-def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
+def _translate(coords, tra_lat, tra_lon):
     """Translate grid so that the centre lies at the position (tra_lat, tra_lon)"""
 
-    (lon, lat) = _tra_sphere(lon, lat, tra_lat)
-    (lonu, latu) = _tra_sphere(lonu, latu, tra_lat)
-    (lonv, latv) = _tra_sphere(lonv, latv, tra_lat)
-    (lonq, latq) = _tra_sphere(lonq, latq, tra_lat)
+    (lon, lat) = _tra_sphere(coords["lon"], coords["lat"], tra_lat)
+    (lonu, latu) = _tra_sphere(coords["lonu"], coords["latu"], tra_lat)
+    (lonv, latv) = _tra_sphere(coords["lonv"], coords["latv"], tra_lat)
+    (lonq, latq) = _tra_sphere(coords["lonq"], coords["latq"], tra_lat)
 
     lon = lon + tra_lon * np.pi / 180
     lonu = lonu + tra_lon * np.pi / 180
@@ -934,7 +1030,18 @@ def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     lonv[lonv < -np.pi] = lonv[lonv < -np.pi] + 2 * np.pi
     lonq[lonq < -np.pi] = lonq[lonq < -np.pi] + 2 * np.pi
 
-    return lon, lat, lonu, latu, lonv, latv, lonq, latq
+    coords = {
+        "lon": lon,
+        "lat": lat,
+        "lonu": lonu,
+        "latu": latu,
+        "lonv": lonv,
+        "latv": latv,
+        "lonq": lonq,
+        "latq": latq,
+    }
+
+    return coords
 
 
 def _rot_sphere(lon, lat, rot):
@@ -1045,21 +1152,31 @@ def _tra_sphere(lon, lat, tra):
     return (lon, lat)
 
 
-def _compute_coordinate_metrics(lon, lonu, latu, lonv, latv):
+def _compute_coordinate_metrics(coords):
     """Compute the curvilinear coordinate metrics pn and pm, defined as 1/grid
     spacing."""
 
     # pm = 1/dx
-    pmu = gc_dist(lonu[:, :-1], latu[:, :-1], lonu[:, 1:], latu[:, 1:])
-    pm = 0 * lon
+    pmu = gc_dist(
+        coords["lonu"][:, :-1],
+        coords["latu"][:, :-1],
+        coords["lonu"][:, 1:],
+        coords["latu"][:, 1:],
+    )
+    pm = 0 * coords["lon"]
     pm[:, 1:-1] = pmu
     pm[:, 0] = pm[:, 1]
     pm[:, -1] = pm[:, -2]
     pm = 1 / pm
 
     # pn = 1/dy
-    pnv = gc_dist(lonv[:-1, :], latv[:-1, :], lonv[1:, :], latv[1:, :])
-    pn = 0 * lon
+    pnv = gc_dist(
+        coords["lonv"][:-1, :],
+        coords["latv"][:-1, :],
+        coords["lonv"][1:, :],
+        coords["latv"][1:, :],
+    )
+    pn = 0 * coords["lon"]
     pn[1:-1, :] = pnv
     pn[0, :] = pn[1, :]
     pn[-1, :] = pn[-2, :]
@@ -1087,16 +1204,16 @@ def gc_dist(lon1, lat1, lon2, lat2):
     return dis
 
 
-def _compute_angle(lon, lonu, latu, lonq):
+def _compute_angle(coords):
     """Compute angles of local grid positive x-axis relative to east."""
 
-    dellat = latu[:, 1:] - latu[:, :-1]
-    dellon = lonu[:, 1:] - lonu[:, :-1]
+    dellat = coords["latu"][:, 1:] - coords["latu"][:, :-1]
+    dellon = coords["lonu"][:, 1:] - coords["lonu"][:, :-1]
     dellon[dellon > np.pi] = dellon[dellon > np.pi] - 2 * np.pi
     dellon[dellon < -np.pi] = dellon[dellon < -np.pi] + 2 * np.pi
-    dellon = dellon * np.cos(0.5 * (latu[:, 1:] + latu[:, :-1]))
+    dellon = dellon * np.cos(0.5 * (coords["latu"][:, 1:] + coords["latu"][:, :-1]))
 
-    ang = copy.copy(lon)
+    ang = copy.copy(coords["lon"])
     ang_s = np.arctan(dellat / (dellon + 1e-16))
     ang_s[(dellon < 0) & (dellat < 0)] = ang_s[(dellon < 0) & (dellat < 0)] - np.pi
     ang_s[(dellon < 0) & (dellat >= 0)] = ang_s[(dellon < 0) & (dellat >= 0)] + np.pi
@@ -1108,137 +1225,6 @@ def _compute_angle(lon, lonu, latu, lonq):
     ang[:, -1] = ang[:, -2]
 
     return ang
-
-
-def _create_grid_ds(
-    lon,
-    lat,
-    lonu,
-    latu,
-    lonv,
-    latv,
-    lonq,
-    latq,
-    pm,
-    pn,
-    angle,
-    rot,
-    center_lon,
-    center_lat,
-):
-    ds = xr.Dataset()
-
-    lon_rho = xr.Variable(
-        data=lon * 180 / np.pi,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
-    )
-    lat_rho = xr.Variable(
-        data=lat * 180 / np.pi,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
-    )
-    lon_u = xr.Variable(
-        data=lonu * 180 / np.pi,
-        dims=["eta_rho", "xi_u"],
-        attrs={"long_name": "longitude of u-points", "units": "degrees East"},
-    )
-    lat_u = xr.Variable(
-        data=latu * 180 / np.pi,
-        dims=["eta_rho", "xi_u"],
-        attrs={"long_name": "latitude of u-points", "units": "degrees North"},
-    )
-    lon_v = xr.Variable(
-        data=lonv * 180 / np.pi,
-        dims=["eta_v", "xi_rho"],
-        attrs={"long_name": "longitude of v-points", "units": "degrees East"},
-    )
-    lat_v = xr.Variable(
-        data=latv * 180 / np.pi,
-        dims=["eta_v", "xi_rho"],
-        attrs={"long_name": "latitude of v-points", "units": "degrees North"},
-    )
-    # lon_q = xr.Variable(
-    #    data=lonq * 180 / np.pi,
-    #    dims=["eta_psi", "xi_psi"],
-    #    attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
-    # )
-    # lat_q = xr.Variable(
-    #    data=latq * 180 / np.pi,
-    #    dims=["eta_psi", "xi_psi"],
-    #    attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
-    # )
-
-    ds = ds.assign_coords(
-        {
-            "lat_rho": lat_rho,
-            "lon_rho": lon_rho,
-            "lat_u": lat_u,
-            "lon_u": lon_u,
-            "lat_v": lat_v,
-            "lon_v": lon_v,
-            # "lat_psi": lat_q,
-            # "lon_psi": lon_q,
-        }
-    )
-
-    ds["angle"] = xr.Variable(
-        data=angle,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
-    )
-
-    # Coriolis frequency
-    f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
-
-    ds["f"] = xr.Variable(
-        data=f0,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "Coriolis parameter at rho-points", "units": "second-1"},
-    )
-
-    ds["pm"] = xr.Variable(
-        data=pm,
-        dims=["eta_rho", "xi_rho"],
-        attrs={
-            "long_name": "Curvilinear coordinate metric in xi-direction",
-            "units": "meter-1",
-        },
-    )
-    ds["pn"] = xr.Variable(
-        data=pn,
-        dims=["eta_rho", "xi_rho"],
-        attrs={
-            "long_name": "Curvilinear coordinate metric in eta-direction",
-            "units": "meter-1",
-        },
-    )
-
-    return ds
-
-
-def _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot):
-
-    ds["spherical"] = xr.DataArray(np.array("T", dtype="S1"))
-    ds["spherical"].attrs["Long_name"] = "Grid type logical switch"
-    ds["spherical"].attrs["option_T"] = "spherical"
-
-    ds.attrs["title"] = "ROMS grid created by ROMS-Tools"
-
-    # Include the version of roms-tools
-    try:
-        roms_tools_version = importlib.metadata.version("roms-tools")
-    except importlib.metadata.PackageNotFoundError:
-        roms_tools_version = "unknown"
-
-    ds.attrs["roms_tools_version"] = roms_tools_version
-    ds.attrs["size_x"] = size_x
-    ds.attrs["size_y"] = size_y
-    ds.attrs["center_lon"] = center_lon
-    ds.attrs["center_lat"] = center_lat
-    ds.attrs["rot"] = rot
-
-    return ds
 
 
 def _f2c(f):

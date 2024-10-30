@@ -113,7 +113,7 @@ def test_plot_save_methods(tmp_path):
 
 
 def test_raise_if_domain_too_large():
-    with pytest.raises(ValueError, match="Domain size has to be smaller"):
+    with pytest.raises(ValueError, match="Domain size exceeds"):
         Grid(nx=3, ny=3, size_x=30000, size_y=30000, center_lon=0, center_lat=51.5)
 
     # test grid with reasonable domain size

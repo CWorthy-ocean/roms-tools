@@ -5,7 +5,7 @@ from scipy.ndimage import label
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 import warnings
 from itertools import count
-from roms_tools.setup.datasets import ETOPO5Dataset
+from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
 from roms_tools.setup.regrid import LateralRegrid
 
 
@@ -90,13 +90,20 @@ def _add_topography_and_mask(
 
 def _get_topography_data(source):
 
+    kwargs = {"use_dask": False}
+
     if source["name"] == "ETOPO5":
-        kwargs = {"use_dask": False}
         if "path" in source.keys():
             kwargs["filename"] = source["path"]
         data = ETOPO5Dataset(**kwargs)
+    elif source["name"] == "SRTM15":
+        kwargs["filename"] = source["path"]
+        data = SRTM15Dataset(**kwargs)
     else:
-        raise ValueError('Only "ETOPO5" is a valid option for source["name"].')
+        raise ValueError(
+            'Only "ETOPO5" and "SRTM15" are valid options for topography_source["name"].'
+        )
+
     return data
 
 

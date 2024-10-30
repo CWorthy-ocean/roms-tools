@@ -1545,8 +1545,8 @@ class ETOPO5Dataset(Dataset):
 
     Parameters
     ----------
-    filename : str
-        The path to the ETOPO5 dataset file.
+    filename : str, optional
+        The path to the ETOPO5 dataset file. Defaults to pulling it via pooch.
     var_names : Dict[str, str], optional
         Dictionary of variable names required in the dataset. Defaults to:
         {
@@ -1592,7 +1592,4 @@ class ETOPO5Dataset(Dataset):
                 "lat": ds["topo_lat"],
             }
         )
-        # Flip sign so that topography over land is negative and
-        # topography in the ocean positive
-        ds[self.var_names["topo"]] = -ds[self.var_names["topo"]]
         return ds

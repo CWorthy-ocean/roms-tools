@@ -51,8 +51,6 @@ def _add_topography_and_mask(
         Updated dataset with added topography, mask, and metadata.
     """
 
-    # Get topography data, which is assumed to have positive topography values
-    # over ocean, negative over land
     data = _get_topography_data(topography_source)
 
     # interpolate topography onto desired grid
@@ -111,6 +109,9 @@ def _make_raw_topography(data, target_coords) -> np.ndarray:
 
     lateral_regrid = LateralRegrid(target_coords, data.dim_names)
     hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
+
+    # flip sign so that bathmetry is positive
+    hraw = -hraw
 
     return hraw
 

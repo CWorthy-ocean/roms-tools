@@ -1,5 +1,4 @@
 import pooch
-import xarray as xr
 
 # Create a Pooch object to manage the global topography data
 topo_data = pooch.create(
@@ -52,29 +51,24 @@ pup_test_data = pooch.create(
 )
 
 
-def fetch_topo(topography_source: str) -> xr.Dataset:
-    """Load the global topography data as an xarray Dataset.
+def download_topo(filename: str) -> str:
+    """Download simple topography file.
 
     Parameters
     ----------
-    topography_source : str
-        The source of the topography data to be loaded. Available options:
-        - "ETOPO5"
+    filename : str
+        The name of the test data file to be downloaded. Available options:
+        - "etopo5.nc"
 
     Returns
     -------
-    xr.Dataset
-        The global topography data as an xarray Dataset.
+    str
+        The path to the downloaded test data file.
     """
-    # Mapping from user-specified topography options to corresponding filenames in the registry
-    topo_dict = {"ETOPO5": "etopo5.nc"}
-
     # Fetch the file using Pooch, downloading if necessary
-    fname = topo_data.fetch(topo_dict[topography_source])
+    fname = topo_data.fetch(filename)
 
-    # Load the dataset using xarray and return it
-    ds = xr.open_dataset(fname)
-    return ds
+    return fname
 
 
 def download_correction_data(filename: str) -> str:

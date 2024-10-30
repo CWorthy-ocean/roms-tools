@@ -1546,7 +1546,8 @@ class ETOPO5Dataset(Dataset):
     Parameters
     ----------
     filename : str, optional
-        The path to the ETOPO5 dataset file. Defaults to pulling it via pooch.
+        The path to the ETOPO5 dataset file. If not provided, the dataset will be downloaded
+        automatically via the `pooch` library.
     var_names : Dict[str, str], optional
         Dictionary of variable names required in the dataset. Defaults to:
         {
@@ -1554,12 +1555,12 @@ class ETOPO5Dataset(Dataset):
         }
     dim_names : Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset. Defaults to:
-        {"longitude": "topo_lon", "latitude": "topo_lat"}.
+        {"longitude": "lon", "latitude": "lat"}.
 
     Attributes
     ----------
     ds : xr.Dataset
-        The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
+        The xarray Dataset containing the ETOPO5 data, loaded from the specified file.
     """
 
     filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
@@ -1593,3 +1594,38 @@ class ETOPO5Dataset(Dataset):
             }
         )
         return ds
+
+
+@dataclass(frozen=True, kw_only=True)
+class SRTM15Dataset(Dataset):
+    """Represents topography data on the original grid from the SRTM15 dataset.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the SRTM15 dataset file.
+    var_names : Dict[str, str], optional
+        Dictionary of variable names required in the dataset. Defaults to:
+        {
+            "topo": "z",
+        }
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset. Defaults to:
+        {"longitude": "lon", "latitude": "lat"}.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the SRTM15 data, loaded from the specified file.
+    """
+
+    filename: str
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "z",
+        }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    ds: xr.Dataset = field(init=False, repr=False)

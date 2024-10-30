@@ -103,10 +103,10 @@ def interpolate_from_rho_to_u(field, method="additive"):
     else:
         raise NotImplementedError(f"Unsupported method '{method}' specified.")
 
-    if "lat_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lat_rho"])
-    if "lon_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lon_rho"])
+    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
+    for var in vars_to_drop:
+        if var in field_interpolated.coords:
+            field_interpolated = field_interpolated.drop_vars(var)
 
     field_interpolated = field_interpolated.swap_dims({"xi_rho": "xi_u"})
 
@@ -151,10 +151,10 @@ def interpolate_from_rho_to_v(field, method="additive"):
     else:
         raise NotImplementedError(f"Unsupported method '{method}' specified.")
 
-    if "lat_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lat_rho"])
-    if "lon_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lon_rho"])
+    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
+    for var in vars_to_drop:
+        if var in field_interpolated.coords:
+            field_interpolated = field_interpolated.drop_vars(var)
 
     field_interpolated = field_interpolated.swap_dims({"eta_rho": "eta_v"})
 

@@ -154,7 +154,7 @@ class Grid:
             This method modifies the dataset in place and does not return a value.
         """
 
-        ds = _add_topography_and_mask(self.ds, topography_source["name"], hmin)
+        ds = _add_topography_and_mask(self.ds, topography_source, hmin)
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)

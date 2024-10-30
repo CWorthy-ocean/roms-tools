@@ -3,14 +3,14 @@ import numpy as np
 import gcm_filters
 from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import label
-from roms_tools.setup.download import fetch_topo
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 import warnings
 from itertools import count
+from roms_tools.setup.datasets import ETOPO5Dataset
 
 
 def _add_topography_and_mask(
-    ds, topography_source, hmin, smooth_factor=8.0, rmax=0.2
+    ds, source, hmin, smooth_factor=8.0, rmax=0.2
 ) -> xr.Dataset:
     """Adds topography and a land/water mask to the dataset based on the provided
     topography source.
@@ -27,8 +27,13 @@ def _add_topography_and_mask(
     ----------
     ds : xr.Dataset
         The dataset to which topography and the land/water mask will be added.
-    topography_source : str
-        The source of the topography data.
+    source : Dict[str, Union[str, Path]], optional
+        Dictionary specifying the source of the topography data:
+
+        - "name" (str): The name of the topography data source (e.g., "SRTM15").
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
+
+        The default is "ETOPO5", which does not require a path.
     hmin : float
         The minimum allowable depth for the topography.
     smooth_factor : float, optional
@@ -49,8 +54,12 @@ def _add_topography_and_mask(
     lon = ds.lon_rho.values
     lat = ds.lat_rho.values
 
+    # Get topography data, which is assumed to have positive topography values
+    # over ocean, negative over land
+    data = _get_topography_data(source)
+
     # interpolate topography onto desired grid
-    hraw = _make_raw_topography(lon, lat, topography_source)
+    hraw = _make_raw_topography(data, lon, lat)
     hraw = xr.DataArray(data=hraw, dims=["eta_rho", "xi_rho"])
 
     # Mask is obtained by finding locations where ocean depth is positive
@@ -80,37 +89,35 @@ def _add_topography_and_mask(
         "units": "meter",
     }
 
-    ds = _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax)
+    ds = _add_topography_metadata(ds, source, smooth_factor, hmin, rmax)
 
     return ds
 
 
-def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
+def _get_topography_data(source):
+
+    if source["name"] == "ETOPO5":
+        kwargs = {"use_dask": False}
+        if "path" in source.keys():
+            kwargs["filename"] = source["path"]
+        data = ETOPO5Dataset(**kwargs)
+    else:
+        raise ValueError('Only "ETOPO5" is a valid option for source["name"].')
+    return data
+
+
+def _make_raw_topography(data, lon, lat) -> np.ndarray:
     """Given a grid of (lon, lat) points, fetch the topography file and interpolate
     height values onto the desired grid."""
 
-    topo_ds = fetch_topo(topography_source)
-
-    # the following will depend on the topography source
-    if topography_source == "ETOPO5":
-        topo_lon = topo_ds["topo_lon"].copy()
-        # Modify longitude values where necessary
-        topo_lon = xr.where(topo_lon < 0, topo_lon + 360, topo_lon)
-        topo_lon_minus360 = topo_lon - 360
-        topo_lon_plus360 = topo_lon + 360
-        # Concatenate along the longitude axis
-        topo_lon_concatenated = xr.concat(
-            [topo_lon_minus360, topo_lon, topo_lon_plus360], dim="lon"
-        )
-        topo_concatenated = xr.concat(
-            [-topo_ds["topo"], -topo_ds["topo"], -topo_ds["topo"]], dim="lon"
-        )
-
-        interp = RegularGridInterpolator(
-            (topo_ds["topo_lat"].values, topo_lon_concatenated.values),
-            topo_concatenated.values,
-            method="linear",
-        )
+    interp = RegularGridInterpolator(
+        (
+            data.ds[data.dim_names["latitude"]].values,
+            data.ds[data.dim_names["longitude"]].values,
+        ),
+        data.ds[data.var_names["topo"]].values,
+        method="linear",
+    )
 
     # Interpolate onto desired domain grid points
     hraw = interp((lat, lon))
@@ -286,7 +293,7 @@ def _compute_rfactor(h):
 
 
 def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
-    ds.attrs["topography_source"] = topography_source
+    ds.attrs["topography_source"] = topography_source["name"]
     ds.attrs["hmin"] = hmin
 
     return ds

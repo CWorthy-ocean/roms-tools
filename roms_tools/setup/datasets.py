@@ -14,7 +14,7 @@ from roms_tools.setup.utils import (
     convert_cftime_to_datetime,
     one_dim_fill,
 )
-from roms_tools.setup.download import download_correction_data
+from roms_tools.setup.download import download_correction_data, download_topo
 from roms_tools.setup.fill import LateralFill
 
 
@@ -71,7 +71,7 @@ class Dataset:
         }
     )
     climatology: Optional[bool] = False
-    use_dask: Optional[bool] = True
+    use_dask: Optional[bool] = False
     apply_post_processing: Optional[bool] = True
 
     is_global: bool = field(init=False, repr=False)
@@ -114,6 +114,8 @@ class Dataset:
 
         # Make sure that latitude is ascending
         ds = self.ensure_dimension_is_ascending(ds, dim="latitude")
+        # Make sure there are no 360 degree jumps in longitude
+        ds = self.ensure_dimension_is_ascending(ds, dim="longitude")
 
         if "depth" in self.dim_names:
             # Make sure that depth is ascending
@@ -467,7 +469,11 @@ class Dataset:
     ) -> xr.Dataset:
         """Ensure that the specified dimension in the dataset is in ascending order.
 
-        If the values along the specified dimension are in descending order, this function reverses the order of the dimension to make it ascending.
+        This function checks the order of values along the specified dimension. If they
+        are in descending order, it reverses the dimension to make it ascending. For
+        the "longitude" dimension, if it has a discontinuity (e.g., [0, 180][-180, 0]),
+        the function adjusts values to eliminate the 360-degree jump, transforming
+        the range into a continuous [0, 360) span.
 
         Parameters
         ----------
@@ -481,13 +487,22 @@ class Dataset:
         -------
         xr.Dataset
             A new `xarray.Dataset` with the specified dimension in ascending order.
-            If the dimension was already in ascending order, the original dataset is returned unchanged.
-            If the dimension was in descending order, the dataset is returned with the dimension reversed.
+            - If the dimension was already in ascending order, the original dataset is returned unchanged.
+            - If the dimension was in descending order, the dataset is returned with the dimension reversed.
+            - If the dimension is "longitude" with a discontinuity (e.g., [0, 180][-180, 0]), the values are adjusted to eliminate the 360-degree jump.
         """
-        # Make sure that latitude is ascending
+        # Check if the dimension is in descending order and reverse if needed
         diff = np.diff(ds[self.dim_names[dim]])
         if np.all(diff < 0):
             ds = ds.isel(**{self.dim_names[dim]: slice(None, None, -1)})
+
+        # Check for a discontinuity in longitude and adjust values if present
+        elif np.any(diff < 0) and dim == "longitude":
+            ds[self.dim_names[dim]] = xr.where(
+                ds[self.dim_names[dim]] < 0,
+                ds[self.dim_names[dim]] + 360,
+                ds[self.dim_names[dim]],
+            )
 
         return ds
 
@@ -1522,3 +1537,62 @@ class ERA5Correction(Dataset):
                 "The correction dataset does not contain all specified longitude values."
             )
         object.__setattr__(self, "ds", subdomain)
+
+
+@dataclass(frozen=True, kw_only=True)
+class ETOPO5Dataset(Dataset):
+    """Represents topography data on the original grid from the ETOPO5 dataset.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the ETOPO5 dataset file.
+    var_names : Dict[str, str], optional
+        Dictionary of variable names required in the dataset. Defaults to:
+        {
+            "topo": "topo",
+        }
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset. Defaults to:
+        {"longitude": "topo_lon", "latitude": "topo_lat"}.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
+    """
+
+    filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "topo",
+        }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Assign lat and lon as coordinates.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            A cleaned `xarray.Dataset` with updated coordinates.
+        """
+        ds = ds.assign_coords(
+            {
+                "lon": ds["topo_lon"],
+                "lat": ds["topo_lat"],
+            }
+        )
+        # Flip sign so that topography over land is negative and
+        # topography in the ocean positive
+        ds[self.var_names["topo"]] = -ds[self.var_names["topo"]]
+        return ds

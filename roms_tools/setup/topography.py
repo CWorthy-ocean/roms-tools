@@ -1,16 +1,16 @@
 import xarray as xr
 import numpy as np
 import gcm_filters
-from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import label
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 import warnings
 from itertools import count
 from roms_tools.setup.datasets import ETOPO5Dataset
+from roms_tools.setup.regrid import LateralRegrid
 
 
 def _add_topography_and_mask(
-    ds, source, hmin, smooth_factor=8.0, rmax=0.2
+    ds, target_coords, topography_source, hmin, smooth_factor=8.0, rmax=0.2
 ) -> xr.Dataset:
     """Adds topography and a land/water mask to the dataset based on the provided
     topography source.
@@ -27,7 +27,7 @@ def _add_topography_and_mask(
     ----------
     ds : xr.Dataset
         The dataset to which topography and the land/water mask will be added.
-    source : Dict[str, Union[str, Path]], optional
+    topography_source : Dict[str, Union[str, Path]], optional
         Dictionary specifying the source of the topography data:
 
         - "name" (str): The name of the topography data source (e.g., "SRTM15").
@@ -48,19 +48,15 @@ def _add_topography_and_mask(
     Returns
     -------
     xr.Dataset
-        The dataset with added topography, mask, and metadata.
+        Updated dataset with added topography, mask, and metadata.
     """
-
-    lon = ds.lon_rho.values
-    lat = ds.lat_rho.values
 
     # Get topography data, which is assumed to have positive topography values
     # over ocean, negative over land
-    data = _get_topography_data(source)
+    data = _get_topography_data(topography_source)
 
     # interpolate topography onto desired grid
-    hraw = _make_raw_topography(data, lon, lat)
-    hraw = xr.DataArray(data=hraw, dims=["eta_rho", "xi_rho"])
+    hraw = _make_raw_topography(data, target_coords)
 
     # Mask is obtained by finding locations where ocean depth is positive
     mask = xr.where(hraw > 0, 1.0, 0.0)
@@ -89,7 +85,7 @@ def _add_topography_and_mask(
         "units": "meter",
     }
 
-    ds = _add_topography_metadata(ds, source, smooth_factor, hmin, rmax)
+    ds = _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax)
 
     return ds
 
@@ -106,21 +102,15 @@ def _get_topography_data(source):
     return data
 
 
-def _make_raw_topography(data, lon, lat) -> np.ndarray:
-    """Given a grid of (lon, lat) points, fetch the topography file and interpolate
-    height values onto the desired grid."""
+def _make_raw_topography(data, target_coords) -> np.ndarray:
 
-    interp = RegularGridInterpolator(
-        (
-            data.ds[data.dim_names["latitude"]].values,
-            data.ds[data.dim_names["longitude"]].values,
-        ),
-        data.ds[data.var_names["topo"]].values,
-        method="linear",
+    data.choose_subdomain(
+        target_coords,
+        buffer_points=3,
     )
 
-    # Interpolate onto desired domain grid points
-    hraw = interp((lat, lon))
+    lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
 
     return hraw
 

@@ -9,7 +9,11 @@ import importlib.metadata
 from typing import Dict, Union, List
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    get_target_coords,
+)
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
 import warnings
@@ -92,14 +96,14 @@ class Grid:
         # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
         object.__setattr__(self, "ds", ds)
 
+        # Check if the Greenwich meridian goes through the domain.
+        self._straddle()
+
         # Update self.ds with topography and mask information
         self.update_topography_and_mask(
             topography_source=self.topography_source,
             hmin=self.hmin,
         )
-
-        # Check if the Greenwich meridian goes through the domain.
-        self._straddle()
 
         object.__setattr__(self, "ds", ds)
 
@@ -126,7 +130,7 @@ class Grid:
                 )
 
     def update_topography_and_mask(
-        self, hmin, topography_source={"name": "ETOPO5"}
+        self, topography_source={"name": "ETOPO5"}, hmin=5.0
     ) -> None:
         """Update the grid dataset by adding or overwriting the topography and land/sea
         mask.
@@ -138,8 +142,6 @@ class Grid:
 
         Parameters
         ----------
-        hmin : float
-            The minimum ocean depth (in meters).
         topography_source : Dict[str, Union[str, Path]], optional
             Dictionary specifying the source of the topography data:
 
@@ -147,6 +149,8 @@ class Grid:
             - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
 
             The default is "ETOPO5", which does not require a path.
+        hmin : float, optional
+            The minimum ocean depth (in meters). The default is 5.0.
 
         Returns
         -------
@@ -154,7 +158,8 @@ class Grid:
             This method modifies the dataset in place and does not return a value.
         """
 
-        ds = _add_topography_and_mask(self.ds, topography_source, hmin)
+        target_coords = get_target_coords(self)
+        ds = _add_topography_and_mask(self.ds, target_coords, topography_source, hmin)
         # Assign the updated dataset back to the frozen dataclass
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)

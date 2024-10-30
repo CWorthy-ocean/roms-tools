@@ -522,4 +522,3 @@ def test_plot():
     grid.plot_vertical_coordinate("interface_depth_rho", xi=0)
     grid.plot_vertical_coordinate("interface_depth_u", xi=0)
     grid.plot_vertical_coordinate("interface_depth_v", xi=0)
-

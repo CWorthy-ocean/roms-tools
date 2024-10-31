@@ -125,11 +125,6 @@ class Dataset:
 
         # Check whether the data covers the entire globe
         object.__setattr__(self, "is_global", self.check_if_global(ds))
-
-        # If dataset is global concatenate three copies of field along longitude dimension
-        if self.is_global:
-            ds = self.concatenate_longitudes(ds)
-
         object.__setattr__(self, "ds", ds)
 
         if self.apply_post_processing:
@@ -557,43 +552,64 @@ class Dataset:
 
         return is_global
 
-    def concatenate_longitudes(self, ds):
-        """
-        Concatenates the field three times: with longitudes shifted by -360, original longitudes, and shifted by +360.
+    def concatenate_longitudes(self, end="upper"):
+        """Concatenates fields in dataset twice along the longitude dimension.
 
         Parameters
         ----------
-        field : xr.DataArray
-            The field to be concatenated.
+        end : str, optional
+            Specifies which end to shift the longitudes.
+            Options are:
+                - "lower": shifts longitudes by -360 degrees and concatenates to the lower end.
+                - "upper": shifts longitudes by +360 degrees and concatenates to the upper end.
+                - "both": shifts longitudes by -360 degrees and 360 degrees and concatenates to both ends.
+            Default is "upper".
 
         Returns
         -------
-        xr.DataArray
-            The concatenated field, with the longitude dimension extended.
-
-        Notes
-        -----
-        Concatenating three times may be overkill in most situations, but it is safe. Alternatively, we could refactor
-        to figure out whether concatenating on the lower end, upper end, or at all is needed.
-
+        None
+            The method updates the internal dataset `self.ds` with the concatenated fields
+            along the longitude dimension.
         """
+
+        ds = self.ds
         ds_concatenated = xr.Dataset()
 
         lon = ds[self.dim_names["longitude"]]
-        lon_minus360 = lon - 360
-        lon_plus360 = lon + 360
-        lon_concatenated = xr.concat(
-            [lon_minus360, lon, lon_plus360], dim=self.dim_names["longitude"]
-        )
+        if end == "lower":
+            lon_minus360 = lon - 360
+            lon_concatenated = xr.concat(
+                [lon_minus360, lon], dim=self.dim_names["longitude"]
+            )
+
+        elif end == "upper":
+            lon_plus360 = lon + 360
+            lon_concatenated = xr.concat(
+                [lon, lon_plus360], dim=self.dim_names["longitude"]
+            )
+
+        elif end == "both":
+            lon_minus360 = lon - 360
+            lon_plus360 = lon + 360
+            lon_concatenated = xr.concat(
+                [lon_minus360, lon, lon_plus360], dim=self.dim_names["longitude"]
+            )
 
         ds_concatenated[self.dim_names["longitude"]] = lon_concatenated
 
-        for var in self.var_names.values():
+        for var in ds.data_vars:
             if self.dim_names["longitude"] in ds[var].dims:
                 field = ds[var]
-                field_concatenated = xr.concat(
-                    [field, field, field], dim=self.dim_names["longitude"]
-                )
+
+                if end == "both":
+                    field_concatenated = xr.concat(
+                        [field, field, field], dim=self.dim_names["longitude"]
+                    )
+                else:
+                    field_concatenated = xr.concat(
+                        [field, field], dim=self.dim_names["longitude"]
+                    )
+
                 if self.use_dask:
                     field_concatenated = field_concatenated.chunk(
                         {self.dim_names["longitude"]: -1}
@@ -603,7 +619,7 @@ class Dataset:
             else:
                 ds_concatenated[var] = ds[var]
 
-        return ds_concatenated
+        object.__setattr__(self, "ds", ds_concatenated)
 
     def post_process(self):
         """Placeholder method to be overridden by subclasses for dataset post-
@@ -655,9 +671,31 @@ class Dataset:
 
         margin = self.resolution * buffer_points
 
-        if not self.is_global:
+        lon = self.ds[self.dim_names["longitude"]]
+
+        if self.is_global:
+            # Concatenate only if necessary
+            if lon_max + margin > lon.max():
+                # See if shifting by +360 degrees helps
+                if (lon_min - margin > (lon + 360).min()) and (
+                    lon_max + margin < (lon + 360).max()
+                ):
+                    self.ds[self.dim_names["longitude"]] = lon + 360
+                    lon = self.ds[self.dim_names["longitude"]]
+                else:
+                    self.concatenate_longitudes(end="upper")
+            if lon_min - margin < lon.min():
+                # See if shifting by -360 degrees helps
+                if (lon_min - margin > (lon - 360).min()) and (
+                    lon_max + margin < (lon - 360).max()
+                ):
+                    self.ds[self.dim_names["longitude"]] = lon - 360
+                    lon = self.ds[self.dim_names["longitude"]]
+                else:
+                    self.concatenate_longitudes(end="lower")
+
+        else:
             # Adjust longitude range if needed to match the expected range
-            lon = self.ds[self.dim_names["longitude"]]
             if not target_coords["straddle"]:
                 if lon.min() < -180:
                     if lon_max + margin > 0:

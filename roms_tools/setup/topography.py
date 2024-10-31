@@ -10,7 +10,13 @@ from roms_tools.setup.regrid import LateralRegrid
 
 
 def _add_topography_and_mask(
-    ds, target_coords, topography_source, hmin, smooth_factor=8.0, rmax=0.2
+    ds,
+    target_coords,
+    topography_source,
+    hmin,
+    smooth_factor=8.0,
+    rmax=0.2,
+    verbose=True,
 ) -> xr.Dataset:
     """Adds topography and a land/water mask to the dataset based on the provided
     topography source.
@@ -44,6 +50,8 @@ def _add_topography_and_mask(
         The maximum allowable steepness ratio for the topography smoothing.
         This parameter controls the local smoothing of the topography. Smaller values result in
         smoother topography, while larger values preserve more detail. The default is 0.2.
+    verbose: bool, optional
+        Controls whether messages about topography generation steps are printed. Defaults to True.
 
     Returns
     -------
@@ -51,21 +59,27 @@ def _add_topography_and_mask(
         Updated dataset with added topography, mask, and metadata.
     """
 
+    if verbose:
+        print("Reading the topography data")
     data = _get_topography_data(topography_source)
 
     # interpolate topography onto desired grid
-    hraw = _make_raw_topography(data, target_coords)
+    hraw = _make_raw_topography(data, target_coords, verbose)
     nan_check(hraw)
 
-    # Mask is obtained by finding locations where ocean depth is positive
-    mask = xr.where(hraw > 0, 1.0, 0.0)
-
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
+    if verbose:
+        print(
+            f"Smoothing the topography globally with a factor of {smooth_factor} times the grid scale to prevent grid scale instabilities"
+        )
     hraw = _smooth_topography_globally(hraw, smooth_factor)
 
+    # Mask is obtained by finding locations where ocean depth is positive
+    if verbose:
+        print("Preparing the mask")
+    mask = xr.where(hraw > 0, 1.0, 0.0)
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
-
     # adjust mask boundaries by copying values from adjacent cells
     mask = _handle_boundaries(mask)
 
@@ -78,6 +92,10 @@ def _add_topography_and_mask(
     ds = _add_velocity_masks(ds)
 
     # smooth topography locally to satisfy r < rmax
+    if verbose:
+        print(
+            f"Smoothing the topography locally to ensure the steepness ratio is below {rmax}"
+        )
     ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
         "long_name": "Final bathymetry at rho-points",
@@ -108,14 +126,13 @@ def _get_topography_data(source):
     return data
 
 
-def _make_raw_topography(data, target_coords) -> np.ndarray:
+def _make_raw_topography(data, target_coords, verbose) -> np.ndarray:
 
-    data.choose_subdomain(
-        target_coords,
-        buffer_points=3,
-    )
+    data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
 
     lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+    if verbose:
+        print("Regridding the topography")
     hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
 
     # flip sign so that bathmetry is positive

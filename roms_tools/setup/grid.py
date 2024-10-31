@@ -63,6 +63,8 @@ class Grid:
         The default is "ETOPO5", which does not require a path.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
+    verbose: bool, optional
+        Controls whether messages about grid generation steps are printed. Defaults to True.
 
     Raises
     ------
@@ -83,6 +85,7 @@ class Grid:
     hc: float = 300.0
     topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     hmin: float = 5.0
+    verbose: bool = True
     ds: xr.Dataset = field(init=False, repr=False)
     straddle: bool = field(init=False, repr=False)
 
@@ -90,12 +93,10 @@ class Grid:
 
         self._input_checks()
 
+        if self.verbose:
+            print("=== Computing latitude and longitude coordinates ===")
         ds = self._make_grid_ds()
-
-        # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
-        # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
         object.__setattr__(self, "ds", ds)
-
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
@@ -103,15 +104,7 @@ class Grid:
         self.update_topography_and_mask(
             topography_source=self.topography_source,
             hmin=self.hmin,
-        )
-
-        object.__setattr__(self, "ds", ds)
-
-        # Update the grid by adding grid variables that are coarsened versions of the original grid variables
-        self._coarsen()
-
-        self.update_vertical_coordinate(
-            N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
+            verbose=self.verbose,
         )
 
     def _input_checks(self):
@@ -130,7 +123,7 @@ class Grid:
                 )
 
     def update_topography_and_mask(
-        self, topography_source={"name": "ETOPO5"}, hmin=5.0
+        self, topography_source={"name": "ETOPO5"}, hmin=5.0, verbose=True
     ) -> None:
         """Update the grid dataset by adding or overwriting the topography and land/sea
         mask.
@@ -151,6 +144,8 @@ class Grid:
             The default is "ETOPO5", which does not require a path.
         hmin : float, optional
             The minimum ocean depth (in meters). The default is 5.0.
+        verbose: bool, optional
+            Controls whether messages about topography generation steps are printed. Defaults to True.
 
         Returns
         -------
@@ -159,11 +154,30 @@ class Grid:
         """
 
         target_coords = get_target_coords(self)
-        ds = _add_topography_and_mask(self.ds, target_coords, topography_source, hmin)
-        # Assign the updated dataset back to the frozen dataclass
+        if verbose:
+            print(
+                f"=== Preparing the topography and mask using {self.topography_source['name']} data ==="
+            )
+        ds = _add_topography_and_mask(
+            ds=self.ds,
+            target_coords=target_coords,
+            topography_source=topography_source,
+            hmin=hmin,
+            verbose=verbose,
+        )
+        ds = self._coarsen(ds)
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)
         object.__setattr__(self, "hmin", hmin)
+
+        # A change in topography will always change the vertical coordinate system
+        if verbose:
+            print(
+                f"=== Computing vertical coordinates using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
+            )
+        self.update_vertical_coordinate(
+            N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
+        )
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.
@@ -184,7 +198,7 @@ class Grid:
         else:
             object.__setattr__(self, "straddle", False)
 
-    def _coarsen(self):
+    def _coarsen(self, ds):
         """Update the grid by adding grid variables that are coarsened versions of the
         original fine-resoluion grid variables. The coarsening is by a factor of two.
 
@@ -194,14 +208,16 @@ class Grid:
         - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
         - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
 
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset containing the fine-resolution grid variables that will be
+            coarsened.
+
         Returns
         -------
-        None
-
-        Modifies
-        --------
-        self.ds : xr.Dataset
-            The dataset attribute of the Grid instance is updated with the new coarser variables.
+        ds : xr.Dataset
+            The updated dataset with coarser variables added.
         """
         d = {
             "angle": "angle_coarse",
@@ -211,7 +227,7 @@ class Grid:
         }
 
         for fine_var, coarse_var in d.items():
-            fine_field = self.ds[fine_var]
+            fine_field = ds[fine_var]
             if self.straddle and fine_var == "lon_rho":
                 fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
 
@@ -221,20 +237,19 @@ class Grid:
                     coarse_field < 0, coarse_field + 360, coarse_field
                 )
             if coarse_var in ["lon_coarse", "lat_coarse"]:
-                ds = self.ds.assign_coords({coarse_var: coarse_field})
-                object.__setattr__(self, "ds", ds)
+                ds = ds.assign_coords({coarse_var: coarse_field})
             else:
-                self.ds[coarse_var] = coarse_field
+                ds[coarse_var] = coarse_field
 
-        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0).astype(
-            np.int32
-        )
+        ds["mask_coarse"] = xr.where(ds["mask_coarse"] > 0.5, 1, 0).astype(np.int32)
 
         for fine_var, coarse_var in d.items():
-            self.ds[coarse_var].attrs[
+            ds[coarse_var].attrs[
                 "long_name"
-            ] = f"{self.ds[fine_var].attrs['long_name']} on coarsened grid"
-            self.ds[coarse_var].attrs["units"] = self.ds[fine_var].attrs["units"]
+            ] = f"{ds[fine_var].attrs['long_name']} on coarsened grid"
+            ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
+
+        return ds
 
     def update_vertical_coordinate(self, N, theta_s, theta_b, hc) -> None:
         """Create vertical coordinate variables for the ROMS grid.
@@ -600,7 +615,8 @@ class Grid:
                 "mask_coarse",
             ]
         ):
-            grid._coarsen()
+            ds = grid._coarsen(grid.ds)
+            object.__setattr__(grid, "ds", ds)
 
         # Move variables to coordinates if necessary
         for var in ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]:

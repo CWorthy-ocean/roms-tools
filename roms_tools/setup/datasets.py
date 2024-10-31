@@ -552,7 +552,7 @@ class Dataset:
 
         return is_global
 
-    def concatenate_longitudes(self, end="upper"):
+    def concatenate_longitudes(self, end="upper", verbose=False):
         """Concatenates fields in dataset twice along the longitude dimension.
 
         Parameters
@@ -564,6 +564,9 @@ class Dataset:
                 - "upper": shifts longitudes by +360 degrees and concatenates to the upper end.
                 - "both": shifts longitudes by -360 degrees and 360 degrees and concatenates to both ends.
             Default is "upper".
+        verbose : bool, optional
+            If True, print message if dataset is concatenated along longitude dimension.
+            Defaults to False.
 
         Returns
         -------
@@ -572,6 +575,10 @@ class Dataset:
             along the longitude dimension.
         """
 
+        if verbose:
+            print(
+                f"Concatenating the data along the longitude dimension at the {end} end"
+            )
         ds = self.ds
         ds_concatenated = xr.Dataset()
 
@@ -632,7 +639,9 @@ class Dataset:
         """
         pass
 
-    def choose_subdomain(self, target_coords, buffer_points=20, return_copy=False):
+    def choose_subdomain(
+        self, target_coords, buffer_points=20, return_copy=False, verbose=False
+    ):
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
         ranges as necessary to accommodate the dataset's expected range and handles
@@ -649,6 +658,9 @@ class Dataset:
         return_subdomain : bool, optional
             If True, returns the subset of the original dataset representing the chosen
             subdomain. If False, assigns the subset to `self.ds`. Defaults to False.
+        verbose : bool, optional
+            If True, print message if dataset is concatenated along longitude dimension.
+            Defaults to False.
 
         Returns
         -------
@@ -683,7 +695,7 @@ class Dataset:
                     self.ds[self.dim_names["longitude"]] = lon + 360
                     lon = self.ds[self.dim_names["longitude"]]
                 else:
-                    self.concatenate_longitudes(end="upper")
+                    self.concatenate_longitudes(end="upper", verbose=verbose)
             if lon_min - margin < lon.min():
                 # See if shifting by -360 degrees helps
                 if (lon_min - margin > (lon - 360).min()) and (
@@ -692,7 +704,7 @@ class Dataset:
                     self.ds[self.dim_names["longitude"]] = lon - 360
                     lon = self.ds[self.dim_names["longitude"]]
                 else:
-                    self.concatenate_longitudes(end="lower")
+                    self.concatenate_longitudes(end="lower", verbose=verbose)
 
         else:
             # Adjust longitude range if needed to match the expected range

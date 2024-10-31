@@ -65,7 +65,7 @@ class Grid:
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     verbose: bool, optional
-        Controls whether to print grid generation steps with timing. Defaults to True.
+        Indicates whether to print grid generation steps with timing. Defaults to True.
 
     Raises
     ------
@@ -592,13 +592,15 @@ class Grid:
         return saved_filenames
 
     @classmethod
-    def from_file(cls, filepath: Union[str, Path]) -> "Grid":
+    def from_file(cls, filepath: Union[str, Path], verbose: bool = True) -> "Grid":
         """Create a Grid instance from an existing file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             Path to the file containing the grid information.
+        verbose: bool, optional
+            Indicates whether to print grid generation steps with timing. Defaults to True.
 
         Returns
         -------
@@ -645,14 +647,25 @@ class Grid:
 
         # Update vertical coordinate if necessary
         if not all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
+            warnings.warn("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
             N = 100
             theta_s = 5.0
             theta_b = 2.0
             hc = 300.0
+            print(
+                f"=== Computing vertical coordinates using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ==="
+            )
 
+            if verbose:
+                start_time = time.time()
             grid.update_vertical_coordinate(
                 N=N, theta_s=theta_s, theta_b=theta_b, hc=hc
             )
+            if verbose:
+                print(f"Total time: {time.time() - start_time:.3f} seconds")
+                print(
+                    "=============================================================================================="
+                )
         else:
             object.__setattr__(grid, "theta_s", ds.attrs["theta_s"].item())
             object.__setattr__(grid, "theta_b", ds.attrs["theta_b"].item())
@@ -725,6 +738,7 @@ class Grid:
         data = asdict(self)
         data.pop("ds", None)
         data.pop("straddle", None)
+        data.pop("verbose", None)
 
         # Include the version of roms-tools
         try:
@@ -745,13 +759,15 @@ class Grid:
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "Grid":
+    def from_yaml(cls, filepath: Union[str, Path], verbose: bool = True) -> "Grid":
         """Create an instance of the class from a YAML file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        verbose: bool, optional
+            Indicates whether to print grid generation steps with timing. Defaults to True.
 
         Returns
         -------
@@ -799,7 +815,7 @@ class Grid:
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
 
-        return cls(**grid_data)
+        return cls(**grid_data, verbose=verbose)
 
     # override __repr__ method to only print attributes that are actually set
     def __repr__(self) -> str:

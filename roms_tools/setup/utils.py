@@ -37,7 +37,7 @@ def nan_check(field, mask, error_message=None) -> None:
     da = xr.where(mask == 1, field, 0)
     if error_message is None:
         error_message = (
-            "NaN values found in interpolated field. This likely occurs because the ROMS grid, including "
+            "NaN values found in regridded field. This likely occurs because the ROMS grid, including "
             "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
             "dataset covers the entire area required by the ROMS grid."
         )

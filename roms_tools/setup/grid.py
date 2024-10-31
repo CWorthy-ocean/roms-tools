@@ -65,7 +65,7 @@ class Grid:
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     verbose: bool, optional
-        Controls whether messages about grid generation steps are printed. Defaults to True.
+        Controls whether to print grid generation steps with timing. Defaults to True.
 
     Raises
     ------

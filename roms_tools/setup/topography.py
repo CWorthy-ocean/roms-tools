@@ -1,3 +1,4 @@
+import time
 import xarray as xr
 import numpy as np
 import gcm_filters
@@ -60,47 +61,54 @@ def _add_topography_and_mask(
     """
 
     if verbose:
-        print("Reading the topography data")
+        start_time = time.time()
     data = _get_topography_data(topography_source)
+    if verbose:
+        print(f"Reading the topography data: {time.time() - start_time:.3f} seconds")
 
     # interpolate topography onto desired grid
     hraw = _make_raw_topography(data, target_coords, verbose)
     nan_check(hraw)
 
+    # Mask is obtained by finding locations where ocean depth is positive
+    mask = xr.where(hraw > 0, 1.0, 0.0)
+
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
     if verbose:
-        print(
-            f"Smoothing the topography globally with a factor of {smooth_factor} times the grid scale to prevent grid scale instabilities"
-        )
+        start_time = time.time()
     hraw = _smooth_topography_globally(hraw, smooth_factor)
-
-    # Mask is obtained by finding locations where ocean depth is positive
     if verbose:
-        print("Preparing the mask")
-    mask = xr.where(hraw > 0, 1.0, 0.0)
+        print(
+            f"Smoothing the topography globally: {time.time() - start_time:.3f} seconds"
+        )
+
+    if verbose:
+        start_time = time.time()
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
     # adjust mask boundaries by copying values from adjacent cells
     mask = _handle_boundaries(mask)
-
     ds["mask_rho"] = xr.DataArray(mask.astype(np.int32), dims=("eta_rho", "xi_rho"))
     ds["mask_rho"].attrs = {
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
     }
-
     ds = _add_velocity_masks(ds)
+    if verbose:
+        print(f"Preparing the masks: {time.time() - start_time:.3f} seconds")
 
     # smooth topography locally to satisfy r < rmax
     if verbose:
-        print(
-            f"Smoothing the topography locally to ensure the steepness ratio is below {rmax}"
-        )
+        start_time = time.time()
     ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
         "long_name": "Final bathymetry at rho-points",
         "units": "meter",
     }
+    if verbose:
+        print(
+            f"Smoothing the topography locally: {time.time() - start_time:.3f} seconds"
+        )
 
     ds = _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax)
 
@@ -130,10 +138,12 @@ def _make_raw_topography(data, target_coords, verbose) -> np.ndarray:
 
     data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
 
-    lateral_regrid = LateralRegrid(target_coords, data.dim_names)
     if verbose:
-        print("Regridding the topography")
+        start_time = time.time()
+    lateral_regrid = LateralRegrid(target_coords, data.dim_names)
     hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
+    if verbose:
+        print(f"Regridding the topography: {time.time() - start_time:.3f} seconds")
 
     # flip sign so that bathmetry is positive
     hraw = -hraw

@@ -1,3 +1,4 @@
+import time
 import re
 import xarray as xr
 from dataclasses import dataclass, field
@@ -576,9 +577,7 @@ class Dataset:
         """
 
         if verbose:
-            print(
-                f"Concatenating the data along the longitude dimension at the {end} end"
-            )
+            start_time = time.time()
         ds = self.ds
         ds_concatenated = xr.Dataset()
 
@@ -627,6 +626,10 @@ class Dataset:
                 ds_concatenated[var] = ds[var]
 
         object.__setattr__(self, "ds", ds_concatenated)
+        if verbose:
+            print(
+                f"Concatenating the data along the longitude dimension: {time.time() - start_time:.3f} seconds"
+            )
 
     def post_process(self):
         """Placeholder method to be overridden by subclasses for dataset post-

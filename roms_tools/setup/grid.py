@@ -1,3 +1,4 @@
+import time
 import copy
 from dataclasses import dataclass, field, asdict
 
@@ -94,8 +95,14 @@ class Grid:
         self._input_checks()
 
         if self.verbose:
+            start_time = time.time()
             print("=== Computing latitude and longitude coordinates ===")
         ds = self._make_grid_ds()
+        if self.verbose:
+            print(f"Total time: {time.time() - start_time:.3f} seconds")
+            print(
+                "=============================================================================================="
+            )
         object.__setattr__(self, "ds", ds)
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
@@ -155,6 +162,7 @@ class Grid:
 
         target_coords = get_target_coords(self)
         if verbose:
+            start_time = time.time()
             print(
                 f"=== Preparing the topography and mask using {self.topography_source['name']} data ==="
             )
@@ -165,6 +173,11 @@ class Grid:
             hmin=hmin,
             verbose=verbose,
         )
+        if verbose:
+            print(f"Total time: {time.time() - start_time:.3f} seconds")
+            print(
+                "=============================================================================================="
+            )
         ds = self._coarsen(ds)
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)
@@ -172,12 +185,18 @@ class Grid:
 
         # A change in topography will always change the vertical coordinate system
         if verbose:
+            start_time = time.time()
             print(
                 f"=== Computing vertical coordinates using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
             )
         self.update_vertical_coordinate(
             N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
         )
+        if verbose:
+            print(f"Total time: {time.time() - start_time:.3f} seconds")
+            print(
+                "=============================================================================================="
+            )
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.

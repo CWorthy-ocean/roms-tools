@@ -1,5 +1,7 @@
+import pytest
 from roms_tools import Grid
 from roms_tools.setup.topography import _compute_rfactor
+from roms_tools.setup.download import download_test_data
 import numpy as np
 import numpy.testing as npt
 from scipy.ndimage import label
@@ -94,3 +96,100 @@ def test_mask_topography_boundary():
     np.testing.assert_array_equal(
         grid.ds.mask_rho.isel(xi_rho=-1).data, grid.ds.mask_rho.isel(xi_rho=-2).data
     )
+
+
+@pytest.fixture()
+def grid_that_straddles_dateline_with_shifted_global_etopo_data():
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1000,
+        size_y=1000,
+        center_lon=0,
+        center_lat=0,
+        rot=20,
+        topography_source={
+            "name": "ETOPO5",
+            "path": download_test_data("etopo5_coarsened_and_shifted.nc"),
+        },
+    )
+
+    return grid
+
+
+@pytest.fixture()
+def grid_that_straddles_dateline_with_global_srtm15_data():
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1000,
+        size_y=1000,
+        center_lon=0,
+        center_lat=0,
+        rot=20,
+        topography_source={
+            "name": "SRTM15",
+            "path": download_test_data("srtm15_coarsened.nc"),
+        },
+    )
+
+    return grid
+
+
+@pytest.fixture()
+def grid_that_straddles_180_degree_meridian_with_shifted_global_etopo_data():
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1000,
+        size_y=1000,
+        center_lon=180,
+        center_lat=0,
+        rot=20,
+        topography_source={
+            "name": "ETOPO5",
+            "path": download_test_data("etopo5_coarsened_and_shifted.nc"),
+        },
+    )
+
+    return grid
+
+
+@pytest.fixture()
+def grid_that_straddles_180_degree_meridian_with_global_srtm15_data():
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1000,
+        size_y=1000,
+        center_lon=180,
+        center_lat=0,
+        rot=20,
+        topography_source={
+            "name": "SRTM15",
+            "path": download_test_data("srtm15_coarsened.nc"),
+        },
+    )
+
+    return grid
+
+
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid_that_straddles_dateline",
+        "grid_that_straddles_180_degree_meridian",
+        "grid_that_straddles_dateline_with_shifted_global_etopo_data",
+        "grid_that_straddles_180_degree_meridian_with_shifted_global_etopo_data",
+        "grid_that_straddles_dateline_with_global_srtm15_data",
+        "grid_that_straddles_180_degree_meridian_with_global_srtm15_data",
+    ],
+)
+def test_successful_initialization(grid_fixture, request):
+
+    grid = request.getfixturevalue(grid_fixture)
+    assert grid is not None

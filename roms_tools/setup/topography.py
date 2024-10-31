@@ -55,6 +55,7 @@ def _add_topography_and_mask(
 
     # interpolate topography onto desired grid
     hraw = _make_raw_topography(data, target_coords)
+    nan_check(hraw)
 
     # Mask is obtained by finding locations where ocean depth is positive
     mask = xr.where(hraw > 0, 1.0, 0.0)
@@ -311,3 +312,13 @@ def _add_velocity_masks(ds):
     ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
 
     return ds
+
+
+def nan_check(hraw):
+    error_message = (
+        "NaN values found in regridded topography. This likely occurs because the ROMS grid, including "
+        "a small safety margin for interpolation, is not fully contained within the topography dataset's longitude/latitude range. Please ensure that the "
+        "dataset covers the entire area required by the ROMS grid."
+    )
+    if hraw.isnull().any().values:
+        raise ValueError(error_message)

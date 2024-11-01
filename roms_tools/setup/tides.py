@@ -400,6 +400,7 @@ class TidalForcing:
         grid_data = asdict(self.grid)
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
+        grid_data.pop("verbose", None)
 
         # Include the version of roms-tools
         try:

@@ -83,7 +83,7 @@ def compute_depth(zeta, h, hc, cs, sigma):
 
     Parameters
     ----------
-    zeta : xr.DataArray
+    zeta : xr.DataArray or scalar
         The sea surface height.
     h : xr.DataArray
         The depth of the sea bottom.
@@ -98,19 +98,10 @@ def compute_depth(zeta, h, hc, cs, sigma):
     -------
     z : xr.DataArray
         The depth at different sigma levels.
-
-    Raises
-    ------
-    ValueError
-        If theta_s or theta_b are less than or equal to zero.
     """
 
-    # Expand dimensions
-    sigma = sigma.expand_dims(dim={"eta_rho": h.eta_rho, "xi_rho": h.xi_rho})
-    cs = cs.expand_dims(dim={"eta_rho": h.eta_rho, "xi_rho": h.xi_rho})
-
-    s = (hc * sigma + h * cs) / (hc + h)
-    z = zeta + (zeta + h) * s
+    z = (hc * sigma + h * cs) / (hc + h)
+    z = zeta + (zeta + h) * z
 
     if "s_rho" in z.dims:
         z = z.transpose("s_rho", "eta_rho", "xi_rho")

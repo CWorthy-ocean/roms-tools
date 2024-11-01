@@ -1,5 +1,6 @@
 import numpy as np
 import xarray as xr
+from roms_tools.setup.utils import transpose_dimensions
 
 
 def compute_cs(sigma, theta_s, theta_b):
@@ -103,9 +104,6 @@ def compute_depth(zeta, h, hc, cs, sigma):
     z = (hc * sigma + h * cs) / (hc + h)
     z = zeta + (zeta + h) * z
 
-    if "s_rho" in z.dims:
-        z = z.transpose("s_rho", "eta_rho", "xi_rho")
-    elif "s_w" in z.dims:
-        z = z.transpose("s_w", "eta_rho", "xi_rho")
+    z = transpose_dimensions(z)
 
     return z

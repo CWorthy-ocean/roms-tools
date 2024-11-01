@@ -21,6 +21,8 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     nan_check,
     substitute_nans_by_fillvalue,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -211,6 +213,17 @@ class BoundaryForcing:
 
                 # vertical regridding
                 for location in ["rho", "u", "v"]:
+
+                    self.grid.ds[
+                        f"layer_depth_{location}_{direction}"
+                    ] = self._get_vertical_coordinates(
+                        type="layer", direction=direction, location=location
+                    )
+                    self.grid.ds[
+                        f"interface_depth_{location}_{direction}"
+                    ] = self._get_vertical_coordinates(
+                        type="interface", direction=direction, location=location
+                    )
                     var_names = [
                         name
                         for name, info in self.variable_info.items()
@@ -218,9 +231,7 @@ class BoundaryForcing:
                     ]
                     if len(var_names) > 0:
                         vertical_regrid = VerticalRegrid(
-                            self.grid.ds[f"layer_depth_{location}"].isel(
-                                **self.bdry_coords[location][direction]
-                            ),
+                            self.grid.ds[f"layer_depth_{location}_{direction}"],
                             bdry_data.ds[bdry_data.dim_names["depth"]],
                         )
                         for var_name in var_names:
@@ -231,14 +242,12 @@ class BoundaryForcing:
 
                 # compute barotropic velocities
                 if "u" in self.variable_info and "v" in self.variable_info:
-                    for var_name in ["u", "v"]:
+                    for location in ["u", "v"]:
                         processed_fields[
-                            f"{var_name}bar"
+                            f"{location}bar"
                         ] = compute_barotropic_velocity(
-                            processed_fields[var_name],
-                            self.grid.ds[f"interface_depth_{var_name}"].isel(
-                                **self.bdry_coords[var_name][direction]
-                            ),
+                            processed_fields[location],
+                            self.grid.ds[f"interface_depth_{location}_{direction}"],
                         )
 
                 # Reorder dimensions
@@ -463,38 +472,56 @@ class BoundaryForcing:
 
         object.__setattr__(self, "bdry_coords", bdry_coords)
 
-    def _get_coordinates(self, direction, point):
+    def _get_vertical_coordinates(self, type, direction, location):
         """Retrieve layer and interface depth coordinates for a specified grid boundary.
 
-        This method extracts the layer depth and interface depth coordinates along
-        a specified boundary (north, south, east, or west) and for a specified point
-        type (rho, u, or v) from the grid dataset.
+        This method extracts the layer depth and interface depth coordinates along a specified
+        boundary (north, south, east, or west) for a given location type (rho, u, or v) from
+        the grid dataset.
 
         Parameters
         ----------
+        type : str
+            The type of depth coordinate to retrieve. Valid options are:
+            - "layer": Retrieves layer depth coordinates.
+            - "interface": Retrieves interface depth coordinates.
+
         direction : str
-            The direction of the boundary to retrieve coordinates for. Valid options
-            are "north", "south", "east", and "west".
-        point : str
-            The type of grid point to retrieve coordinates for. Valid options are
-            "rho" for the grid's central points, "u" for the u-flux points, and "v"
-            for the v-flux points.
+            The direction of the boundary to retrieve coordinates for. Valid options are:
+            - "north"
+            - "south"
+            - "east"
+            - "west"
+
+        location : str
+            The type of grid point to retrieve coordinates for. Valid options are:
+            - "rho": Central grid points.
+            - "u": U-flux points.
+            - "v": V-flux points.
 
         Returns
         -------
-        xarray.DataArray, xarray.DataArray
-            The layer depth and interface depth coordinates for the specified grid
-            boundary and point type.
+        xarray.DataArray
+            The layer depth or interface depth coordinates for the specified grid boundary and location type.
         """
 
-        layer_depth = self.grid.ds[f"layer_depth_{point}"].isel(
-            **self.bdry_coords[point][direction]
-        )
-        interface_depth = self.grid.ds[f"interface_depth_{point}"].isel(
-            **self.bdry_coords[point][direction]
-        )
+        depth = self.grid.ds[f"{type}_depth_rho"]
 
-        return layer_depth, interface_depth
+        if location == "rho":
+            depth = depth.isel(**self.bdry_coords["rho"][direction])
+        else:
+            # selection of margin consisting of 2 grid cells
+            depth = depth.isel(**self.bdry_coords["vector"][direction])
+
+            if location == "u":
+                depth = interpolate_from_rho_to_u(depth)
+            elif location == "v":
+                depth = interpolate_from_rho_to_v(depth)
+
+            # selection of outermost margin
+            depth = depth.isel(**self.bdry_coords[location][direction])
+
+        return depth
 
     def _add_global_metadata(self, data, ds=None):
 
@@ -704,20 +731,13 @@ class BoundaryForcing:
 
         field = self.ds[var_name].isel(bry_time=time).load()
         title = field.long_name
+        var_name_wo_direction, direction = var_name.split("_")
+        location = self.variable_info[var_name_wo_direction]["location"]
 
         if "s_rho" in field.dims:
-            if var_name.startswith(("u_", "ubar_")):
-                point = "u"
-            elif var_name.startswith(("v_", "vbar_")):
-                point = "v"
-            else:
-                point = "rho"
-            direction = var_name.split("_")[-1]
-
-            layer_depth, interface_depth = self._get_coordinates(direction, point)
-
-            field = field.assign_coords({"layer_depth": layer_depth})
-
+            field = field.assign_coords(
+                {"layer_depth": self.grid.ds[f"layer_depth_{location}_{direction}"]}
+            )
         # chose colorbar
         if var_name.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)
@@ -735,6 +755,9 @@ class BoundaryForcing:
 
         if len(field.dims) == 2:
             if layer_contours:
+                interface_depth = self.grid.ds[
+                    f"interface_depth_{location}_{direction}"
+                ]
                 # restrict number of layer_contours to 10 for the sake of plot clearity
                 nr_layers = len(interface_depth["s_w"])
                 selected_layers = np.linspace(
@@ -817,6 +840,7 @@ class BoundaryForcing:
         grid_data = asdict(self.grid)
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
+        grid_data.pop("verbose", None)
 
         # Include the version of roms-tools
         try:

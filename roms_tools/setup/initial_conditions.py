@@ -16,6 +16,8 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     compute_barotropic_velocity,
     transpose_dimensions,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
 )
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
@@ -159,6 +161,14 @@ class InitialConditions:
                 if info["location"] == location and info["is_3d"]
             ]
             if len(var_names) > 0:
+                if location == "u":
+                    self.grid.ds["layer_depth_u"] = interpolate_from_rho_to_u(
+                        self.grid.ds["layer_depth_rho"]
+                    )
+                elif location == "v":
+                    self.grid.ds["layer_depth_v"] = interpolate_from_rho_to_v(
+                        self.grid.ds["layer_depth_rho"]
+                    )
                 vertical_regrid = VerticalRegrid(
                     self.grid.ds[f"layer_depth_{location}"],
                     data.ds[data.dim_names["depth"]],
@@ -171,6 +181,13 @@ class InitialConditions:
 
         # compute barotropic velocities
         if "u" in self.variable_info and "v" in self.variable_info:
+            self.grid.ds["interface_depth_u"] = interpolate_from_rho_to_u(
+                self.grid.ds["interface_depth_rho"]
+            )
+            self.grid.ds["interface_depth_v"] = interpolate_from_rho_to_v(
+                self.grid.ds["interface_depth_rho"]
+            )
+
             for var_name in ["u", "v"]:
                 processed_fields[f"{var_name}bar"] = compute_barotropic_velocity(
                     processed_fields[var_name],
@@ -704,6 +721,7 @@ class InitialConditions:
         grid_data = asdict(self.grid)
         grid_data.pop("ds", None)  # Exclude non-serializable fields
         grid_data.pop("straddle", None)
+        grid_data.pop("verbose", None)
 
         # Include the version of roms-tools
         try:

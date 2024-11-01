@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "s_rho",
-        "eta_rho",
-        "xi_u"
-    ],
-    "long_name": "Layer depth at u-points",
-    "units": "m"
-}

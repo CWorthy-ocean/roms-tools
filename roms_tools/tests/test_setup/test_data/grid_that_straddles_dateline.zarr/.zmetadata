@@ -3,7 +3,7 @@
         ".zattrs": {
             "center_lat": 0,
             "center_lon": 0,
-            "coordinates": "interface_depth_rho interface_depth_u interface_depth_v layer_depth_rho layer_depth_u layer_depth_v",
+            "coordinates": "interface_depth_rho layer_depth_rho",
             "hc": 300.0,
             "hmin": 5.0,
             "roms_tools_version": "0.1.dev157+dirty",
@@ -229,72 +229,6 @@
             "long_name": "Interface depth at rho-points",
             "units": "m"
         },
-        "interface_depth_u/.zarray": {
-            "chunks": [
-                101,
-                3,
-                2
-            ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<f4",
-            "fill_value": "NaN",
-            "filters": null,
-            "order": "C",
-            "shape": [
-                101,
-                3,
-                2
-            ],
-            "zarr_format": 2
-        },
-        "interface_depth_u/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "s_w",
-                "eta_rho",
-                "xi_u"
-            ],
-            "long_name": "Interface depth at u-points",
-            "units": "m"
-        },
-        "interface_depth_v/.zarray": {
-            "chunks": [
-                101,
-                2,
-                3
-            ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<f4",
-            "fill_value": "NaN",
-            "filters": null,
-            "order": "C",
-            "shape": [
-                101,
-                2,
-                3
-            ],
-            "zarr_format": 2
-        },
-        "interface_depth_v/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "s_w",
-                "eta_v",
-                "xi_rho"
-            ],
-            "long_name": "Interface depth at v-points",
-            "units": "m"
-        },
         "lat_coarse/.zarray": {
             "chunks": [
                 2,
@@ -446,72 +380,6 @@
                 "xi_rho"
             ],
             "long_name": "Layer depth at rho-points",
-            "units": "m"
-        },
-        "layer_depth_u/.zarray": {
-            "chunks": [
-                100,
-                3,
-                2
-            ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<f4",
-            "fill_value": "NaN",
-            "filters": null,
-            "order": "C",
-            "shape": [
-                100,
-                3,
-                2
-            ],
-            "zarr_format": 2
-        },
-        "layer_depth_u/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "s_rho",
-                "eta_rho",
-                "xi_u"
-            ],
-            "long_name": "Layer depth at u-points",
-            "units": "m"
-        },
-        "layer_depth_v/.zarray": {
-            "chunks": [
-                100,
-                2,
-                3
-            ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<f4",
-            "fill_value": "NaN",
-            "filters": null,
-            "order": "C",
-            "shape": [
-                100,
-                2,
-                3
-            ],
-            "zarr_format": 2
-        },
-        "layer_depth_v/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "s_rho",
-                "eta_v",
-                "xi_rho"
-            ],
-            "long_name": "Layer depth at v-points",
             "units": "m"
         },
         "lon_coarse/.zarray": {

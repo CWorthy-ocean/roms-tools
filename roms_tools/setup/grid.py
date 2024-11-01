@@ -15,7 +15,7 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_v,
     get_target_coords,
 )
-from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
+from roms_tools.setup.vertical_coordinate import sigma_stretch
 from roms_tools.setup.utils import extract_single_value, save_datasets
 import warnings
 from pathlib import Path
@@ -25,9 +25,14 @@ RADIUS_OF_EARTH = 6371315.0  # in m
 
 @dataclass(frozen=True, kw_only=True)
 class Grid:
-    """A single ROMS grid.
+    """A single ROMS grid, used for creating, plotting, and then saving a new ROMS
+    domain grid.
 
-    Used for creating, plotting, and then saving a new ROMS domain grid.
+    The grid generation consists of three steps:
+
+    1.  Computing latitude and longitude coordinates
+    2.  Preparing the topography and mask
+    3.  Computing the vertical S-coordinate stretching curves
 
     Parameters
     ----------
@@ -273,7 +278,9 @@ class Grid:
     def update_vertical_coordinate(self, N, theta_s, theta_b, hc) -> None:
         """Create vertical coordinate variables for the ROMS grid.
 
-        This method computes the S-coordinate stretching curves and depths
+        This method computes the S-coordinate stretching curves at rho- and
+        w-points.
+        and depths
         at various grid points (rho, u, v) using the specified parameters.
         The computed depths and stretching curves are added to the dataset
         as new coordinates, along with their corresponding attributes.
@@ -299,7 +306,11 @@ class Grid:
         # need to drop vertical coordinates because they could cause conflict if N changed
         vars_to_drop = [
             "layer_depth_rho",
+            "layer_depth_u",
+            "layer_depth_v",
             "interface_depth_rho",
+            "interface_depth_u",
+            "interface_depth_v",
             "Cs_w",
             "Cs_r",
         ]
@@ -308,40 +319,32 @@ class Grid:
             if var in ds.variables:
                 ds = ds.drop_vars(var)
 
-        h = ds.h
-
         cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
-        zr = compute_depth(h * 0, h, hc, cs_r, sigma_r)
         cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
-        zw = compute_depth(h * 0, h, hc, cs_w, sigma_w)
+
+        ds["sigma_r"] = sigma_r.astype(np.float32)
+        ds["sigma_r"].attrs[
+            "long_name"
+        ] = "Fractional vertical stretching coordinate at rho-points"
+        ds["sigma_r"].attrs["units"] = "nondimensional"
 
         ds["Cs_r"] = cs_r.astype(np.float32)
-        ds["Cs_r"].attrs["long_name"] = "S-coordinate stretching curves at rho-points"
+        ds["Cs_r"].attrs["long_name"] = "Vertical stretching function at rho-points"
         ds["Cs_r"].attrs["units"] = "nondimensional"
 
+        ds["sigma_w"] = sigma_r.astype(np.float32)
+        ds["sigma_w"].attrs[
+            "long_name"
+        ] = "Fractional vertical stretching coordinate at w-points"
+        ds["sigma_w"].attrs["units"] = "nondimensional"
+
         ds["Cs_w"] = cs_w.astype(np.float32)
-        ds["Cs_w"].attrs["long_name"] = "S-coordinate stretching curves at w-points"
+        ds["Cs_w"].attrs["long_name"] = "Vertical stretching function at w-points"
         ds["Cs_w"].attrs["units"] = "nondimensional"
 
         ds.attrs["theta_s"] = np.float32(theta_s)
         ds.attrs["theta_b"] = np.float32(theta_b)
         ds.attrs["hc"] = np.float32(hc)
-
-        depth = -zr
-        depth.attrs["long_name"] = "Layer depth at rho-points"
-        depth.attrs["units"] = "m"
-
-        interface_depth = -zw
-        interface_depth.attrs["long_name"] = "Interface depth at rho-points"
-        interface_depth.attrs["units"] = "m"
-
-        ds = ds.assign_coords(
-            {
-                "layer_depth_rho": depth.astype(np.float32),
-                "interface_depth_rho": interface_depth.astype(np.float32),
-            }
-        )
-        ds = ds.drop_vars(["eta_rho", "xi_rho"])
 
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "theta_s", theta_s)

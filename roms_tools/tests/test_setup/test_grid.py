@@ -180,8 +180,6 @@ def test_compatability_with_matlab_grid(tmp_path):
             "lon_v",
             "lat_coarse",
             "lon_coarse",
-            "layer_depth_rho",
-            "interface_depth_rho",
         ]
     )
     actual_coords = set(grid.ds.coords.keys())
@@ -503,8 +501,15 @@ def test_plot():
         theta_b=2.0,
         hc=250.0,
     )
-    grid.plot_vertical_coordinate("layer_depth_rho", s=-1)
-    grid.plot_vertical_coordinate("layer_depth_rho", eta=0)
-    grid.plot_vertical_coordinate("interface_depth_rho", eta=0)
-    grid.plot_vertical_coordinate("layer_depth_rho", xi=0)
-    grid.plot_vertical_coordinate("interface_depth_rho", xi=0)
+    grid.plot_vertical_coordinate(s=-1)
+    grid.plot_vertical_coordinate(eta=0)
+    grid.plot_vertical_coordinate(xi=0)
+
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(s=-1, eta=0)
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(s=-1, xi=0)
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(eta=-1, xi=0)
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(eta=-1, xi=0, s=-1)

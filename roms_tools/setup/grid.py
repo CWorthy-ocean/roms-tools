@@ -335,34 +335,14 @@ class Grid:
         depth.attrs["long_name"] = "Layer depth at rho-points"
         depth.attrs["units"] = "m"
 
-        depth_u = interpolate_from_rho_to_u(depth)
-        depth_u.attrs["long_name"] = "Layer depth at u-points"
-        depth_u.attrs["units"] = "m"
-
-        depth_v = interpolate_from_rho_to_v(depth)
-        depth_v.attrs["long_name"] = "Layer depth at v-points"
-        depth_v.attrs["units"] = "m"
-
         interface_depth = -zw
         interface_depth.attrs["long_name"] = "Interface depth at rho-points"
         interface_depth.attrs["units"] = "m"
 
-        interface_depth_u = interpolate_from_rho_to_u(interface_depth)
-        interface_depth_u.attrs["long_name"] = "Interface depth at u-points"
-        interface_depth_u.attrs["units"] = "m"
-
-        interface_depth_v = interpolate_from_rho_to_v(interface_depth)
-        interface_depth_v.attrs["long_name"] = "Interface depth at v-points"
-        interface_depth_v.attrs["units"] = "m"
-
         ds = ds.assign_coords(
             {
                 "layer_depth_rho": depth.astype(np.float32),
-                "layer_depth_u": depth_u.astype(np.float32),
-                "layer_depth_v": depth_v.astype(np.float32),
                 "interface_depth_rho": interface_depth.astype(np.float32),
-                "interface_depth_u": interface_depth_u.astype(np.float32),
-                "interface_depth_v": interface_depth_v.astype(np.float32),
             }
         )
         ds = ds.drop_vars(["eta_rho", "xi_rho"])

@@ -131,8 +131,8 @@ class InitialConditions:
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
 
-        variable_info = self._set_variable_info(data, type=type)
-        var_names = variable_info.keys()
+        self._set_variable_info(data, type=type)
+        var_names = self.variable_info.keys()
 
         # lateral regridding
         lateral_regrid = LateralRegrid(target_coords, data.dim_names)
@@ -143,7 +143,7 @@ class InitialConditions:
                 )
 
         # rotation of velocities and interpolation to u/v points
-        if "u" in variable_info and "v" in variable_info:
+        if "u" in self.variable_info and "v" in self.variable_info:
             (processed_fields["u"], processed_fields["v"],) = rotate_velocities(
                 processed_fields["u"],
                 processed_fields["v"],
@@ -155,7 +155,7 @@ class InitialConditions:
         for location in ["rho", "u", "v"]:
             var_names = [
                 name
-                for name, info in variable_info.items()
+                for name, info in self.variable_info.items()
                 if info["location"] == location and info["is_3d"]
             ]
             if len(var_names) > 0:
@@ -170,7 +170,7 @@ class InitialConditions:
                         )
 
         # compute barotropic velocities
-        if "u" in variable_info and "v" in variable_info:
+        if "u" in self.variable_info and "v" in self.variable_info:
             for var_name in ["u", "v"]:
                 processed_fields[f"{var_name}bar"] = compute_barotropic_velocity(
                     processed_fields[var_name],
@@ -179,7 +179,7 @@ class InitialConditions:
 
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
-            for var_name in variable_info.keys():
+            for var_name in self.variable_info.keys():
                 processed_fields[var_name] = processed_fields[var_name].assign_coords(
                     {"time": processed_fields["temp"]["time"]}
                 )
@@ -261,9 +261,8 @@ class InitialConditions:
 
         Returns
         -------
-        dict
-            A dictionary where the keys are variable names and the values are dictionaries of metadata
-            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        None
+            This method updates the instance attribute `variable_info` with the metadata dictionary for the variables.
         """
         default_info = {
             "location": "rho",
@@ -313,7 +312,7 @@ class InitialConditions:
             for var_name in data.var_names.keys():
                 variable_info[var_name] = default_info
 
-        return variable_info
+        object.__setattr__(self, "variable_info", variable_info)
 
     def _write_into_dataset(self, processed_fields, d_meta):
 

@@ -85,8 +85,8 @@ class TidalForcing:
 
         data.apply_lateral_fill()
 
-        variable_info = self._set_variable_info()
-        var_names = variable_info.keys()
+        self._set_variable_info()
+        var_names = self.variable_info.keys()
 
         processed_fields = {}
         # lateral regridding
@@ -98,7 +98,7 @@ class TidalForcing:
                 )
 
         # rotation of velocities and interpolation to u/v points
-        vector_pairs = get_vector_pairs(variable_info)
+        vector_pairs = get_vector_pairs(self.variable_info)
         for pair in vector_pairs:
             u_component = pair[0]
             v_component = pair[1]
@@ -163,9 +163,8 @@ class TidalForcing:
 
         Returns
         -------
-        dict
-            A dictionary where the keys are variable names and the values are dictionaries of metadata
-            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        None
+            This method updates the instance attribute `variable_info` with the metadata dictionary for the variables.
         """
         default_info = {
             "location": "rho",
@@ -206,7 +205,7 @@ class TidalForcing:
             },
         }
 
-        return variable_info
+        object.__setattr__(self, "variable_info", variable_info)
 
     def _write_into_dataset(self, processed_fields, d_meta):
 

@@ -113,8 +113,8 @@ class BoundaryForcing:
             data.extrapolate_deepest_to_bottom()
             data.apply_lateral_fill()
 
-        variable_info = self._set_variable_info(data)
-        bdry_coords = get_boundary_info()
+        self._set_variable_info(data)
+        self._set_boundary_info()
         ds = xr.Dataset()
 
         for direction in ["south", "east", "north", "west"]:
@@ -122,10 +122,10 @@ class BoundaryForcing:
 
                 bdry_target_coords = {
                     "lat": target_coords["lat"].isel(
-                        **bdry_coords["vector"][direction]
+                        **self.bdry_coords["vector"][direction]
                     ),
                     "lon": target_coords["lon"].isel(
-                        **bdry_coords["vector"][direction]
+                        **self.bdry_coords["vector"][direction]
                     ),
                     "straddle": target_coords["straddle"],
                 }
@@ -143,11 +143,17 @@ class BoundaryForcing:
 
                 # lateral regridding of vector fields
                 vector_var_names = [
-                    name for name, info in variable_info.items() if info["is_vector"]
+                    name
+                    for name, info in self.variable_info.items()
+                    if info["is_vector"]
                 ]
                 if len(vector_var_names) > 0:
-                    lon = target_coords["lon"].isel(**bdry_coords["vector"][direction])
-                    lat = target_coords["lat"].isel(**bdry_coords["vector"][direction])
+                    lon = target_coords["lon"].isel(
+                        **self.bdry_coords["vector"][direction]
+                    )
+                    lat = target_coords["lat"].isel(
+                        **self.bdry_coords["vector"][direction]
+                    )
                     lateral_regrid = LateralRegrid(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
@@ -160,12 +166,16 @@ class BoundaryForcing:
                 # lateral regridding of tracer fields
                 tracer_var_names = [
                     name
-                    for name, info in variable_info.items()
+                    for name, info in self.variable_info.items()
                     if not info["is_vector"]
                 ]
                 if len(tracer_var_names) > 0:
-                    lon = target_coords["lon"].isel(**bdry_coords["rho"][direction])
-                    lat = target_coords["lat"].isel(**bdry_coords["rho"][direction])
+                    lon = target_coords["lon"].isel(
+                        **self.bdry_coords["rho"][direction]
+                    )
+                    lat = target_coords["lat"].isel(
+                        **self.bdry_coords["rho"][direction]
+                    )
                     lateral_regrid = LateralRegrid(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
@@ -176,9 +186,9 @@ class BoundaryForcing:
                             )
 
                 # rotation of velocities and interpolation to u/v points
-                if "u" in variable_info and "v" in variable_info:
+                if "u" in self.variable_info and "v" in self.variable_info:
                     angle = target_coords["angle"].isel(
-                        **bdry_coords["vector"][direction]
+                        **self.bdry_coords["vector"][direction]
                     )
                     (processed_fields["u"], processed_fields["v"],) = rotate_velocities(
                         processed_fields["u"],
@@ -188,13 +198,13 @@ class BoundaryForcing:
                     )
 
                 # selection of outermost margin for u/v variables
-                for var_name in variable_info.keys():
+                for var_name in self.variable_info.keys():
                     if var_name in processed_fields:
-                        location = variable_info[var_name]["location"]
+                        location = self.variable_info[var_name]["location"]
                         if location in ["u", "v"]:
                             processed_fields[var_name] = processed_fields[
                                 var_name
-                            ].isel(**bdry_coords[location][direction])
+                            ].isel(**self.bdry_coords[location][direction])
 
                 if not self.apply_2d_horizontal_fill:
                     processed_fields = apply_1d_horizontal_fill(processed_fields)
@@ -203,13 +213,13 @@ class BoundaryForcing:
                 for location in ["rho", "u", "v"]:
                     var_names = [
                         name
-                        for name, info in variable_info.items()
+                        for name, info in self.variable_info.items()
                         if info["location"] == location and info["is_3d"]
                     ]
                     if len(var_names) > 0:
                         vertical_regrid = VerticalRegrid(
                             self.grid.ds[f"layer_depth_{location}"].isel(
-                                **bdry_coords[location][direction]
+                                **self.bdry_coords[location][direction]
                             ),
                             bdry_data.ds[bdry_data.dim_names["depth"]],
                         )
@@ -220,14 +230,14 @@ class BoundaryForcing:
                                 )
 
                 # compute barotropic velocities
-                if "u" in variable_info and "v" in variable_info:
+                if "u" in self.variable_info and "v" in self.variable_info:
                     for var_name in ["u", "v"]:
                         processed_fields[
                             f"{var_name}bar"
                         ] = compute_barotropic_velocity(
                             processed_fields[var_name],
                             self.grid.ds[f"interface_depth_{var_name}"].isel(
-                                **bdry_coords[var_name][direction]
+                                **self.bdry_coords[var_name][direction]
                             ),
                         )
 
@@ -243,7 +253,7 @@ class BoundaryForcing:
         # Add global information
         ds = self._add_global_metadata(data, ds)
 
-        self._validate(ds, variable_info, bdry_coords)
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -308,11 +318,15 @@ class BoundaryForcing:
         - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
         - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
 
+        Parameters
+        ----------
+        data : object
+            An object that contains variable names for the data being processed. This is used to set variable information for biogeochemical data.
+
         Returns
         -------
-        dict
-            A dictionary where the keys are variable names and the values are dictionaries of metadata
-            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        None
+            This method updates the instance attribute `variable_info` with the metadata dictionary for the variables.
         """
         default_info = {
             "location": "rho",
@@ -362,7 +376,7 @@ class BoundaryForcing:
             for var_name in data.var_names.keys():
                 variable_info[var_name] = default_info
 
-        return variable_info
+        object.__setattr__(self, "variable_info", variable_info)
 
     def _write_into_dataset(self, direction, processed_fields, ds=None):
         if ds is None:
@@ -402,6 +416,53 @@ class BoundaryForcing:
 
         return ds
 
+    def _set_boundary_info(self):
+        """Updates boundary coordinates for rho, u, and v variables on the grid.
+
+        This method determines the boundary points for the grid variables by specifying the
+        indices for the south, east, north, and west boundaries. The resulting boundary
+        information is stored in the instance attribute `bdry_coords`.
+
+        Returns
+        -------
+        None
+            The method does not return a value. Instead, it updates the instance attribute
+            `bdry_coords`, which is a dictionary structured as follows:
+            - Keys: Variable types ("rho", "u", "v", "vector").
+            - Values: Nested dictionaries mapping each direction ("south", "east", "north", "west")
+              to their corresponding boundary coordinates. The coordinates are specified in terms of
+              grid indices for the respective variable types.
+        """
+
+        bdry_coords = {
+            "rho": {
+                "south": {"eta_rho": 0},
+                "east": {"xi_rho": -1},
+                "north": {"eta_rho": -1},
+                "west": {"xi_rho": 0},
+            },
+            "u": {
+                "south": {"eta_rho": 0},
+                "east": {"xi_u": -1},
+                "north": {"eta_rho": -1},
+                "west": {"xi_u": 0},
+            },
+            "v": {
+                "south": {"eta_v": 0},
+                "east": {"xi_rho": -1},
+                "north": {"eta_v": -1},
+                "west": {"xi_rho": 0},
+            },
+            "vector": {
+                "south": {"eta_rho": [0, 1]},
+                "east": {"xi_rho": [-2, -1]},
+                "north": {"eta_rho": [-2, -1]},
+                "west": {"xi_rho": [0, 1]},
+            },
+        }
+
+        object.__setattr__(self, "bdry_coords", bdry_coords)
+
     def _get_coordinates(self, direction, point):
         """Retrieve layer and interface depth coordinates for a specified grid boundary.
 
@@ -426,13 +487,11 @@ class BoundaryForcing:
             boundary and point type.
         """
 
-        bdry_coords = get_boundary_info()
-
         layer_depth = self.grid.ds[f"layer_depth_{point}"].isel(
-            **bdry_coords[point][direction]
+            **self.bdry_coords[point][direction]
         )
         interface_depth = self.grid.ds[f"interface_depth_{point}"].isel(
-            **bdry_coords[point][direction]
+            **self.bdry_coords[point][direction]
         )
 
         return layer_depth, interface_depth
@@ -506,7 +565,7 @@ class BoundaryForcing:
 
         return ds
 
-    def _validate(self, ds, variable_info, bdry_coords):
+    def _validate(self, ds):
         """Validate the dataset for NaN values at the first time step based on the fill
         method used.
 
@@ -514,12 +573,6 @@ class BoundaryForcing:
         ----------
         ds : xarray.Dataset
             The dataset to validate.
-
-        variable_info : dict
-            A dictionary containing metadata about the variables, including their locations (e.g., 'rho', 'u', 'v').
-
-        bdry_coords : dict
-            A dictionary containing the boundary coordinates for each variable location.
 
         Raises
         ------
@@ -537,8 +590,8 @@ class BoundaryForcing:
         """
         if self.apply_2d_horizontal_fill:
             # Strict NaN check with ValueError makes sense to be applied
-            for var_name in variable_info:
-                location = variable_info[var_name]["location"]
+            for var_name in self.variable_info:
+                location = self.variable_info[var_name]["location"]
 
                 # Select the appropriate mask based on variable location
                 if location == "rho":
@@ -557,13 +610,13 @@ class BoundaryForcing:
                         # Check for NaN values at the first time step using the nan_check function
                         nan_check(
                             ds[bdry_var_name].isel(bry_time=0),
-                            mask.isel(**bdry_coords[location][direction]),
+                            mask.isel(**self.bdry_coords[location][direction]),
                         )
         else:
             # Can't apply strict NaN check because land values haven't been filled before regridding step; instead warn user
             for direction in ["south", "east", "north", "west"]:
                 if self.boundaries[direction]:
-                    for var_name in variable_info:
+                    for var_name in self.variable_info:
                         bdry_var_name = f"{var_name}_{direction}"
                         if ds[bdry_var_name].isel(bry_time=0).isnull().any().values:
                             warnings.warn(
@@ -847,50 +900,6 @@ class BoundaryForcing:
 
         # Create and return an instance of InitialConditions
         return cls(grid=grid, **boundary_forcing_data, use_dask=use_dask)
-
-
-def get_boundary_info():
-    """This function provides information about the boundary points for the rho, u, and
-    v variables on the grid, specifying the indices for the south, east, north, and west
-    boundaries.
-
-    Returns
-    -------
-    dict
-        A dictionary where keys are variable types ("rho", "u", "v"), and values
-        are nested dictionaries mapping directions ("south", "east", "north", "west")
-        to the corresponding boundary coordinates.
-    """
-
-    # Boundary coordinates
-    bdry_coords = {
-        "rho": {
-            "south": {"eta_rho": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_rho": 0},
-        },
-        "u": {
-            "south": {"eta_rho": 0},
-            "east": {"xi_u": -1},
-            "north": {"eta_rho": -1},
-            "west": {"xi_u": 0},
-        },
-        "v": {
-            "south": {"eta_v": 0},
-            "east": {"xi_rho": -1},
-            "north": {"eta_v": -1},
-            "west": {"xi_rho": 0},
-        },
-        "vector": {
-            "south": {"eta_rho": [0, 1]},
-            "east": {"xi_rho": [-2, -1]},
-            "north": {"eta_rho": [-2, -1]},
-            "west": {"xi_rho": [0, 1]},
-        },
-    }
-
-    return bdry_coords
 
 
 def apply_1d_horizontal_fill(processed_fields: dict) -> dict:

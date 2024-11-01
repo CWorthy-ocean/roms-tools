@@ -299,11 +299,7 @@ class Grid:
         # need to drop vertical coordinates because they could cause conflict if N changed
         vars_to_drop = [
             "layer_depth_rho",
-            "layer_depth_u",
-            "layer_depth_v",
             "interface_depth_rho",
-            "interface_depth_u",
-            "interface_depth_v",
             "Cs_w",
             "Cs_r",
         ]
@@ -403,11 +399,7 @@ class Grid:
             The vertical coordinate field to plot. Options include:
 
             - "layer_depth_rho": Layer depth at rho-points.
-            - "layer_depth_u": Layer depth at u-points.
-            - "layer_depth_v": Layer depth at v-points.
             - "interface_depth_rho": Interface depth at rho-points.
-            - "interface_depth_u": Interface depth at u-points.
-            - "interface_depth_v": Interface depth at v-points.
 
         s: int, optional
             The s-index to plot. Default is None.
@@ -440,14 +432,6 @@ class Grid:
             field = field.assign_coords(
                 {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
             )
-        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            interface_depth = self.ds.interface_depth_u
-            field = field.where(self.ds.mask_u)
-            field = field.assign_coords({"lon": self.ds.lon_u, "lat": self.ds.lat_u})
-        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_v
-            field = field.where(self.ds.mask_v)
-            field = field.assign_coords({"lon": self.ds.lon_v, "lat": self.ds.lat_v})
 
         # slice the field as desired
         title = field.long_name
@@ -468,26 +452,18 @@ class Grid:
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
                 interface_depth = interface_depth.isel(eta_rho=eta)
-            elif "eta_v" in field.dims:
-                title = title + f", eta_v = {field.eta_v[eta].item()}"
-                field = field.isel(eta_v=eta)
-                interface_depth = interface_depth.isel(eta_v=eta)
             else:
                 raise ValueError(
-                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
+                    f"None of the expected dimensions (eta_rho) found in ds[{varname}]."
                 )
         if xi is not None:
             if "xi_rho" in field.dims:
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
                 interface_depth = interface_depth.isel(xi_rho=xi)
-            elif "xi_u" in field.dims:
-                title = title + f", xi_u = {field.xi_u[xi].item()}"
-                field = field.isel(xi_u=xi)
-                interface_depth = interface_depth.isel(xi_u=xi)
             else:
                 raise ValueError(
-                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
+                    f"None of the expected dimensions (xi_rho) found in ds[{varname}]."
                 )
 
         if eta is None and xi is None:
@@ -794,7 +770,6 @@ class Grid:
 
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
-
         return cls(**grid_data, verbose=verbose)
 
     # override __repr__ method to only print attributes that are actually set

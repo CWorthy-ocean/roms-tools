@@ -181,11 +181,7 @@ def test_compatability_with_matlab_grid(tmp_path):
             "lat_coarse",
             "lon_coarse",
             "layer_depth_rho",
-            "layer_depth_u",
-            "layer_depth_v",
             "interface_depth_rho",
-            "interface_depth_u",
-            "interface_depth_v",
         ]
     )
     actual_coords = set(grid.ds.coords.keys())
@@ -507,18 +503,8 @@ def test_plot():
         theta_b=2.0,
         hc=250.0,
     )
-    grid.plot_vertical_coordinate("layer_depth_u", s=0)
     grid.plot_vertical_coordinate("layer_depth_rho", s=-1)
-    grid.plot_vertical_coordinate("interface_depth_v", s=-1)
     grid.plot_vertical_coordinate("layer_depth_rho", eta=0)
-    grid.plot_vertical_coordinate("layer_depth_u", eta=0)
-    grid.plot_vertical_coordinate("layer_depth_v", eta=0)
     grid.plot_vertical_coordinate("interface_depth_rho", eta=0)
-    grid.plot_vertical_coordinate("interface_depth_u", eta=0)
-    grid.plot_vertical_coordinate("interface_depth_v", eta=0)
     grid.plot_vertical_coordinate("layer_depth_rho", xi=0)
-    grid.plot_vertical_coordinate("layer_depth_u", xi=0)
-    grid.plot_vertical_coordinate("layer_depth_v", xi=0)
     grid.plot_vertical_coordinate("interface_depth_rho", xi=0)
-    grid.plot_vertical_coordinate("interface_depth_u", xi=0)
-    grid.plot_vertical_coordinate("interface_depth_v", xi=0)

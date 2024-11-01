@@ -9,13 +9,13 @@ import yaml
 import importlib.metadata
 from typing import Dict, Union, List
 from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
-from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
+from roms_tools.setup.plot import _plot, _section_plot
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_target_coords,
 )
-from roms_tools.setup.vertical_coordinate import sigma_stretch
+from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
 import warnings
 from pathlib import Path
@@ -31,8 +31,8 @@ class Grid:
     The grid generation consists of three steps:
 
     1.  Computing latitude and longitude coordinates
-    2.  Preparing the topography and mask
-    3.  Computing the vertical S-coordinate stretching curves
+    2.  Making the topography and mask
+    3.  Preparing the vertical coordinate system
 
     Parameters
     ----------
@@ -169,7 +169,7 @@ class Grid:
         if verbose:
             start_time = time.time()
             print(
-                f"=== Preparing the topography and mask using {self.topography_source['name']} data ==="
+                f"=== Making the topography and mask using {self.topography_source['name']} data ==="
             )
         ds = _add_topography_and_mask(
             ds=self.ds,
@@ -181,7 +181,7 @@ class Grid:
         if verbose:
             print(f"Total time: {time.time() - start_time:.3f} seconds")
             print(
-                "=============================================================================================="
+                "========================================================================================================"
             )
         ds = self._coarsen(ds)
         object.__setattr__(self, "ds", ds)
@@ -192,7 +192,7 @@ class Grid:
         if verbose:
             start_time = time.time()
             print(
-                f"=== Computing vertical coordinates using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
+                f"=== Preparing the vertical coordinate system using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
             )
         self.update_vertical_coordinate(
             N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
@@ -200,7 +200,7 @@ class Grid:
         if verbose:
             print(f"Total time: {time.time() - start_time:.3f} seconds")
             print(
-                "=============================================================================================="
+                "========================================================================================================"
             )
 
     def _straddle(self) -> None:
@@ -311,6 +311,8 @@ class Grid:
             "interface_depth_rho",
             "interface_depth_u",
             "interface_depth_v",
+            "sigma_r",
+            "sigma_w",
             "Cs_w",
             "Cs_r",
         ]
@@ -332,7 +334,7 @@ class Grid:
         ds["Cs_r"].attrs["long_name"] = "Vertical stretching function at rho-points"
         ds["Cs_r"].attrs["units"] = "nondimensional"
 
-        ds["sigma_w"] = sigma_r.astype(np.float32)
+        ds["sigma_w"] = sigma_w.astype(np.float32)
         ds["sigma_w"].attrs[
             "long_name"
         ] = "Fractional vertical stretching coordinate at w-points"
@@ -389,21 +391,14 @@ class Grid:
 
     def plot_vertical_coordinate(
         self,
-        varname="layer_depth_rho",
         s=None,
         eta=None,
         xi=None,
     ) -> None:
-        """Plot the vertical coordinate system for a given eta-, xi-, or s-slice.
+        """Plot the layer depth for a given eta-, xi-, or s-slice.
 
         Parameters
         ----------
-        varname : str, optional
-            The vertical coordinate field to plot. Options include:
-
-            - "layer_depth_rho": Layer depth at rho-points.
-            - "interface_depth_rho": Interface depth at rho-points.
-
         s: int, optional
             The s-index to plot. Default is None.
         eta : int, optional
@@ -419,88 +414,60 @@ class Grid:
         Raises
         ------
         ValueError
-            If the specified varname is not one of the valid options.
-            If none of s, eta, xi are specified.
+            If not exactly one of s, eta, xi is specified.
         """
 
-        if not any([s is not None, eta is not None, xi is not None]):
-            raise ValueError("At least one of s, eta, or xi must be specified.")
+        title = "Layer depth at rho-points"
 
-        self.ds[varname].load()
-        field = self.ds[varname].squeeze()
+        if sum(s is not None for s in [s, eta, xi]) != 1:
+            raise ValueError("Exactly one of s, eta, or xi must be specified.")
 
-        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_rho
-            field = field.where(self.ds.mask_rho)
-            field = field.assign_coords(
-                {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
-            )
+        h = self.ds["h"]
+        h = h.assign_coords({"lon": self.ds.lon_rho, "lat": self.ds.lat_rho})
 
-        # slice the field as desired
-        title = field.long_name
-        if s is not None:
-            if "s_rho" in field.dims:
-                title = title + f", s_rho = {field.s_rho[s].item()}"
-                field = field.isel(s_rho=s)
-            elif "s_w" in field.dims:
-                title = title + f", s_w = {field.s_w[s].item()}"
-                field = field.isel(s_w=s)
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (s_rho, s_w) found in ds[{varname}]."
-                )
-
+        # slice the bathymetry as desired
         if eta is not None:
-            if "eta_rho" in field.dims:
-                title = title + f", eta_rho = {field.eta_rho[eta].item()}"
-                field = field.isel(eta_rho=eta)
-                interface_depth = interface_depth.isel(eta_rho=eta)
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (eta_rho) found in ds[{varname}]."
-                )
+            title = title + f", eta_rho = {h.eta_rho[eta].item()}"
+            h = h.isel(eta_rho=eta)
         if xi is not None:
-            if "xi_rho" in field.dims:
-                title = title + f", xi_rho = {field.xi_rho[xi].item()}"
-                field = field.isel(xi_rho=xi)
-                interface_depth = interface_depth.isel(xi_rho=xi)
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (xi_rho) found in ds[{varname}]."
-                )
+            title = title + f", xi_rho = {h.xi_rho[xi].item()}"
+            h = h.isel(xi_rho=xi)
 
         if eta is None and xi is None:
-            vmax = field.max().values
-            vmin = field.min().values
+            layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
+            layer_depth = layer_depth.isel(s_rho=s)
+
+            vmax = layer_depth.max().values
+            vmin = layer_depth.min().values
             cmap = plt.colormaps.get_cmap("YlGnBu")
             cmap.set_bad(color="gray")
             kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
             _plot(
                 self.ds,
-                field=field,
+                field=layer_depth,
                 straddle=self.straddle,
                 depth_contours=False,
                 title=title,
                 kwargs=kwargs,
             )
         else:
-            if len(field.dims) == 2:
-                cmap = plt.colormaps.get_cmap("YlGnBu")
-                cmap.set_bad(color="gray")
-                kwargs = {"vmax": 0.0, "vmin": 0.0, "cmap": cmap, "add_colorbar": False}
+            layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
+            field = xr.zeros_like(layer_depth)
+            field = field.assign_coords({"layer_depth": layer_depth})
+            interface_depth = compute_depth(
+                0, h, self.hc, self.ds.Cs_w, self.ds.sigma_w
+            )
+            cmap = plt.colormaps.get_cmap("YlGnBu")
+            cmap.set_bad(color="gray")
+            kwargs = {"vmax": 0.0, "vmin": 0.0, "cmap": cmap, "add_colorbar": False}
 
-                _section_plot(
-                    xr.zeros_like(field),
-                    interface_depth=interface_depth,
-                    title=title,
-                    kwargs=kwargs,
-                )
-            else:
-                if "s_rho" in field.dims or "s_w" in field.dims:
-                    _profile_plot(field, title=title)
-                else:
-                    _line_plot(field, title=title)
+            _section_plot(
+                field=field,
+                interface_depth=interface_depth,
+                title=title,
+                kwargs=kwargs,
+            )
 
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
@@ -623,7 +590,7 @@ class Grid:
             if verbose:
                 print(f"Total time: {time.time() - start_time:.3f} seconds")
                 print(
-                    "=============================================================================================="
+                    "========================================================================================================"
                 )
         else:
             object.__setattr__(grid, "theta_s", ds.attrs["theta_s"].item())

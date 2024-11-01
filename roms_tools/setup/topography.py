@@ -17,7 +17,7 @@ def _add_topography_and_mask(
     hmin,
     smooth_factor=8.0,
     rmax=0.2,
-    verbose=True,
+    verbose=False,
 ) -> xr.Dataset:
     """Adds topography and a land/water mask to the dataset based on the provided
     topography source.
@@ -52,7 +52,7 @@ def _add_topography_and_mask(
         This parameter controls the local smoothing of the topography. Smaller values result in
         smoother topography, while larger values preserve more detail. The default is 0.2.
     verbose: bool, optional
-        Controls whether messages about topography generation steps are printed. Defaults to True.
+        Indicates whether to print topography generation steps with timing. Defaults to False.
 
     Returns
     -------

@@ -65,7 +65,7 @@ class Grid:
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     verbose: bool, optional
-        Indicates whether to print grid generation steps with timing. Defaults to True.
+        Indicates whether to print grid generation steps with timing. Defaults to False.
 
     Raises
     ------
@@ -86,7 +86,7 @@ class Grid:
     hc: float = 300.0
     topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     hmin: float = 5.0
-    verbose: bool = True
+    verbose: bool = False
     ds: xr.Dataset = field(init=False, repr=False)
     straddle: bool = field(init=False, repr=False)
 
@@ -130,7 +130,7 @@ class Grid:
                 )
 
     def update_topography_and_mask(
-        self, topography_source={"name": "ETOPO5"}, hmin=5.0, verbose=True
+        self, topography_source={"name": "ETOPO5"}, hmin=5.0, verbose=False
     ) -> None:
         """Update the grid dataset by adding or overwriting the topography and land/sea
         mask.
@@ -152,7 +152,7 @@ class Grid:
         hmin : float, optional
             The minimum ocean depth (in meters). The default is 5.0.
         verbose: bool, optional
-            Controls whether messages about topography generation steps are printed. Defaults to True.
+            Indicates whether to print grid generation steps with timing. Defaults to False.
 
         Returns
         -------
@@ -592,7 +592,7 @@ class Grid:
         return saved_filenames
 
     @classmethod
-    def from_file(cls, filepath: Union[str, Path], verbose: bool = True) -> "Grid":
+    def from_file(cls, filepath: Union[str, Path], verbose: bool = False) -> "Grid":
         """Create a Grid instance from an existing file.
 
         Parameters
@@ -600,7 +600,7 @@ class Grid:
         filepath : Union[str, Path]
             Path to the file containing the grid information.
         verbose: bool, optional
-            Indicates whether to print grid generation steps with timing. Defaults to True.
+            Indicates whether to print grid generation steps with timing. Defaults to False.
 
         Returns
         -------
@@ -759,7 +759,7 @@ class Grid:
             yaml.dump(yaml_data, file, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path], verbose: bool = True) -> "Grid":
+    def from_yaml(cls, filepath: Union[str, Path], verbose: bool = False) -> "Grid":
         """Create an instance of the class from a YAML file.
 
         Parameters
@@ -767,7 +767,7 @@ class Grid:
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
         verbose: bool, optional
-            Indicates whether to print grid generation steps with timing. Defaults to True.
+            Indicates whether to print grid generation steps with timing. Defaults to False.
 
         Returns
         -------

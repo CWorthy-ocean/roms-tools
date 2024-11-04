@@ -73,8 +73,8 @@ def _add_topography_and_mask(
     # Mask
     if verbose:
         start_time = time.time()
-    # Mask is obtained by finding locations where ocean depth is positive
-    mask = xr.where(hraw > 0, 1.0, 0.0)
+
+    mask = _infer_mask(hraw)
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
     # adjust mask boundaries by copying values from adjacent cells
@@ -149,6 +149,14 @@ def _make_raw_topography(data, target_coords, verbose) -> np.ndarray:
     hraw = -hraw
 
     return hraw
+
+
+def _infer_mask(hraw):
+    """Mask is obtained by finding locations where ocean depth is positive."""
+
+    mask = xr.where(hraw > 0, 1.0, 0.0)
+
+    return mask
 
 
 def _smooth_topography_globally(hraw, factor) -> xr.DataArray:

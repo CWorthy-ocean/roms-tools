@@ -70,20 +70,11 @@ def _add_topography_and_mask(
     hraw = _make_raw_topography(data, target_coords, verbose)
     nan_check(hraw)
 
+    # Mask
+    if verbose:
+        start_time = time.time()
     # Mask is obtained by finding locations where ocean depth is positive
     mask = xr.where(hraw > 0, 1.0, 0.0)
-
-    # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
-    if verbose:
-        start_time = time.time()
-    hraw = _smooth_topography_globally(hraw, smooth_factor)
-    if verbose:
-        print(
-            f"Smoothing the topography globally: {time.time() - start_time:.3f} seconds"
-        )
-
-    if verbose:
-        start_time = time.time()
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
     # adjust mask boundaries by copying values from adjacent cells
@@ -96,6 +87,15 @@ def _add_topography_and_mask(
     ds = _add_velocity_masks(ds)
     if verbose:
         print(f"Preparing the masks: {time.time() - start_time:.3f} seconds")
+
+    # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
+    if verbose:
+        start_time = time.time()
+    hraw = _smooth_topography_globally(hraw, smooth_factor)
+    if verbose:
+        print(
+            f"Smoothing the topography globally: {time.time() - start_time:.3f} seconds"
+        )
 
     # smooth topography locally to satisfy r < rmax
     if verbose:

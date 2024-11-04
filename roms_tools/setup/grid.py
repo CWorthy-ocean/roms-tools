@@ -137,42 +137,54 @@ class Grid:
                 )
 
     def update_topography_and_mask(
-        self, topography_source={"name": "ETOPO5"}, hmin=5.0, verbose=False
+        self, topography_source=None, hmin=None, verbose=False
     ) -> None:
-        """Update the grid dataset by adding or overwriting the topography and land/sea
-        mask.
+        """Update the grid dataset with processed topography and land/sea mask.
 
-        This method processes the topography data and generates a land/sea mask.
-        It applies several steps, including interpolating topography, smoothing
-        the topography over the entire domain and locally, and filling in enclosed basins. The
-        processed topography and mask are added to the grid's dataset as new variables.
+        This method processes the topography data and generates a land/sea mask for the grid.
+        It performs several key operations, including interpolating topography, smoothing the
+        topography over the entire domain and locally, and filling in enclosed basins.
+        The processed topography and mask are then added to the grid's dataset as new variables.
 
         Parameters
         ----------
-        topography_source : Dict[str, Union[str, Path]], optional
-            Dictionary specifying the source of the topography data:
-
+        topography_source : dict, optional
+            A dictionary specifying the source of the topography data. The dictionary should
+            contain the following keys:
             - "name" (str): The name of the topography data source (e.g., "SRTM15").
-            - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
+            - "path" (Union[str, Path): The path to the raw data file.
 
-            The default is "ETOPO5", which does not require a path.
+            If not provided, `topography_source` will remain unchanged (i.e., the existing value will not be overwritten).
+
         hmin : float, optional
-            The minimum ocean depth (in meters). The default is 5.0.
-        verbose: bool, optional
-            Indicates whether to print grid generation steps with timing. Defaults to False.
+            The minimum ocean depth (in meters).
+            If not provided, `hmin` will remain unchanged (i.e., the existing value will not be overwritten).
+
+        verbose : bool, optional
+            If True, the method will print detailed information about the grid generation process,
+            including the timing of each step. Defaults to False.
 
         Returns
         -------
         None
-            This method modifies the dataset in place and does not return a value.
+            This method updates the internal dataset (`self.ds`) in place by adding or overwriting the
+            topography and mask variables. It does not return any value.
         """
 
+        topography_source = topography_source or self.topography_source
+        hmin = hmin or self.hmin
+
+        # Extract target coordinates for processing
         target_coords = get_target_coords(self)
+
+        # If verbose is enabled, start the timer and print the start message
         if verbose:
             start_time = time.time()
             print(
-                f"=== Making the topography and mask using {self.topography_source['name']} data ==="
+                f"=== Generating topography and mask using {topography_source['name']} data and hmin = {hmin} meters ==="
             )
+
+        # Add topography and mask to the dataset
         ds = _add_topography_and_mask(
             ds=self.ds,
             target_coords=target_coords,
@@ -180,15 +192,120 @@ class Grid:
             hmin=hmin,
             verbose=verbose,
         )
+
+        # If verbose is enabled, print elapsed time and a separator
         if verbose:
             print(f"Total time: {time.time() - start_time:.3f} seconds")
             print(
                 "========================================================================================================"
             )
+
+        # Coarsen the dataset if needed
         ds = self._coarsen(ds)
+
+        # Update the grid's dataset and related attributes
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)
         object.__setattr__(self, "hmin", hmin)
+
+    def update_vertical_coordinate(
+        self, N=None, theta_s=None, theta_b=None, hc=None, verbose=False
+    ) -> None:
+        """Create vertical coordinate variables for the ROMS grid.
+
+        This method computes the S-coordinate stretching curves at rho- and
+        w-points.
+
+        Parameters
+        ----------
+        N : int
+            Number of vertical levels.
+            If not provided, `N` will remain unchanged (i.e., the existing value will not be overwritten).
+        theta_s : float
+            S-coordinate surface control parameter.
+            If not provided, `theta_s` will remain unchanged (i.e., the existing value will not be overwritten).
+        theta_b : float
+            S-coordinate bottom control parameter.
+            If not provided, `theta_b` will remain unchanged (i.e., the existing value will not be overwritten).
+        hc : float
+            Critical depth (m) used in ROMS vertical coordinate stretching.
+            If not provided, `hc` will remain unchanged (i.e., the existing value will not be overwritten).
+        verbose: bool, optional
+            Indicates whether to print vertical coordinate generation steps with timing. Defaults to False.
+
+        Returns
+        -------
+        None
+            This method modifies the dataset in place by adding vertical coordinate variables.
+        """
+        if verbose:
+            start_time = time.time()
+            print(
+                f"=== Preparing the vertical coordinate system using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
+            )
+
+        N = N or self.N
+        theta_s = theta_s or self.theta_s
+        theta_b = theta_b or self.theta_b
+        hc = hc or self.hc
+
+        ds = self.ds
+        # need to drop vertical coordinates because they could cause conflict if N changed
+        vars_to_drop = [
+            "layer_depth_rho",
+            "layer_depth_u",
+            "layer_depth_v",
+            "interface_depth_rho",
+            "interface_depth_u",
+            "interface_depth_v",
+            "sigma_r",
+            "sigma_w",
+            "Cs_w",
+            "Cs_r",
+        ]
+
+        for var in vars_to_drop:
+            if var in ds.variables:
+                ds = ds.drop_vars(var)
+
+        cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
+        cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
+
+        ds["sigma_r"] = sigma_r.astype(np.float32)
+        ds["sigma_r"].attrs[
+            "long_name"
+        ] = "Fractional vertical stretching coordinate at rho-points"
+        ds["sigma_r"].attrs["units"] = "nondimensional"
+
+        ds["Cs_r"] = cs_r.astype(np.float32)
+        ds["Cs_r"].attrs["long_name"] = "Vertical stretching function at rho-points"
+        ds["Cs_r"].attrs["units"] = "nondimensional"
+
+        ds["sigma_w"] = sigma_w.astype(np.float32)
+        ds["sigma_w"].attrs[
+            "long_name"
+        ] = "Fractional vertical stretching coordinate at w-points"
+        ds["sigma_w"].attrs["units"] = "nondimensional"
+
+        ds["Cs_w"] = cs_w.astype(np.float32)
+        ds["Cs_w"].attrs["long_name"] = "Vertical stretching function at w-points"
+        ds["Cs_w"].attrs["units"] = "nondimensional"
+
+        ds.attrs["theta_s"] = np.float32(theta_s)
+        ds.attrs["theta_b"] = np.float32(theta_b)
+        ds.attrs["hc"] = np.float32(hc)
+
+        if verbose:
+            print(f"Total time: {time.time() - start_time:.3f} seconds")
+            print(
+                "========================================================================================================"
+            )
+
+        object.__setattr__(self, "ds", ds)
+        object.__setattr__(self, "theta_s", theta_s)
+        object.__setattr__(self, "theta_b", theta_b)
+        object.__setattr__(self, "hc", hc)
+        object.__setattr__(self, "N", N)
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.
@@ -261,101 +378,6 @@ class Grid:
             ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
 
         return ds
-
-    def update_vertical_coordinate(
-        self, N, theta_s, theta_b, hc, verbose=False
-    ) -> None:
-        """Create vertical coordinate variables for the ROMS grid.
-
-        This method computes the S-coordinate stretching curves at rho- and
-        w-points.
-        and depths
-        at various grid points (rho, u, v) using the specified parameters.
-        The computed depths and stretching curves are added to the dataset
-        as new coordinates, along with their corresponding attributes.
-
-        Parameters
-        ----------
-        N : int
-            Number of vertical levels.
-        theta_s : float
-            S-coordinate surface control parameter.
-        theta_b : float
-            S-coordinate bottom control parameter.
-        hc : float
-            Critical depth (m) used in ROMS vertical coordinate stretching.
-        verbose: bool, optional
-            Indicates whether to print vertical coordinate generation steps with timing. Defaults to False.
-
-        Returns
-        -------
-        None
-            This method modifies the dataset in place by adding vertical coordinate variables.
-        """
-
-        if verbose:
-            start_time = time.time()
-            print(
-                f"=== Preparing the vertical coordinate system using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
-            )
-
-        ds = self.ds
-        # need to drop vertical coordinates because they could cause conflict if N changed
-        vars_to_drop = [
-            "layer_depth_rho",
-            "layer_depth_u",
-            "layer_depth_v",
-            "interface_depth_rho",
-            "interface_depth_u",
-            "interface_depth_v",
-            "sigma_r",
-            "sigma_w",
-            "Cs_w",
-            "Cs_r",
-        ]
-
-        for var in vars_to_drop:
-            if var in ds.variables:
-                ds = ds.drop_vars(var)
-
-        cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
-        cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
-
-        ds["sigma_r"] = sigma_r.astype(np.float32)
-        ds["sigma_r"].attrs[
-            "long_name"
-        ] = "Fractional vertical stretching coordinate at rho-points"
-        ds["sigma_r"].attrs["units"] = "nondimensional"
-
-        ds["Cs_r"] = cs_r.astype(np.float32)
-        ds["Cs_r"].attrs["long_name"] = "Vertical stretching function at rho-points"
-        ds["Cs_r"].attrs["units"] = "nondimensional"
-
-        ds["sigma_w"] = sigma_w.astype(np.float32)
-        ds["sigma_w"].attrs[
-            "long_name"
-        ] = "Fractional vertical stretching coordinate at w-points"
-        ds["sigma_w"].attrs["units"] = "nondimensional"
-
-        ds["Cs_w"] = cs_w.astype(np.float32)
-        ds["Cs_w"].attrs["long_name"] = "Vertical stretching function at w-points"
-        ds["Cs_w"].attrs["units"] = "nondimensional"
-
-        ds.attrs["theta_s"] = np.float32(theta_s)
-        ds.attrs["theta_b"] = np.float32(theta_b)
-        ds.attrs["hc"] = np.float32(hc)
-
-        if verbose:
-            print(f"Total time: {time.time() - start_time:.3f} seconds")
-            print(
-                "========================================================================================================"
-            )
-
-        object.__setattr__(self, "ds", ds)
-        object.__setattr__(self, "theta_s", theta_s)
-        object.__setattr__(self, "theta_b", theta_b)
-        object.__setattr__(self, "hc", hc)
-        object.__setattr__(self, "N", N)
 
     def plot(self, bathymetry: bool = False) -> None:
         """Plot the grid.

@@ -104,6 +104,6 @@ def compute_depth(zeta, h, hc, cs, sigma):
     z = (hc * sigma + h * cs) / (hc + h)
     z = zeta + (zeta + h) * z
 
-    z = transpose_dimensions(z)
+    z = -transpose_dimensions(z)
 
     return z

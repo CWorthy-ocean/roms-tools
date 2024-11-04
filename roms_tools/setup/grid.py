@@ -99,23 +99,25 @@ class Grid:
 
         self._input_checks()
 
-        if self.verbose:
-            start_time = time.time()
-            print("=== Computing latitude and longitude coordinates ===")
-        ds = self._make_grid_ds()
-        if self.verbose:
-            print(f"Total time: {time.time() - start_time:.3f} seconds")
-            print(
-                "=============================================================================================="
-            )
-        object.__setattr__(self, "ds", ds)
+        # Latitude and longitude coordinates
+        self._compute_lat_lon_coords()
+
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
-        # Update self.ds with topography and mask information
+        # Topography and mask
         self.update_topography_and_mask(
             topography_source=self.topography_source,
             hmin=self.hmin,
+            verbose=self.verbose,
+        )
+
+        # Vertical coordinate system
+        self.update_vertical_coordinate(
+            N=self.N,
+            theta_s=self.theta_s,
+            theta_b=self.theta_b,
+            hc=self.hc,
             verbose=self.verbose,
         )
 
@@ -187,21 +189,6 @@ class Grid:
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)
         object.__setattr__(self, "hmin", hmin)
-
-        # A change in topography will always change the vertical coordinate system
-        if verbose:
-            start_time = time.time()
-            print(
-                f"=== Preparing the vertical coordinate system using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
-            )
-        self.update_vertical_coordinate(
-            N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
-        )
-        if verbose:
-            print(f"Total time: {time.time() - start_time:.3f} seconds")
-            print(
-                "========================================================================================================"
-            )
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.
@@ -275,7 +262,9 @@ class Grid:
 
         return ds
 
-    def update_vertical_coordinate(self, N, theta_s, theta_b, hc) -> None:
+    def update_vertical_coordinate(
+        self, N, theta_s, theta_b, hc, verbose=False
+    ) -> None:
         """Create vertical coordinate variables for the ROMS grid.
 
         This method computes the S-coordinate stretching curves at rho- and
@@ -295,12 +284,20 @@ class Grid:
             S-coordinate bottom control parameter.
         hc : float
             Critical depth (m) used in ROMS vertical coordinate stretching.
+        verbose: bool, optional
+            Indicates whether to print vertical coordinate generation steps with timing. Defaults to False.
 
         Returns
         -------
         None
             This method modifies the dataset in place by adding vertical coordinate variables.
         """
+
+        if verbose:
+            start_time = time.time()
+            print(
+                f"=== Preparing the vertical coordinate system using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
+            )
 
         ds = self.ds
         # need to drop vertical coordinates because they could cause conflict if N changed
@@ -347,6 +344,12 @@ class Grid:
         ds.attrs["theta_s"] = np.float32(theta_s)
         ds.attrs["theta_b"] = np.float32(theta_b)
         ds.attrs["hc"] = np.float32(hc)
+
+        if verbose:
+            print(f"Total time: {time.time() - start_time:.3f} seconds")
+            print(
+                "========================================================================================================"
+            )
 
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "theta_s", theta_s)
@@ -753,7 +756,11 @@ class Grid:
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
-    def _make_grid_ds(self) -> xr.Dataset():
+    def _compute_lat_lon_coords(self) -> xr.Dataset():
+        if self.verbose:
+            start_time = time.time()
+            print("=== Computing latitude and longitude coordinates ===")
+
         self._raise_if_domain_size_too_large()
 
         coords = self._make_initial_lon_lat_ds()
@@ -778,7 +785,13 @@ class Grid:
 
         ds = self._add_global_metadata(ds)
 
-        return ds
+        if self.verbose:
+            print(f"Total time: {time.time() - start_time:.3f} seconds")
+            print(
+                "=============================================================================================="
+            )
+
+        object.__setattr__(self, "ds", ds)
 
     def _add_global_metadata(self, ds):
 

@@ -3,7 +3,6 @@
         ".zattrs": {
             "center_lat": 0,
             "center_lon": -20,
-            "coordinates": "interface_depth_rho layer_depth_rho",
             "hc": 300.0,
             "hmin": 5.0,
             "roms_tools_version": "0.1.dev157+dirty",
@@ -42,7 +41,7 @@
             "_ARRAY_DIMENSIONS": [
                 "s_rho"
             ],
-            "long_name": "S-coordinate stretching curves at rho-points",
+            "long_name": "Vertical stretching function at rho-points",
             "units": "nondimensional"
         },
         "Cs_w/.zarray": {
@@ -69,7 +68,7 @@
             "_ARRAY_DIMENSIONS": [
                 "s_w"
             ],
-            "long_name": "S-coordinate stretching curves at w-points",
+            "long_name": "Vertical stretching function at w-points",
             "units": "nondimensional"
         },
         "angle/.zarray": {
@@ -196,39 +195,6 @@
             "long_name": "Final bathymetry at rho-points",
             "units": "meter"
         },
-        "interface_depth_rho/.zarray": {
-            "chunks": [
-                101,
-                3,
-                3
-            ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<f4",
-            "fill_value": "NaN",
-            "filters": null,
-            "order": "C",
-            "shape": [
-                101,
-                3,
-                3
-            ],
-            "zarr_format": 2
-        },
-        "interface_depth_rho/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "s_w",
-                "eta_rho",
-                "xi_rho"
-            ],
-            "long_name": "Interface depth at rho-points",
-            "units": "m"
-        },
         "lat_coarse/.zarray": {
             "chunks": [
                 2,
@@ -348,39 +314,6 @@
             ],
             "long_name": "latitude of v-points",
             "units": "degrees North"
-        },
-        "layer_depth_rho/.zarray": {
-            "chunks": [
-                100,
-                3,
-                3
-            ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<f4",
-            "fill_value": "NaN",
-            "filters": null,
-            "order": "C",
-            "shape": [
-                100,
-                3,
-                3
-            ],
-            "zarr_format": 2
-        },
-        "layer_depth_rho/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "s_rho",
-                "eta_rho",
-                "xi_rho"
-            ],
-            "long_name": "Layer depth at rho-points",
-            "units": "m"
         },
         "lon_coarse/.zarray": {
             "chunks": [
@@ -687,6 +620,60 @@
             "coordinates": "lat_rho lon_rho",
             "long_name": "Curvilinear coordinate metric in eta-direction",
             "units": "meter-1"
+        },
+        "sigma_r/.zarray": {
+            "chunks": [
+                100
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                100
+            ],
+            "zarr_format": 2
+        },
+        "sigma_r/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "s_rho"
+            ],
+            "long_name": "Fractional vertical stretching coordinate at rho-points",
+            "units": "nondimensional"
+        },
+        "sigma_w/.zarray": {
+            "chunks": [
+                101
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                101
+            ],
+            "zarr_format": 2
+        },
+        "sigma_w/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "s_w"
+            ],
+            "long_name": "Fractional vertical stretching coordinate at w-points",
+            "units": "nondimensional"
         },
         "spherical/.zarray": {
             "chunks": [],

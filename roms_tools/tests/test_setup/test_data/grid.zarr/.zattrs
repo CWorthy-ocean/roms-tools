@@ -1,7 +1,6 @@
 {
     "center_lat": 0,
     "center_lon": -20,
-    "coordinates": "interface_depth_rho layer_depth_rho",
     "hc": 300.0,
     "hmin": 5.0,
     "roms_tools_version": "0.1.dev157+dirty",

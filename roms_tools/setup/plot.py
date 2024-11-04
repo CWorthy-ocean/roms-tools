@@ -135,18 +135,14 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}):
 def _profile_plot(field, title=""):
 
     depths_to_check = [
-        "layer_depth_rho",
-        "layer_depth_u",
-        "layer_depth_v",
-        "interface_depth_rho",
-        "interface_depth_u",
-        "interface_depth_v",
+        "layer_depth",
+        "interface_depth",
     ]
     try:
         depth_label = next(
             depth_label
-            for depth_label in depths_to_check
-            if depth_label in field.coords
+            for depth_label in field.coords
+            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
         )
     except StopIteration:
         raise ValueError(

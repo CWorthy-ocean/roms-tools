@@ -134,10 +134,14 @@ def test_bgc_boundary_forcing_plot_save(
 ):
     """Test plot and save methods."""
 
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_south")
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east")
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_north")
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west")
+    bgc_boundary_forcing_from_climatology.plot(
+        var_name="ALK_south", layer_contours=True
+    )
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east", layer_contours=True)
+    bgc_boundary_forcing_from_climatology.plot(
+        var_name="ALK_north", layer_contours=True
+    )
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west", layer_contours=True)
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture

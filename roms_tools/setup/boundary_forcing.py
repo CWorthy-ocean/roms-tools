@@ -821,6 +821,16 @@ class BoundaryForcing:
 
         if len(field.dims) == 2:
             if layer_contours:
+                if location in ["u", "v"]:
+                    additional_locations = ["u", "v"]
+                else:
+                    additional_locations = []
+                self._get_vertical_coordinates(
+                    type="interface",
+                    direction=direction,
+                    additional_locations=additional_locations,
+                )
+
                 interface_depth = self.grid.ds[
                     f"interface_depth_{location}_{direction}"
                 ]

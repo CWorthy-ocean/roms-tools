@@ -59,6 +59,12 @@ def test_hmin_criterion():
     assert grid.hmin == 10.0
     assert np.less_equal(grid.hmin, grid.ds.h.min())
 
+    # this should not do anything
+    grid.update_topography_and_mask()
+
+    assert grid.hmin == 10.0
+    assert np.less_equal(grid.hmin, grid.ds.h.min())
+
 
 def test_mask_topography_boundary():
     """Test that the mask and topography along the grid boundaries (north, south, east,

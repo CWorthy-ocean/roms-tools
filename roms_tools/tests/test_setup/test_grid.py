@@ -486,6 +486,22 @@ def test_update_vertical_coordinate():
     assert grid.hc == 400.0
     assert len(grid.ds.s_rho) == 3
 
+    grid.update_vertical_coordinate(N=5)
+
+    assert grid.N == 5
+    assert grid.theta_s == 10.0
+    assert grid.theta_b == 1.0
+    assert grid.hc == 400.0
+    assert len(grid.ds.s_rho) == 5
+
+    grid.update_vertical_coordinate()
+
+    assert grid.N == 5
+    assert grid.theta_s == 10.0
+    assert grid.theta_b == 1.0
+    assert grid.hc == 400.0
+    assert len(grid.ds.s_rho) == 5
+
 
 def test_plot():
     grid = Grid(

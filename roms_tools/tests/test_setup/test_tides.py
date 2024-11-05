@@ -168,10 +168,12 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_da
             use_dask=use_dask,
         )
 
+
 def test_tidal_forcing_plot(tidal_forcing):
     """Test plot method."""
 
     tidal_forcing.plot(var_name="ssh_Re", ntides=0)
+
 
 def test_tidal_forcing_save(tidal_forcing, tmp_path):
     """Test save method."""

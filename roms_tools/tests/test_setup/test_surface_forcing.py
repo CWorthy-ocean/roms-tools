@@ -552,6 +552,7 @@ def test_surface_forcing_bgc_plot(bgc_surface_forcing):
 
     bgc_surface_forcing.plot(var_name="pco2_air", time=0)
 
+
 def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
     """Test save method."""
 
@@ -601,7 +602,7 @@ def test_surface_forcing_bgc_from_clim_save(
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-            
+
             # Test saving without partitioning and grouping
             saved_filenames = bgc_surface_forcing_from_climatology.save(filepath)
             filepath_str = str(Path(filepath).with_suffix(""))
@@ -611,7 +612,9 @@ def test_surface_forcing_bgc_from_clim_save(
             expected_filepath.unlink()
 
             # Test saving without partitioning but with grouping
-            saved_filenames = bgc_surface_forcing_from_climatology.save(filepath, group=True)
+            saved_filenames = bgc_surface_forcing_from_climatology.save(
+                filepath, group=True
+            )
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")
             assert saved_filenames == [expected_filepath]

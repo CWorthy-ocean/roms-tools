@@ -518,7 +518,12 @@ class InitialConditions:
         ):
             raise ValueError("For 2D fields, specify either eta or xi, not both.")
 
-        self.ds[var_name].load()
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds[var_name].load()
+
         field = self.ds[var_name].squeeze()
 
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
@@ -681,7 +686,13 @@ class InitialConditions:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        dataset_list = [self.ds.load()]
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds.load()
+
+        dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(

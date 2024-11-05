@@ -462,7 +462,13 @@ class SurfaceForcing:
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        field = self.ds[var_name].isel(time=time).load()
+        field = self.ds[var_name].isel(time=time)
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field = field.load()
+
         title = field.long_name
 
         # assign lat / lon
@@ -549,12 +555,16 @@ class SurfaceForcing:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds.load()
+
         if group:
-            dataset_list, output_filenames = group_dataset(
-                self.ds.load(), str(filepath)
-            )
+            dataset_list, output_filenames = group_dataset(self.ds, str(filepath))
         else:
-            dataset_list = [self.ds.load()]
+            dataset_list = [self.ds]
             output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(

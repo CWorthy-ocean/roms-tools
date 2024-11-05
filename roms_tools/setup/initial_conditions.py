@@ -603,7 +603,12 @@ class InitialConditions:
         ):
             raise ValueError("For 2D fields, specify either eta or xi, not both.")
 
-        self.ds[var_name].load()
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds[var_name].load()
+
         field = self.ds[var_name].squeeze()
         if s is not None:
             layer_contours = False
@@ -790,7 +795,13 @@ class InitialConditions:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        dataset_list = [self.ds.load()]
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds.load()
+
+        dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
@@ -829,14 +840,17 @@ class InitialConditions:
 
         initial_conditions_data = {
             "InitialConditions": {
-                "source": self.source,
                 "ini_time": self.ini_time.isoformat(),
-                "model_reference_date": self.model_reference_date.isoformat(),
+                "source": self.source,
             }
         }
         # Include bgc_source if it's not None
         if self.bgc_source is not None:
             initial_conditions_data["InitialConditions"]["bgc_source"] = self.bgc_source
+
+        initial_conditions_data["InitialConditions"][
+            "model_reference_date"
+        ] = self.model_reference_date.isoformat()
 
         yaml_data = {
             **grid_yaml_data,
@@ -847,7 +861,7 @@ class InitialConditions:
             # Write header
             file.write(header)
             # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
     def from_yaml(

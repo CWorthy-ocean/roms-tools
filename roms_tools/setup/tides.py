@@ -299,7 +299,14 @@ class TidalForcing:
         >>> tidal_forcing.plot("ssh_Re", nc=0)
         """
 
-        field = self.ds[var_name].isel(ntides=ntides).compute()
+        field = self.ds[var_name].isel(ntides=ntides)
+
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field = field.load()
+
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             field = field.where(self.grid.ds.mask_rho)
             field = field.assign_coords(
@@ -377,7 +384,13 @@ class TidalForcing:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        dataset_list = [self.ds.load()]
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds.load()
+
+        dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(
@@ -419,8 +432,8 @@ class TidalForcing:
             "TidalForcing": {
                 "source": self.source,
                 "ntides": self.ntides,
-                "model_reference_date": self.model_reference_date.isoformat(),
                 "allan_factor": self.allan_factor,
+                "model_reference_date": self.model_reference_date.isoformat(),
             }
         }
 
@@ -431,7 +444,7 @@ class TidalForcing:
             # Write header
             file.write(header)
             # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
     def from_yaml(

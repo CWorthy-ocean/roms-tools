@@ -176,10 +176,8 @@ def test_interpolation_from_climatology(
     )
 
 
-def test_initial_conditions_plot_save(
-    initial_conditions_with_bgc_from_climatology, tmp_path
-):
-    """Test plot and save methods."""
+def test_initial_conditions_plot(initial_conditions_with_bgc_from_climatology):
+    """Test plot method."""
 
     initial_conditions_with_bgc_from_climatology.plot(var_name="temp", s=0)
     initial_conditions_with_bgc_from_climatology.plot(
@@ -212,6 +210,12 @@ def test_initial_conditions_plot_save(
     initial_conditions_with_bgc_from_climatology.plot(var_name="vbar")
     initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", s=0, xi=0)
     initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", eta=0, xi=0)
+
+
+def test_initial_conditions_save(
+    initial_conditions_with_bgc_from_climatology, tmp_path
+):
+    """Test save method."""
 
     for file_str in ["test_ic", "test_ic.nc"]:
         # Create a temporary filepath using the tmp_path fixture

@@ -795,7 +795,14 @@ class BoundaryForcing:
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        field = self.ds[var_name].isel(bry_time=time).load()
+        field = self.ds[var_name].isel(bry_time=time)
+
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field = field.load()
+
         title = field.long_name
         var_name_wo_direction, direction = var_name.split("_")
         location = self.variable_info[var_name_wo_direction]["location"]
@@ -851,24 +858,26 @@ class BoundaryForcing:
             _line_plot(field, title=title)
 
     def save(
-        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
+        self,
+        filepath: Union[str, Path],
+        np_eta: int = None,
+        np_xi: int = None,
+        group: bool = False,
     ) -> None:
-        """Save the boundary forcing fields to netCDF4 files.
+        """Save the boundary forcing fields to one or more netCDF4 files.
 
-        This method saves the dataset by grouping it into subsets based on the data frequency. The subsets are then written
-        to one or more netCDF4 files. The filenames of the output files reflect the temporal coverage of the data.
+        This method saves the dataset either as a single file or as multiple files depending on the partitioning and grouping options.
+        The dataset can be saved in two modes:
 
-        There are two modes of saving the dataset:
+        1. **Single File Mode (default)**:
+            - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file.
+            - The file is named based on the `filepath`, with `.nc` automatically appended.
 
-          1. **Single File Mode (default)**:
+        2. **Partitioned Mode**:
+            - If either `np_eta` or `np_xi` is specified, the dataset is partitioned into spatial tiles along the `eta` and `xi` axes.
+            - Each tile is saved as a separate netCDF4 file, and filenames are modified with an index (e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`).
 
-            If both `np_eta` and `np_xi` are `None`, the entire dataset, divided by temporal subsets, is saved as a single netCDF4 file
-            with the base filename specified by `filepath.nc`.
-
-          2. **Partitioned Mode**:
-
-            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-            - Each spatial tile is saved as a separate netCDF4 file.
+        Additionally, if `group` is set to `True`, the dataset is first grouped into temporal subsets, resulting in multiple grouped files before partitioning and saving.
 
         Parameters
         ----------
@@ -880,6 +889,8 @@ class BoundaryForcing:
             The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
         np_xi : int, optional
             The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
+        group: bool, optional
+            If `True`, groups the dataset into multiple files based on temporal data frequency. Defaults to `False`.
 
         Returns
         -------
@@ -894,7 +905,18 @@ class BoundaryForcing:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        dataset_list, output_filenames = group_dataset(self.ds.load(), str(filepath))
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds.load()
+
+        if group:
+            dataset_list, output_filenames = group_dataset(self.ds, str(filepath))
+        else:
+            dataset_list = [self.ds]
+            output_filenames = [str(filepath)]
+
         saved_filenames = save_datasets(
             dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
         )
@@ -949,7 +971,7 @@ class BoundaryForcing:
             # Write header
             file.write(header)
             # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
     def from_yaml(

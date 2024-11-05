@@ -85,8 +85,8 @@ def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
     assert hasattr(boundary_forcing.ds, "climatology")
 
 
-def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
-    """Test plot and save methods."""
+def test_boundary_forcing_plot(boundary_forcing):
+    """Test plot."""
 
     boundary_forcing.plot(var_name="temp_south", layer_contours=True)
     boundary_forcing.plot(var_name="temp_east", layer_contours=True)
@@ -99,15 +99,28 @@ def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
     boundary_forcing.plot(var_name="vbar_north")
     boundary_forcing.plot(var_name="ubar_west")
 
+def test_boundary_forcing_save(boundary_forcing, tmp_path):
+    """Test save method."""
+
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
         for filepath in [
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
-            # Test saving without partitioning
+            
+            # Test saving without partitioning and grouping
             saved_filenames = boundary_forcing.save(filepath)
+
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}.nc")
+
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+            # Test saving without partitioning but with grouping
+            saved_filenames = boundary_forcing.save(filepath, group=True)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_202106.nc")
@@ -116,8 +129,8 @@ def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
             assert expected_filepath.exists()
             expected_filepath.unlink()
 
-            # Test saving with partitioning
-            saved_filenames = boundary_forcing.save(filepath, np_eta=2)
+            # Test saving with partitioning and grouping
+            saved_filenames = boundary_forcing.save(filepath, np_eta=2, group=True)
             expected_filepath_list = [
                 Path(filepath_str + f"_202106.{index}.nc") for index in range(2)
             ]
@@ -128,16 +141,20 @@ def test_boundary_forcing_plot_save(boundary_forcing, tmp_path):
                 assert expected_filepath.exists()
                 expected_filepath.unlink()
 
-
-def test_bgc_boundary_forcing_plot_save(
-    bgc_boundary_forcing_from_climatology, tmp_path
+def test_bgc_boundary_forcing_plot(
+    bgc_boundary_forcing_from_climatology
 ):
-    """Test plot and save methods."""
+    """Test plot method."""
 
     bgc_boundary_forcing_from_climatology.plot(var_name="ALK_south")
     bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east")
     bgc_boundary_forcing_from_climatology.plot(var_name="ALK_north")
     bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west")
+
+def test_bgc_boundary_forcing_save(
+    bgc_boundary_forcing_from_climatology, tmp_path
+):
+    """Test save method."""
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -146,8 +163,17 @@ def test_bgc_boundary_forcing_plot_save(
             str(tmp_path / file_str),
         ]:  # test for Path object and str
 
-            # Test saving without partitioning
+            # Test saving without partitioning and grouping
             saved_filenames = bgc_boundary_forcing_from_climatology.save(filepath)
+
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+            # Test saving without partitioning but with grouping
+            saved_filenames = bgc_boundary_forcing_from_climatology.save(filepath, group=True)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")
@@ -157,7 +183,7 @@ def test_bgc_boundary_forcing_plot_save(
 
             # Test saving with partitioning
             saved_filenames = bgc_boundary_forcing_from_climatology.save(
-                filepath, np_xi=2
+                filepath, np_xi=2, group=True
             )
 
             expected_filepath_list = [
@@ -207,9 +233,9 @@ def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
     filepath2 = tmp_path / "test2.nc"
 
     boundary_forcing.to_yaml(yaml_filepath)
-    boundary_forcing.save(filepath1)
+    boundary_forcing.save(filepath1, group=True)
     bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
-    bdry_forcing_from_file.save(filepath2)
+    bdry_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
     filepath_str2 = str(Path(filepath2).with_suffix(""))
@@ -235,9 +261,9 @@ def test_files_have_same_hash_clim(
     filepath2 = tmp_path / "test2.nc"
 
     bgc_boundary_forcing_from_climatology.to_yaml(yaml_filepath)
-    bgc_boundary_forcing_from_climatology.save(filepath1)
+    bgc_boundary_forcing_from_climatology.save(filepath1, group=True)
     bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
-    bdry_forcing_from_file.save(filepath2)
+    bdry_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
     filepath_str2 = str(Path(filepath2).with_suffix(""))

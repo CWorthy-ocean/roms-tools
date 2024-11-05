@@ -187,12 +187,6 @@ def grid_that_straddles_180_degree_meridian():
 def test_successful_initialization_with_regional_data(grid_fixture, request, use_dask):
     """Test the initialization of SurfaceForcing with regional ERA5 data.
 
-    This test checks the following:
-    1. SurfaceForcing object initializes successfully with provided regional data.
-    2. Attributes such as `start_time`, `end_time`, and `source` are set correctly.
-    3. The dataset contains expected variables, including "uwnd", "vwnd", "swrad", "lwrad", "Tair", "qair", and "rain".
-    4. Surface forcing plots for "uwnd", "vwnd", and "rain" are generated without errors.
-
     The test is performed twice:
     - First with the default fine grid.
     - Then with the coarse grid enabled.
@@ -513,8 +507,8 @@ def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
         "coarse_surface_forcing",
     ],
 )
-def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
-    """Test plot and save methods."""
+def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
+    """Test save method."""
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
     sfc_forcing.plot(var_name="uwnd", time=0)
 
@@ -525,8 +519,16 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
             str(tmp_path / file_str),
         ]:  # test for Path object and str
 
-            # Test saving without partitioning
+            # Test saving without partitioning and grouping
             saved_filenames = sfc_forcing.save(filepath)
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+            # Test saving without partitioning but with grouping
+            saved_filenames = sfc_forcing.save(filepath, group=True)
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_202002.nc")
             assert saved_filenames == [expected_filepath]
@@ -534,7 +536,7 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
             expected_filepath.unlink()
 
             # Test saving with partitioning
-            saved_filenames = sfc_forcing.save(filepath, np_eta=1)
+            saved_filenames = sfc_forcing.save(filepath, np_eta=1, group=True)
 
             expected_filepath_list = [
                 Path(filepath_str + f"_202002.{index}.nc") for index in range(1)
@@ -545,11 +547,13 @@ def test_surface_forcing_plot_save(sfc_forcing_fixture, request, tmp_path):
                 expected_filepath.unlink()
 
 
-def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
-    """Test plot and save methods."""
+def test_surface_forcing_bgc_plot(bgc_surface_forcing):
+    """Test plot method."""
 
-    # Check the values in the dataset
     bgc_surface_forcing.plot(var_name="pco2_air", time=0)
+
+def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
+    """Test save method."""
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -558,8 +562,16 @@ def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
             str(tmp_path / file_str),
         ]:  # test for Path object and str
 
-            # Test saving without partitioning
+            # Test saving without partitioning and grouping
             saved_filenames = bgc_surface_forcing.save(filepath)
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+            # Test saving without partitioning but with grouping
+            saved_filenames = bgc_surface_forcing.save(filepath, group=True)
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_202002.nc")
             assert saved_filenames == [expected_filepath]
@@ -567,7 +579,7 @@ def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
             expected_filepath.unlink()
 
             # Test saving with partitioning
-            saved_filenames = bgc_surface_forcing.save(filepath, np_xi=5)
+            saved_filenames = bgc_surface_forcing.save(filepath, np_xi=5, group=True)
 
             expected_filepath_list = [
                 Path(filepath_str + f"_202002.{index}.nc") for index in range(5)
@@ -578,13 +590,10 @@ def test_surface_forcing_bgc_plot_save(bgc_surface_forcing, tmp_path):
                 expected_filepath.unlink()
 
 
-def test_surface_forcing_bgc_from_clim_plot_save(
+def test_surface_forcing_bgc_from_clim_save(
     bgc_surface_forcing_from_climatology, tmp_path
 ):
-    """Test plot and save methods."""
-
-    # Check the values in the dataset
-    bgc_surface_forcing_from_climatology.plot(var_name="pco2_air", time=0)
+    """Test save method."""
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -592,18 +601,26 @@ def test_surface_forcing_bgc_from_clim_plot_save(
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
-            # Test saving without partitioning
+            
+            # Test saving without partitioning and grouping
             saved_filenames = bgc_surface_forcing_from_climatology.save(filepath)
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+            # Test saving without partitioning but with grouping
+            saved_filenames = bgc_surface_forcing_from_climatology.save(filepath, group=True)
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")
             assert saved_filenames == [expected_filepath]
             assert expected_filepath.exists()
             expected_filepath.unlink()
 
-            # Test saving with partitioning
+            # Test saving with partitioning and grouping
             saved_filenames = bgc_surface_forcing_from_climatology.save(
-                filepath, np_eta=5
+                filepath, np_eta=5, group=True
             )
 
             expected_filepath_list = [
@@ -666,9 +683,9 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
     filepath2 = tmp_path / "test2.nc"
 
     sfc_forcing.to_yaml(yaml_filepath)
-    sfc_forcing.save(filepath1)
+    sfc_forcing.save(filepath1, group=True)
     sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath, use_dask=use_dask)
-    sfc_forcing_from_file.save(filepath2)
+    sfc_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
     filepath_str2 = str(Path(filepath2).with_suffix(""))
@@ -694,9 +711,9 @@ def test_files_have_same_hash_clim(
     filepath2 = tmp_path / "test2.nc"
 
     bgc_surface_forcing_from_climatology.to_yaml(yaml_filepath)
-    bgc_surface_forcing_from_climatology.save(filepath1)
+    bgc_surface_forcing_from_climatology.save(filepath1, group=True)
     sfc_forcing_from_file = SurfaceForcing.from_yaml(yaml_filepath, use_dask=use_dask)
-    sfc_forcing_from_file.save(filepath2)
+    sfc_forcing_from_file.save(filepath2, group=True)
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
     filepath_str2 = str(Path(filepath2).with_suffix(""))

@@ -679,7 +679,7 @@ class Grid:
             # Write header
             file.write(header)
             # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "Grid":

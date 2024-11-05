@@ -72,41 +72,47 @@ Here are these steps illustrated for an example domain:
 Vertical Coordinate System
 ###########################
 
-ROMS uses a terrain-following vertical coordinate system. The vertical coordinate system is important for ``ROMS-Tools`` while creating input fields that have a depth dimension, such as the initial conditions or the boundary forcing. ``ROMS-Tools`` prepares the vertical coordinate system during the grid generation process, when an instance of the :class:`roms_tools.Grid` class is created. The vertical coordinate system parameters are as follows:
+ROMS uses a terrain-following vertical coordinate system. The vertical coordinate system is important for ``ROMS-Tools`` while creating input fields that have a depth dimension, such as the initial conditions or the boundary forcing, and therefore has to mimic the vertical coordinate system that is internally computed by ROMS. The vertical coordinate system parameters are as follows:
 
-- ``N``: Number of vertical layers
-- ``0 < theta_s <= 10``: Surface control parameter
-- ``0 < theta_b <= 4``: Bottom control parameter
-- ``hc``: Critical depth in meters
+- :math: `N`: Number of vertical layers
+- :math: `0 < theta_s <= 10`: Surface control parameter
+- :math: `0 < theta_b <= 4`: Bottom control parameter
+- :math: `h_c`: Critical depth in meters
 
 Following :cite:t:`shchepetkin_correction_2009` (see also Figure 2 in :cite:t:`lemarie_are_2012`), these parameters are used to create the vertical coordinate system as follows:
 
-1. Introduction of a vertical stretched coordinate ``\sigma(k)`` ranging from ``-1 \leq \sigma \leq 0``.
+1. Introduction of a vertical stretched coordinate :math: `\sigma(k)` ranging from :math: `-1 \leq \sigma \leq 0`:
 
-   .. math::
+.. math::
       \sigma(k) =
       \begin{cases}
          \frac{k-N}{N} & \text{at vertical w-points}, & k=0,\ldots,N \\
          \frac{k-N-0.5}{N} & \text{at vertical rho-points}, & k=1,\ldots,N
       \end{cases}
 
-2. Computation of a vertical stretching function through a series of two refinement functions.
+2. Computation of a vertical stretching function through a series of two refinement functions:
 
-   .. math::
+.. math::
       C(\sigma) = \frac{1-\cosh(\theta_s \sigma)}{\cosh(\theta_s)-1}
 
+.. math::
       C(\sigma) = \frac{\exp(\theta_b C(\sigma))-1}{1-\exp(-\theta_b)}
 
-   The first equation corresponds to the surface refinement function, while the second describes the bottom refinement function. ``C(\sigma)`` is a non-dimensional, monotonic function ranging from ``-1 \leq C(\sigma) \leq 0``.
+The first equation corresponds to the surface refinement function, while the second describes the bottom refinement function. ``C(\sigma)`` is a non-dimensional, monotonic function ranging from ``-1 \leq C(\sigma) \leq 0``.
 
 3. Computation of the layer and interface depths:
 
-   .. math::
-      z(x,y,\sigma,t) = \eta(x,y,t) + (\eta(x,y,t) + h(x,y)) \cdot S(x,y,\sigma)
+.. math::
+      z(x,y,\sigma,t) = \zeta(x,y,t) + (\zeta(x,y,t) + h(x,y)) \cdot S(x,y,\sigma),
 
-      S(x,y,\sigma) = \frac{hc \cdot \sigma + h(x,y) \cdot C(\sigma)}{hc + h(x,y)}
+with the nonlinear vertical transformation functional :math: `S(x,y,\sigma)` given by
+.. math::
+      S(x,y,\sigma) = \frac{hc \cdot \sigma + h(x,y) \cdot C(\sigma)}{hc + h(x,y)}.
 
-   Here, ``S(x,y,\sigma)`` is a nonlinear vertical transformation functional, ``\eta(x,y,t)`` is the time-varying sea surface height, and ``h(x,y)`` is the unperturbed water column thickness, given by the topography. ``z = -h(x,y)`` corresponds to the ocean bottom.
+Here, :math: `\zeta(x,y,t)` is the time-varying sea surface height, and :math: `h(x,y)` is the unperturbed water column thickness, given by the topography. :math: `z = -h(x,y)` corresponds to the ocean bottom.
+
+``ROMS-Tools`` executes steps 1 and 2 during the grid generation process, when an instance of the :class:`roms_tools.Grid` class is created. Step 3 is executed when needed, during the creation of the initial conditions and boundary forcing. While exectuing step 3, ``ROMS-Tools`` assumes :math: `\zeta(x,y,t) = 0`, i.e., zero sea surface height.
+
 
 Tidal Forcing
 ##############

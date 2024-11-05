@@ -502,7 +502,11 @@ class SurfaceForcing:
         )
 
     def save(
-            self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None, group : bool = False
+        self,
+        filepath: Union[str, Path],
+        np_eta: int = None,
+        np_xi: int = None,
+        group: bool = False,
     ) -> None:
         """Save the surface forcing fields to one or more netCDF4 files.
 
@@ -512,7 +516,7 @@ class SurfaceForcing:
         1. **Single File Mode (default)**:
             - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file.
             - The file is named based on the `filepath`, with `.nc` automatically appended.
-        
+
         2. **Partitioned Mode**:
             - If either `np_eta` or `np_xi` is specified, the dataset is partitioned into spatial tiles along the `eta` and `xi` axes.
             - Each tile is saved as a separate netCDF4 file, and filenames are modified with an index (e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`).
@@ -544,9 +548,11 @@ class SurfaceForcing:
         # Remove ".nc" suffix if present
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
-        
+
         if group:
-            dataset_list, output_filenames = group_dataset(self.ds.load(), str(filepath))
+            dataset_list, output_filenames = group_dataset(
+                self.ds.load(), str(filepath)
+            )
         else:
             dataset_list = [self.ds.load()]
             output_filenames = [str(filepath)]
@@ -608,7 +614,7 @@ class SurfaceForcing:
             # Write header
             file.write(header)
             # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
     def from_yaml(

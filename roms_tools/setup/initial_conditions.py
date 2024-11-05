@@ -719,14 +719,17 @@ class InitialConditions:
 
         initial_conditions_data = {
             "InitialConditions": {
-                "source": self.source,
                 "ini_time": self.ini_time.isoformat(),
-                "model_reference_date": self.model_reference_date.isoformat(),
+                "source": self.source,
             }
         }
         # Include bgc_source if it's not None
         if self.bgc_source is not None:
             initial_conditions_data["InitialConditions"]["bgc_source"] = self.bgc_source
+
+        initial_conditions_data["InitialConditions"][
+            "model_reference_date"
+        ] = self.model_reference_date.isoformat()
 
         yaml_data = {
             **grid_yaml_data,
@@ -737,7 +740,7 @@ class InitialConditions:
             # Write header
             file.write(header)
             # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
     def from_yaml(

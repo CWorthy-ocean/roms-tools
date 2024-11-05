@@ -419,8 +419,8 @@ class TidalForcing:
             "TidalForcing": {
                 "source": self.source,
                 "ntides": self.ntides,
-                "model_reference_date": self.model_reference_date.isoformat(),
                 "allan_factor": self.allan_factor,
+                "model_reference_date": self.model_reference_date.isoformat(),
             }
         }
 
@@ -431,7 +431,7 @@ class TidalForcing:
             # Write header
             file.write(header)
             # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
     def from_yaml(

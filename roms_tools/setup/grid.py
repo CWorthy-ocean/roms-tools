@@ -30,8 +30,8 @@ class Grid:
 
     The grid generation consists of three steps:
 
-    1.  Computing latitude and longitude coordinates
-    2.  Making the topography and mask
+    1.  Creating the horizontal grid
+    2.  Generating the topography and mask
     3.  Preparing the vertical coordinate system
 
     Parameters
@@ -99,8 +99,8 @@ class Grid:
 
         self._input_checks()
 
-        # Latitude and longitude coordinates
-        self._compute_lat_lon_coords()
+        # Horizontal grid
+        self._create_horizontal_grid()
 
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
@@ -181,7 +181,7 @@ class Grid:
         if verbose:
             start_time = time.time()
             print(
-                f"=== Generating topography and mask using {topography_source['name']} data and hmin = {hmin} meters ==="
+                f"=== Generating the topography and mask using {topography_source['name']} data and hmin = {hmin} meters ==="
             )
 
         # Add topography and mask to the dataset
@@ -238,16 +238,17 @@ class Grid:
         None
             This method modifies the dataset in place by adding vertical coordinate variables.
         """
-        if verbose:
-            start_time = time.time()
-            print(
-                f"=== Preparing the vertical coordinate system using N = {self.N}, theta_s = {self.theta_s}, theta_b = {self.theta_b}, hc = {self.hc} ==="
-            )
 
         N = N or self.N
         theta_s = theta_s or self.theta_s
         theta_b = theta_b or self.theta_b
         hc = hc or self.hc
+
+        if verbose:
+            start_time = time.time()
+            print(
+                f"=== Preparing the vertical coordinate system using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ==="
+            )
 
         ds = self.ds
         # need to drop vertical coordinates because they could cause conflict if N changed
@@ -603,20 +604,10 @@ class Grid:
             theta_s = 5.0
             theta_b = 2.0
             hc = 300.0
-            print(
-                f"=== Computing vertical coordinates using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ==="
-            )
 
-            if verbose:
-                start_time = time.time()
             grid.update_vertical_coordinate(
-                N=N, theta_s=theta_s, theta_b=theta_b, hc=hc
+                N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=verbose
             )
-            if verbose:
-                print(f"Total time: {time.time() - start_time:.3f} seconds")
-                print(
-                    "========================================================================================================"
-                )
         else:
             object.__setattr__(grid, "theta_s", ds.attrs["theta_s"].item())
             object.__setattr__(grid, "theta_b", ds.attrs["theta_b"].item())
@@ -778,10 +769,10 @@ class Grid:
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
-    def _compute_lat_lon_coords(self) -> xr.Dataset():
+    def _create_horizontal_grid(self) -> xr.Dataset():
         if self.verbose:
             start_time = time.time()
-            print("=== Computing latitude and longitude coordinates ===")
+            print("=== Creating the horizontal grid ===")
 
         self._raise_if_domain_size_too_large()
 

@@ -52,14 +52,6 @@ class Grid:
         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
         Positive values represent a counterclockwise rotation.
         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
-    N : int, optional
-        The number of vertical levels. The default is 100.
-    theta_s : float, optional
-        The surface control parameter. Must satisfy 0 < theta_s <= 10. The default is 5.0.
-    theta_b : float, optional
-        The bottom control parameter. Must satisfy 0 < theta_b <= 4. The default is 2.0.
-    hc : float, optional
-        The critical depth (in meters). The default is 300.0.
     topography_source : Dict[str, Union[str, Path]], optional
         Dictionary specifying the source of the topography data:
 
@@ -69,6 +61,14 @@ class Grid:
         The default is "ETOPO5", which does not require a path.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
+    N : int, optional
+        The number of vertical levels. The default is 100.
+    theta_s : float, optional
+        The surface control parameter. Must satisfy 0 < theta_s <= 10. The default is 5.0.
+    theta_b : float, optional
+        The bottom control parameter. Must satisfy 0 < theta_b <= 4. The default is 2.0.
+    hc : float, optional
+        The critical depth (in meters). The default is 300.0.
     verbose: bool, optional
         Indicates whether to print grid generation steps with timing. Defaults to False.
 
@@ -471,7 +471,7 @@ class Grid:
 
             _plot(
                 self.ds,
-                field=layer_depth,
+                field=layer_depth.where(self.ds.mask_rho),
                 straddle=self.straddle,
                 depth_contours=False,
                 title=title,

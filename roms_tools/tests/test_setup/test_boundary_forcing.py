@@ -1,10 +1,12 @@
 import pytest
 from datetime import datetime
-from roms_tools import BoundaryForcing
+import xarray as xr
+from roms_tools import Grid, BoundaryForcing
 import textwrap
 from roms_tools.setup.download import download_test_data
 from conftest import calculate_file_hash
 from pathlib import Path
+import logging
 
 
 @pytest.mark.parametrize(
@@ -83,6 +85,99 @@ def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
     assert len(boundary_forcing.ds.bry_time) == 12
     assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
     assert hasattr(boundary_forcing.ds, "climatology")
+
+
+def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = download_test_data("GLORYS_coarse_test_data.nc")
+
+    with pytest.raises(ValueError, match="consists entirely of NaNs"):
+
+        BoundaryForcing(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            source={"name": "GLORYS", "path": fname},
+            apply_2d_horizontal_fill=False,
+            use_dask=use_dask,
+        )
+
+    fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+
+    with pytest.raises(ValueError, match="consists entirely of NaNs"):
+
+        BoundaryForcing(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+            type="bgc",
+            apply_2d_horizontal_fill=False,
+            use_dask=use_dask,
+        )
+
+
+def test_boundary_divided_by_land_warning(caplog, use_dask):
+
+    # Iceland intersects the western boundary of the following grid
+    grid = Grid(
+        nx=5, ny=5, size_x=500, size_y=500, center_lon=-10, center_lat=65, rot=0
+    )
+
+    fname = download_test_data("GLORYS_coarse_test_data.nc")
+
+    with caplog.at_level(logging.WARNING):
+        BoundaryForcing(
+            grid=grid,
+            start_time=datetime(2021, 6, 29),
+            end_time=datetime(2021, 6, 30),
+            source={"path": fname, "name": "GLORYS", "climatology": False},
+            apply_2d_horizontal_fill=False,
+            use_dask=use_dask,
+        )
+    # Verify the warning message in the log
+    assert "the western boundary is divided by land" in caplog.text
+
+
+def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
+
+    # this grid lies entirely over open ocean
+    grid = Grid(nx=5, ny=5, size_x=300, size_y=300, center_lon=-5, center_lat=65, rot=0)
+
+    fname = download_test_data("GLORYS_coarse_test_data.nc")
+
+    kwargs = {
+        "grid": grid,
+        "start_time": datetime(2021, 6, 29),
+        "end_time": datetime(2021, 6, 29),
+        "source": {"path": fname, "name": "GLORYS", "climatology": False},
+        "use_dask": use_dask,
+    }
+
+    bf_1d_fill = BoundaryForcing(
+        **kwargs,
+        apply_2d_horizontal_fill=False,
+    )
+    bf_2d_fill = BoundaryForcing(
+        **kwargs,
+        apply_2d_horizontal_fill=True,
+    )
+
+    xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
 
 
 def test_boundary_forcing_plot(boundary_forcing):

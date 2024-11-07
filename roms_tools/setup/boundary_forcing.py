@@ -62,7 +62,7 @@ class BoundaryForcing:
     apply_2d_horizontal_fill: bool, optional
         Indicates whether to perform a two-dimensional horizontal fill on the source data prior to regridding to boundaries.
         If `False`, a one-dimensional horizontal fill is performed separately on each of the four regridded boundaries.
-        Defaults to `True`.
+        Defaults to `False`.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
@@ -92,7 +92,7 @@ class BoundaryForcing:
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     model_reference_date: datetime = datetime(2000, 1, 1)
-    apply_2d_horizontal_fill: bool = True
+    apply_2d_horizontal_fill: bool = False
     use_dask: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)

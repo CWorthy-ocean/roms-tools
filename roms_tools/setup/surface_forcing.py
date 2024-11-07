@@ -392,7 +392,8 @@ class SurfaceForcing:
         """
 
         for var_name in ds.data_vars:
-            if variable_info[var_name]["validate"]:
+            # Only validate variables based on "validate" flag if use_dask is False
+            if not self.use_dask or variable_info["var_name"]["validate"]:
                 nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):

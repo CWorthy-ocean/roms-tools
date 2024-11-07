@@ -267,7 +267,8 @@ class TidalForcing:
         The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
         """
         for var_name in ds.data_vars:
-            if variable_info[var_name]["validate"]:
+            # only validate variables based on "validate" flag if use_dask is false
+            if not self.use_dask or variable_info["var_name"]["validate"]:
                 nan_check(ds[var_name].isel(ntides=0), self.grid.ds.mask_rho)
 
     def plot(self, var_name, ntides=0) -> None:

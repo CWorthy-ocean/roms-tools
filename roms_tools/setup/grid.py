@@ -13,7 +13,7 @@ from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plo
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
-import warnings
+import logging
 from pathlib import Path
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -727,9 +727,8 @@ class Grid:
                 roms_tools_version_current = "unknown"
 
             if roms_tools_version_header != roms_tools_version_current:
-                warnings.warn(
+                logging.warning(
                     f"Current roms-tools version ({roms_tools_version_current}) does not match the version in the YAML header ({roms_tools_version_header}).",
-                    UserWarning,
                 )
 
         if grid_data is None:

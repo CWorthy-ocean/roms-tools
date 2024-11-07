@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import yaml
 import importlib.metadata
-import warnings
 from typing import Dict, Union, List
 from dataclasses import dataclass, field, asdict
 from roms_tools.setup.grid import Grid
@@ -507,8 +506,7 @@ class BoundaryForcing:
         return ds
 
     def _validate(self, ds, variable_info, bdry_coords):
-        """Validate the dataset for NaN values at the first time step based on the fill
-        method used.
+        """Validate the dataset for NaN values at the first time step.
 
         Parameters
         ----------
@@ -530,48 +528,41 @@ class BoundaryForcing:
         Notes
         -----
         Validation is performed on the initial boundary time step (`bry_time=0`) for each
-        variable in the dataset. If the `apply_2d_horizontal_fill` attribute is set to False,
-        a warning is issued instead of a strict NaN check, as the data may not be reliably validated.
-        Conversely, if `apply_2d_horizontal_fill` is True, a strict NaN check is performed, raising
-        a ValueError if any NaN values are detected.
+        variable in the dataset.
         """
-        if self.apply_2d_horizontal_fill:
-            # Strict NaN check with ValueError makes sense to be applied
-            for var_name in variable_info:
-                location = variable_info[var_name]["location"]
+        for var_name in variable_info:
+            location = variable_info[var_name]["location"]
 
-                # Select the appropriate mask based on variable location
-                if location == "rho":
-                    mask = self.grid.ds.mask_rho
-                elif location == "u":
-                    mask = self.grid.ds.mask_u
-                elif location == "v":
-                    mask = self.grid.ds.mask_v
-                else:
-                    continue  # Skip if location is not recognized
+            # Select the appropriate mask based on variable location
+            if location == "rho":
+                mask = self.grid.ds.mask_rho
+            elif location == "u":
+                mask = self.grid.ds.mask_u
+            elif location == "v":
+                mask = self.grid.ds.mask_v
+            else:
+                continue  # Skip if location is not recognized
 
-                for direction in ["south", "east", "north", "west"]:
-                    if self.boundaries[direction]:
-                        bdry_var_name = f"{var_name}_{direction}"
-
-                        # Check for NaN values at the first time step using the nan_check function
-                        nan_check(
-                            ds[bdry_var_name].isel(bry_time=0),
-                            mask.isel(**bdry_coords[location][direction]),
-                        )
-        else:
-            # Can't apply strict NaN check because land values haven't been filled before regridding step; instead warn user
             for direction in ["south", "east", "north", "west"]:
                 if self.boundaries[direction]:
-                    for var_name in variable_info:
-                        bdry_var_name = f"{var_name}_{direction}"
-                        if ds[bdry_var_name].isel(bry_time=0).isnull().any().values:
-                            warnings.warn(
-                                f"NaN values detected in regridded variables along the {direction}ern boundary. This may indicate that the entire boundary is on land in the source data, or that the source data does not cover this boundary.",
-                                UserWarning,
-                            )
-                            # Break after the first warning for this direction to avoid duplicates
-                            break
+                    bdry_var_name = f"{var_name}_{direction}"
+
+                    # Check for NaN values at the first time step using the nan_check function
+                    if self.apply_2d_horizontal_fill:
+                        error_message = None
+                    else:
+                        error_message = (
+                            f"{bdry_var_name} consists entirely of NaNs after regridding. "
+                            f"This may be due to the {direction}ern boundary being on land in the "
+                            f"{self.source['name']} data, which could have a coarser resolution than the ROMS domain. "
+                            f"Try setting `apply_2d_horizontal_fill = True` to resolve this issue."
+                        )
+
+                    nan_check(
+                        ds[bdry_var_name].isel(bry_time=0),
+                        mask.isel(**bdry_coords[location][direction]),
+                        error_message=error_message,
+                    )
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.

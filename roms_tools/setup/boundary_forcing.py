@@ -797,6 +797,7 @@ class BoundaryForcing:
                 "boundaries": self.boundaries,
                 "source": self.source,
                 "type": self.type,
+                "apply_2d_horizontal_fill": self.apply_2d_horizontal_fill,
                 "model_reference_date": self.model_reference_date.isoformat(),
             }
         }

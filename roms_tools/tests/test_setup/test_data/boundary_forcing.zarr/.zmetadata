@@ -38,10 +38,7 @@
             "_ARRAY_DIMENSIONS": [
                 "bry_time"
             ],
-            "axis": "T",
             "calendar": "gregorian",
-            "long_name": "Time",
-            "standard_name": "time",
             "units": "seconds since 1970-01-01"
         },
         "bry_time/.zarray": {
@@ -892,7 +889,6 @@
             ],
             "coordinates": "abs_time",
             "long_name": "eastern boundary sea surface height",
-            "standard_name": "sea_surface_height_above_geoid",
             "units": "m"
         },
         "zeta_north/.zarray": {
@@ -924,7 +920,6 @@
             ],
             "coordinates": "abs_time",
             "long_name": "northern boundary sea surface height",
-            "standard_name": "sea_surface_height_above_geoid",
             "units": "m"
         },
         "zeta_south/.zarray": {
@@ -956,7 +951,6 @@
             ],
             "coordinates": "abs_time",
             "long_name": "southern boundary sea surface height",
-            "standard_name": "sea_surface_height_above_geoid",
             "units": "m"
         },
         "zeta_west/.zarray": {
@@ -988,7 +982,6 @@
             ],
             "coordinates": "abs_time",
             "long_name": "western boundary sea surface height",
-            "standard_name": "sea_surface_height_above_geoid",
             "units": "m"
         }
     },

@@ -1,6 +1,8 @@
 import xarray as xr
 import numpy as np
 import pandas as pd
+from scipy.ndimage import label
+import logging
 import yaml
 import importlib.metadata
 from typing import Dict, Union, List
@@ -196,6 +198,13 @@ class BoundaryForcing:
                             ].isel(**bdry_coords[location][direction])
 
                 if not self.apply_2d_horizontal_fill:
+                    self._validate_1d_fill(
+                        processed_fields,
+                        variable_info,
+                        bdry_coords,
+                        direction,
+                        bdry_data.dim_names["depth"],
+                    )
                     processed_fields = apply_1d_horizontal_fill(processed_fields)
 
                 # vertical regridding
@@ -328,38 +337,46 @@ class BoundaryForcing:
                     "is_vector": False,
                     "vector_pair": None,
                     "is_3d": False,
+                    "validate": True,
                 },
-                "temp": default_info,
-                "salt": default_info,
+                "temp": {**default_info, "validate": True},
+                "salt": {**default_info, "validate": False},
                 "u": {
                     "location": "u",
                     "is_vector": True,
                     "vector_pair": "v",
                     "is_3d": True,
+                    "validate": True,
                 },
                 "v": {
                     "location": "v",
                     "is_vector": True,
                     "vector_pair": "u",
                     "is_3d": True,
+                    "validate": True,
                 },
                 "ubar": {
                     "location": "u",
                     "is_vector": True,
                     "vector_pair": "vbar",
                     "is_3d": False,
+                    "validate": False,
                 },
                 "vbar": {
                     "location": "v",
                     "is_vector": True,
                     "vector_pair": "ubar",
                     "is_3d": False,
+                    "validate": False,
                 },
             }
         elif self.type == "bgc":
             variable_info = {}
             for var_name in data.var_names.keys():
-                variable_info[var_name] = default_info
+                if var_name == "ALK":
+                    variable_info[var_name] = {**default_info, "validate": True}
+                else:
+                    variable_info[var_name] = {**default_info, "validate": False}
 
         return variable_info
 
@@ -505,6 +522,54 @@ class BoundaryForcing:
 
         return ds
 
+    def _validate_1d_fill(
+        self, processed_fields, variable_info, bdry_coords, direction, depth_dim
+    ):
+        """Check if any boundary is divided by land and warn if so, suggesting the use
+        of 2D horizontal fill for safer regridding.
+
+        Parameters:
+        -----------
+        da: xr.DataArray
+
+        Returns:
+        --------
+        None : Issues a warning if boundary is divided by land.
+        """
+
+        for var_name in processed_fields.keys():
+            if variable_info[var_name]["validate"]:
+                location = variable_info[var_name]["location"]
+
+                # Select the appropriate mask based on variable location
+                if location == "rho":
+                    mask = self.grid.ds.mask_rho
+                elif location == "u":
+                    mask = self.grid.ds.mask_u
+                elif location == "v":
+                    mask = self.grid.ds.mask_v
+
+                mask = mask.isel(**bdry_coords[location][direction])
+
+                if variable_info[var_name]["is_3d"]:
+                    da = processed_fields[var_name].isel({depth_dim: 0, "time": 0})
+                else:
+                    da = processed_fields[var_name].isel({"time": 0})
+
+                wet_nans = xr.where(da.where(mask).isnull(), 1, 0)
+                # Apply label to find connected components of wet NaNs
+                labeled_array, num_features = label(wet_nans)
+                left_margin = labeled_array[0]
+                right_margin = labeled_array[-1]
+                if left_margin != 0:
+                    num_features = num_features - 1
+                if right_margin != 0:
+                    num_features = num_features - 1
+                if num_features > 0:
+                    logging.warning(
+                        f"For {var_name}, the {direction}ern boundary is divided by land. It would be safer (but slower) to use `apply_2d_horizontal_fill = True`."
+                    )
+
     def _validate(self, ds, variable_info, bdry_coords):
         """Validate the dataset for NaN values at the first time step.
 
@@ -531,38 +596,37 @@ class BoundaryForcing:
         variable in the dataset.
         """
         for var_name in variable_info:
-            location = variable_info[var_name]["location"]
+            if variable_info[var_name]["validate"]:
+                location = variable_info[var_name]["location"]
 
-            # Select the appropriate mask based on variable location
-            if location == "rho":
-                mask = self.grid.ds.mask_rho
-            elif location == "u":
-                mask = self.grid.ds.mask_u
-            elif location == "v":
-                mask = self.grid.ds.mask_v
-            else:
-                continue  # Skip if location is not recognized
+                # Select the appropriate mask based on variable location
+                if location == "rho":
+                    mask = self.grid.ds.mask_rho
+                elif location == "u":
+                    mask = self.grid.ds.mask_u
+                elif location == "v":
+                    mask = self.grid.ds.mask_v
 
-            for direction in ["south", "east", "north", "west"]:
-                if self.boundaries[direction]:
-                    bdry_var_name = f"{var_name}_{direction}"
+                for direction in ["south", "east", "north", "west"]:
+                    if self.boundaries[direction]:
+                        bdry_var_name = f"{var_name}_{direction}"
 
-                    # Check for NaN values at the first time step using the nan_check function
-                    if self.apply_2d_horizontal_fill:
-                        error_message = None
-                    else:
-                        error_message = (
-                            f"{bdry_var_name} consists entirely of NaNs after regridding. "
-                            f"This may be due to the {direction}ern boundary being on land in the "
-                            f"{self.source['name']} data, which could have a coarser resolution than the ROMS domain. "
-                            f"Try setting `apply_2d_horizontal_fill = True` to resolve this issue."
+                        # Check for NaN values at the first time step using the nan_check function
+                        if self.apply_2d_horizontal_fill:
+                            error_message = None
+                        else:
+                            error_message = (
+                                f"{bdry_var_name} consists entirely of NaNs after regridding. "
+                                f"This may be due to the {direction}ern boundary being on land in the "
+                                f"{self.source['name']} data, which could have a coarser resolution than the ROMS domain. "
+                                f"Try setting `apply_2d_horizontal_fill = True` to resolve this issue."
+                            )
+
+                        nan_check(
+                            ds[bdry_var_name].isel(bry_time=0),
+                            mask.isel(**bdry_coords[location][direction]),
+                            error_message=error_message,
                         )
-
-                    nan_check(
-                        ds[bdry_var_name].isel(bry_time=0),
-                        mask.isel(**bdry_coords[location][direction]),
-                        error_message=error_message,
-                    )
 
     def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.
@@ -945,6 +1009,7 @@ def apply_1d_horizontal_fill(processed_fields: dict) -> dict:
             raise ValueError(
                 f"No valid horizontal dimension found for variable '{var_name}'."
             )
+
         # Forward and backward fill in the horizontal direction
         filled = one_dim_fill(
             processed_fields[var_name], selected_horizontal_dim, direction="forward"

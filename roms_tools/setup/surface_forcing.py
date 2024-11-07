@@ -133,7 +133,7 @@ class SurfaceForcing:
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
 
-        self._validate(ds, target_coords["mask"])
+        self._validate(ds, target_coords["mask"], variable_info)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -226,28 +226,34 @@ class SurfaceForcing:
         # Define a dictionary for variable names and their associated information
         if self.type == "physics":
             variable_info = {
-                "swrad": default_info,
-                "lwrad": default_info,
-                "Tair": default_info,
-                "qair": default_info,
-                "rain": default_info,
+                "swrad": {**default_info, "validate": True},
+                "lwrad": {**default_info, "validate": False},
+                "Tair": {**default_info, "validate": False},
+                "qair": {**default_info, "validate": True},
+                "rain": {**default_info, "validate": False},
                 "uwnd": {
                     "location": "u",
                     "is_vector": True,
                     "vector_pair": "vwnd",
                     "is_3d": False,
+                    "validate": True,
                 },
                 "vwnd": {
                     "location": "v",
                     "is_vector": True,
                     "vector_pair": "uwnd",
                     "is_3d": False,
+                    "validate": True,
                 },
             }
         elif self.type == "bgc":
             variable_info = {}
-            for var in data.var_names.keys():
-                variable_info[var] = default_info
+            for var_name in data.var_names.keys():
+                variable_info[var_name] = default_info
+                if var_name == "pco2_air":
+                    variable_info[var_name] = {**default_info, "validate": True}
+                else:
+                    variable_info[var_name] = {**default_info, "validate": False}
 
         return variable_info
 
@@ -359,7 +365,7 @@ class SurfaceForcing:
 
         return ds
 
-    def _validate(self, ds, mask):
+    def _validate(self, ds, mask, variable_info):
         """Validates the dataset by checking for NaN values at wet points, which would
         indicate missing raw data coverage over the target domain.
 
@@ -369,6 +375,10 @@ class SurfaceForcing:
             The dataset to validate.
         mask : xarray.DataArray
             Land mask (1=ocean, 0=land) to determine wet points in the domain.
+        variable_info : dict
+            A dictionary containing metadata about each variable (e.g., location,
+            whether it's a 3D variable, etc.). Used to retrieve information for
+            validating each variable.
 
         Raises
         ------
@@ -382,7 +392,8 @@ class SurfaceForcing:
         """
 
         for var_name in ds.data_vars:
-            nan_check(ds[var_name].isel(time=0), mask)
+            if variable_info[var_name]["validate"]:
+                nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):
 

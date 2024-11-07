@@ -525,16 +525,35 @@ class BoundaryForcing:
     def _validate_1d_fill(
         self, processed_fields, variable_info, bdry_coords, direction, depth_dim
     ):
-        """Check if any boundary is divided by land and warn if so, suggesting the use
-        of 2D horizontal fill for safer regridding.
+        """Check if any boundary is divided by land and issue a warning if so,
+        suggesting the use of 2D horizontal fill for safer regridding.
 
-        Parameters:
-        -----------
-        da: xr.DataArray
+        Parameters
+        ----------
+        processed_fields : dict
+            A dictionary where keys are variable names and values are `xarray.DataArray`
+            objects representing the processed data for each variable.
 
-        Returns:
-        --------
-        None : Issues a warning if boundary is divided by land.
+        variable_info : dict
+            A dictionary containing metadata about each variable (e.g., location,
+            whether it's a 3D variable, etc.). Used to retrieve information for
+            validating each variable.
+
+        bdry_coords : dict
+            A dictionary containing boundary coordinates for different directions (north, south,
+            east, west), used to slice the boundary-specific data for each variable.
+
+        direction : str
+            The boundary direction being processed (e.g., "north", "south", "east", or "west").
+
+        depth_dim : str
+            The dimension representing depth (e.g., 'z', 'depth', etc.), used when slicing 3D
+            data for a specific depth level.
+
+        Returns
+        -------
+        None
+            If a boundary is divided by land, a warning is issued. No return value is provided.
         """
 
         for var_name in processed_fields.keys():
@@ -571,7 +590,9 @@ class BoundaryForcing:
                     )
 
     def _validate(self, ds, variable_info, bdry_coords):
-        """Validate the dataset for NaN values at the first time step.
+        """Validate the dataset for NaN values at the first time step (bry_time=0) for
+        specified variables. If NaN values are found at wet points, this function raises
+        an error.
 
         Parameters
         ----------

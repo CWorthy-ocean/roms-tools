@@ -573,12 +573,7 @@ class BoundaryForcing:
                             # Break after the first warning for this direction to avoid duplicates
                             break
 
-    def plot(
-        self,
-        var_name,
-        time=0,
-        layer_contours=False,
-    ) -> None:
+    def plot(self, var_name, time=0, layer_contours=False, ax=None) -> None:
         """Plot the boundary forcing field for a given time-slice.
 
         Parameters
@@ -634,6 +629,8 @@ class BoundaryForcing:
             If True, contour lines representing the boundaries between vertical layers will
             be added to the plot. For clarity, the number of layer
             contours displayed is limited to a maximum of 10. Default is False.
+        ax : matplotlib.axes.Axes, optional
+            The axes to plot on. If None, a new figure is created.
 
         Returns
         -------
@@ -700,10 +697,14 @@ class BoundaryForcing:
                 interface_depth = None
 
             _section_plot(
-                field, interface_depth=interface_depth, title=title, kwargs=kwargs
+                field,
+                interface_depth=interface_depth,
+                title=title,
+                kwargs=kwargs,
+                ax=ax,
             )
         else:
-            _line_plot(field, title=title)
+            _line_plot(field, title=title, ax=ax)
 
     def save(
         self,

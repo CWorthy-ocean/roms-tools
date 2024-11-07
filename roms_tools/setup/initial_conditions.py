@@ -425,6 +425,7 @@ class InitialConditions:
         xi=None,
         depth_contours=False,
         layer_contours=False,
+        ax=None,
     ) -> None:
         """Plot the initial conditions field for a given eta-, xi-, or s_rho- slice.
 
@@ -492,6 +493,8 @@ class InitialConditions:
             be added to the plot. This is particularly useful in vertical sections to
             visualize the layering of the water column. For clarity, the number of layer
             contours displayed is limited to a maximum of 10. Default is False.
+        ax : matplotlib.axes.Axes, optional
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
 
         Returns
         -------
@@ -639,13 +642,17 @@ class InitialConditions:
 
             if len(field.dims) == 2:
                 _section_plot(
-                    field, interface_depth=interface_depth, title=title, kwargs=kwargs
+                    field,
+                    interface_depth=interface_depth,
+                    title=title,
+                    kwargs=kwargs,
+                    ax=ax,
                 )
             else:
                 if "s_rho" in field.dims:
-                    _profile_plot(field, title=title)
+                    _profile_plot(field, title=title, ax=ax)
                 else:
-                    _line_plot(field, title=title)
+                    _line_plot(field, title=title, ax=ax)
 
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None

@@ -91,14 +91,13 @@ class InitialConditions:
         self._input_checks()
 
         processed_fields = {}
-        processed_fields = self._process_data(processed_fields, type="physics")
+        processed_fields, variable_info = self._process_data(
+            processed_fields, type="physics"
+        )
 
         if self.bgc_source is not None:
-            processed_fields = self._process_data(processed_fields, type="bgc")
-
-        for var_name in processed_fields.keys():
-            processed_fields[var_name] = transpose_dimensions(
-                processed_fields[var_name]
+            processed_fields, bgc_variable_info = self._process_data(
+                processed_fields, type="bgc"
             )
 
         d_meta = get_variable_metadata()
@@ -106,7 +105,9 @@ class InitialConditions:
 
         ds = self._add_global_metadata(ds)
 
-        self._validate(ds)
+        if self.bgc_source is not None:
+            variable_info = {**variable_info, **bgc_variable_info}
+        self._validate(ds, variable_info)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -184,7 +185,12 @@ class InitialConditions:
                     {"time": processed_fields["temp"]["time"]}
                 )
 
-        return processed_fields
+        for var_name in processed_fields.keys():
+            processed_fields[var_name] = transpose_dimensions(
+                processed_fields[var_name]
+            )
+
+        return processed_fields, variable_info
 
     def _input_checks(self):
 
@@ -259,11 +265,21 @@ class InitialConditions:
         - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
         - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
 
+        Parameters
+        ----------
+        data : object
+            The data object which contains variable names for the "bgc" type variables.
+
+        type : str, optional, default="physics"
+            The type of variable metadata to return. Can be one of:
+            - "physics": for physical variables such as temperature, salinity, and velocity components.
+            - "bgc": for biogeochemical variables (like ALK).
+
         Returns
         -------
         dict
             A dictionary where the keys are variable names and the values are dictionaries of metadata
-            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+            about each variable, including 'location', 'is_vector', 'vector_pair', 'is_3d', and 'validate'.
         """
         default_info = {
             "location": "rho",
@@ -272,7 +288,6 @@ class InitialConditions:
             "is_3d": True,
         }
 
-        # Define a dictionary for variable names and their associated information
         if type == "physics":
             variable_info = {
                 "zeta": {
@@ -280,38 +295,54 @@ class InitialConditions:
                     "is_vector": False,
                     "vector_pair": None,
                     "is_3d": False,
+                    "validate": True,
                 },
-                "temp": default_info,
-                "salt": default_info,
+                "temp": {**default_info, "validate": False},
+                "salt": {**default_info, "validate": False},
                 "u": {
                     "location": "u",
                     "is_vector": True,
                     "vector_pair": "v",
                     "is_3d": True,
+                    "validate": False,
                 },
                 "v": {
                     "location": "v",
                     "is_vector": True,
                     "vector_pair": "u",
                     "is_3d": True,
+                    "validate": False,
                 },
                 "ubar": {
                     "location": "u",
                     "is_vector": True,
                     "vector_pair": "vbar",
                     "is_3d": False,
+                    "validate": False,
                 },
                 "vbar": {
                     "location": "v",
                     "is_vector": True,
                     "vector_pair": "ubar",
                     "is_3d": False,
+                    "validate": False,
+                },
+                "w": {
+                    "location": "rho",
+                    "is_vector": False,
+                    "vector_pair": None,
+                    "is_3d": True,
+                    "validate": False,
                 },
             }
-        elif type == "bgc":
+
+        if type == "bgc":
             variable_info = {}
             for var_name in data.var_names.keys():
-                variable_info[var_name] = default_info
+                if var_name == "ALK":
+                    variable_info[var_name] = {**default_info, "validate": True}
+                else:
+                    variable_info[var_name] = {**default_info, "validate": False}
 
         return variable_info
 
@@ -373,7 +404,7 @@ class InitialConditions:
 
         return ds
 
-    def _validate(self, ds):
+    def _validate(self, ds, variable_info):
         """Validates the dataset by checking for NaN values in SSH at wet points, which
         would indicate missing raw data coverage over the target domain.
 
@@ -381,6 +412,8 @@ class InitialConditions:
         ----------
         ds : xarray.Dataset
             The dataset to validate.
+        variable_info : dict
+            A dictionary containing metadata about the variables, including whether to validate them.
 
         Raises
         ------
@@ -393,8 +426,11 @@ class InitialConditions:
         This check is only applied to the 2D variable SSH to improve performance.
         """
 
-        ds["zeta"].load()
-        nan_check(ds["zeta"].squeeze(), self.grid.ds.mask_rho)
+        for var_name in variable_info:
+            # Only validate variables based on "validate" flag if use_dask is False
+            if not self.use_dask or variable_info[var_name]["validate"]:
+                ds[var_name].load()
+                nan_check(ds[var_name].squeeze(), self.grid.ds.mask_rho)
 
     def _add_global_metadata(self, ds):
 
@@ -425,6 +461,7 @@ class InitialConditions:
         xi=None,
         depth_contours=False,
         layer_contours=False,
+        ax=None,
     ) -> None:
         """Plot the initial conditions field for a given eta-, xi-, or s_rho- slice.
 
@@ -492,6 +529,8 @@ class InitialConditions:
             be added to the plot. This is particularly useful in vertical sections to
             visualize the layering of the water column. For clarity, the number of layer
             contours displayed is limited to a maximum of 10. Default is False.
+        ax : matplotlib.axes.Axes, optional
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
 
         Returns
         -------
@@ -639,13 +678,17 @@ class InitialConditions:
 
             if len(field.dims) == 2:
                 _section_plot(
-                    field, interface_depth=interface_depth, title=title, kwargs=kwargs
+                    field,
+                    interface_depth=interface_depth,
+                    title=title,
+                    kwargs=kwargs,
+                    ax=ax,
                 )
             else:
                 if "s_rho" in field.dims:
-                    _profile_plot(field, title=title)
+                    _profile_plot(field, title=title, ax=ax)
                 else:
-                    _line_plot(field, title=title)
+                    _line_plot(field, title=title, ax=ax)
 
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None

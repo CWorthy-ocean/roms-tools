@@ -129,7 +129,7 @@ class TidalForcing:
 
         ds = self._add_global_metadata(ds)
 
-        self._validate(ds)
+        self._validate(ds, variable_info)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -176,33 +176,37 @@ class TidalForcing:
 
         # Define a dictionary for variable names and their associated information
         variable_info = {
-            "ssh_Re": default_info,
-            "ssh_Im": default_info,
-            "pot_Re": default_info,
-            "pot_Im": default_info,
+            "ssh_Re": {**default_info, "validate": True},
+            "ssh_Im": {**default_info, "validate": False},
+            "pot_Re": {**default_info, "validate": False},
+            "pot_Im": {**default_info, "validate": False},
             "u_Re": {
                 "location": "u",
                 "is_vector": True,
                 "vector_pair": "v_Re",
                 "is_3d": False,
+                "validate": True,
             },
             "v_Re": {
                 "location": "v",
                 "is_vector": True,
                 "vector_pair": "u_Re",
                 "is_3d": False,
+                "validate": True,
             },
             "u_Im": {
                 "location": "u",
                 "is_vector": True,
                 "vector_pair": "v_Im",
                 "is_3d": False,
+                "validate": False,
             },
             "v_Im": {
                 "location": "v",
                 "is_vector": True,
                 "vector_pair": "u_Im",
                 "is_3d": False,
+                "validate": False,
             },
         }
 
@@ -239,14 +243,17 @@ class TidalForcing:
 
         return ds
 
-    def _validate(self, ds):
-        """Validates the dataset by checking for NaN values at wet points, which would
-        indicate missing raw data coverage over the target domain.
+    def _validate(self, ds, variable_info):
+        """Validates the dataset by checking for NaN values at wet points for specified
+        variables, which would indicate missing raw data coverage over the target
+        domain.
 
         Parameters
         ----------
         ds : xarray.Dataset
             The dataset to validate, containing tidal variables and a mask for wet points.
+        variable_info : dict
+            A dictionary containing metadata about the variables, including whether to validate them.
 
         Raises
         ------
@@ -260,7 +267,9 @@ class TidalForcing:
         The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
         """
         for var_name in ds.data_vars:
-            nan_check(ds[var_name].isel(ntides=0), self.grid.ds.mask_rho)
+            # only validate variables based on "validate" flag if use_dask is false
+            if not self.use_dask or variable_info[var_name]["validate"]:
+                nan_check(ds[var_name].isel(ntides=0), self.grid.ds.mask_rho)
 
     def plot(self, var_name, ntides=0) -> None:
         """Plot the specified tidal forcing variable for a given tidal constituent.

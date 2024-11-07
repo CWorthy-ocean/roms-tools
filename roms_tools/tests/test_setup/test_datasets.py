@@ -1,4 +1,5 @@
 import pytest
+import logging
 from datetime import datetime
 import numpy as np
 import xarray as xr
@@ -229,12 +230,12 @@ def test_multiple_matching_times(
     assert dataset.ds["time"].values == np.datetime64(datetime(2022, 2, 1, 0, 0))
 
 
-def test_warnings_times(global_dataset, tmp_path, use_dask):
+def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
     """Test handling when no matching times are found."""
     # Create a temporary file
     filepath = tmp_path / "test.nc"
     global_dataset.to_netcdf(filepath)
-    with pytest.warns(Warning, match="No records found at or before the start_time."):
+    with caplog.at_level(logging.WARNING):
         start_time = datetime(2021, 1, 1)
         end_time = datetime(2021, 2, 1)
 
@@ -245,8 +246,10 @@ def test_warnings_times(global_dataset, tmp_path, use_dask):
             end_time=end_time,
             use_dask=use_dask,
         )
+    # Verify the warning message in the log
+    assert "No records found at or before the start_time." in caplog.text
 
-    with pytest.warns(Warning, match="No records found at or after the end_time."):
+    with caplog.at_level(logging.WARNING):
         start_time = datetime(2024, 1, 1)
         end_time = datetime(2024, 2, 1)
 
@@ -257,6 +260,8 @@ def test_warnings_times(global_dataset, tmp_path, use_dask):
             end_time=end_time,
             use_dask=use_dask,
         )
+    # Verify the warning message in the log
+    assert "No records found at or after the end_time." in caplog.text
 
 
 def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):

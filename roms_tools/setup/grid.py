@@ -13,7 +13,7 @@ from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plo
 from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
-import warnings
+import logging
 from pathlib import Path
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -350,11 +350,7 @@ class Grid:
             _plot(self.ds, straddle=self.straddle)
 
     def plot_vertical_coordinate(
-        self,
-        varname="layer_depth_rho",
-        s=None,
-        eta=None,
-        xi=None,
+        self, varname="layer_depth_rho", s=None, eta=None, xi=None, ax=None
     ) -> None:
         """Plot the vertical coordinate system for a given eta-, xi-, or s-slice.
 
@@ -376,6 +372,8 @@ class Grid:
             The eta-index to plot. Default is None.
         xi : int, optional
             The xi-index to plot. Default is None.
+        ax : matplotlib.axes.Axes, optional
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
 
         Returns
         -------
@@ -477,12 +475,13 @@ class Grid:
                     interface_depth=interface_depth,
                     title=title,
                     kwargs=kwargs,
+                    ax=ax,
                 )
             else:
                 if "s_rho" in field.dims or "s_w" in field.dims:
-                    _profile_plot(field, title=title)
+                    _profile_plot(field, title=title, ax=ax)
                 else:
-                    _line_plot(field, title=title)
+                    _line_plot(field, title=title, ax=ax)
 
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
@@ -728,9 +727,8 @@ class Grid:
                 roms_tools_version_current = "unknown"
 
             if roms_tools_version_header != roms_tools_version_current:
-                warnings.warn(
+                logging.warning(
                     f"Current roms-tools version ({roms_tools_version_current}) does not match the version in the YAML header ({roms_tools_version_header}).",
-                    UserWarning,
                 )
 
         if grid_data is None:

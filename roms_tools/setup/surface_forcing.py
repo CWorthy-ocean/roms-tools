@@ -133,14 +133,7 @@ class SurfaceForcing:
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
 
-        if self.use_coarse_grid:
-            mask = self.grid.ds["mask_coarse"].rename(
-                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
-            )
-        else:
-            mask = self.grid.ds["mask_rho"]
-
-        self._validate(ds, mask)
+        self._validate(ds, target_coords["mask"])
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -299,9 +292,6 @@ class SurfaceForcing:
             ds[var_name] = processed_fields[var_name].astype(np.float32)
             ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
             ds[var_name].attrs["units"] = d_meta[var_name]["units"]
-
-        if self.use_coarse_grid:
-            ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
         ds = self._add_global_metadata(ds)
 
@@ -471,12 +461,7 @@ class SurfaceForcing:
 
         title = field.long_name
 
-        # assign lat / lon
-        if self.use_coarse_grid:
-            field = field.rename({"eta_rho": "eta_coarse", "xi_rho": "xi_coarse"})
-            field = field.where(self.grid.ds.mask_coarse)
-        else:
-            field = field.where(self.grid.ds.mask_rho)
+        field = field.where(self.target_coords["mask"])
 
         field = field.assign_coords(
             {"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]}

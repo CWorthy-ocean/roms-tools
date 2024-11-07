@@ -724,23 +724,31 @@ def get_target_coords(grid, use_coarse_grid=False):
     Returns
     -------
     dict
-        Dictionary containing the longitude, latitude, and angle arrays, along with a boolean indicating
+        Dictionary containing the longitude, latitude, angle and mask arrays, along with a boolean indicating
         if the grid straddles the meridian.
     """
     # Select grid variables based on whether the coarse grid is used
     if use_coarse_grid:
-        lat, lon, angle = (
-            grid.ds.lat_coarse,
-            grid.ds.lon_coarse,
-            grid.ds.angle_coarse,
+        lat, lon, angle, mask = (
+            grid.ds.lat_coarse.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}),
+            grid.ds.lon_coarse.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}),
+            grid.ds.angle_coarse.rename(
+                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+            ),
+            grid.ds.mask_coarse.rename(
+                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+            ),
         )
+
         lat_psi = grid.ds.get("lat_psi_coarse")
         lon_psi = grid.ds.get("lon_psi_coarse")
+
     else:
-        lat, lon, angle = (
+        lat, lon, angle, mask = (
             grid.ds.lat_rho,
             grid.ds.lon_rho,
             grid.ds.angle,
+            grid.ds.mask_rho,
         )
         lat_psi = grid.ds.get("lat_psi")
         lon_psi = grid.ds.get("lon_psi")
@@ -763,6 +771,7 @@ def get_target_coords(grid, use_coarse_grid=False):
         "lat_psi": lat_psi,
         "lon_psi": lon_psi,
         "angle": angle,
+        "mask": mask,
         "straddle": straddle,
     }
 

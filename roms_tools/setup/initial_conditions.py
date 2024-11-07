@@ -428,7 +428,7 @@ class InitialConditions:
 
         for var_name in variable_info:
             # Only validate variables based on "validate" flag if use_dask is False
-            if not self.use_dask or variable_info["var_name"]["validate"]:
+            if not self.use_dask or variable_info[var_name]["validate"]:
                 ds[var_name].load()
                 nan_check(ds[var_name].squeeze(), self.grid.ds.mask_rho)
 

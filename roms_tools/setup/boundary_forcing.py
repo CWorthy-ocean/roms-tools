@@ -558,7 +558,7 @@ class BoundaryForcing:
 
         for var_name in processed_fields.keys():
             # Only validate variables based on "validate" flag if use_dask is False
-            if not self.use_dask or variable_info["var_name"]["validate"]:
+            if not self.use_dask or variable_info[var_name]["validate"]:
                 location = variable_info[var_name]["location"]
 
                 # Select the appropriate mask based on variable location
@@ -619,7 +619,7 @@ class BoundaryForcing:
         """
         for var_name in variable_info:
             # only validate variables based on "validate" flag if use_dask is false
-            if not self.use_dask or variable_info["var_name"]["validate"]:
+            if not self.use_dask or variable_info[var_name]["validate"]:
                 location = variable_info[var_name]["location"]
 
                 # Select the appropriate mask based on variable location

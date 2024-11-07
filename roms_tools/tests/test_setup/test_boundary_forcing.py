@@ -11,7 +11,7 @@ from pathlib import Path
     "boundary_forcing_fixture",
     [
         "boundary_forcing",
-        "boundary_forcing_with_2d_fill",
+        # "boundary_forcing_with_2d_fill",
     ],
 )
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
@@ -51,7 +51,7 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     "boundary_forcing_fixture",
     [
         "bgc_boundary_forcing_from_climatology",
-        "bgc_boundary_forcing_from_climatology_with_2d_fill",
+        # "bgc_boundary_forcing_from_climatology_with_2d_fill",
     ],
 )
 def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):

@@ -133,14 +133,7 @@ class SurfaceForcing:
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
 
-        if self.use_coarse_grid:
-            mask = self.grid.ds["mask_coarse"].rename(
-                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
-            )
-        else:
-            mask = self.grid.ds["mask_rho"]
-
-        self._validate(ds, mask)
+        self._validate(ds, target_coords["mask"], variable_info)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -232,28 +225,34 @@ class SurfaceForcing:
         # Define a dictionary for variable names and their associated information
         if self.type == "physics":
             variable_info = {
-                "swrad": default_info,
-                "lwrad": default_info,
-                "Tair": default_info,
-                "qair": default_info,
-                "rain": default_info,
+                "swrad": {**default_info, "validate": True},
+                "lwrad": {**default_info, "validate": False},
+                "Tair": {**default_info, "validate": False},
+                "qair": {**default_info, "validate": True},
+                "rain": {**default_info, "validate": False},
                 "uwnd": {
                     "location": "u",
                     "is_vector": True,
                     "vector_pair": "vwnd",
                     "is_3d": False,
+                    "validate": True,
                 },
                 "vwnd": {
                     "location": "v",
                     "is_vector": True,
                     "vector_pair": "uwnd",
                     "is_3d": False,
+                    "validate": True,
                 },
             }
         elif self.type == "bgc":
             variable_info = {}
-            for var in data.var_names.keys():
-                variable_info[var] = default_info
+            for var_name in data.var_names.keys():
+                variable_info[var_name] = default_info
+                if var_name == "pco2_air":
+                    variable_info[var_name] = {**default_info, "validate": True}
+                else:
+                    variable_info[var_name] = {**default_info, "validate": False}
 
         object.__setattr__(self, "variable_info", variable_info)
 
@@ -298,9 +297,6 @@ class SurfaceForcing:
             ds[var_name] = processed_fields[var_name].astype(np.float32)
             ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
             ds[var_name].attrs["units"] = d_meta[var_name]["units"]
-
-        if self.use_coarse_grid:
-            ds = ds.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
         ds = self._add_global_metadata(ds)
 
@@ -368,7 +364,7 @@ class SurfaceForcing:
 
         return ds
 
-    def _validate(self, ds, mask):
+    def _validate(self, ds, mask, variable_info):
         """Validates the dataset by checking for NaN values at wet points, which would
         indicate missing raw data coverage over the target domain.
 
@@ -378,6 +374,10 @@ class SurfaceForcing:
             The dataset to validate.
         mask : xarray.DataArray
             Land mask (1=ocean, 0=land) to determine wet points in the domain.
+        variable_info : dict
+            A dictionary containing metadata about each variable (e.g., location,
+            whether it's a 3D variable, etc.). Used to retrieve information for
+            validating each variable.
 
         Raises
         ------
@@ -391,7 +391,9 @@ class SurfaceForcing:
         """
 
         for var_name in ds.data_vars:
-            nan_check(ds[var_name].isel(time=0), mask)
+            # Only validate variables based on "validate" flag if use_dask is False
+            if not self.use_dask or variable_info[var_name]["validate"]:
+                nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):
 
@@ -470,12 +472,7 @@ class SurfaceForcing:
 
         title = field.long_name
 
-        # assign lat / lon
-        if self.use_coarse_grid:
-            field = field.rename({"eta_rho": "eta_coarse", "xi_rho": "xi_coarse"})
-            field = field.where(self.grid.ds.mask_coarse)
-        else:
-            field = field.where(self.grid.ds.mask_rho)
+        field = field.where(self.target_coords["mask"])
 
         field = field.assign_coords(
             {"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]}

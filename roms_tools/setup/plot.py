@@ -12,6 +12,32 @@ def _plot(
     title="",
     kwargs={},
 ):
+    """Plots a grid or field on a map with optional depth contours.
+
+    This function plots a map using Cartopy projections. It supports plotting a grid, a field, and adding depth contours if desired.
+    The projection can be customized, and the grid can be adjusted for domains straddling the 180° meridian.
+
+    Parameters
+    ----------
+    grid_ds : xarray.Dataset
+        The grid dataset containing coordinates (`lon_rho`, `lat_rho`).
+    field : xarray.DataArray, optional
+        The field to plot. If None, only the grid is plotted.
+    depth_contours : bool, optional
+        If True, adds depth contours to the plot.
+    straddle : bool, optional
+        If True, adjusts longitude values to straddle across the 180° meridian.
+    c : str, optional
+        Color for the boundary plot (default is 'red').
+    title : str, optional
+        Title of the plot.
+    kwargs : dict, optional
+        Additional keyword arguments to pass to `pcolormesh` (e.g., colormap or color limits).
+
+    Notes
+    -----
+    The function raises a `NotImplementedError` if the domain contains the North or South Pole.
+    """
 
     if field is None:
         lon_deg = grid_ds["lon_rho"]
@@ -84,12 +110,11 @@ def _plot(
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=10)
 
-    return fig
 
+def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
 
-def _section_plot(field, interface_depth=None, title="", kwargs={}):
-
-    fig, ax = plt.subplots(1, 1, figsize=(9, 5))
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
     dims_to_check = ["eta_rho", "eta_u", "eta_v", "xi_rho", "xi_u", "xi_v"]
     try:
@@ -132,7 +157,23 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}):
     ax.set_title(title)
 
 
-def _profile_plot(field, title=""):
+def _profile_plot(field, title="", ax=None):
+    """Plots a profile of the given field against depth.
+
+    Parameters
+    ----------
+    field : xarray.DataArray
+        Data to plot.
+    title : str, optional
+        Title of the plot.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on. If None, a new figure is created.
+
+    Raises
+    ------
+    ValueError
+        If no expected depth coordinate is found in the field.
+    """
 
     depths_to_check = [
         "layer_depth",
@@ -149,16 +190,33 @@ def _profile_plot(field, title=""):
             "None of the expected coordinates (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v) found in field.coords"
         )
 
-    fig, ax = plt.subplots(1, 1, figsize=(4, 7))
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(4, 7))
     kwargs = {"y": depth_label, "yincrease": False}
     field.plot(**kwargs)
     ax.set_title(title)
     ax.grid()
 
 
-def _line_plot(field, title=""):
+def _line_plot(field, title="", ax=None):
+    """Plots a line graph of the given field.
 
-    fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-    field.plot()
+    Parameters
+    ----------
+    field : xarray.DataArray
+        Data to plot.
+    title : str, optional
+        Title of the plot.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on. If None, a new figure is created.
+
+    Returns
+    -------
+    None
+        Modifies the plot in-place.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+    field.plot(ax=ax)
     ax.set_title(title)
     ax.grid()

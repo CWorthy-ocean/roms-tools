@@ -58,7 +58,7 @@ jobs:
           flags: unittests # optional
 
   test-with-dask:
-    name: 3.12-build-with-dask
+    name: 3.13-build-with-dask
     runs-on: ubuntu-latest
     strategy:
       matrix:

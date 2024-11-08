@@ -1,4 +1,5 @@
 import pytest
+import logging
 import xarray as xr
 from roms_tools import Grid
 import importlib.metadata
@@ -385,7 +386,7 @@ def test_from_yaml_missing_grid(tmp_path):
         yaml_filepath.unlink()
 
 
-def test_from_yaml_version_mismatch(tmp_path):
+def test_from_yaml_version_mismatch(tmp_path, caplog):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -419,11 +420,11 @@ def test_from_yaml_version_mismatch(tmp_path):
             with open(yaml_filepath, "w") as f:
                 f.write(yaml_content)
 
-        with pytest.warns(
-            UserWarning,
-            match="Current roms-tools version.*does not match the version in the YAML header.*",
-        ):
+        with caplog.at_level(logging.WARNING):
             Grid.from_yaml(yaml_filepath)
+
+        # Verify the warning message in the log
+        assert "Current roms-tools version" in caplog.text
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import numpy as np
 from typing import Dict, Optional, Union, List
 from pathlib import Path
-import warnings
+import logging
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
     interpolate_from_climatology,
@@ -408,7 +408,7 @@ class Dataset:
                             ds[time_dim].where(before_start, drop=True).max()
                         )
                     else:
-                        warnings.warn("No records found at or before the start_time.")
+                        logging.warning("No records found at or before the start_time.")
                         closest_before_start = ds[time_dim].min()
 
                     # Identify records after or at end_time
@@ -418,7 +418,7 @@ class Dataset:
                             ds[time_dim].where(after_end, drop=True).min()
                         )
                     else:
-                        warnings.warn("No records found at or after the end_time.")
+                        logging.warning("No records found at or after the end_time.")
                         closest_after_end = ds[time_dim].max()
 
                     # Select records within the time range and add the closest before/after
@@ -449,11 +449,11 @@ class Dataset:
                     if ds.sizes[time_dim] > 1:
                         # Pick the time closest to self.start_time
                         ds = ds.isel({time_dim: 0})
-                    print(
+                    logging.info(
                         f"Selected time entry closest to the specified start_time ({self.start_time}) within the range [{self.start_time}, {self.start_time + timedelta(hours=24)}]: {ds[time_dim].values}"
                     )
         else:
-            warnings.warn(
+            logging.warning(
                 "Dataset does not contain any time information. Please check if the time dimension "
                 "is correctly named or if the dataset includes time data."
             )

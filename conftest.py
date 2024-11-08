@@ -208,37 +208,8 @@ def boundary_forcing(request, use_dask):
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
         source={"name": "GLORYS", "path": fname},
-        use_dask=use_dask,
-    )
-
-
-@pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill(request, use_dask):
-    """Fixture for creating a BoundaryForcing object with 2d horizontal fill."""
-
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
-
-    return BoundaryForcing(
-        grid=grid,
-        start_time=datetime(2021, 6, 29),
-        end_time=datetime(2021, 6, 30),
-        source={"name": "GLORYS", "path": fname},
-        use_dask=use_dask,
         apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
     )
 
 
@@ -268,38 +239,8 @@ def bgc_boundary_forcing_from_climatology(request, use_dask):
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
         type="bgc",
-        use_dask=use_dask,
-    )
-
-
-@pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_climatology_with_2d_fill(request, use_dask):
-    """Fixture for creating a BoundaryForcing object with 2d horizontal fill."""
-
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
-
-    return BoundaryForcing(
-        grid=grid,
-        start_time=datetime(2021, 6, 29),
-        end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
-        type="bgc",
-        use_dask=use_dask,
         apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
     )
 
 

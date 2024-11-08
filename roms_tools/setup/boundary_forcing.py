@@ -213,8 +213,6 @@ class BoundaryForcing:
                 if not self.apply_2d_horizontal_fill:
                     self._validate_1d_fill(
                         processed_fields,
-                        variable_info,
-                        bdry_coords,
                         direction,
                         bdry_data.dim_names["depth"],
                     )
@@ -674,9 +672,7 @@ class BoundaryForcing:
 
         return ds
 
-    def _validate_1d_fill(
-        self, processed_fields, variable_info, bdry_coords, direction, depth_dim
-    ):
+    def _validate_1d_fill(self, processed_fields, direction, depth_dim):
         """Check if any boundary is divided by land and issue a warning if so,
         suggesting the use of 2D horizontal fill for safer regridding.
 
@@ -685,15 +681,6 @@ class BoundaryForcing:
         processed_fields : dict
             A dictionary where keys are variable names and values are `xarray.DataArray`
             objects representing the processed data for each variable.
-
-        variable_info : dict
-            A dictionary containing metadata about each variable (e.g., location,
-            whether it's a 3D variable, etc.). Used to retrieve information for
-            validating each variable.
-
-        bdry_coords : dict
-            A dictionary containing boundary coordinates for different directions (north, south,
-            east, west), used to slice the boundary-specific data for each variable.
 
         direction : str
             The boundary direction being processed (e.g., "north", "south", "east", or "west").
@@ -710,8 +697,8 @@ class BoundaryForcing:
 
         for var_name in processed_fields.keys():
             # Only validate variables based on "validate" flag if use_dask is False
-            if not self.use_dask or variable_info[var_name]["validate"]:
-                location = variable_info[var_name]["location"]
+            if not self.use_dask or self.variable_info[var_name]["validate"]:
+                location = self.variable_info[var_name]["location"]
 
                 # Select the appropriate mask based on variable location
                 if location == "rho":
@@ -721,9 +708,9 @@ class BoundaryForcing:
                 elif location == "v":
                     mask = self.grid.ds.mask_v
 
-                mask = mask.isel(**bdry_coords[location][direction])
+                mask = mask.isel(**self.bdry_coords[location][direction])
 
-                if variable_info[var_name]["is_3d"]:
+                if self.variable_info[var_name]["is_3d"]:
                     da = processed_fields[var_name].isel({depth_dim: 0, "time": 0})
                 else:
                     da = processed_fields[var_name].isel({"time": 0})
@@ -742,7 +729,7 @@ class BoundaryForcing:
                         f"For {var_name}, the {direction}ern boundary is divided by land. It would be safer (but slower) to use `apply_2d_horizontal_fill = True`."
                     )
 
-    def _validate(self, ds, variable_info, bdry_coords):
+    def _validate(self, ds):
         """Validate the dataset for NaN values at the first time step (bry_time=0) for
         specified variables. If NaN values are found at wet points, this function raises
         an error.
@@ -763,10 +750,10 @@ class BoundaryForcing:
         Validation is performed on the initial boundary time step (`bry_time=0`) for each
         variable in the dataset.
         """
-        for var_name in variable_info:
+        for var_name in self.variable_info:
             # only validate variables based on "validate" flag if use_dask is false
-            if not self.use_dask or variable_info[var_name]["validate"]:
-                location = variable_info[var_name]["location"]
+            if not self.use_dask or self.variable_info[var_name]["validate"]:
+                location = self.variable_info[var_name]["location"]
 
                 # Select the appropriate mask based on variable location
                 if location == "rho":
@@ -793,7 +780,7 @@ class BoundaryForcing:
 
                         nan_check(
                             ds[bdry_var_name].isel(bry_time=0),
-                            mask.isel(**bdry_coords[location][direction]),
+                            mask.isel(**self.bdry_coords[location][direction]),
                             error_message=error_message,
                         )
 

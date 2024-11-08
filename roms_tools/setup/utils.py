@@ -729,27 +729,27 @@ def get_target_coords(grid, use_coarse_grid=False):
     """
     # Select grid variables based on whether the coarse grid is used
     if use_coarse_grid:
-        lat, lon, angle, mask = (
-            grid.ds.lat_coarse.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}),
-            grid.ds.lon_coarse.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}),
-            grid.ds.angle_coarse.rename(
-                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
-            ),
-            grid.ds.mask_coarse.rename(
-                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
-            ),
+        lat = grid.ds.lat_coarse.rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
+        lon = grid.ds.lon_coarse.rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        angle = grid.ds.angle_coarse.rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        mask = grid.ds.get("mask_coarse")
+        if mask is not None:
+            mask = mask.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
         lat_psi = grid.ds.get("lat_psi_coarse")
         lon_psi = grid.ds.get("lon_psi_coarse")
 
     else:
-        lat, lon, angle, mask = (
-            grid.ds.lat_rho,
-            grid.ds.lon_rho,
-            grid.ds.angle,
-            grid.ds.mask_rho,
-        )
+        lat = grid.ds.lat_rho
+        lon = grid.ds.lon_rho
+        angle = grid.ds.angle
+        mask = grid.ds.get("mask_rho")
         lat_psi = grid.ds.get("lat_psi")
         lon_psi = grid.ds.get("lon_psi")
 

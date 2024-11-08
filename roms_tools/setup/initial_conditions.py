@@ -94,23 +94,17 @@ class InitialConditions:
         self._input_checks()
 
         processed_fields = {}
-        processed_fields, variable_info = self._process_data(
-            processed_fields, type="physics"
-        )
+        processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
-            processed_fields, bgc_variable_info = self._process_data(
-                processed_fields, type="bgc"
-            )
+            processed_fields = self._process_data(processed_fields, type="bgc")
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(processed_fields, d_meta)
 
         ds = self._add_global_metadata(ds)
 
-        if self.bgc_source is not None:
-            variable_info = {**variable_info, **bgc_variable_info}
-        self._validate(ds, variable_info)
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -136,7 +130,9 @@ class InitialConditions:
         data.apply_lateral_fill()
 
         self._set_variable_info(data, type=type)
-        var_names = self.variable_info.keys()
+        attr_name = f"variable_info_{type}"
+        variable_info = getattr(self, attr_name)
+        var_names = variable_info.keys()
 
         # lateral regridding
         lateral_regrid = LateralRegrid(target_coords, data.dim_names)
@@ -147,7 +143,7 @@ class InitialConditions:
                 )
 
         # rotation of velocities and interpolation to u/v points
-        if "u" in self.variable_info and "v" in self.variable_info:
+        if "u" in variable_info and "v" in variable_info:
             (processed_fields["u"], processed_fields["v"],) = rotate_velocities(
                 processed_fields["u"],
                 processed_fields["v"],
@@ -159,7 +155,7 @@ class InitialConditions:
         for location in ["rho", "u", "v"]:
             var_names_dict[location] = [
                 name
-                for name, info in self.variable_info.items()
+                for name, info in variable_info.items()
                 if info["location"] == location and info["is_3d"]
             ]
 
@@ -186,7 +182,7 @@ class InitialConditions:
                         )
 
         # compute barotropic velocities
-        if "u" in self.variable_info and "v" in self.variable_info:
+        if "u" in variable_info and "v" in variable_info:
             self._get_vertical_coordinates(
                 type="interface",
                 additional_locations=["u", "v"],
@@ -199,7 +195,7 @@ class InitialConditions:
 
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
-            for var_name in self.variable_info.keys():
+            for var_name in variable_info.keys():
                 processed_fields[var_name] = processed_fields[var_name].assign_coords(
                     {"time": processed_fields["temp"]["time"]}
                 )
@@ -209,7 +205,7 @@ class InitialConditions:
                 processed_fields[var_name]
             )
 
-        return processed_fields, variable_info
+        return processed_fields
 
     def _input_checks(self):
 
@@ -363,7 +359,7 @@ class InitialConditions:
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
 
-        object.__setattr__(self, "variable_info", variable_info)
+        object.__setattr__(self, f"variable_info_{type}", variable_info)
 
     def _get_vertical_coordinates(self, type, additional_locations=["u", "v"]):
         """Retrieve layer and interface depth coordinates.
@@ -490,7 +486,7 @@ class InitialConditions:
 
         return ds
 
-    def _validate(self, ds, variable_info):
+    def _validate(self, ds):
         """Validates the dataset by checking for NaN values in SSH at wet points, which
         would indicate missing raw data coverage over the target domain.
 
@@ -498,8 +494,6 @@ class InitialConditions:
         ----------
         ds : xarray.Dataset
             The dataset to validate.
-        variable_info : dict
-            A dictionary containing metadata about the variables, including whether to validate them.
 
         Raises
         ------
@@ -511,6 +505,10 @@ class InitialConditions:
         -----
         This check is only applied to the 2D variable SSH to improve performance.
         """
+        if self.bgc_source is not None:
+            variable_info = {**self.variable_info_physics, **self.variable_info_bgc}
+        else:
+            variable_info = self.variable_info_physics
 
         for var_name in variable_info:
             # Only validate variables based on "validate" flag if use_dask is False

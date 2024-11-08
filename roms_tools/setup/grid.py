@@ -1,5 +1,6 @@
 import time
 import copy
+import logging
 from dataclasses import dataclass, field, asdict
 
 import numpy as np
@@ -17,7 +18,6 @@ from roms_tools.setup.utils import (
 )
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
-import logging
 from pathlib import Path
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -180,7 +180,7 @@ class Grid:
         # If verbose is enabled, start the timer and print the start message
         if verbose:
             start_time = time.time()
-            print(
+            logging.info(
                 f"=== Generating the topography and mask using {topography_source['name']} data and hmin = {hmin} meters ==="
             )
 
@@ -195,8 +195,8 @@ class Grid:
 
         # If verbose is enabled, print elapsed time and a separator
         if verbose:
-            print(f"Total time: {time.time() - start_time:.3f} seconds")
-            print(
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
                 "========================================================================================================"
             )
 
@@ -246,7 +246,7 @@ class Grid:
 
         if verbose:
             start_time = time.time()
-            print(
+            logging.info(
                 f"=== Preparing the vertical coordinate system using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ==="
             )
 
@@ -297,8 +297,8 @@ class Grid:
         ds.attrs["hc"] = np.float32(hc)
 
         if verbose:
-            print(f"Total time: {time.time() - start_time:.3f} seconds")
-            print(
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
                 "========================================================================================================"
             )
 
@@ -601,7 +601,7 @@ class Grid:
 
         # Update vertical coordinate if necessary
         if not all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
-            warnings.warn("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
+            logging.warning("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
             N = 100
             theta_s = 5.0
             theta_b = 2.0
@@ -773,7 +773,7 @@ class Grid:
     def _create_horizontal_grid(self) -> xr.Dataset():
         if self.verbose:
             start_time = time.time()
-            print("=== Creating the horizontal grid ===")
+            logging.info("=== Creating the horizontal grid ===")
 
         self._raise_if_domain_size_too_large()
 
@@ -800,9 +800,9 @@ class Grid:
         ds = self._add_global_metadata(ds)
 
         if self.verbose:
-            print(f"Total time: {time.time() - start_time:.3f} seconds")
-            print(
-                "=============================================================================================="
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
+                "========================================================================================================"
             )
 
         object.__setattr__(self, "ds", ds)

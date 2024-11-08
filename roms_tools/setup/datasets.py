@@ -627,7 +627,7 @@ class Dataset:
         ds_concatenated[self.dim_names["longitude"]] = lon_concatenated
 
         if verbose:
-            print(
+            logging.info(
                 f"Concatenating the data along the longitude dimension: {time.time() - start_time:.3f} seconds"
             )
 

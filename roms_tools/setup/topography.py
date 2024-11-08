@@ -1,4 +1,5 @@
 import time
+import logging
 import xarray as xr
 import numpy as np
 import gcm_filters
@@ -64,7 +65,9 @@ def _add_topography_and_mask(
         start_time = time.time()
     data = _get_topography_data(topography_source)
     if verbose:
-        print(f"Reading the topography data: {time.time() - start_time:.3f} seconds")
+        logging.info(
+            f"Reading the topography data: {time.time() - start_time:.3f} seconds"
+        )
 
     # interpolate topography onto desired grid
     hraw = _make_raw_topography(data, target_coords, verbose)
@@ -86,14 +89,14 @@ def _add_topography_and_mask(
     }
     ds = _add_velocity_masks(ds)
     if verbose:
-        print(f"Preparing the masks: {time.time() - start_time:.3f} seconds")
+        logging.info(f"Preparing the masks: {time.time() - start_time:.3f} seconds")
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
     if verbose:
         start_time = time.time()
     hraw = _smooth_topography_globally(hraw, smooth_factor)
     if verbose:
-        print(
+        logging.info(
             f"Smoothing the topography globally: {time.time() - start_time:.3f} seconds"
         )
 
@@ -106,7 +109,7 @@ def _add_topography_and_mask(
         "units": "meter",
     }
     if verbose:
-        print(
+        logging.info(
             f"Smoothing the topography locally: {time.time() - start_time:.3f} seconds"
         )
 
@@ -143,7 +146,9 @@ def _make_raw_topography(data, target_coords, verbose) -> np.ndarray:
     lateral_regrid = LateralRegrid(target_coords, data.dim_names)
     hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
     if verbose:
-        print(f"Regridding the topography: {time.time() - start_time:.3f} seconds")
+        logging.info(
+            f"Regridding the topography: {time.time() - start_time:.3f} seconds"
+        )
 
     # flip sign so that bathmetry is positive
     hraw = -hraw

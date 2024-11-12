@@ -42,7 +42,7 @@ During the grid generation process, when an instance of the `roms_tools.Grid` cl
 
 The topography field parameters are as follows:
 
-| Parameter            | Description                                           | Unit | Constraints         |
+| Parameter            | Description                                           | Unit | Constraint         |
 |----------------------|-------------------------------------------------------|------|---------------------|
 | `topography_source`   | Data source for the topography                        | -    | -                   |
 | $h_{min}$               | Minimum ocean depth                                   | m    | $h_{min} > 0$         
@@ -75,7 +75,7 @@ Here are these steps illustrated for an example domain:
 
 ROMS uses a terrain-following vertical coordinate system. The vertical coordinate system is important for `ROMS-Tools` while creating input fields that have a depth dimension, such as the initial conditions or the boundary forcing, and therefore has to mimic the vertical coordinate system that is internally computed by ROMS. The vertical coordinate system parameters are as follows:
 
-| Parameter                     | Description                                                | Unit | Constraints             |
+| Parameter                     | Description                                                | Unit | Constraint             |
 |-------------------------------|------------------------------------------------------------|------|-------------------------|
 | $N$                            | Number of vertical layers                                  | -    | -                       |
 | $\theta_s$                          | Surface control parameter                                  | -    | $0 < \theta_s ≤ 10$          |

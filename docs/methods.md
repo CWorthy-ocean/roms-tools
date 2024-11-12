@@ -45,7 +45,7 @@ The topography field parameters are as follows:
 | Parameter            | Description                                           | Unit | Constraint         |
 |----------------------|-------------------------------------------------------|------|---------------------|
 | `topography_source`   | Data source for the topography                        | -    | -                   |
-| $h_{min}$               | Minimum ocean depth                                   | m    | $h_{min} > 0$         
+| $h_{min}$               | Minimum ocean depth                                   | m    | $h_{min} > 0$
 
 
 The topography and mask are generated via the following steps:
@@ -79,7 +79,7 @@ ROMS uses a terrain-following vertical coordinate system. The vertical coordinat
 |-------------------------------|------------------------------------------------------------|------|-------------------------|
 | $N$                            | Number of vertical layers                                  | -    | -                       |
 | $\theta_s$                          | Surface control parameter                                  | -    | $0 < \theta_s ≤ 10$          |
-| $\theta_b$                          | Bottom control parameter                                   | -    | $0 < \theta_b ≤ 4$          
+| $\theta_b$                          | Bottom control parameter                                   | -    | $0 < \theta_b ≤ 4$
 | $h_c$                          | Critical depth                                             | m    | -                       |
 
 Following [Shchepetkin and McWilliams (2009)](https://www.sciencedirect.com/science/article/pii/S0022103108001483) (see also Figure 2 in [Lemarie et al. (2012)](https://journals.ametsoc.org/view/journals/phoc/42/10/2012jpo03631.1.xml)), these parameters are used to create the vertical coordinate system as follows:

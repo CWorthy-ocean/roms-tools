@@ -20,14 +20,21 @@ The horizontal grid parameters are as follows:
 
 To generate the horizontal grid from these parameters, `ROMS-Tools` follows a series of steps to define the domain and coordinate system:
 
-- Given the `size_x` and `size_y` parameters, the domain is initially oriented to prioritize the x-direction as longer than the y-direction. This may involve swapping `size_x` with `size_y` and `nx` with `ny`. This step is performed to minimize grid distortion.
-- `nx + 2` grid points are spaced uniformly in longitude.
-- A Mercator projection is applied across the equator to convert latitude degrees into y-coordinates. `ny + 2` grid points are spaced uniformly in the y-coordinate. An inverse Mercator projection is then performed to return to geographic coordinates.
-- If there was a swap in step 1, the grid is now rotated by 90 degrees back to its original orientation.
-- The coordinate system is rotated by the specified angle `rot` to align with the desired orientation.
-- Coordinates are translated to center the grid at the specified longitude `center_lon` and latitude `center_lat`.
-- Grid metrics `pm = 1/dx` and `pn = 1/dy` are computed, where `dx` and `dy` represent the grid spacing in the x and y directions, respectively.
-- The angle between the positive x-axis of the local grid and East is computed to establish the orientation relative to geographic directions.
+1. **Domain Orientation**: Given the `size_x` and `size_y` parameters, the domain is initially oriented to prioritize the x-direction as longer than the y-direction. This may involve swapping `size_x` with `size_y` and `nx` with `ny`. This step is performed to minimize grid distortion.
+
+2. **Longitude Grid Points**: `nx` + 2 grid points are spaced uniformly in longitude.
+
+3. **Mercator Projection**: A Mercator projection is applied across the equator to convert latitude degrees into y-coordinates. `ny` + 2 grid points are spaced uniformly in the y-coordinate. An inverse Mercator projection is then performed to return to geographic coordinates.
+
+4. **Grid Rotation Back to Original Orientation**: If there was a swap in step 1, the grid is now rotated by 90 degrees back to its original orientation.
+
+5. **Coordinate System Rotation**: The coordinate system is rotated by the specified angle `rot` to align with the desired orientation.
+
+6. **Grid Centering**: Coordinates are translated to center the grid at the specified longitude `center_lon` and latitude `center_lat`.
+
+7. **Grid Metrics Computation**: Grid metrics `pm = 1 / dx` and `pn = 1 / dy` are computed, where `dx` and `dy` represent the grid spacing in the x and y directions, respectively.
+
+8. **Angle computation**: The angle between the positive x-axis of the local grid and East is computed to establish the orientation relative to geographic directions.
 
 ## Topography and Mask
 
@@ -35,10 +42,10 @@ During the grid generation process, when an instance of the `roms_tools.Grid` cl
 
 The topography field parameters are as follows:
 
-| Parameter            | Description                                           | Constraints         | Unit |
-|----------------------|-------------------------------------------------------|---------------------|------|
-| `topography_source`   | Data source for the topography                        | -                   | -    |
-| `h_min`               | Minimum ocean depth, strictly greater than zero       | `h_min > 0`         | m    |
+| Parameter            | Description                                           | Unit | Constraints         |
+|----------------------|-------------------------------------------------------|------|---------------------|
+| `topography_source`   | Data source for the topography                        | -    | -                   |
+| $h_{min}$               | Minimum ocean depth                                   | m    | $h_{min} > 0$         
 
 
 The topography and mask are generated via the following steps:
@@ -47,13 +54,15 @@ The topography and mask are generated via the following steps:
 2. **Mask Definition**: The mask is defined using the regridded topography from step 1. At each grid point, topography values smaller than 0.0 meters are classified as land, and values larger than 0.0 meters are classified as ocean.
 3. **Filling Enclosed Basins**: The mask is modified by filling enclosed basins with land.
 4. **Domain-wide Smoothing**: The regridded topography from step 1 is smoothed over the entire domain with a smoothing factor of 8. This step ensures that the topography is smooth at the grid scale, a prerequisite for avoiding grid-scale instabilities during model runtime.
-5. **Local Smoothing**: The topography field `h` is then smoothed locally such that the maximum slope parameter `r` is smaller than 0.2. The maximum slope parameter is given by
+5. **Local Smoothing**: The topography field `h` is then smoothed locally such that the maximum slope parameter `r` is smaller than 0.2. This step modifies the topography predominantly along the continental shelf. The maximum slope parameter is given by
 
-   $$ r = \max \left( \frac{|\Delta_x h|}{2h}, \frac{|\Delta_y h|}{2h} \right) $$
+$$
 
-   The local smoothing in this step modifies the topography predominantly along the continental shelf.
+     r = \max \left( \frac{|\Delta_x h|}{2h}, \frac{|\Delta_y h|}{2h} \right)
 
-6. **Depth Clipping**: Regions where the ocean depth is shallower than `h_min` are set to `h_min`. The rationale behind this step is to ensure that tidal excursion does not exceed the water depth at runtime. Since ROMS currently does not support wetting or drying, the model will crash if the water depth becomes negative.
+$$
+
+6. **Depth Clipping**: Regions where the ocean depth is shallower than $h_{min}$ are set to $h_{min}$. The rationale behind this step is to ensure that tidal excursion does not exceed the water depth at runtime. Since ROMS currently does not support wetting or drying, the model will crash if the water depth becomes negative.
 
 Here are these steps illustrated for an example domain:
 
@@ -66,16 +75,16 @@ Here are these steps illustrated for an example domain:
 
 ROMS uses a terrain-following vertical coordinate system. The vertical coordinate system is important for `ROMS-Tools` while creating input fields that have a depth dimension, such as the initial conditions or the boundary forcing, and therefore has to mimic the vertical coordinate system that is internally computed by ROMS. The vertical coordinate system parameters are as follows:
 
-| Parameter                     | Description                                                | Constraints             | Unit |
-|-------------------------------|------------------------------------------------------------|-------------------------|------|
-| `N`                            | Number of vertical layers                                  | -                       | -    |
-| `θ_s`                          | Surface control parameter                                  | `0 < θ_s ≤ 10`          | -    |    
-| `θ_b`                          | Bottom control parameter                                   | `0 < θ_b ≤ 4`           | -    |
-| `h_c`                          | Critical depth                                             | -                       | m    |
+| Parameter                     | Description                                                | Unit | Constraints             |
+|-------------------------------|------------------------------------------------------------|------|-------------------------|
+| $N$                            | Number of vertical layers                                  | -    | -                       |
+| $\theta_s$                          | Surface control parameter                                  | -    | $0 < \theta_s ≤ 10$          |
+| $\theta_b$                          | Bottom control parameter                                   | -    | $0 < \theta_b ≤ 4$          
+| $h_c$                          | Critical depth                                             | m    | -                       |
 
 Following [Shchepetkin and McWilliams (2009)](https://www.sciencedirect.com/science/article/pii/S0022103108001483) (see also Figure 2 in [Lemarie et al. (2012)](https://journals.ametsoc.org/view/journals/phoc/42/10/2012jpo03631.1.xml)), these parameters are used to create the vertical coordinate system as follows:
 
-1. Introduction of a vertical stretched coordinate `σ(k)` ranging from `-1 ≤ σ ≤ 0`:
+1. **Vertical Coordinate**: A vertical stretched coordinate $\sigma(k)$ ranging from $-1 ≤ \sigma ≤ 0$ is defined as:
 
    $$
    \sigma(k) =
@@ -85,7 +94,7 @@ Following [Shchepetkin and McWilliams (2009)](https://www.sciencedirect.com/scie
    \end{cases}
    $$
 
-2. Computation of a vertical stretching function through a series of two refinement functions:
+2. **Vertical Stretching Functions**: The vertical stretching function is computed through a series of two refinement functions:
 
    $$
    C(\sigma) = \frac{1-\cosh(\theta_s \sigma)}{\cosh(\theta_s)-1}
@@ -95,23 +104,23 @@ Following [Shchepetkin and McWilliams (2009)](https://www.sciencedirect.com/scie
    C(\sigma) = \frac{\exp(\theta_b C(\sigma))-1}{1-\exp(-\theta_b)}
    $$
 
-   The first equation corresponds to the surface refinement function, while the second describes the bottom refinement function. `C(σ)` is a non-dimensional, monotonic function ranging from `-1 ≤ C(σ) ≤ 0`.
+   The first equation corresponds to the surface refinement function, while the second describes the bottom refinement function. $C(\sigma)$ is a non-dimensional, monotonic function ranging from $-1 ≤ C(\sigma) ≤ 0$.
 
-3. Computation of the layer and interface depths:
+3. **Layer Depths**: The layer and interface depths are computed as:
 
    $$
    z(x,y,\sigma,t) = \zeta(x,y,t) + (\zeta(x,y,t) + h(x,y)) \cdot S(x,y,\sigma)
    $$
 
-   with the nonlinear vertical transformation functional `S(x,y,σ)` given by
+   with the nonlinear vertical transformation functional $S(x,y,\sigma)$ given by
 
    $$
    S(x,y,\sigma) = \frac{hc \cdot \sigma + h(x,y) \cdot C(\sigma)}{hc + h(x,y)}
    $$
 
-Here, `ζ(x,y,t)` is the time-varying sea surface height, and `h(x,y)` is the unperturbed water column thickness, given by the topography. `z = -h(x,y)` corresponds to the ocean bottom.
+Here, $\zeta(x,y,t)$ is the time-varying sea surface height, and $h(x,y)$ is the unperturbed water column thickness, given by the topography. $z = -h(x,y)$ corresponds to the ocean bottom.
 
-`ROMS-Tools` executes steps 1 and 2 during the grid generation process, when an instance of the `roms_tools.Grid` class is created. Step 3 is executed when needed, during the creation of the initial conditions and boundary forcing. While executing step 3, `ROMS-Tools` assumes `ζ(x,y,t) = 0`, i.e., zero sea surface height.
+`ROMS-Tools` executes steps 1 and 2 during the grid generation process, when an instance of the `roms_tools.Grid` class is created. Step 3 is executed when needed, during the creation of the initial conditions and boundary forcing. While executing step 3, `ROMS-Tools` assumes $\zeta(x,y,t) = 0$, i.e., zero sea surface height.
 
 ## Tidal Forcing
 
@@ -123,12 +132,8 @@ Coming soon...
 
 ## Initial Conditions
 
-*The initial conditions are created under the assumption of zero sea surface height.*
-
 Coming soon...
 
 ## Boundary Forcing
-
-*The initial conditions are created under the assumption of zero sea surface height.*
 
 Coming soon...

@@ -35,10 +35,11 @@ During the grid generation process, when an instance of the `roms_tools.Grid` cl
 
 The topography field parameters are as follows:
 
-| Parameter            | Description                                               | Unit |
-|----------------------|-----------------------------------------------------------|------|
-| `topography_source`   | Data source for the topography                            | -    |
-| `h_min`               | Minimum ocean depth, strictly greater than zero           | m    |
+| Parameter            | Description                                           | Constraints         | Unit |
+|----------------------|-------------------------------------------------------|---------------------|------|
+| `topography_source`   | Data source for the topography                        | -                   | -    |
+| `h_min`               | Minimum ocean depth, strictly greater than zero       | `h_min > 0`         | m    |
+
 
 The topography and mask are generated via the following steps:
 
@@ -65,12 +66,12 @@ Here are these steps illustrated for an example domain:
 
 ROMS uses a terrain-following vertical coordinate system. The vertical coordinate system is important for `ROMS-Tools` while creating input fields that have a depth dimension, such as the initial conditions or the boundary forcing, and therefore has to mimic the vertical coordinate system that is internally computed by ROMS. The vertical coordinate system parameters are as follows:
 
-| Parameter                     | Description                                                | Unit |
-|-------------------------------|------------------------------------------------------------|------|
-| `N`                            | Number of vertical layers                                  | -    |
-| `0 < θ_s ≤ 10`                 | Surface control parameter                                  | -    |
-| `0 < θ_b ≤ 4`                  | Bottom control parameter                                   | -    |
-| `h_c`                          | Critical depth                                             | m    |
+| Parameter                     | Description                                                | Constraints             | Unit |
+|-------------------------------|------------------------------------------------------------|-------------------------|------|
+| `N`                            | Number of vertical layers                                  | -                       | -    |
+| `θ_s`                          | Surface control parameter                                  | `0 < θ_s ≤ 10`          | -    |    
+| `θ_b`                          | Bottom control parameter                                   | `0 < θ_b ≤ 4`           | -    |
+| `h_c`                          | Critical depth                                             | -                       | m    |
 
 Following [Shchepetkin and McWilliams (2009)](https://www.sciencedirect.com/science/article/pii/S0022103108001483) (see also Figure 2 in [Lemarie et al. (2012)](https://journals.ametsoc.org/view/journals/phoc/42/10/2012jpo03631.1.xml)), these parameters are used to create the vertical coordinate system as follows:
 

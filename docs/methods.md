@@ -115,7 +115,7 @@ Following [Shchepetkin and McWilliams (2009)](https://www.sciencedirect.com/scie
    with the nonlinear vertical transformation functional $S(x,y,\sigma)$ given by
 
    $$
-   S(x,y,\sigma) = \frac{hc \cdot \sigma + h(x,y) \cdot C(\sigma)}{hc + h(x,y)}
+   S(x,y,\sigma) = \frac{h_c \cdot \sigma + h(x,y) \cdot C(\sigma)}{h_c + h(x,y)}
    $$
 
 Here, $\zeta(x,y,t)$ is the time-varying sea surface height, and $h(x,y)$ is the unperturbed water column thickness, given by the topography. $z = -h(x,y)$ corresponds to the ocean bottom.

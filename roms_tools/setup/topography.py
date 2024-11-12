@@ -70,7 +70,7 @@ def _add_topography_and_mask(
         )
 
     # interpolate topography onto desired grid
-    hraw = _make_raw_topography(data, target_coords, verbose)
+    hraw = _make_raw_topography(data, target_coords, verbose=verbose)
     nan_check(hraw)
 
     # Mask
@@ -137,14 +137,16 @@ def _get_topography_data(source):
     return data
 
 
-def _make_raw_topography(data, target_coords, verbose) -> np.ndarray:
+def _make_raw_topography(
+    data, target_coords, method="linear", verbose=False
+) -> xr.DataArray:
 
     data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
 
     if verbose:
         start_time = time.time()
     lateral_regrid = LateralRegrid(target_coords, data.dim_names)
-    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]])
+    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]], method=method)
     if verbose:
         logging.info(
             f"Regridding the topography: {time.time() - start_time:.3f} seconds"

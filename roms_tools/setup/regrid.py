@@ -28,20 +28,22 @@ class LateralRegrid:
             source_dim_names["longitude"]: target_coords["lon"],
         }
 
-    def apply(self, da):
+    def apply(self, da, method="linear"):
         """Fills missing values and regrids the variable.
 
         Parameters
         ----------
         da : xarray.DataArray
             Input data to fill and regrid.
+        method : str
+            Interpolation method to use.
 
         Returns
         -------
         xarray.DataArray
             Regridded data with filled values.
         """
-        regridded = da.interp(self.coords, method="linear").drop_vars(
+        regridded = da.interp(self.coords, method=method).drop_vars(
             list(self.coords.keys())
         )
         return regridded

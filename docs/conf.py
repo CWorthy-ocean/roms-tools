@@ -27,6 +27,7 @@ extensions = [
     "nbsphinx",
     "sphinxcontrib.bibtex",
 ]
+myst_enable_extensions = ["dollarmath", "amsmath"]
 
 numpydoc_show_class_members = True
 napolean_google_docstring = False

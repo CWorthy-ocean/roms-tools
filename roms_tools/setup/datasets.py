@@ -17,6 +17,8 @@ from roms_tools.setup.utils import (
 from roms_tools.setup.download import download_correction_data
 from roms_tools.setup.fill import LateralFill
 
+# lat-lon datasets
+
 
 @dataclass(frozen=True, kw_only=True)
 class Dataset:
@@ -149,101 +151,7 @@ class Dataset:
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
 
-        # Precompile the regex for matching wildcard characters
-        wildcard_regex = re.compile(r"[\*\?\[\]]")
-
-        # Convert Path objects to strings
-        if isinstance(self.filename, (str, Path)):
-            filename_str = str(self.filename)
-        elif isinstance(self.filename, list):
-            filename_str = [str(f) for f in self.filename]
-        else:
-            raise ValueError(
-                "filename must be a string, Path, or a list of strings/Paths."
-            )
-
-        # Handle the case when filename is a string
-        contains_wildcard = False
-        if isinstance(filename_str, str):
-            contains_wildcard = bool(wildcard_regex.search(filename_str))
-            if contains_wildcard:
-                matching_files = glob.glob(filename_str)
-                if not matching_files:
-                    raise FileNotFoundError(
-                        f"No files found matching the pattern '{filename_str}'."
-                    )
-            else:
-                matching_files = [filename_str]
-
-        # Handle the case when filename is a list
-        elif isinstance(filename_str, list):
-            contains_wildcard = any(wildcard_regex.search(f) for f in filename_str)
-            if contains_wildcard:
-                matching_files = []
-                for f in filename_str:
-                    files = glob.glob(f)
-                    if not files:
-                        raise FileNotFoundError(
-                            f"No files found matching the pattern '{f}'."
-                        )
-                    matching_files.extend(files)
-            else:
-                matching_files = filename_str
-
-        # Check if time dimension is available when multiple files are provided
-        if isinstance(filename_str, list) and "time" not in self.dim_names:
-            raise ValueError(
-                "A list of files is provided, but time dimension is not available. "
-                "A time dimension must be available to concatenate the files."
-            )
-
-        # Determine the kwargs for combining datasets
-        if contains_wildcard or len(matching_files) == 1:
-            # If there is a wildcard or just one file, use by_coords
-            kwargs = {"combine": "by_coords"}
-        else:
-            # Otherwise, use nested combine based on time
-            kwargs = {"combine": "nested", "concat_dim": self.dim_names["time"]}
-
-        # Base kwargs used for dataset combination
-        combine_kwargs = {
-            "coords": "minimal",
-            "compat": "override",
-            "combine_attrs": "override",
-        }
-
-        if self.use_dask:
-
-            chunks = {
-                self.dim_names["latitude"]: -1,
-                self.dim_names["longitude"]: -1,
-            }
-            if "depth" in self.dim_names:
-                chunks[self.dim_names["depth"]] = -1
-            if "time" in self.dim_names:
-                chunks[self.dim_names["time"]] = 1
-
-            ds = xr.open_mfdataset(
-                matching_files,
-                chunks=chunks,
-                **combine_kwargs,
-                **kwargs,
-            )
-        else:
-            ds_list = []
-            for file in matching_files:
-                ds = xr.open_dataset(file, chunks=None)
-                ds_list.append(ds)
-
-            if kwargs["combine"] == "by_coords":
-                ds = xr.combine_by_coords(ds_list, **combine_kwargs)
-            elif kwargs["combine"] == "nested":
-                ds = xr.combine_nested(
-                    ds_list, concat_dim=kwargs["concat_dim"], **combine_kwargs
-                )
-
-        if "time" in self.dim_names and self.dim_names["time"] not in ds.dims:
-            ds = ds.expand_dims(self.dim_names["time"])
+        ds = _load_data(self.filename, self.dim_names, self.use_dask)
 
         return ds
 
@@ -278,19 +186,8 @@ class Dataset:
         ValueError
             If the dataset does not contain the specified variables or dimensions.
         """
-        missing_vars = [
-            var for var in self.var_names.values() if var not in ds.data_vars
-        ]
-        if missing_vars:
-            raise ValueError(
-                f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
-            )
 
-        missing_dims = [dim for dim in self.dim_names.values() if dim not in ds.dims]
-        if missing_dims:
-            raise ValueError(
-                f"Dataset does not contain all required dimensions. The following dimensions are missing: {missing_vars}"
-            )
+        _check_dataset(ds, self.var_names, self.dim_names)
 
     def select_relevant_fields(self, ds) -> xr.Dataset:
         """Selects and returns a subset of the dataset containing only the variables
@@ -379,86 +276,10 @@ class Dataset:
         """
 
         time_dim = self.dim_names["time"]
-        if time_dim in ds.variables:
-            if self.climatology:
-                if len(ds[time_dim]) != 12:
-                    raise ValueError(
-                        f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
-                    )
-                if not self.end_time:
-                    # Interpolate from climatology for initial conditions
-                    ds = interpolate_from_climatology(
-                        ds, self.dim_names["time"], self.start_time
-                    )
-            else:
-                time_type = get_time_type(ds[time_dim])
-                if time_type == "int":
-                    raise ValueError(
-                        "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
-                    )
-                if time_type == "cftime":
-                    ds = ds.assign_coords(
-                        {time_dim: convert_cftime_to_datetime(ds[time_dim])}
-                    )
-                if self.end_time:
-                    end_time = self.end_time
 
-                    # Identify records before or at start_time
-                    before_start = ds[time_dim] <= np.datetime64(self.start_time)
-                    if before_start.any():
-                        closest_before_start = (
-                            ds[time_dim].where(before_start, drop=True).max()
-                        )
-                    else:
-                        logging.warning("No records found at or before the start_time.")
-                        closest_before_start = ds[time_dim].min()
-
-                    # Identify records after or at end_time
-                    after_end = ds[time_dim] >= np.datetime64(end_time)
-                    if after_end.any():
-                        closest_after_end = (
-                            ds[time_dim].where(after_end, drop=True).min()
-                        )
-                    else:
-                        logging.warning("No records found at or after the end_time.")
-                        closest_after_end = ds[time_dim].max()
-
-                    # Select records within the time range and add the closest before/after
-                    within_range = (ds[time_dim] > np.datetime64(self.start_time)) & (
-                        ds[time_dim] < np.datetime64(end_time)
-                    )
-                    selected_times = ds[time_dim].where(
-                        within_range
-                        | (ds[time_dim] == closest_before_start)
-                        | (ds[time_dim] == closest_after_end),
-                        drop=True,
-                    )
-                    ds = ds.sel({time_dim: selected_times})
-                else:
-                    # Look in time range [self.start_time, self.start_time + 24h]
-                    end_time = self.start_time + timedelta(days=1)
-                    times = (np.datetime64(self.start_time) <= ds[time_dim]) & (
-                        ds[time_dim] < np.datetime64(end_time)
-                    )
-                    if np.all(~times):
-                        raise ValueError(
-                            f"The dataset does not contain any time entries between the specified start_time: {self.start_time} "
-                            f"and {self.start_time + timedelta(hours=24)}. "
-                            "Please ensure the dataset includes time entries for that range."
-                        )
-
-                    ds = ds.where(times, drop=True)
-                    if ds.sizes[time_dim] > 1:
-                        # Pick the time closest to self.start_time
-                        ds = ds.isel({time_dim: 0})
-                    logging.info(
-                        f"Selected time entry closest to the specified start_time ({self.start_time}) within the range [{self.start_time}, {self.start_time + timedelta(hours=24)}]: {ds[time_dim].values}"
-                    )
-        else:
-            logging.warning(
-                "Dataset does not contain any time information. Please check if the time dimension "
-                "is correctly named or if the dataset includes time data."
-            )
+        ds = _select_relevant_times(
+            ds, time_dim, self.start_time, self.end_time, self.climatology
+        )
 
         return ds
 
@@ -1522,3 +1343,508 @@ class ERA5Correction(Dataset):
                 "The correction dataset does not contain all specified longitude values."
             )
         object.__setattr__(self, "ds", subdomain)
+
+
+# river datasets
+@dataclass(frozen=True, kw_only=True)
+class RiverDataset:
+    """Represents river data.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
+        or a list of strings or Path objects containing multiple files.
+    start_time : datetime
+        The start time for selecting relevant data.
+    end_time : datetime
+        The end time for selecting relevant data.
+    var_names: Dict[str, str]
+        Dictionary of variable names that are required in the dataset.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the forcing data on its original grid.
+    """
+
+    filename: Union[str, Path, List[Union[str, Path]]]
+    start_time: datetime
+    end_time: datetime
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "latitude": "lat_mou",
+            "longitude": "lon_mou",
+            "flux": "FLOW",
+            "ratio": "ratio_m2s",
+            "vol": "vol_stn",
+            "name": "riv_name",
+        }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "station": "station",
+            "time": "time",
+        }
+    )
+    is_global: bool = field(init=False, repr=False)
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self):
+        """
+        Post-initialization processing:
+        1. Loads the dataset from the specified filename.
+        2. Applies time filtering based on start_time and end_time if provided.
+        3. Selects relevant fields as specified by var_names.
+        4. Ensures latitude values and depth values are in ascending order.
+        5. Checks if the dataset covers the entire globe and adjusts if necessary.
+        """
+
+        # Validate start_time and end_time
+        if not isinstance(self.start_time, datetime):
+            raise TypeError(
+                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
+            )
+        if not isinstance(self.end_time, datetime):
+            raise TypeError(
+                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
+            )
+
+        ds = self.load_data()
+        self.check_dataset(ds)
+
+        # Select relevant times
+        ds = self.add_time_info(ds)
+        ds = self.select_relevant_times(ds)
+
+        object.__setattr__(self, "ds", ds)
+
+    def load_data(self) -> xr.Dataset:
+        """Load dataset from the specified file.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The loaded xarray Dataset containing the forcing data.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the specified file does not exist.
+        ValueError
+            If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
+        """
+        ds = _load_data(
+            self.filename, self.dim_names, use_dask=False, decode_times=False
+        )
+
+        return ds
+
+    def check_dataset(self, ds: xr.Dataset) -> None:
+        """Check if the dataset contains the specified variables and dimensions.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to check.
+
+        Raises
+        ------
+        ValueError
+            If the dataset does not contain the specified variables or dimensions.
+        """
+
+        _check_dataset(ds, self.var_names, self.dim_names)
+
+    def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
+        """Dummy method to be overridden by child classes to add time information to the
+        dataset.
+
+        This method is intended as a placeholder and should be implemented in subclasses
+        to provide specific functionality for adding time-related information to the dataset.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset to which time information will be added.
+
+        Returns
+        -------
+        xr.Dataset
+            The xarray Dataset with time information added (as implemented by child classes).
+        """
+        return ds
+
+    def select_relevant_times(self, ds) -> xr.Dataset:
+        """Select a subset of the dataset based on the specified time range.
+
+        This method filters the dataset to include all records between `start_time` and `end_time`.
+        Additionally, it ensures that one record at or before `start_time` and one record at or
+        after `end_time` are included, even if they fall outside the strict time range.
+
+        If no `end_time` is specified, the method will select the time range of
+        [start_time, start_time + 24 hours] and return the closest time entry to `start_time` within that range.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset to be filtered. Must contain a time dimension.
+
+        Returns
+        -------
+        xr.Dataset
+            A dataset filtered to the specified time range, including the closest entries
+            at or before `start_time` and at or after `end_time` if applicable.
+
+        Warns
+        -----
+        UserWarning
+            If no records at or before `start_time` or no records at or after `end_time` are found.
+
+        UserWarning
+            If the dataset does not contain any time dimension or the time dimension is incorrectly named.
+        """
+
+        time_dim = self.dim_names["time"]
+
+        ds = _select_relevant_times(ds, time_dim, self.start_time, self.end_time, False)
+
+        return ds
+
+
+@dataclass(frozen=True, kw_only=True)
+class DaiRiverDataset(RiverDataset):
+    def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
+        """Adds time information to the dataset based on the climatology flag and
+        dimension names.
+
+        This method processes the dataset to include time information according to the climatology
+        setting. If the dataset represents climatology data and the time dimension is labeled as
+        "month", it assigns dates to the dataset based on a monthly climatology. Additionally, it
+        handles dimension name updates if necessary.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset to which time information will be added.
+
+        Returns
+        -------
+        xr.Dataset
+            The dataset with time information added, including adjustments for climatology and
+            dimension names.
+        """
+        time_dim = self.dim_names["time"]
+
+        # Extract the 'time' variable as a numpy array
+        time_vals = ds[time_dim].values
+
+        # Handle rounding of the time values
+        year = np.round(time_vals * 1e-2).astype(int)
+        month = np.round((time_vals * 1e-2 - year) * 1e2).astype(int)
+
+        # Convert to datetime (assuming the day is always 15th for this example)
+        dates = [datetime(year=i, month=m, day=15) for i, m in zip(year, month)]
+
+        ds[time_dim] = dates
+
+        return ds
+
+
+# shared functions
+
+
+def _load_data(filename, dim_names, use_dask, decode_times=True):
+    """Load dataset from the specified file.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
+        or a list of strings or Path objects containing multiple files.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+    use_dask: bool
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    decode_times: bool, optional
+        If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+
+    Returns
+    -------
+    ds : xr.Dataset
+        The loaded xarray Dataset containing the forcing data.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified file does not exist.
+    ValueError
+        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+    """
+
+    # Precompile the regex for matching wildcard characters
+    wildcard_regex = re.compile(r"[\*\?\[\]]")
+
+    # Convert Path objects to strings
+    if isinstance(filename, (str, Path)):
+        filename_str = str(filename)
+    elif isinstance(filename, list):
+        filename_str = [str(f) for f in filename]
+    else:
+        raise ValueError("filename must be a string, Path, or a list of strings/Paths.")
+    # Handle the case when filename is a string
+    contains_wildcard = False
+    if isinstance(filename_str, str):
+        contains_wildcard = bool(wildcard_regex.search(filename_str))
+        if contains_wildcard:
+            matching_files = glob.glob(filename_str)
+            if not matching_files:
+                raise FileNotFoundError(
+                    f"No files found matching the pattern '{filename_str}'."
+                )
+        else:
+            matching_files = [filename_str]
+
+    # Handle the case when filename is a list
+    elif isinstance(filename_str, list):
+        contains_wildcard = any(wildcard_regex.search(f) for f in filename_str)
+        if contains_wildcard:
+            matching_files = []
+            for f in filename_str:
+                files = glob.glob(f)
+                if not files:
+                    raise FileNotFoundError(
+                        f"No files found matching the pattern '{f}'."
+                    )
+                matching_files.extend(files)
+        else:
+            matching_files = filename_str
+
+    # Check if time dimension is available when multiple files are provided
+    if isinstance(filename_str, list) and "time" not in dim_names:
+        raise ValueError(
+            "A list of files is provided, but time dimension is not available. "
+            "A time dimension must be available to concatenate the files."
+        )
+
+    # Determine the kwargs for combining datasets
+    if contains_wildcard or len(matching_files) == 1:
+        # If there is a wildcard or just one file, use by_coords
+        kwargs = {"combine": "by_coords"}
+    else:
+        # Otherwise, use nested combine based on time
+        kwargs = {"combine": "nested", "concat_dim": dim_names["time"]}
+
+    # Base kwargs used for dataset combination
+    combine_kwargs = {
+        "coords": "minimal",
+        "compat": "override",
+        "combine_attrs": "override",
+    }
+
+    if use_dask:
+
+        chunks = {
+            dim_names["latitude"]: -1,
+            dim_names["longitude"]: -1,
+        }
+        if "depth" in dim_names:
+            chunks[dim_names["depth"]] = -1
+        if "time" in dim_names:
+            chunks[dim_names["time"]] = 1
+
+        ds = xr.open_mfdataset(
+            matching_files,
+            decode_times=decode_times,
+            chunks=chunks,
+            **combine_kwargs,
+            **kwargs,
+        )
+    else:
+        ds_list = []
+        for file in matching_files:
+            ds = xr.open_dataset(file, decode_times=decode_times, chunks=None)
+            ds_list.append(ds)
+
+        if kwargs["combine"] == "by_coords":
+            ds = xr.combine_by_coords(ds_list, **combine_kwargs)
+        elif kwargs["combine"] == "nested":
+            ds = xr.combine_nested(
+                ds_list, concat_dim=kwargs["concat_dim"], **combine_kwargs
+            )
+
+    if "time" in dim_names and dim_names["time"] not in ds.dims:
+        ds = ds.expand_dims(dim_names["time"])
+
+    return ds
+
+
+def _check_dataset(ds: xr.Dataset, var_names, dim_names) -> None:
+    """Check if the dataset contains the specified variables and dimensions.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset to check.
+    var_names: Dict[str, str]
+        Dictionary of variable names that are required in the dataset.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+
+    Raises
+    ------
+    ValueError
+        If the dataset does not contain the specified variables or dimensions.
+    """
+
+    missing_vars = [var for var in var_names.values() if var not in ds.data_vars]
+    if missing_vars:
+        raise ValueError(
+            f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
+        )
+
+    missing_dims = [dim for dim in dim_names.values() if dim not in ds.dims]
+    if missing_dims:
+        raise ValueError(
+            f"Dataset does not contain all required dimensions. The following dimensions are missing: {missing_vars}"
+        )
+
+
+def _select_relevant_times(
+    ds, time_dim, start_time=None, end_time=None, climatology=False
+) -> xr.Dataset:
+    """Select a subset of the dataset based on the specified time range.
+
+    This method filters the dataset to include all records between `start_time` and `end_time`.
+    Additionally, it ensures that one record at or before `start_time` and one record at or
+    after `end_time` are included, even if they fall outside the strict time range.
+
+    If no `end_time` is specified, the method will select the time range of
+    [start_time, start_time + 24 hours] and return the closest time entry to `start_time` within that range.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The input dataset to be filtered. Must contain a time dimension.
+    time_dim: str
+        Name of time dimension.
+    start_time : Optional[datetime], optional
+        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    end_time : Optional[datetime], optional
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
+        or no filtering is applied if start_time is not provided.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
+
+    Returns
+    -------
+    xr.Dataset
+        A dataset filtered to the specified time range, including the closest entries
+        at or before `start_time` and at or after `end_time` if applicable.
+
+    Raises
+    ------
+    ValueError
+        If no matching times are found between `start_time` and `start_time + 24 hours`.
+
+    Warns
+    -----
+    UserWarning
+        If the dataset contains exactly 12 time steps but the climatology flag is not set.
+        This may indicate that the dataset represents climatology data.
+
+    UserWarning
+        If no records at or before `start_time` or no records at or after `end_time` are found.
+
+    UserWarning
+        If the dataset does not contain any time dimension or the time dimension is incorrectly named.
+
+    Notes
+    -----
+    - If the `climatology` flag is set and `end_time` is not provided, the method will
+      interpolate initial conditions from climatology data.
+    - If the dataset uses `cftime` datetime objects, these will be converted to standard
+      `np.datetime64` objects before filtering.
+    """
+
+    if time_dim in ds.variables:
+        if climatology:
+            if len(ds[time_dim]) != 12:
+                raise ValueError(
+                    f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
+                )
+            if not end_time:
+                # Interpolate from climatology for initial conditions
+                ds = interpolate_from_climatology(ds, time_dim, start_time)
+        else:
+            time_type = get_time_type(ds[time_dim])
+            if time_type == "int":
+                raise ValueError(
+                    "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
+                )
+            if time_type == "cftime":
+                ds = ds.assign_coords(
+                    {time_dim: convert_cftime_to_datetime(ds[time_dim])}
+                )
+            if end_time:
+                end_time = end_time
+
+                # Identify records before or at start_time
+                before_start = ds[time_dim] <= np.datetime64(start_time)
+                if before_start.any():
+                    closest_before_start = (
+                        ds[time_dim].where(before_start, drop=True).max()
+                    )
+                else:
+                    logging.warning("No records found at or before the start_time.")
+                    closest_before_start = ds[time_dim].min()
+
+                # Identify records after or at end_time
+                after_end = ds[time_dim] >= np.datetime64(end_time)
+                if after_end.any():
+                    closest_after_end = ds[time_dim].where(after_end, drop=True).min()
+                else:
+                    logging.warning("No records found at or after the end_time.")
+                    closest_after_end = ds[time_dim].max()
+
+                # Select records within the time range and add the closest before/after
+                within_range = (ds[time_dim] > np.datetime64(start_time)) & (
+                    ds[time_dim] < np.datetime64(end_time)
+                )
+                selected_times = ds[time_dim].where(
+                    within_range
+                    | (ds[time_dim] == closest_before_start)
+                    | (ds[time_dim] == closest_after_end),
+                    drop=True,
+                )
+                ds = ds.sel({time_dim: selected_times})
+            else:
+                # Look in time range [start_time, start_time + 24h]
+                end_time = start_time + timedelta(days=1)
+                times = (np.datetime64(start_time) <= ds[time_dim]) & (
+                    ds[time_dim] < np.datetime64(end_time)
+                )
+                if np.all(~times):
+                    raise ValueError(
+                        f"The dataset does not contain any time entries between the specified start_time: {start_time} "
+                        f"and {start_time + timedelta(hours=24)}. "
+                        "Please ensure the dataset includes time entries for that range."
+                    )
+
+                ds = ds.where(times, drop=True)
+                if ds.sizes[time_dim] > 1:
+                    # Pick the time closest to start_time
+                    ds = ds.isel({time_dim: 0})
+                logging.info(
+                    f"Selected time entry closest to the specified start_time ({start_time}) within the range [{start_time}, {start_time + timedelta(hours=24)}]: {ds[time_dim].values}"
+                )
+    else:
+        logging.warning(
+            "Dataset does not contain any time information. Please check if the time dimension "
+            "is correctly named or if the dataset includes time data."
+        )
+
+    return ds

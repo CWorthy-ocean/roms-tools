@@ -921,3 +921,55 @@ def get_vector_pairs(variable_info):
                 processed.update([var_name, vector_pair])
 
     return vector_pairs
+
+
+def gc_dist(lon1, lat1, lon2, lat2):
+    """Calculate the great circle distance between two points on the Earth's surface.
+    Latitude and longitude must be provided in degrees (they will be converted to
+    radians).
+
+    The function uses the Haversine formula to compute the shortest distance
+    along the surface of a sphere (Earth), assuming the Earth is a perfect sphere.
+
+    Parameters
+    ----------
+    lon1, lat1 : float
+        Longitude and latitude of the first point in degrees.
+    lon2, lat2 : float
+        Longitude and latitude of the second point in degrees.
+
+    Returns
+    -------
+    dis : float
+        The great circle distance between the two points in meters.
+        This is the shortest distance along the surface of a sphere (Earth).
+
+    Notes
+    -----
+    The radius of the Earth is taken to be 6371315 meters.
+    """
+    # Convert degrees to radians
+    d2r = np.pi / 180
+    lon1 = lon1 * d2r
+    lat1 = lat1 * d2r
+    lon2 = lon2 * d2r
+    lat2 = lat2 * d2r
+
+    # Difference in latitudes and longitudes
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    # Haversine formula
+    dang = 2 * np.arcsin(
+        np.sqrt(
+            np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+        )
+    )
+
+    # Radius of the Earth in meters
+    r_earth = 6371315.0
+
+    # Distance in meters
+    dis = r_earth * dang
+
+    return dis

@@ -5,6 +5,7 @@ import pandas as pd
 import cftime
 from roms_tools.utils import partition
 from pathlib import Path
+from datetime import datetime
 
 
 def nan_check(field, mask, error_message=None) -> None:
@@ -973,3 +974,46 @@ def gc_dist(lon1, lat1, lon2, lat2):
     dis = r_earth * dang
 
     return dis
+
+
+def convert_to_roms_time(ds, model_reference_date, climatology):
+
+    if climatology:
+        ds.attrs["climatology"] = str(True)
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords(
+            {"abs_time": np.datetime64(model_reference_date) + ds["time"]}
+        )
+        # Convert to pandas TimedeltaIndex
+        timedelta_index = pd.to_timedelta(ds["time"].values)
+
+        # Determine the start of the year for the base_datetime
+        start_of_year = datetime(model_reference_date.year, 1, 1)
+
+        # Calculate the offset from midnight of the new year
+        offset = model_reference_date - start_of_year
+
+        # Convert the timedelta to nanoseconds first, then to days
+        time = xr.DataArray(
+            (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
+            dims="time",
+        )
+        time.attrs["cycle_length"] = 365.25
+
+    else:
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords({"abs_time": ds["time"]})
+
+        time = (
+            (ds["time"] - np.datetime64(model_reference_date)).astype("float64")
+            / 3600
+            / 24
+            * 1e-9
+        )
+
+    time.attrs["long_name"] = f"days since {str(model_reference_date)}"
+    time.encoding["units"] = "days"
+    time.attrs["units"] = "days"
+    ds.encoding["unlimited_dims"] = "time"
+
+    return ds, time

@@ -1,6 +1,5 @@
 import xarray as xr
 import numpy as np
-import pandas as pd
 from scipy.ndimage import label
 import logging
 import yaml
@@ -22,6 +21,7 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     nan_check,
     substitute_nans_by_fillvalue,
+    convert_to_roms_time,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -474,51 +474,13 @@ class BoundaryForcing:
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
 
         # Convert the time coordinate to the format expected by ROMS
-        if data.climatology:
-            ds.attrs["climatology"] = str(True)
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords(
-                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
-            )
-            # Convert to pandas TimedeltaIndex
-            timedelta_index = pd.to_timedelta(ds["time"].values)
-
-            # Determine the start of the year for the base_datetime
-            start_of_year = datetime(self.model_reference_date.year, 1, 1)
-
-            # Calculate the offset from midnight of the new year
-            offset = self.model_reference_date - start_of_year
-
-            # Convert the timedelta to nanoseconds first, then to days
-            bry_time = xr.DataArray(
-                (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
-                dims="time",
-            )
-
-        else:
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords({"abs_time": ds["time"]})
-            bry_time = (
-                (ds["time"] - np.datetime64(self.model_reference_date)).astype(
-                    "float64"
-                )
-                / 3600
-                / 24
-                * 1e-9
-            )
+        ds, bry_time = convert_to_roms_time(
+            ds, self.model_reference_date, data.climatology
+        )
 
         ds = ds.assign_coords({"bry_time": bry_time})
-        ds["bry_time"].attrs[
-            "long_name"
-        ] = f"days since {str(self.model_reference_date)}"
-        ds["bry_time"].encoding["units"] = "days"
-        ds["bry_time"].attrs["units"] = "days"
         ds = ds.swap_dims({"time": "bry_time"})
         ds = ds.drop_vars("time")
-        ds.encoding["unlimited_dims"] = "bry_time"
-
-        if data.climatology:
-            ds["bry_time"].attrs["cycle_length"] = 365.25
 
         return ds
 

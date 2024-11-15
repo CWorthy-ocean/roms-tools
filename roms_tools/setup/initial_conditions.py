@@ -392,7 +392,7 @@ class InitialConditions:
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
 
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        # Convert the time coordinate to the format expected by ROMS (seconds since model reference date)
         ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
         ds = ds.assign_coords(ocean_time=("time", ocean_time.data.astype("float64")))
         ds["ocean_time"].attrs[

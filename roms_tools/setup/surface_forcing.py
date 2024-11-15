@@ -1,5 +1,4 @@
 import xarray as xr
-import pandas as pd
 import yaml
 import importlib.metadata
 from dataclasses import dataclass, field, asdict
@@ -22,6 +21,7 @@ from roms_tools.setup.utils import (
     save_datasets,
     get_target_coords,
     rotate_velocities,
+    convert_to_roms_time,
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
@@ -302,38 +302,9 @@ class SurfaceForcing:
         ds = self._add_global_metadata(ds)
 
         # Convert the time coordinate to the format expected by ROMS
-        if data.climatology:
-            ds.attrs["climatology"] = str(True)
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords(
-                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
-            )
-            # Convert to pandas TimedeltaIndex
-            timedelta_index = pd.to_timedelta(ds["time"].values)
-
-            # Determine the start of the year for the base_datetime
-            start_of_year = datetime(self.model_reference_date.year, 1, 1)
-
-            # Calculate the offset from midnight of the new year
-            offset = self.model_reference_date - start_of_year
-
-            # Convert the timedelta to nanoseconds first, then to days
-            sfc_time = xr.DataArray(
-                (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
-                dims="time",
-            )
-        else:
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords({"abs_time": ds["time"]})
-
-            sfc_time = (
-                (ds["time"] - np.datetime64(self.model_reference_date)).astype(
-                    "float64"
-                )
-                / 3600
-                / 24
-                * 1e-9
-            )
+        ds, sfc_time = convert_to_roms_time(
+            ds, self.model_reference_date, data.climatology
+        )
 
         if self.type == "physics":
             time_coords = ["time"]
@@ -347,14 +318,6 @@ class SurfaceForcing:
             ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
-            ds[time_coord].attrs[
-                "long_name"
-            ] = f"days since {str(self.model_reference_date)}"
-            ds[time_coord].encoding["units"] = "days"
-            ds[time_coord].attrs["units"] = "days"
-            if data.climatology:
-                ds[time_coord].attrs["cycle_length"] = 365.25
-        ds.encoding["unlimited_dims"] = "time"
 
         if self.type == "bgc":
             ds = ds.drop_vars(["time"])

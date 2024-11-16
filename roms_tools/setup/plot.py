@@ -58,15 +58,70 @@ def _plot(
     if straddle:
         lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
-    # Define projections
-    proj = ccrs.PlateCarree()
-
-    trans = ccrs.NearsidePerspective(
-        central_longitude=lon_deg.mean().values, central_latitude=lat_deg.mean().values
-    )
+    trans = _get_projection(lon_deg, lat_deg)
 
     lon_deg = lon_deg.values
     lat_deg = lat_deg.values
+
+    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
+    _add_plot_to_ax(
+        ax, lon_deg, lat_deg, trans, field, depth_contours, c, title, kwargs
+    )
+
+
+def _add_plot_to_ax(
+    ax,
+    lon_deg,
+    lat_deg,
+    trans,
+    field=None,
+    depth_contours=False,
+    c="red",
+    title="",
+    add_colorbar=True,
+    kwargs=None,
+):
+    """Plots a grid or field on a map with optional depth contours.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes._axes.Axes
+        The axes on which to plot the data (Cartopy axis with projection).
+
+    lon_deg : np.ndarray
+        Longitude values in degrees.
+
+    lat_deg : np.ndarray
+        Latitude values in degrees.
+
+    trans : cartopy.crs.Projection
+        The projection for transforming coordinates.
+
+    field : xarray.DataArray, optional
+        Field data to plot (e.g., temperature, salinity). If None, only the grid is plotted.
+
+    depth_contours : bool, optional
+        If True, adds depth contours to the plot.
+
+    c : str, optional
+        Color of the grid boundary (default is 'red').
+
+    title : str, optional
+        Title of the plot.
+
+    add_colorbar : bool, optional
+        If True, add colobar.
+
+    kwargs : dict, optional
+        Additional keyword arguments passed to `pcolormesh` (e.g., colormap, limits).
+
+    Notes
+    -----
+    - If `field` is provided, a colorbar is added.
+    - If `depth_contours` is True, the field’s `layer_depth` is used to add contours.
+    """
+    proj = ccrs.PlateCarree()
 
     # find corners
     corners = [
@@ -80,14 +135,13 @@ def _plot(
     transformed_corners = [trans.transform_point(lo, la, proj) for lo, la in corners]
     transformed_lons, transformed_lats = zip(*transformed_corners)
 
-    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
-
-    ax.plot(
-        list(transformed_lons) + [transformed_lons[0]],
-        list(transformed_lats) + [transformed_lats[0]],
-        "o-",
-        c=c,
-    )
+    if c is not None:
+        ax.plot(
+            list(transformed_lons) + [transformed_lons[0]],
+            list(transformed_lats) + [transformed_lats[0]],
+            "o-",
+            c=c,
+        )
 
     ax.coastlines(
         resolution="50m", linewidth=0.5, color="black"
@@ -104,11 +158,19 @@ def _plot(
             label = f"{field.Long_name} [{field.units}]"
         else:
             label = ""
-        plt.colorbar(p, label=label)
+        if add_colorbar:
+            plt.colorbar(p, label=label)
 
     if depth_contours:
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=10)
+
+
+def _get_projection(lon, lat):
+
+    return ccrs.NearsidePerspective(
+        central_longitude=lon.mean().values, central_latitude=lat.mean().values
+    )
 
 
 def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):

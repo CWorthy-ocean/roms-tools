@@ -13,6 +13,7 @@ from roms_tools.setup.utils import (
     get_time_type,
     convert_cftime_to_datetime,
     one_dim_fill,
+    gc_dist,
 )
 from roms_tools.setup.download import download_correction_data
 from roms_tools.setup.fill import LateralFill
@@ -34,10 +35,10 @@ class Dataset:
     end_time : Optional[datetime], optional
         The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
         or no filtering is applied if start_time is not provided.
-    var_names: Dict[str, str]
-        Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    var_names: Dict[str, str]
+        Dictionary of variable names that are required in the dataset.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
     use_dask: bool
@@ -64,7 +65,6 @@ class Dataset:
     filename: Union[str, Path, List[Union[str, Path]]]
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
-    var_names: Dict[str, str]
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
@@ -72,6 +72,7 @@ class Dataset:
             "time": "time",
         }
     )
+    var_names: Dict[str, str]
     climatology: Optional[bool] = False
     use_dask: Optional[bool] = True
     apply_post_processing: Optional[bool] = True
@@ -187,7 +188,7 @@ class Dataset:
             If the dataset does not contain the specified variables or dimensions.
         """
 
-        _check_dataset(ds, self.var_names, self.dim_names)
+        _check_dataset(ds, self.dim_names, self.var_names)
 
     def select_relevant_fields(self, ds) -> xr.Dataset:
         """Selects and returns a subset of the dataset containing only the variables
@@ -1359,10 +1360,14 @@ class RiverDataset:
         The start time for selecting relevant data.
     end_time : datetime
         The end time for selecting relevant data.
-    var_names: Dict[str, str]
-        Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+    opt_var_names: Dict[str, str], optional
+        Dictionary of variable names that are optional in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
 
     Attributes
     ----------
@@ -1373,23 +1378,32 @@ class RiverDataset:
     filename: Union[str, Path, List[Union[str, Path]]]
     start_time: datetime
     end_time: datetime
-    var_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "latitude": "lat_mou",
-            "longitude": "lon_mou",
-            "flux": "FLOW",
-            "ratio": "ratio_m2s",
-            "vol": "vol_stn",
-            "name": "riv_name",
-        }
-    )
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {
             "station": "station",
             "time": "time",
         }
     )
-    is_global: bool = field(init=False, repr=False)
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "latitude": "lat_mou",
+            "longitude": "lon_mou",
+            "flux": "FLOW",
+            "ratio": "ratio_m2s",
+            "name": "riv_name",
+        }
+    )
+    opt_var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "latitude": "lat_mou",
+            "longitude": "lon_mou",
+            "flux": "FLOW",
+            "ratio": "ratio_m2s",
+            "vol": "vol_stn",  # optional
+            "name": "riv_name",
+        }
+    )
+    climatology: Optional[bool] = False
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -1413,6 +1427,7 @@ class RiverDataset:
             )
 
         ds = self.load_data()
+        ds = self.clean_up(ds)
         self.check_dataset(ds)
 
         # Select relevant times
@@ -1442,6 +1457,42 @@ class RiverDataset:
 
         return ds
 
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Decodes the 'name' variable (if byte-encoded) and updates the dataset.
+
+        This method checks if the 'name' variable is of dtype 'object' (i.e., byte-encoded),
+        and if so, decodes each byte array to a string and updates the dataset.
+        It also ensures that the 'station' dimension is of integer type.
+
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset containing the 'name' variable to decode.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The dataset with the decoded 'name' variable.
+        """
+
+        if ds[self.var_names["name"]].dtype == "object":
+            names = []
+            for i in range(len(ds[self.dim_names["station"]])):
+                byte_array = ds[self.var_names["name"]].isel(
+                    **{self.dim_names["station"]: i}
+                )
+                name = decode_string(byte_array)
+                names.append(name)
+            ds[self.var_names["name"]] = xr.DataArray(
+                data=names, dims=self.dim_names["station"]
+            )
+
+        if ds[self.dim_names["station"]].dtype == "float64":
+            ds[self.dim_names["station"]] = ds[self.dim_names["station"]].astype(int)
+
+        return ds
+
     def check_dataset(self, ds: xr.Dataset) -> None:
         """Check if the dataset contains the specified variables and dimensions.
 
@@ -1456,7 +1507,7 @@ class RiverDataset:
             If the dataset does not contain the specified variables or dimensions.
         """
 
-        _check_dataset(ds, self.var_names, self.dim_names)
+        _check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Dummy method to be overridden by child classes to add time information to the
@@ -1512,6 +1563,129 @@ class RiverDataset:
         ds = _select_relevant_times(ds, time_dim, self.start_time, self.end_time, False)
 
         return ds
+
+    def sort_by_river_volume(self, ds: xr.Dataset) -> xr.Dataset:
+        """Sorts the dataset by river volume in descending order (largest rivers first),
+        if the volume variable is available.
+
+        This method uses the river volume to reorder the dataset such that the rivers with
+        the largest volumes come first in the `station` dimension. If the volume variable
+        is not present in the dataset, a warning is logged.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The xarray Dataset containing the river data to be sorted by volume.
+
+        Returns
+        -------
+        xr.Dataset
+            The dataset with rivers sorted by their volume in descending order.
+            If the volume variable is not available, the original dataset is returned.
+        """
+
+        if "vol" in self.opt_var_names:
+            volume_values = ds[self.opt_var_names["vol"]].values
+            if isinstance(volume_values, np.ndarray):
+                # Check if all volume values are the same
+                if np.all(volume_values == volume_values[0]):
+                    # If all volumes are the same, no need to reverse order
+                    sorted_indices = np.argsort(
+                        volume_values
+                    )  # Sort in ascending order
+                else:
+                    # If volumes differ, reverse order for descending sort
+                    sorted_indices = np.argsort(volume_values)[
+                        ::-1
+                    ]  # Reverse for descending order
+
+                ds = ds.isel(**{self.dim_names["station"]: sorted_indices})
+
+            else:
+                logging.warning("The volume data is not in a valid array format.")
+        else:
+            logging.warning(
+                "Cannot sort rivers by volume. 'vol' is missing in the variable names."
+            )
+
+        return ds
+
+    def extract_relevant_rivers(self, target_coords, dx):
+        """Extracts a subset of the dataset based on the proximity of river mouths to
+        target coordinates.
+
+        This method calculates the distance between each river mouth and the provided target coordinates
+        (latitude and longitude) using the `gc_dist` function. It then filters the dataset to include only those
+        river stations whose minimum distance from the target is less than a specified threshold distance (`dx`).
+
+        Parameters
+        ----------
+        target_coords : dict
+            A dictionary containing the target coordinates for the comparison. It should include:
+            - "lon" (float): The target longitude in degrees.
+            - "lat" (float): The target latitude in degrees.
+            - "straddle" (bool): A flag indicating whether to adjust the longitudes for stations that cross the
+              International Date Line. If `True`, longitudes greater than 180 degrees are adjusted by subtracting 360,
+              otherwise, negative longitudes are adjusted by adding 360.
+
+        dx : float
+            The maximum distance threshold (in meters) for including a river station. Only river mouths that are
+            within `dx` meters from the target coordinates will be included in the returned dataset.
+
+        Returns
+        -------
+        indices : dict
+            A dictionary containing the indices of the rivers that are within the threshold distance from
+            the target coordinates. The dictionary keys are:
+            - "station" : numpy.ndarray
+                The indices of the rivers that satisfy the distance threshold.
+            - "eta_rho" : numpy.ndarray
+                The indices of the `eta_rho` dimension corresponding to the selected stations.
+            - "xi_rho" : numpy.ndarray
+                The indices of the `xi_rho` dimension corresponding to the selected stations.
+        """
+
+        # Retrieve longitude and latitude of river mouths
+        river_lon = self.ds[self.var_names["longitude"]]
+        river_lat = self.ds[self.var_names["latitude"]]
+
+        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
+        if target_coords["straddle"]:
+            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
+        else:
+            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+
+        # Calculate the distance between the target coordinates and each river mouth
+        dist = gc_dist(target_coords["lon"], target_coords["lat"], river_lon, river_lat)
+        dist_min = dist.min(dim=["eta_rho", "xi_rho"])
+
+        # Filter the dataset to include only stations within the distance threshold
+        ds = self.ds.where(dist_min < dx, drop=True)
+        ds = self.sort_by_river_volume(ds)
+
+        object.__setattr__(self, "ds", ds)
+
+        dist = dist.where(dist_min < dx, drop=True).transpose(
+            self.dim_names["station"], "eta_rho", "xi_rho"
+        )
+        dist_min = dist_min.where(dist_min < dx, drop=True)
+
+        # Find the indices of the closest grid cell to the river mouth
+        indices = np.where(dist == dist_min)
+        names = (
+            self.ds[self.var_names["name"]]
+            .isel({self.dim_names["station"]: indices[0]})
+            .values
+        )
+        # Return the indices in a dictionary format
+        indices = {
+            "station": indices[0],
+            "eta_rho": indices[1],
+            "xi_rho": indices[2],
+            "name": names,
+        }
+
+        return indices
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1682,23 +1856,38 @@ def _load_data(filename, dim_names, use_dask, decode_times=True):
     return ds
 
 
-def _check_dataset(ds: xr.Dataset, var_names, dim_names) -> None:
+def _check_dataset(
+    ds: xr.Dataset,
+    dim_names: Dict[str, str],
+    var_names: Dict[str, str],
+    opt_var_names: Optional[Dict[str, str]] = None,
+) -> None:
     """Check if the dataset contains the specified variables and dimensions.
 
     Parameters
     ----------
     ds : xr.Dataset
         The xarray Dataset to check.
-    var_names: Dict[str, str]
-        Dictionary of variable names that are required in the dataset.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
+    var_names: Dict[str, str]
+        Dictionary of variable names that are required in the dataset.
+    opt_var_names : Optional[Dict[str, str]], optional
+        Dictionary of optional variable names.
+        These variables are not strictly required, and the function will not raise an error if they are missing.
+        Default is None, meaning no optional variables are considered.
+
 
     Raises
     ------
     ValueError
         If the dataset does not contain the specified variables or dimensions.
     """
+    missing_dims = [dim for dim in dim_names.values() if dim not in ds.dims]
+    if missing_dims:
+        raise ValueError(
+            f"Dataset does not contain all required dimensions. The following dimensions are missing: {missing_dims}"
+        )
 
     missing_vars = [var for var in var_names.values() if var not in ds.data_vars]
     if missing_vars:
@@ -1706,11 +1895,14 @@ def _check_dataset(ds: xr.Dataset, var_names, dim_names) -> None:
             f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
         )
 
-    missing_dims = [dim for dim in dim_names.values() if dim not in ds.dims]
-    if missing_dims:
-        raise ValueError(
-            f"Dataset does not contain all required dimensions. The following dimensions are missing: {missing_vars}"
-        )
+    if opt_var_names:
+        missing_optional_vars = [
+            var for var in opt_var_names.values() if var not in ds.data_vars
+        ]
+        if missing_optional_vars:
+            logging.warning(
+                f"Optional variables missing (but not critical): {missing_optional_vars}"
+            )
 
 
 def _select_relevant_times(
@@ -1848,3 +2040,17 @@ def _select_relevant_times(
         )
 
     return ds
+
+
+def decode_string(byte_array):
+
+    # Decode each byte and handle errors with 'ignore'
+    decoded_string = "".join(
+        [
+            x.decode("utf-8", errors="ignore")  # Ignore invalid byte sequences
+            for x in byte_array.values
+            if isinstance(x, bytes) and x != b" " and x is not np.nan
+        ]
+    )
+
+    return decoded_string

@@ -165,7 +165,8 @@ class RiverForcing:
         river_tracer = xr.DataArray(
             tracer_data, dims=("river_time", "nriver", "ntracers")
         )
-        river_tracer.coords["ntracers"] = ["temperature", "salinity"]
+        river_tracer.coords["ntracers"] = ["temperature [degrees C]", "salinity [psu]"]
+        river_tracer.attrs["long_name"] = "River tracer data"
 
         ds["river_tracer"] = river_tracer
 
@@ -279,9 +280,11 @@ class RiverForcing:
             station = indices["station"][i]
             eta_index = indices["eta_rho"][i]
             xi_index = indices["xi_rho"][i]
-            river_locations[eta_index, xi_index] = station + 1
+            river_locations[eta_index, xi_index] = station + 2
 
-            self.grid.ds["river_flux"] = river_locations
+        river_locations.attrs["long_name"] = "River volume flux partition"
+        river_locations.attrs["units"] = "none"
+        self.grid.ds["river_flux"] = river_locations
 
     def plot_locations(self):
         """Plots the original and updated river locations on a map projection."""
@@ -354,8 +357,23 @@ class RiverForcing:
 
         axs[1].legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
-    def plot(self):
-        """Plots the river volume flux for all rivers."""
+    def plot(self, var_name="river_volume"):
+        """Plots the river flux (e.g., volume, temperature, or salinity) over time for
+        all rivers.
+
+        This method generates a time-series plot for a specified river-related variable (such as river volume,
+        river temperature, or river salinity) for each river in the dataset. It can handle climatology data
+        as well as time series data, and customizes the x-axis and labels accordingly.
+
+        Parameters
+        ----------
+        var_name : str, optional
+            The variable to plot. It can be one of the following:
+            - 'river_volume' : Plot the river volume flux.
+            - 'river_temperature' : Plot the river temperature (from the river_tracer).
+            - 'river_salinity' : Plot the river salinity (from the river_tracer).
+            The default is 'river_volume'.
+        """
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
         if self.source["climatology"]:
@@ -364,11 +382,25 @@ class RiverForcing:
         else:
             xticks = self.ds.river_time.values
             xlabel = "time"
+
+        if var_name == "river_volume":
+            field = self.ds[var_name]
+            units = f"${self.ds.river_volume.units}$"
+            long_name = self.ds[var_name].long_name
+        elif var_name == "river_temperature":
+            field = self.ds["river_tracer"].isel(ntracers=0)
+            units = "degrees C"
+            long_name = "River temperature"
+        elif var_name == "river_salinity":
+            field = self.ds["river_tracer"].isel(ntracers=1)
+            units = "psu"
+            long_name = "River salinity"
+
         for i in range(len(self.ds.nriver)):
 
             ax.plot(
                 xticks,
-                self.ds.isel(nriver=i).river_volume.values,
+                field.isel(nriver=i),
                 marker="x",
                 markersize=8,
                 markeredgewidth=2,
@@ -382,7 +414,7 @@ class RiverForcing:
             n = len(self.ds.river_time)
             ticks = self.ds.river_time.values[:: n // 6 + 1]
             ax.set_xticks(ticks)
-        ax.set_ylabel(f"${self.ds.river_volume.units}$")
-        ax.set_title(self.ds.river_volume.long_name)
+        ax.set_ylabel(units)
+        ax.set_title(long_name)
         ax.grid()
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))

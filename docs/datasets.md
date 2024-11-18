@@ -38,3 +38,11 @@ To use `ROMS-Tools`, the user is required to download the following datasets:
 |             |                        | `so`                | Salinity (psu)                                                            |                                                                                  |                     |
 |             |                        | `uo`                | Eastward velocity (m/s)                                                   |                                                                                  |                     |
 |             |                        | `vo`                | Northward velocity (m/s)                                                  |                                                                                  |                     |
+|-------------|------------------------|---------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------|---------------------|
+| Dai and Trenberth (coastal station volume, monthly series)      | 2019                      | `time`              | Time                                                                      | [NCAR Research Data Archive](https://rda.ucar.edu/datasets/d551000/dataaccess/#) | River Forcing     |
+|  | -                      | `lat_mou`              | River mouth latitude                                                  |  |      |
+|  | -                      | `lon_mou`              | River mouth longitude                                                  |  |      |
+|  | -                      | `FLOW`              | Monthly mean volume at station                                                  |  |      |
+|  | -                      | `ratio_m2s`              | Ratio of volume between river mouth and station                                                  |  |      |
+|  | -                      | `riv_name`              | River name                                                  |  |      |
+|  | -                      | `vol_stn` (optional)             | Annual volume at station                                                  |  |      |

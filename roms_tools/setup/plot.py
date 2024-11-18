@@ -66,7 +66,7 @@ def _plot(
     fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
     _add_plot_to_ax(
-        ax, lon_deg, lat_deg, trans, field, depth_contours, c, title, kwargs
+        ax, lon_deg, lat_deg, trans, field, depth_contours, c, title, kwargs=kwargs
     )
 
 

@@ -1395,12 +1395,7 @@ class RiverDataset:
     )
     opt_var_names: Dict[str, str] = field(
         default_factory=lambda: {
-            "latitude": "lat_mou",
-            "longitude": "lon_mou",
-            "flux": "FLOW",
-            "ratio": "ratio_m2s",
-            "vol": "vol_stn",  # optional
-            "name": "riv_name",
+            "vol": "vol_stn",
         }
     )
     climatology: Optional[bool] = False
@@ -1432,8 +1427,6 @@ class RiverDataset:
 
         # Select relevant times
         ds = self.add_time_info(ds)
-        ds = self.select_relevant_times(ds)
-
         object.__setattr__(self, "ds", ds)
 
     def load_data(self) -> xr.Dataset:
@@ -1563,6 +1556,24 @@ class RiverDataset:
         ds = _select_relevant_times(ds, time_dim, self.start_time, self.end_time, False)
 
         return ds
+
+    def compute_climatology(self):
+        logging.info("Compute climatology for river forcing.")
+
+        time_dim = self.dim_names["time"]
+
+        flux = self.ds[self.var_names["flux"]].groupby(f"{time_dim}.month").mean()
+        self.ds[self.var_names["flux"]] = flux
+
+        ds = assign_dates_to_climatology(self.ds, "month")
+        ds = ds.swap_dims({"month": "time"})
+        object.__setattr__(self, "ds", ds)
+
+        updated_dim_names = {**self.dim_names}
+        updated_dim_names["time"] = "time"
+        object.__setattr__(self, "dim_names", updated_dim_names)
+
+        object.__setattr__(self, "climatology", True)
 
     def sort_by_river_volume(self, ds: xr.Dataset) -> xr.Dataset:
         """Sorts the dataset by river volume in descending order (largest rivers first),

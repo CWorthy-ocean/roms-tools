@@ -32,7 +32,7 @@ class RiverForcing:
         Start time of the desired river forcing data.
     end_time : datetime
         End time of the desired river forcing data.
-    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool], optional
         Dictionary specifying the source of the river forcing data. Keys include:
 
           - "name" (str): Name of the data source (e.g., "DAI").
@@ -42,6 +42,8 @@ class RiverForcing:
             - A single Path object.
             - A list of strings or Path objects containing multiple files.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
+
+        The default is the Dai and Trenberth global river dataset (updated in May 2019), which does not require a path.
 
     convert_to_climatology : str, optional
         Determines when to compute climatology for river forcing. Options are:
@@ -56,7 +58,7 @@ class RiverForcing:
     grid: Grid
     start_time: datetime
     end_time: datetime
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     convert_to_climatology: str = "if_any_missing"
     model_reference_date: datetime = datetime(2000, 1, 1)
 
@@ -87,11 +89,14 @@ class RiverForcing:
         object.__setattr__(self, "ds", ds)
 
     def _input_checks(self):
-        # Ensure 'source' dictionary contains required keys
+        if self.source is None:
+            object.__setattr__(self, "source", {"name": "DAI"})
+
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] != "DAI":
+                raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
         object.__setattr__(
@@ -103,13 +108,14 @@ class RiverForcing:
     def _get_data(self):
 
         data_dict = {
-            "filename": self.source["path"],
             "start_time": self.start_time,
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
         }
 
         if self.source["name"] == "DAI":
+            if "path" in self.source.keys():
+                data_dict["filename"] = self.source["path"]
             data = DaiRiverDataset(**data_dict)
         else:
             raise ValueError('Only "DAI" is a valid option for source["name"].')

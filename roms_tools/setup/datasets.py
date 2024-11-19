@@ -15,7 +15,7 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     gc_dist,
 )
-from roms_tools.setup.download import download_correction_data
+from roms_tools.setup.download import download_correction_data, download_river_data
 from roms_tools.setup.fill import LateralFill
 
 # lat-lon datasets
@@ -1360,12 +1360,15 @@ class RiverDataset:
         The start time for selecting relevant data.
     end_time : datetime
         The end time for selecting relevant data.
-    dim_names: Dict[str, str], optional
+    dim_names: Dict[str, str]
         Dictionary specifying the names of dimensions in the dataset.
-    var_names: Dict[str, str], optional
+        Requires "station" and "time" as keys.
+    var_names: Dict[str, str]
         Dictionary of variable names that are required in the dataset.
+        Requires the keys "latitude", "longitude", "flux", "ratio", and "name".
     opt_var_names: Dict[str, str], optional
         Dictionary of variable names that are optional in the dataset.
+        Defaults to an empty dictionary.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
 
@@ -1378,26 +1381,9 @@ class RiverDataset:
     filename: Union[str, Path, List[Union[str, Path]]]
     start_time: datetime
     end_time: datetime
-    dim_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "station": "station",
-            "time": "time",
-        }
-    )
-    var_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "latitude": "lat_mou",
-            "longitude": "lon_mou",
-            "flux": "FLOW",
-            "ratio": "ratio_m2s",
-            "name": "riv_name",
-        }
-    )
-    opt_var_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "vol": "vol_stn",
-        }
-    )
+    dim_names: Dict[str, str]
+    var_names: Dict[str, str]
+    opt_var_names: Optional[Dict[str, str]] = field(default_factory=dict)
     climatology: Optional[bool] = False
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -1693,6 +1679,60 @@ class RiverDataset:
 
 @dataclass(frozen=True, kw_only=True)
 class DaiRiverDataset(RiverDataset):
+    """Represents river data from the Dai river dataset.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]], optional
+        The path to the Dai River dataset file. If not provided, the dataset will be downloaded
+        automatically via the `pooch` library.
+    start_time : datetime
+        The start time for selecting relevant data.
+    end_time : datetime
+        The end time for selecting relevant data.
+    dim_names: Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+    var_names: Dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
+    opt_var_names: Dict[str, str], optional
+        Dictionary of variable names that are optional in the dataset.
+    climatology : bool
+        Indicates whether the dataset is climatological. Defaults to False.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the forcing data on its original grid.
+    """
+
+    filename: Union[str, Path, List[Union[str, Path]]] = field(
+        default_factory=lambda: download_river_data("dai_trenberth_may2019.nc")
+    )
+    start_time: datetime
+    end_time: datetime
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "station": "station",
+            "time": "time",
+        }
+    )
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "latitude": "lat_mou",
+            "longitude": "lon_mou",
+            "flux": "FLOW",
+            "ratio": "ratio_m2s",
+            "name": "riv_name",
+        }
+    )
+    opt_var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "vol": "vol_stn",
+        }
+    )
+    climatology: Optional[bool] = False
+    ds: xr.Dataset = field(init=False, repr=False)
+
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Adds time information to the dataset based on the climatology flag and
         dimension names.

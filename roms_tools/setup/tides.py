@@ -1,11 +1,9 @@
 from datetime import datetime
 import xarray as xr
 import numpy as np
-import yaml
-import importlib.metadata
 from typing import Dict, Union, List
-
-from dataclasses import dataclass, field, asdict
+import importlib.metadata
+from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
 from roms_tools.setup.datasets import TPXODataset
@@ -19,6 +17,8 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     get_vector_pairs,
+    _to_yaml,
+    _from_yaml,
 )
 from roms_tools.setup.regrid import LateralRegrid
 import matplotlib.pyplot as plt
@@ -418,42 +418,8 @@ class TidalForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        filepath = Path(filepath)
 
-        grid_data = asdict(self.grid)
-        grid_data.pop("ds", None)  # Exclude non-serializable fields
-        grid_data.pop("straddle", None)
-
-        # Include the version of roms-tools
-        try:
-            roms_tools_version = importlib.metadata.version("roms-tools")
-        except importlib.metadata.PackageNotFoundError:
-            roms_tools_version = "unknown"
-
-        # Create header
-        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-        # Extract grid data
-        grid_yaml_data = {"Grid": grid_data}
-
-        # Extract tidal forcing data
-        tidal_forcing_data = {
-            "TidalForcing": {
-                "source": self.source,
-                "ntides": self.ntides,
-                "allan_factor": self.allan_factor,
-                "model_reference_date": self.model_reference_date.isoformat(),
-            }
-        }
-
-        # Combine both sections
-        yaml_data = {**grid_yaml_data, **tidal_forcing_data}
-
-        with filepath.open("w") as file:
-            # Write header
-            file.write(header)
-            # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+        _to_yaml(self, filepath)
 
     @classmethod
     def from_yaml(
@@ -474,36 +440,9 @@ class TidalForcing:
             An instance of the TidalForcing class.
         """
         filepath = Path(filepath)
-        # Read the entire file content
-        with filepath.open("r") as file:
-            file_content = file.read()
 
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        tidal_forcing_data = None
-
-        # Process the YAML documents
-        for doc in documents:
-            if doc is None:
-                continue
-            if "TidalForcing" in doc:
-                tidal_forcing_data = doc["TidalForcing"]
-                break
-
-        if tidal_forcing_data is None:
-            raise ValueError("No TidalForcing configuration found in the YAML file.")
-
-        # Convert the model_reference_date from string to datetime
-        tidal_forcing_params = tidal_forcing_data
-        tidal_forcing_params["model_reference_date"] = datetime.fromisoformat(
-            tidal_forcing_params["model_reference_date"]
-        )
-
-        # Create Grid instance from the YAML file
         grid = Grid.from_yaml(filepath)
-
-        # Create and return an instance of TidalForcing
+        tidal_forcing_params = _from_yaml(cls, filepath)
         return cls(grid=grid, **tidal_forcing_params, use_dask=use_dask)
 
     def _correct_tides(self, data):

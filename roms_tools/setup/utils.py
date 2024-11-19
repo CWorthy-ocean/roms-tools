@@ -1,11 +1,14 @@
 import xarray as xr
 import numpy as np
-from typing import Union
+from typing import Union, Any, Dict, Type
 import pandas as pd
 import cftime
 from roms_tools.utils import partition
 from pathlib import Path
 from datetime import datetime
+from dataclasses import fields, asdict
+import importlib.metadata
+import yaml
 
 
 def nan_check(field, mask, error_message=None) -> None:
@@ -1017,3 +1020,153 @@ def convert_to_roms_time(ds, model_reference_date, climatology):
     ds.encoding["unlimited_dims"] = "time"
 
     return ds, time
+
+
+def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
+    """Serialize a forcing object (including its grid) into a YAML file.
+
+    This function serializes a dataclass object (forcing_object) and its associated
+    `grid` attribute into a YAML file. It includes additional metadata, such as
+    the version of the `roms-tools` package, and omits fields like `grid` and `ds`
+    that are not serializable or meant to be excluded.
+
+    The function also converts datetime fields to ISO format strings for proper
+    serialization.
+
+    Parameters
+    ----------
+    forcing_object : object
+        The object that contains the forcing data, typically a dataclass with attributes
+        such as `grid`, `start_time`, `end_time`, etc.
+    filepath : Union[str, Path]
+        The path where the serialized YAML file will be saved.
+
+    Returns
+    -------
+    None
+        The function writes the serialized data directly to a YAML file at the specified path.
+    """
+
+    # Convert the filepath to a Path object
+    filepath = Path(filepath)
+
+    # Step 1: Serialize Grid data
+    # Convert the grid attribute to a dictionary and remove non-serializable fields
+    grid_data = asdict(forcing_object.grid)
+    grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
+    grid_data.pop("straddle", None)  # Remove 'straddle' if it's non-essential
+    grid_yaml_data = {"Grid": grid_data}
+
+    # Step 2: Get ROMS Tools version
+    # Fetch the version of the 'roms-tools' package for inclusion in the YAML header
+    try:
+        roms_tools_version = importlib.metadata.version("roms-tools")
+    except importlib.metadata.PackageNotFoundError:
+        roms_tools_version = "unknown"
+
+    # Create YAML header with version information
+    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+    # Step 3: Prepare Forcing Data
+    # Prepare the forcing object fields, excluding 'grid' and 'ds'
+    forcing_data = {}
+    field_names = [field.name for field in fields(forcing_object)]
+    filtered_field_names = [
+        param for param in field_names if param not in ("grid", "ds", "use_dask")
+    ]
+
+    for field_name in filtered_field_names:
+        # Retrieve the value of each field using getattr
+        value = getattr(forcing_object, field_name)
+
+        # If the field is a datetime object, convert it to ISO format
+        if isinstance(value, datetime):
+            value = value.isoformat()
+
+        # Add the field and its value to the forcing_data dictionary
+        forcing_data[field_name] = value
+
+    # Step 4: Combine Grid and Forcing Data
+    # Combine grid and forcing data into a single dictionary for the final YAML content
+    yaml_data = {
+        **grid_yaml_data,  # Add the grid data to the final YAML structure
+        forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
+    }
+
+    # Step 5: Write to YAML file
+    with filepath.open("w") as file:
+        # Write the header first
+        file.write(header)
+        # Write the serialized YAML data
+        yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+
+
+def _from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, Any]:
+    """Extract the configuration data for a given forcing object from a YAML file.
+
+    This function reads a YAML file, searches for the configuration data associated
+    with the class name of the forcing object, and returns the configuration data
+    as a dictionary. The dictionary contains the forcing parameters extracted from
+    the YAML file, with any date fields converted from ISO format.
+
+    Parameters
+    ----------
+    filepath : Union[str, Path]
+        The path to the YAML file from which the parameters will be read.
+    forcing_object : Type
+        The class type (e.g., TidalForcing) whose configuration data is to be loaded
+        from the YAML file. The class name is used to locate the relevant data in
+        the YAML structure.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the forcing parameters extracted from the YAML file.
+        This dictionary contains key-value pairs where the keys are the parameter
+        names, and the values are the corresponding values from the YAML file.
+        Any date fields are converted from ISO format if necessary.
+
+    Raises
+    ------
+    ValueError
+        If no configuration for the specified class name is found in the YAML file.
+    """
+
+    # Read the entire file content
+    with filepath.open("r") as file:
+        file_content = file.read()
+
+    # Split the content into YAML documents
+    documents = list(yaml.safe_load_all(file_content))
+
+    forcing_data = None
+    forcing_object_name = forcing_object.__name__
+
+    # Process the YAML documents to find the forcing data for the given object
+    for doc in documents:
+        if doc is None:
+            continue
+        if forcing_object_name in doc:
+            forcing_data = doc[forcing_object_name]
+            break
+
+    if forcing_data is None:
+        raise ValueError(
+            f"No {forcing_object_name} configuration found in the YAML file."
+        )
+
+    # Convert any date fields from ISO format if necessary
+    for key, value in forcing_data.items():
+        forcing_data[key] = _convert_from_iso_format(value)
+
+    # Return the forcing data as a dictionary
+    return forcing_data
+
+
+def _convert_from_iso_format(value):
+    try:
+        # Return the parsed datetime object if successful
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        # Return None or raise an exception if parsing fails
+        return value

@@ -1,7 +1,6 @@
 import xarray as xr
-import yaml
 import importlib.metadata
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
@@ -22,6 +21,8 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     convert_to_roms_time,
+    _to_yaml,
+    _from_yaml,
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
@@ -542,49 +543,8 @@ class SurfaceForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        filepath = Path(filepath)
 
-        # Serialize Grid data
-        grid_data = asdict(self.grid)
-        grid_data.pop("ds", None)  # Exclude non-serializable fields
-        grid_data.pop("straddle", None)
-
-        # Include the version of roms-tools
-        try:
-            roms_tools_version = importlib.metadata.version("roms-tools")
-        except importlib.metadata.PackageNotFoundError:
-            roms_tools_version = "unknown"
-
-        # Create header
-        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-        # Create YAML data for Grid and optional attributes
-        grid_yaml_data = {"Grid": grid_data}
-
-        # Combine all sections
-        surface_forcing_data = {
-            "SurfaceForcing": {
-                "start_time": self.start_time.isoformat(),
-                "end_time": self.end_time.isoformat(),
-                "source": self.source,
-                "type": self.type,
-                "correct_radiation": self.correct_radiation,
-                "use_coarse_grid": self.use_coarse_grid,
-                "model_reference_date": self.model_reference_date.isoformat(),
-            }
-        }
-
-        # Merge YAML data while excluding empty sections
-        yaml_data = {
-            **grid_yaml_data,
-            **surface_forcing_data,
-        }
-
-        with filepath.open("w") as file:
-            # Write header
-            file.write(header)
-            # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+        _to_yaml(self, filepath)
 
     @classmethod
     def from_yaml(
@@ -605,33 +565,8 @@ class SurfaceForcing:
             An instance of the SurfaceForcing class.
         """
         filepath = Path(filepath)
-        # Read the entire file content
-        with filepath.open("r") as file:
-            file_content = file.read()
 
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        surface_forcing_data = None
-
-        # Process the YAML documents
-        for doc in documents:
-            if doc is None:
-                continue
-            if "SurfaceForcing" in doc:
-                surface_forcing_data = doc["SurfaceForcing"]
-
-        if surface_forcing_data is None:
-            raise ValueError("No SurfaceForcing configuration found in the YAML file.")
-
-        # Convert from string to datetime
-        for date_string in ["model_reference_date", "start_time", "end_time"]:
-            surface_forcing_data[date_string] = datetime.fromisoformat(
-                surface_forcing_data[date_string]
-            )
-
-        # Create Grid instance from the YAML file
         grid = Grid.from_yaml(filepath)
+        params = _from_yaml(cls, filepath)
 
-        # Create and return an instance of SurfaceForcing
-        return cls(grid=grid, **surface_forcing_data, use_dask=use_dask)
+        return cls(grid=grid, **params, use_dask=use_dask)

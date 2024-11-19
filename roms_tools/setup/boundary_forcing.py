@@ -2,10 +2,9 @@ import xarray as xr
 import numpy as np
 from scipy.ndimage import label
 import logging
-import yaml
 import importlib.metadata
 from typing import Dict, Union, List
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from datetime import datetime
@@ -22,6 +21,8 @@ from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
     convert_to_roms_time,
+    _to_yaml,
+    _from_yaml,
 )
 from roms_tools.setup.plot import _section_plot, _line_plot
 import matplotlib.pyplot as plt
@@ -59,12 +60,12 @@ class BoundaryForcing:
           - "physics": for physical atmospheric forcing.
           - "bgc": for biogeochemical forcing.
 
-    model_reference_date : datetime, optional
-        Reference date for the model. Default is January 1, 2000.
     apply_2d_horizontal_fill: bool, optional
         Indicates whether to perform a two-dimensional horizontal fill on the source data prior to regridding to boundaries.
         If `False`, a one-dimensional horizontal fill is performed separately on each of the four regridded boundaries.
         Defaults to `False`.
+    model_reference_date : datetime, optional
+        Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
@@ -93,8 +94,8 @@ class BoundaryForcing:
     )
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
-    model_reference_date: datetime = datetime(2000, 1, 1)
     apply_2d_horizontal_fill: bool = False
+    model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -821,46 +822,8 @@ class BoundaryForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        filepath = Path(filepath)
 
-        # Serialize Grid data
-        grid_data = asdict(self.grid)
-        grid_data.pop("ds", None)  # Exclude non-serializable fields
-        grid_data.pop("straddle", None)
-
-        # Include the version of roms-tools
-        try:
-            roms_tools_version = importlib.metadata.version("roms-tools")
-        except importlib.metadata.PackageNotFoundError:
-            roms_tools_version = "unknown"
-
-        # Create header
-        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-        grid_yaml_data = {"Grid": grid_data}
-
-        boundary_forcing_data = {
-            "BoundaryForcing": {
-                "start_time": self.start_time.isoformat(),
-                "end_time": self.end_time.isoformat(),
-                "boundaries": self.boundaries,
-                "source": self.source,
-                "type": self.type,
-                "apply_2d_horizontal_fill": self.apply_2d_horizontal_fill,
-                "model_reference_date": self.model_reference_date.isoformat(),
-            }
-        }
-
-        yaml_data = {
-            **grid_yaml_data,
-            **boundary_forcing_data,
-        }
-
-        with filepath.open("w") as file:
-            # Write header
-            file.write(header)
-            # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+        _to_yaml(self, filepath)
 
     @classmethod
     def from_yaml(
@@ -881,36 +844,12 @@ class BoundaryForcing:
             An instance of the BoundaryForcing class.
         """
         filepath = Path(filepath)
-        # Read the entire file content
-        with filepath.open("r") as file:
-            file_content = file.read()
-
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        boundary_forcing_data = None
-
-        # Process the YAML documents
-        for doc in documents:
-            if doc is None:
-                continue
-            if "BoundaryForcing" in doc:
-                boundary_forcing_data = doc["BoundaryForcing"]
-                break
-
-        if boundary_forcing_data is None:
-            raise ValueError("No BoundaryForcing configuration found in the YAML file.")
-
-        # Convert from string to datetime
-        for date_string in ["model_reference_date", "start_time", "end_time"]:
-            boundary_forcing_data[date_string] = datetime.fromisoformat(
-                boundary_forcing_data[date_string]
-            )
 
         grid = Grid.from_yaml(filepath)
+        params = _from_yaml(cls, filepath)
 
         # Create and return an instance of InitialConditions
-        return cls(grid=grid, **boundary_forcing_data, use_dask=use_dask)
+        return cls(grid=grid, **params, use_dask=use_dask)
 
 
 def get_boundary_info():

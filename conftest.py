@@ -368,7 +368,7 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
 
 
 @pytest.fixture(scope="session")
-def river_forcing_from_dai():
+def river_forcing():
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
     grid = Grid(
         nx=20, ny=20, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3

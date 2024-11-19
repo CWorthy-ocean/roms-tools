@@ -1,5 +1,6 @@
 import xarray as xr
 import numpy as np
+import logging
 from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from datetime import datetime
@@ -7,7 +8,14 @@ from typing import Dict, Union, List
 from roms_tools.setup.datasets import DaiRiverDataset
 from pathlib import Path
 import matplotlib.pyplot as plt
-from roms_tools.setup.utils import get_target_coords, gc_dist
+from roms_tools.setup.utils import (
+    get_target_coords,
+    gc_dist,
+    substitute_nans_by_fillvalue,
+    save_datasets,
+    _to_yaml,
+    _from_yaml,
+)
 from roms_tools.setup.plot import _get_projection, _add_plot_to_ax
 import cartopy.crs as ccrs
 
@@ -67,10 +75,16 @@ class RiverForcing:
 
         original_indices = data.extract_relevant_rivers(target_coords, dx)
         object.__setattr__(self, "original_indices", original_indices)
-
-        self._create_river_forcing(data)
-
         self.move_rivers_to_closest_coast(target_coords, data)
+
+        ds = self._create_river_forcing(data)
+
+        self._validate(ds)
+
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name], fill_value=0.0)
+
+        object.__setattr__(self, "ds", ds)
 
     def _input_checks(self):
         # Ensure 'source' dictionary contains required keys
@@ -103,29 +117,30 @@ class RiverForcing:
         return data
 
     def _create_river_forcing(self, data):
-        """Create river forcing data for volume flux and tracers.
+        """Create river forcing data for volume flux and tracers (temperature and
+        salinity).
 
-        This method computes river volume flux and associated tracers (temperature
-        and salinity) based on the provided input data. It creates a new dataset that
-        contains:
-        - `river_volume`: The river volume flux, calculated as the product of
-          river flux and a specified ratio, with units of m³/s.
-        - `river_tracer`: A tracer array for temperature and salinity at each river
-          station over time.
+        This method computes the river volume flux and associated tracers (temperature and salinity)
+        based on the provided input data. It generates a new `xarray.Dataset` that contains:
+        - `river_volume`: The river volume flux, calculated as the product of river flux and a specified ratio, with units of m³/s.
+        - `river_tracer`: A tracer array containing temperature and salinity values at each river station over time.
 
-        Parameters:
-        -----------
+        The method also handles climatological adjustments for missing or incomplete data, depending on the `convert_to_climatology` setting.
+
+        Parameters
+        ----------
         data : object
-            An object containing the dataset and necessary variables. It must have the following attributes:
-            - `ds`: The dataset containing the river flux and ratio data.
-            - `var_names`: A dictionary of variable names in the dataset (e.g., "flux", "ratio", "name").
-            - `dim_names`: A dictionary of dimension names (e.g., "time", "station").
+            An object containing the necessary dataset and variables for river forcing creation. The object must have the following attributes:
+            - `ds`: The dataset containing the river flux, ratio, and other related variables.
+            - `var_names`: A dictionary mapping variable names (e.g., `"flux"`, `"ratio"`, `"name"`) to the corresponding variable names in the dataset.
+            - `dim_names`: A dictionary mapping dimension names (e.g., `"time"`, `"station"`) to the corresponding dimension names in the dataset.
 
-        Returns:
-        --------
-        None
-            This method creates a new dataset `ds` containing the river volume and
-            tracer data, and stores it as an attribute of the object.
+        Returns
+        -------
+        xr.Dataset
+            A new `xarray.Dataset` containing the computed river forcing data. The dataset includes:
+            - `river_volume`: A `DataArray` representing the river volume flux (m³/s).
+            - `river_tracer`: A `DataArray` representing tracer data for temperature and salinity at each river station over time.
         """
         if not self.source["climatology"]:
             if self.convert_to_climatology in ["never", "if_any_missing"]:
@@ -170,7 +185,7 @@ class RiverForcing:
 
         ds["river_tracer"] = river_tracer
 
-        object.__setattr__(self, "ds", ds)
+        return ds
 
     def move_rivers_to_closest_coast(self, target_coords, data):
         """Move river mouths to the closest coastal grid cell.
@@ -285,6 +300,29 @@ class RiverForcing:
         river_locations.attrs["long_name"] = "River volume flux partition"
         river_locations.attrs["units"] = "none"
         self.grid.ds["river_flux"] = river_locations
+
+    def _validate(self, ds):
+        """Validates the dataset by checking for NaN values in river forcing data.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to validate.
+
+        Raises
+        ------
+        Warning
+            If NaN values are found in any of the dataset variables, a warning message is logged.
+        """
+
+        for var_name in ds.data_vars:
+            da = ds[var_name]
+            if da.isnull().any().values:
+                logging.warning(
+                    f"NaN values detected in the '{var_name}' field. These values are being set to zero. "
+                    "This may indicate missing river data, which could affect model accuracy. Consider setting "
+                    "`convert_to_climatology = 'if_any_missing'` to automatically fill missing values with climatological data."
+                )
 
     def plot_locations(self):
         """Plots the original and updated river locations on a map projection."""
@@ -418,3 +456,96 @@ class RiverForcing:
         ax.set_title(long_name)
         ax.grid()
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
+
+    def save(
+        self,
+        filepath: Union[str, Path],
+        filepath_grid: Union[str, Path],
+        np_eta: int = None,
+        np_xi: int = None,
+    ) -> None:
+        """Save the river forcing and grid file to netCDF4 files. The grid file is
+        required because a new field `river_flux` has been added.
+
+        This method allows saving the river forcing and grid data either each as a single file or each partitioned into multiple files, based on the provided options. The dataset can be saved in two modes:
+
+        1. **Single File Mode (default)**:
+            - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file.
+            - The file is named based on the provided `filepath`, with `.nc` automatically appended to the filename.
+
+        2. **Partitioned Mode**:
+            - If either `np_eta` or `np_xi` is specified, the dataset is partitioned spatially along the `eta` and `xi` axes into tiles.
+            - Each tile is saved as a separate netCDF4 file. Filenames will be modified with an index to represent each partition, e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
+            If partitioning is used, additional indices will be appended to the filenames, e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
+
+        filepath_grid : Union[str, Path]
+            The base path and filename for saving the grid file. This file is essential for including the `river_flux` field.
+
+        np_eta : int, optional
+            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed along the `eta` axis.
+
+        np_xi : int, optional
+            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed along the `xi` axis.
+
+        Returns
+        -------
+        List[Path]
+            A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
+        """
+
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+        filepath_grid = Path(filepath_grid)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
+        if filepath_grid.suffix == ".nc":
+            filepath_grid = filepath_grid.with_suffix("")
+
+        dataset_list = [self.ds, self.grid.ds]
+        output_filenames = [str(filepath), str(filepath_grid)]
+
+        saved_filenames = save_datasets(
+            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
+        )
+
+        return saved_filenames
+
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The path to the YAML file where the parameters will be saved.
+        """
+
+        _to_yaml(self, filepath)
+
+    @classmethod
+    def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":
+        """Create an instance of the RiverForcing class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        RiverForcing
+            An instance of the RiverForcing class.
+        """
+        filepath = Path(filepath)
+
+        grid = Grid.from_yaml(filepath)
+        params = _from_yaml(cls, filepath)
+
+        return cls(grid=grid, **params)

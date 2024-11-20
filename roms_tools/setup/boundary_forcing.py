@@ -553,6 +553,8 @@ class BoundaryForcing:
 
         elif f"{type}_depth_rho" in self.grid.ds:
             depth = self.grid.ds[f"{type}_depth_rho"]
+            depth.attrs["long_name"] = f"{type} depth at rho-points"
+            depth.attrs["units"] = "m"
             self.grid.ds[f"{type}_depth_rho_{direction}"] = depth.isel(
                 **self.bdry_coords["rho"][direction]
             )
@@ -563,11 +565,15 @@ class BoundaryForcing:
                 # interpolation
                 if "u" in additional_locations:
                     depth_u = interpolate_from_rho_to_u(depth)
+                    depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                    depth_u.attrs["units"] = "m"
                     self.grid.ds[f"{type}_depth_u_{direction}"] = depth_u.isel(
                         **self.bdry_coords["u"][direction]
                     )
                 if "v" in additional_locations:
                     depth_v = interpolate_from_rho_to_v(depth)
+                    depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                    depth_v.attrs["units"] = "m"
                     self.grid.ds[f"{type}_depth_v_{direction}"] = depth_v.isel(
                         **self.bdry_coords["v"][direction]
                     )
@@ -586,6 +592,8 @@ class BoundaryForcing:
                 )
 
             if "u" in additional_locations or "v" in additional_locations:
+                depth.attrs["long_name"] = f"{type} depth at rho-points"
+                depth.attrs["units"] = "m"
                 self.grid.ds[f"{type}_depth_rho_{direction}"] = depth.isel(
                     **self.bdry_coords["rho"][direction]
                 )
@@ -595,13 +603,19 @@ class BoundaryForcing:
                 depth_u = interpolate_from_rho_to_u(depth)
                 depth_v = interpolate_from_rho_to_v(depth)
                 # selection of outermost margin
+                depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                depth_u.attrs["units"] = "m"
                 self.grid.ds[f"{type}_depth_u_{direction}"] = depth_u.isel(
                     **self.bdry_coords["u"][direction]
                 )
+                depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                depth_v.attrs["units"] = "m"
                 self.grid.ds[f"{type}_depth_v_{direction}"] = depth_v.isel(
                     **self.bdry_coords["v"][direction]
                 )
             else:
+                depth.attrs["long_name"] = f"{type} depth at rho-points"
+                depth.attrs["units"] = "m"
                 self.grid.ds[f"{type}_depth_rho_{direction}"] = depth
 
     def _add_global_metadata(self, data, ds=None):

@@ -105,7 +105,7 @@ def _add_topography_and_mask(
         start_time = time.time()
     ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
-        "long_name": "Final bathymetry at rho-points",
+        "long_name": "Bathymetry at rho-points",
         "units": "meter",
     }
     if verbose:

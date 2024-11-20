@@ -464,6 +464,8 @@ class Grid:
         if eta is None and xi is None:
             layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
             layer_depth = layer_depth.isel(s_rho=s)
+            layer_depth.attrs["long_name"] = "Layer depth"
+            layer_depth.attrs["units"] = "m"
 
             vmax = layer_depth.max().values
             vmin = layer_depth.min().values
@@ -481,8 +483,11 @@ class Grid:
             )
         else:
             layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
+            layer_depth.attrs["long_name"] = "Layer depth"
+            layer_depth.attrs["units"] = "m"
             field = xr.zeros_like(layer_depth)
             field = field.assign_coords({"layer_depth": layer_depth})
+
             interface_depth = compute_depth(
                 0, h, self.hc, self.ds.Cs_w, self.ds.sigma_w
             )

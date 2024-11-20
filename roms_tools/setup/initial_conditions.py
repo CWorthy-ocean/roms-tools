@@ -405,9 +405,13 @@ class InitialConditions:
                 # interpolation
                 if "u" in additional_locations:
                     depth_u = interpolate_from_rho_to_u(depth)
+                    depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                    depth_u.attrs["units"] = "m"
                     self.grid.ds[f"{type}_depth_u"] = depth_u
                 if "v" in additional_locations:
                     depth_v = interpolate_from_rho_to_v(depth)
+                    depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                    depth_v.attrs["units"] = "m"
                     self.grid.ds[f"{type}_depth_v"] = depth_v
         else:
             h = self.grid.ds["h"]
@@ -420,12 +424,18 @@ class InitialConditions:
                     0, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
                 )
 
+            depth.attrs["long_name"] = f"{type} depth at rho-points"
+            depth.attrs["units"] = "m"
             self.grid.ds[f"{type}_depth_rho"] = depth
 
             if "u" in additional_locations or "v" in additional_locations:
                 # interpolation
                 depth_u = interpolate_from_rho_to_u(depth)
+                depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                depth_u.attrs["units"] = "m"
                 depth_v = interpolate_from_rho_to_v(depth)
+                depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                depth_v.attrs["units"] = "m"
                 self.grid.ds[f"{type}_depth_u"] = depth_u
                 self.grid.ds[f"{type}_depth_v"] = depth_v
 

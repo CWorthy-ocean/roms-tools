@@ -84,16 +84,23 @@ class RiverForcing:
 
         original_indices = data.extract_relevant_rivers(target_coords, dx)
         object.__setattr__(self, "original_indices", original_indices)
-        self.move_rivers_to_closest_coast(target_coords, data)
 
-        ds = self._create_river_forcing(data)
+        if len(original_indices["station"]) > 0:
+            self.move_rivers_to_closest_coast(target_coords, data)
+            ds = self._create_river_forcing(data)
+            self._validate(ds)
 
-        self._validate(ds)
+            for var_name in ds.data_vars:
+                ds[var_name] = substitute_nans_by_fillvalue(
+                    ds[var_name], fill_value=0.0
+                )
 
-        for var_name in ds.data_vars:
-            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name], fill_value=0.0)
+            object.__setattr__(self, "ds", ds)
 
-        object.__setattr__(self, "ds", ds)
+        else:
+            raise ValueError(
+                "No relevant rivers found. Consider increasing domain size or using a different river dataset."
+            )
 
     def _input_checks(self):
         if self.source is None:

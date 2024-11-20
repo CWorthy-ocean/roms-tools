@@ -463,7 +463,9 @@ class Grid:
 
         if eta is None and xi is None:
             layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
+            title = title + f", s_rho = {layer_depth.s_rho[s].item()}"
             layer_depth = layer_depth.isel(s_rho=s)
+
             layer_depth.attrs["long_name"] = "Layer depth"
             layer_depth.attrs["units"] = "m"
 

@@ -176,11 +176,12 @@ def partition(
         ]
 
     if np_eta > 1:
-        partitioned_sizes["eta_rho"] = (
-            [eta_rho_domain_size + n_eta_ghost_cells]
-            + [eta_rho_domain_size] * (np_eta - 2)
-            + [eta_rho_domain_size + n_eta_ghost_cells]
-        )
+        if "eta_rho" in dims_to_partition:
+            partitioned_sizes["eta_rho"] = (
+                [eta_rho_domain_size + n_eta_ghost_cells]
+                + [eta_rho_domain_size] * (np_eta - 2)
+                + [eta_rho_domain_size + n_eta_ghost_cells]
+            )
         if "eta_psi" in dims_to_partition:
             partitioned_sizes["eta_psi"] = (
                 [n_eta_ghost_cells + eta_psi_domain_size]
@@ -195,11 +196,12 @@ def partition(
             )
 
     if np_xi > 1:
-        partitioned_sizes["xi_rho"] = (
-            [xi_rho_domain_size + n_xi_ghost_cells]
-            + [xi_rho_domain_size] * (np_xi - 2)
-            + [xi_rho_domain_size + n_xi_ghost_cells]
-        )
+        if "xi_rho" in dims_to_partition:
+            partitioned_sizes["xi_rho"] = (
+                [xi_rho_domain_size + n_xi_ghost_cells]
+                + [xi_rho_domain_size] * (np_xi - 2)
+                + [xi_rho_domain_size + n_xi_ghost_cells]
+            )
         if "xi_psi" in dims_to_partition:
             partitioned_sizes["xi_psi"] = (
                 [n_xi_ghost_cells + xi_psi_domain_size]

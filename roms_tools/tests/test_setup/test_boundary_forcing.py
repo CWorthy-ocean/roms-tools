@@ -396,9 +396,7 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, request, use_dask):
       rot: -20
       topography_source:
         name: ETOPO5
-      smooth_factor: 8
       hmin: 5.0
-      rmax: 0.2
     """
     )
     # Create a temporary filepath using the tmp_path fixture

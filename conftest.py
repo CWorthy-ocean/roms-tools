@@ -6,6 +6,7 @@ from roms_tools import (
     InitialConditions,
     BoundaryForcing,
     SurfaceForcing,
+    RiverForcing,
 )
 from roms_tools.setup.datasets import (
     GLORYSDataset,
@@ -384,6 +385,41 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
         source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
         type="bgc",
         use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def river_forcing():
+    """Fixture for creating a RiverForcing object from the global Dai river dataset."""
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
+    return RiverForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+
+@pytest.fixture(scope="session")
+def river_forcing_no_climatology():
+    """Fixture for creating a RiverForcing object from the global Dai river dataset."""
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
+    return RiverForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        convert_to_climatology="never",
     )
 
 

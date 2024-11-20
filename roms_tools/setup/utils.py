@@ -1,10 +1,14 @@
 import xarray as xr
 import numpy as np
-from typing import Union
+from typing import Union, Any, Dict, Type
 import pandas as pd
 import cftime
 from roms_tools.utils import partition
 from pathlib import Path
+from datetime import datetime
+from dataclasses import fields, asdict
+import importlib.metadata
+import yaml
 
 
 def nan_check(field, mask, error_message=None) -> None:
@@ -921,3 +925,250 @@ def get_vector_pairs(variable_info):
                 processed.update([var_name, vector_pair])
 
     return vector_pairs
+
+
+def gc_dist(lon1, lat1, lon2, lat2):
+    """Calculate the great circle distance between two points on the Earth's surface.
+    Latitude and longitude must be provided in degrees (they will be converted to
+    radians).
+
+    The function uses the Haversine formula to compute the shortest distance
+    along the surface of a sphere (Earth), assuming the Earth is a perfect sphere.
+
+    Parameters
+    ----------
+    lon1, lat1 : float
+        Longitude and latitude of the first point in degrees.
+    lon2, lat2 : float
+        Longitude and latitude of the second point in degrees.
+
+    Returns
+    -------
+    dis : float
+        The great circle distance between the two points in meters.
+        This is the shortest distance along the surface of a sphere (Earth).
+
+    Notes
+    -----
+    The radius of the Earth is taken to be 6371315 meters.
+    """
+    # Convert degrees to radians
+    d2r = np.pi / 180
+    lon1 = lon1 * d2r
+    lat1 = lat1 * d2r
+    lon2 = lon2 * d2r
+    lat2 = lat2 * d2r
+
+    # Difference in latitudes and longitudes
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    # Haversine formula
+    dang = 2 * np.arcsin(
+        np.sqrt(
+            np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+        )
+    )
+
+    # Radius of the Earth in meters
+    r_earth = 6371315.0
+
+    # Distance in meters
+    dis = r_earth * dang
+
+    return dis
+
+
+def convert_to_roms_time(ds, model_reference_date, climatology):
+
+    if climatology:
+        ds.attrs["climatology"] = str(True)
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords(
+            {"abs_time": np.datetime64(model_reference_date) + ds["time"]}
+        )
+        # Convert to pandas TimedeltaIndex
+        timedelta_index = pd.to_timedelta(ds["time"].values)
+
+        # Determine the start of the year for the base_datetime
+        start_of_year = datetime(model_reference_date.year, 1, 1)
+
+        # Calculate the offset from midnight of the new year
+        offset = model_reference_date - start_of_year
+
+        # Convert the timedelta to nanoseconds first, then to days
+        time = xr.DataArray(
+            (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
+            dims="time",
+        )
+        time.attrs["cycle_length"] = 365.25
+
+    else:
+        # Preserve absolute time coordinate for readability
+        ds = ds.assign_coords({"abs_time": ds["time"]})
+
+        time = (
+            (ds["time"] - np.datetime64(model_reference_date)).astype("float64")
+            / 3600
+            / 24
+            * 1e-9
+        )
+
+    time.attrs["long_name"] = f"days since {str(model_reference_date)}"
+    time.encoding["units"] = "days"
+    time.attrs["units"] = "days"
+    ds.encoding["unlimited_dims"] = "time"
+
+    return ds, time
+
+
+def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
+    """Serialize a forcing object (including its grid) into a YAML file.
+
+    This function serializes a dataclass object (forcing_object) and its associated
+    `grid` attribute into a YAML file. It includes additional metadata, such as
+    the version of the `roms-tools` package, and omits fields like `grid` and `ds`
+    that are not serializable or meant to be excluded.
+
+    The function also converts datetime fields to ISO format strings for proper
+    serialization.
+
+    Parameters
+    ----------
+    forcing_object : object
+        The object that contains the forcing data, typically a dataclass with attributes
+        such as `grid`, `start_time`, `end_time`, etc.
+    filepath : Union[str, Path]
+        The path where the serialized YAML file will be saved.
+
+    Returns
+    -------
+    None
+        The function writes the serialized data directly to a YAML file at the specified path.
+    """
+
+    # Convert the filepath to a Path object
+    filepath = Path(filepath)
+
+    # Step 1: Serialize Grid data
+    # Convert the grid attribute to a dictionary and remove non-serializable fields
+    grid_data = asdict(forcing_object.grid)
+    grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
+    grid_data.pop("straddle", None)  # Remove 'straddle' if it's non-essential
+    grid_yaml_data = {"Grid": grid_data}
+
+    # Step 2: Get ROMS Tools version
+    # Fetch the version of the 'roms-tools' package for inclusion in the YAML header
+    try:
+        roms_tools_version = importlib.metadata.version("roms-tools")
+    except importlib.metadata.PackageNotFoundError:
+        roms_tools_version = "unknown"
+
+    # Create YAML header with version information
+    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+    # Step 3: Prepare Forcing Data
+    # Prepare the forcing object fields, excluding 'grid' and 'ds'
+    forcing_data = {}
+    field_names = [field.name for field in fields(forcing_object)]
+    filtered_field_names = [
+        param
+        for param in field_names
+        if param not in ("grid", "ds", "use_dask", "climatology")
+    ]
+
+    for field_name in filtered_field_names:
+        # Retrieve the value of each field using getattr
+        value = getattr(forcing_object, field_name)
+
+        # If the field is a datetime object, convert it to ISO format
+        if isinstance(value, datetime):
+            value = value.isoformat()
+
+        # Add the field and its value to the forcing_data dictionary
+        forcing_data[field_name] = value
+
+    # Step 4: Combine Grid and Forcing Data
+    # Combine grid and forcing data into a single dictionary for the final YAML content
+    yaml_data = {
+        **grid_yaml_data,  # Add the grid data to the final YAML structure
+        forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
+    }
+
+    # Step 5: Write to YAML file
+    with filepath.open("w") as file:
+        # Write the header first
+        file.write(header)
+        # Write the serialized YAML data
+        yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+
+
+def _from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, Any]:
+    """Extract the configuration data for a given forcing object from a YAML file.
+
+    This function reads a YAML file, searches for the configuration data associated
+    with the class name of the forcing object, and returns the configuration data
+    as a dictionary. The dictionary contains the forcing parameters extracted from
+    the YAML file, with any date fields converted from ISO format.
+
+    Parameters
+    ----------
+    filepath : Union[str, Path]
+        The path to the YAML file from which the parameters will be read.
+    forcing_object : Type
+        The class type (e.g., TidalForcing) whose configuration data is to be loaded
+        from the YAML file. The class name is used to locate the relevant data in
+        the YAML structure.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the forcing parameters extracted from the YAML file.
+        This dictionary contains key-value pairs where the keys are the parameter
+        names, and the values are the corresponding values from the YAML file.
+        Any date fields are converted from ISO format if necessary.
+
+    Raises
+    ------
+    ValueError
+        If no configuration for the specified class name is found in the YAML file.
+    """
+
+    # Read the entire file content
+    with filepath.open("r") as file:
+        file_content = file.read()
+
+    # Split the content into YAML documents
+    documents = list(yaml.safe_load_all(file_content))
+
+    forcing_data = None
+    forcing_object_name = forcing_object.__name__
+
+    # Process the YAML documents to find the forcing data for the given object
+    for doc in documents:
+        if doc is None:
+            continue
+        if forcing_object_name in doc:
+            forcing_data = doc[forcing_object_name]
+            break
+
+    if forcing_data is None:
+        raise ValueError(
+            f"No {forcing_object_name} configuration found in the YAML file."
+        )
+
+    # Convert any date fields from ISO format if necessary
+    for key, value in forcing_data.items():
+        forcing_data[key] = _convert_from_iso_format(value)
+
+    # Return the forcing data as a dictionary
+    return forcing_data
+
+
+def _convert_from_iso_format(value):
+    try:
+        # Return the parsed datetime object if successful
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        # Return None or raise an exception if parsing fails
+        return value

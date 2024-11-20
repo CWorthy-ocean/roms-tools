@@ -1054,7 +1054,8 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     # Convert the grid attribute to a dictionary and remove non-serializable fields
     grid_data = asdict(forcing_object.grid)
     grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
-    grid_data.pop("straddle", None)  # Remove 'straddle' if it's non-essential
+    grid_data.pop("straddle", None)
+    grid_data.pop("verbose", None)
     grid_yaml_data = {"Grid": grid_data}
 
     # Step 2: Get ROMS Tools version

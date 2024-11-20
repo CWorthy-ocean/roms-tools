@@ -53,6 +53,13 @@ class RiverForcing:
 
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the river forcing data.
+    climatology : bool
+        Indicates whether the final river forcing is climatological.
     """
 
     grid: Grid
@@ -63,9 +70,9 @@ class RiverForcing:
     model_reference_date: datetime = datetime(2000, 1, 1)
 
     ds: xr.Dataset = field(init=False, repr=False)
+    climatology: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-
         self._input_checks()
         target_coords = get_target_coords(self.grid)
         # maximum dx in grid
@@ -148,20 +155,24 @@ class RiverForcing:
             - `river_volume`: A `DataArray` representing the river volume flux (m³/s).
             - `river_tracer`: A `DataArray` representing tracer data for temperature and salinity at each river station over time.
         """
-        if not self.source["climatology"]:
+        if self.source["climatology"]:
+            object.__setattr__(self, "climatology", True)
+        else:
             if self.convert_to_climatology in ["never", "if_any_missing"]:
                 data_ds = data.select_relevant_times(data.ds)
                 if self.convert_to_climatology == "if_any_missing":
                     if data_ds[data.var_names["flux"]].isnull().any():
                         data.compute_climatology()
-                        self.source["climatology"] = True
+                        object.__setattr__(self, "climatology", True)
                     else:
                         object.__setattr__(data, "ds", data_ds)
+                        object.__setattr__(self, "climatology", False)
                 else:
                     object.__setattr__(data, "ds", data_ds)
+                    object.__setattr__(self, "climatology", False)
             elif self.convert_to_climatology == "always":
                 data.compute_climatology()
-                self.source["climatology"] = True
+                object.__setattr__(self, "climatology", True)
 
         ds = xr.Dataset()
 
@@ -420,7 +431,7 @@ class RiverForcing:
         """
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
-        if self.source["climatology"]:
+        if self.climatology:
             xticks = np.arange(1, 13)
             xlabel = "months"
         else:
@@ -454,7 +465,7 @@ class RiverForcing:
 
         ax.set_xticks(xticks)
         ax.set_xlabel(xlabel)
-        if not self.source["climatology"]:
+        if not self.climatology:
             n = len(self.ds.river_time)
             ticks = self.ds.river_time.values[:: n // 6 + 1]
             ax.set_xticks(ticks)

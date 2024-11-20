@@ -26,6 +26,10 @@ to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation. This tool s
   - **Physical forcing**: temperature, velocities, etc.
   - **Biogeochemical forcing**: alkalinity, etc.
 
+- **River forcing**:
+
+  - **Physical forcing**: river volume flux, river temperature, river salinity
+
 Currently, **ROMS-Tools** does **not** support:
 
 - Nesting

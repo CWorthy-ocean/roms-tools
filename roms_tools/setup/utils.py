@@ -1072,7 +1072,9 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     forcing_data = {}
     field_names = [field.name for field in fields(forcing_object)]
     filtered_field_names = [
-        param for param in field_names if param not in ("grid", "ds", "use_dask")
+        param
+        for param in field_names
+        if param not in ("grid", "ds", "use_dask", "climatology")
     ]
 
     for field_name in filtered_field_names:

@@ -1,0 +1,178 @@
+{
+    "metadata": {
+        ".zattrs": {},
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "month/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "month/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "river_time"
+            ]
+        },
+        "nriver/.zarray": {
+            "chunks": [
+                6
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "|O",
+            "fill_value": null,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                6
+            ],
+            "zarr_format": 2
+        },
+        "nriver/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "nriver"
+            ]
+        },
+        "ntracers/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U23",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "ntracers/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntracers"
+            ]
+        },
+        "river_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "river_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "river_time"
+            ],
+            "units": "days"
+        },
+        "river_tracer/.zarray": {
+            "chunks": [
+                12,
+                6,
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                6,
+                2
+            ],
+            "zarr_format": 2
+        },
+        "river_tracer/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "river_time",
+                "nriver",
+                "ntracers"
+            ],
+            "coordinates": "month",
+            "long_name": "River tracer data"
+        },
+        "river_volume/.zarray": {
+            "chunks": [
+                12,
+                6
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                6
+            ],
+            "zarr_format": 2
+        },
+        "river_volume/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "river_time",
+                "nriver"
+            ],
+            "coordinates": "month",
+            "long_name": "River volume flux",
+            "units": "m^3/s"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

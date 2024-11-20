@@ -1,0 +1,8 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "river_time",
+        "nriver"
+    ],
+    "long_name": "River volume flux",
+    "units": "m^3/s"
+}

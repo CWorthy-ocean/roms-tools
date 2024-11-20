@@ -16,7 +16,11 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     gc_dist,
 )
-from roms_tools.setup.download import download_correction_data, download_topo, download_river_data
+from roms_tools.setup.download import (
+    download_correction_data,
+    download_topo,
+    download_river_data,
+)
 from roms_tools.setup.fill import LateralFill
 
 # lat-lon datasets
@@ -1424,6 +1428,7 @@ class ERA5Correction(Dataset):
             )
         object.__setattr__(self, "ds", subdomain)
 
+
 @dataclass(frozen=True, kw_only=True)
 class ETOPO5Dataset(Dataset):
     """Represents topography data on the original grid from the ETOPO5 dataset.
@@ -1515,6 +1520,7 @@ class SRTM15Dataset(Dataset):
     )
     ds: xr.Dataset = field(init=False, repr=False)
 
+
 # river datasets
 @dataclass(frozen=True, kw_only=True)
 class RiverDataset:
@@ -1546,7 +1552,7 @@ class RiverDataset:
     ds : xr.Dataset
         The xarray Dataset containing the forcing data on its original grid.
     """
-    
+
     filename: Union[str, Path, List[Union[str, Path]]]
     start_time: datetime
     end_time: datetime

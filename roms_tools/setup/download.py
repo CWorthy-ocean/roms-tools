@@ -83,7 +83,7 @@ def download_topo(filename: str) -> str:
     return fname
 
 
-def download_river_data(filename: str) -> xr.Dataset:
+def download_river_data(filename: str) -> str:
     """Download river data file.
 
     Parameters

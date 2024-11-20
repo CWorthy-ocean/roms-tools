@@ -267,9 +267,7 @@ def test_from_yaml_missing_tidal_forcing(tmp_path, use_dask):
       center_lat: 61
       rot: -20
       topography_source: ETOPO5
-      smooth_factor: 8
       hmin: 5.0
-      rmax: 0.2
     """
     )
 

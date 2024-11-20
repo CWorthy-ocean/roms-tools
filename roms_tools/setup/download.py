@@ -24,6 +24,16 @@ correction_data = pooch.create(
     },
 )
 
+# Create a Pooch object to manage the global topography data
+river_data = pooch.create(
+    # Use the default cache folder for the operating system
+    path=pooch.os_cache("roms-tools"),
+    base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
+    # The registry specifies the files that can be fetched
+    registry={
+        "dai_trenberth_may2019.nc": "sha256:793849e6aa60d1f6bdb480c345515fb2453d903c0a30599241b3d752f53715ab",
+    },
+)
 # Create a Pooch object to manage the test data
 pup_test_data = pooch.create(
     # Use the default cache folder for the operating system
@@ -75,6 +85,26 @@ def fetch_topo(topography_source: str) -> xr.Dataset:
     # Load the dataset using xarray and return it
     ds = xr.open_dataset(fname)
     return ds
+
+
+def download_river_data(filename: str) -> xr.Dataset:
+    """Download river data file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the test data file to be downloaded. Available options:
+        - "dai_trenberth_may2019.nc"
+    Returns
+    -------
+    str
+        The path to the downloaded test data file.
+    """
+
+    # Fetch the file using Pooch, downloading if necessary
+    fname = river_data.fetch(filename)
+
+    return fname
 
 
 def download_correction_data(filename: str) -> str:

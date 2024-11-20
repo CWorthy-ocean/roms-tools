@@ -1,8 +1,7 @@
 import xarray as xr
 import numpy as np
-import yaml
 import importlib.metadata
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Dict, Union, List, Optional
 from roms_tools.setup.grid import Grid
 from datetime import datetime
@@ -16,6 +15,8 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     compute_barotropic_velocity,
     transpose_dimensions,
+    _to_yaml,
+    _from_yaml,
 )
 from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
@@ -392,7 +393,7 @@ class InitialConditions:
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
 
-        # Convert the time coordinate to the format expected by ROMS (days since model reference date)
+        # Convert the time coordinate to the format expected by ROMS (seconds since model reference date)
         ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
         ds = ds.assign_coords(ocean_time=("time", ocean_time.data.astype("float64")))
         ds["ocean_time"].attrs[
@@ -753,48 +754,8 @@ class InitialConditions:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        filepath = Path(filepath)
 
-        # Serialize Grid data
-        grid_data = asdict(self.grid)
-        grid_data.pop("ds", None)  # Exclude non-serializable fields
-        grid_data.pop("straddle", None)
-
-        # Include the version of roms-tools
-        try:
-            roms_tools_version = importlib.metadata.version("roms-tools")
-        except importlib.metadata.PackageNotFoundError:
-            roms_tools_version = "unknown"
-
-        # Create header
-        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-        grid_yaml_data = {"Grid": grid_data}
-
-        initial_conditions_data = {
-            "InitialConditions": {
-                "ini_time": self.ini_time.isoformat(),
-                "source": self.source,
-            }
-        }
-        # Include bgc_source if it's not None
-        if self.bgc_source is not None:
-            initial_conditions_data["InitialConditions"]["bgc_source"] = self.bgc_source
-
-        initial_conditions_data["InitialConditions"][
-            "model_reference_date"
-        ] = self.model_reference_date.isoformat()
-
-        yaml_data = {
-            **grid_yaml_data,
-            **initial_conditions_data,
-        }
-
-        with filepath.open("w") as file:
-            # Write header
-            file.write(header)
-            # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+        _to_yaml(self, filepath)
 
     @classmethod
     def from_yaml(
@@ -815,35 +776,7 @@ class InitialConditions:
             An instance of the InitialConditions class.
         """
         filepath = Path(filepath)
-        # Read the entire file content
-        with filepath.open("r") as file:
-            file_content = file.read()
-
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        initial_conditions_data = None
-
-        # Process the YAML documents
-        for doc in documents:
-            if doc is None:
-                continue
-            if "InitialConditions" in doc:
-                initial_conditions_data = doc["InitialConditions"]
-                break
-
-        if initial_conditions_data is None:
-            raise ValueError(
-                "No InitialConditions configuration found in the YAML file."
-            )
-
-        # Convert from string to datetime
-        for date_string in ["model_reference_date", "ini_time"]:
-            initial_conditions_data[date_string] = datetime.fromisoformat(
-                initial_conditions_data[date_string]
-            )
 
         grid = Grid.from_yaml(filepath)
-
-        # Create and return an instance of InitialConditions
-        return cls(grid=grid, **initial_conditions_data, use_dask=use_dask)
+        initial_conditions_params = _from_yaml(cls, filepath)
+        return cls(grid=grid, **initial_conditions_params, use_dask=use_dask)

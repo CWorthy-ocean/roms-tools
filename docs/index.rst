@@ -28,7 +28,6 @@ to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation. This tool s
 
 Currently, **ROMS-Tools** does **not** support:
 
-- River forcing
 - Nesting
 
 .. important::
@@ -55,6 +54,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    Creating surface forcing <surface_forcing>
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>
+   Creating river forcing <river_forcing>
 
    Partitioning the input files <partition>
 

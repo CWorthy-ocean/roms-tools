@@ -2,6 +2,7 @@ import pytest
 import os
 import shutil
 import xarray as xr
+import numpy as np
 
 
 def _get_fname(name):
@@ -23,6 +24,8 @@ def _get_fname(name):
         "bgc_surface_forcing_from_climatology",
         "boundary_forcing",
         "bgc_boundary_forcing_from_climatology",
+        "river_forcing",
+        "river_forcing_no_climatology",
     ],
 )
 # this test will not be run by default
@@ -60,6 +63,8 @@ def test_save_results(forcing_fixture, request):
         "bgc_surface_forcing_from_climatology",
         "boundary_forcing",
         "bgc_boundary_forcing_from_climatology",
+        "river_forcing",
+        "river_forcing_no_climatology",
     ],
 )
 def test_check_results(forcing_fixture, request):
@@ -68,5 +73,10 @@ def test_check_results(forcing_fixture, request):
     expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)
 
     forcing = request.getfixturevalue(forcing_fixture)
+    if "river_time" in forcing.ds and forcing.climatology:
+        # convert from timedelta64 to int
+        forcing.ds["river_time"] = (
+            (forcing.ds["river_time"]) / np.timedelta64(1, "D")
+        ).astype(int)
 
     xr.testing.assert_allclose(forcing.ds, expected_forcing_ds, rtol=1.0e-5)

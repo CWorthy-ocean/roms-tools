@@ -1,8 +1,6 @@
 import xarray as xr
-import pandas as pd
-import yaml
 import importlib.metadata
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
@@ -22,6 +20,9 @@ from roms_tools.setup.utils import (
     save_datasets,
     get_target_coords,
     rotate_velocities,
+    convert_to_roms_time,
+    _to_yaml,
+    _from_yaml,
 )
 from roms_tools.setup.plot import _plot
 import matplotlib.pyplot as plt
@@ -302,38 +303,9 @@ class SurfaceForcing:
         ds = self._add_global_metadata(ds)
 
         # Convert the time coordinate to the format expected by ROMS
-        if data.climatology:
-            ds.attrs["climatology"] = str(True)
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords(
-                {"abs_time": np.datetime64(self.model_reference_date) + ds["time"]}
-            )
-            # Convert to pandas TimedeltaIndex
-            timedelta_index = pd.to_timedelta(ds["time"].values)
-
-            # Determine the start of the year for the base_datetime
-            start_of_year = datetime(self.model_reference_date.year, 1, 1)
-
-            # Calculate the offset from midnight of the new year
-            offset = self.model_reference_date - start_of_year
-
-            # Convert the timedelta to nanoseconds first, then to days
-            sfc_time = xr.DataArray(
-                (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
-                dims="time",
-            )
-        else:
-            # Preserve absolute time coordinate for readability
-            ds = ds.assign_coords({"abs_time": ds["time"]})
-
-            sfc_time = (
-                (ds["time"] - np.datetime64(self.model_reference_date)).astype(
-                    "float64"
-                )
-                / 3600
-                / 24
-                * 1e-9
-            )
+        ds, sfc_time = convert_to_roms_time(
+            ds, self.model_reference_date, data.climatology
+        )
 
         if self.type == "physics":
             time_coords = ["time"]
@@ -347,14 +319,6 @@ class SurfaceForcing:
             ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
-            ds[time_coord].attrs[
-                "long_name"
-            ] = f"days since {str(self.model_reference_date)}"
-            ds[time_coord].encoding["units"] = "days"
-            ds[time_coord].attrs["units"] = "days"
-            if data.climatology:
-                ds[time_coord].attrs["cycle_length"] = 365.25
-        ds.encoding["unlimited_dims"] = "time"
 
         if self.type == "bgc":
             ds = ds.drop_vars(["time"])
@@ -579,49 +543,8 @@ class SurfaceForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        filepath = Path(filepath)
 
-        # Serialize Grid data
-        grid_data = asdict(self.grid)
-        grid_data.pop("ds", None)  # Exclude non-serializable fields
-        grid_data.pop("straddle", None)
-
-        # Include the version of roms-tools
-        try:
-            roms_tools_version = importlib.metadata.version("roms-tools")
-        except importlib.metadata.PackageNotFoundError:
-            roms_tools_version = "unknown"
-
-        # Create header
-        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-        # Create YAML data for Grid and optional attributes
-        grid_yaml_data = {"Grid": grid_data}
-
-        # Combine all sections
-        surface_forcing_data = {
-            "SurfaceForcing": {
-                "start_time": self.start_time.isoformat(),
-                "end_time": self.end_time.isoformat(),
-                "source": self.source,
-                "type": self.type,
-                "correct_radiation": self.correct_radiation,
-                "use_coarse_grid": self.use_coarse_grid,
-                "model_reference_date": self.model_reference_date.isoformat(),
-            }
-        }
-
-        # Merge YAML data while excluding empty sections
-        yaml_data = {
-            **grid_yaml_data,
-            **surface_forcing_data,
-        }
-
-        with filepath.open("w") as file:
-            # Write header
-            file.write(header)
-            # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+        _to_yaml(self, filepath)
 
     @classmethod
     def from_yaml(
@@ -642,33 +565,8 @@ class SurfaceForcing:
             An instance of the SurfaceForcing class.
         """
         filepath = Path(filepath)
-        # Read the entire file content
-        with filepath.open("r") as file:
-            file_content = file.read()
 
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        surface_forcing_data = None
-
-        # Process the YAML documents
-        for doc in documents:
-            if doc is None:
-                continue
-            if "SurfaceForcing" in doc:
-                surface_forcing_data = doc["SurfaceForcing"]
-
-        if surface_forcing_data is None:
-            raise ValueError("No SurfaceForcing configuration found in the YAML file.")
-
-        # Convert from string to datetime
-        for date_string in ["model_reference_date", "start_time", "end_time"]:
-            surface_forcing_data[date_string] = datetime.fromisoformat(
-                surface_forcing_data[date_string]
-            )
-
-        # Create Grid instance from the YAML file
         grid = Grid.from_yaml(filepath)
+        params = _from_yaml(cls, filepath)
 
-        # Create and return an instance of SurfaceForcing
-        return cls(grid=grid, **surface_forcing_data, use_dask=use_dask)
+        return cls(grid=grid, **params, use_dask=use_dask)

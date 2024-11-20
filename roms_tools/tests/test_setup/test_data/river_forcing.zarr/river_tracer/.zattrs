@@ -1,0 +1,9 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "river_time",
+        "nriver",
+        "ntracers"
+    ],
+    "coordinates": "month",
+    "long_name": "River tracer data"
+}

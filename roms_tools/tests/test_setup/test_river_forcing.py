@@ -1,9 +1,10 @@
-from roms_tools import Grid, RiverForcing
+from roms_tools import RiverForcing
 import xarray as xr
 import textwrap
 from pathlib import Path
 import pytest
 from conftest import calculate_file_hash
+
 
 def test_successful_initialization_with_dai_data(river_forcing):
 
@@ -11,9 +12,10 @@ def test_successful_initialization_with_dai_data(river_forcing):
     assert "river_volume" in river_forcing.ds
     assert "river_tracer" in river_forcing.ds
 
+
 def test_roundtrip_yaml(river_forcing, tmp_path):
-    """Test that creating an RiverForcing object, saving its parameters to yaml
-    file, and re-opening yaml file creates the same object."""
+    """Test that creating an RiverForcing object, saving its parameters to yaml file,
+    and re-opening yaml file creates the same object."""
 
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"
@@ -24,9 +26,7 @@ def test_roundtrip_yaml(river_forcing, tmp_path):
 
         river_forcing.to_yaml(filepath)
 
-        river_forcing_from_file = RiverForcing.from_yaml(
-            filepath
-        )
+        river_forcing_from_file = RiverForcing.from_yaml(filepath)
 
         assert river_forcing == river_forcing_from_file
 
@@ -100,4 +100,3 @@ def test_from_yaml_missing_initial_conditions(tmp_path):
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
-

@@ -64,13 +64,6 @@ $$
 
 6. **Depth Clipping**: Regions where the ocean depth is shallower than $h_{min}$ are set to $h_{min}$. The rationale behind this step is to ensure that tidal excursion does not exceed the water depth at runtime. Since ROMS currently does not support wetting or drying, the model will crash if the water depth becomes negative.
 
-Here are these steps illustrated for an example domain:
-
-![Step 1](images/Step1.png)
-![Step 2](images/Step2.png)
-![Step 3](images/Step3.png)
-![Step 4](images/Step4.png)
-
 ## Vertical Coordinate System
 
 ROMS uses a terrain-following vertical coordinate system. The vertical coordinate system is important for `ROMS-Tools` while creating input fields that have a depth dimension, such as the initial conditions or the boundary forcing, and therefore has to mimic the vertical coordinate system that is internally computed by ROMS. The vertical coordinate system parameters are as follows:

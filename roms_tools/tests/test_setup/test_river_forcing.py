@@ -6,6 +6,7 @@ import textwrap
 from pathlib import Path
 import pytest
 from conftest import calculate_file_hash
+from roms_tools.setup.download import download_river_data
 
 
 @pytest.fixture
@@ -26,6 +27,31 @@ def river_forcing_climatology():
     )
 
 
+@pytest.fixture
+def river_forcing_for_grid_that_straddles_dateline():
+    """Fixture for creating a RiverForcing object from the global Dai river dataset for
+    a grid that straddles the dateline."""
+
+    grid = Grid(
+        nx=18,
+        ny=18,
+        size_x=1500,
+        size_y=1500,
+        center_lon=-0,
+        center_lat=65,
+        rot=20,
+        N=3,
+    )
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
+    return RiverForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+
 def compare_dictionaries(dict1, dict2):
     assert dict1.keys() == dict2.keys()
 
@@ -33,9 +59,19 @@ def compare_dictionaries(dict1, dict2):
         assert np.array_equal(dict1[key], dict2[key])
 
 
-def test_successful_initialization_with_climatological_dai_data(river_forcing):
+@pytest.mark.parametrize(
+    "river_forcing_fixture",
+    ["river_forcing", "river_forcing_for_grid_that_straddles_dateline"],
+)
+def test_successful_initialization_with_climatological_dai_data(
+    river_forcing_fixture, request
+):
+
+    river_forcing = request.getfixturevalue(river_forcing_fixture)
 
     assert isinstance(river_forcing.ds, xr.Dataset)
+    assert len(river_forcing.ds.nriver) > 0
+    assert len(river_forcing.original_indices["name"]) > 0
     assert river_forcing.climatology
     assert "river_volume" in river_forcing.ds
     assert "river_tracer" in river_forcing.ds
@@ -104,17 +140,80 @@ def test_river_locations_are_along_coast(river_forcing_fixture, request):
 
     indices = river_forcing.updated_indices
     for i in range(len(indices["station"])):
-        assert coast[indices["eta_rho"][i], indices["xi_rho"][i]]
+        eta_rho = indices["eta_rho"][i]
+        xi_rho = indices["xi_rho"][i]
+        assert coast[eta_rho, xi_rho]
+        assert river_forcing.grid.ds["river_flux"][eta_rho, xi_rho] > 0
 
 
-# @pytest.mark.parametrize(
-#    "river_forcing_fixture",
-#    [
-#        "river_forcing_climatology",
-#        "river_forcing_no_climatology"
-#    ],
-# )
-# def test_river_flux_variable_grid_file(river_forcing_fixture, request):
+def test_missing_source_name():
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+    )
+
+    with pytest.raises(ValueError, match="`source` must include a 'name'."):
+        RiverForcing(
+            grid=grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            source={"path": "river_data.nc"},
+        )
+
+
+def test_no_rivers_found():
+
+    # Create a grid over open ocean
+    grid = Grid(
+        nx=2, ny=2, size_x=50, size_y=50, center_lon=0, center_lat=55, rot=10, N=3
+    )
+    with pytest.raises(
+        ValueError,
+        match="No relevant rivers found.",
+    ):
+
+        RiverForcing(
+            grid=grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+
+
+def test_reproducibility_same_grid(river_forcing):
+
+    the_same_river_forcing = RiverForcing(
+        grid=river_forcing.grid,
+        start_time=datetime(1998, 1, 1),
+        end_time=datetime(1998, 3, 1),
+    )
+
+    assert river_forcing == the_same_river_forcing
+
+
+def test_update_river_flux_variable_without_conflicts(river_forcing, tmp_path):
+
+    fname = download_river_data("dai_trenberth_may2019.nc")
+    ds = xr.open_dataset(fname, decode_times=False)
+    # only keep the 300 biggest rivers, which will lower the total relevant river number
+    ds = ds.isel(station=slice(None, 300))
+    filepath = tmp_path / "test.nc"
+    ds.to_netcdf(filepath)
+
+    another_river_forcing = RiverForcing(
+        grid=river_forcing.grid,
+        start_time=datetime(1998, 1, 1),
+        end_time=datetime(1998, 3, 1),
+        source={"name": "DAI", "path": filepath},
+    )
+
+    assert isinstance(another_river_forcing.ds, xr.Dataset)
 
 
 def test_river_forcing_plot(river_forcing):

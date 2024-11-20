@@ -1630,6 +1630,11 @@ class RiverDataset:
         if ds[self.dim_names["station"]].dtype == "float64":
             ds[self.dim_names["station"]] = ds[self.dim_names["station"]].astype(int)
 
+        # Drop all variables that have chars dim
+        vars_to_drop = ["ocn_name", "stn_name", "ct_name", "cn_name", "chars"]
+        existing_vars = [var for var in vars_to_drop if var in ds]
+        ds = ds.drop_vars(existing_vars)
+
         return ds
 
     def check_dataset(self, ds: xr.Dataset) -> None:
@@ -1815,32 +1820,39 @@ class RiverDataset:
         # Calculate the distance between the target coordinates and each river mouth
         dist = gc_dist(target_coords["lon"], target_coords["lat"], river_lon, river_lat)
         dist_min = dist.min(dim=["eta_rho", "xi_rho"])
-
         # Filter the dataset to include only stations within the distance threshold
-        ds = self.ds.where(dist_min < dx, drop=True)
-        ds = self.sort_by_river_volume(ds)
+        if (dist_min < dx).any():
+            ds = self.ds.where(dist_min < dx, drop=True)
+            ds = self.sort_by_river_volume(ds)
+            dist = dist.where(dist_min < dx, drop=True).transpose(
+                self.dim_names["station"], "eta_rho", "xi_rho"
+            )
+            dist_min = dist_min.where(dist_min < dx, drop=True)
+
+            # Find the indices of the closest grid cell to the river mouth
+            indices = np.where(dist == dist_min)
+            names = (
+                self.ds[self.var_names["name"]]
+                .isel({self.dim_names["station"]: indices[0]})
+                .values
+            )
+            # Return the indices in a dictionary format
+            indices = {
+                "station": indices[0],
+                "eta_rho": indices[1],
+                "xi_rho": indices[2],
+                "name": names,
+            }
+        else:
+            ds = xr.Dataset()
+            indices = {
+                "station": [],
+                "eta_rho": [],
+                "xi_rho": [],
+                "name": [],
+            }
 
         object.__setattr__(self, "ds", ds)
-
-        dist = dist.where(dist_min < dx, drop=True).transpose(
-            self.dim_names["station"], "eta_rho", "xi_rho"
-        )
-        dist_min = dist_min.where(dist_min < dx, drop=True)
-
-        # Find the indices of the closest grid cell to the river mouth
-        indices = np.where(dist == dist_min)
-        names = (
-            self.ds[self.var_names["name"]]
-            .isel({self.dim_names["station"]: indices[0]})
-            .values
-        )
-        # Return the indices in a dictionary format
-        indices = {
-            "station": indices[0],
-            "eta_rho": indices[1],
-            "xi_rho": indices[2],
-            "name": names,
-        }
 
         return indices
 

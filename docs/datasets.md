@@ -39,7 +39,8 @@ To use `ROMS-Tools`, the user is required to download the following datasets:
 |             |                        | `uo`                | Eastward velocity (m/s)                                                   |                                                                                  |                     |
 |             |                        | `vo`                | Northward velocity (m/s)                                                  |                                                                                  |                     |
 |-------------|------------------------|---------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------|---------------------|
-| Dai and Trenberth (coastal station volume, monthly series)      | 2019                      | `time`              | Time                                                                      | [NCAR Research Data Archive](https://rda.ucar.edu/datasets/d551000/dataaccess/#) | River Forcing     |
+| Dai and Trenberth (coastal station volume, monthly series)      | 2019                      | `station`              | Station index                                                                      | [NCAR Research Data Archive](https://rda.ucar.edu/datasets/d551000/dataaccess/#) | River Forcing     |
+|   |                       | `time`              | Time                                                                      | |      |
 |  | -                      | `lat_mou`              | River mouth latitude                                                  |  |      |
 |  | -                      | `lon_mou`              | River mouth longitude                                                  |  |      |
 |  | -                      | `FLOW`              | Monthly mean volume at station                                                  |  |      |

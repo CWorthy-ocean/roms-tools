@@ -390,13 +390,15 @@ class Grid:
 
         object.__setattr__(self, "ds", ds)
 
-    def plot(self, bathymetry: bool = False) -> None:
+    def plot(self, bathymetry: bool = False, title: str = None) -> None:
         """Plot the grid.
 
         Parameters
         ----------
         bathymetry : bool
             Whether or not to plot the bathymetry. Default is False.
+        title : str, optional
+            The title of the plot. If not provided, it will be set to a default.
 
         Returns
         -------
@@ -405,6 +407,8 @@ class Grid:
         """
 
         if bathymetry:
+            if title is None:
+                title = "ROMS grid and bathymetry"
             field = self.ds.h.where(self.ds.mask_rho)
             field = field.assign_coords(
                 {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
@@ -420,10 +424,13 @@ class Grid:
                 self.ds,
                 field=field,
                 straddle=self.straddle,
+                title=title,
                 kwargs=kwargs,
             )
         else:
-            _plot(self.ds, straddle=self.straddle)
+            if title is None:
+                title = "ROMS grid"
+            _plot(self.ds, straddle=self.straddle, title=title)
 
     def plot_vertical_coordinate(
         self,

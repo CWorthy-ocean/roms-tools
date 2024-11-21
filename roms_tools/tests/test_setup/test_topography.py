@@ -54,13 +54,13 @@ def test_hmin_criterion():
     assert grid.hmin == 5.0
     assert np.less_equal(grid.hmin, grid.ds.h.min())
 
-    grid.update_topography_and_mask(hmin=10.0)
+    grid.update_topography(hmin=10.0)
 
     assert grid.hmin == 10.0
     assert np.less_equal(grid.hmin, grid.ds.h.min())
 
     # this should not do anything
-    grid.update_topography_and_mask()
+    grid.update_topography()
 
     assert grid.hmin == 10.0
     assert np.less_equal(grid.hmin, grid.ds.h.min())

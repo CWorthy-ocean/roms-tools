@@ -3,15 +3,14 @@ import logging
 import xarray as xr
 import numpy as np
 import gcm_filters
-from scipy.ndimage import label
-from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.utils import handle_boundaries
 import warnings
 from itertools import count
 from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
 from roms_tools.setup.regrid import LateralRegrid
 
 
-def _add_topography_and_mask(
+def _add_topography(
     ds,
     target_coords,
     topography_source,
@@ -20,21 +19,12 @@ def _add_topography_and_mask(
     rmax=0.2,
     verbose=False,
 ) -> xr.Dataset:
-    """Adds topography and a land/water mask to the dataset based on the provided
-    topography source.
-
-    This function performs the following operations:
-    1. Interpolates topography data onto the desired grid.
-    2. Applies a mask based on ocean depth.
-    3. Smooths the topography globally to reduce grid-scale instabilities.
-    4. Fills enclosed basins with land.
-    5. Smooths the topography locally to ensure the steepness ratio satisfies the rmax criterion.
-    6. Adds topography metadata.
+    """Adds topography to the dataset based on the provided topography source.
 
     Parameters
     ----------
     ds : xr.Dataset
-        The dataset to which topography and the land/water mask will be added.
+        The dataset to which topography will be added.
     topography_source : Dict[str, Union[str, Path]], optional
         Dictionary specifying the source of the topography data:
 
@@ -58,7 +48,7 @@ def _add_topography_and_mask(
     Returns
     -------
     xr.Dataset
-        Updated dataset with added topography, mask, and metadata.
+        Updated dataset with added topography and metadata.
     """
 
     if verbose:
@@ -73,24 +63,6 @@ def _add_topography_and_mask(
     hraw = _make_raw_topography(data, target_coords, verbose=verbose)
     nan_check(hraw)
 
-    # Mask
-    if verbose:
-        start_time = time.time()
-
-    mask = _infer_mask(hraw)
-    # fill enclosed basins with land
-    mask = _fill_enclosed_basins(mask.values)
-    # adjust mask boundaries by copying values from adjacent cells
-    mask = _handle_boundaries(mask)
-    ds["mask_rho"] = xr.DataArray(mask.astype(np.int32), dims=("eta_rho", "xi_rho"))
-    ds["mask_rho"].attrs = {
-        "long_name": "Mask at rho-points",
-        "units": "land/water (0/1)",
-    }
-    ds = _add_velocity_masks(ds)
-    if verbose:
-        logging.info(f"Preparing the masks: {time.time() - start_time:.3f} seconds")
-
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
     if verbose:
         start_time = time.time()
@@ -103,6 +75,9 @@ def _add_topography_and_mask(
     # smooth topography locally to satisfy r < rmax
     if verbose:
         start_time = time.time()
+    # inserting hraw * mask_rho into this function eliminates any inconsistencies between
+    # the land according to the topography and the land according to the mask; land points
+    # will always be set to hmin
     ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
         "long_name": "Bathymetry at rho-points",
@@ -158,14 +133,6 @@ def _make_raw_topography(
     return hraw
 
 
-def _infer_mask(hraw):
-    """Mask is obtained by finding locations where ocean depth is positive."""
-
-    mask = xr.where(hraw > 0, 1.0, 0.0)
-
-    return mask
-
-
 def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
     # since GCM-Filters assumes periodic domain, we extend the domain by one grid cell in each dimension
     # and set that margin to land
@@ -194,28 +161,6 @@ def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
     hsmooth = hsmooth.isel(eta_rho=slice(None, -1), xi_rho=slice(None, -1))
 
     return hsmooth
-
-
-def _fill_enclosed_basins(mask) -> np.ndarray:
-    """Fills in enclosed basins with land."""
-
-    # Label connected regions in the mask
-    reg, nreg = label(mask)
-    # Find the largest region
-    lint = 0
-    lreg = 0
-    for ireg in range(nreg):
-        int_ = np.sum(reg == ireg)
-        if int_ > lint and mask[reg == ireg].sum() > 0:
-            lreg = ireg
-            lint = int_
-
-    # Remove regions other than the largest one
-    for ireg in range(nreg):
-        if ireg != lreg:
-            mask[reg == ireg] = 0
-
-    return mask
 
 
 def _smooth_topography_locally(h, hmin=5, rmax=0.2):
@@ -280,7 +225,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         )
 
         # No gradient at the domain boundaries
-        h_log = _handle_boundaries(h_log)
+        h_log = handle_boundaries(h_log)
 
         # Update h
         h = hmin * np.exp(h_log)
@@ -294,29 +239,6 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
             break
 
     return h
-
-
-def _handle_boundaries(field):
-    """Adjust the boundaries of a 2D field by copying values from adjacent cells.
-
-    Parameters
-    ----------
-    field : numpy.ndarray or xarray.DataArray
-        A 2D array representing a field (e.g., topography or mask) whose boundary values
-        need to be adjusted.
-
-    Returns
-    -------
-    field : numpy.ndarray or xarray.DataArray
-        The input field with adjusted boundary values.
-    """
-
-    field[0, :] = field[1, :]
-    field[-1, :] = field[-2, :]
-    field[:, 0] = field[:, 1]
-    field[:, -1] = field[:, -2]
-
-    return field
 
 
 def _compute_rfactor(h):
@@ -336,22 +258,6 @@ def _compute_rfactor(h):
 def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
     ds.attrs["topography_source"] = topography_source["name"]
     ds.attrs["hmin"] = hmin
-
-    return ds
-
-
-def _add_velocity_masks(ds):
-
-    # add u- and v-masks
-    ds["mask_u"] = interpolate_from_rho_to_u(
-        ds["mask_rho"], method="multiplicative"
-    ).astype(np.int32)
-    ds["mask_v"] = interpolate_from_rho_to_v(
-        ds["mask_rho"], method="multiplicative"
-    ).astype(np.int32)
-
-    ds["mask_u"].attrs = {"long_name": "Mask at u-points", "units": "land/water (0/1)"}
-    ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
 
     return ds
 

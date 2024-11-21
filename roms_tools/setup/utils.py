@@ -1173,3 +1173,26 @@ def _convert_from_iso_format(value):
     except ValueError:
         # Return None or raise an exception if parsing fails
         return value
+
+
+def handle_boundaries(field):
+    """Adjust the boundaries of a 2D field by copying values from adjacent cells.
+
+    Parameters
+    ----------
+    field : numpy.ndarray or xarray.DataArray
+        A 2D array representing a field (e.g., topography or mask) whose boundary values
+        need to be adjusted.
+
+    Returns
+    -------
+    field : numpy.ndarray or xarray.DataArray
+        The input field with adjusted boundary values.
+    """
+
+    field[0, :] = field[1, :]
+    field[-1, :] = field[-2, :]
+    field[:, 0] = field[:, 1]
+    field[:, -1] = field[:, -2]
+
+    return field

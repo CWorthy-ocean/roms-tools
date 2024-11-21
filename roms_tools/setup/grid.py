@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
 from typing import Dict, Union, List
-from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
+from roms_tools.setup.topography import _add_topography
+from roms_tools.setup.mask import _add_mask, _add_velocity_masks
 from roms_tools.setup.plot import _plot, _section_plot
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
@@ -28,11 +29,12 @@ class Grid:
     """A single ROMS grid, used for creating, plotting, and then saving a new ROMS
     domain grid.
 
-    The grid generation consists of three steps:
+    The grid generation consists of four steps:
 
     1.  Creating the horizontal grid
-    2.  Generating the topography and mask
-    3.  Preparing the vertical coordinate system
+    2.  Creating the land mask
+    3.  Generating the topography
+    4.  Preparing the vertical coordinate system
 
     Parameters
     ----------
@@ -105,8 +107,14 @@ class Grid:
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
+        # Mask
+        self._create_mask(verbose=self.verbose)
+
+        # Coarsen the dataset if needed
+        self._coarsen()
+
         # Topography and mask
-        self.update_topography_and_mask(
+        self.update_topography(
             topography_source=self.topography_source,
             hmin=self.hmin,
             verbose=self.verbose,
@@ -136,15 +144,29 @@ class Grid:
                     "`topography_source` must include a 'path' key when the 'name' is not 'ETOPO5'."
                 )
 
-    def update_topography_and_mask(
+    def _create_mask(self, verbose=False) -> None:
+
+        if verbose:
+            start_time = time.time()
+            logging.info("=== Creating the land mask ===")
+        ds = _add_mask(self.ds)
+
+        if verbose:
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
+                "========================================================================================================"
+            )
+
+        object.__setattr__(self, "ds", ds)
+
+    def update_topography(
         self, topography_source=None, hmin=None, verbose=False
     ) -> None:
-        """Update the grid dataset with processed topography and land/sea mask.
+        """Update the grid dataset with processed topography.
 
-        This method processes the topography data and generates a land/sea mask for the grid.
-        It performs several key operations, including interpolating topography, smoothing the
-        topography over the entire domain and locally, and filling in enclosed basins.
-        The processed topography and mask are then added to the grid's dataset as new variables.
+        This method performs several key operations, including regridding the topography, smoothing the
+        topography over the entire domain and locally.
+        The processed topography is then added to the grid's dataset.
 
         Parameters
         ----------
@@ -168,7 +190,7 @@ class Grid:
         -------
         None
             This method updates the internal dataset (`self.ds`) in place by adding or overwriting the
-            topography and mask variables. It does not return any value.
+            topography variable. It does not return any value.
         """
 
         topography_source = topography_source or self.topography_source
@@ -181,11 +203,11 @@ class Grid:
         if verbose:
             start_time = time.time()
             logging.info(
-                f"=== Generating the topography and mask using {topography_source['name']} data and hmin = {hmin} meters ==="
+                f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ==="
             )
 
         # Add topography and mask to the dataset
-        ds = _add_topography_and_mask(
+        ds = _add_topography(
             ds=self.ds,
             target_coords=target_coords,
             topography_source=topography_source,
@@ -199,9 +221,6 @@ class Grid:
             logging.info(
                 "========================================================================================================"
             )
-
-        # Coarsen the dataset if needed
-        ds = self._coarsen(ds)
 
         # Update the grid's dataset and related attributes
         object.__setattr__(self, "ds", ds)
@@ -327,7 +346,7 @@ class Grid:
         else:
             object.__setattr__(self, "straddle", False)
 
-    def _coarsen(self, ds):
+    def _coarsen(self):
         """Update the grid by adding grid variables that are coarsened versions of the
         original fine-resoluion grid variables. The coarsening is by a factor of two.
 
@@ -336,17 +355,6 @@ class Grid:
         - `lat_rho` -> `lat_coarse`: Latitude at rho points.
         - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
         - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The dataset containing the fine-resolution grid variables that will be
-            coarsened.
-
-        Returns
-        -------
-        ds : xr.Dataset
-            The updated dataset with coarser variables added.
         """
         d = {
             "angle": "angle_coarse",
@@ -354,6 +362,8 @@ class Grid:
             "lat_rho": "lat_coarse",
             "lon_rho": "lon_coarse",
         }
+
+        ds = self.ds
 
         for fine_var, coarse_var in d.items():
             fine_field = ds[fine_var]
@@ -378,7 +388,7 @@ class Grid:
             ] = f"{ds[fine_var].attrs['long_name']} on coarsened grid"
             ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
 
-        return ds
+        object.__setattr__(self, "ds", ds)
 
     def plot(self, bathymetry: bool = False) -> None:
         """Plot the grid.
@@ -597,8 +607,7 @@ class Grid:
                 "mask_coarse",
             ]
         ):
-            ds = grid._coarsen(grid.ds)
-            object.__setattr__(grid, "ds", ds)
+            grid._coarsen()
 
         # Move variables to coordinates if necessary
         for var in ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]:

@@ -449,7 +449,7 @@ class RiverForcing:
             xticks = np.arange(1, 13)
             xlabel = "months"
         else:
-            xticks = self.ds.river_time.values
+            xticks = self.ds.abs_time.values
             xlabel = "time"
 
         if var_name == "river_volume":
@@ -481,7 +481,7 @@ class RiverForcing:
         ax.set_xlabel(xlabel)
         if not self.climatology:
             n = len(self.ds.river_time)
-            ticks = self.ds.river_time.values[:: n // 6 + 1]
+            ticks = self.ds.abs_time.values[:: n // 6 + 1]
             ax.set_xticks(ticks)
         ax.set_ylabel(units)
         ax.set_title(long_name)

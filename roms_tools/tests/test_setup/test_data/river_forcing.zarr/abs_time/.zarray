@@ -9,8 +9,8 @@
         "id": "blosc",
         "shuffle": 1
     },
-    "dtype": "<f8",
-    "fill_value": "NaN",
+    "dtype": "<i8",
+    "fill_value": null,
     "filters": null,
     "order": "C",
     "shape": [

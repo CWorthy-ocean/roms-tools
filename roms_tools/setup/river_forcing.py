@@ -12,6 +12,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
     substitute_nans_by_fillvalue,
+    convert_to_roms_time,
     save_datasets,
     _to_yaml,
     _from_yaml,
@@ -208,6 +209,12 @@ class RiverForcing:
         river_tracer.attrs["long_name"] = "River tracer data"
 
         ds["river_tracer"] = river_tracer
+
+        ds, time = convert_to_roms_time(
+            ds, self.model_reference_date, self.climatology, time_name="river_time"
+        )
+
+        ds = ds.assign_coords({"river_time": time})
 
         return ds
 

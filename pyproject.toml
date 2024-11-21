@@ -32,7 +32,8 @@ dependencies = [
     "netcdf4",
     "PyYAML",
     "pyamg",
-    "bottleneck" # required for xr.ffill
+    "bottleneck",
+    "regionmask"
 ]
 dynamic = ["version"]
 

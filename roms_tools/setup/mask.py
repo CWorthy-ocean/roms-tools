@@ -2,14 +2,19 @@ import xarray as xr
 import numpy as np
 import regionmask
 from scipy.ndimage import label
-from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v, handle_boundaries
+from roms_tools.setup.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    handle_boundaries,
+)
+
 
 def _add_mask(ds):
 
     land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
 
     land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
-    mask = land_mask.isnull() 
+    mask = land_mask.isnull()
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
@@ -24,6 +29,7 @@ def _add_mask(ds):
     ds = _add_velocity_masks(ds)
 
     return ds
+
 
 def _fill_enclosed_basins(mask) -> np.ndarray:
     """Fills in enclosed basins with land."""
@@ -46,6 +52,7 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
 
     return mask
 
+
 def _add_velocity_masks(ds):
 
     # add u- and v-masks
@@ -60,4 +67,3 @@ def _add_velocity_masks(ds):
     ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
 
     return ds
-

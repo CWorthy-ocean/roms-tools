@@ -32,7 +32,7 @@ class Grid:
     The grid generation consists of four steps:
 
     1.  Creating the horizontal grid
-    2.  Creating the land mask
+    2.  Creating the mask
     3.  Generating the topography
     4.  Preparing the vertical coordinate system
 
@@ -148,7 +148,7 @@ class Grid:
 
         if verbose:
             start_time = time.time()
-            logging.info("=== Creating the land mask ===")
+            logging.info("=== Creating the mask ===")
         ds = _add_mask(self.ds)
 
         if verbose:

@@ -62,7 +62,7 @@ If you want to use `ROMS-Tools` together with dask (which we recommend), you can
 install `ROMS-Tools` along with the additional dependency via:
 
 ```bash
-pip install -e .[dask]
+pip install -e ".[dask]"
 ```
 
 

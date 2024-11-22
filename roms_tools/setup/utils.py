@@ -983,10 +983,11 @@ def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"
 
     if climatology:
         ds.attrs["climatology"] = str(True)
+        month = xr.DataArray(range(1, 13), dims=time_name)
+        month.attrs["long_name"] = "Month index (1-12)"
+        ds = ds.assign_coords({"month": month})
         # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords(
-            {"abs_time": np.datetime64(model_reference_date) + ds[time_name]}
-        )
+        abs_time = np.datetime64(model_reference_date) + ds[time_name]
         # Convert to pandas TimedeltaIndex
         timedelta_index = pd.to_timedelta(ds[time_name].values)
 
@@ -1005,7 +1006,7 @@ def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"
 
     else:
         # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords({"abs_time": ds[time_name]})
+        abs_time = ds[time_name]
 
         time = (
             (ds[time_name] - np.datetime64(model_reference_date)).astype("float64")
@@ -1014,7 +1015,13 @@ def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"
             * 1e-9
         )
 
-    time.attrs["long_name"] = f"days since {str(model_reference_date)}"
+    attrs = [key for key in abs_time.attrs]
+    for attr in attrs:
+        del abs_time.attrs[attr]
+    abs_time.attrs["long_name"] = "absolute time"
+    ds = ds.assign_coords({"abs_time": abs_time})
+
+    time.attrs["long_name"] = f"relative time: days since {str(model_reference_date)}"
     time.encoding["units"] = "days"
     time.attrs["units"] = "days"
     ds.encoding["unlimited_dims"] = "time"

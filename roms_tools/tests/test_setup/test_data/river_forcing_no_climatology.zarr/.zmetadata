@@ -29,9 +29,10 @@
                 "river_time"
             ],
             "calendar": "proleptic_gregorian",
+            "long_name": "absolute time",
             "units": "days since 1997-12-15 00:00:00"
         },
-        "nriver/.zarray": {
+        "river_name/.zarray": {
             "chunks": [
                 6
             ],
@@ -55,35 +56,11 @@
             ],
             "zarr_format": 2
         },
-        "nriver/.zattrs": {
+        "river_name/.zattrs": {
             "_ARRAY_DIMENSIONS": [
                 "nriver"
-            ]
-        },
-        "ntracers/.zarray": {
-            "chunks": [
-                2
             ],
-            "compressor": {
-                "blocksize": 0,
-                "clevel": 5,
-                "cname": "lz4",
-                "id": "blosc",
-                "shuffle": 1
-            },
-            "dtype": "<U23",
-            "fill_value": null,
-            "filters": null,
-            "order": "C",
-            "shape": [
-                2
-            ],
-            "zarr_format": 2
-        },
-        "ntracers/.zattrs": {
-            "_ARRAY_DIMENSIONS": [
-                "ntracers"
-            ]
+            "long_name": "River name"
         },
         "river_time/.zarray": {
             "chunks": [
@@ -109,14 +86,14 @@
             "_ARRAY_DIMENSIONS": [
                 "river_time"
             ],
-            "long_name": "days since 2000-01-01 00:00:00",
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
             "units": "days"
         },
         "river_tracer/.zarray": {
             "chunks": [
                 4,
-                6,
-                2
+                2,
+                6
             ],
             "compressor": {
                 "blocksize": 0,
@@ -125,25 +102,26 @@
                 "id": "blosc",
                 "shuffle": 1
             },
-            "dtype": "<f8",
+            "dtype": "<f4",
             "fill_value": "NaN",
             "filters": null,
             "order": "C",
             "shape": [
                 4,
-                6,
-                2
+                2,
+                6
             ],
             "zarr_format": 2
         },
         "river_tracer/.zattrs": {
             "_ARRAY_DIMENSIONS": [
                 "river_time",
-                "nriver",
-                "ntracers"
+                "ntracers",
+                "nriver"
             ],
-            "coordinates": "abs_time",
-            "long_name": "River tracer data"
+            "coordinates": "abs_time river_name tracer_name",
+            "long_name": "River tracer data",
+            "units": "degrees C [temperature]; psu [salinity]"
         },
         "river_volume/.zarray": {
             "chunks": [
@@ -172,9 +150,35 @@
                 "river_time",
                 "nriver"
             ],
-            "coordinates": "abs_time",
+            "coordinates": "abs_time river_name",
             "long_name": "River volume flux",
             "units": "m^3/s"
+        },
+        "tracer_name/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U11",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "tracer_name/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntracers"
+            ],
+            "long_name": "Tracer name"
         }
     },
     "zarr_consolidated_format": 1

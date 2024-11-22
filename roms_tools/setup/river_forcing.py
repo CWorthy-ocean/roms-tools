@@ -195,19 +195,24 @@ class RiverForcing:
         name = data.ds[data.var_names["name"]].rename(
             {data.dim_names["station"]: "nriver"}
         )
-        river_volume.coords["nriver"] = name
+        name.attrs["long_name"] = "River name"
+        river_volume.coords["river_name"] = name
         ds["river_volume"] = river_volume
 
-        tracer_data = np.zeros((len(ds.river_time), len(ds.nriver), 2), dtype=float)
-        tracer_data[:, :, 0] = 17.0
-        tracer_data[:, :, 1] = 1.0
+        tracer_data = np.zeros(
+            (len(ds.river_time), 2, len(ds.nriver)), dtype=np.float32
+        )
+        tracer_data[:, 0, :] = 17.0
+        tracer_data[:, 1, :] = 1.0
 
         river_tracer = xr.DataArray(
-            tracer_data, dims=("river_time", "nriver", "ntracers")
+            tracer_data, dims=("river_time", "ntracers", "nriver")
         )
-        river_tracer.coords["ntracers"] = ["temperature [degrees C]", "salinity [psu]"]
         river_tracer.attrs["long_name"] = "River tracer data"
-
+        river_tracer.attrs["units"] = "degrees C [temperature]; psu [salinity]"
+        tracer_names = xr.DataArray(["temperature", "salinity"], dims="ntracers")
+        tracer_names.attrs["long_name"] = "Tracer name"
+        river_tracer.coords["tracer_name"] = tracer_names
         ds["river_tracer"] = river_tracer
 
         ds, time = convert_to_roms_time(
@@ -215,6 +220,8 @@ class RiverForcing:
         )
 
         ds = ds.assign_coords({"river_time": time})
+
+        ds = ds.drop_vars("nriver")
 
         return ds
 
@@ -446,8 +453,8 @@ class RiverForcing:
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
         if self.climatology:
-            xticks = np.arange(1, 13)
-            xlabel = "months"
+            xticks = self.ds.month.values
+            xlabel = "month"
         else:
             xticks = self.ds.abs_time.values
             xlabel = "time"
@@ -474,7 +481,7 @@ class RiverForcing:
                 markersize=8,
                 markeredgewidth=2,
                 lw=2,
-                label=self.ds.isel(nriver=i).nriver.values,
+                label=self.ds.isel(nriver=i).river_name.values,
             )
 
         ax.set_xticks(xticks)

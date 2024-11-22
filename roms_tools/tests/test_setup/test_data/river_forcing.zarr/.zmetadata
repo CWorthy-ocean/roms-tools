@@ -1,8 +1,37 @@
 {
     "metadata": {
-        ".zattrs": {},
+        ".zattrs": {
+            "climatology": "True"
+        },
         ".zgroup": {
             "zarr_format": 2
+        },
+        "abs_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "abs_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "river_time"
+            ],
+            "calendar": "proleptic_gregorian",
+            "units": "days since 2000-01-16 00:00:00"
         },
         "month/.zarray": {
             "chunks": [
@@ -94,8 +123,8 @@
                 "id": "blosc",
                 "shuffle": 1
             },
-            "dtype": "<i8",
-            "fill_value": null,
+            "dtype": "<f8",
+            "fill_value": "NaN",
             "filters": null,
             "order": "C",
             "shape": [
@@ -107,6 +136,8 @@
             "_ARRAY_DIMENSIONS": [
                 "river_time"
             ],
+            "cycle_length": 365.25,
+            "long_name": "days since 2000-01-01 00:00:00",
             "units": "days"
         },
         "river_tracer/.zarray": {
@@ -139,7 +170,7 @@
                 "nriver",
                 "ntracers"
             ],
-            "coordinates": "month",
+            "coordinates": "abs_time month",
             "long_name": "River tracer data"
         },
         "river_volume/.zarray": {
@@ -169,7 +200,7 @@
                 "river_time",
                 "nriver"
             ],
-            "coordinates": "month",
+            "coordinates": "abs_time month",
             "long_name": "River volume flux",
             "units": "m^3/s"
         }

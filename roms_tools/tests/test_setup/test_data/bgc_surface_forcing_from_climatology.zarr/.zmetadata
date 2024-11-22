@@ -5,7 +5,7 @@
             "correct_radiation": "False",
             "end_time": "2020-02-01 00:00:00",
             "model_reference_date": "2000-01-01 00:00:00",
-            "roms_tools_version": "0.1.dev157+dirty",
+            "roms_tools_version": "0.1.dev169+dirty",
             "source": "CESM_REGRIDDED",
             "start_time": "2020-02-01 00:00:00",
             "title": "ROMS surface forcing file created by ROMS-Tools",
@@ -40,6 +40,7 @@
                 "time"
             ],
             "calendar": "proleptic_gregorian",
+            "long_name": "absolute time",
             "units": "days since 2000-01-16 00:00:00"
         },
         "dust/.zarray": {
@@ -72,7 +73,7 @@
                 "eta_rho",
                 "xi_rho"
             ],
-            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
             "long_name": "dust decomposition",
             "units": "kg/m^2/s"
         },
@@ -101,7 +102,7 @@
                 "time"
             ],
             "cycle_length": 365.25,
-            "long_name": "days since 2000-01-01 00:00:00",
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
             "units": "days"
         },
         "iron/.zarray": {
@@ -134,7 +135,7 @@
                 "eta_rho",
                 "xi_rho"
             ],
-            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
             "long_name": "iron decomposition",
             "units": "nmol/cm^2/s"
         },
@@ -163,8 +164,34 @@
                 "time"
             ],
             "cycle_length": 365.25,
-            "long_name": "days since 2000-01-01 00:00:00",
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
             "units": "days"
+        },
+        "month/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "month/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "long_name": "Month index (1-12)"
         },
         "nhy/.zarray": {
             "chunks": [
@@ -196,7 +223,7 @@
                 "eta_rho",
                 "xi_rho"
             ],
-            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
             "long_name": "NHy decomposition",
             "units": "kg/m^2/s"
         },
@@ -225,7 +252,7 @@
                 "time"
             ],
             "cycle_length": 365.25,
-            "long_name": "days since 2000-01-01 00:00:00",
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
             "units": "days"
         },
         "nox/.zarray": {
@@ -258,7 +285,7 @@
                 "eta_rho",
                 "xi_rho"
             ],
-            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
             "long_name": "NOx decomposition",
             "units": "kg/m^2/s"
         },
@@ -287,7 +314,7 @@
                 "time"
             ],
             "cycle_length": 365.25,
-            "long_name": "days since 2000-01-01 00:00:00",
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
             "units": "days"
         },
         "pco2_air/.zarray": {
@@ -320,7 +347,7 @@
                 "eta_rho",
                 "xi_rho"
             ],
-            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
             "long_name": "atmospheric pCO2",
             "units": "ppmv"
         },
@@ -354,7 +381,7 @@
                 "eta_rho",
                 "xi_rho"
             ],
-            "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+            "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
             "long_name": "atmospheric pCO2, alternative CO2",
             "units": "ppmv"
         },
@@ -383,7 +410,7 @@
                 "time"
             ],
             "cycle_length": 365.25,
-            "long_name": "days since 2000-01-01 00:00:00",
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
             "units": "days"
         }
     },

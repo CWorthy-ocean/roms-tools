@@ -4,7 +4,7 @@
         "s_rho",
         "eta_rho"
     ],
-    "coordinates": "abs_time",
+    "coordinates": "abs_time month",
     "long_name": "eastern boundary alkalinity, alternative CO2",
     "units": "meq/m^3"
 }

@@ -4,7 +4,7 @@
         "eta_rho",
         "xi_rho"
     ],
-    "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+    "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
     "long_name": "NHy decomposition",
     "units": "kg/m^2/s"
 }

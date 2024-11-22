@@ -4,7 +4,7 @@
         "s_rho",
         "eta_rho"
     ],
-    "coordinates": "abs_time",
+    "coordinates": "abs_time month",
     "long_name": "western boundary diazotroph iron",
     "units": "mmol/m^3"
 }

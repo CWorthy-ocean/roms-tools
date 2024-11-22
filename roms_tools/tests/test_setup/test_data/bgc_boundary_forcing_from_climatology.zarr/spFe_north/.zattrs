@@ -4,7 +4,7 @@
         "s_rho",
         "xi_rho"
     ],
-    "coordinates": "abs_time",
+    "coordinates": "abs_time month",
     "long_name": "northern boundary small phytoplankton iron",
     "units": "mmol/m^3"
 }

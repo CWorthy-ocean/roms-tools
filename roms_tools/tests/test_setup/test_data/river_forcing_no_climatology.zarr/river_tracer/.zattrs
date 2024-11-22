@@ -1,9 +1,10 @@
 {
     "_ARRAY_DIMENSIONS": [
         "river_time",
-        "nriver",
-        "ntracers"
+        "ntracers",
+        "nriver"
     ],
-    "coordinates": "abs_time",
-    "long_name": "River tracer data"
+    "coordinates": "abs_time river_name tracer_name",
+    "long_name": "River tracer data",
+    "units": "degrees C [temperature]; psu [salinity]"
 }

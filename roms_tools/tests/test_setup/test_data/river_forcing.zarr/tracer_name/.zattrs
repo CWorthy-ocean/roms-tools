@@ -1,5 +1,6 @@
 {
     "_ARRAY_DIMENSIONS": [
         "ntracers"
-    ]
+    ],
+    "long_name": "Tracer name"
 }

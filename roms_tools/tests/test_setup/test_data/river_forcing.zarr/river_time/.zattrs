@@ -3,6 +3,6 @@
         "river_time"
     ],
     "cycle_length": 365.25,
-    "long_name": "days since 2000-01-01 00:00:00",
+    "long_name": "relative time: days since 2000-01-01 00:00:00",
     "units": "days"
 }

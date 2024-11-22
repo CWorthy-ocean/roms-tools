@@ -1,0 +1,9 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "eta_coarse",
+        "xi_coarse"
+    ],
+    "coordinates": "lat_coarse lon_coarse",
+    "long_name": "Mask at rho-points on coarsened grid",
+    "units": "land/water (0/1)"
+}

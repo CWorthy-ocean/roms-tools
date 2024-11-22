@@ -12,8 +12,8 @@ from itertools import count
 def _add_topography_and_mask(
     ds, topography_source, hmin, smooth_factor=8.0, rmax=0.2
 ) -> xr.Dataset:
-    """
-    Adds topography and a land/water mask to the dataset based on the provided topography source.
+    """Adds topography and a land/water mask to the dataset based on the provided
+    topography source.
 
     This function performs the following operations:
     1. Interpolates topography data onto the desired grid.
@@ -57,10 +57,14 @@ def _add_topography_and_mask(
     mask = xr.where(hraw > 0, 1.0, 0.0)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
-    hraw = _smooth_topography_globally(hraw, mask, smooth_factor)
+    hraw = _smooth_topography_globally(hraw, smooth_factor)
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
+
+    # adjust mask boundaries by copying values from adjacent cells
+    mask = _handle_boundaries(mask)
+
     ds["mask_rho"] = xr.DataArray(mask.astype(np.int32), dims=("eta_rho", "xi_rho"))
     ds["mask_rho"].attrs = {
         "long_name": "Mask at rho-points",
@@ -82,9 +86,8 @@ def _add_topography_and_mask(
 
 
 def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
-    """
-    Given a grid of (lon, lat) points, fetch the topography file and interpolate height values onto the desired grid.
-    """
+    """Given a grid of (lon, lat) points, fetch the topography file and interpolate
+    height values onto the desired grid."""
 
     topo_ds = fetch_topo(topography_source)
 
@@ -115,10 +118,12 @@ def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
     return hraw
 
 
-def _smooth_topography_globally(hraw, wet_mask, factor) -> xr.DataArray:
+def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
     # since GCM-Filters assumes periodic domain, we extend the domain by one grid cell in each dimension
     # and set that margin to land
-    margin_mask = xr.concat([wet_mask, 0 * wet_mask.isel(eta_rho=-1)], dim="eta_rho")
+
+    mask = xr.ones_like(hraw)
+    margin_mask = xr.concat([mask, 0 * mask.isel(eta_rho=-1)], dim="eta_rho")
     margin_mask = xr.concat(
         [margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
     )
@@ -144,9 +149,7 @@ def _smooth_topography_globally(hraw, wet_mask, factor) -> xr.DataArray:
 
 
 def _fill_enclosed_basins(mask) -> np.ndarray:
-    """
-    Fills in enclosed basins with land
-    """
+    """Fills in enclosed basins with land."""
 
     # Label connected regions in the mask
     reg, nreg = label(mask)
@@ -168,9 +171,7 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
 
 
 def _smooth_topography_locally(h, hmin=5, rmax=0.2):
-    """
-    Smoothes topography locally to satisfy r < rmax
-    """
+    """Smoothes topography locally to satisfy r < rmax."""
     # Compute rmax_log
     if rmax > 0.0:
         rmax_log = np.log((1.0 + rmax * 0.9) / (1.0 - rmax * 0.9))
@@ -231,10 +232,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         )
 
         # No gradient at the domain boundaries
-        h_log[0, :] = h_log[1, :]
-        h_log[-1, :] = h_log[-2, :]
-        h_log[:, 0] = h_log[:, 1]
-        h_log[:, -1] = h_log[:, -2]
+        h_log = _handle_boundaries(h_log)
 
         # Update h
         h = hmin * np.exp(h_log)
@@ -250,10 +248,32 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
     return h
 
 
+def _handle_boundaries(field):
+    """Adjust the boundaries of a 2D field by copying values from adjacent cells.
+
+    Parameters
+    ----------
+    field : numpy.ndarray or xarray.DataArray
+        A 2D array representing a field (e.g., topography or mask) whose boundary values
+        need to be adjusted.
+
+    Returns
+    -------
+    field : numpy.ndarray or xarray.DataArray
+        The input field with adjusted boundary values.
+    """
+
+    field[0, :] = field[1, :]
+    field[-1, :] = field[-2, :]
+    field[:, 0] = field[:, 1]
+    field[:, -1] = field[:, -2]
+
+    return field
+
+
 def _compute_rfactor(h):
-    """
-    Computes slope parameter (or r-factor) r = |Delta h| / 2h in both horizontal grid directions.
-    """
+    """Computes slope parameter (or r-factor) r = |Delta h| / 2h in both horizontal grid
+    directions."""
     # compute r_{i-1/2} = |h_i - h_{i-1}| / (h_i + h_{i+1})
     r_eta = np.abs(h.diff("eta_rho")) / (h + h.shift(eta_rho=1)).isel(
         eta_rho=slice(1, None)

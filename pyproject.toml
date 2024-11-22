@@ -17,23 +17,31 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 requires-python = ">=3.10"
 dependencies = [
     "xarray >=2022.6.0",
-    "xarray-datatree",
     "numpy",
-    "netcdf4",
     "pooch",
     "matplotlib",
     "cartopy",
     "packaging",
     "scipy",
     "gcm_filters",
-    "numba"
+    "netcdf4",
+    "PyYAML",
+    "pyamg",
+    "bottleneck" # required for xr.ffill
+]
+dynamic = ["version"]
+
+
+[project.optional-dependencies]
+dask = [
+    "dask[diagnostics]"
 ]
 
-dynamic = ["version"]
 
 [project.urls]
 Home = "https://github.com/CWorthy-ocean/roms-tools"
@@ -51,6 +59,7 @@ requires = [
 version_scheme = "guess-next-dev"
 local_scheme = "dirty-tag"
 write_to = "roms_tools/_version.py"
+fallback_version = "9999"
 write_to_template = '''
 # Do not change! Do not track in version control!
 __version__ = "{version}"

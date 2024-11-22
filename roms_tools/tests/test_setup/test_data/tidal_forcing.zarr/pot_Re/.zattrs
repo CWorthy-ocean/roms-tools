@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "ntides",
+        "eta_rho",
+        "xi_rho"
+    ],
+    "coordinates": "omega",
+    "long_name": "Tidal potential, real part",
+    "units": "m"
+}

@@ -19,12 +19,15 @@ author = "ROMS-Tools developers"
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
+    "myst_parser",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
+    "sphinx.ext.mathjax",
     "nbsphinx",
     "sphinxcontrib.bibtex",
 ]
+myst_enable_extensions = ["dollarmath", "amsmath"]
 
 numpydoc_show_class_members = True
 napolean_google_docstring = False

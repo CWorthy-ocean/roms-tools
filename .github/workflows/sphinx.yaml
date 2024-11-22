@@ -16,14 +16,14 @@ jobs:
           cache-downloads: true
           cache-environment: true
           micromamba-version: 'latest'
-          environment-file: ci/environment.yml
-          create-args: |
-            python=${{ matrix.python-version }}
+          environment-file: docs/environment.yml
+      - name: Conda info
+        run: conda info
       - name: Install roms-tools
         shell: micromamba-shell {0}
         run: |
            python - V
-           python -m pip install -e . --no-deps --force-reinstall
+           python -m pip install -e . --force-reinstall
       - name: Build Docs
         shell: bash -l {0}
         run: |

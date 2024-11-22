@@ -1,0 +1,4454 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "climatology": "True",
+            "end_time": "2021-06-30 00:00:00",
+            "hc": 250.0,
+            "model_reference_date": "2000-01-01 00:00:00",
+            "roms_tools_version": "0.1.dev169+dirty",
+            "source": "CESM_REGRIDDED",
+            "start_time": "2021-06-29 00:00:00",
+            "theta_b": 2.0,
+            "theta_s": 5.0,
+            "title": "ROMS boundary forcing file created by ROMS-Tools"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "ALK_ALT_CO2_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_ALT_CO2_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary alkalinity, alternative CO2",
+            "units": "meq/m^3"
+        },
+        "ALK_ALT_CO2_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_ALT_CO2_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary alkalinity, alternative CO2",
+            "units": "meq/m^3"
+        },
+        "ALK_ALT_CO2_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_ALT_CO2_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary alkalinity, alternative CO2",
+            "units": "meq/m^3"
+        },
+        "ALK_ALT_CO2_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_ALT_CO2_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary alkalinity, alternative CO2",
+            "units": "meq/m^3"
+        },
+        "ALK_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary alkalinity",
+            "units": "meq/m^3"
+        },
+        "ALK_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary alkalinity",
+            "units": "meq/m^3"
+        },
+        "ALK_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary alkalinity",
+            "units": "meq/m^3"
+        },
+        "ALK_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "ALK_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary alkalinity",
+            "units": "meq/m^3"
+        },
+        "DIC_ALT_CO2_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_ALT_CO2_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved inorganic carbon, alternative CO2",
+            "units": "mmol/m^3"
+        },
+        "DIC_ALT_CO2_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_ALT_CO2_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved inorganic carbon, alternative CO2",
+            "units": "mmol/m^3"
+        },
+        "DIC_ALT_CO2_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_ALT_CO2_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved inorganic carbon, alternative CO2",
+            "units": "mmol/m^3"
+        },
+        "DIC_ALT_CO2_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_ALT_CO2_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved inorganic carbon, alternative CO2",
+            "units": "mmol/m^3"
+        },
+        "DIC_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved inorganic carbon",
+            "units": "mmol/m^3"
+        },
+        "DIC_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved inorganic carbon",
+            "units": "mmol/m^3"
+        },
+        "DIC_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved inorganic carbon",
+            "units": "mmol/m^3"
+        },
+        "DIC_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DIC_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved inorganic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOC_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOC_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOC_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOC_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOC_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOC_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOC_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOC_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOCr_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOCr_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary refractory dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOCr_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOCr_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary refractory dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOCr_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOCr_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary refractory dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DOCr_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOCr_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary refractory dissolved organic carbon",
+            "units": "mmol/m^3"
+        },
+        "DON_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DON_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DON_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DON_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DON_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DON_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DON_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DON_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DONr_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DONr_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary refractory dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DONr_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DONr_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary refractory dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DONr_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DONr_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary refractory dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DONr_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DONr_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary refractory dissolved organic nitrogen",
+            "units": "mmol/m^3"
+        },
+        "DOP_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOP_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOP_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOP_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOP_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOP_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOP_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOP_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOPr_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOPr_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary refractory dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOPr_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOPr_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary refractory dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOPr_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOPr_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary refractory dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "DOPr_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "DOPr_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary refractory dissolved organic phosphorus",
+            "units": "mmol/m^3"
+        },
+        "Fe_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Fe_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved inorganic iron",
+            "units": "mmol/m^3"
+        },
+        "Fe_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Fe_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved inorganic iron",
+            "units": "mmol/m^3"
+        },
+        "Fe_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Fe_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved inorganic iron",
+            "units": "mmol/m^3"
+        },
+        "Fe_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Fe_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved inorganic iron",
+            "units": "mmol/m^3"
+        },
+        "Lig_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Lig_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary iron binding ligand",
+            "units": "mmol/m^3"
+        },
+        "Lig_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Lig_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary iron binding ligand",
+            "units": "mmol/m^3"
+        },
+        "Lig_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Lig_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary iron binding ligand",
+            "units": "mmol/m^3"
+        },
+        "Lig_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "Lig_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary iron binding ligand",
+            "units": "mmol/m^3"
+        },
+        "NH4_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NH4_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved ammonia",
+            "units": "mmol/m^3"
+        },
+        "NH4_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NH4_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved ammonia",
+            "units": "mmol/m^3"
+        },
+        "NH4_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NH4_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved ammonia",
+            "units": "mmol/m^3"
+        },
+        "NH4_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NH4_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved ammonia",
+            "units": "mmol/m^3"
+        },
+        "NO3_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NO3_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved inorganic nitrate",
+            "units": "mmol/m^3"
+        },
+        "NO3_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NO3_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved inorganic nitrate",
+            "units": "mmol/m^3"
+        },
+        "NO3_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NO3_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved inorganic nitrate",
+            "units": "mmol/m^3"
+        },
+        "NO3_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "NO3_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved inorganic nitrate",
+            "units": "mmol/m^3"
+        },
+        "O2_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "O2_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved oxygen",
+            "units": "mmol/m^3"
+        },
+        "O2_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "O2_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved oxygen",
+            "units": "mmol/m^3"
+        },
+        "O2_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "O2_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved oxygen",
+            "units": "mmol/m^3"
+        },
+        "O2_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "O2_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved oxygen",
+            "units": "mmol/m^3"
+        },
+        "PO4_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "PO4_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved inorganic phosphate",
+            "units": "mmol/m^3"
+        },
+        "PO4_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "PO4_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved inorganic phosphate",
+            "units": "mmol/m^3"
+        },
+        "PO4_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "PO4_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved inorganic phosphate",
+            "units": "mmol/m^3"
+        },
+        "PO4_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "PO4_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved inorganic phosphate",
+            "units": "mmol/m^3"
+        },
+        "SiO3_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "SiO3_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary dissolved inorganic silicate",
+            "units": "mmol/m^3"
+        },
+        "SiO3_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "SiO3_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary dissolved inorganic silicate",
+            "units": "mmol/m^3"
+        },
+        "SiO3_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "SiO3_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary dissolved inorganic silicate",
+            "units": "mmol/m^3"
+        },
+        "SiO3_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "SiO3_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary dissolved inorganic silicate",
+            "units": "mmol/m^3"
+        },
+        "abs_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "abs_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time"
+            ],
+            "calendar": "proleptic_gregorian",
+            "long_name": "absolute time",
+            "units": "days since 2000-01-16 00:00:00"
+        },
+        "bry_time/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "bry_time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time"
+            ],
+            "cycle_length": 365.25,
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
+            "units": "days"
+        },
+        "diatC_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatC_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diatom carbon",
+            "units": "mmol/m^3"
+        },
+        "diatC_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatC_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diatom carbon",
+            "units": "mmol/m^3"
+        },
+        "diatC_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatC_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diatom carbon",
+            "units": "mmol/m^3"
+        },
+        "diatC_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatC_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diatom carbon",
+            "units": "mmol/m^3"
+        },
+        "diatChl_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatChl_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diatom chloropyll",
+            "units": "mg/m^3"
+        },
+        "diatChl_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatChl_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diatom chloropyll",
+            "units": "mg/m^3"
+        },
+        "diatChl_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatChl_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diatom chloropyll",
+            "units": "mg/m^3"
+        },
+        "diatChl_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatChl_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diatom chloropyll",
+            "units": "mg/m^3"
+        },
+        "diatFe_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatFe_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diatom iron",
+            "units": "mmol/m^3"
+        },
+        "diatFe_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatFe_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diatom iron",
+            "units": "mmol/m^3"
+        },
+        "diatFe_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatFe_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diatom iron",
+            "units": "mmol/m^3"
+        },
+        "diatFe_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatFe_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diatom iron",
+            "units": "mmol/m^3"
+        },
+        "diatP_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatP_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diatom phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diatP_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatP_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diatom phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diatP_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatP_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diatom phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diatP_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatP_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diatom phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diatSi_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatSi_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diatom silicate",
+            "units": "mmol/m^3"
+        },
+        "diatSi_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatSi_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diatom silicate",
+            "units": "mmol/m^3"
+        },
+        "diatSi_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatSi_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diatom silicate",
+            "units": "mmol/m^3"
+        },
+        "diatSi_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diatSi_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diatom silicate",
+            "units": "mmol/m^3"
+        },
+        "diazC_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazC_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diazotroph carbon",
+            "units": "mmol/m^3"
+        },
+        "diazC_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazC_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diazotroph carbon",
+            "units": "mmol/m^3"
+        },
+        "diazC_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazC_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diazotroph carbon",
+            "units": "mmol/m^3"
+        },
+        "diazC_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazC_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diazotroph carbon",
+            "units": "mmol/m^3"
+        },
+        "diazChl_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazChl_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diazotroph chloropyll",
+            "units": "mg/m^3"
+        },
+        "diazChl_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazChl_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diazotroph chloropyll",
+            "units": "mg/m^3"
+        },
+        "diazChl_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazChl_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diazotroph chloropyll",
+            "units": "mg/m^3"
+        },
+        "diazChl_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazChl_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diazotroph chloropyll",
+            "units": "mg/m^3"
+        },
+        "diazFe_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazFe_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diazotroph iron",
+            "units": "mmol/m^3"
+        },
+        "diazFe_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazFe_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diazotroph iron",
+            "units": "mmol/m^3"
+        },
+        "diazFe_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazFe_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diazotroph iron",
+            "units": "mmol/m^3"
+        },
+        "diazFe_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazFe_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diazotroph iron",
+            "units": "mmol/m^3"
+        },
+        "diazP_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazP_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary diazotroph phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diazP_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazP_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary diazotroph phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diazP_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazP_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary diazotroph phosphorus",
+            "units": "mmol/m^3"
+        },
+        "diazP_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "diazP_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary diazotroph phosphorus",
+            "units": "mmol/m^3"
+        },
+        "month/.zarray": {
+            "chunks": [
+                12
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12
+            ],
+            "zarr_format": 2
+        },
+        "month/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time"
+            ],
+            "long_name": "Month index (1-12)"
+        },
+        "spC_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spC_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary small phytoplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "spC_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spC_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary small phytoplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "spC_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spC_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary small phytoplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "spC_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spC_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary small phytoplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "spCaCO3_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spCaCO3_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary small phytoplankton CaCO3",
+            "units": "mmol/m^3"
+        },
+        "spCaCO3_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spCaCO3_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary small phytoplankton CaCO3",
+            "units": "mmol/m^3"
+        },
+        "spCaCO3_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spCaCO3_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary small phytoplankton CaCO3",
+            "units": "mmol/m^3"
+        },
+        "spCaCO3_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spCaCO3_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary small phytoplankton CaCO3",
+            "units": "mmol/m^3"
+        },
+        "spChl_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spChl_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary small phytoplankton chlorophyll",
+            "units": "mg/m^3"
+        },
+        "spChl_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spChl_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary small phytoplankton chlorophyll",
+            "units": "mg/m^3"
+        },
+        "spChl_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spChl_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary small phytoplankton chlorophyll",
+            "units": "mg/m^3"
+        },
+        "spChl_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spChl_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary small phytoplankton chlorophyll",
+            "units": "mg/m^3"
+        },
+        "spFe_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spFe_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary small phytoplankton iron",
+            "units": "mmol/m^3"
+        },
+        "spFe_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spFe_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary small phytoplankton iron",
+            "units": "mmol/m^3"
+        },
+        "spFe_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spFe_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary small phytoplankton iron",
+            "units": "mmol/m^3"
+        },
+        "spFe_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spFe_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary small phytoplankton iron",
+            "units": "mmol/m^3"
+        },
+        "spP_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spP_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary small phytoplankton phosphorous",
+            "units": "mmol/m^3"
+        },
+        "spP_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spP_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary small phytoplankton phosphorous",
+            "units": "mmol/m^3"
+        },
+        "spP_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spP_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary small phytoplankton phosphorous",
+            "units": "mmol/m^3"
+        },
+        "spP_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "spP_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary small phytoplankton phosphorous",
+            "units": "mmol/m^3"
+        },
+        "zooC_east/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "zooC_east/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "eastern boundary zooplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "zooC_north/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "zooC_north/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "northern boundary zooplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "zooC_south/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "zooC_south/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "xi_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "southern boundary zooplankton carbon",
+            "units": "mmol/m^3"
+        },
+        "zooC_west/.zarray": {
+            "chunks": [
+                12,
+                3,
+                4
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                12,
+                3,
+                4
+            ],
+            "zarr_format": 2
+        },
+        "zooC_west/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "bry_time",
+                "s_rho",
+                "eta_rho"
+            ],
+            "coordinates": "abs_time month",
+            "long_name": "western boundary zooplankton carbon",
+            "units": "mmol/m^3"
+        }
+    },
+    "zarr_consolidated_format": 1
+}

@@ -1,0 +1,9 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "eta_rho",
+        "xi_u"
+    ],
+    "coordinates": "lat_u lon_u",
+    "long_name": "Mask at u-points",
+    "units": "land/water (0/1)"
+}

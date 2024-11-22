@@ -1,0 +1,7 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "ocean_time"
+    ],
+    "long_name": "seconds since 2000-01-01 00:00:00",
+    "units": "seconds"
+}

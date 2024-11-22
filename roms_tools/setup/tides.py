@@ -1,14 +1,11 @@
 from datetime import datetime
 import xarray as xr
 import numpy as np
-import yaml
+from typing import Dict, Union, List
 import importlib.metadata
-from typing import Dict, Union
-
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.plot import _plot
-from roms_tools.setup.fill import fill_and_interpolate
 from roms_tools.setup.datasets import TPXODataset
 from roms_tools.setup.utils import (
     nan_check,
@@ -16,35 +13,44 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_variable_metadata,
+    save_datasets,
+    get_target_coords,
+    rotate_velocities,
+    get_vector_pairs,
+    _to_yaml,
+    _from_yaml,
 )
-from roms_tools.setup.mixins import ROMSToolsMixins
+from roms_tools.setup.regrid import LateralRegrid
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
-class TidalForcing(ROMSToolsMixins):
-    """
-    Represents tidal forcing data used in ocean modeling.
+class TidalForcing:
+    """Represents tidal forcing for ROMS.
 
     Parameters
     ----------
     grid : Grid
         The grid object representing the ROMS grid associated with the tidal forcing data.
-    source : Dict[str, Union[str, None]]
-        Dictionary specifying the source of the tidal data:
-        - "name" (str): Name of the data source (e.g., "TPXO").
-        - "path" (str): Path to the tidal data file. Can contain wildcards.
+    source : Dict[str, Union[str, Path, List[Union[str, Path]]]]
+        Dictionary specifying the source of the tidal data. Keys include:
+
+          - "name" (str): Name of the data source (e.g., "TPXO").
+          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+
+            - A single string (with or without wildcards).
+            - A single Path object.
+            - A list of strings or Path objects containing multiple files.
+
     ntides : int, optional
         Number of constituents to consider. Maximum number is 14. Default is 10.
     allan_factor : float, optional
         The Allan factor used in tidal model computation. Default is 2.0.
     model_reference_date : datetime, optional
         The reference date for the ROMS simulation. Default is datetime(2000, 1, 1).
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the tidal forcing data.
+    use_dask: bool, optional
+        Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
     Examples
     --------
@@ -54,89 +60,80 @@ class TidalForcing(ROMSToolsMixins):
     """
 
     grid: Grid
-    source: Dict[str, Union[str, None]]
+    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     ntides: int = 10
     allan_factor: float = 2.0
     model_reference_date: datetime = datetime(2000, 1, 1)
+    use_dask: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
 
         self._input_checks()
-        lon, lat, angle, straddle = super().get_target_lon_lat()
+        target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
-
         data.check_number_constituents(self.ntides)
         data.choose_subdomain(
-            latitude_range=[lat.min().values, lat.max().values],
-            longitude_range=[lon.min().values, lon.max().values],
-            margin=2,
-            straddle=straddle,
+            target_coords,
+            buffer_points=20,
         )
-
-        tides = self._get_corrected_tides(data)
-
         # select desired number of constituents
-        for k in tides.keys():
-            tides[k] = tides[k].isel(ntides=slice(None, self.ntides))
+        object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
+        self._correct_tides(data)
 
-        # interpolate onto desired grid
-        coords = {"latitude": lat, "longitude": lon}
-        mask = xr.where(data.ds.depth > 0, 1, 0)
+        data.apply_lateral_fill()
 
-        varnames = [
-            "ssh_Re",
-            "ssh_Im",
-            "pot_Re",
-            "pot_Im",
-            "u_Re",
-            "u_Im",
-            "v_Re",
-            "v_Im",
-        ]
-        data_vars = {}
+        variable_info = self._set_variable_info()
+        var_names = variable_info.keys()
 
-        for var in varnames:
-            data_vars[var] = fill_and_interpolate(
-                tides[var],
-                mask,
-                list(coords.keys()),
-                coords,
-                method="linear",
-            )
+        processed_fields = {}
+        # lateral regridding
+        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        for var_name in var_names:
+            if var_name in data.var_names.keys():
+                processed_fields[var_name] = lateral_regrid.apply(
+                    data.ds[data.var_names[var_name]]
+                )
 
-        data_vars = super().process_velocities(
-            data_vars, angle, "u_Re", "v_Re", interpolate=False
-        )
-        data_vars = super().process_velocities(
-            data_vars, angle, "u_Im", "v_Im", interpolate=False
-        )
+        # rotation of velocities and interpolation to u/v points
+        vector_pairs = get_vector_pairs(variable_info)
+        for pair in vector_pairs:
+            u_component = pair[0]
+            v_component = pair[1]
+            if u_component in processed_fields and v_component in processed_fields:
+                (
+                    processed_fields[u_component],
+                    processed_fields[v_component],
+                ) = rotate_velocities(
+                    processed_fields[u_component],
+                    processed_fields[v_component],
+                    target_coords["angle"],
+                    interpolate=False,
+                )
 
-        # Convert to barotropic velocity
-        for varname in ["u_Re", "v_Re", "u_Im", "v_Im"]:
-            data_vars[varname] = data_vars[varname] / self.grid.ds.h
+        # convert to barotropic velocity
+        for var_name in ["u_Re", "v_Re", "u_Im", "v_Im"]:
+            processed_fields[var_name] = processed_fields[var_name] / self.grid.ds.h
 
-        # Interpolate from rho- to velocity points
+        # interpolate from rho- to velocity points
         for uname in ["u_Re", "u_Im"]:
-            data_vars[uname] = interpolate_from_rho_to_u(data_vars[uname])
+            processed_fields[uname] = interpolate_from_rho_to_u(processed_fields[uname])
         for vname in ["v_Re", "v_Im"]:
-            data_vars[vname] = interpolate_from_rho_to_v(data_vars[vname])
+            processed_fields[vname] = interpolate_from_rho_to_v(processed_fields[vname])
 
         d_meta = get_variable_metadata()
-        ds = self._write_into_dataset(data_vars, d_meta)
-        ds["omega"] = tides["omega"]
+        ds = self._write_into_dataset(processed_fields, d_meta)
+        ds["omega"] = data.ds["omega"]
 
         ds = self._add_global_metadata(ds)
 
-        # NaN values at wet points indicate that the raw data did not cover the domain, and the following will raise a ValueError
-        for var in ["ssh_Re", "u_Re", "v_Im"]:
-            nan_check(ds[var].isel(ntides=0), self.grid.ds.mask_rho)
+        self._validate(ds, variable_info)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
-        for var in ds.data_vars:
-            ds[var] = substitute_nans_by_fillvalue(ds[var])
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         object.__setattr__(self, "ds", ds)
 
@@ -150,20 +147,80 @@ class TidalForcing(ROMSToolsMixins):
     def _get_data(self):
 
         if self.source["name"] == "TPXO":
-            data = TPXODataset(filename=self.source["path"])
+            data = TPXODataset(filename=self.source["path"], use_dask=self.use_dask)
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
         return data
 
-    def _write_into_dataset(self, data_vars, d_meta):
+    def _set_variable_info(self):
+        """Sets up a dictionary with metadata for variables based on the type.
+
+        The dictionary contains the following information:
+        - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
+        - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
+        - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
+        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are variable names and the values are dictionaries of metadata
+            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        """
+        default_info = {
+            "location": "rho",
+            "is_vector": False,
+            "vector_pair": None,
+            "is_3d": False,
+        }
+
+        # Define a dictionary for variable names and their associated information
+        variable_info = {
+            "ssh_Re": {**default_info, "validate": True},
+            "ssh_Im": {**default_info, "validate": False},
+            "pot_Re": {**default_info, "validate": False},
+            "pot_Im": {**default_info, "validate": False},
+            "u_Re": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "v_Re",
+                "is_3d": False,
+                "validate": True,
+            },
+            "v_Re": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "u_Re",
+                "is_3d": False,
+                "validate": True,
+            },
+            "u_Im": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "v_Im",
+                "is_3d": False,
+                "validate": False,
+            },
+            "v_Im": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "u_Im",
+                "is_3d": False,
+                "validate": False,
+            },
+        }
+
+        return variable_info
+
+    def _write_into_dataset(self, processed_fields, d_meta):
 
         # save in new dataset
         ds = xr.Dataset()
 
-        for var in data_vars.keys():
-            ds[var] = data_vars[var].astype(np.float32)
-            ds[var].attrs["long_name"] = d_meta[var]["long_name"]
-            ds[var].attrs["units"] = d_meta[var]["units"]
+        for var_name in processed_fields.keys():
+            ds[var_name] = processed_fields[var_name].astype(np.float32)
+            ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
+            ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
         ds = ds.drop_vars(["lat_rho", "lon_rho"])
 
@@ -186,14 +243,42 @@ class TidalForcing(ROMSToolsMixins):
 
         return ds
 
-    def plot(self, varname, ntides=0) -> None:
-        """
-        Plot the specified tidal forcing variable for a given tidal constituent.
+    def _validate(self, ds, variable_info):
+        """Validates the dataset by checking for NaN values at wet points for specified
+        variables, which would indicate missing raw data coverage over the target
+        domain.
 
         Parameters
         ----------
-        varname : str
+        ds : xarray.Dataset
+            The dataset to validate, containing tidal variables and a mask for wet points.
+        variable_info : dict
+            A dictionary containing metadata about the variables, including whether to validate them.
+
+        Raises
+        ------
+        ValueError
+            If NaN values are found in any of the specified variables at wet points,
+            indicating incomplete data coverage.
+
+        Notes
+        -----
+        This check is applied to the first constituent (`ntides=0`) of each variable in the dataset.
+        The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
+        """
+        for var_name in ds.data_vars:
+            # only validate variables based on "validate" flag if use_dask is false
+            if not self.use_dask or variable_info[var_name]["validate"]:
+                nan_check(ds[var_name].isel(ntides=0), self.grid.ds.mask_rho)
+
+    def plot(self, var_name, ntides=0) -> None:
+        """Plot the specified tidal forcing variable for a given tidal constituent.
+
+        Parameters
+        ----------
+        var_name : str
             The tidal forcing variable to plot. Options include:
+
             - "ssh_Re": Real part of tidal elevation.
             - "ssh_Im": Imaginary part of tidal elevation.
             - "pot_Re": Real part of tidal potential.
@@ -202,6 +287,7 @@ class TidalForcing(ROMSToolsMixins):
             - "u_Im": Imaginary part of tidal velocity in the x-direction.
             - "v_Re": Real part of tidal velocity in the y-direction.
             - "v_Im": Imaginary part of tidal velocity in the y-direction.
+
         ntides : int, optional
             The index of the tidal constituent to plot. Default is 0, which corresponds
             to the first constituent.
@@ -223,7 +309,14 @@ class TidalForcing(ROMSToolsMixins):
         >>> tidal_forcing.plot("ssh_Re", nc=0)
         """
 
-        field = self.ds[varname].isel(ntides=ntides).compute()
+        field = self.ds[var_name].isel(ntides=ntides)
+
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field = field.load()
+
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             field = field.where(self.grid.ds.mask_rho)
             field = field.assign_coords(
@@ -244,7 +337,7 @@ class TidalForcing(ROMSToolsMixins):
         else:
             ValueError("provided field does not have two horizontal dimension")
 
-        title = "%s, ntides = %i" % (field.long_name, self.ds[varname].ntides[ntides])
+        title = "%s, ntides = %i" % (field.long_name, self.ds[var_name].ntides[ntides])
 
         vmax = max(field.max(), -field.min())
         vmin = -vmax
@@ -262,114 +355,118 @@ class TidalForcing(ROMSToolsMixins):
             title=title,
         )
 
-    def save(self, filepath: str) -> None:
-        """
-        Save the tidal forcing information to a netCDF4 file.
+    def save(
+        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
+    ) -> None:
+        """Save the tidal forcing information to a netCDF4 file.
+
+        This method supports saving the dataset in two modes:
+
+          1. **Single File Mode (default)**:
+
+            If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file
+            with the base filename specified by `filepath.nc`.
+
+          2. **Partitioned Mode**:
+
+            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
+            - Each spatial tile is saved as a separate netCDF4 file.
 
         Parameters
         ----------
-        filepath
-        """
-        self.ds.to_netcdf(filepath)
+        filepath : Union[str, Path]
+            The base path or filename where the dataset should be saved.
+        np_eta : int, optional
+            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
+        np_xi : int, optional
+            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
 
-    def to_yaml(self, filepath: str) -> None:
+        Returns
+        -------
+        List[Path]
+            A list of Path objects for the filenames that were saved.
         """
-        Export the parameters of the class to a YAML file, including the version of roms-tools.
+
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
+
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds.load()
+
+        dataset_list = [self.ds]
+        output_filenames = [str(filepath)]
+
+        saved_filenames = save_datasets(
+            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
+        )
+
+        return saved_filenames
+
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        grid_data = asdict(self.grid)
-        grid_data.pop("ds", None)  # Exclude non-serializable fields
-        grid_data.pop("straddle", None)
 
-        # Include the version of roms-tools
-        try:
-            roms_tools_version = importlib.metadata.version("roms-tools")
-        except importlib.metadata.PackageNotFoundError:
-            roms_tools_version = "unknown"
-
-        # Create header
-        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-        # Extract grid data
-        grid_yaml_data = {"Grid": grid_data}
-
-        # Extract tidal forcing data
-        tidal_forcing_data = {
-            "TidalForcing": {
-                "source": self.source,
-                "ntides": self.ntides,
-                "model_reference_date": self.model_reference_date.isoformat(),
-                "allan_factor": self.allan_factor,
-            }
-        }
-
-        # Combine both sections
-        yaml_data = {**grid_yaml_data, **tidal_forcing_data}
-
-        with open(filepath, "w") as file:
-            # Write header
-            file.write(header)
-            # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False)
+        _to_yaml(self, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: str) -> "TidalForcing":
-        """
-        Create an instance of the TidalForcing class from a YAML file.
+    def from_yaml(
+        cls, filepath: Union[str, Path], use_dask: bool = False
+    ) -> "TidalForcing":
+        """Create an instance of the TidalForcing class from a YAML file.
 
         Parameters
         ----------
-        filepath : str
+        filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        use_dask: bool, optional
+            Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
 
         Returns
         -------
         TidalForcing
             An instance of the TidalForcing class.
         """
-        # Read the entire file content
-        with open(filepath, "r") as file:
-            file_content = file.read()
+        filepath = Path(filepath)
 
-        # Split the content into YAML documents
-        documents = list(yaml.safe_load_all(file_content))
-
-        tidal_forcing_data = None
-
-        # Process the YAML documents
-        for doc in documents:
-            if doc is None:
-                continue
-            if "TidalForcing" in doc:
-                tidal_forcing_data = doc["TidalForcing"]
-                break
-
-        if tidal_forcing_data is None:
-            raise ValueError("No TidalForcing configuration found in the YAML file.")
-
-        # Convert the model_reference_date from string to datetime
-        tidal_forcing_params = tidal_forcing_data
-        tidal_forcing_params["model_reference_date"] = datetime.fromisoformat(
-            tidal_forcing_params["model_reference_date"]
-        )
-
-        # Create Grid instance from the YAML file
         grid = Grid.from_yaml(filepath)
+        tidal_forcing_params = _from_yaml(cls, filepath)
+        return cls(grid=grid, **tidal_forcing_params, use_dask=use_dask)
 
-        # Create and return an instance of TidalForcing
-        return cls(grid=grid, **tidal_forcing_params)
+    def _correct_tides(self, data):
+        """Apply tidal corrections to the dataset. This method corrects the dataset for
+        equilibrium tides, self-attraction and loading (SAL) effects, and adjusts phases
+        and amplitudes of tidal elevations and transports using Egbert's correction.
 
-    def _get_corrected_tides(self, data):
+        Parameters
+        ----------
+        data : Dataset
+            The dataset containing tidal data, including variables for sea surface height (ssh), zonal and meridional
+            currents (u, v), and self-attraction and loading corrections (sal).
+        Returns
+        -------
+        None
+            The dataset is modified in-place with corrected real and imaginary components for ssh, u, v, and the
+            potential field ('pot_Re', 'pot_Im').
+        """
 
         # Get equilibrium tides
         tpc = compute_equilibrium_tide(
             data.ds[data.dim_names["longitude"]], data.ds[data.dim_names["latitude"]]
         )
-        tpc = tpc.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
+        tpc = tpc.isel(ntides=data.ds["ntides"])
         # Correct for SAL
         tsc = self.allan_factor * (
             data.ds[data.var_names["sal_Re"]] + 1j * data.ds[data.var_names["sal_Im"]]
@@ -383,9 +480,9 @@ class TidalForcing(ROMSToolsMixins):
 
         # Apply correction for phases and amplitudes
         pf, pu, aa = egbert_correction(self.model_reference_date)
-        pf = pf.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
-        pu = pu.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
-        aa = aa.isel(**{data.dim_names["ntides"]: data.ds[data.dim_names["ntides"]]})
+        pf = pf.isel(ntides=data.ds["ntides"])
+        pu = pu.isel(ntides=data.ds["ntides"])
+        aa = aa.isel(ntides=data.ds["ntides"])
 
         dt = (self.model_reference_date - data.reference_date).days * 3600 * 24
 
@@ -394,27 +491,25 @@ class TidalForcing(ROMSToolsMixins):
         tvc = pf * tvc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
         tpc = pf * tpc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
 
-        tides = {
-            "ssh_Re": thc.real,
-            "ssh_Im": thc.imag,
-            "u_Re": tuc.real,
-            "u_Im": tuc.imag,
-            "v_Re": tvc.real,
-            "v_Im": tvc.imag,
-            "pot_Re": tpc.real,
-            "pot_Im": tpc.imag,
-            "omega": data.ds["omega"],
-        }
+        data.ds[data.var_names["ssh_Re"]] = thc.real
+        data.ds[data.var_names["ssh_Im"]] = thc.imag
+        data.ds[data.var_names["u_Re"]] = tuc.real
+        data.ds[data.var_names["u_Im"]] = tuc.imag
+        data.ds[data.var_names["v_Re"]] = tvc.real
+        data.ds[data.var_names["v_Im"]] = tvc.imag
+        data.ds["pot_Re"] = tpc.real
+        data.ds["pot_Im"] = tpc.imag
 
-        for k in tides.keys():
-            tides[k] = tides[k].rename({data.dim_names["ntides"]: "ntides"})
+        # Update var_names dictionary
+        var_names = {**data.var_names, "pot_Re": "pot_Re", "pot_Im": "pot_Im"}
+        var_names.pop("sal_Re", None)  # Remove "sal_Re" if it exists
+        var_names.pop("sal_Im", None)  # Remove "sal_Im" if it exists
 
-        return tides
+        object.__setattr__(data, "var_names", var_names)
 
 
 def modified_julian_days(year, month, day, hour=0):
-    """
-    Calculate the Modified Julian Day (MJD) for a given date and time.
+    """Calculate the Modified Julian Day (MJD) for a given date and time.
 
     The Modified Julian Day (MJD) is a modified Julian day count starting from
     November 17, 1858 AD. It is commonly used in astronomy and geodesy.
@@ -472,9 +567,8 @@ def modified_julian_days(year, month, day, hour=0):
 
 
 def egbert_correction(date):
-    """
-    Correct phases and amplitudes for real-time runs using parts of the
-    post-processing code from Egbert's & Erofeeva's (OSU) TPXO model.
+    """Correct phases and amplitudes for real-time runs using parts of the post-
+    processing code from Egbert's & Erofeeva's (OSU) TPXO model.
 
     Parameters
     ----------
@@ -494,7 +588,6 @@ def egbert_correction(date):
     ----------
     - Egbert, G.D., and S.Y. Erofeeva. "Efficient inverse modeling of barotropic ocean
       tides." Journal of Atmospheric and Oceanic Technology 19, no. 2 (2002): 183-204.
-
     """
 
     year = date.year
@@ -562,7 +655,7 @@ def egbert_correction(date):
     pf[12] = pftmp**2  # Ms4
     pf[13] = pftmp  # 2n2
     pf[14] = 1.0  # S1
-    pf = xr.DataArray(pf, dims="nc")
+    pf = xr.DataArray(pf, dims="ntides")
 
     putmp = (
         np.arctan(
@@ -598,7 +691,7 @@ def egbert_correction(date):
     pu[12] = putmp  # Ms4
     pu[13] = putmp  # 2n2
     pu[14] = 0.0  # S1
-    pu = xr.DataArray(pu, dims="nc")
+    pu = xr.DataArray(pu, dims="ntides")
     # convert from degrees to radians
     pu = pu * rad
 
@@ -622,15 +715,14 @@ def egbert_correction(date):
                 0.0,  # S1
             ]
         ),
-        dims="nc",
+        dims="ntides",
     )
 
     return pf, pu, aa
 
 
 def compute_equilibrium_tide(lon, lat):
-    """
-    Compute equilibrium tide for given longitudes and latitudes.
+    """Compute equilibrium tide for given longitudes and latitudes.
 
     Parameters
     ----------
@@ -652,7 +744,6 @@ def compute_equilibrium_tide(lon, lat):
         - 2: semidiurnal
         - 1: diurnal
         - 0: long-term
-
     """
 
     # Amplitudes and elasticity factors for 15 tidal constituents
@@ -676,7 +767,7 @@ def compute_equilibrium_tide(lon, lat):
                 0.000764,  # S1
             ]
         ),
-        dims="nc",
+        dims="ntides",
     )
     B = xr.DataArray(
         data=np.array(
@@ -698,12 +789,12 @@ def compute_equilibrium_tide(lon, lat):
                 0.693,  # S1
             ]
         ),
-        dims="nc",
+        dims="ntides",
     )
 
     # types: 2 = semidiurnal, 1 = diurnal, 0 = long-term
     ityp = xr.DataArray(
-        data=np.array([2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 2, 1]), dims="nc"
+        data=np.array([2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 2, 1]), dims="ntides"
     )
 
     d2r = np.pi / 180

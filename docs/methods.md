@@ -80,6 +80,7 @@ Here are the main steps illustrated for an example domain with 100 x 100 horizon
 ![Step 2](images/step2.png)
 ![Step 5](images/step5.png)
 
+
 ## Vertical Coordinate System
 
 ROMS uses a terrain-following vertical coordinate system. The vertical coordinate system is important for `ROMS-Tools` while creating input fields that have a depth dimension, such as the initial conditions or the boundary forcing, and therefore has to mimic the vertical coordinate system that is internally computed by ROMS. The vertical coordinate system parameters are as follows:

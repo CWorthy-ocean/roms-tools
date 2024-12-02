@@ -72,17 +72,29 @@ def test_successful_initialization_with_climatological_dai_data(
     assert isinstance(river_forcing.ds, xr.Dataset)
     assert len(river_forcing.ds.nriver) > 0
     assert len(river_forcing.original_indices["name"]) > 0
-    assert river_forcing.climatology
     assert "river_volume" in river_forcing.ds
     assert "river_tracer" in river_forcing.ds
+    assert river_forcing.climatology
+    assert "river_time" in river_forcing.ds
+    assert hasattr(
+        river_forcing.ds.river_time,
+        "cycle_length",
+    )
+    assert hasattr(river_forcing.ds, "climatology")
 
 
 def test_successful_initialization_with_monthly_dai_data(river_forcing_no_climatology):
 
     assert isinstance(river_forcing_no_climatology.ds, xr.Dataset)
-    assert not river_forcing_no_climatology.climatology
     assert "river_volume" in river_forcing_no_climatology.ds
     assert "river_tracer" in river_forcing_no_climatology.ds
+    assert "river_time" in river_forcing_no_climatology.ds
+    assert not river_forcing_no_climatology.climatology
+    assert not hasattr(
+        river_forcing_no_climatology.ds.river_time,
+        "cycle_length",
+    )
+    assert not hasattr(river_forcing_no_climatology.ds, "climatology")
 
 
 def test_reproducibility(river_forcing, river_forcing_climatology):

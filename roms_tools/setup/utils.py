@@ -979,16 +979,17 @@ def gc_dist(lon1, lat1, lon2, lat2):
     return dis
 
 
-def convert_to_roms_time(ds, model_reference_date, climatology):
+def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"):
 
     if climatology:
         ds.attrs["climatology"] = str(True)
+        month = xr.DataArray(range(1, 13), dims=time_name)
+        month.attrs["long_name"] = "Month index (1-12)"
+        ds = ds.assign_coords({"month": month})
         # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords(
-            {"abs_time": np.datetime64(model_reference_date) + ds["time"]}
-        )
+        abs_time = np.datetime64(model_reference_date) + ds[time_name]
         # Convert to pandas TimedeltaIndex
-        timedelta_index = pd.to_timedelta(ds["time"].values)
+        timedelta_index = pd.to_timedelta(ds[time_name].values)
 
         # Determine the start of the year for the base_datetime
         start_of_year = datetime(model_reference_date.year, 1, 1)
@@ -999,22 +1000,28 @@ def convert_to_roms_time(ds, model_reference_date, climatology):
         # Convert the timedelta to nanoseconds first, then to days
         time = xr.DataArray(
             (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
-            dims="time",
+            dims=time_name,
         )
         time.attrs["cycle_length"] = 365.25
 
     else:
         # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords({"abs_time": ds["time"]})
+        abs_time = ds[time_name]
 
         time = (
-            (ds["time"] - np.datetime64(model_reference_date)).astype("float64")
+            (ds[time_name] - np.datetime64(model_reference_date)).astype("float64")
             / 3600
             / 24
             * 1e-9
         )
 
-    time.attrs["long_name"] = f"days since {str(model_reference_date)}"
+    attrs = [key for key in abs_time.attrs]
+    for attr in attrs:
+        del abs_time.attrs[attr]
+    abs_time.attrs["long_name"] = "absolute time"
+    ds = ds.assign_coords({"abs_time": abs_time})
+
+    time.attrs["long_name"] = f"relative time: days since {str(model_reference_date)}"
     time.encoding["units"] = "days"
     time.attrs["units"] = "days"
     ds.encoding["unlimited_dims"] = "time"

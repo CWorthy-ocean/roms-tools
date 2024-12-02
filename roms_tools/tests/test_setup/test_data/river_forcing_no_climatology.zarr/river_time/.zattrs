@@ -2,6 +2,6 @@
     "_ARRAY_DIMENSIONS": [
         "river_time"
     ],
-    "calendar": "proleptic_gregorian",
-    "units": "days since 1997-12-15 00:00:00"
+    "long_name": "relative time: days since 2000-01-01 00:00:00",
+    "units": "days"
 }

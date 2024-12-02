@@ -480,7 +480,12 @@ class InitialConditions:
         ds["Cs_w"] = self.grid.ds["Cs_w"]
 
         # Preserve absolute time coordinate for readability
-        ds = ds.assign_coords({"abs_time": ds["time"]})
+        abs_time = ds["time"]
+        attrs = [key for key in abs_time.attrs]
+        for attr in attrs:
+            del abs_time.attrs[attr]
+        abs_time.attrs["long_name"] = "absolute time"
+        ds = ds.assign_coords({"abs_time": abs_time})
 
         # Translate the time coordinate to days since the model reference date
         model_reference_date = np.datetime64(self.model_reference_date)
@@ -490,7 +495,7 @@ class InitialConditions:
         ds = ds.assign_coords(ocean_time=("time", ocean_time.data.astype("float64")))
         ds["ocean_time"].attrs[
             "long_name"
-        ] = f"seconds since {str(self.model_reference_date)}"
+        ] = f"relative time: seconds since {str(self.model_reference_date)}"
         ds["ocean_time"].attrs["units"] = "seconds"
         ds = ds.swap_dims({"time": "ocean_time"})
         ds = ds.drop_vars("time")

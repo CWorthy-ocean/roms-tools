@@ -3,6 +3,7 @@
         "river_time",
         "nriver"
     ],
+    "coordinates": "abs_time river_name",
     "long_name": "River volume flux",
     "units": "m^3/s"
 }

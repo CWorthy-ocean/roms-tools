@@ -36,7 +36,7 @@ Currently, **ROMS-Tools** does **not** support:
 
 .. important::
 
-   **DISCLAIMER**: This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout Fall 2024. We do not recommend using this software before this ALPHA development and test phase is completed.
+   **DISCLAIMER**: This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout 2024. We do not recommend using this software before this ALPHA development and test phase is completed.
 
 This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
 

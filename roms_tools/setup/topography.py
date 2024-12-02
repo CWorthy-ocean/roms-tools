@@ -1,34 +1,37 @@
+import time
+import logging
 import xarray as xr
 import numpy as np
 import gcm_filters
-from scipy.interpolate import RegularGridInterpolator
-from scipy.ndimage import label
-from roms_tools.setup.download import fetch_topo
-from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from roms_tools.setup.utils import handle_boundaries
 import warnings
 from itertools import count
+from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
+from roms_tools.setup.regrid import LateralRegrid
 
 
-def _add_topography_and_mask(
-    ds, topography_source, hmin, smooth_factor=8.0, rmax=0.2
+def _add_topography(
+    ds,
+    target_coords,
+    topography_source,
+    hmin,
+    smooth_factor=8.0,
+    rmax=0.2,
+    verbose=False,
 ) -> xr.Dataset:
-    """Adds topography and a land/water mask to the dataset based on the provided
-    topography source.
-
-    This function performs the following operations:
-    1. Interpolates topography data onto the desired grid.
-    2. Applies a mask based on ocean depth.
-    3. Smooths the topography globally to reduce grid-scale instabilities.
-    4. Fills enclosed basins with land.
-    5. Smooths the topography locally to ensure the steepness ratio satisfies the rmax criterion.
-    6. Adds topography metadata.
+    """Adds topography to the dataset based on the provided topography source.
 
     Parameters
     ----------
     ds : xr.Dataset
-        The dataset to which topography and the land/water mask will be added.
-    topography_source : str
-        The source of the topography data.
+        The dataset to which topography will be added.
+    topography_source : Dict[str, Union[str, Path]], optional
+        Dictionary specifying the source of the topography data:
+
+        - "name" (str): The name of the topography data source (e.g., "SRTM15").
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
+
+        The default is "ETOPO5", which does not require a path.
     hmin : float
         The minimum allowable depth for the topography.
     smooth_factor : float, optional
@@ -39,81 +42,93 @@ def _add_topography_and_mask(
         The maximum allowable steepness ratio for the topography smoothing.
         This parameter controls the local smoothing of the topography. Smaller values result in
         smoother topography, while larger values preserve more detail. The default is 0.2.
+    verbose: bool, optional
+        Indicates whether to print topography generation steps with timing. Defaults to False.
 
     Returns
     -------
     xr.Dataset
-        The dataset with added topography, mask, and metadata.
+        Updated dataset with added topography and metadata.
     """
 
-    lon = ds.lon_rho.values
-    lat = ds.lat_rho.values
+    if verbose:
+        start_time = time.time()
+    data = _get_topography_data(topography_source)
+    if verbose:
+        logging.info(
+            f"Reading the topography data: {time.time() - start_time:.3f} seconds"
+        )
 
     # interpolate topography onto desired grid
-    hraw = _make_raw_topography(lon, lat, topography_source)
-    hraw = xr.DataArray(data=hraw, dims=["eta_rho", "xi_rho"])
-
-    # Mask is obtained by finding locations where ocean depth is positive
-    mask = xr.where(hraw > 0, 1.0, 0.0)
+    hraw = _make_raw_topography(data, target_coords, verbose=verbose)
+    nan_check(hraw)
 
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
+    if verbose:
+        start_time = time.time()
     hraw = _smooth_topography_globally(hraw, smooth_factor)
-
-    # fill enclosed basins with land
-    mask = _fill_enclosed_basins(mask.values)
-
-    # adjust mask boundaries by copying values from adjacent cells
-    mask = _handle_boundaries(mask)
-
-    ds["mask_rho"] = xr.DataArray(mask.astype(np.int32), dims=("eta_rho", "xi_rho"))
-    ds["mask_rho"].attrs = {
-        "long_name": "Mask at rho-points",
-        "units": "land/water (0/1)",
-    }
-
-    ds = _add_velocity_masks(ds)
+    if verbose:
+        logging.info(
+            f"Smoothing the topography globally: {time.time() - start_time:.3f} seconds"
+        )
 
     # smooth topography locally to satisfy r < rmax
+    if verbose:
+        start_time = time.time()
+    # inserting hraw * mask_rho into this function eliminates any inconsistencies between
+    # the land according to the topography and the land according to the mask; land points
+    # will always be set to hmin
     ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
     ds["h"].attrs = {
-        "long_name": "Final bathymetry at rho-points",
+        "long_name": "Bathymetry at rho-points",
         "units": "meter",
     }
+    if verbose:
+        logging.info(
+            f"Smoothing the topography locally: {time.time() - start_time:.3f} seconds"
+        )
 
     ds = _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax)
 
     return ds
 
 
-def _make_raw_topography(lon, lat, topography_source) -> np.ndarray:
-    """Given a grid of (lon, lat) points, fetch the topography file and interpolate
-    height values onto the desired grid."""
+def _get_topography_data(source):
 
-    topo_ds = fetch_topo(topography_source)
+    kwargs = {"use_dask": False}
 
-    # the following will depend on the topography source
-    if topography_source == "ETOPO5":
-        topo_lon = topo_ds["topo_lon"].copy()
-        # Modify longitude values where necessary
-        topo_lon = xr.where(topo_lon < 0, topo_lon + 360, topo_lon)
-        topo_lon_minus360 = topo_lon - 360
-        topo_lon_plus360 = topo_lon + 360
-        # Concatenate along the longitude axis
-        topo_lon_concatenated = xr.concat(
-            [topo_lon_minus360, topo_lon, topo_lon_plus360], dim="lon"
-        )
-        topo_concatenated = xr.concat(
-            [-topo_ds["topo"], -topo_ds["topo"], -topo_ds["topo"]], dim="lon"
+    if source["name"] == "ETOPO5":
+        if "path" in source.keys():
+            kwargs["filename"] = source["path"]
+        data = ETOPO5Dataset(**kwargs)
+    elif source["name"] == "SRTM15":
+        kwargs["filename"] = source["path"]
+        data = SRTM15Dataset(**kwargs)
+    else:
+        raise ValueError(
+            'Only "ETOPO5" and "SRTM15" are valid options for topography_source["name"].'
         )
 
-        interp = RegularGridInterpolator(
-            (topo_ds["topo_lat"].values, topo_lon_concatenated.values),
-            topo_concatenated.values,
-            method="linear",
+    return data
+
+
+def _make_raw_topography(
+    data, target_coords, method="linear", verbose=False
+) -> xr.DataArray:
+
+    data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
+
+    if verbose:
+        start_time = time.time()
+    lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+    hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]], method=method)
+    if verbose:
+        logging.info(
+            f"Regridding the topography: {time.time() - start_time:.3f} seconds"
         )
 
-    # Interpolate onto desired domain grid points
-    hraw = interp((lat, lon))
+    # flip sign so that bathmetry is positive
+    hraw = -hraw
 
     return hraw
 
@@ -146,28 +161,6 @@ def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
     hsmooth = hsmooth.isel(eta_rho=slice(None, -1), xi_rho=slice(None, -1))
 
     return hsmooth
-
-
-def _fill_enclosed_basins(mask) -> np.ndarray:
-    """Fills in enclosed basins with land."""
-
-    # Label connected regions in the mask
-    reg, nreg = label(mask)
-    # Find the largest region
-    lint = 0
-    lreg = 0
-    for ireg in range(nreg):
-        int_ = np.sum(reg == ireg)
-        if int_ > lint and mask[reg == ireg].sum() > 0:
-            lreg = ireg
-            lint = int_
-
-    # Remove regions other than the largest one
-    for ireg in range(nreg):
-        if ireg != lreg:
-            mask[reg == ireg] = 0
-
-    return mask
 
 
 def _smooth_topography_locally(h, hmin=5, rmax=0.2):
@@ -232,7 +225,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         )
 
         # No gradient at the domain boundaries
-        h_log = _handle_boundaries(h_log)
+        h_log = handle_boundaries(h_log)
 
         # Update h
         h = hmin * np.exp(h_log)
@@ -246,29 +239,6 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
             break
 
     return h
-
-
-def _handle_boundaries(field):
-    """Adjust the boundaries of a 2D field by copying values from adjacent cells.
-
-    Parameters
-    ----------
-    field : numpy.ndarray or xarray.DataArray
-        A 2D array representing a field (e.g., topography or mask) whose boundary values
-        need to be adjusted.
-
-    Returns
-    -------
-    field : numpy.ndarray or xarray.DataArray
-        The input field with adjusted boundary values.
-    """
-
-    field[0, :] = field[1, :]
-    field[-1, :] = field[-2, :]
-    field[:, 0] = field[:, 1]
-    field[:, -1] = field[:, -2]
-
-    return field
 
 
 def _compute_rfactor(h):
@@ -286,23 +256,17 @@ def _compute_rfactor(h):
 
 
 def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
-    ds.attrs["topography_source"] = topography_source
+    ds.attrs["topography_source"] = topography_source["name"]
     ds.attrs["hmin"] = hmin
 
     return ds
 
 
-def _add_velocity_masks(ds):
-
-    # add u- and v-masks
-    ds["mask_u"] = interpolate_from_rho_to_u(
-        ds["mask_rho"], method="multiplicative"
-    ).astype(np.int32)
-    ds["mask_v"] = interpolate_from_rho_to_v(
-        ds["mask_rho"], method="multiplicative"
-    ).astype(np.int32)
-
-    ds["mask_u"].attrs = {"long_name": "Mask at u-points", "units": "land/water (0/1)"}
-    ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
-
-    return ds
+def nan_check(hraw):
+    error_message = (
+        "NaN values found in regridded topography. This likely occurs because the ROMS grid, including "
+        "a small safety margin for interpolation, is not fully contained within the topography dataset's longitude/latitude range. Please ensure that the "
+        "dataset covers the entire area required by the ROMS grid."
+    )
+    if hraw.isnull().any().values:
+        raise ValueError(error_message)

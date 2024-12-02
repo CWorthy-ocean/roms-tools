@@ -85,8 +85,8 @@ class TidalForcing:
 
         data.apply_lateral_fill()
 
-        variable_info = self._set_variable_info()
-        var_names = variable_info.keys()
+        self._set_variable_info()
+        var_names = self.variable_info.keys()
 
         processed_fields = {}
         # lateral regridding
@@ -98,7 +98,7 @@ class TidalForcing:
                 )
 
         # rotation of velocities and interpolation to u/v points
-        vector_pairs = get_vector_pairs(variable_info)
+        vector_pairs = get_vector_pairs(self.variable_info)
         for pair in vector_pairs:
             u_component = pair[0]
             v_component = pair[1]
@@ -129,7 +129,7 @@ class TidalForcing:
 
         ds = self._add_global_metadata(ds)
 
-        self._validate(ds, variable_info)
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -163,9 +163,8 @@ class TidalForcing:
 
         Returns
         -------
-        dict
-            A dictionary where the keys are variable names and the values are dictionaries of metadata
-            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        None
+            This method updates the instance attribute `variable_info` with the metadata dictionary for the variables.
         """
         default_info = {
             "location": "rho",
@@ -210,7 +209,7 @@ class TidalForcing:
             },
         }
 
-        return variable_info
+        object.__setattr__(self, "variable_info", variable_info)
 
     def _write_into_dataset(self, processed_fields, d_meta):
 
@@ -243,7 +242,7 @@ class TidalForcing:
 
         return ds
 
-    def _validate(self, ds, variable_info):
+    def _validate(self, ds):
         """Validates the dataset by checking for NaN values at wet points for specified
         variables, which would indicate missing raw data coverage over the target
         domain.
@@ -252,8 +251,6 @@ class TidalForcing:
         ----------
         ds : xarray.Dataset
             The dataset to validate, containing tidal variables and a mask for wet points.
-        variable_info : dict
-            A dictionary containing metadata about the variables, including whether to validate them.
 
         Raises
         ------
@@ -268,7 +265,7 @@ class TidalForcing:
         """
         for var_name in ds.data_vars:
             # only validate variables based on "validate" flag if use_dask is false
-            if not self.use_dask or variable_info[var_name]["validate"]:
+            if not self.use_dask or self.variable_info[var_name]["validate"]:
                 nan_check(ds[var_name].isel(ntides=0), self.grid.ds.mask_rho)
 
     def plot(self, var_name, ntides=0) -> None:

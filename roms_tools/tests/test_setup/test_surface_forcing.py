@@ -153,27 +153,6 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
     return grid
 
 
-@pytest.fixture
-def grid_that_straddles_180_degree_meridian():
-    """Fixture for creating a domain that straddles 180 degree meridian.
-
-    This is a good test grid for the global ERA5 data, which comes on an [-180, 180]
-    longitude grid.
-    """
-
-    grid = Grid(
-        nx=5,
-        ny=5,
-        size_x=1800,
-        size_y=2400,
-        center_lon=180,
-        center_lat=61,
-        rot=20,
-    )
-
-    return grid
-
-
 @pytest.mark.parametrize(
     "grid_fixture",
     [
@@ -747,7 +726,8 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
       center_lon: -10
       center_lat: 61
       rot: -20
-      topography_source: ETOPO5
+      topography_source:
+        name: ETOPO5
       hmin: 5.0
     """
     )

@@ -1,4 +1,6 @@
+import time
 import copy
+import logging
 from dataclasses import dataclass, field, asdict
 
 import numpy as np
@@ -6,14 +8,17 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
-
-from typing import Union
-from roms_tools.setup.topography import _add_topography_and_mask, _add_velocity_masks
-from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.setup.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+from typing import Dict, Union, List
+from roms_tools.setup.topography import _add_topography
+from roms_tools.setup.mask import _add_mask, _add_velocity_masks
+from roms_tools.setup.plot import _plot, _section_plot
+from roms_tools.setup.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    get_target_coords,
+)
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
-import logging
 from pathlib import Path
 
 RADIUS_OF_EARTH = 6371315.0  # in m
@@ -21,9 +26,15 @@ RADIUS_OF_EARTH = 6371315.0  # in m
 
 @dataclass(frozen=True, kw_only=True)
 class Grid:
-    """A single ROMS grid.
+    """A single ROMS grid, used for creating, plotting, and then saving a new ROMS
+    domain grid.
 
-    Used for creating, plotting, and then saving a new ROMS domain grid.
+    The grid generation consists of four steps:
+
+    1.  Creating the horizontal grid
+    2.  Creating the mask
+    3.  Generating the topography
+    4.  Preparing the vertical coordinate system
 
     Parameters
     ----------
@@ -43,6 +54,15 @@ class Grid:
         Rotation of grid x-direction from lines of constant latitude, measured in degrees.
         Positive values represent a counterclockwise rotation.
         The default is 0, which means that the x-direction of the grid is aligned with lines of constant latitude.
+    topography_source : Dict[str, Union[str, Path]], optional
+        Dictionary specifying the source of the topography data:
+
+        - "name" (str): The name of the topography data source (e.g., "SRTM15").
+        - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
+
+        The default is "ETOPO5", which does not require a path.
+    hmin : float, optional
+       The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
         The number of vertical levels. The default is 100.
     theta_s : float, optional
@@ -51,11 +71,8 @@ class Grid:
         The bottom control parameter. Must satisfy 0 < theta_b <= 4. The default is 2.0.
     hc : float, optional
         The critical depth (in meters). The default is 300.0.
-    topography_source : str, optional
-        Specifies the data source to use for the topography. Options are
-        "ETOPO5". The default is "ETOPO5".
-    hmin : float, optional
-        The minimum ocean depth (in meters). The default is 5.0.
+    verbose: bool, optional
+        Indicates whether to print grid generation steps with timing. Defaults to False.
 
     Raises
     ------
@@ -74,71 +91,241 @@ class Grid:
     theta_s: float = 5.0
     theta_b: float = 2.0
     hc: float = 300.0
-    topography_source: str = "ETOPO5"
+    topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     hmin: float = 5.0
+    verbose: bool = False
     ds: xr.Dataset = field(init=False, repr=False)
     straddle: bool = field(init=False, repr=False)
 
     def __post_init__(self):
-        ds = _make_grid_ds(
-            nx=self.nx,
-            ny=self.ny,
-            size_x=self.size_x,
-            size_y=self.size_y,
-            center_lon=self.center_lon,
-            center_lat=self.center_lat,
-            rot=self.rot,
-        )
-        # Calling object.__setattr__ is ugly but apparently this really is the best (current) way to combine __post_init__ with a frozen dataclass
-        # see https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
-        object.__setattr__(self, "ds", ds)
 
-        # Update self.ds with topography and mask information
-        self.update_topography_and_mask(
-            topography_source=self.topography_source,
-            hmin=self.hmin,
-        )
+        self._input_checks()
+
+        # Horizontal grid
+        self._create_horizontal_grid()
 
         # Check if the Greenwich meridian goes through the domain.
         self._straddle()
 
-        object.__setattr__(self, "ds", ds)
+        # Mask
+        self._create_mask(verbose=self.verbose)
 
-        # Update the grid by adding grid variables that are coarsened versions of the original grid variables
+        # Coarsen the dataset if needed
         self._coarsen()
 
-        self.update_vertical_coordinate(
-            N=self.N, theta_s=self.theta_s, theta_b=self.theta_b, hc=self.hc
+        # Topography and mask
+        self.update_topography(
+            topography_source=self.topography_source,
+            hmin=self.hmin,
+            verbose=self.verbose,
         )
 
-    def update_topography_and_mask(self, hmin, topography_source="ETOPO5") -> None:
-        """Update the grid dataset by adding or overwriting the topography and land/sea
-        mask.
+        # Vertical coordinate system
+        self.update_vertical_coordinate(
+            N=self.N,
+            theta_s=self.theta_s,
+            theta_b=self.theta_b,
+            hc=self.hc,
+            verbose=self.verbose,
+        )
 
-        This method processes the topography data and generates a land/sea mask.
-        It applies several steps, including interpolating topography, smoothing
-        the topography over the entire domain and locally, and filling in enclosed basins. The
-        processed topography and mask are added to the grid's dataset as new variables.
+    def _input_checks(self):
+        if self.topography_source is None:
+            object.__setattr__(self, "topography_source", {"name": "ETOPO5"})
+
+        if "name" not in self.topography_source:
+            raise ValueError(
+                "`topography_source` must include a 'name' key specifying the data source."
+            )
+
+        if self.topography_source["name"] != "ETOPO5":
+            if "path" not in self.topography_source:
+                raise ValueError(
+                    "`topography_source` must include a 'path' key when the 'name' is not 'ETOPO5'."
+                )
+
+    def _create_mask(self, verbose=False) -> None:
+
+        if verbose:
+            start_time = time.time()
+            logging.info("=== Creating the mask ===")
+        ds = _add_mask(self.ds)
+
+        if verbose:
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
+                "========================================================================================================"
+            )
+
+        object.__setattr__(self, "ds", ds)
+
+    def update_topography(
+        self, topography_source=None, hmin=None, verbose=False
+    ) -> None:
+        """Update the grid dataset with processed topography.
+
+        This method performs several key operations, including regridding the topography, smoothing the
+        topography over the entire domain and locally.
+        The processed topography is then added to the grid's dataset.
 
         Parameters
         ----------
-        hmin : float
+        topography_source : dict, optional
+            A dictionary specifying the source of the topography data. The dictionary should
+            contain the following keys:
+            - "name" (str): The name of the topography data source (e.g., "SRTM15").
+            - "path" (Union[str, Path): The path to the raw data file.
+
+            If not provided, `topography_source` will remain unchanged (i.e., the existing value will not be overwritten).
+
+        hmin : float, optional
             The minimum ocean depth (in meters).
-        topography_source : str
-            Specifies the data source to use for the topography. Options are
-            "ETOPO5". Default is "ETOPO5".
+            If not provided, `hmin` will remain unchanged (i.e., the existing value will not be overwritten).
+
+        verbose : bool, optional
+            If True, the method will print detailed information about the grid generation process,
+            including the timing of each step. Defaults to False.
 
         Returns
         -------
         None
-            This method modifies the dataset in place and does not return a value.
+            This method updates the internal dataset (`self.ds`) in place by adding or overwriting the
+            topography variable. It does not return any value.
         """
 
-        ds = _add_topography_and_mask(self.ds, topography_source, hmin)
-        # Assign the updated dataset back to the frozen dataclass
+        topography_source = topography_source or self.topography_source
+        hmin = hmin or self.hmin
+
+        # Extract target coordinates for processing
+        target_coords = get_target_coords(self)
+
+        # If verbose is enabled, start the timer and print the start message
+        if verbose:
+            start_time = time.time()
+            logging.info(
+                f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ==="
+            )
+
+        # Add topography and mask to the dataset
+        ds = _add_topography(
+            ds=self.ds,
+            target_coords=target_coords,
+            topography_source=topography_source,
+            hmin=hmin,
+            verbose=verbose,
+        )
+
+        # If verbose is enabled, print elapsed time and a separator
+        if verbose:
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
+                "========================================================================================================"
+            )
+
+        # Update the grid's dataset and related attributes
         object.__setattr__(self, "ds", ds)
         object.__setattr__(self, "topography_source", topography_source)
         object.__setattr__(self, "hmin", hmin)
+
+    def update_vertical_coordinate(
+        self, N=None, theta_s=None, theta_b=None, hc=None, verbose=False
+    ) -> None:
+        """Create vertical coordinate variables for the ROMS grid.
+
+        This method computes the S-coordinate stretching curves at rho- and
+        w-points.
+
+        Parameters
+        ----------
+        N : int
+            Number of vertical levels.
+            If not provided, `N` will remain unchanged (i.e., the existing value will not be overwritten).
+        theta_s : float
+            S-coordinate surface control parameter.
+            If not provided, `theta_s` will remain unchanged (i.e., the existing value will not be overwritten).
+        theta_b : float
+            S-coordinate bottom control parameter.
+            If not provided, `theta_b` will remain unchanged (i.e., the existing value will not be overwritten).
+        hc : float
+            Critical depth (m) used in ROMS vertical coordinate stretching.
+            If not provided, `hc` will remain unchanged (i.e., the existing value will not be overwritten).
+        verbose: bool, optional
+            Indicates whether to print vertical coordinate generation steps with timing. Defaults to False.
+
+        Returns
+        -------
+        None
+            This method modifies the dataset in place by adding vertical coordinate variables.
+        """
+
+        N = N or self.N
+        theta_s = theta_s or self.theta_s
+        theta_b = theta_b or self.theta_b
+        hc = hc or self.hc
+
+        if verbose:
+            start_time = time.time()
+            logging.info(
+                f"=== Preparing the vertical coordinate system using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ==="
+            )
+
+        ds = self.ds
+        # need to drop vertical coordinates because they could cause conflict if N changed
+        vars_to_drop = [
+            "layer_depth_rho",
+            "layer_depth_u",
+            "layer_depth_v",
+            "interface_depth_rho",
+            "interface_depth_u",
+            "interface_depth_v",
+            "sigma_r",
+            "sigma_w",
+            "Cs_w",
+            "Cs_r",
+        ]
+
+        for var in vars_to_drop:
+            if var in ds.variables:
+                ds = ds.drop_vars(var)
+
+        cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
+        cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
+
+        ds["sigma_r"] = sigma_r.astype(np.float32)
+        ds["sigma_r"].attrs[
+            "long_name"
+        ] = "Fractional vertical stretching coordinate at rho-points"
+        ds["sigma_r"].attrs["units"] = "nondimensional"
+
+        ds["Cs_r"] = cs_r.astype(np.float32)
+        ds["Cs_r"].attrs["long_name"] = "Vertical stretching function at rho-points"
+        ds["Cs_r"].attrs["units"] = "nondimensional"
+
+        ds["sigma_w"] = sigma_w.astype(np.float32)
+        ds["sigma_w"].attrs[
+            "long_name"
+        ] = "Fractional vertical stretching coordinate at w-points"
+        ds["sigma_w"].attrs["units"] = "nondimensional"
+
+        ds["Cs_w"] = cs_w.astype(np.float32)
+        ds["Cs_w"].attrs["long_name"] = "Vertical stretching function at w-points"
+        ds["Cs_w"].attrs["units"] = "nondimensional"
+
+        ds.attrs["theta_s"] = np.float32(theta_s)
+        ds.attrs["theta_b"] = np.float32(theta_b)
+        ds.attrs["hc"] = np.float32(hc)
+
+        if verbose:
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
+                "========================================================================================================"
+            )
+
+        object.__setattr__(self, "ds", ds)
+        object.__setattr__(self, "theta_s", theta_s)
+        object.__setattr__(self, "theta_b", theta_b)
+        object.__setattr__(self, "hc", hc)
+        object.__setattr__(self, "N", N)
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.
@@ -168,15 +355,6 @@ class Grid:
         - `lat_rho` -> `lat_coarse`: Latitude at rho points.
         - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
         - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
-
-        Returns
-        -------
-        None
-
-        Modifies
-        --------
-        self.ds : xr.Dataset
-            The dataset attribute of the Grid instance is updated with the new coarser variables.
         """
         d = {
             "angle": "angle_coarse",
@@ -185,8 +363,10 @@ class Grid:
             "lon_rho": "lon_coarse",
         }
 
+        ds = self.ds
+
         for fine_var, coarse_var in d.items():
-            fine_field = self.ds[fine_var]
+            fine_field = ds[fine_var]
             if self.straddle and fine_var == "lon_rho":
                 fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
 
@@ -196,131 +376,29 @@ class Grid:
                     coarse_field < 0, coarse_field + 360, coarse_field
                 )
             if coarse_var in ["lon_coarse", "lat_coarse"]:
-                ds = self.ds.assign_coords({coarse_var: coarse_field})
-                object.__setattr__(self, "ds", ds)
+                ds = ds.assign_coords({coarse_var: coarse_field})
             else:
-                self.ds[coarse_var] = coarse_field
+                ds[coarse_var] = coarse_field
 
-        self.ds["mask_coarse"] = xr.where(self.ds["mask_coarse"] > 0.5, 1, 0).astype(
-            np.int32
-        )
+        ds["mask_coarse"] = xr.where(ds["mask_coarse"] > 0.5, 1, 0).astype(np.int32)
 
         for fine_var, coarse_var in d.items():
-            self.ds[coarse_var].attrs[
+            ds[coarse_var].attrs[
                 "long_name"
-            ] = f"{self.ds[fine_var].attrs['long_name']} on coarsened grid"
-            self.ds[coarse_var].attrs["units"] = self.ds[fine_var].attrs["units"]
-
-    def update_vertical_coordinate(self, N, theta_s, theta_b, hc) -> None:
-        """Create vertical coordinate variables for the ROMS grid.
-
-        This method computes the S-coordinate stretching curves and depths
-        at various grid points (rho, u, v) using the specified parameters.
-        The computed depths and stretching curves are added to the dataset
-        as new coordinates, along with their corresponding attributes.
-
-        Parameters
-        ----------
-        N : int
-            Number of vertical levels.
-        theta_s : float
-            S-coordinate surface control parameter.
-        theta_b : float
-            S-coordinate bottom control parameter.
-        hc : float
-            Critical depth (m) used in ROMS vertical coordinate stretching.
-
-        Returns
-        -------
-        None
-            This method modifies the dataset in place by adding vertical coordinate variables.
-        """
-
-        ds = self.ds
-        # need to drop vertical coordinates because they could cause conflict if N changed
-        vars_to_drop = [
-            "layer_depth_rho",
-            "layer_depth_u",
-            "layer_depth_v",
-            "interface_depth_rho",
-            "interface_depth_u",
-            "interface_depth_v",
-            "Cs_w",
-            "Cs_r",
-        ]
-
-        for var in vars_to_drop:
-            if var in ds.variables:
-                ds = ds.drop_vars(var)
-
-        h = ds.h
-
-        cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
-        zr = compute_depth(h * 0, h, hc, cs_r, sigma_r)
-        cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
-        zw = compute_depth(h * 0, h, hc, cs_w, sigma_w)
-
-        ds["Cs_r"] = cs_r.astype(np.float32)
-        ds["Cs_r"].attrs["long_name"] = "S-coordinate stretching curves at rho-points"
-        ds["Cs_r"].attrs["units"] = "nondimensional"
-
-        ds["Cs_w"] = cs_w.astype(np.float32)
-        ds["Cs_w"].attrs["long_name"] = "S-coordinate stretching curves at w-points"
-        ds["Cs_w"].attrs["units"] = "nondimensional"
-
-        ds.attrs["theta_s"] = np.float32(theta_s)
-        ds.attrs["theta_b"] = np.float32(theta_b)
-        ds.attrs["hc"] = np.float32(hc)
-
-        depth = -zr
-        depth.attrs["long_name"] = "Layer depth at rho-points"
-        depth.attrs["units"] = "m"
-
-        depth_u = interpolate_from_rho_to_u(depth)
-        depth_u.attrs["long_name"] = "Layer depth at u-points"
-        depth_u.attrs["units"] = "m"
-
-        depth_v = interpolate_from_rho_to_v(depth)
-        depth_v.attrs["long_name"] = "Layer depth at v-points"
-        depth_v.attrs["units"] = "m"
-
-        interface_depth = -zw
-        interface_depth.attrs["long_name"] = "Interface depth at rho-points"
-        interface_depth.attrs["units"] = "m"
-
-        interface_depth_u = interpolate_from_rho_to_u(interface_depth)
-        interface_depth_u.attrs["long_name"] = "Interface depth at u-points"
-        interface_depth_u.attrs["units"] = "m"
-
-        interface_depth_v = interpolate_from_rho_to_v(interface_depth)
-        interface_depth_v.attrs["long_name"] = "Interface depth at v-points"
-        interface_depth_v.attrs["units"] = "m"
-
-        ds = ds.assign_coords(
-            {
-                "layer_depth_rho": depth.astype(np.float32),
-                "layer_depth_u": depth_u.astype(np.float32),
-                "layer_depth_v": depth_v.astype(np.float32),
-                "interface_depth_rho": interface_depth.astype(np.float32),
-                "interface_depth_u": interface_depth_u.astype(np.float32),
-                "interface_depth_v": interface_depth_v.astype(np.float32),
-            }
-        )
-        ds = ds.drop_vars(["eta_rho", "xi_rho"])
+            ] = f"{ds[fine_var].attrs['long_name']} on coarsened grid"
+            ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
 
         object.__setattr__(self, "ds", ds)
-        object.__setattr__(self, "theta_s", theta_s)
-        object.__setattr__(self, "theta_b", theta_b)
-        object.__setattr__(self, "hc", hc)
-        object.__setattr__(self, "N", N)
 
-    def plot(self, bathymetry: bool = False) -> None:
+    def plot(self, bathymetry: bool = False, title: str = None) -> None:
         """Plot the grid.
 
         Parameters
         ----------
         bathymetry : bool
             Whether or not to plot the bathymetry. Default is False.
+        title : str, optional
+            The title of the plot. If not provided, it will be set to a default.
 
         Returns
         -------
@@ -329,6 +407,8 @@ class Grid:
         """
 
         if bathymetry:
+            if title is None:
+                title = "ROMS grid and bathymetry"
             field = self.ds.h.where(self.ds.mask_rho)
             field = field.assign_coords(
                 {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
@@ -344,28 +424,24 @@ class Grid:
                 self.ds,
                 field=field,
                 straddle=self.straddle,
+                title=title,
                 kwargs=kwargs,
             )
         else:
-            _plot(self.ds, straddle=self.straddle)
+            if title is None:
+                title = "ROMS grid"
+            _plot(self.ds, straddle=self.straddle, title=title)
 
     def plot_vertical_coordinate(
-        self, varname="layer_depth_rho", s=None, eta=None, xi=None, ax=None
+        self,
+        s=None,
+        eta=None,
+        xi=None,
     ) -> None:
-        """Plot the vertical coordinate system for a given eta-, xi-, or s-slice.
+        """Plot the layer depth for a given eta-, xi-, or s-slice.
 
         Parameters
         ----------
-        varname : str, optional
-            The vertical coordinate field to plot. Options include:
-
-            - "layer_depth_rho": Layer depth at rho-points.
-            - "layer_depth_u": Layer depth at u-points.
-            - "layer_depth_v": Layer depth at v-points.
-            - "interface_depth_rho": Interface depth at rho-points.
-            - "interface_depth_u": Interface depth at u-points.
-            - "interface_depth_v": Interface depth at v-points.
-
         s: int, optional
             The s-index to plot. Default is None.
         eta : int, optional
@@ -383,105 +459,67 @@ class Grid:
         Raises
         ------
         ValueError
-            If the specified varname is not one of the valid options.
-            If none of s, eta, xi are specified.
+            If not exactly one of s, eta, xi is specified.
         """
 
-        if not any([s is not None, eta is not None, xi is not None]):
-            raise ValueError("At least one of s, eta, or xi must be specified.")
+        title = "Layer depth at rho-points"
 
-        self.ds[varname].load()
-        field = self.ds[varname].squeeze()
+        if sum(s is not None for s in [s, eta, xi]) != 1:
+            raise ValueError("Exactly one of s, eta, or xi must be specified.")
 
-        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_rho
-            field = field.where(self.ds.mask_rho)
-            field = field.assign_coords(
-                {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
-            )
-        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            interface_depth = self.ds.interface_depth_u
-            field = field.where(self.ds.mask_u)
-            field = field.assign_coords({"lon": self.ds.lon_u, "lat": self.ds.lat_u})
-        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            interface_depth = self.ds.interface_depth_v
-            field = field.where(self.ds.mask_v)
-            field = field.assign_coords({"lon": self.ds.lon_v, "lat": self.ds.lat_v})
+        h = self.ds["h"]
+        h = h.assign_coords({"lon": self.ds.lon_rho, "lat": self.ds.lat_rho})
 
-        # slice the field as desired
-        title = field.long_name
-        if s is not None:
-            if "s_rho" in field.dims:
-                title = title + f", s_rho = {field.s_rho[s].item()}"
-                field = field.isel(s_rho=s)
-            elif "s_w" in field.dims:
-                title = title + f", s_w = {field.s_w[s].item()}"
-                field = field.isel(s_w=s)
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (s_rho, s_w) found in ds[{varname}]."
-                )
-
+        # slice the bathymetry as desired
         if eta is not None:
-            if "eta_rho" in field.dims:
-                title = title + f", eta_rho = {field.eta_rho[eta].item()}"
-                field = field.isel(eta_rho=eta)
-                interface_depth = interface_depth.isel(eta_rho=eta)
-            elif "eta_v" in field.dims:
-                title = title + f", eta_v = {field.eta_v[eta].item()}"
-                field = field.isel(eta_v=eta)
-                interface_depth = interface_depth.isel(eta_v=eta)
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{varname}]."
-                )
+            title = title + f", eta_rho = {h.eta_rho[eta].item()}"
+            h = h.isel(eta_rho=eta)
         if xi is not None:
-            if "xi_rho" in field.dims:
-                title = title + f", xi_rho = {field.xi_rho[xi].item()}"
-                field = field.isel(xi_rho=xi)
-                interface_depth = interface_depth.isel(xi_rho=xi)
-            elif "xi_u" in field.dims:
-                title = title + f", xi_u = {field.xi_u[xi].item()}"
-                field = field.isel(xi_u=xi)
-                interface_depth = interface_depth.isel(xi_u=xi)
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{varname}]."
-                )
+            title = title + f", xi_rho = {h.xi_rho[xi].item()}"
+            h = h.isel(xi_rho=xi)
 
         if eta is None and xi is None:
-            vmax = field.max().values
-            vmin = field.min().values
+            layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
+            title = title + f", s_rho = {layer_depth.s_rho[s].item()}"
+            layer_depth = layer_depth.isel(s_rho=s)
+
+            layer_depth.attrs["long_name"] = "Layer depth"
+            layer_depth.attrs["units"] = "m"
+
+            vmax = layer_depth.max().values
+            vmin = layer_depth.min().values
             cmap = plt.colormaps.get_cmap("YlGnBu")
             cmap.set_bad(color="gray")
             kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
             _plot(
                 self.ds,
-                field=field,
+                field=layer_depth.where(self.ds.mask_rho),
                 straddle=self.straddle,
                 depth_contours=False,
                 title=title,
                 kwargs=kwargs,
             )
         else:
-            if len(field.dims) == 2:
-                cmap = plt.colormaps.get_cmap("YlGnBu")
-                cmap.set_bad(color="gray")
-                kwargs = {"vmax": 0.0, "vmin": 0.0, "cmap": cmap, "add_colorbar": False}
+            layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
+            layer_depth.attrs["long_name"] = "Layer depth"
+            layer_depth.attrs["units"] = "m"
+            field = xr.zeros_like(layer_depth)
+            field = field.assign_coords({"layer_depth": layer_depth})
 
-                _section_plot(
-                    xr.zeros_like(field),
-                    interface_depth=interface_depth,
-                    title=title,
-                    kwargs=kwargs,
-                    ax=ax,
-                )
-            else:
-                if "s_rho" in field.dims or "s_w" in field.dims:
-                    _profile_plot(field, title=title, ax=ax)
-                else:
-                    _line_plot(field, title=title, ax=ax)
+            interface_depth = compute_depth(
+                0, h, self.hc, self.ds.Cs_w, self.ds.sigma_w
+            )
+            cmap = plt.colormaps.get_cmap("YlGnBu")
+            cmap.set_bad(color="gray")
+            kwargs = {"vmax": 0.0, "vmin": 0.0, "cmap": cmap, "add_colorbar": False}
+
+            _section_plot(
+                field=field,
+                interface_depth=interface_depth,
+                title=title,
+                kwargs=kwargs,
+            )
 
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
@@ -532,13 +570,15 @@ class Grid:
         return saved_filenames
 
     @classmethod
-    def from_file(cls, filepath: Union[str, Path]) -> "Grid":
+    def from_file(cls, filepath: Union[str, Path], verbose: bool = False) -> "Grid":
         """Create a Grid instance from an existing file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             Path to the file containing the grid information.
+        verbose: bool, optional
+            Indicates whether to print grid generation steps with timing. Defaults to False.
 
         Returns
         -------
@@ -584,13 +624,14 @@ class Grid:
 
         # Update vertical coordinate if necessary
         if not all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
+            logging.warning("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
             N = 100
             theta_s = 5.0
             theta_b = 2.0
             hc = 300.0
 
             grid.update_vertical_coordinate(
-                N=N, theta_s=theta_s, theta_b=theta_b, hc=hc
+                N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=verbose
             )
         else:
             object.__setattr__(grid, "theta_s", ds.attrs["theta_s"].item())
@@ -639,7 +680,10 @@ class Grid:
             "hmin",
         ]:
             if attr in ds.attrs:
-                a = ds.attrs[attr]
+                if attr == "topography_source":
+                    a = {"name": ds.attrs[attr]}
+                else:
+                    a = ds.attrs[attr]
             else:
                 a = None
             object.__setattr__(grid, attr, a)
@@ -661,6 +705,7 @@ class Grid:
         data = asdict(self)
         data.pop("ds", None)
         data.pop("straddle", None)
+        data.pop("verbose", None)
 
         # Include the version of roms-tools
         try:
@@ -681,13 +726,15 @@ class Grid:
             yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "Grid":
+    def from_yaml(cls, filepath: Union[str, Path], verbose: bool = False) -> "Grid":
         """Create an instance of the class from a YAML file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        verbose: bool, optional
+            Indicates whether to print grid generation steps with timing. Defaults to False.
 
         Returns
         -------
@@ -733,8 +780,7 @@ class Grid:
 
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
-
-        return cls(**grid_data)
+        return cls(**grid_data, verbose=verbose)
 
     # override __repr__ method to only print attributes that are actually set
     def __repr__(self) -> str:
@@ -747,150 +793,263 @@ class Grid:
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
+    def _create_horizontal_grid(self) -> xr.Dataset():
+        if self.verbose:
+            start_time = time.time()
+            logging.info("=== Creating the horizontal grid ===")
 
-def _make_grid_ds(
-    nx: int,
-    ny: int,
-    size_x: float,
-    size_y: float,
-    center_lon: float,
-    center_lat: float,
-    rot: float,
-) -> xr.Dataset:
-    _raise_if_domain_size_too_large(size_x, size_y)
+        self._raise_if_domain_size_too_large()
 
-    initial_lon_lat_vars = _make_initial_lon_lat_ds(size_x, size_y, nx, ny)
+        coords = self._make_initial_lon_lat_ds()
 
-    # rotate coordinate system
-    rotated_lon_lat_vars = _rotate(*initial_lon_lat_vars, rot)
+        # rotate coordinate system
+        coords = _rotate(coords, self.rot)
 
-    # translate coordinate system
-    translated_lon_lat_vars = _translate(*rotated_lon_lat_vars, center_lat, center_lon)
-    lon, lat, lonu, latu, lonv, latv, lonq, latq = translated_lon_lat_vars
+        # translate coordinate system
+        coords = _translate(coords, self.center_lat, self.center_lon)
 
-    # compute 1/dx and 1/dy
-    pm, pn = _compute_coordinate_metrics(lon, lonu, latu, lonv, latv)
+        # compute 1/dx and 1/dy
+        coords["pm"], coords["pn"] = _compute_coordinate_metrics(coords)
 
-    # compute angle of local grid positive x-axis relative to east
-    ang = _compute_angle(lon, lonu, latu, lonq)
+        # compute angle of local grid positive x-axis relative to east
+        coords["angle"] = _compute_angle(coords)
 
-    # make sure lons are in [0, 360] range
-    lon[lon < 0] = lon[lon < 0] + 2 * np.pi
-    lonu[lonu < 0] = lonu[lonu < 0] + 2 * np.pi
-    lonv[lonv < 0] = lonv[lonv < 0] + 2 * np.pi
-    lonq[lonq < 0] = lonq[lonq < 0] + 2 * np.pi
+        # make sure lons are in [0, 360] range
+        for lon in ["lon", "lonu", "lonv", "lonq"]:
+            coords[lon][coords[lon] < 0] = coords[lon][coords[lon] < 0] + 2 * np.pi
 
-    ds = _create_grid_ds(
-        lon,
-        lat,
-        lonu,
-        latu,
-        lonv,
-        latv,
-        lonq,
-        latq,
-        pm,
-        pn,
-        ang,
-        rot,
-        center_lon,
-        center_lat,
-    )
+        ds = self._create_grid_ds(coords)
 
-    ds = _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot)
+        ds = self._add_global_metadata(ds)
 
-    return ds
+        if self.verbose:
+            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
+            logging.info(
+                "========================================================================================================"
+            )
+
+        object.__setattr__(self, "ds", ds)
+
+    def _add_global_metadata(self, ds):
+
+        ds["spherical"] = xr.DataArray(np.array("T", dtype="S1"))
+        ds["spherical"].attrs["Long_name"] = "Grid type logical switch"
+        ds["spherical"].attrs["option_T"] = "spherical"
+
+        ds.attrs["title"] = "ROMS grid created by ROMS-Tools"
+
+        # Include the version of roms-tools
+        try:
+            roms_tools_version = importlib.metadata.version("roms-tools")
+        except importlib.metadata.PackageNotFoundError:
+            roms_tools_version = "unknown"
+
+        ds.attrs["roms_tools_version"] = roms_tools_version
+        ds.attrs["size_x"] = self.size_x
+        ds.attrs["size_y"] = self.size_y
+        ds.attrs["center_lon"] = self.center_lon
+        ds.attrs["center_lat"] = self.center_lat
+        ds.attrs["rot"] = self.rot
+
+        return ds
+
+    def _raise_if_domain_size_too_large(self):
+        threshold = 20000
+        if self.size_x > threshold or self.size_y > threshold:
+            raise ValueError(
+                f"Domain size exceeds the allowable limit of {threshold} km. "
+                f"Received dimensions: size_x = {self.size_x} km, size_y = {self.size_y} km. "
+                "Please reduce the domain size to meet the threshold."
+            )
+
+    def _make_initial_lon_lat_ds(self):
+        # Mercator projection around the equator
+
+        # initially define the domain to be longer in x-direction (dimension "length")
+        # than in y-direction (dimension "width") to keep grid distortion minimal
+        if self.size_y > self.size_x:
+            domain_length, domain_width = self.size_y * 1e3, self.size_x * 1e3  # in m
+            nl, nw = self.ny, self.nx
+        else:
+            domain_length, domain_width = self.size_x * 1e3, self.size_y * 1e3  # in m
+            nl, nw = self.nx, self.ny
+
+        domain_length_in_degrees = domain_length / RADIUS_OF_EARTH
+        domain_width_in_degrees = domain_width / RADIUS_OF_EARTH
+
+        # 1d array describing the longitudes at cell centers
+        x = np.arange(-0.5, nl + 1.5, 1)
+        lon_array_1d_in_degrees = (
+            domain_length_in_degrees * x / nl - domain_length_in_degrees / 2
+        )
+        # 1d array describing the longitudes at cell corners (or vorticity points "q")
+        xq = np.arange(-1, nl + 2, 1)
+        lonq_array_1d_in_degrees_q = (
+            domain_length_in_degrees * xq / nl - domain_length_in_degrees / 2
+        )
+
+        # convert degrees latitude to y-coordinate using Mercator projection
+        y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
+        y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
+
+        # linearly space points in y-space
+        y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
+        yq = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
+
+        # inverse Mercator projections
+        lat_array_1d_in_degrees = np.arctan(np.sinh(y))
+        latq_array_1d_in_degrees = np.arctan(np.sinh(yq))
+
+        # 2d grid at cell centers
+        lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
+        # 2d grid at cell corners
+        lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
+
+        if self.size_y > self.size_x:
+            # Rotate grid by 90 degrees because until here the grid has been defined
+            # to be longer in x-direction than in y-direction
+
+            lon, lat = _rot_sphere(lon, lat, 90)
+            lonq, latq = _rot_sphere(lonq, latq, 90)
+
+            lon = np.transpose(np.flip(lon, 0))
+            lat = np.transpose(np.flip(lat, 0))
+            lonq = np.transpose(np.flip(lonq, 0))
+            latq = np.transpose(np.flip(latq, 0))
+
+        # infer longitudes and latitudes at u- and v-points
+        lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
+        latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
+        lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
+        latv = 0.5 * (lat[:-1, :] + lat[1:, :])
+
+        coords = {
+            "lon": lon,
+            "lat": lat,
+            "lonu": lonu,
+            "latu": latu,
+            "lonv": lonv,
+            "latv": latv,
+            "lonq": lonq,
+            "latq": latq,
+        }
+
+        return coords
+
+    def _create_grid_ds(self, coords):
+
+        ds = xr.Dataset()
+
+        lon_rho = xr.Variable(
+            data=coords["lon"] * 180 / np.pi,
+            dims=["eta_rho", "xi_rho"],
+            attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
+        )
+        lat_rho = xr.Variable(
+            data=coords["lat"] * 180 / np.pi,
+            dims=["eta_rho", "xi_rho"],
+            attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
+        )
+        lon_u = xr.Variable(
+            data=coords["lonu"] * 180 / np.pi,
+            dims=["eta_rho", "xi_u"],
+            attrs={"long_name": "longitude of u-points", "units": "degrees East"},
+        )
+        lat_u = xr.Variable(
+            data=coords["latu"] * 180 / np.pi,
+            dims=["eta_rho", "xi_u"],
+            attrs={"long_name": "latitude of u-points", "units": "degrees North"},
+        )
+        lon_v = xr.Variable(
+            data=coords["lonv"] * 180 / np.pi,
+            dims=["eta_v", "xi_rho"],
+            attrs={"long_name": "longitude of v-points", "units": "degrees East"},
+        )
+        lat_v = xr.Variable(
+            data=coords["latv"] * 180 / np.pi,
+            dims=["eta_v", "xi_rho"],
+            attrs={"long_name": "latitude of v-points", "units": "degrees North"},
+        )
+        # lon_q = xr.Variable(
+        #    data=coords["lonq"] * 180 / np.pi,
+        #    dims=["eta_psi", "xi_psi"],
+        #    attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
+        # )
+        # lat_q = xr.Variable(
+        #    data=coords["latq"] * 180 / np.pi,
+        #    dims=["eta_psi", "xi_psi"],
+        #    attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
+        # )
+
+        ds = ds.assign_coords(
+            {
+                "lat_rho": lat_rho,
+                "lon_rho": lon_rho,
+                "lat_u": lat_u,
+                "lon_u": lon_u,
+                "lat_v": lat_v,
+                "lon_v": lon_v,
+                # "lat_psi": lat_q,
+                # "lon_psi": lon_q,
+            }
+        )
+
+        ds["angle"] = xr.Variable(
+            data=coords["angle"],
+            dims=["eta_rho", "xi_rho"],
+            attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
+        )
+
+        # Coriolis frequency
+        f0 = 4 * np.pi * np.sin(coords["lat"]) / (24 * 3600)
+
+        ds["f"] = xr.Variable(
+            data=f0,
+            dims=["eta_rho", "xi_rho"],
+            attrs={
+                "long_name": "Coriolis parameter at rho-points",
+                "units": "second-1",
+            },
+        )
+
+        ds["pm"] = xr.Variable(
+            data=coords["pm"],
+            dims=["eta_rho", "xi_rho"],
+            attrs={
+                "long_name": "Curvilinear coordinate metric in xi-direction",
+                "units": "meter-1",
+            },
+        )
+        ds["pn"] = xr.Variable(
+            data=coords["pn"],
+            dims=["eta_rho", "xi_rho"],
+            attrs={
+                "long_name": "Curvilinear coordinate metric in eta-direction",
+                "units": "meter-1",
+            },
+        )
+
+        return ds
 
 
-def _raise_if_domain_size_too_large(size_x, size_y):
-    threshold = 20000
-    if size_x > threshold or size_y > threshold:
-        raise ValueError("Domain size has to be smaller than %g km" % threshold)
-
-
-def _make_initial_lon_lat_ds(size_x, size_y, nx, ny):
-    # Mercator projection around the equator
-
-    # initially define the domain to be longer in x-direction (dimension "length")
-    # than in y-direction (dimension "width") to keep grid distortion minimal
-    if size_y > size_x:
-        domain_length, domain_width = size_y * 1e3, size_x * 1e3  # in m
-        nl, nw = ny, nx
-    else:
-        domain_length, domain_width = size_x * 1e3, size_y * 1e3  # in m
-        nl, nw = nx, ny
-
-    domain_length_in_degrees = domain_length / RADIUS_OF_EARTH
-    domain_width_in_degrees = domain_width / RADIUS_OF_EARTH
-
-    # 1d array describing the longitudes at cell centers
-    x = np.arange(-0.5, nl + 1.5, 1)
-    lon_array_1d_in_degrees = (
-        domain_length_in_degrees * x / nl - domain_length_in_degrees / 2
-    )
-    # 1d array describing the longitudes at cell corners (or vorticity points "q")
-    xq = np.arange(-1, nl + 2, 1)
-    lonq_array_1d_in_degrees_q = (
-        domain_length_in_degrees * xq / nl - domain_length_in_degrees / 2
-    )
-
-    # convert degrees latitude to y-coordinate using Mercator projection
-    y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
-    y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
-
-    # linearly space points in y-space
-    y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
-    yq = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
-
-    # inverse Mercator projections
-    lat_array_1d_in_degrees = np.arctan(np.sinh(y))
-    latq_array_1d_in_degrees = np.arctan(np.sinh(yq))
-
-    # 2d grid at cell centers
-    lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
-    # 2d grid at cell corners
-    lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
-
-    if size_y > size_x:
-        # Rotate grid by 90 degrees because until here the grid has been defined
-        # to be longer in x-direction than in y-direction
-
-        lon, lat = _rot_sphere(lon, lat, 90)
-        lonq, latq = _rot_sphere(lonq, latq, 90)
-
-        lon = np.transpose(np.flip(lon, 0))
-        lat = np.transpose(np.flip(lat, 0))
-        lonq = np.transpose(np.flip(lonq, 0))
-        latq = np.transpose(np.flip(latq, 0))
-
-    # infer longitudes and latitudes at u- and v-points
-    lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
-    latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
-    lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
-    latv = 0.5 * (lat[:-1, :] + lat[1:, :])
-
-    # TODO wrap up into temporary container Dataset object?
-    return lon, lat, lonu, latu, lonv, latv, lonq, latq
-
-
-def _rotate(lon, lat, lonu, latu, lonv, latv, lonq, latq, rot):
+def _rotate(coords, rot):
     """Rotate grid counterclockwise relative to surface of Earth by rot degrees."""
 
-    (lon, lat) = _rot_sphere(lon, lat, rot)
-    (lonu, latu) = _rot_sphere(lonu, latu, rot)
-    (lonv, latv) = _rot_sphere(lonv, latv, rot)
-    (lonq, latq) = _rot_sphere(lonq, latq, rot)
+    (coords["lon"], coords["lat"]) = _rot_sphere(coords["lon"], coords["lat"], rot)
+    (coords["lonu"], coords["latu"]) = _rot_sphere(coords["lonu"], coords["latu"], rot)
+    (coords["lonv"], coords["latv"]) = _rot_sphere(coords["lonv"], coords["latv"], rot)
+    (coords["lonq"], coords["latq"]) = _rot_sphere(coords["lonq"], coords["latq"], rot)
 
-    return lon, lat, lonu, latu, lonv, latv, lonq, latq
+    return coords
 
 
-def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
+def _translate(coords, tra_lat, tra_lon):
     """Translate grid so that the centre lies at the position (tra_lat, tra_lon)"""
 
-    (lon, lat) = _tra_sphere(lon, lat, tra_lat)
-    (lonu, latu) = _tra_sphere(lonu, latu, tra_lat)
-    (lonv, latv) = _tra_sphere(lonv, latv, tra_lat)
-    (lonq, latq) = _tra_sphere(lonq, latq, tra_lat)
+    (lon, lat) = _tra_sphere(coords["lon"], coords["lat"], tra_lat)
+    (lonu, latu) = _tra_sphere(coords["lonu"], coords["latu"], tra_lat)
+    (lonv, latv) = _tra_sphere(coords["lonv"], coords["latv"], tra_lat)
+    (lonq, latq) = _tra_sphere(coords["lonq"], coords["latq"], tra_lat)
 
     lon = lon + tra_lon * np.pi / 180
     lonu = lonu + tra_lon * np.pi / 180
@@ -902,7 +1061,18 @@ def _translate(lon, lat, lonu, latu, lonv, latv, lonq, latq, tra_lat, tra_lon):
     lonv[lonv < -np.pi] = lonv[lonv < -np.pi] + 2 * np.pi
     lonq[lonq < -np.pi] = lonq[lonq < -np.pi] + 2 * np.pi
 
-    return lon, lat, lonu, latu, lonv, latv, lonq, latq
+    coords = {
+        "lon": lon,
+        "lat": lat,
+        "lonu": lonu,
+        "latu": latu,
+        "lonv": lonv,
+        "latv": latv,
+        "lonq": lonq,
+        "latq": latq,
+    }
+
+    return coords
 
 
 def _rot_sphere(lon, lat, rot):
@@ -1013,21 +1183,31 @@ def _tra_sphere(lon, lat, tra):
     return (lon, lat)
 
 
-def _compute_coordinate_metrics(lon, lonu, latu, lonv, latv):
+def _compute_coordinate_metrics(coords):
     """Compute the curvilinear coordinate metrics pn and pm, defined as 1/grid
     spacing."""
 
     # pm = 1/dx
-    pmu = gc_dist(lonu[:, :-1], latu[:, :-1], lonu[:, 1:], latu[:, 1:])
-    pm = 0 * lon
+    pmu = gc_dist(
+        coords["lonu"][:, :-1],
+        coords["latu"][:, :-1],
+        coords["lonu"][:, 1:],
+        coords["latu"][:, 1:],
+    )
+    pm = 0 * coords["lon"]
     pm[:, 1:-1] = pmu
     pm[:, 0] = pm[:, 1]
     pm[:, -1] = pm[:, -2]
     pm = 1 / pm
 
     # pn = 1/dy
-    pnv = gc_dist(lonv[:-1, :], latv[:-1, :], lonv[1:, :], latv[1:, :])
-    pn = 0 * lon
+    pnv = gc_dist(
+        coords["lonv"][:-1, :],
+        coords["latv"][:-1, :],
+        coords["lonv"][1:, :],
+        coords["latv"][1:, :],
+    )
+    pn = 0 * coords["lon"]
     pn[1:-1, :] = pnv
     pn[0, :] = pn[1, :]
     pn[-1, :] = pn[-2, :]
@@ -1055,16 +1235,16 @@ def gc_dist(lon1, lat1, lon2, lat2):
     return dis
 
 
-def _compute_angle(lon, lonu, latu, lonq):
+def _compute_angle(coords):
     """Compute angles of local grid positive x-axis relative to east."""
 
-    dellat = latu[:, 1:] - latu[:, :-1]
-    dellon = lonu[:, 1:] - lonu[:, :-1]
+    dellat = coords["latu"][:, 1:] - coords["latu"][:, :-1]
+    dellon = coords["lonu"][:, 1:] - coords["lonu"][:, :-1]
     dellon[dellon > np.pi] = dellon[dellon > np.pi] - 2 * np.pi
     dellon[dellon < -np.pi] = dellon[dellon < -np.pi] + 2 * np.pi
-    dellon = dellon * np.cos(0.5 * (latu[:, 1:] + latu[:, :-1]))
+    dellon = dellon * np.cos(0.5 * (coords["latu"][:, 1:] + coords["latu"][:, :-1]))
 
-    ang = copy.copy(lon)
+    ang = copy.copy(coords["lon"])
     ang_s = np.arctan(dellat / (dellon + 1e-16))
     ang_s[(dellon < 0) & (dellat < 0)] = ang_s[(dellon < 0) & (dellat < 0)] - np.pi
     ang_s[(dellon < 0) & (dellat >= 0)] = ang_s[(dellon < 0) & (dellat >= 0)] + np.pi
@@ -1076,137 +1256,6 @@ def _compute_angle(lon, lonu, latu, lonq):
     ang[:, -1] = ang[:, -2]
 
     return ang
-
-
-def _create_grid_ds(
-    lon,
-    lat,
-    lonu,
-    latu,
-    lonv,
-    latv,
-    lonq,
-    latq,
-    pm,
-    pn,
-    angle,
-    rot,
-    center_lon,
-    center_lat,
-):
-    ds = xr.Dataset()
-
-    lon_rho = xr.Variable(
-        data=lon * 180 / np.pi,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "longitude of rho-points", "units": "degrees East"},
-    )
-    lat_rho = xr.Variable(
-        data=lat * 180 / np.pi,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "latitude of rho-points", "units": "degrees North"},
-    )
-    lon_u = xr.Variable(
-        data=lonu * 180 / np.pi,
-        dims=["eta_rho", "xi_u"],
-        attrs={"long_name": "longitude of u-points", "units": "degrees East"},
-    )
-    lat_u = xr.Variable(
-        data=latu * 180 / np.pi,
-        dims=["eta_rho", "xi_u"],
-        attrs={"long_name": "latitude of u-points", "units": "degrees North"},
-    )
-    lon_v = xr.Variable(
-        data=lonv * 180 / np.pi,
-        dims=["eta_v", "xi_rho"],
-        attrs={"long_name": "longitude of v-points", "units": "degrees East"},
-    )
-    lat_v = xr.Variable(
-        data=latv * 180 / np.pi,
-        dims=["eta_v", "xi_rho"],
-        attrs={"long_name": "latitude of v-points", "units": "degrees North"},
-    )
-    # lon_q = xr.Variable(
-    #    data=lonq * 180 / np.pi,
-    #    dims=["eta_psi", "xi_psi"],
-    #    attrs={"long_name": "longitude of psi-points", "units": "degrees East"},
-    # )
-    # lat_q = xr.Variable(
-    #    data=latq * 180 / np.pi,
-    #    dims=["eta_psi", "xi_psi"],
-    #    attrs={"long_name": "latitude of psi-points", "units": "degrees North"},
-    # )
-
-    ds = ds.assign_coords(
-        {
-            "lat_rho": lat_rho,
-            "lon_rho": lon_rho,
-            "lat_u": lat_u,
-            "lon_u": lon_u,
-            "lat_v": lat_v,
-            "lon_v": lon_v,
-            # "lat_psi": lat_q,
-            # "lon_psi": lon_q,
-        }
-    )
-
-    ds["angle"] = xr.Variable(
-        data=angle,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "Angle between xi axis and east", "units": "radians"},
-    )
-
-    # Coriolis frequency
-    f0 = 4 * np.pi * np.sin(lat) / (24 * 3600)
-
-    ds["f"] = xr.Variable(
-        data=f0,
-        dims=["eta_rho", "xi_rho"],
-        attrs={"long_name": "Coriolis parameter at rho-points", "units": "second-1"},
-    )
-
-    ds["pm"] = xr.Variable(
-        data=pm,
-        dims=["eta_rho", "xi_rho"],
-        attrs={
-            "long_name": "Curvilinear coordinate metric in xi-direction",
-            "units": "meter-1",
-        },
-    )
-    ds["pn"] = xr.Variable(
-        data=pn,
-        dims=["eta_rho", "xi_rho"],
-        attrs={
-            "long_name": "Curvilinear coordinate metric in eta-direction",
-            "units": "meter-1",
-        },
-    )
-
-    return ds
-
-
-def _add_global_metadata(ds, size_x, size_y, center_lon, center_lat, rot):
-
-    ds["spherical"] = xr.DataArray(np.array("T", dtype="S1"))
-    ds["spherical"].attrs["Long_name"] = "Grid type logical switch"
-    ds["spherical"].attrs["option_T"] = "spherical"
-
-    ds.attrs["title"] = "ROMS grid created by ROMS-Tools"
-
-    # Include the version of roms-tools
-    try:
-        roms_tools_version = importlib.metadata.version("roms-tools")
-    except importlib.metadata.PackageNotFoundError:
-        roms_tools_version = "unknown"
-
-    ds.attrs["roms_tools_version"] = roms_tools_version
-    ds.attrs["size_x"] = size_x
-    ds.attrs["size_y"] = size_y
-    ds.attrs["center_lon"] = center_lon
-    ds.attrs["center_lat"] = center_lat
-    ds.attrs["rot"] = rot
-
-    return ds
 
 
 def _f2c(f):

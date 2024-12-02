@@ -1,3 +1,4 @@
+import time
 import re
 import xarray as xr
 from dataclasses import dataclass, field
@@ -15,7 +16,11 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     gc_dist,
 )
-from roms_tools.setup.download import download_correction_data, download_river_data
+from roms_tools.setup.download import (
+    download_correction_data,
+    download_topo,
+    download_river_data,
+)
 from roms_tools.setup.fill import LateralFill
 
 # lat-lon datasets
@@ -74,7 +79,7 @@ class Dataset:
     )
     var_names: Dict[str, str]
     climatology: Optional[bool] = False
-    use_dask: Optional[bool] = True
+    use_dask: Optional[bool] = False
     apply_post_processing: Optional[bool] = True
 
     is_global: bool = field(init=False, repr=False)
@@ -117,6 +122,8 @@ class Dataset:
 
         # Make sure that latitude is ascending
         ds = self.ensure_dimension_is_ascending(ds, dim="latitude")
+        # Make sure there are no 360 degree jumps in longitude
+        ds = self.ensure_dimension_is_ascending(ds, dim="longitude")
 
         if "depth" in self.dim_names:
             # Make sure that depth is ascending
@@ -126,11 +133,6 @@ class Dataset:
 
         # Check whether the data covers the entire globe
         object.__setattr__(self, "is_global", self.check_if_global(ds))
-
-        # If dataset is global concatenate three copies of field along longitude dimension
-        if self.is_global:
-            ds = self.concatenate_longitudes(ds)
-
         object.__setattr__(self, "ds", ds)
 
         if self.apply_post_processing:
@@ -289,7 +291,11 @@ class Dataset:
     ) -> xr.Dataset:
         """Ensure that the specified dimension in the dataset is in ascending order.
 
-        If the values along the specified dimension are in descending order, this function reverses the order of the dimension to make it ascending.
+        This function checks the order of values along the specified dimension. If they
+        are in descending order, it reverses the dimension to make it ascending. For
+        the "longitude" dimension, if it has a discontinuity (e.g., [0, 180][-180, 0]),
+        the function adjusts values to eliminate the 360-degree jump, transforming
+        the range into a continuous [0, 360) span.
 
         Parameters
         ----------
@@ -303,13 +309,22 @@ class Dataset:
         -------
         xr.Dataset
             A new `xarray.Dataset` with the specified dimension in ascending order.
-            If the dimension was already in ascending order, the original dataset is returned unchanged.
-            If the dimension was in descending order, the dataset is returned with the dimension reversed.
+            - If the dimension was already in ascending order, the original dataset is returned unchanged.
+            - If the dimension was in descending order, the dataset is returned with the dimension reversed.
+            - If the dimension is "longitude" with a discontinuity (e.g., [0, 180][-180, 0]), the values are adjusted to eliminate the 360-degree jump.
         """
-        # Make sure that latitude is ascending
+        # Check if the dimension is in descending order and reverse if needed
         diff = np.diff(ds[self.dim_names[dim]])
         if np.all(diff < 0):
             ds = ds.isel(**{self.dim_names[dim]: slice(None, None, -1)})
+
+        # Check for a discontinuity in longitude and adjust values if present
+        elif np.any(diff < 0) and dim == "longitude":
+            ds[self.dim_names[dim]] = xr.where(
+                ds[self.dim_names[dim]] < 0,
+                ds[self.dim_names[dim]] + 360,
+                ds[self.dim_names[dim]],
+            )
 
         return ds
 
@@ -364,43 +379,68 @@ class Dataset:
 
         return is_global
 
-    def concatenate_longitudes(self, ds):
-        """
-        Concatenates the field three times: with longitudes shifted by -360, original longitudes, and shifted by +360.
+    def concatenate_longitudes(self, ds, end="upper", verbose=False):
+        """Concatenates fields in dataset twice along the longitude dimension.
 
         Parameters
         ----------
-        field : xr.DataArray
-            The field to be concatenated.
+        ds: xr.Dataset
+            The dataset to be concatenated. The longitude dimension must be present in this dataset.
+        end : str, optional
+            Specifies which end to shift the longitudes.
+            Options are:
+                - "lower": shifts longitudes by -360 degrees and concatenates to the lower end.
+                - "upper": shifts longitudes by +360 degrees and concatenates to the upper end.
+                - "both": shifts longitudes by -360 degrees and 360 degrees and concatenates to both ends.
+            Default is "upper".
+        verbose : bool, optional
+            If True, print message if dataset is concatenated along longitude dimension.
+            Defaults to False.
 
         Returns
         -------
-        xr.DataArray
-            The concatenated field, with the longitude dimension extended.
-
-        Notes
-        -----
-        Concatenating three times may be overkill in most situations, but it is safe. Alternatively, we could refactor
-        to figure out whether concatenating on the lower end, upper end, or at all is needed.
-
+        ds_concatenated : xr.Dataset
+            The concatenated dataset.
         """
+
+        if verbose:
+            start_time = time.time()
+
         ds_concatenated = xr.Dataset()
 
         lon = ds[self.dim_names["longitude"]]
-        lon_minus360 = lon - 360
-        lon_plus360 = lon + 360
-        lon_concatenated = xr.concat(
-            [lon_minus360, lon, lon_plus360], dim=self.dim_names["longitude"]
-        )
+        if end == "lower":
+            lon_minus360 = lon - 360
+            lon_concatenated = xr.concat(
+                [lon_minus360, lon], dim=self.dim_names["longitude"]
+            )
 
-        ds_concatenated[self.dim_names["longitude"]] = lon_concatenated
+        elif end == "upper":
+            lon_plus360 = lon + 360
+            lon_concatenated = xr.concat(
+                [lon, lon_plus360], dim=self.dim_names["longitude"]
+            )
 
-        for var in self.var_names.values():
+        elif end == "both":
+            lon_minus360 = lon - 360
+            lon_plus360 = lon + 360
+            lon_concatenated = xr.concat(
+                [lon_minus360, lon, lon_plus360], dim=self.dim_names["longitude"]
+            )
+
+        for var in ds.data_vars:
             if self.dim_names["longitude"] in ds[var].dims:
                 field = ds[var]
-                field_concatenated = xr.concat(
-                    [field, field, field], dim=self.dim_names["longitude"]
-                )
+
+                if end == "both":
+                    field_concatenated = xr.concat(
+                        [field, field, field], dim=self.dim_names["longitude"]
+                    )
+                else:
+                    field_concatenated = xr.concat(
+                        [field, field], dim=self.dim_names["longitude"]
+                    )
+
                 if self.use_dask:
                     field_concatenated = field_concatenated.chunk(
                         {self.dim_names["longitude"]: -1}
@@ -409,6 +449,13 @@ class Dataset:
                 ds_concatenated[var] = field_concatenated
             else:
                 ds_concatenated[var] = ds[var]
+
+        ds_concatenated[self.dim_names["longitude"]] = lon_concatenated
+
+        if verbose:
+            logging.info(
+                f"Concatenating the data along the longitude dimension: {time.time() - start_time:.3f} seconds"
+            )
 
         return ds_concatenated
 
@@ -423,7 +470,9 @@ class Dataset:
         """
         pass
 
-    def choose_subdomain(self, target_coords, buffer_points=20, return_copy=False):
+    def choose_subdomain(
+        self, target_coords, buffer_points=20, return_copy=False, verbose=False
+    ):
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
         ranges as necessary to accommodate the dataset's expected range and handles
@@ -440,6 +489,9 @@ class Dataset:
         return_subdomain : bool, optional
             If True, returns the subset of the original dataset representing the chosen
             subdomain. If False, assigns the subset to `self.ds`. Defaults to False.
+        verbose : bool, optional
+            If True, print message if dataset is concatenated along longitude dimension.
+            Defaults to False.
 
         Returns
         -------
@@ -462,9 +514,43 @@ class Dataset:
 
         margin = self.resolution * buffer_points
 
-        if not self.is_global:
+        # Select the subdomain in latitude direction (so that we have to concatenate fewer latitudes below if concatenation is necessary)
+        subdomain = self.ds.sel(
+            **{
+                self.dim_names["latitude"]: slice(lat_min - margin, lat_max + margin),
+            }
+        )
+        lon = subdomain[self.dim_names["longitude"]]
+
+        if self.is_global:
+            # Concatenate only if necessary
+            if lon_max + margin > lon.max():
+                # See if shifting by +360 degrees helps
+                if (lon_min - margin > (lon + 360).min()) and (
+                    lon_max + margin < (lon + 360).max()
+                ):
+                    subdomain[self.dim_names["longitude"]] = lon + 360
+                    lon = subdomain[self.dim_names["longitude"]]
+                else:
+                    subdomain = self.concatenate_longitudes(
+                        subdomain, end="upper", verbose=verbose
+                    )
+                    lon = subdomain[self.dim_names["longitude"]]
+            if lon_min - margin < lon.min():
+                # See if shifting by -360 degrees helps
+                if (lon_min - margin > (lon - 360).min()) and (
+                    lon_max + margin < (lon - 360).max()
+                ):
+                    subdomain[self.dim_names["longitude"]] = lon - 360
+                    lon = subdomain[self.dim_names["longitude"]]
+                else:
+                    subdomain = self.concatenate_longitudes(
+                        subdomain, end="lower", verbose=verbose
+                    )
+                    lon = subdomain[self.dim_names["longitude"]]
+
+        else:
             # Adjust longitude range if needed to match the expected range
-            lon = self.ds[self.dim_names["longitude"]]
             if not target_coords["straddle"]:
                 if lon.min() < -180:
                     if lon_max + margin > 0:
@@ -484,12 +570,9 @@ class Dataset:
                     if lon_min - margin < 0:
                         lon_min += 360
                         lon_max += 360
-
-        # Select the subdomain
-
-        subdomain = self.ds.sel(
+        # Select the subdomain in longitude direction
+        subdomain = subdomain.sel(
             **{
-                self.dim_names["latitude"]: slice(lat_min - margin, lat_max + margin),
                 self.dim_names["longitude"]: slice(lon_min - margin, lon_max + margin),
             }
         )
@@ -1346,6 +1429,98 @@ class ERA5Correction(Dataset):
         object.__setattr__(self, "ds", subdomain)
 
 
+@dataclass(frozen=True, kw_only=True)
+class ETOPO5Dataset(Dataset):
+    """Represents topography data on the original grid from the ETOPO5 dataset.
+
+    Parameters
+    ----------
+    filename : str, optional
+        The path to the ETOPO5 dataset file. If not provided, the dataset will be downloaded
+        automatically via the `pooch` library.
+    var_names : Dict[str, str], optional
+        Dictionary of variable names required in the dataset. Defaults to:
+        {
+            "topo": "topo",
+        }
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset. Defaults to:
+        {"longitude": "lon", "latitude": "lat"}.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the ETOPO5 data, loaded from the specified file.
+    """
+
+    filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "topo",
+        }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Assign lat and lon as coordinates.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            A cleaned `xarray.Dataset` with updated coordinates.
+        """
+        ds = ds.assign_coords(
+            {
+                "lon": ds["topo_lon"],
+                "lat": ds["topo_lat"],
+            }
+        )
+        return ds
+
+
+@dataclass(frozen=True, kw_only=True)
+class SRTM15Dataset(Dataset):
+    """Represents topography data on the original grid from the SRTM15 dataset.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the SRTM15 dataset file.
+    var_names : Dict[str, str], optional
+        Dictionary of variable names required in the dataset. Defaults to:
+        {
+            "topo": "z",
+        }
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset. Defaults to:
+        {"longitude": "lon", "latitude": "lat"}.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray Dataset containing the SRTM15 data, loaded from the specified file.
+    """
+
+    filename: str
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "z",
+        }
+    )
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    ds: xr.Dataset = field(init=False, repr=False)
+
+
 # river datasets
 @dataclass(frozen=True, kw_only=True)
 class RiverDataset:
@@ -1414,13 +1589,6 @@ class RiverDataset:
         -------
         ds : xr.Dataset
             The loaded xarray Dataset containing the forcing data.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified file does not exist.
-        ValueError
-            If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
         ds = _load_data(
             self.filename, self.dim_names, use_dask=False, decode_times=False

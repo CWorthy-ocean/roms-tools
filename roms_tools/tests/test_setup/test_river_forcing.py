@@ -323,7 +323,7 @@ def test_files_have_same_hash(river_forcing, tmp_path):
     grid_filepath2.unlink()
 
 
-def test_from_yaml_missing_initial_conditions(tmp_path):
+def test_from_yaml_missing_river_forcing(tmp_path):
     yaml_content = textwrap.dedent(
         """\
     ---
@@ -337,7 +337,8 @@ def test_from_yaml_missing_initial_conditions(tmp_path):
       center_lon: -10
       center_lat: 61
       rot: -20
-      topography_source: ETOPO5
+      topography_source:
+        name: ETOPO5
       hmin: 5.0
     """
     )

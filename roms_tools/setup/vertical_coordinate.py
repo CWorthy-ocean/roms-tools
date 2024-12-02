@@ -1,5 +1,6 @@
 import numpy as np
 import xarray as xr
+from roms_tools.setup.utils import transpose_dimensions
 
 
 def compute_cs(sigma, theta_s, theta_b):
@@ -83,7 +84,7 @@ def compute_depth(zeta, h, hc, cs, sigma):
 
     Parameters
     ----------
-    zeta : xr.DataArray
+    zeta : xr.DataArray or scalar
         The sea surface height.
     h : xr.DataArray
         The depth of the sea bottom.
@@ -98,23 +99,11 @@ def compute_depth(zeta, h, hc, cs, sigma):
     -------
     z : xr.DataArray
         The depth at different sigma levels.
-
-    Raises
-    ------
-    ValueError
-        If theta_s or theta_b are less than or equal to zero.
     """
 
-    # Expand dimensions
-    sigma = sigma.expand_dims(dim={"eta_rho": h.eta_rho, "xi_rho": h.xi_rho})
-    cs = cs.expand_dims(dim={"eta_rho": h.eta_rho, "xi_rho": h.xi_rho})
+    z = (hc * sigma + h * cs) / (hc + h)
+    z = zeta + (zeta + h) * z
 
-    s = (hc * sigma + h * cs) / (hc + h)
-    z = zeta + (zeta + h) * s
-
-    if "s_rho" in z.dims:
-        z = z.transpose("s_rho", "eta_rho", "xi_rho")
-    elif "s_w" in z.dims:
-        z = z.transpose("s_w", "eta_rho", "xi_rho")
+    z = -transpose_dimensions(z)
 
     return z

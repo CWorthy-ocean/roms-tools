@@ -59,6 +59,27 @@ def grid_that_straddles_dateline():
 
 
 @pytest.fixture(scope="session")
+def grid_that_straddles_180_degree_meridian():
+    """Fixture for creating a domain that straddles 180 degree meridian.
+
+    This is a good test grid for the global ERA5 data, which comes on an [-180, 180]
+    longitude grid.
+    """
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    return grid
+
+
+@pytest.fixture(scope="session")
 def tidal_forcing(request, use_dask):
 
     grid = Grid(

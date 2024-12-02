@@ -2,6 +2,6 @@
     "_ARRAY_DIMENSIONS": [
         "s_rho"
     ],
-    "long_name": "S-coordinate stretching curves at rho-points",
+    "long_name": "Vertical stretching function at rho-points",
     "units": "nondimensional"
 }

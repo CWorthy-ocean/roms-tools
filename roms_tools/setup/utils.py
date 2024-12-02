@@ -41,7 +41,7 @@ def nan_check(field, mask, error_message=None) -> None:
     da = xr.where(mask == 1, field, 0)
     if error_message is None:
         error_message = (
-            "NaN values found in interpolated field. This likely occurs because the ROMS grid, including "
+            "NaN values found in regridded field. This likely occurs because the ROMS grid, including "
             "a small safety margin for interpolation, is not fully contained within the dataset's longitude/latitude range. Please ensure that the "
             "dataset covers the entire area required by the ROMS grid."
         )
@@ -107,10 +107,10 @@ def interpolate_from_rho_to_u(field, method="additive"):
     else:
         raise NotImplementedError(f"Unsupported method '{method}' specified.")
 
-    if "lat_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lat_rho"])
-    if "lon_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lon_rho"])
+    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
+    for var in vars_to_drop:
+        if var in field_interpolated.coords:
+            field_interpolated = field_interpolated.drop_vars(var)
 
     field_interpolated = field_interpolated.swap_dims({"xi_rho": "xi_u"})
 
@@ -155,10 +155,10 @@ def interpolate_from_rho_to_v(field, method="additive"):
     else:
         raise NotImplementedError(f"Unsupported method '{method}' specified.")
 
-    if "lat_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lat_rho"])
-    if "lon_rho" in field_interpolated.coords:
-        field_interpolated.drop_vars(["lon_rho"])
+    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
+    for var in vars_to_drop:
+        if var in field_interpolated.coords:
+            field_interpolated = field_interpolated.drop_vars(var)
 
     field_interpolated = field_interpolated.swap_dims({"eta_rho": "eta_v"})
 
@@ -733,27 +733,27 @@ def get_target_coords(grid, use_coarse_grid=False):
     """
     # Select grid variables based on whether the coarse grid is used
     if use_coarse_grid:
-        lat, lon, angle, mask = (
-            grid.ds.lat_coarse.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}),
-            grid.ds.lon_coarse.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}),
-            grid.ds.angle_coarse.rename(
-                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
-            ),
-            grid.ds.mask_coarse.rename(
-                {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
-            ),
+        lat = grid.ds.lat_coarse.rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
+        lon = grid.ds.lon_coarse.rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        angle = grid.ds.angle_coarse.rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        mask = grid.ds.get("mask_coarse")
+        if mask is not None:
+            mask = mask.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
         lat_psi = grid.ds.get("lat_psi_coarse")
         lon_psi = grid.ds.get("lon_psi_coarse")
 
     else:
-        lat, lon, angle, mask = (
-            grid.ds.lat_rho,
-            grid.ds.lon_rho,
-            grid.ds.angle,
-            grid.ds.mask_rho,
-        )
+        lat = grid.ds.lat_rho
+        lon = grid.ds.lon_rho
+        angle = grid.ds.angle
+        mask = grid.ds.get("mask_rho")
         lat_psi = grid.ds.get("lat_psi")
         lon_psi = grid.ds.get("lon_psi")
 
@@ -1061,7 +1061,8 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     # Convert the grid attribute to a dictionary and remove non-serializable fields
     grid_data = asdict(forcing_object.grid)
     grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
-    grid_data.pop("straddle", None)  # Remove 'straddle' if it's non-essential
+    grid_data.pop("straddle", None)
+    grid_data.pop("verbose", None)
     grid_yaml_data = {"Grid": grid_data}
 
     # Step 2: Get ROMS Tools version
@@ -1179,3 +1180,26 @@ def _convert_from_iso_format(value):
     except ValueError:
         # Return None or raise an exception if parsing fails
         return value
+
+
+def handle_boundaries(field):
+    """Adjust the boundaries of a 2D field by copying values from adjacent cells.
+
+    Parameters
+    ----------
+    field : numpy.ndarray or xarray.DataArray
+        A 2D array representing a field (e.g., topography or mask) whose boundary values
+        need to be adjusted.
+
+    Returns
+    -------
+    field : numpy.ndarray or xarray.DataArray
+        The input field with adjusted boundary values.
+    """
+
+    field[0, :] = field[1, :]
+    field[-1, :] = field[-2, :]
+    field[:, 0] = field[:, 1]
+    field[:, -1] = field[:, -2]
+
+    return field

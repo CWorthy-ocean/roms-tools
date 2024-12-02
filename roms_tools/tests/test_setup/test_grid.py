@@ -114,7 +114,7 @@ def test_plot_save_methods(tmp_path):
 
 
 def test_raise_if_domain_too_large():
-    with pytest.raises(ValueError, match="Domain size has to be smaller"):
+    with pytest.raises(ValueError, match="Domain size exceeds"):
         Grid(nx=3, ny=3, size_x=30000, size_y=30000, center_lon=0, center_lat=51.5)
 
     # test grid with reasonable domain size
@@ -181,12 +181,6 @@ def test_compatability_with_matlab_grid(tmp_path):
             "lon_v",
             "lat_coarse",
             "lon_coarse",
-            "layer_depth_rho",
-            "layer_depth_u",
-            "layer_depth_v",
-            "interface_depth_rho",
-            "interface_depth_u",
-            "interface_depth_v",
         ]
     )
     actual_coords = set(grid.ds.coords.keys())
@@ -229,7 +223,7 @@ def test_roundtrip_netcdf(tmp_path):
         center_lon=0.0,
         center_lat=0.0,
         rot=0.0,
-        topography_source="ETOPO5",
+        topography_source={"name": "ETOPO5"},
         hmin=5.0,
     )
 
@@ -267,7 +261,7 @@ def test_roundtrip_yaml(tmp_path):
         center_lon=0.0,
         center_lat=0.0,
         rot=0.0,
-        topography_source="ETOPO5",
+        topography_source={"name": "ETOPO5"},
         hmin=5.0,
     )
 
@@ -300,7 +294,7 @@ def test_files_have_same_hash(tmp_path):
         center_lon=0.0,
         center_lat=0.0,
         rot=0.0,
-        topography_source="ETOPO5",
+        topography_source={"name": "ETOPO5"},
         hmin=5.0,
     )
 
@@ -336,7 +330,8 @@ def test_from_yaml_missing_version(tmp_path):
       center_lon: -10
       center_lat: 61
       rot: -20
-      topography_source: ETOPO5
+      topography_source:
+        name: ETOPO5
       hmin: 5.0
     """
     )
@@ -405,7 +400,8 @@ def test_from_yaml_version_mismatch(tmp_path, caplog):
       center_lon: -10
       center_lat: 61
       rot: -20
-      topography_source: ETOPO5
+      topography_source:
+        name: ETOPO5
       hmin: 5.0
     """
     )
@@ -432,3 +428,105 @@ def test_from_yaml_version_mismatch(tmp_path, caplog):
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
+
+
+def test_invalid_theta_s_value():
+    """Test the validation of the theta_s value."""
+    with pytest.raises(ValueError):
+
+        Grid(
+            nx=2,
+            ny=2,
+            size_x=500,
+            size_y=1000,
+            center_lon=0,
+            center_lat=55,
+            rot=10,
+            N=3,
+            theta_s=11.0,  # Invalid value, should be 0 < theta_s <= 10
+            theta_b=2.0,
+            hc=250.0,
+        )
+
+
+def test_invalid_theta_b_value():
+    """Test the validation of the theta_b value."""
+    with pytest.raises(ValueError):
+        Grid(
+            nx=2,
+            ny=2,
+            size_x=500,
+            size_y=1000,
+            center_lon=0,
+            center_lat=55,
+            rot=10,
+            N=3,
+            theta_s=5.0,
+            theta_b=5.0,  # Invalid value, should be 0 < theta_b <= 4
+            hc=250.0,
+        )
+
+
+def test_update_vertical_coordinate():
+
+    grid = Grid(
+        nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10
+    )
+
+    assert grid.N == 100
+    assert grid.theta_s == 5.0
+    assert grid.theta_b == 2.0
+    assert grid.hc == 300.0
+    assert len(grid.ds.s_rho) == 100
+
+    grid.update_vertical_coordinate(N=3, theta_s=10.0, theta_b=1.0, hc=400.0)
+
+    assert grid.N == 3
+    assert grid.theta_s == 10.0
+    assert grid.theta_b == 1.0
+    assert grid.hc == 400.0
+    assert len(grid.ds.s_rho) == 3
+
+    grid.update_vertical_coordinate(N=5)
+
+    assert grid.N == 5
+    assert grid.theta_s == 10.0
+    assert grid.theta_b == 1.0
+    assert grid.hc == 400.0
+    assert len(grid.ds.s_rho) == 5
+
+    grid.update_vertical_coordinate()
+
+    assert grid.N == 5
+    assert grid.theta_s == 10.0
+    assert grid.theta_b == 1.0
+    assert grid.hc == 400.0
+    assert len(grid.ds.s_rho) == 5
+
+
+def test_plot():
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    grid.plot_vertical_coordinate(s=-1)
+    grid.plot_vertical_coordinate(eta=0)
+    grid.plot_vertical_coordinate(xi=0)
+
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(s=-1, eta=0)
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(s=-1, xi=0)
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(eta=-1, xi=0)
+    with pytest.raises(ValueError, match="Exactly one of"):
+        grid.plot_vertical_coordinate(eta=-1, xi=0, s=-1)

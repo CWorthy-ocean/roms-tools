@@ -241,10 +241,14 @@ def test_boundary_forcing_save(boundary_forcing, tmp_path):
 def test_bgc_boundary_forcing_plot(bgc_boundary_forcing_from_climatology):
     """Test plot method."""
 
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_south")
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east")
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_north")
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west")
+    bgc_boundary_forcing_from_climatology.plot(
+        var_name="ALK_south", layer_contours=True
+    )
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east", layer_contours=True)
+    bgc_boundary_forcing_from_climatology.plot(
+        var_name="ALK_north", layer_contours=True
+    )
+    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west", layer_contours=True)
 
 
 def test_bgc_boundary_forcing_save(bgc_boundary_forcing_from_climatology, tmp_path):
@@ -390,7 +394,8 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, request, use_dask):
       center_lon: -10
       center_lat: 61
       rot: -20
-      topography_source: ETOPO5
+      topography_source:
+        name: ETOPO5
       hmin: 5.0
     """
     )

@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "s_w",
-        "eta_v",
-        "xi_rho"
-    ],
-    "long_name": "Interface depth at v-points",
-    "units": "m"
-}

@@ -6,6 +6,7 @@ from typing import Dict, Union, List, Optional
 from roms_tools.setup.grid import Grid
 from datetime import datetime
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
+from roms_tools.setup.vertical_coordinate import compute_depth
 from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
@@ -15,6 +16,8 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     compute_barotropic_velocity,
     transpose_dimensions,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
     _to_yaml,
     _from_yaml,
 )
@@ -92,23 +95,17 @@ class InitialConditions:
         self._input_checks()
 
         processed_fields = {}
-        processed_fields, variable_info = self._process_data(
-            processed_fields, type="physics"
-        )
+        processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
-            processed_fields, bgc_variable_info = self._process_data(
-                processed_fields, type="bgc"
-            )
+            processed_fields = self._process_data(processed_fields, type="bgc")
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(processed_fields, d_meta)
 
         ds = self._add_global_metadata(ds)
 
-        if self.bgc_source is not None:
-            variable_info = {**variable_info, **bgc_variable_info}
-        self._validate(ds, variable_info)
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -133,7 +130,9 @@ class InitialConditions:
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
 
-        variable_info = self._set_variable_info(data, type=type)
+        self._set_variable_info(data, type=type)
+        attr_name = f"variable_info_{type}"
+        variable_info = getattr(self, attr_name)
         var_names = variable_info.keys()
 
         # lateral regridding
@@ -153,19 +152,31 @@ class InitialConditions:
                 interpolate=True,
             )
 
-        # vertical regridding
+        var_names_dict = {}
         for location in ["rho", "u", "v"]:
-            var_names = [
+            var_names_dict[location] = [
                 name
                 for name, info in variable_info.items()
                 if info["location"] == location and info["is_3d"]
             ]
-            if len(var_names) > 0:
+
+        # compute layer depth coordinates
+        if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
+            self._get_vertical_coordinates(
+                type="layer",
+                additional_locations=["u", "v"],
+            )
+        else:
+            if len(var_names_dict["rho"]) > 0:
+                self._get_vertical_coordinates(type="layer", additional_locations=[])
+        # vertical regridding
+        for location in ["rho", "u", "v"]:
+            if len(var_names_dict[location]) > 0:
                 vertical_regrid = VerticalRegrid(
                     self.grid.ds[f"layer_depth_{location}"],
                     data.ds[data.dim_names["depth"]],
                 )
-                for var_name in var_names:
+                for var_name in var_names_dict[location]:
                     if var_name in processed_fields:
                         processed_fields[var_name] = vertical_regrid.apply(
                             processed_fields[var_name]
@@ -173,10 +184,14 @@ class InitialConditions:
 
         # compute barotropic velocities
         if "u" in variable_info and "v" in variable_info:
-            for var_name in ["u", "v"]:
-                processed_fields[f"{var_name}bar"] = compute_barotropic_velocity(
-                    processed_fields[var_name],
-                    self.grid.ds[f"interface_depth_{var_name}"],
+            self._get_vertical_coordinates(
+                type="interface",
+                additional_locations=["u", "v"],
+            )
+            for location in ["u", "v"]:
+                processed_fields[f"{location}bar"] = compute_barotropic_velocity(
+                    processed_fields[location],
+                    self.grid.ds[f"interface_depth_{location}"],
                 )
 
         if type == "bgc":
@@ -191,7 +206,7 @@ class InitialConditions:
                 processed_fields[var_name]
             )
 
-        return processed_fields, variable_info
+        return processed_fields
 
     def _input_checks(self):
 
@@ -345,7 +360,84 @@ class InitialConditions:
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
 
-        return variable_info
+        object.__setattr__(self, f"variable_info_{type}", variable_info)
+
+    def _get_vertical_coordinates(self, type, additional_locations=["u", "v"]):
+        """Retrieve layer and interface depth coordinates.
+
+        This method computes and updates the layer and interface depth coordinates. It handles depth calculations for rho points and
+        additional specified locations (u and v).
+
+        Parameters
+        ----------
+        type : str
+            The type of depth coordinate to retrieve. Valid options are:
+            - "layer": Retrieves layer depth coordinates.
+            - "interface": Retrieves interface depth coordinates.
+
+        additional_locations : list of str, optional
+            Specifies additional locations to compute depth coordinates for. Default is ["u", "v"].
+            Valid options include:
+            - "u": Computes depth coordinates for u points.
+            - "v": Computes depth coordinates for v points.
+
+        Updates
+        -------
+        self.grid.ds : xarray.Dataset
+            The dataset is updated with the following vertical depth coordinates:
+            - f"{type}_depth_rho": Depth coordinates at rho points.
+            - f"{type}_depth_u": Depth coordinates at u points (if applicable).
+            - f"{type}_depth_v": Depth coordinates at v points (if applicable).
+        """
+
+        layer_vars = []
+        for location in ["rho"] + additional_locations:
+            layer_vars.append(f"{type}_depth_{location}")
+
+        if all(layer_var in self.grid.ds for layer_var in layer_vars):
+            # Vertical coordinate data already exists
+            pass
+
+        elif f"{type}_depth_rho" in self.grid.ds:
+            depth = self.grid.ds[f"{type}_depth_rho"]
+
+            if "u" in additional_locations or "v" in additional_locations:
+                # interpolation
+                if "u" in additional_locations:
+                    depth_u = interpolate_from_rho_to_u(depth)
+                    depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                    depth_u.attrs["units"] = "m"
+                    self.grid.ds[f"{type}_depth_u"] = depth_u
+                if "v" in additional_locations:
+                    depth_v = interpolate_from_rho_to_v(depth)
+                    depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                    depth_v.attrs["units"] = "m"
+                    self.grid.ds[f"{type}_depth_v"] = depth_v
+        else:
+            h = self.grid.ds["h"]
+            if type == "layer":
+                depth = compute_depth(
+                    0, h, self.grid.hc, self.grid.ds.Cs_r, self.grid.ds.sigma_r
+                )
+            else:
+                depth = compute_depth(
+                    0, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
+                )
+
+            depth.attrs["long_name"] = f"{type} depth at rho-points"
+            depth.attrs["units"] = "m"
+            self.grid.ds[f"{type}_depth_rho"] = depth
+
+            if "u" in additional_locations or "v" in additional_locations:
+                # interpolation
+                depth_u = interpolate_from_rho_to_u(depth)
+                depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                depth_u.attrs["units"] = "m"
+                depth_v = interpolate_from_rho_to_v(depth)
+                depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                depth_v.attrs["units"] = "m"
+                self.grid.ds[f"{type}_depth_u"] = depth_u
+                self.grid.ds[f"{type}_depth_v"] = depth_v
 
     def _write_into_dataset(self, processed_fields, d_meta):
 
@@ -410,7 +502,7 @@ class InitialConditions:
 
         return ds
 
-    def _validate(self, ds, variable_info):
+    def _validate(self, ds):
         """Validates the dataset by checking for NaN values in SSH at wet points, which
         would indicate missing raw data coverage over the target domain.
 
@@ -418,8 +510,6 @@ class InitialConditions:
         ----------
         ds : xarray.Dataset
             The dataset to validate.
-        variable_info : dict
-            A dictionary containing metadata about the variables, including whether to validate them.
 
         Raises
         ------
@@ -431,6 +521,10 @@ class InitialConditions:
         -----
         This check is only applied to the 2D variable SSH to improve performance.
         """
+        if self.bgc_source is not None:
+            variable_info = {**self.variable_info_physics, **self.variable_info_bgc}
+        else:
+            variable_info = self.variable_info_physics
 
         for var_name in variable_info:
             # Only validate variables based on "validate" flag if use_dask is False
@@ -570,9 +664,17 @@ class InitialConditions:
                 self.ds[var_name].load()
 
         field = self.ds[var_name].squeeze()
+        if s is not None:
+            layer_contours = False
 
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            interface_depth = self.grid.ds.interface_depth_rho
+            if layer_contours:
+                if "interface_depth_rho" in self.grid.ds:
+                    interface_depth = self.grid.ds.interface_depth_rho
+                else:
+                    self.get_vertical_coordinates(
+                        type="interface", additional_locations=[]
+                    )
             layer_depth = self.grid.ds.layer_depth_rho
             mask = self.grid.ds.mask_rho
             field = field.assign_coords(
@@ -580,7 +682,13 @@ class InitialConditions:
             )
 
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            interface_depth = self.grid.ds.interface_depth_u
+            if layer_contours:
+                if "interface_depth_u" in self.grid.ds:
+                    interface_depth = self.grid.ds.interface_depth_u
+                else:
+                    self.get_vertical_coordinates(
+                        type="interface", additional_locations=["u", "v"]
+                    )
             layer_depth = self.grid.ds.layer_depth_u
             mask = self.grid.ds.mask_u
             field = field.assign_coords(
@@ -588,7 +696,13 @@ class InitialConditions:
             )
 
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            interface_depth = self.grid.ds.interface_depth_v
+            if layer_contours:
+                if "interface_depth_v" in self.grid.ds:
+                    interface_depth = self.grid.ds.interface_depth_v
+                else:
+                    self.get_vertical_coordinates(
+                        type="interface", additional_locations=["u", "v"]
+                    )
             layer_depth = self.grid.ds.layer_depth_v
             mask = self.grid.ds.mask_v
             field = field.assign_coords(
@@ -612,14 +726,16 @@ class InitialConditions:
                 title = title + f", eta_rho = {field.eta_rho[eta].item()}"
                 field = field.isel(eta_rho=eta)
                 layer_depth = layer_depth.isel(eta_rho=eta)
-                interface_depth = interface_depth.isel(eta_rho=eta)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(eta_rho=eta)
                 if "s_rho" in field.dims:
                     field = field.assign_coords({"layer_depth": layer_depth})
             elif "eta_v" in field.dims:
                 title = title + f", eta_v = {field.eta_v[eta].item()}"
                 field = field.isel(eta_v=eta)
                 layer_depth = layer_depth.isel(eta_v=eta)
-                interface_depth = interface_depth.isel(eta_v=eta)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(eta_v=eta)
                 if "s_rho" in field.dims:
                     field = field.assign_coords({"layer_depth": layer_depth})
             else:
@@ -631,14 +747,16 @@ class InitialConditions:
                 title = title + f", xi_rho = {field.xi_rho[xi].item()}"
                 field = field.isel(xi_rho=xi)
                 layer_depth = layer_depth.isel(xi_rho=xi)
-                interface_depth = interface_depth.isel(xi_rho=xi)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(xi_rho=xi)
                 if "s_rho" in field.dims:
                     field = field.assign_coords({"layer_depth": layer_depth})
             elif "xi_u" in field.dims:
                 title = title + f", xi_u = {field.xi_u[xi].item()}"
                 field = field.isel(xi_u=xi)
                 layer_depth = layer_depth.isel(xi_u=xi)
-                interface_depth = interface_depth.isel(xi_u=xi)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(xi_u=xi)
                 if "s_rho" in field.dims:
                     field = field.assign_coords({"layer_depth": layer_depth})
             else:

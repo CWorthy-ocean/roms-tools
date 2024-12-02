@@ -12,13 +12,13 @@ from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
 )
 from roms_tools.setup.utils import (
+    get_target_coords,
     nan_check,
     substitute_nans_by_fillvalue,
     interpolate_from_climatology,
     get_variable_metadata,
     group_dataset,
     save_datasets,
-    get_target_coords,
     rotate_velocities,
     convert_to_roms_time,
     _to_yaml,
@@ -105,8 +105,8 @@ class SurfaceForcing:
 
         data.apply_lateral_fill()
 
-        variable_info = self._set_variable_info(data)
-        var_names = variable_info.keys()
+        self._set_variable_info(data)
+        var_names = self.variable_info.keys()
 
         processed_fields = {}
         # lateral regridding
@@ -118,7 +118,7 @@ class SurfaceForcing:
                 )
 
         # rotation of velocities and interpolation to u/v points
-        if "uwnd" in variable_info and "vwnd" in variable_info:
+        if "uwnd" in self.variable_info and "vwnd" in self.variable_info:
             processed_fields["uwnd"], processed_fields["vwnd"] = rotate_velocities(
                 processed_fields["uwnd"],
                 processed_fields["vwnd"],
@@ -134,7 +134,7 @@ class SurfaceForcing:
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
 
-        self._validate(ds, target_coords["mask"], variable_info)
+        self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -213,9 +213,8 @@ class SurfaceForcing:
 
         Returns
         -------
-        dict
-            A dictionary where the keys are variable names and the values are dictionaries of metadata
-            about each variable, including 'location', 'is_vector', 'vector_pair', and 'is_3d'.
+        None
+            This method updates the instance attribute `variable_info` with the metadata dictionary for the variables.
         """
         default_info = {
             "location": "rho",
@@ -256,7 +255,7 @@ class SurfaceForcing:
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
 
-        return variable_info
+        object.__setattr__(self, "variable_info", variable_info)
 
     def _apply_correction(self, processed_fields, data):
 
@@ -329,7 +328,7 @@ class SurfaceForcing:
 
         return ds
 
-    def _validate(self, ds, mask, variable_info):
+    def _validate(self, ds):
         """Validates the dataset by checking for NaN values at wet points, which would
         indicate missing raw data coverage over the target domain.
 
@@ -337,12 +336,6 @@ class SurfaceForcing:
         ----------
         ds : xarray.Dataset
             The dataset to validate.
-        mask : xarray.DataArray
-            Land mask (1=ocean, 0=land) to determine wet points in the domain.
-        variable_info : dict
-            A dictionary containing metadata about each variable (e.g., location,
-            whether it's a 3D variable, etc.). Used to retrieve information for
-            validating each variable.
 
         Raises
         ------
@@ -357,8 +350,8 @@ class SurfaceForcing:
 
         for var_name in ds.data_vars:
             # Only validate variables based on "validate" flag if use_dask is False
-            if not self.use_dask or variable_info[var_name]["validate"]:
-                nan_check(ds[var_name].isel(time=0), mask)
+            if not self.use_dask or self.variable_info[var_name]["validate"]:
+                nan_check(ds[var_name].isel(time=0), self.target_coords["mask"])
 
     def _add_global_metadata(self, ds=None):
 

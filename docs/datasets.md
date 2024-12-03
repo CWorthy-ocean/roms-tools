@@ -1,9 +1,13 @@
-# Required Datasets
+# Datasets
 
 To use `ROMS-Tools`, the user is required to download the following datasets:
 
 
 | **Dataset** | **Supported Versions** | **Required Fields** | **Field Description**                                                      | **Available at**                                                                 | **Required For**    |
+|-------------|------------------------|---------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------|---------------------|
+| SRTM15        | V2.6   | `lat`             | Latitude (degrees north)                                     | [USCD SRTM15+ Product](https://topex.ucsd.edu/WWW_html/srtm15_plus.html)                             | Grid (Topography)       |
+|         |    | `lon`             | Longitude (degrees east)                                     |                              |        |
+|         |    | `z`             | Topography                                     |                              |        |
 |-------------|------------------------|---------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------|---------------------|
 | TPXO        | TPXO9v2 (1/6 degree)   | `lat_r`             | Latitude at rho points (degrees north)                                     | [OSU TPXO Tide Models](https://www.tpxo.net/global)                             | Tidal Forcing       |
 |             |                        | `lon_r`             | Longitude at rho points (degrees east)                                     |                                                                                  |                     |
@@ -39,7 +43,7 @@ To use `ROMS-Tools`, the user is required to download the following datasets:
 |             |                        | `uo`                | Eastward velocity (m/s)                                                   |                                                                                  |                     |
 |             |                        | `vo`                | Northward velocity (m/s)                                                  |                                                                                  |                     |
 |-------------|------------------------|---------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------|---------------------|
-| Dai and Trenberth (coastal station volume, monthly series)      | 2019                      | `station`              | Station index                                                                      | [NCAR Research Data Archive](https://rda.ucar.edu/datasets/d551000/dataaccess/#) | River Forcing     |
+| Dai and Trenberth (coastal station volume, monthly series); **Note: downloaded internally**      | 2019                      | `station`              | Station index                                                                      | [NCAR Research Data Archive](https://rda.ucar.edu/datasets/d551000/dataaccess/#) | River Forcing     |
 |   |                       | `time`              | Time                                                                      | |      |
 |  | -                      | `lat_mou`              | River mouth latitude                                                  |  |      |
 |  | -                      | `lon_mou`              | River mouth longitude                                                  |  |      |

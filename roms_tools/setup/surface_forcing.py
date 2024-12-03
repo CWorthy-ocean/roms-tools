@@ -117,7 +117,7 @@ class SurfaceForcing:
                     data.ds[data.var_names[var_name]]
                 )
 
-        # rotation of velocities and interpolation to u/v points
+        # rotation of velocities
         if "uwnd" in self.variable_info and "vwnd" in self.variable_info:
             processed_fields["uwnd"], processed_fields["vwnd"] = rotate_velocities(
                 processed_fields["uwnd"],

@@ -200,6 +200,41 @@ For practical examples, see [this notebook](surface_forcing.ipynb)
 
 ## Initial Conditions
 
+The initial condition data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields). The data is regridded onto the ROMS grid via the following steps:
+
+1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the ERA5/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in skewed values at certain ocean points in the ROMS grid that the ERA5/CESM data considers land. Surface forcing over land differs significantly from surface forcing over the ocean, making the horizontal land fill essential.
+2. **Horizontal Regridding**: The horizontally filled surface forcing data is then regridded onto the ROMS grid using linear interpolation.
+
+```{note}
+It’s important to note that the 10m wind components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the wind components should be handled as a vector field. 
+```
+3. **Rotation of Wind Velocities**: The 10m wind components are rotated onto the ROMS grid to align with its orientation. 
+4. **Radiation Correction**: If specified, shortwave radiation is corrected. It is widely recognized that global data products like ERA5 can have biases in radiation due to uncertain cloud-radiative feedbacks. `ROMS-Tools` includes functionality to correct for these biases. If `correct_radiation = True`, a multiplicative correction factor is applied to the ERA5 shortwave radiation. The correction factors have been pre-computed based on the differences between ERA5 climatology and the COREv2 climatology.
+
+As a result of these processes, the following fields are produced on the ROMS grid:
+
+Meteorological forcing fields:
+
+- **Downward short-wave radiation** (W/m$^2$): `swrad`
+- **Downward long-wave radiation** (W/m$^2$): `lwrad`
+- **Air temperature at 2m** ($^\circ$C): `Tair`
+- **Absolute humidity at 2m** (kg/kg): `qair`
+- **Total precipitation** (cm/day): `rain`
+- **10m wind in x-direction** (m/s): `uwnd`
+- **10m wind in y-direction** (m/s): `vwnd`
+
+Biogeochemical (BGC) forcing fields, compatible with ROMS-MARBL:
+
+- **Atmospheric pCO2** (ppmv): `pco2_air`
+- **Atmospheric pCO2, alternative CO2** (ppmv): `pco2_air_alt`
+- **Iron decomposition** (nmol/cm$^2$/s): `iron`
+- **Dust decomposition** (kg/m$^2$/s): `dust`
+- **NOx decomposition** (kg/m$^2$/s): `nox`
+- **NHy decomposition** (kg/m$^2$/s): `nhy`
+
+
+For practical examples, see [this notebook](surface_forcing.ipynb)
+
 Coming soon...
 
 ## Boundary Forcing
@@ -226,4 +261,14 @@ The timings in the respective right panel reflect the following:
 ```
 Note that the setup time is only required once, as the solver is based on a fixed land mask. Once set up, the same solver can be used for multiple horizontal levels and across multiple time steps. 
 Note that the timings increase from top to bottom due to the increasing resolution: ERA5 (1/4$^\circ$), TPXO (1/6$^\circ$), and GLORYS (1/12$^\circ$).
+
+```{note}
+While the AMG method is highly efficient, the timing can still accumulate over many time slices and vertical levels. To minimize unnecessary calculations, `ROMS-Tools` limits the horizontal land fill to a small area surrounding the target ROMS domain. However, a buffer zone around the target ROMS domain needs to be included to avoid edge artifacts from the horizontal fill near the boundaries (see [this issue](https://github.com/CWorthy-ocean/roms-tools/issues/153) for more details).
+
+Two factors have to be balanced:
+- A smaller margin leads to more efficient computations.
+- A larger margin provides more accurate fill results by avoiding boundary effects.
+
+As a compromise, `ROMS-Tools` uses 20 buffer points for the margin. For example, in the case of ERA5, this results in a margin of 20 * 0.25$^\circ$ = 5$^\circ$.
+```
 

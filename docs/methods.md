@@ -147,10 +147,10 @@ After these corrections, the corrected data is regridded onto the ROMS grid, via
 2. **Horizontal Regridding**: The horizontally filled TPXO data is then linearly regridded onto the ROMS grid.
 
 ```{warning}
-It’s important to note that the tidal velocities are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocities should be handled as a vector field. 
+It’s important to note that the tidal velocities are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocities should be handled as a vector field.
 ```
 
-3. **Rotation of Velocities**: The tidal velocities are rotated onto the ROMS grid to align with its orientation. 
+3. **Rotation of Velocities**: The tidal velocities are rotated onto the ROMS grid to align with its orientation.
 4. **Computation of barotropic velocities**: The rotated velocities are then divided by the ocean depth to convert tidal transport into tidal barotropic velocities. These barotropic velocities are then interpolated from rho-points to u- and v-points.
 
 As a result of these processes, the following field pairs are produced on the ROMS grid, each consisting of real and imaginary components:
@@ -169,7 +169,7 @@ The surface forcing data is sourced from **ERA5** (for meteorological forcing) a
 2. **Horizontal Regridding**: The horizontally filled surface forcing data is then regridded onto the ROMS grid using linear interpolation.
 
 ```{warning}
-It’s important to note that the 10m wind components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the wind components should be handled as a vector field. 
+It’s important to note that the 10m wind components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the wind components should be handled as a vector field.
 ```
 3. **Rotation of Wind Velocities**: The 10m wind components are rotated onto the ROMS grid to align with its orientation.
 4. **Radiation Correction**: If specified, shortwave radiation is corrected. It is widely recognized that global data products like ERA5 can have biases in radiation due to uncertain cloud-radiative feedbacks. `ROMS-Tools` includes functionality to correct for these biases. If `correct_radiation = True`, a multiplicative correction factor is applied to the ERA5 shortwave radiation. The correction factors have been pre-computed based on the differences between ERA5 climatology and the COREv2 climatology.
@@ -207,7 +207,7 @@ The initial conditions data is sourced from **GLORYS** (for physical fields) and
 3. **Horizontal Regridding**: The horizontally filled initial conditions data is then regridded onto the ROMS grid using linear interpolation.
 
 ```{warning}
-It’s important to note that the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocity components should be handled as a vector field. 
+It’s important to note that the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocity components should be handled as a vector field.
 ```
 4. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid to align with its orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
 5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points.
@@ -267,7 +267,7 @@ For practical examples, see [this notebook](initial_conditions.ipynb).
 
 ## Boundary Forcing
 
-The boundary forcing data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields). 
+The boundary forcing data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields).
 
 1. **Extrapolation to Depth**: Values are extrapolated to depth by propagating the deepest available value down to the bottom.
 
@@ -281,7 +281,7 @@ The user can choose between two options for how to proceed with the regridding o
 
 ### Option B:
 
-2. **2D Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). 
+2. **2D Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values).
 3. **Horizontal Regridding**: The data is then regridded onto the boundaries of the ROMS grid using linear interpolation.
 4. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid boundaries to align with the grid's orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
 
@@ -290,7 +290,7 @@ Option A is faster and the default choice. Option B is more thorough but slower,
 ```
 
 ```{warning}
-It’s important to note that in both Option A and B the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocity components should be handled as a vector field. 
+It’s important to note that in both Option A and B the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocity components should be handled as a vector field.
 ```
 
 5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points.
@@ -357,7 +357,7 @@ $$
 max(\sqrt{(\Delta x)^2 + (\Delta y)^2)} / 2),
 $$
 
-where $\Delta x$ and $\Delta y$ represent the grid spacing in the x- and y-directions, respectively. This method ensures that only rivers that are geographically relevant to the ROMS grid are included in the forcing. 
+where $\Delta x$ and $\Delta y$ represent the grid spacing in the x- and y-directions, respectively. This method ensures that only rivers that are geographically relevant to the ROMS grid are included in the forcing.
 
 2. **Placement of Rivers at Coastal Land Points**: ROMS requires rivers to be placed at coastal land points, i.e., land points that are adjacent to wet points. Therefore, `ROMS-Tools` moves the relevant rivers (from Step 1) to the nearest coastal land point, see [here](river_forcing.ipynb#River-locations) for an example.
 3. **Creating the River Forcing**: For the relevant rivers, `ROMS-Tools` extracts the volume flux for the specified time period (as a climatology, if specified). Additionally, constant values of 17$^\circ$C and 1 PSU (pratical salinity units) are assigned for river temperature and salinity, respectively.
@@ -375,11 +375,11 @@ Below are a few examples illustrating how the horizontal land fill looks in prac
 ![AMG method for TPXO data](images/AMG_TPXO.png)
 ![AMG method for GLORYS data](images/AMG_GLORYS.png)
 
-The timings in the respective right panel reflect the following: 
+The timings in the respective right panel reflect the following:
 ```
 (time to set up the solver) + (time to perform a horizontal fill on a single horizontal slice)
 ```
-Note that the setup time is only required once, as the solver is based on a fixed land mask. Once set up, the same solver can be used for multiple horizontal levels and across multiple time steps. 
+Note that the setup time is only required once, as the solver is based on a fixed land mask. Once set up, the same solver can be used for multiple horizontal levels and across multiple time steps.
 Note that the timings increase from top to bottom due to the increasing resolution: ERA5 (1/4$^\circ$), TPXO (1/6$^\circ$), and GLORYS (1/12$^\circ$).
 
 ```{note}
@@ -391,4 +391,3 @@ Two factors have to be balanced:
 
 As a compromise, `ROMS-Tools` uses 20 buffer points for the margin. For example, in the case of ERA5, this results in a margin of 20 * 0.25$^\circ$ = 5$^\circ$.
 ```
-

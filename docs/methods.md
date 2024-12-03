@@ -146,12 +146,12 @@ After these corrections, the corrected data is regridded onto the ROMS grid, via
 1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is important because the TPXO and ROMS grids may have differing land masks, particularly when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in zero values at certain ocean points in the ROMS grid, where the TPXO data considers them land.
 2. **Horizontal Regridding**: The horizontally filled TPXO data is then linearly regridded onto the ROMS grid.
 
-```{note}
+```{warning}
 It’s important to note that the tidal velocities are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocities should be handled as a vector field. 
 ```
 
 3. **Rotation of Velocities**: The tidal velocities are rotated onto the ROMS grid to align with its orientation. 
-4. **Computation of barotropic velocities**: The rotated velocities are then divided by the ocean depth to convert tidal transport into tidal barotropic velocities.
+4. **Computation of barotropic velocities**: The rotated velocities are then divided by the ocean depth to convert tidal transport into tidal barotropic velocities. These barotropic velocities are then interpolated from rho-points to u- and v-points.
 
 As a result of these processes, the following field pairs are produced on the ROMS grid, each consisting of real and imaginary components:
 
@@ -159,7 +159,7 @@ As a result of these processes, the following field pairs are produced on the RO
 - **Tidal Potential** (m): `pot_Re`, `pot_Im`
 - **Tidal Barotropic Velocities** (m/s): `u_Re`, `u_Im`, `v_Re`, `v_Im`
 
-For practical examples, see [this notebook](tides.ipynb)
+For practical examples, see [this notebook](tides.ipynb).
 
 ## Surface Forcing
 
@@ -168,10 +168,10 @@ The surface forcing data is sourced from **ERA5** (for meteorological forcing) a
 1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the ERA5/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in skewed values at certain ocean points in the ROMS grid that the ERA5/CESM data considers land. Surface forcing over land differs significantly from surface forcing over the ocean, making the horizontal land fill essential.
 2. **Horizontal Regridding**: The horizontally filled surface forcing data is then regridded onto the ROMS grid using linear interpolation.
 
-```{note}
+```{warning}
 It’s important to note that the 10m wind components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the wind components should be handled as a vector field. 
 ```
-3. **Rotation of Wind Velocities**: The 10m wind components are rotated onto the ROMS grid to align with its orientation. 
+3. **Rotation of Wind Velocities**: The 10m wind components are rotated onto the ROMS grid to align with its orientation.
 4. **Radiation Correction**: If specified, shortwave radiation is corrected. It is widely recognized that global data products like ERA5 can have biases in radiation due to uncertain cloud-radiative feedbacks. `ROMS-Tools` includes functionality to correct for these biases. If `correct_radiation = True`, a multiplicative correction factor is applied to the ERA5 shortwave radiation. The correction factors have been pre-computed based on the differences between ERA5 climatology and the COREv2 climatology.
 
 As a result of these processes, the following fields are produced on the ROMS grid:
@@ -196,54 +196,174 @@ Biogeochemical (BGC) forcing fields, compatible with ROMS-MARBL:
 - **NHy decomposition** (kg/m$^2$/s): `nhy`
 
 
-For practical examples, see [this notebook](surface_forcing.ipynb)
+For practical examples, see [this notebook](surface_forcing.ipynb).
 
 ## Initial Conditions
 
-The initial condition data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields). The data is regridded onto the ROMS grid via the following steps:
+The initial conditions data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields). The data is regridded onto the ROMS grid via the following steps:
 
-1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the ERA5/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in skewed values at certain ocean points in the ROMS grid that the ERA5/CESM data considers land. Surface forcing over land differs significantly from surface forcing over the ocean, making the horizontal land fill essential.
-2. **Horizontal Regridding**: The horizontally filled surface forcing data is then regridded onto the ROMS grid using linear interpolation.
+1. **Extrapolation to Depth**: Values are extrapolated to depth by propagating the deepest available value down to the bottom.
+2. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the GLORYS/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in NaN values at certain ocean points in the ROMS grid that the GLORYS/CESM data considers land.
+3. **Horizontal Regridding**: The horizontally filled initial conditions data is then regridded onto the ROMS grid using linear interpolation.
 
-```{note}
-It’s important to note that the 10m wind components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the wind components should be handled as a vector field. 
+```{warning}
+It’s important to note that the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocity components should be handled as a vector field. 
 ```
-3. **Rotation of Wind Velocities**: The 10m wind components are rotated onto the ROMS grid to align with its orientation. 
-4. **Radiation Correction**: If specified, shortwave radiation is corrected. It is widely recognized that global data products like ERA5 can have biases in radiation due to uncertain cloud-radiative feedbacks. `ROMS-Tools` includes functionality to correct for these biases. If `correct_radiation = True`, a multiplicative correction factor is applied to the ERA5 shortwave radiation. The correction factors have been pre-computed based on the differences between ERA5 climatology and the COREv2 climatology.
+4. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid to align with its orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
+5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points.
+6. **Computation of barotropic velocities**: To obtain the barotropic velocities, the rotated and regridded velocities are vertically integrated.
+7. **Zero vertical velocities**: The initial condition for the vertical velocity `w` is set to zero.
 
 As a result of these processes, the following fields are produced on the ROMS grid:
 
-Meteorological forcing fields:
+Physical initial conditions:
 
-- **Downward short-wave radiation** (W/m$^2$): `swrad`
-- **Downward long-wave radiation** (W/m$^2$): `lwrad`
-- **Air temperature at 2m** ($^\circ$C): `Tair`
-- **Absolute humidity at 2m** (kg/kg): `qair`
-- **Total precipitation** (cm/day): `rain`
-- **10m wind in x-direction** (m/s): `uwnd`
-- **10m wind in y-direction** (m/s): `vwnd`
+- **Sea surface height** (m): `zeta`
+- **Potential temperature** ($^\circ$C): `temp`
+- **Salinity** (psu) : `salt`
+- **U-flux component** (m/s): `u`
+- **V-flux component** (m/s): `v`
+- **Vertically integrated u-flux component** (m/s): `ubar`
+- **Vertically integrated v-flux component** (m/s): `vbar`
+- **W-flux component** (m/s): `w`
 
-Biogeochemical (BGC) forcing fields, compatible with ROMS-MARBL:
+Biogeochemical (BGC) initial conditions, compatible with ROMS-MARBL:
 
-- **Atmospheric pCO2** (ppmv): `pco2_air`
-- **Atmospheric pCO2, alternative CO2** (ppmv): `pco2_air_alt`
-- **Iron decomposition** (nmol/cm$^2$/s): `iron`
-- **Dust decomposition** (kg/m$^2$/s): `dust`
-- **NOx decomposition** (kg/m$^2$/s): `nox`
-- **NHy decomposition** (kg/m$^2$/s): `nhy`
+- **Dissolved inorganic phosphate** (mmol/m$^3$): `PO4`
+- **Dissolved inorganic nitrate** (mmol/m$^3$): `NO3`
+- **Dissolved inorganic silicate** (mmol/m$^3$): `SiO3`
+- **Dissolved ammonia** (mmol/m$^3$): `NH4`
+- **Dissolved inorganic iron** (mmol/m$^3$): `Fe`
+- **Iron binding ligand** (mmol/m$^3$): `Lig`
+- **Dissolved oxygen** (mmol/m$^3$): `O2`
+- **Dissolved inorganic carbon** (mmol/m$^3$): `DIC`
+- **Dissolved inorganic carbon, alternative CO2** (mmol/m$^3$): `DIC_ALT_CO2`
+- **Alkalinity** (meq/m$^3$): `ALK`
+- **Alkalinity, alternative CO2** (meq/m$^3$): `ALK_ALT_CO2`
+- **Dissolved organic carbon** (mmol/m$^3$): `DOC`
+- **Dissolved organic nitrogen** (mmol/m$^3$):, `DON`
+- **Dissolved organic phosphorus** (mmol/m$^3$): `DOP`
+- **Refractory dissolved organic carbon** (mmol/m$^3$): `DOCr`
+- **Refractory dissolved organic nitrogen** (mmol/m$^3$): `DONr`
+- **Refractory dissolved organic phosphorus** (mmol/m$^3$): `DOPr`
+- **Zooplankton carbon** (mmol/m$^3$): `zooC`
+- **Small phytoplankton chlorophyll** (mg/m$^3$): `spChl`
+- **Small phytoplankton carbon** (mmol/m$^3$): `spC`
+- **Small phytoplankton phosphorous** (mmol/m$^3$): `spC`
+- **Small phytoplankton iron** (mmol/m$^3$): `spFe`
+- **Small phytoplankton CaCO3** (mmol/m$^3$): `spCaCO3`
+- **Diatom chloropyll** (mg/m$^3$): `diatChl`
+- **Diatom carbon** (mmol/m$^3$): `diatC`
+- **Diatom phosphorus** (mmol/m$^3$): `diatP`
+- **Diatom iron** (mmol/m$^3$): `diatFe`
+- **Diatom silicate** (mmol/m$^3$): `diatSi`
+- **Diazotroph chloropyll** (mg/m$^3$): `diazChl`
+- **Diazotroph carbon** (mmol/m$^3$): `diazC`
+- **Diazotroph phosphorus** (mmol/m$^3$): `diazP`
+- **Diazotroph iron** (mmol/m$^3$): `diazFe`
 
 
-For practical examples, see [this notebook](surface_forcing.ipynb)
-
-Coming soon...
+For practical examples, see [this notebook](initial_conditions.ipynb).
 
 ## Boundary Forcing
 
-Coming soon...
+The boundary forcing data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields). 
+
+1. **Extrapolation to Depth**: Values are extrapolated to depth by propagating the deepest available value down to the bottom.
+
+The user can choose between two options for how to proceed with the regridding of the data onto the ROMS grid boundaries:
+
+### Option A:
+
+2. **Horizontal Regridding**: The data is regridded onto the ROMS grid boundaries using linear interpolation.
+3. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid boundaries to align with the grid's orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
+4. **1D Horizontal Land Fill**: The regridded data is extrapolated along each boundary edge individually, using a forward fill followed by a backward fill to fill missing values.
+
+### Option B:
+
+2. **2D Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). 
+3. **Horizontal Regridding**: The data is then regridded onto the boundaries of the ROMS grid using linear interpolation.
+4. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid boundaries to align with the grid's orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
+
+```{admonition} Option A vs. Option B
+Option A is faster and the default choice. Option B is more thorough but slower, as it fills an entire 2D domain at each depth level, often covering interior areas that won’t ultimately be used for the boundary forcing. However, Option A may not be safe in all situations. Limitations are explained in detail [here](boundary_forcing.ipynb#1D-versus-2D-horizontal-fill), and `ROMS-Tools` will issue errors and warnings if it detects one of these unsafe situations while the user has chosen Option A.
+```
+
+```{warning}
+It’s important to note that in both Option A and B the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocity components should be handled as a vector field. 
+```
+
+5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points.
+6. **Computation of barotropic velocities**: To obtain the barotropic velocities, the rotated and regridded velocities are vertically integrated.
+
+As a result of these processes, the following fields are produced at each of the user-specified **boundaries** of the ROMS grid:
+
+Physical initial conditions:
+
+- **Sea surface height** (m): `zeta`
+- **Potential temperature** ($^\circ$C): `temp`
+- **Salinity** (psu) : `salt`
+- **U-flux component** (m/s): `u`
+- **V-flux component** (m/s): `v`
+- **Vertically integrated u-flux component** (m/s): `ubar`
+- **Vertically integrated v-flux component** (m/s): `vbar`
+- **W-flux component** (m/s): `w`
+
+Biogeochemical (BGC) initial conditions, compatible with ROMS-MARBL:
+
+- **Dissolved inorganic phosphate** (mmol/m$^3$): `PO4`
+- **Dissolved inorganic nitrate** (mmol/m$^3$): `NO3`
+- **Dissolved inorganic silicate** (mmol/m$^3$): `SiO3`
+- **Dissolved ammonia** (mmol/m$^3$): `NH4`
+- **Dissolved inorganic iron** (mmol/m$^3$): `Fe`
+- **Iron binding ligand** (mmol/m$^3$): `Lig`
+- **Dissolved oxygen** (mmol/m$^3$): `O2`
+- **Dissolved inorganic carbon** (mmol/m$^3$): `DIC`
+- **Dissolved inorganic carbon, alternative CO2** (mmol/m$^3$): `DIC_ALT_CO2`
+- **Alkalinity** (meq/m$^3$): `ALK`
+- **Alkalinity, alternative CO2** (meq/m$^3$): `ALK_ALT_CO2`
+- **Dissolved organic carbon** (mmol/m$^3$): `DOC`
+- **Dissolved organic nitrogen** (mmol/m$^3$):, `DON`
+- **Dissolved organic phosphorus** (mmol/m$^3$): `DOP`
+- **Refractory dissolved organic carbon** (mmol/m$^3$): `DOCr`
+- **Refractory dissolved organic nitrogen** (mmol/m$^3$): `DONr`
+- **Refractory dissolved organic phosphorus** (mmol/m$^3$): `DOPr`
+- **Zooplankton carbon** (mmol/m$^3$): `zooC`
+- **Small phytoplankton chlorophyll** (mg/m$^3$): `spChl`
+- **Small phytoplankton carbon** (mmol/m$^3$): `spC`
+- **Small phytoplankton phosphorous** (mmol/m$^3$): `spC`
+- **Small phytoplankton iron** (mmol/m$^3$): `spFe`
+- **Small phytoplankton CaCO3** (mmol/m$^3$): `spCaCO3`
+- **Diatom chloropyll** (mg/m$^3$): `diatChl`
+- **Diatom carbon** (mmol/m$^3$): `diatC`
+- **Diatom phosphorus** (mmol/m$^3$): `diatP`
+- **Diatom iron** (mmol/m$^3$): `diatFe`
+- **Diatom silicate** (mmol/m$^3$): `diatSi`
+- **Diazotroph chloropyll** (mg/m$^3$): `diazChl`
+- **Diazotroph carbon** (mmol/m$^3$): `diazC`
+- **Diazotroph phosphorus** (mmol/m$^3$): `diazP`
+- **Diazotroph iron** (mmol/m$^3$): `diazFe`
+
+
+For practical examples, see [this notebook](boundary_forcing.ipynb).
 
 ## River Forcing
 
-Coming soon...
+The river forcing is sourced from a provided river dataset containing river volume fluxes. By default, the Dai and Trenberth global river dataset is used.
+
+1. **Extraction of Relevant Rivers**: For each river in the provided source dataset, the distance between the river mouth and the latitudes and longitudes of the ROMS grid is computed. Only rivers whose mouths are within a specified maximum distance from the grid are retained. This maximum distance is defined as:
+
+$$
+max(\sqrt{(\Delta x)^2 + (\Delta y)^2)} / 2),
+$$
+
+where $\Delta x$ and $\Delta y$ represent the grid spacing in the x- and y-directions, respectively. This method ensures that only rivers that are geographically relevant to the ROMS grid are included in the forcing. 
+
+2. **Placement of Rivers at Coastal Land Points**: ROMS requires rivers to be placed at coastal land points, i.e., land points that are adjacent to wet points. Therefore, `ROMS-Tools` moves the relevant rivers (from Step 1) to the nearest coastal land point, see [here](river_forcing.ipynb#River-locations) for an example.
+3. **Creating the River Forcing**: For the relevant rivers, `ROMS-Tools` extracts the volume flux for the specified time period (as a climatology, if specified). Additionally, constant values of 17$^\circ$C and 1 PSU (pratical salinity units) are assigned for river temperature and salinity, respectively.
+
+For practical examples, see [this notebook](river_forcing.ipynb).
+
 
 ## Multigrid Method for Filling Land Values
 

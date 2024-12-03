@@ -7,13 +7,13 @@ Welcome to the ROMS-Tools Documentation!
 ========================================
 
 **ROMS-Tools** is a Python package designed for creating the input files necessary
-to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation. This tool simplifies the process of generating:
+to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ or ROMS-MARBL simulation. This tool simplifies the process of generating:
 
 - **Grid**
 - **Tidal forcing**
 - **Surface forcing**:
 
-  - **Physical forcing**: wind, radiation, etc.
+  - **Physical/Meteorological forcing**: wind, radiation, etc.
   - **Biogeochemical forcing**: atmospheric pCO₂, etc.
 
 - **Initial conditions**:

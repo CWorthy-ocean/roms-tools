@@ -354,7 +354,7 @@ The river forcing is sourced from a provided river dataset containing river volu
 1. **Extraction of Relevant Rivers**: For each river in the provided source dataset, the distance between the river mouth and the latitudes and longitudes of the ROMS grid is computed. Only rivers whose mouths are within a specified maximum distance from the grid are retained. This maximum distance is defined as:
 
 $$
-max(\sqrt{(\Delta x)^2 + (\Delta y)^2)} / 2),
+max(\sqrt{(\Delta x)^2 + (\Delta y)^2} / 2),
 $$
 
 where $\Delta x$ and $\Delta y$ represent the grid spacing in the x- and y-directions, respectively. This method ensures that only rivers that are geographically relevant to the ROMS grid are included in the forcing.

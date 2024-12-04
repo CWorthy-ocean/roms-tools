@@ -61,7 +61,11 @@ def compare_dictionaries(dict1, dict2):
 
 @pytest.mark.parametrize(
     "river_forcing_fixture",
-    ["river_forcing", "river_forcing_for_grid_that_straddles_dateline"],
+    [
+        "river_forcing",
+        "river_forcing_for_grid_that_straddles_dateline",
+        "river_forcing_with_bgc",
+    ],
 )
 def test_successful_initialization_with_climatological_dai_data(
     river_forcing_fixture, request
@@ -121,7 +125,11 @@ def test_reproducibility_indices(river_forcing, river_forcing_no_climatology):
 
 @pytest.mark.parametrize(
     "river_forcing_fixture",
-    ["river_forcing_climatology", "river_forcing_no_climatology"],
+    [
+        "river_forcing_climatology",
+        "river_forcing_no_climatology",
+        "river_forcing_with_bgc",
+    ],
 )
 def test_constant_tracers(river_forcing_fixture, request):
     river_forcing = request.getfixturevalue(river_forcing_fixture)
@@ -132,11 +140,18 @@ def test_constant_tracers(river_forcing_fixture, request):
     np.testing.assert_allclose(
         river_forcing.ds.river_tracer.isel(ntracers=1).values, 1.0, atol=0
     )
+    np.testing.assert_allclose(
+        river_forcing.ds.river_tracer.isel(ntracers=slice(2, None)).values, 0.0, atol=0
+    )
 
 
 @pytest.mark.parametrize(
     "river_forcing_fixture",
-    ["river_forcing_climatology", "river_forcing_no_climatology"],
+    [
+        "river_forcing_climatology",
+        "river_forcing_no_climatology",
+        "river_forcing_with_bgc",
+    ],
 )
 def test_river_locations_are_along_coast(river_forcing_fixture, request):
     river_forcing = request.getfixturevalue(river_forcing_fixture)
@@ -228,16 +243,18 @@ def test_update_river_flux_variable_without_conflicts(river_forcing, tmp_path):
     assert isinstance(another_river_forcing.ds, xr.Dataset)
 
 
-def test_river_forcing_plot(river_forcing):
+def test_river_forcing_plot(river_forcing_with_bgc):
     """Test plot method."""
 
-    river_forcing.plot_locations()
-    river_forcing.plot("river_volume")
-    river_forcing.plot("river_temperature")
-    river_forcing.plot("river_salinity")
+    river_forcing_with_bgc.plot_locations()
+    river_forcing_with_bgc.plot("river_volume")
+    river_forcing_with_bgc.plot("river_temp")
+    river_forcing_with_bgc.plot("river_salt")
+    river_forcing_with_bgc.plot("river_ALK")
+    river_forcing_with_bgc.plot("river_PO4")
 
 
-def test_river_forcing_save(river_forcing, tmp_path):
+def test_river_forcing_save(river_forcing_with_bgc, tmp_path):
     """Test save method."""
 
     for file_str, grid_file_str in zip(
@@ -250,7 +267,7 @@ def test_river_forcing_save(river_forcing, tmp_path):
         ):  # test for Path object and str
 
             # Test saving without partitioning
-            saved_filenames = river_forcing.save(filepath, grid_filepath)
+            saved_filenames = river_forcing_with_bgc.save(filepath, grid_filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
             grid_filepath = Path(grid_filepath).with_suffix(".nc")
@@ -262,7 +279,7 @@ def test_river_forcing_save(river_forcing, tmp_path):
             grid_filepath.unlink()
 
             # Test saving with partitioning
-            saved_filenames = river_forcing.save(
+            saved_filenames = river_forcing_with_bgc.save(
                 filepath, grid_filepath, np_eta=3, np_xi=3
             )
 
@@ -277,9 +294,19 @@ def test_river_forcing_save(river_forcing, tmp_path):
                 expected_filepath.unlink()
 
 
-def test_roundtrip_yaml(river_forcing, tmp_path):
+@pytest.mark.parametrize(
+    "river_forcing_fixture",
+    [
+        "river_forcing_climatology",
+        "river_forcing_no_climatology",
+        "river_forcing_with_bgc",
+    ],
+)
+def test_roundtrip_yaml(river_forcing_fixture, request, tmp_path):
     """Test that creating an RiverForcing object, saving its parameters to yaml file,
     and re-opening yaml file creates the same object."""
+
+    river_forcing = request.getfixturevalue(river_forcing_fixture)
 
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"
@@ -298,7 +325,17 @@ def test_roundtrip_yaml(river_forcing, tmp_path):
         filepath.unlink()
 
 
-def test_files_have_same_hash(river_forcing, tmp_path):
+@pytest.mark.parametrize(
+    "river_forcing_fixture",
+    [
+        "river_forcing_climatology",
+        "river_forcing_no_climatology",
+        "river_forcing_with_bgc",
+    ],
+)
+def test_files_have_same_hash(river_forcing_fixture, request, tmp_path):
+
+    river_forcing = request.getfixturevalue(river_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml.yaml"
     filepath1 = tmp_path / "test1.nc"

@@ -16,6 +16,7 @@ from roms_tools.setup.utils import (
     save_datasets,
     _to_yaml,
     _from_yaml,
+    get_variable_metadata,
 )
 from roms_tools.setup.plot import _get_projection, _add_plot_to_ax
 import cartopy.crs as ccrs
@@ -52,6 +53,8 @@ class RiverForcing:
           - "never": Do not compute climatology.
           - "always": Compute climatology for all rivers, regardless of missing data.
 
+    include_bgc : bool, optional
+        Whether to include BGC tracers. Defaults to `False`.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
 
@@ -68,6 +71,7 @@ class RiverForcing:
     end_time: datetime
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     convert_to_climatology: str = "if_any_missing"
+    include_bgc: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -138,13 +142,13 @@ class RiverForcing:
         return data
 
     def _create_river_forcing(self, data):
-        """Create river forcing data for volume flux and tracers (temperature and
-        salinity).
+        """Create river forcing data for volume flux and tracers (temperature, salinity,
+        BGC tracers).
 
-        This method computes the river volume flux and associated tracers (temperature and salinity)
+        This method computes the river volume flux and associated tracers (temperature, salinity, BGC tracers)
         based on the provided input data. It generates a new `xarray.Dataset` that contains:
         - `river_volume`: The river volume flux, calculated as the product of river flux and a specified ratio, with units of m³/s.
-        - `river_tracer`: A tracer array containing temperature and salinity values at each river station over time.
+        - `river_tracer`: A tracer array containing temperature, salinity, and BGC tracer values for each river over time.
 
         The method also handles climatological adjustments for missing or incomplete data, depending on the `convert_to_climatology` setting.
 
@@ -161,7 +165,7 @@ class RiverForcing:
         xr.Dataset
             A new `xarray.Dataset` containing the computed river forcing data. The dataset includes:
             - `river_volume`: A `DataArray` representing the river volume flux (m³/s).
-            - `river_tracer`: A `DataArray` representing tracer data for temperature and salinity at each river station over time.
+            - `river_tracer`: A `DataArray` representing tracer data for temperature, salinity and BGC tracers (if specified) for each river over time.
         """
         if self.source["climatology"]:
             object.__setattr__(self, "climatology", True)
@@ -199,18 +203,64 @@ class RiverForcing:
         river_volume.coords["river_name"] = name
         ds["river_volume"] = river_volume
 
+        if self.include_bgc:
+            ntracers = 2 + 32
+        else:
+            ntracers = 2
         tracer_data = np.zeros(
-            (len(ds.river_time), 2, len(ds.nriver)), dtype=np.float32
+            (len(ds.river_time), ntracers, len(ds.nriver)), dtype=np.float32
         )
         tracer_data[:, 0, :] = 17.0
         tracer_data[:, 1, :] = 1.0
+        tracer_data[:, 2:, :] = 0.0
 
         river_tracer = xr.DataArray(
             tracer_data, dims=("river_time", "ntracers", "nriver")
         )
         river_tracer.attrs["long_name"] = "River tracer data"
-        river_tracer.attrs["units"] = "degrees C [temperature]; psu [salinity]"
-        tracer_names = xr.DataArray(["temperature", "salinity"], dims="ntracers")
+
+        if self.include_bgc:
+            tracer_names = xr.DataArray(
+                [
+                    "temp",
+                    "salt",
+                    "PO4",
+                    "NO3",
+                    "SiO3",
+                    "NH4",
+                    "Fe",
+                    "Lig",
+                    "O2",
+                    "DIC",
+                    "DIC_ALT_CO2",
+                    "ALK",
+                    "ALK_ALT_CO2",
+                    "DOC",
+                    "DON",
+                    "DOP",
+                    "DOPr",
+                    "DONr",
+                    "DOCr",
+                    "zooC",
+                    "spChl",
+                    "spC",
+                    "spP",
+                    "spFe",
+                    "spCaCO3",
+                    "diatChl",
+                    "diatC",
+                    "diatP",
+                    "diatFe",
+                    "diatSi",
+                    "diazChl",
+                    "diazC",
+                    "diazP",
+                    "diazFe",
+                ],
+                dims="ntracers",
+            )
+        else:
+            tracer_names = xr.DataArray(["temp", "salt"], dims="ntracers")
         tracer_names.attrs["long_name"] = "Tracer name"
         river_tracer.coords["tracer_name"] = tracer_names
         ds["river_tracer"] = river_tracer
@@ -445,9 +495,43 @@ class RiverForcing:
         ----------
         var_name : str, optional
             The variable to plot. It can be one of the following:
-            - 'river_volume' : Plot the river volume flux.
-            - 'river_temperature' : Plot the river temperature (from the river_tracer).
-            - 'river_salinity' : Plot the river salinity (from the river_tracer).
+
+            - 'river_volume' : river volume flux.
+            - 'river_temp' : river temperature (from river_tracer).
+            - 'river_salt' : river salinity (from river_tracer).
+            - 'river_PO4' : river PO4 (from river_tracer).
+            - 'river_NO3' : river NO3 (from river_tracer).
+            - 'river_SiO3' : river SiO3 (from river_tracer).
+            - 'river_NH4' : river NH4 (from river_tracer).
+            - 'river_Fe' : river Fe (from river_tracer).
+            - 'river_Lig' : river Lig (from river_tracer).
+            - 'river_O2' : river O2 (from river_tracer).
+            - 'river_DIC' : river DIC (from river_tracer).
+            - 'river_DIC_ALT_CO2' : river DIC_ALT_CO2 (from river_tracer).
+            - 'river_ALK' : river ALK (from river_tracer).
+            - 'river_ALK_ALT_CO2' : river ALK_ALT_CO2 (from river_tracer).
+            - 'river_DOC' : river DOC (from river_tracer).
+            - 'river_DON' : river DON (from river_tracer).
+            - 'river_DOP' : river DOP (from river_tracer).
+            - 'river_DOPr' : river DOPr (from river_tracer).
+            - 'river_DONr' : river DONr (from river_tracer).
+            - 'river_DOCr' : river DOCr (from river_tracer).
+            - 'river_zooC' : river zooC (from river_tracer).
+            - 'river_spChl' : river sphChl (from river_tracer).
+            - 'river_spC' : river spC (from river_tracer).
+            - 'river_spP' : river spP (from river_tracer).
+            - 'river_spFe' : river spFe (from river_tracer).
+            - 'river_spCaCO3' : river spCaCO3 (from river_tracer).
+            - 'river_diatChl' : river diatChl (from river_tracer).
+            - 'river_diatC' : river diatC (from river_tracer).
+            - 'river_diatP' : river diatP (from river_tracer).
+            - 'river_diatFe' : river diatFe (from river_tracer).
+            - 'river_diatSi' : river diatSi (from river_tracer).
+            - 'river_diazChl' : river diazChl (from river_tracer).
+            - 'river_diazC' : river diazC (from river_tracer).
+            - 'river_diazP' : river diazP (from river_tracer).
+            - 'river_diazFe' : river diazFe (from river_tracer).
+
             The default is 'river_volume'.
         """
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
@@ -463,14 +547,14 @@ class RiverForcing:
             field = self.ds[var_name]
             units = f"${self.ds.river_volume.units}$"
             long_name = self.ds[var_name].long_name
-        elif var_name == "river_temperature":
-            field = self.ds["river_tracer"].isel(ntracers=0)
-            units = "degrees C"
-            long_name = "River temperature"
-        elif var_name == "river_salinity":
-            field = self.ds["river_tracer"].isel(ntracers=1)
-            units = "psu"
-            long_name = "River salinity"
+        else:
+            d = get_variable_metadata()
+            var_name_wo_river = var_name.split("_")[1]
+            field = self.ds["river_tracer"].isel(
+                ntracers=self.ds.tracer_name == var_name_wo_river
+            )
+            units = d[var_name_wo_river]["units"]
+            long_name = f"River {d[var_name_wo_river]['long_name']}"
 
         for i in range(len(self.ds.nriver)):
 

@@ -23,7 +23,7 @@ def _get_fname(name):
         "bgc_surface_forcing_from_climatology",
         "boundary_forcing",
         "bgc_boundary_forcing_from_climatology",
-        "river_forcing",
+        "river_forcing_with_bgc",
         "river_forcing_no_climatology",
     ],
 )
@@ -62,7 +62,7 @@ def test_save_results(forcing_fixture, request):
         "bgc_surface_forcing_from_climatology",
         "boundary_forcing",
         "bgc_boundary_forcing_from_climatology",
-        "river_forcing",
+        "river_forcing_with_bgc",
         "river_forcing_no_climatology",
     ],
 )

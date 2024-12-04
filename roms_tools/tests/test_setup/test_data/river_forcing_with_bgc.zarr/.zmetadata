@@ -121,7 +121,7 @@
         "river_tracer/.zarray": {
             "chunks": [
                 12,
-                2,
+                34,
                 6
             ],
             "compressor": {
@@ -137,7 +137,7 @@
             "order": "C",
             "shape": [
                 12,
-                2,
+                34,
                 6
             ],
             "zarr_format": 2
@@ -149,8 +149,7 @@
                 "nriver"
             ],
             "coordinates": "abs_time month river_name tracer_name",
-            "long_name": "River tracer data",
-            "units": "degrees C [temperature]; psu [salinity]"
+            "long_name": "River tracer data"
         },
         "river_volume/.zarray": {
             "chunks": [
@@ -185,7 +184,7 @@
         },
         "tracer_name/.zarray": {
             "chunks": [
-                2
+                34
             ],
             "compressor": {
                 "blocksize": 0,
@@ -199,7 +198,7 @@
             "filters": null,
             "order": "C",
             "shape": [
-                2
+                34
             ],
             "zarr_format": 2
         },

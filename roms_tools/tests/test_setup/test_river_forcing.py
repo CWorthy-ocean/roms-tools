@@ -233,8 +233,8 @@ def test_river_forcing_plot(river_forcing):
 
     river_forcing.plot_locations()
     river_forcing.plot("river_volume")
-    river_forcing.plot("river_temperature")
-    river_forcing.plot("river_salinity")
+    river_forcing.plot("river_temp")
+    river_forcing.plot("river_salt")
 
 
 def test_river_forcing_save(river_forcing, tmp_path):

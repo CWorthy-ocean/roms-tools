@@ -9,7 +9,7 @@
         "id": "blosc",
         "shuffle": 1
     },
-    "dtype": "<U11",
+    "dtype": "<U4",
     "fill_value": null,
     "filters": null,
     "order": "C",

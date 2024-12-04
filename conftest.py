@@ -423,6 +423,21 @@ def river_forcing_no_climatology():
     )
 
 
+@pytest.fixture
+def river_forcing_with_bgc(scope="session"):
+    """Fixture for creating a RiverForcing object with BGC tracers."""
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
+    return RiverForcing(
+        grid=grid, start_time=start_time, end_time=end_time, include_bgc=True
+    )
+
+
 @pytest.fixture(scope="session")
 def era5_data(request, use_dask):
     fname = download_test_data("ERA5_regional_test_data.nc")

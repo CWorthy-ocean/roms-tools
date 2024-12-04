@@ -5,6 +5,5 @@
         "nriver"
     ],
     "coordinates": "abs_time river_name tracer_name",
-    "long_name": "River tracer data",
-    "units": "degrees C [temperature]; psu [salinity]"
+    "long_name": "River tracer data"
 }

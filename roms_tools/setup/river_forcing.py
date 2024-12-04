@@ -71,7 +71,7 @@ class RiverForcing:
     end_time: datetime
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     convert_to_climatology: str = "if_any_missing"
-    include_bgc: bool = True
+    include_bgc: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
 
     ds: xr.Dataset = field(init=False, repr=False)

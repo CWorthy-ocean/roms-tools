@@ -383,9 +383,10 @@ class Grid:
         ds["mask_coarse"] = xr.where(ds["mask_coarse"] > 0.5, 1, 0).astype(np.int32)
 
         for fine_var, coarse_var in d.items():
-            ds[coarse_var].attrs[
-                "long_name"
-            ] = f"{ds[fine_var].attrs['long_name']} on coarsened grid"
+            long_name = ds[fine_var].attrs.get(
+                "long_name", ds[fine_var].attrs.get("Long_name", "")
+            )
+            ds[coarse_var].attrs["long_name"] = f"{long_name} on coarsened grid"
             ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
 
         object.__setattr__(self, "ds", ds)
@@ -631,7 +632,7 @@ class Grid:
             hc = 300.0
 
             grid.update_vertical_coordinate(
-                N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=verbose
+                N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=True
             )
         else:
             object.__setattr__(grid, "theta_s", ds.attrs["theta_s"].item())

@@ -1203,3 +1203,52 @@ def handle_boundaries(field):
     field[:, -1] = field[:, -2]
 
     return field
+
+
+def get_boundary_coords():
+    """This function determines the boundary points for the grid variables by specifying
+    the indices for the south, east, north, and west boundaries.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the boundary coordinates for different variable types.
+        The dictionary has the following structure:
+        - Keys: Variable types ("rho", "u", "v", "vector").
+        - Values: Nested dictionaries that map each direction ("south", "east", "north", "west")
+          to another dictionary specifying the boundary coordinates, represented by grid indices
+          for the respective variable types. For example:
+          - "rho" variables (e.g., `eta_rho`, `xi_rho`)
+          - "u" variables (e.g., `xi_u`)
+          - "v" variables (e.g., `eta_v`)
+          - "vector" variables with lists of indices for multiple grid points (e.g., `eta_rho`, `xi_rho`).
+    """
+
+    bdry_coords = {
+        "rho": {
+            "south": {"eta_rho": 0},
+            "east": {"xi_rho": -1},
+            "north": {"eta_rho": -1},
+            "west": {"xi_rho": 0},
+        },
+        "u": {
+            "south": {"eta_rho": 0},
+            "east": {"xi_u": -1},
+            "north": {"eta_rho": -1},
+            "west": {"xi_u": 0},
+        },
+        "v": {
+            "south": {"eta_v": 0},
+            "east": {"xi_rho": -1},
+            "north": {"eta_v": -1},
+            "west": {"xi_rho": 0},
+        },
+        "vector": {
+            "south": {"eta_rho": [0, 1]},
+            "east": {"xi_rho": [-2, -1]},
+            "north": {"eta_rho": [-2, -1]},
+            "west": {"xi_rho": [0, 1]},
+        },
+    }
+
+    return bdry_coords

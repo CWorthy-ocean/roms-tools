@@ -46,4 +46,3 @@ grid = Grid(topography_source="ETOPO5")
 * SRTM15 topography examples have been added to the documentation ([#72](https://github.com/CWorthy-ocean/roms-tools/pull/172)).
 
 ### Bugfixes
-

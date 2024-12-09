@@ -15,7 +15,7 @@
 
 ## Overview
 
-A suite of python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla-roms) simulation.
+A suite of Python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla-roms) simulation.
 
 ## Installation
 

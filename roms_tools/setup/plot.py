@@ -346,4 +346,4 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle):
         resolution="50m", linewidth=0.5, color="black"
     )  # add map of coastlines
     ax.gridlines()
-    ax.legend()
+    ax.legend(loc="best")

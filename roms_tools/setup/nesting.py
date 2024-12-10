@@ -7,7 +7,7 @@ from roms_tools.setup.grid import Grid
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    get_boundary_coords
+    get_boundary_coords,
 )
 from roms_tools.setup.plot import _plot_nesting
 import warnings
@@ -25,8 +25,9 @@ class Nesting:
     child_grid :
         Object representing the child grid information.
     boundaries : Dict[str, bool], optional
-        Dictionary specifying which boundaries of the child grid are to be forced (south, east, north, west). Default is all True.
+        Dictionary specifying which boundaries of the child grid are to be used (south, east, north, west). Default is all True.
     child_prefix : str, optional
+
     Attributes
     ----------
     ds : xr.Dataset
@@ -81,14 +82,13 @@ class Nesting:
         ds = xr.Dataset()
 
         for direction in ["south", "east", "north", "west"]:
-
             if self.boundaries[direction]:
                 for grid_location in ["rho", "u", "v"]:
                     names = {
                         "latitude": f"lat_{grid_location}",
                         "longitude": f"lon_{grid_location}",
                         "mask": f"mask_{grid_location}",
-                        "angle" : f"angle_{grid_location}"
+                        "angle": f"angle_{grid_location}",
                     }
                     bdry_coords = bdry_coords_dict[grid_location]
                     if grid_location == "rho":
@@ -112,20 +112,27 @@ class Nesting:
                     )
 
                     i_eta, i_xi = update_indices_if_on_parent_land(
-                       i_eta, i_xi, grid_location, parent_grid_ds
+                        i_eta, i_xi, grid_location, parent_grid_ds
                     )
 
+                    var_name = f"{self.child_prefix}_{direction}_{suffix}"
                     if grid_location == "rho":
-                        ds[f"{self.child_prefix}_{direction}_{suffix}"] = xr.concat(
-                            [i_xi, i_eta], dim="two"
-                        )
+                        ds[var_name] = xr.concat([i_xi, i_eta], dim="two")
+                        ds[var_name].attrs[
+                            "long_name"
+                        ] = f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
+                        ds[var_name].attrs["units"] = "non-dimensional"
                     else:
                         angle_child = child_grid_ds[names["angle"]].isel(
                             **bdry_coords[direction]
                         )
-                        ds[f"{self.child_prefix}_{direction}_{suffix}"] = xr.concat(
+                        ds[var_name] = xr.concat(
                             [i_xi, i_eta, angle_child], dim="three"
                         )
+                        ds[var_name].attrs[
+                            "long_name"
+                        ] = f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
+                        ds[var_name].attrs["units"] = "non-dimensional and radian"
 
         vars_to_drop = ["lat_rho", "lon_rho", "lat_u", "lon_u", "lat_v", "lon_v"]
         vars_to_drop_existing = [var for var in vars_to_drop if var in ds]
@@ -138,6 +145,13 @@ class Nesting:
             if dim not in ["two", "three"]
         }
         ds = ds.rename(dims_to_rename)
+
+        ds = ds.assign_coords(
+            {
+                "indices_rho": ("two", ["xi", "eta"]),
+                "indices_vel": ("three", ["xi", "eta", "angle"]),
+            }
+        )
 
         object.__setattr__(self, "ds", ds)
 
@@ -176,20 +190,10 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
         Interpolated j-indices for the child grid.
     """
 
-    # latitude_range = [lat.min().values, lat.max().values]
-    # longitude_range = [lon.min().values, lon.max().values]
-    # cropped_parent_grid_ds = refine_region(
-    #    parent_grid_ds, latitude_range, longitude_range
-    # )
-
     lon_parent = parent_grid_ds.lon_rho
     lat_parent = parent_grid_ds.lat_rho
     i_parent = parent_grid_ds.i_eta
     j_parent = parent_grid_ds.i_xi
-    # lon_parent = cropped_parent_grid_ds.lon_rho
-    # lat_parent = cropped_parent_grid_ds.lat_rho
-    # i_parent = cropped_parent_grid_ds.i_eta
-    # j_parent = cropped_parent_grid_ds.i_xi
 
     # Create meshgrid
     j_parent, i_parent = np.meshgrid(j_parent.values, i_parent.values)
@@ -216,12 +220,6 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
     i_chk = i[mask == 1]
     j_chk = j[mask == 1]
 
-    ## Check for NaN values
-    # if np.sum(np.isnan(i_chk)) > 0 or np.sum(np.isnan(j_chk)) > 0:
-    #    raise ValueError(
-    #        "Some unmasked points are outside the grid. Please choose either a bigger parent grid or a smaller child grid."
-    #    )
-
     nxp, nyp = lon_parent.shape
     # Check whether indices are close to border of parent grid
     if len(i_chk) > 0:
@@ -238,194 +236,10 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
     return i, j
 
 
-def pad_and_extend_condition(cond, dim):
-    """Pad the condition array with a single False value at both ends, perform logical
-    OR operation with shifted versions of the array, and then remove the padding.
-
-    Parameters
-    ----------
-    cond : xarray.DataArray
-        Condition array to be padded and extended.
-    dim : str
-        Dimension along which to pad and extend the condition.
-
-    Returns
-    -------
-    xarray.DataArray
-        Padded and extended condition array.
-    """
-    cond_padded = xr.concat(
-        [False * cond.isel({dim: 0}), cond, False * cond.isel({dim: -1})], dim=dim
-    )
-    extended_cond = (
-        cond_padded.shift({dim: -1}, fill_value=False)
-        | cond_padded
-        | cond_padded.shift({dim: 1}, fill_value=False)
-    )
-    return extended_cond.sel({dim: slice(1, -1)})
-
-
-def refine_region(grid_ds, latitude_range, longitude_range):
-    """Refine the region of the grid to match boundary conditions.
-
-    Parameters
-    ----------
-    grid_ds : xarray.Dataset
-        Grid information of parent grid.
-
-    latitude_range : tuple
-        A tuple (lat_min, lat_max) specifying the minimum and maximum latitude values of the subdomain.
-    longitude_range : tuple
-        A tuple (lon_min, lon_max) specifying the minimum and maximum longitude values of the subdomain.
-
-    Returns
-    -------
-    xr.Dataset
-        The subset of the original dataset representing the chosen subdomain.
-    """
-    lat_min, lat_max = latitude_range
-    lon_min, lon_max = longitude_range
-
-    lat_cond = (grid_ds.lat_rho >= lat_min) & (grid_ds.lat_rho <= lat_max)
-    lon_cond = (grid_ds.lon_rho >= lon_min) & (grid_ds.lon_rho <= lon_max)
-
-    combined_cond = lat_cond & lon_cond
-
-    extended_cond = pad_and_extend_condition(combined_cond, "eta_rho")
-    extended_cond = pad_and_extend_condition(extended_cond, "xi_rho")
-
-    if not extended_cond.any():
-        raise ValueError(
-            "Some unmasked points are outside the grid. Please choose either a bigger parent grid or a smaller child grid."
-        )
-
-    subdomain = grid_ds.where(extended_cond, drop=True)
-
-    return subdomain
-
-
-def crop_parent(parent_grid_ds, latitude_range, longitude_range):
-    """Refine the region of the grid to match boundary conditions.
-
-    Parameters
-    ----------
-    parent_grid_ds : xarray.Dataset
-        Grid information of parent grid.
-
-    latitude_range : tuple
-        A tuple (lat_min, lat_max) specifying the minimum and maximum latitude values of the subdomain.
-
-    longitude_range : tuple
-        A tuple (lon_min, lon_max) specifying the minimum and maximum longitude values of the subdomain.
-
-    Returns
-    -------
-    xr.Dataset
-        The subset of the original dataset representing the chosen subdomain.
-    """
-    lat_min, lat_max = latitude_range
-    lon_min, lon_max = longitude_range
-
-    # Find the indices of the parent grid that match the latitude and longitude ranges
-    lat_cond = (parent_grid_ds.lat_rho >= lat_min) & (parent_grid_ds.lat_rho <= lat_max)
-    lon_cond = (parent_grid_ds.lon_rho >= lon_min) & (parent_grid_ds.lon_rho <= lon_max)
-
-    # Combined condition
-    combined_cond = lat_cond & lon_cond
-
-    # Check if any points satisfy the combined condition
-    if not combined_cond.any():
-        raise ValueError(
-            "No points found within the specified latitude and longitude range."
-        )
-
-    #print(combined_cond.where(combined_cond, drop=True).eta_rho.values)
-    #print(combined_cond.where(combined_cond, drop=True).xi_rho.values)
-    # Find the minimum and maximum indices in both dimensions
-    i0 = combined_cond.where(combined_cond, drop=True).eta_rho.values[0]
-    i1 = combined_cond.where(combined_cond, drop=True).eta_rho.values[-1]
-    j0 = combined_cond.where(combined_cond, drop=True).xi_rho.values[0]
-    j1 = combined_cond.where(combined_cond, drop=True).xi_rho.values[-1]
-
-    #print(f"i0: {i0}, i1: {i1}, j0: {j0}, j1: {j1}")
-    # Subset the original dataset based on the found indices
-    cropped_ds = parent_grid_ds.isel(
-        eta_rho=slice(i0 - 1, i1 + 2), xi_rho=slice(j0 - 1, j1 + 2)
-    )
-
-    return cropped_ds
-
-
-# def crop_parent(parent_grid_ds, latitude_range, longitude_range):
-#    """
-#    Crop parent grid to minimal size.
-#
-#    Parameters
-#    ----------
-#    parent_grid_ds : xarray.Dataset
-#        Grid information of parent grid.
-#
-#    latitude_range : tuple
-#        A tuple (lat_min, lat_max) specifying the minimum and maximum latitude values of the subdomain.
-#
-#    longitude_range : tuple
-#        A tuple (lon_min, lon_max) specifying the minimum and maximum longitude values of the subdomain.
-#
-#    Returns
-#    -------
-#    xr.Dataset
-#        The subset of the original dataset representing the chosen subdomain.
-#    """
-#    lat_min, lat_max = latitude_range
-#    lon_min, lon_max = longitude_range
-#
-#    cropped_ds = parent_grid_ds
-#    for _ in range(5):
-#        lon = cropped_ds.lon_rho
-#        lat = cropped_ds.lat_rho
-#        nxs, nys = lon.shape
-#
-#        parent_lon_min = lon.min(dim="eta_rho")
-#        parent_lon_max = lon.max(dim="eta_rho")
-#        parent_lat_min = lat.min(dim="xi_rho")
-#        parent_lat_max = lat.max(dim="xi_rho")
-#        print(parent_lon_min)
-#        print(parent_lon_max)
-#        print(parent_lat_min)
-#        print(parent_lat_max)
-#
-#        i0 = (
-#            np.where(parent_lon_max < lon_min)[0][-1]
-#            if np.any(parent_lon_max < lon_min)
-#            else 0
-#        )
-#        i1 = (
-#            np.where(parent_lon_min > lon_max)[0][0]
-#            if np.any(parent_lon_min > lon_max)
-#            else nxs - 1
-#        )
-#        j0 = (
-#            np.where(parent_lat_max < lat_min)[0][-1]
-#            if np.any(parent_lat_max < lat_min)
-#            else 0
-#        )
-#        j1 = (
-#            np.where(parent_lat_min > lat_max)[0][0]
-#            if np.any(parent_lat_min > lat_max)
-#            else nys - 1
-#        )
-#
-#        print(f"i0: {i0}, i1: {i1}, j0: {j0}, j1: {j1}")
-#        cropped_ds = cropped_ds.isel(
-#            eta_rho=slice(i0, i1 + 1), xi_rho=slice(j0, j1 + 1)
-#        )
-#
-#    return cropped_ds
-
-
 def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds):
-    """Finds points that are in the parent land mask but not land masked in the child and replaces
-    parent indices with nearest neighbor wet points.
+    """Finds points that are in the parent land mask but not land masked in the child
+    and replaces parent indices with nearest neighbor wet points.
+
     Parameters
     ----------
     i_eta : xarray.DataArray
@@ -448,8 +262,6 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
     """
 
     if grid_location == "rho":
-        # convert from [-0.5, len(eta_rho) - 1.5] to [0, len(eta_rho) - 1]
-        # convert from [-0.5, len(xi_rho) - 1.5] to [0, len(xi_rho) - 1]
         i_eta_rho = i_eta + 0.5
         i_xi_rho = i_xi + 0.5
         mask_rho = parent_grid_ds.mask_rho
@@ -465,10 +277,8 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
             summed_mask[i] = np.sum(mask)
 
     elif grid_location in ["u", "v"]:
-        # convert from [0, len(eta_rho) - 2] to [0, len(eta_rho) - 2]
-        # convert from [-0.5, len(xi_rho) - 1.5] to [0, len(xi_rho) - 1]
-        i_eta_u = i_eta
-        i_xi_u = i_xi + 0.5
+        i_eta_u = i_eta + 0.5
+        i_xi_u = i_xi
 
         mask_u = parent_grid_ds.mask_u
         summed_mask_u = np.zeros_like(i_eta_u)
@@ -482,10 +292,8 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
             )
             summed_mask_u[i] = np.sum(mask)
 
-        # convert from [-0.5, len(eta_rho) - 1.5] to [0, len(eta_rho) - 1]
-        # convert from [0, len(xi_rho) - 2] to [0, len(xi_rho) - 2]
-        i_eta_v = i_eta + 0.5
-        i_xi_v = i_xi
+        i_eta_v = i_eta
+        i_xi_v = i_xi + 0.5
 
         mask_v = parent_grid_ds.mask_v
         summed_mask_v = np.zeros_like(i_xi_v)
@@ -500,8 +308,6 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
             summed_mask_v[i] = np.sum(mask)
 
         summed_mask = summed_mask_u * summed_mask_v
-        # print(f"summed mask u: {summed_mask_u}")
-        # print(f"summed mask v: {summed_mask_v}")
 
     # Filter out points where summed_mask is 0
     valid_points = summed_mask != 0
@@ -511,7 +317,6 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
 
     # Handle indices where summed_mask is 0
     indx = np.where(summed_mask == 0)[0]
-    print(f"Fixing {len(indx)} points that are inside the parent mask")
     if len(indx) > 0:
         i_eta_interp = interp1d(
             x_mod, i_eta_mod, kind="nearest", fill_value="extrapolate"

@@ -14,6 +14,7 @@ from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
 from roms_tools.setup.initial_conditions import InitialConditions  # noqa: F401
 from roms_tools.setup.boundary_forcing import BoundaryForcing  # noqa: F401
 from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
+from roms_tools.setup.nesting import Nesting  # noqa: F401
 
 # Configure logging when the package is imported
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")

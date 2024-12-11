@@ -8,6 +8,7 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_boundary_coords,
+    wrap_longitudes,
 )
 from roms_tools.setup.plot import _plot_nesting
 import warnings
@@ -60,120 +61,33 @@ class Nesting:
 
     def __post_init__(self):
 
-        bdry_coords_dict = get_boundary_coords()
+        parent_grid_ds = self.parent_grid.ds
+        child_grid_ds = self.child_grid.ds
 
-        parent_grid_ds = self.parent_grid.ds.copy()
-        child_grid_ds = self.child_grid.ds.copy()
+        # Adjust longitude for dateline crossing to prevent interpolation artifacts
+        for grid_ds in [parent_grid_ds, child_grid_ds]:
+            grid_ds = wrap_longitudes(grid_ds, straddle=self.parent_grid.straddle)
 
-        i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
-        i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
+        # Map child boundaries onto parent grid indices
+        ds = map_child_boundaries_onto_parent_grid_indices(
+            parent_grid_ds,
+            child_grid_ds,
+            self.boundaries,
+            self.child_prefix,
+            self.period,
+        )
+        object.__setattr__(self, "ds", ds)
 
-        parent_grid_ds = parent_grid_ds.assign_coords(
-            i_eta=("eta_rho", i_eta)
-        ).assign_coords(i_xi=("xi_rho", i_xi))
-
-        if self.parent_grid.straddle:
-            for grid_ds in [parent_grid_ds, child_grid_ds]:
-                for lon_dim in ["lon_rho", "lon_u", "lon_v"]:
-                    grid_ds[lon_dim] = xr.where(
-                        grid_ds[lon_dim] > 180,
-                        grid_ds[lon_dim] - 360,
-                        grid_ds[lon_dim],
-                    )
-        else:
-            for grid_ds in [parent_grid_ds, child_grid_ds]:
-                for lon_dim in ["lon_rho", "lon_u", "lon_v"]:
-                    grid_ds[lon_dim] = xr.where(
-                        grid_ds[lon_dim] < 0, grid_ds[lon_dim] + 360, grid_ds[lon_dim]
-                    )
-
-        # add angles at u- and v-points
-        child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
-        child_grid_ds["angle_v"] = interpolate_from_rho_to_v(child_grid_ds["angle"])
-
-        ds = xr.Dataset()
-
-        for direction in ["south", "east", "north", "west"]:
-            if self.boundaries[direction]:
-                for grid_location in ["rho", "u", "v"]:
-                    names = {
-                        "latitude": f"lat_{grid_location}",
-                        "longitude": f"lon_{grid_location}",
-                        "mask": f"mask_{grid_location}",
-                        "angle": f"angle_{grid_location}",
-                    }
-                    bdry_coords = bdry_coords_dict[grid_location]
-                    if grid_location == "rho":
-                        suffix = "r"
-                    else:
-                        suffix = grid_location
-
-                    lon_child = child_grid_ds[names["longitude"]].isel(
-                        **bdry_coords[direction]
-                    )
-                    lat_child = child_grid_ds[names["latitude"]].isel(
-                        **bdry_coords[direction]
-                    )
-
-                    mask_child = child_grid_ds[names["mask"]].isel(
-                        **bdry_coords[direction]
-                    )
-
-                    i_eta, i_xi = interpolate_indices(
-                        parent_grid_ds, lon_child, lat_child, mask_child
-                    )
-
-                    i_eta, i_xi = update_indices_if_on_parent_land(
-                        i_eta, i_xi, grid_location, parent_grid_ds
-                    )
-
-                    var_name = f"{self.child_prefix}_{direction}_{suffix}"
-                    if grid_location == "rho":
-                        ds[var_name] = xr.concat([i_xi, i_eta], dim="two")
-                        ds[var_name].attrs[
-                            "long_name"
-                        ] = f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
-                        ds[var_name].attrs["units"] = "non-dimensional"
-                        ds[var_name].attrs["output_vars"] = "zeta, temp, salt"
-                    else:
-                        angle_child = child_grid_ds[names["angle"]].isel(
-                            **bdry_coords[direction]
-                        )
-                        ds[var_name] = xr.concat(
-                            [i_xi, i_eta, angle_child], dim="three"
-                        )
-                        ds[var_name].attrs[
-                            "long_name"
-                        ] = f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
-                        ds[var_name].attrs["units"] = "non-dimensional and radian"
-
-                        if grid_location == "u":
-                            ds[var_name].attrs["output_vars"] = "ubar, u, up"
-                        elif grid_location == "v":
-                            ds[var_name].attrs["output_vars"] = "vbar, v, vp"
-
-                    ds[var_name].attrs["output_period"] = self.period
-
-        vars_to_drop = ["lat_rho", "lon_rho", "lat_u", "lon_u", "lat_v", "lon_v"]
-        vars_to_drop_existing = [var for var in vars_to_drop if var in ds]
-        ds = ds.drop_vars(vars_to_drop_existing)
-
-        # Rename dimensions
-        dims_to_rename = {
-            dim: f"{self.child_prefix}_{dim}"
-            for dim in ds.dims
-            if dim not in ["two", "three"]
-        }
-        ds = ds.rename(dims_to_rename)
-
-        ds = ds.assign_coords(
-            {
-                "indices_rho": ("two", ["xi", "eta"]),
-                "indices_vel": ("three", ["xi", "eta", "angle"]),
-            }
+        # Modify child topography and mask to match the parent grid
+        child_grid_ds = modify_child_topography_and_mask(
+            parent_grid_ds, child_grid_ds, self.boundaries
         )
 
-        object.__setattr__(self, "ds", ds)
+        # Convert longitudes back to [0, 360] range
+        for grid_ds in [parent_grid_ds, child_grid_ds]:
+            grid_ds = wrap_longitudes(grid_ds, straddle=False)
+        object.__setattr__(self.parent_grid, "ds", parent_grid_ds)
+        object.__setattr__(self.child_grid, "ds", child_grid_ds)
 
     def plot(self) -> None:
         """Plot the parent and child grids in a single figure.
@@ -187,6 +101,108 @@ class Nesting:
         _plot_nesting(
             self.parent_grid.ds, self.child_grid.ds, self.parent_grid.straddle
         )
+
+
+def map_child_boundaries_onto_parent_grid_indices(
+    parent_grid_ds,
+    child_grid_ds,
+    boundaries,
+    child_prefix,
+    period,
+    update_land_indices=True,
+):
+
+    bdry_coords_dict = get_boundary_coords()
+
+    i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
+    i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
+
+    parent_grid_ds = parent_grid_ds.assign_coords(
+        i_eta=("eta_rho", i_eta)
+    ).assign_coords(i_xi=("xi_rho", i_xi))
+
+    # add angles at u- and v-points
+    child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
+    child_grid_ds["angle_v"] = interpolate_from_rho_to_v(child_grid_ds["angle"])
+
+    ds = xr.Dataset()
+
+    for direction in ["south", "east", "north", "west"]:
+        if boundaries[direction]:
+            for grid_location in ["rho", "u", "v"]:
+                names = {
+                    "latitude": f"lat_{grid_location}",
+                    "longitude": f"lon_{grid_location}",
+                    "mask": f"mask_{grid_location}",
+                    "angle": f"angle_{grid_location}",
+                }
+                bdry_coords = bdry_coords_dict[grid_location]
+                if grid_location == "rho":
+                    suffix = "r"
+                else:
+                    suffix = grid_location
+
+                lon_child = child_grid_ds[names["longitude"]].isel(
+                    **bdry_coords[direction]
+                )
+                lat_child = child_grid_ds[names["latitude"]].isel(
+                    **bdry_coords[direction]
+                )
+
+                mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
+
+                i_eta, i_xi = interpolate_indices(
+                    parent_grid_ds, lon_child, lat_child, mask_child
+                )
+
+                if update_land_indices:
+                    i_eta, i_xi = update_indices_if_on_parent_land(
+                        i_eta, i_xi, grid_location, parent_grid_ds
+                    )
+
+                var_name = f"{child_prefix}_{direction}_{suffix}"
+                if grid_location == "rho":
+                    ds[var_name] = xr.concat([i_xi, i_eta], dim="two")
+                    ds[var_name].attrs[
+                        "long_name"
+                    ] = f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
+                    ds[var_name].attrs["units"] = "non-dimensional"
+                    ds[var_name].attrs["output_vars"] = "zeta, temp, salt"
+                else:
+                    angle_child = child_grid_ds[names["angle"]].isel(
+                        **bdry_coords[direction]
+                    )
+                    ds[var_name] = xr.concat([i_xi, i_eta, angle_child], dim="three")
+                    ds[var_name].attrs[
+                        "long_name"
+                    ] = f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
+                    ds[var_name].attrs["units"] = "non-dimensional and radian"
+
+                    if grid_location == "u":
+                        ds[var_name].attrs["output_vars"] = "ubar, u, up"
+                    elif grid_location == "v":
+                        ds[var_name].attrs["output_vars"] = "vbar, v, vp"
+
+                ds[var_name].attrs["output_period"] = period
+
+    vars_to_drop = ["lat_rho", "lon_rho", "lat_u", "lon_u", "lat_v", "lon_v"]
+    vars_to_drop_existing = [var for var in vars_to_drop if var in ds]
+    ds = ds.drop_vars(vars_to_drop_existing)
+
+    # Rename dimensions
+    dims_to_rename = {
+        dim: f"{child_prefix}_{dim}" for dim in ds.dims if dim not in ["two", "three"]
+    }
+    ds = ds.rename(dims_to_rename)
+
+    ds = ds.assign_coords(
+        {
+            "indices_rho": ("two", ["xi", "eta"]),
+            "indices_vel": ("three", ["xi", "eta", "angle"]),
+        }
+    )
+
+    return ds
 
 
 def interpolate_indices(parent_grid_ds, lon, lat, mask):
@@ -349,3 +365,111 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
         i_xi[indx] = i_xi_interp(indx)
 
     return i_eta, i_xi
+
+
+def modify_child_topography_and_mask(parent_grid_ds, child_grid_ds, boundaries):
+
+    # regrid parent topography and mask onto child grid
+    points = np.column_stack(
+        (parent_grid_ds.lon_rho.values.ravel(), parent_grid_ds.lat_rho.values.ravel())
+    )
+    xi = (child_grid_ds.lon_rho.values, child_grid_ds.lat_rho.values)
+
+    values = parent_grid_ds["h"].values.ravel()
+    h_parent_interpolated = griddata(points, values, xi, method="linear")
+    h_parent_interpolated = xr.DataArray(
+        h_parent_interpolated, dims=("eta_rho", "xi_rho")
+    )
+
+    values = parent_grid_ds["mask_rho"].values.ravel()
+    mask_parent_interpolated = griddata(points, values, xi, method="linear")
+    mask_parent_interpolated = xr.DataArray(
+        mask_parent_interpolated, dims=("eta_rho", "xi_rho")
+    )
+
+    # compute weight based on distance
+    alpha = compute_boundary_distance(child_grid_ds["mask_rho"], boundaries)
+    # update child topography and mask to be weighted sum between original child and interpolated parent
+    child_grid_ds["h"] = (
+        alpha * child_grid_ds["h"] + (1 - alpha) * h_parent_interpolated
+    )
+
+    child_mask = (
+        alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated
+    )
+    child_grid_ds["mask_rho"] = xr.where(child_mask >= 0.5, 1, 0)
+
+    return child_grid_ds
+
+
+def compute_boundary_distance(
+    child_mask, boundaries={"south": True, "east": True, "north": True, "west": True}
+):
+    """Computes a normalized distance field from the boundaries of a grid, given a mask
+    and boundary conditions.
+
+    Parameters
+    ----------
+    child_mask : xr.DataArray
+        A 2D xarray DataArray representing the land/sea mask of the grid (1 for sea, 0 for land),
+        with dimensions ("eta_rho", "xi_rho").
+    boundaries : dict, optional
+        A dictionary specifying which boundaries are open. Keys are "south", "east", "north", "west",
+        with boolean values indicating whether the boundary is open.
+
+    Returns
+    -------
+    xr.DataArray
+        A 2D DataArray with normalized distance values ranging from 0 to 1, adjusted by a cosine taper.
+    """
+    dist = np.full_like(child_mask, 1e6, dtype=float)
+    nx, ny = child_mask.shape
+    n = max(nx, ny)
+
+    x = np.arange(nx) / n
+    y = np.arange(ny) / n
+    x, y = np.meshgrid(x, y, indexing="ij")
+
+    trans = 0.05
+    width = int(np.ceil(n * trans))
+
+    if boundaries["south"]:
+        bx = x[:, 0][child_mask[:, 0] > 0]
+        by = y[:, 0][child_mask[:, 0] > 0]
+        for i in range(len(bx)):
+            dtmp = (x[:, :width] - bx[i]) ** 2 + (y[:, :width] - by[i]) ** 2
+            dist[:, :width] = np.minimum(dist[:, :width], dtmp)
+
+    if boundaries["east"]:
+        bx = x[-1, :][child_mask[-1, :] > 0]
+        by = y[-1, :][child_mask[-1, :] > 0]
+        for i in range(len(bx)):
+            dtmp = (x[nx - width : nx, :] - bx[i]) ** 2 + (
+                y[nx - width : nx, :] - by[i]
+            ) ** 2
+            dist[nx - width : nx, :] = np.minimum(dist[nx - width : nx, :], dtmp)
+
+    if boundaries["north"]:
+        bx = x[:, -1][child_mask[:, -1] > 0]
+        by = y[:, -1][child_mask[:, -1] > 0]
+        for i in range(len(bx)):
+            dtmp = (x[:, ny - width : ny] - bx[i]) ** 2 + (
+                y[:, ny - width : ny] - by[i]
+            ) ** 2
+            dist[:, ny - width : ny] = np.minimum(dist[:, ny - width : ny], dtmp)
+
+    if boundaries["west"]:
+        bx = x[0, :][child_mask[0, :] > 0]
+        by = y[0, :][child_mask[0, :] > 0]
+        for i in range(len(bx)):
+            dtmp = (x[:width, :] - bx[i]) ** 2 + (y[:width, :] - by[i]) ** 2
+            dist[:width, :] = np.minimum(dist[:width, :], dtmp)
+
+    dist = np.sqrt(dist)
+    dist[dist > trans] = trans
+    dist = dist / trans
+    alpha = 0.5 - 0.5 * np.cos(np.pi * dist)
+
+    alpha = xr.DataArray(alpha, dims=("eta_rho", "xi_rho"))
+
+    return alpha

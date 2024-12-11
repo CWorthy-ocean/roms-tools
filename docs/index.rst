@@ -32,10 +32,6 @@ to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ or ROMS-MARBL simulatio
 
 - Nesting
 
-.. important::
-
-   **DISCLAIMER**: This project is **ALPHA** and will be **EXPERIMENTAL** at least throughout 2024. We do not recommend using this software before this ALPHA development and test phase is completed.
-
 This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
 
 
@@ -63,9 +59,10 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
 
 .. toctree::
    :maxdepth: 1
-   :caption: Contributor Guide
+   :caption: For Developers
 
    contributing
+   releases
 
 .. toctree::
    :maxdepth: 1

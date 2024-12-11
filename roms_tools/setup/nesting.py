@@ -16,22 +16,33 @@ from scipy.interpolate import interp1d
 
 @dataclass(frozen=True, kw_only=True)
 class Nesting:
-    """Represents relation between parent and child grid for nested ROMS simulations.
+    """Represents the relationship between a parent and a child grid in nested ROMS
+    simulations. This class facilitates mapping the boundaries of the child grid onto
+    the parent grid indices and modifying the child grid topography such that it matches
+    the parent topography at the boundaries.
 
     Parameters
     ----------
     parent_grid : Grid
-        Object representing the parent grid information.
-    child_grid :
-        Object representing the child grid information.
+        The parent grid object, containing information about the larger domain.
+    child_grid : Grid
+        The child grid object, containing information about the nested domain.
     boundaries : Dict[str, bool], optional
-        Dictionary specifying which boundaries of the child grid are to be used (south, east, north, west). Default is all True.
+        Dictionary specifying which boundaries of the child grid are used
+        in the nesting process. Keys are "south", "east", "north", and "west",
+        with boolean values indicating inclusion. Defaults to all boundaries (True).
     child_prefix : str, optional
+        Prefix added to variable names in the generated dataset to distinguish
+        child grid information. Defaults to "child".
+    period : float
+        The temporal resolution or output period for boundary variables in the child grid.
 
     Attributes
     ----------
     ds : xr.Dataset
-        Xarray Dataset containing the index information for the child grid.
+        An xarray Dataset containing the index mappings between the child and parent grids
+        for each specified boundary. Includes metadata about grid points, angles,
+        and boundary variable outputs.
     """
 
     parent_grid: Grid
@@ -45,6 +56,7 @@ class Nesting:
         }
     )
     child_prefix: str = "child"
+    period: float
 
     def __post_init__(self):
 
@@ -122,6 +134,7 @@ class Nesting:
                             "long_name"
                         ] = f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
                         ds[var_name].attrs["units"] = "non-dimensional"
+                        ds[var_name].attrs["output_vars"] = "zeta, temp, salt"
                     else:
                         angle_child = child_grid_ds[names["angle"]].isel(
                             **bdry_coords[direction]
@@ -133,6 +146,13 @@ class Nesting:
                             "long_name"
                         ] = f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
                         ds[var_name].attrs["units"] = "non-dimensional and radian"
+
+                        if grid_location == "u":
+                            ds[var_name].attrs["output_vars"] = "ubar, u, up"
+                        elif grid_location == "v":
+                            ds[var_name].attrs["output_vars"] = "vbar, v, vp"
+
+                    ds[var_name].attrs["output_period"] = self.period
 
         vars_to_drop = ["lat_rho", "lon_rho", "lat_u", "lon_u", "lat_v", "lon_v"]
         vars_to_drop_existing = [var for var in vars_to_drop if var in ds]

@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 import regionmask
+import warnings
 from scipy.ndimage import label
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
@@ -13,7 +14,12 @@ def _add_mask(ds):
 
     land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
 
-    land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
+    # Suppress specific warning
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="No gridpoint belongs to any region.*"
+        )
+        land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
     mask = land_mask.isnull()
 
     # fill enclosed basins with land

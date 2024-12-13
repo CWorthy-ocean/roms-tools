@@ -11,7 +11,7 @@ from roms_tools.setup.utils import (
     wrap_longitudes,
 )
 from roms_tools.setup.plot import _plot_nesting
-import warnings
+import logging
 from scipy.interpolate import interp1d
 
 
@@ -113,13 +113,6 @@ def map_child_boundaries_onto_parent_grid_indices(
 ):
 
     bdry_coords_dict = get_boundary_coords()
-
-    i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
-    i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
-
-    parent_grid_ds = parent_grid_ds.assign_coords(
-        i_eta=("eta_rho", i_eta)
-    ).assign_coords(i_xi=("xi_rho", i_xi))
 
     # add angles at u- and v-points
     child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
@@ -225,6 +218,12 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
     j : xarray.DataArray
         Interpolated j-indices for the child grid.
     """
+    i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
+    i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
+
+    parent_grid_ds = parent_grid_ds.assign_coords(
+        i_eta=("eta_rho", i_eta)
+    ).assign_coords(i_xi=("xi_rho", i_xi))
 
     lon_parent = parent_grid_ds.lon_rho
     lat_parent = parent_grid_ds.lat_rho
@@ -260,12 +259,12 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
     # Check whether indices are close to border of parent grid
     if len(i_chk) > 0:
         if np.min(i_chk) < 0 or np.max(i_chk) > nxp - 2:
-            warnings.warn(
+            logging.warning(
                 "Some boundary points of the child grid are very close to the boundary of the parent grid."
             )
     if len(j_chk) > 0:
         if np.min(j_chk) < 0 or np.max(j_chk) > nyp - 2:
-            warnings.warn(
+            logging.warning(
                 "Some boundary points of the child grid are very close to the boundary of the parent grid."
             )
 

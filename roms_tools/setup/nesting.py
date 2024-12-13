@@ -35,8 +35,9 @@ class Nesting:
     child_prefix : str, optional
         Prefix added to variable names in the generated dataset to distinguish
         child grid information. Defaults to "child".
-    period : float
+    period : float, optional
         The temporal resolution or output period for boundary variables in the child grid.
+        Defaults to hourly.
 
     Attributes
     ----------
@@ -57,7 +58,7 @@ class Nesting:
         }
     )
     child_prefix: str = "child"
-    period: float
+    period: float = 3600.0
 
     def __post_init__(self):
 
@@ -251,22 +252,16 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
             "Some points are outside the grid. Please choose either a bigger parent grid or a smaller child grid."
         )
 
-    ## Check only unmasked i- and j-indices
-    i_chk = i[mask == 1]
-    j_chk = j[mask == 1]
-
-    nxp, nyp = lon_parent.shape
     # Check whether indices are close to border of parent grid
-    if len(i_chk) > 0:
-        if np.min(i_chk) < 0 or np.max(i_chk) > nxp - 2:
-            logging.warning(
-                "Some boundary points of the child grid are very close to the boundary of the parent grid."
-            )
-    if len(j_chk) > 0:
-        if np.min(j_chk) < 0 or np.max(j_chk) > nyp - 2:
-            logging.warning(
-                "Some boundary points of the child grid are very close to the boundary of the parent grid."
-            )
+    nxp, nyp = lon_parent.shape
+    if np.min(i) < 0 or np.max(i) > nxp - 2:
+        logging.warning(
+            "Some boundary points of the child grid are very close to the boundary of the parent grid."
+        )
+    if np.min(j) < 0 or np.max(j) > nyp - 2:
+        logging.warning(
+            "Some boundary points of the child grid are very close to the boundary of the parent grid."
+        )
 
     return i, j
 

@@ -107,9 +107,9 @@ class Nesting:
 def map_child_boundaries_onto_parent_grid_indices(
     parent_grid_ds,
     child_grid_ds,
-    boundaries,
-    child_prefix,
-    period,
+    boundaries={"south": True, "east": True, "north": True, "west": True},
+    child_prefix="child",
+    period=3600.0,
     update_land_indices=True,
 ):
 
@@ -361,7 +361,11 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
     return i_eta, i_xi
 
 
-def modify_child_topography_and_mask(parent_grid_ds, child_grid_ds, boundaries):
+def modify_child_topography_and_mask(
+    parent_grid_ds,
+    child_grid_ds,
+    boundaries={"south": True, "east": True, "north": True, "west": True},
+):
 
     # regrid parent topography and mask onto child grid
     points = np.column_stack(
@@ -400,7 +404,8 @@ def compute_boundary_distance(
     child_mask, boundaries={"south": True, "east": True, "north": True, "west": True}
 ):
     """Computes a normalized distance field from the boundaries of a grid, given a mask
-    and boundary conditions.
+    and boundary conditions. The normalized distance values range from 0 (boundary) to 1
+    (inner grid).
 
     Parameters
     ----------
@@ -414,7 +419,7 @@ def compute_boundary_distance(
     Returns
     -------
     xr.DataArray
-        A 2D DataArray with normalized distance values ranging from 0 to 1, adjusted by a cosine taper.
+        A 2D DataArray with normalized distance values.
     """
     dist = np.full_like(child_mask, 1e6, dtype=float)
     nx, ny = child_mask.shape

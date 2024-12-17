@@ -391,15 +391,18 @@ class Grid:
 
         object.__setattr__(self, "ds", ds)
 
-    def plot(self, bathymetry: bool = False, title: str = None) -> None:
+    def plot(self, bathymetry: bool = False, title: str = None, with_dim_names: bool = False) -> None:
         """Plot the grid.
 
         Parameters
         ----------
-        bathymetry : bool
+        bathymetry : bool, optional
             Whether or not to plot the bathymetry. Default is False.
         title : str, optional
             The title of the plot. If not provided, it will be set to a default.
+        with_dim_names : bool, optional
+            Whether or not to plot the dimension names. Default is False.
+
 
         Returns
         -------
@@ -426,12 +429,13 @@ class Grid:
                 field=field,
                 straddle=self.straddle,
                 title=title,
+                with_dim_names=with_dim_names,
                 kwargs=kwargs,
             )
         else:
             if title is None:
                 title = "ROMS grid"
-            _plot(self.ds, straddle=self.straddle, title=title)
+            _plot(self.ds, straddle=self.straddle, title=title, with_dim_names=with_dim_names)
 
     def plot_vertical_coordinate(
         self,

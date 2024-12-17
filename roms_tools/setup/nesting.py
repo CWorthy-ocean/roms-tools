@@ -90,7 +90,7 @@ class Nesting:
         object.__setattr__(self.parent_grid, "ds", parent_grid_ds)
         object.__setattr__(self.child_grid, "ds", child_grid_ds)
 
-    def plot(self) -> None:
+    def plot(self, with_dim_names=False) -> None:
         """Plot the parent and child grids in a single figure.
 
         Returns
@@ -100,7 +100,7 @@ class Nesting:
         """
 
         _plot_nesting(
-            self.parent_grid.ds, self.child_grid.ds, self.parent_grid.straddle
+            self.parent_grid.ds, self.child_grid.ds, self.parent_grid.straddle, with_dim_names
         )
 
 

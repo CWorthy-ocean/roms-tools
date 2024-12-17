@@ -1,6 +1,7 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import xarray as xr
+import numpy as np
 
 
 def _plot(
@@ -10,6 +11,7 @@ def _plot(
     straddle=False,
     c="red",
     title="",
+    with_dim_names=False,
     kwargs={},
 ):
     """Plots a grid or field on a map with optional depth contours.
@@ -66,7 +68,7 @@ def _plot(
     fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
     if c is not None:
-        _add_boundary_to_ax(ax, lon_deg, lat_deg, trans, c, kwargs)
+        _add_boundary_to_ax(ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names)
 
     if field is not None:
         _add_field_to_ax(ax, lon_deg, lat_deg, field, depth_contours, kwargs=kwargs)
@@ -78,7 +80,7 @@ def _plot(
     ax.set_title(title)
 
 
-def _add_boundary_to_ax(ax, lon_deg, lat_deg, trans, c="red", label=""):
+def _add_boundary_to_ax(ax, lon_deg, lat_deg, trans, c="red", label="", with_dim_names=False):
     """Plots a grid or field on a map with optional depth contours.
 
     Parameters
@@ -119,6 +121,43 @@ def _add_boundary_to_ax(ax, lon_deg, lat_deg, trans, c="red", label=""):
         c=c,
         label=label,
     )
+
+    if with_dim_names:
+        for i in range(len(corners)):
+            if i in [0, 2]:
+                dim_name = r"$\xi$"
+            else:
+                dim_name = r"$\eta$"
+            # Define start and end points for each edge
+            start_lon, start_lat = transformed_corners[i]
+            end_lon, end_lat = transformed_corners[(i + 1) % len(corners)]
+
+            # Compute midpoint
+            mid_lon = (start_lon + end_lon) / 2
+            mid_lat = (start_lat + end_lat) / 2
+
+            # Compute vector direction for arrow
+            arrow_dx = (end_lon - start_lon) * 0.1  # Scale arrow size
+            arrow_dy = (end_lat - start_lat) * 0.1
+
+            # Add arrow
+            ax.annotate(
+                "",
+                xy=(mid_lon + arrow_dx, mid_lat + arrow_dy),
+                xytext=(mid_lon - arrow_dx, mid_lat - arrow_dy),
+                arrowprops=dict(arrowstyle="->", color=c, lw=3),
+            )
+
+            ax.text(
+                mid_lon,
+                mid_lat,
+                dim_name,
+                color=c,
+                fontsize=10,
+                ha="center",
+                va="center",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, boxstyle="round,pad=0.2"),
+            )
 
 
 def _add_field_to_ax(
@@ -295,7 +334,7 @@ def _line_plot(field, title="", ax=None):
     ax.grid()
 
 
-def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle):
+def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
 
     parent_lon_deg = parent_grid_ds["lon_rho"]
     parent_lat_deg = parent_grid_ds["lat_rho"]
@@ -321,11 +360,11 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle):
     fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
     _add_boundary_to_ax(
-        ax, parent_lon_deg, parent_lat_deg, trans, c="r", label="parent grid"
+        ax, parent_lon_deg, parent_lat_deg, trans, c="r", label="parent grid", with_dim_names=with_dim_names
     )
 
     _add_boundary_to_ax(
-        ax, child_lon_deg, child_lat_deg, trans, c="g", label="child grid"
+        ax, child_lon_deg, child_lat_deg, trans, c="g", label="child grid", with_dim_names=with_dim_names
     )
 
     vmax = 3

@@ -100,7 +100,10 @@ class Nesting:
         """
 
         _plot_nesting(
-            self.parent_grid.ds, self.child_grid.ds, self.parent_grid.straddle, with_dim_names
+            self.parent_grid.ds,
+            self.child_grid.ds,
+            self.parent_grid.straddle,
+            with_dim_names,
         )
 
 

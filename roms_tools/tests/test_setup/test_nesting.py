@@ -2,8 +2,10 @@ import pytest
 import xarray as xr
 import numpy as np
 import logging
+from pathlib import Path
 from roms_tools import Grid, Nesting
 from roms_tools.setup.utils import get_boundary_coords
+from conftest import calculate_file_hash
 from roms_tools.setup.nesting import (
     interpolate_indices,
     map_child_boundaries_onto_parent_grid_indices,
@@ -44,6 +46,20 @@ def parent_grid_that_straddles():
 def child_grid_that_straddles():
     return Grid(
         nx=10, ny=10, center_lon=10, center_lat=61, rot=-20, size_x=500, size_y=500
+    )
+
+
+@pytest.fixture()
+def nesting(parent_grid, child_grid):
+    return Nesting(parent_grid=parent_grid, child_grid=child_grid, period=3600.0)
+
+
+@pytest.fixture()
+def nesting_that_straddles(parent_grid_that_straddles, child_grid_that_straddles):
+    return Nesting(
+        parent_grid=parent_grid_that_straddles,
+        child_grid=child_grid_that_straddles,
+        period=3600.0,
     )
 
 
@@ -323,19 +339,11 @@ class TestModifyChid:
 
 class TestNesting:
     @pytest.mark.parametrize(
-        "parent_grid_fixture, child_grid_fixture",
-        [
-            ("parent_grid", "child_grid"),
-            ("parent_grid_that_straddles", "child_grid_that_straddles"),
-        ],
+        "nesting_fixture",
+        ["nesting", "nesting_that_straddles"],
     )
-    def test_successful_initialization(
-        self, parent_grid_fixture, child_grid_fixture, request
-    ):
-        parent_grid = request.getfixturevalue(parent_grid_fixture)
-        child_grid = request.getfixturevalue(child_grid_fixture)
-
-        nesting = Nesting(parent_grid=parent_grid, child_grid=child_grid, period=3600.0)
+    def test_successful_initialization(self, nesting_fixture, request):
+        nesting = request.getfixturevalue(nesting_fixture)
 
         assert nesting.boundaries == {
             "south": True,
@@ -385,3 +393,97 @@ class TestNesting:
 
         with pytest.raises(ValueError, match="Some points are outside the grid."):
             Nesting(parent_grid=parent_grid, child_grid=child_grid)
+
+    @pytest.mark.parametrize(
+        "nesting_fixture",
+        ["nesting", "nesting_that_straddles"],
+    )
+    def test_plot(self, nesting_fixture, request):
+        """Test plot method."""
+        nesting = request.getfixturevalue(nesting_fixture)
+
+        nesting.plot()
+        nesting.plot(with_dim_names=True)
+
+    def test_save(self, nesting, tmp_path):
+        """Test save method."""
+
+        for file_str, grid_file_str in zip(
+            ["test_nesting", "test_nesting.nc"], ["test_grid", "test_grid.nc"]
+        ):
+            # Create a temporary filepath using the tmp_path fixture
+            for filepath, grid_filepath in zip(
+                [tmp_path / file_str, str(tmp_path / file_str)],
+                [tmp_path / grid_file_str, str(tmp_path / grid_file_str)],
+            ):  # test for Path object and str
+
+                # Test saving without partitioning
+                saved_filenames = nesting.save(filepath, grid_filepath)
+                # Check if the .nc file was created
+                filepath = Path(filepath).with_suffix(".nc")
+                grid_filepath = Path(grid_filepath).with_suffix(".nc")
+                assert saved_filenames == [filepath, grid_filepath]
+                assert filepath.exists()
+                assert grid_filepath.exists()
+                # Clean up the .nc file
+                filepath.unlink()
+                grid_filepath.unlink()
+
+                # Test saving with partitioning
+                saved_filenames = nesting.save(
+                    filepath, grid_filepath, np_eta=5, np_xi=5
+                )
+
+                filepath_str = str(filepath.with_suffix(""))
+                grid_filepath_str = str(grid_filepath.with_suffix(""))
+                expected_filepath_list = [
+                    Path(filepath_str + f".{index}.nc") for index in range(25)
+                ] + [Path(grid_filepath_str + f".{index}.nc") for index in range(25)]
+                assert saved_filenames == expected_filepath_list
+                for expected_filepath in expected_filepath_list:
+                    assert expected_filepath.exists()
+                    expected_filepath.unlink()
+
+    def test_roundtrip_yaml(self, nesting, tmp_path):
+        """Test that creating a Nesting object, saving its parameters to yaml file, and
+        re-opening yaml file creates the same object."""
+
+        # Create a temporary filepath using the tmp_path fixture
+        file_str = "test_yaml"
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
+
+            nesting.to_yaml(filepath)
+
+            nesting_from_file = Nesting.from_yaml(filepath)
+
+            assert nesting == nesting_from_file
+
+            filepath = Path(filepath)
+            filepath.unlink()
+
+    def test_files_have_same_hash(self, nesting, tmp_path):
+
+        yaml_filepath = tmp_path / "test_yaml.yaml"
+        filepath1 = tmp_path / "test1.nc"
+        filepath2 = tmp_path / "test2.nc"
+        grid_filepath1 = tmp_path / "grid_test1.nc"
+        grid_filepath2 = tmp_path / "grid_test2.nc"
+
+        nesting.to_yaml(yaml_filepath)
+        nesting.save(filepath1, grid_filepath1)
+        nesting_from_file = Nesting.from_yaml(yaml_filepath)
+        nesting_from_file.save(filepath2, grid_filepath2)
+
+        hash1 = calculate_file_hash(filepath1)
+        hash2 = calculate_file_hash(filepath2)
+
+        assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+        yaml_filepath.unlink()
+        filepath1.unlink()
+        filepath2.unlink()
+        grid_filepath1.unlink()
+        grid_filepath2.unlink()

@@ -2,13 +2,17 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import griddata
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Union
+from pathlib import Path
 from roms_tools.setup.grid import Grid
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_boundary_coords,
     wrap_longitudes,
+    save_datasets,
+    _to_yaml,
+    _from_yaml,
 )
 from roms_tools.setup.plot import _plot_nesting
 import logging
@@ -105,6 +109,100 @@ class Nesting:
             self.parent_grid.straddle,
             with_dim_names,
         )
+
+    def save(
+        self,
+        filepath: Union[str, Path],
+        filepath_child_grid: Union[str, Path],
+        np_eta: int = None,
+        np_xi: int = None,
+    ) -> None:
+        """Save the nesting and child grid file to netCDF4 files. The child grid file is
+        required because the topography and mask of the child grid has been modified.
+
+        This method allows saving the nesting and child grid data either each as a single file or each partitioned into multiple files, based on the provided options. The dataset can be saved in two modes:
+
+        1. **Single File Mode (default)**:
+            - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file.
+            - The file is named based on the provided `filepath`, with `.nc` automatically appended to the filename.
+
+        2. **Partitioned Mode**:
+            - If either `np_eta` or `np_xi` is specified, the dataset is partitioned spatially along the `eta` and `xi` axes into tiles.
+            - Each tile is saved as a separate netCDF4 file. Filenames will be modified with an index to represent each partition, e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
+            If partitioning is used, additional indices will be appended to the filenames, e.g., `"filepath.0.nc"`, `"filepath.1.nc"`, etc.
+
+        filepath_child_grid : Union[str, Path]
+            The base path and filename for saving the childe grid file.
+
+        np_eta : int, optional
+            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed along the `eta` axis.
+
+        np_xi : int, optional
+            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed along the `xi` axis.
+
+        Returns
+        -------
+        List[Path]
+            A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
+        """
+
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+        filepath_child_grid = Path(filepath_child_grid)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
+        if filepath_child_grid.suffix == ".nc":
+            filepath_child_grid = filepath_child_grid.with_suffix("")
+
+        dataset_list = [self.ds, self.child_grid.ds]
+        output_filenames = [str(filepath), str(filepath_child_grid)]
+
+        saved_filenames = save_datasets(
+            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
+        )
+
+        return saved_filenames
+
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The path to the YAML file where the parameters will be saved.
+        """
+
+        _to_yaml(self, filepath)
+
+    @classmethod
+    def from_yaml(cls, filepath: Union[str, Path]) -> "Nesting":
+        """Create an instance of the Nesting class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        Nesting
+            An instance of the Nesting class.
+        """
+        filepath = Path(filepath)
+
+        parent_grid = Grid.from_yaml(filepath, "ParentGrid")
+        child_grid = Grid.from_yaml(filepath, "ChildGrid")
+        params = _from_yaml(cls, filepath)
+
+        return cls(parent_grid=parent_grid, child_grid=child_grid, **params)
 
 
 def map_child_boundaries_onto_parent_grid_indices(

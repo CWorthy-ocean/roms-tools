@@ -91,7 +91,7 @@ class RiverForcing:
         object.__setattr__(self, "original_indices", original_indices)
 
         if len(original_indices["station"]) > 0:
-            self.move_rivers_to_closest_coast(target_coords, data)
+            self._move_rivers_to_closest_coast(target_coords, data)
             ds = self._create_river_forcing(data)
             self._validate(ds)
 
@@ -275,7 +275,7 @@ class RiverForcing:
 
         return ds
 
-    def move_rivers_to_closest_coast(self, target_coords, data):
+    def _move_rivers_to_closest_coast(self, target_coords, data):
         """Move river mouths to the closest coastal grid cell.
 
         This method computes the closest coastal grid point to each river mouth
@@ -345,10 +345,10 @@ class RiverForcing:
             "xi_rho": indices[2],
             "name": names,
         }
-        self.write_indices_into_grid_file(indices)
+        self._write_indices_into_grid_file(indices)
         object.__setattr__(self, "updated_indices", indices)
 
-    def write_indices_into_grid_file(self, indices):
+    def _write_indices_into_grid_file(self, indices):
         """Writes river location indices into the grid dataset as the "river_flux"
         variable.
 
@@ -601,10 +601,10 @@ class RiverForcing:
         ----------
         filepath : Union[str, Path]
             The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
-            If partitioning is used, additional indices will be appended to the filenames, e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
+            If partitioning is used, additional indices will be appended to the filenames, e.g., `"filepath.0.nc"`, `"filepath.1.nc"`, etc.
 
         filepath_grid : Union[str, Path]
-            The base path and filename for saving the grid file. This file is essential for including the `river_flux` field.
+            The base path and filename for saving the grid file.
 
         np_eta : int, optional
             The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed along the `eta` axis.

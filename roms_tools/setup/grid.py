@@ -738,20 +738,38 @@ class Grid:
             yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path], verbose: bool = False) -> "Grid":
+    def from_yaml(
+        cls,
+        filepath: Union[str, Path],
+        section_name: str = "Grid",
+        verbose: bool = False,
+    ) -> "Grid":
         """Create an instance of the class from a YAML file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
-        verbose: bool, optional
+        section_name : str, optional
+            The name of the YAML section containing the grid configuration. Defaults to "Grid".
+        verbose : bool, optional
             Indicates whether to print grid generation steps with timing. Defaults to False.
 
         Returns
         -------
         Grid
-            An instance of the Grid class.
+            An instance of the Grid class initialized with the parameters from the YAML file.
+
+        Raises
+        ------
+        ValueError
+            If the ROMS-Tools version is not found in the YAML file or if the specified section
+            does not exist in the file.
+
+        Warnings
+        --------
+        Issues a warning if the ROMS-Tools version in the YAML header does not match the
+        currently installed version.
         """
 
         filepath = Path(filepath)
@@ -771,8 +789,8 @@ class Grid:
                 continue
             if "roms_tools_version" in doc:
                 header_data = doc
-            elif "Grid" in doc:
-                grid_data = doc["Grid"]
+            elif section_name in doc:
+                grid_data = doc[section_name]
 
         if header_data is None:
             raise ValueError("Version of ROMS-Tools not found in the YAML file.")

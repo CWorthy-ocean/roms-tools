@@ -1058,12 +1058,17 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     filepath = Path(filepath)
 
     # Step 1: Serialize Grid data
-    # Convert the grid attribute to a dictionary and remove non-serializable fields
-    grid_data = asdict(forcing_object.grid)
-    grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
-    grid_data.pop("straddle", None)
-    grid_data.pop("verbose", None)
-    grid_yaml_data = {"Grid": grid_data}
+    # Check if the forcing_object has a grid attribute
+    if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
+        grid_data = asdict(forcing_object.grid)
+        grid_yaml_data = {"Grid": _pop_grid_data(grid_data)}
+    else:
+        parent_grid_data = asdict(forcing_object.parent_grid)
+        parent_grid_yaml_data = {"ParentGrid": _pop_grid_data(parent_grid_data)}
+        child_grid_data = asdict(forcing_object.child_grid)
+        child_grid_yaml_data = {"ChildGrid": _pop_grid_data(child_grid_data)}
+
+        grid_yaml_data = {**parent_grid_yaml_data, **child_grid_yaml_data}
 
     # Step 2: Get ROMS Tools version
     # Fetch the version of the 'roms-tools' package for inclusion in the YAML header
@@ -1082,7 +1087,8 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     filtered_field_names = [
         param
         for param in field_names
-        if param not in ("grid", "ds", "use_dask", "climatology")
+        if param
+        not in ("grid", "parent_grid", "child_grid", "ds", "use_dask", "climatology")
     ]
 
     for field_name in filtered_field_names:
@@ -1109,6 +1115,14 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         file.write(header)
         # Write the serialized YAML data
         yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+
+
+def _pop_grid_data(grid_data):
+    grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
+    grid_data.pop("straddle", None)
+    grid_data.pop("verbose", None)
+
+    return grid_data
 
 
 def _from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, Any]:

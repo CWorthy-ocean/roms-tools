@@ -42,6 +42,22 @@ Boundary Forcing
 
    roms_tools.BoundaryForcing
 
+River Forcing
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.RiverForcing
+
+Nesting
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.Nesting
+
 =======
 
 Utilities

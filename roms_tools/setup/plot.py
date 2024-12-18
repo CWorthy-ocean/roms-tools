@@ -10,6 +10,7 @@ def _plot(
     straddle=False,
     c="red",
     title="",
+    with_dim_names=False,
     kwargs={},
 ):
     """Plots a grid or field on a map with optional depth contours.
@@ -65,22 +66,23 @@ def _plot(
 
     fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
-    _add_plot_to_ax(
-        ax, lon_deg, lat_deg, trans, field, depth_contours, c, title, kwargs=kwargs
-    )
+    if c is not None:
+        _add_boundary_to_ax(
+            ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names
+        )
+
+    if field is not None:
+        _add_field_to_ax(ax, lon_deg, lat_deg, field, depth_contours, kwargs=kwargs)
+
+    ax.coastlines(
+        resolution="50m", linewidth=0.5, color="black"
+    )  # add map of coastlines
+    ax.gridlines()
+    ax.set_title(title)
 
 
-def _add_plot_to_ax(
-    ax,
-    lon_deg,
-    lat_deg,
-    trans,
-    field=None,
-    depth_contours=False,
-    c="red",
-    title="",
-    add_colorbar=True,
-    kwargs=None,
+def _add_boundary_to_ax(
+    ax, lon_deg, lat_deg, trans, c="red", label="", with_dim_names=False
 ):
     """Plots a grid or field on a map with optional depth contours.
 
@@ -98,28 +100,8 @@ def _add_plot_to_ax(
     trans : cartopy.crs.Projection
         The projection for transforming coordinates.
 
-    field : xarray.DataArray, optional
-        Field data to plot (e.g., temperature, salinity). If None, only the grid is plotted.
-
-    depth_contours : bool, optional
-        If True, adds depth contours to the plot.
-
     c : str, optional
         Color of the grid boundary (default is 'red').
-
-    title : str, optional
-        Title of the plot.
-
-    add_colorbar : bool, optional
-        If True, add colobar.
-
-    kwargs : dict, optional
-        Additional keyword arguments passed to `pcolormesh` (e.g., colormap, limits).
-
-    Notes
-    -----
-    - If `field` is provided, a colorbar is added.
-    - If `depth_contours` is True, the field’s `layer_depth` is used to add contours.
     """
     proj = ccrs.PlateCarree()
 
@@ -135,31 +117,112 @@ def _add_plot_to_ax(
     transformed_corners = [trans.transform_point(lo, la, proj) for lo, la in corners]
     transformed_lons, transformed_lats = zip(*transformed_corners)
 
-    if c is not None:
-        ax.plot(
-            list(transformed_lons) + [transformed_lons[0]],
-            list(transformed_lats) + [transformed_lats[0]],
-            "o-",
-            c=c,
-        )
+    ax.plot(
+        list(transformed_lons) + [transformed_lons[0]],
+        list(transformed_lats) + [transformed_lats[0]],
+        "o-",
+        c=c,
+        label=label,
+    )
 
-    ax.coastlines(
-        resolution="50m", linewidth=0.5, color="black"
-    )  # add map of coastlines
-    ax.gridlines()
-    ax.set_title(title)
+    if with_dim_names:
+        for i in range(len(corners)):
+            if i in [0, 2]:
+                dim_name = r"$\xi$"
+            else:
+                dim_name = r"$\eta$"
+            # Define start and end points for each edge
+            start_lon, start_lat = transformed_corners[i]
+            end_lon, end_lat = transformed_corners[(i + 1) % len(corners)]
 
-    if field is not None:
-        p = ax.pcolormesh(lon_deg, lat_deg, field, transform=proj, **kwargs)
-        if hasattr(field, "long_name"):
-            label = f"{field.long_name} [{field.units}]"
-        elif hasattr(field, "Long_name"):
-            # this is the case for matlab generated grids
-            label = f"{field.Long_name} [{field.units}]"
-        else:
-            label = ""
-        if add_colorbar:
-            plt.colorbar(p, label=label)
+            # Compute midpoint
+            mid_lon = (start_lon + end_lon) / 2
+            mid_lat = (start_lat + end_lat) / 2
+
+            # Compute vector direction for arrow
+            arrow_dx = (end_lon - start_lon) * 0.4  # Scale arrow size
+            arrow_dy = (end_lat - start_lat) * 0.4
+
+            # Reverse arrow direction for edges 2 and 3
+            if i in [2, 3]:
+                arrow_dx *= -1
+                arrow_dy *= -1
+
+            # Add arrow
+            ax.annotate(
+                "",
+                xy=(mid_lon + arrow_dx, mid_lat + arrow_dy),
+                xytext=(mid_lon - arrow_dx, mid_lat - arrow_dy),
+                arrowprops=dict(arrowstyle="->", color=c, lw=1.5),
+            )
+
+            ax.text(
+                mid_lon,
+                mid_lat,
+                dim_name,
+                color=c,
+                fontsize=10,
+                ha="center",
+                va="center",
+                bbox=dict(
+                    facecolor="white",
+                    edgecolor="none",
+                    alpha=0.7,
+                    boxstyle="round,pad=0.2",
+                ),
+            )
+
+
+def _add_field_to_ax(
+    ax,
+    lon_deg,
+    lat_deg,
+    field,
+    depth_contours=False,
+    add_colorbar=True,
+    kwargs={},
+):
+    """Plots a grid or field on a map with optional depth contours.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes._axes.Axes
+        The axes on which to plot the data (Cartopy axis with projection).
+
+    lon_deg : np.ndarray
+        Longitude values in degrees.
+
+    lat_deg : np.ndarray
+        Latitude values in degrees.
+
+    field : xarray.DataArray, optional
+        Field data to plot (e.g., temperature, salinity). If None, only the grid is plotted.
+
+    depth_contours : bool, optional
+        If True, adds depth contours to the plot.
+
+    add_colorbar : bool, optional
+        If True, add colobar.
+
+    kwargs : dict, optional
+        Additional keyword arguments passed to `pcolormesh` (e.g., colormap, limits).
+
+    Notes
+    -----
+    - If `depth_contours` is True, the field’s `layer_depth` is used to add contours.
+    """
+    proj = ccrs.PlateCarree()
+
+    p = ax.pcolormesh(lon_deg, lat_deg, field, transform=proj, **kwargs)
+    if hasattr(field, "long_name"):
+        label = f"{field.long_name} [{field.units}]"
+    elif hasattr(field, "Long_name"):
+        # this is the case for matlab generated grids
+        label = f"{field.Long_name} [{field.units}]"
+    else:
+        label = ""
+    if add_colorbar:
+        plt.colorbar(p, label=label)
 
     if depth_contours:
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
@@ -282,3 +345,69 @@ def _line_plot(field, title="", ax=None):
     field.plot(ax=ax)
     ax.set_title(title)
     ax.grid()
+
+
+def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
+
+    parent_lon_deg = parent_grid_ds["lon_rho"]
+    parent_lat_deg = parent_grid_ds["lat_rho"]
+
+    child_lon_deg = child_grid_ds["lon_rho"]
+    child_lat_deg = child_grid_ds["lat_rho"]
+
+    if parent_straddle:
+        parent_lon_deg = xr.where(
+            parent_lon_deg > 180, parent_lon_deg - 360, parent_lon_deg
+        )
+        child_lon_deg = xr.where(
+            child_lon_deg > 180, child_lon_deg - 360, child_lon_deg
+        )
+
+    trans = _get_projection(parent_lon_deg, parent_lat_deg)
+
+    parent_lon_deg = parent_lon_deg.values
+    parent_lat_deg = parent_lat_deg.values
+    child_lon_deg = child_lon_deg.values
+    child_lat_deg = child_lat_deg.values
+
+    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
+    _add_boundary_to_ax(
+        ax,
+        parent_lon_deg,
+        parent_lat_deg,
+        trans,
+        c="r",
+        label="parent grid",
+        with_dim_names=with_dim_names,
+    )
+
+    _add_boundary_to_ax(
+        ax,
+        child_lon_deg,
+        child_lat_deg,
+        trans,
+        c="g",
+        label="child grid",
+        with_dim_names=with_dim_names,
+    )
+
+    vmax = 3
+    vmin = 0
+    cmap = plt.colormaps.get_cmap("Blues")
+    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+    _add_field_to_ax(
+        ax,
+        parent_lon_deg,
+        parent_lat_deg,
+        parent_grid_ds.mask_rho,
+        add_colorbar=False,
+        kwargs=kwargs,
+    )
+
+    ax.coastlines(
+        resolution="50m", linewidth=0.5, color="black"
+    )  # add map of coastlines
+    ax.gridlines()
+    ax.legend(loc="best")

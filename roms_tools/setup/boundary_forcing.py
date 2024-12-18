@@ -24,6 +24,7 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     convert_to_roms_time,
+    get_boundary_coords,
     _to_yaml,
     _from_yaml,
 )
@@ -459,7 +460,7 @@ class BoundaryForcing:
         return ds
 
     def _set_boundary_info(self):
-        """Updates boundary coordinates for rho, u, and v variables on the grid.
+        """Sets boundary coordinates for rho, u, and v variables on the grid.
 
         This method determines the boundary points for the grid variables by specifying the
         indices for the south, east, north, and west boundaries. The resulting boundary
@@ -476,32 +477,7 @@ class BoundaryForcing:
               grid indices for the respective variable types.
         """
 
-        bdry_coords = {
-            "rho": {
-                "south": {"eta_rho": 0},
-                "east": {"xi_rho": -1},
-                "north": {"eta_rho": -1},
-                "west": {"xi_rho": 0},
-            },
-            "u": {
-                "south": {"eta_rho": 0},
-                "east": {"xi_u": -1},
-                "north": {"eta_rho": -1},
-                "west": {"xi_u": 0},
-            },
-            "v": {
-                "south": {"eta_v": 0},
-                "east": {"xi_rho": -1},
-                "north": {"eta_v": -1},
-                "west": {"xi_rho": 0},
-            },
-            "vector": {
-                "south": {"eta_rho": [0, 1]},
-                "east": {"xi_rho": [-2, -1]},
-                "north": {"eta_rho": [-2, -1]},
-                "west": {"xi_rho": [0, 1]},
-            },
-        }
+        bdry_coords = get_boundary_coords()
 
         object.__setattr__(self, "bdry_coords", bdry_coords)
 

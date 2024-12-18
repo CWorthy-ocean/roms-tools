@@ -13,26 +13,24 @@ to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ or ROMS-MARBL simulatio
 - **Tidal forcing**
 - **Surface forcing**:
 
-  - **Physical/Meteorological forcing**: wind, radiation, etc.
-  - **Biogeochemical forcing**: atmospheric pCO₂, etc.
+  - Physical/Meteorological forcing: wind, radiation, etc.
+  - Biogeochemical forcing: atmospheric pCO₂, etc.
 
 - **Initial conditions**:
 
-  - **Physical conditions**: temperature, velocities, etc.
-  - **Biogeochemical conditions**: alkalinity, etc.
+  - Physical conditions: temperature, velocities, etc.
+  - Biogeochemical conditions: alkalinity, etc.
 
 - **Boundary forcing**:
 
-  - **Physical forcing**: temperature, velocities, etc.
-  - **Biogeochemical forcing**: alkalinity, etc.
+  - Physical forcing: temperature, velocities, etc.
+  - Biogeochemical forcing: alkalinity, etc.
 
 - **River forcing**:
 
-  - **Physical forcing**: river volume flux, river temperature, river salinity
+  - Physical forcing: river volume flux, river temperature, river salinity
 
-Currently, **ROMS-Tools** does **not** support:
-
-- Nesting
+- **Nesting**
 
 This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
 
@@ -55,6 +53,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>
    Creating river forcing <river_forcing>
+   Preparing nested simulations <nesting>
 
    Partitioning the input files <partition>
 

@@ -4,6 +4,8 @@
 
 ### New Features
 
+* Nesting capability ([#204](https://github.com/CWorthy-ocean/roms-tools/pull/204))
+
 ### Breaking Changes
 
 ### Internal Changes

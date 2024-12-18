@@ -18,7 +18,7 @@ from roms_tools.setup.utils import (
     _from_yaml,
     get_variable_metadata,
 )
-from roms_tools.setup.plot import _get_projection, _add_plot_to_ax
+from roms_tools.setup.plot import _get_projection, _add_field_to_ax
 import cartopy.crs as ccrs
 
 
@@ -446,13 +446,11 @@ class RiverForcing:
         )
 
         for ax in axs:
-            _add_plot_to_ax(
+            _add_field_to_ax(
                 ax,
                 lon_deg,
                 lat_deg,
-                trans,
                 field,
-                c=None,
                 add_colorbar=False,
                 kwargs=kwargs,
             )

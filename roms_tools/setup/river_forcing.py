@@ -601,10 +601,10 @@ class RiverForcing:
         ----------
         filepath : Union[str, Path]
             The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
-            If partitioning is used, additional indices will be appended to the filenames, e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
+            If partitioning is used, additional indices will be appended to the filenames, e.g., `"filepath.0.nc"`, `"filepath.1.nc"`, etc.
 
         filepath_grid : Union[str, Path]
-            The base path and filename for saving the grid file. This file is essential for including the `river_flux` field.
+            The base path and filename for saving the grid file.
 
         np_eta : int, optional
             The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed along the `eta` axis.

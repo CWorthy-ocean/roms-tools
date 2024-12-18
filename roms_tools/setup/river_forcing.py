@@ -91,7 +91,7 @@ class RiverForcing:
         object.__setattr__(self, "original_indices", original_indices)
 
         if len(original_indices["station"]) > 0:
-            self.move_rivers_to_closest_coast(target_coords, data)
+            self._move_rivers_to_closest_coast(target_coords, data)
             ds = self._create_river_forcing(data)
             self._validate(ds)
 
@@ -275,7 +275,7 @@ class RiverForcing:
 
         return ds
 
-    def move_rivers_to_closest_coast(self, target_coords, data):
+    def _move_rivers_to_closest_coast(self, target_coords, data):
         """Move river mouths to the closest coastal grid cell.
 
         This method computes the closest coastal grid point to each river mouth
@@ -345,10 +345,10 @@ class RiverForcing:
             "xi_rho": indices[2],
             "name": names,
         }
-        self.write_indices_into_grid_file(indices)
+        self._write_indices_into_grid_file(indices)
         object.__setattr__(self, "updated_indices", indices)
 
-    def write_indices_into_grid_file(self, indices):
+    def _write_indices_into_grid_file(self, indices):
         """Writes river location indices into the grid dataset as the "river_flux"
         variable.
 

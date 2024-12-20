@@ -1088,7 +1088,15 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         param
         for param in field_names
         if param
-        not in ("grid", "parent_grid", "child_grid", "ds", "use_dask", "climatology")
+        not in (
+            "grid",
+            "parent_grid",
+            "child_grid",
+            "ds",
+            "use_dask",
+            "bypass_validation",
+            "climatology",
+        )
     ]
 
     for field_name in filtered_field_names:

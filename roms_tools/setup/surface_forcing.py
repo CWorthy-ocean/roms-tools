@@ -66,6 +66,10 @@ class SurfaceForcing:
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    bypass_validation: bool, optional
+        Indicates whether to skip validation checks in the processed data. When set to True,
+        the validation process that ensures no NaN values exist at wet points
+        in the processed dataset is bypassed. Defaults to False.
 
     Examples
     --------
@@ -88,6 +92,7 @@ class SurfaceForcing:
     use_coarse_grid: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False
+    bypass_validation: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -134,7 +139,8 @@ class SurfaceForcing:
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
 
-        self._validate(ds)
+        if not self.bypass_validation:
+            self._validate(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -541,7 +547,10 @@ class SurfaceForcing:
 
     @classmethod
     def from_yaml(
-        cls, filepath: Union[str, Path], use_dask: bool = False
+        cls,
+        filepath: Union[str, Path],
+        use_dask: bool = False,
+        bypass_validation: bool = False,
     ) -> "SurfaceForcing":
         """Create an instance of the SurfaceForcing class from a YAML file.
 
@@ -551,6 +560,10 @@ class SurfaceForcing:
             The path to the YAML file from which the parameters will be read.
         use_dask: bool, optional
             Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+        bypass_validation: bool, optional
+            Indicates whether to skip validation checks in the processed data. When set to True,
+            the validation process that ensures no NaN values exist at wet points
+            in the processed dataset is bypassed. Defaults to False.
 
         Returns
         -------
@@ -562,4 +575,6 @@ class SurfaceForcing:
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
 
-        return cls(grid=grid, **params, use_dask=use_dask)
+        return cls(
+            grid=grid, **params, use_dask=use_dask, bypass_validation=bypass_validation
+        )

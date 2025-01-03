@@ -1,5 +1,4 @@
 import time
-import copy
 import logging
 from dataclasses import dataclass, field, asdict
 
@@ -16,12 +15,11 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_target_coords,
+    gc_dist,
 )
 from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
 from pathlib import Path
-
-RADIUS_OF_EARTH = 6371315.0  # in m
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -379,6 +377,8 @@ class Grid:
                 ds = ds.assign_coords({coarse_var: coarse_field})
             else:
                 ds[coarse_var] = coarse_field
+
+            del fine_field, coarse_field
 
         ds["mask_coarse"] = xr.where(ds["mask_coarse"] > 0.5, 1, 0).astype(np.int32)
 
@@ -812,11 +812,12 @@ class Grid:
             raise ValueError("No Grid configuration found in the YAML file.")
         return cls(**grid_data, verbose=verbose)
 
-    # override __repr__ method to only print attributes that are actually set
     def __repr__(self) -> str:
+        """Return a string representation of the object with non-None attributes,
+        excluding 'ds'."""
         cls = self.__class__
         cls_name = cls.__name__
-        # Create a dictionary of attribute names and values, filtering out those that are not set and 'ds'
+        # Filter attributes to exclude 'ds' and those with None values
         attr_dict = {
             k: v for k, v in self.__dict__.items() if k != "ds" and v is not None
         }
@@ -824,6 +825,23 @@ class Grid:
         return f"{cls_name}({attr_str})"
 
     def _create_horizontal_grid(self) -> xr.Dataset():
+        """Create the horizontal grid based on a Mercator projection and store it in the
+        'ds' attribute.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        xr.Dataset
+            The created horizontal grid dataset, including coordinates, grid metrics, angles, and metadata.
+
+        Notes
+        -----
+        - Longitude values are adjusted to fall within the range [0, 360].
+        - Grid rotation and translation are applied based on the specified parameters.
+        """
         if self.verbose:
             start_time = time.time()
             logging.info("=== Creating the horizontal grid ===")
@@ -861,7 +879,24 @@ class Grid:
         object.__setattr__(self, "ds", ds)
 
     def _add_global_metadata(self, ds):
+        """Add global metadata and attributes to the dataset.
 
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset to which global metadata and attributes will be added.
+
+        Returns
+        -------
+        xr.Dataset
+            The dataset with added global metadata, including grid type, tool version,
+            grid dimensions, center coordinates, and rotation.
+
+        Notes
+        -----
+        - The "spherical" attribute indicates the grid type and is set to "T" (spherical).
+        - The ROMS-Tools version is included as "roms_tools_version". If unavailable, it defaults to "unknown".
+        """
         ds["spherical"] = xr.DataArray(np.array("T", dtype="S1"))
         ds["spherical"].attrs["Long_name"] = "Grid type logical switch"
         ds["spherical"].attrs["option_T"] = "spherical"
@@ -884,6 +919,11 @@ class Grid:
         return ds
 
     def _raise_if_domain_size_too_large(self):
+        """Raise a ValueError if the domain size exceeds the allowable threshold.
+
+        Checks if either the x or y domain size exceeds 20,000 km and raises an error
+        with appropriate details if the threshold is surpassed.
+        """
         threshold = 20000
         if self.size_x > threshold or self.size_y > threshold:
             raise ValueError(
@@ -893,7 +933,20 @@ class Grid:
             )
 
     def _make_initial_lon_lat_ds(self):
-        # Mercator projection around the equator
+        """Generate initial longitude and latitude arrays with Mercator projection
+        around the equator.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the following arrays:
+            - lon, lat: 2D arrays of longitudes and latitudes at cell centers.
+            - lonu, latu: 2D arrays of longitudes and latitudes at u-points.
+            - lonv, latv: 2D arrays of longitudes and latitudes at v-points.
+            - lonq, latq: 2D arrays of longitudes and latitudes at cell corners.
+        """
+
+        r_earth = 6371315.0
 
         # initially define the domain to be longer in x-direction (dimension "length")
         # than in y-direction (dimension "width") to keep grid distortion minimal
@@ -904,35 +957,31 @@ class Grid:
             domain_length, domain_width = self.size_x * 1e3, self.size_y * 1e3  # in m
             nl, nw = self.nx, self.ny
 
-        domain_length_in_degrees = domain_length / RADIUS_OF_EARTH
-        domain_width_in_degrees = domain_width / RADIUS_OF_EARTH
+        domain_length_in_degrees = domain_length / r_earth
+        domain_width_in_degrees = domain_width / r_earth
 
-        # 1d array describing the longitudes at cell centers
-        x = np.arange(-0.5, nl + 1.5, 1)
-        lon_array_1d_in_degrees = (
-            domain_length_in_degrees * x / nl - domain_length_in_degrees / 2
+        # Generate 1D longitude arrays at cell centers and corners
+        lon_array_1d_in_degrees = domain_length_in_degrees * (
+            np.arange(-0.5, nl + 1.5) / nl - 0.5
         )
-        # 1d array describing the longitudes at cell corners (or vorticity points "q")
-        xq = np.arange(-1, nl + 2, 1)
-        lonq_array_1d_in_degrees_q = (
-            domain_length_in_degrees * xq / nl - domain_length_in_degrees / 2
+        lonq_array_1d_in_degrees_q = domain_length_in_degrees * (
+            np.arange(-1, nl + 2) / nl - 0.5
         )
 
-        # convert degrees latitude to y-coordinate using Mercator projection
+        # Mercator projection for latitude
         y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
         y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
 
-        # linearly space points in y-space
-        y = (y2 - y1) * np.arange(-0.5, nw + 1.5, 1) / nw + y1
-        yq = (y2 - y1) * np.arange(-1, nw + 2) / nw + y1
+        # Generate 1D latitude arrays with inverse Mercator projection
+        lat_array_1d_in_degrees = np.arctan(
+            np.sinh((y2 - y1) * (np.arange(-0.5, nw + 1.5) / nw) + y1)
+        )
+        latq_array_1d_in_degrees = np.arctan(
+            np.sinh((y2 - y1) * (np.arange(-1, nw + 2) / nw) + y1)
+        )
 
-        # inverse Mercator projections
-        lat_array_1d_in_degrees = np.arctan(np.sinh(y))
-        latq_array_1d_in_degrees = np.arctan(np.sinh(yq))
-
-        # 2d grid at cell centers
+        # 2D grids for cell centers and corners
         lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
-        # 2d grid at cell corners
         lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
 
         if self.size_y > self.size_x:
@@ -947,7 +996,7 @@ class Grid:
             lonq = np.transpose(np.flip(lonq, 0))
             latq = np.transpose(np.flip(latq, 0))
 
-        # infer longitudes and latitudes at u- and v-points
+        # Inference for u- and v-point coordinates
         lonu = 0.5 * (lon[:, :-1] + lon[:, 1:])
         latu = 0.5 * (lat[:, :-1] + lat[:, 1:])
         lonv = 0.5 * (lon[:-1, :] + lon[1:, :])
@@ -967,6 +1016,22 @@ class Grid:
         return coords
 
     def _create_grid_ds(self, coords):
+        """Create an xarray Dataset with grid coordinates and metrics.
+
+        Parameters
+        ----------
+        coords : dict
+            Dictionary containing:
+            - lon, lat, lonu, latu, lonv, latv : 1d arrays of coordinates (degrees)
+            - angle : 2d array (radians)
+            - pm, pn : 2d arrays (meter^-1)
+
+        Returns
+        -------
+        xarray.Dataset
+            Dataset with variables: lon_rho, lat_rho, lon_u, lat_u, lon_v, lat_v,
+            angle, f (Coriolis parameter), pm, pn.
+        """
 
         ds = xr.Dataset()
 
@@ -1106,116 +1171,129 @@ def _translate(coords, tra_lat, tra_lon):
 
 
 def _rot_sphere(lon, lat, rot):
-    (n, m) = np.shape(lon)
-    # convert rotation angle from degrees to radians
+    """Rotate longitude and latitude coordinates on a sphere.
+
+    Parameters
+    ----------
+    lon : ndarray
+        2D array of longitudes in radians.
+    lat : ndarray
+        2D array of latitudes in radians.
+    rot : float
+        Rotation angle in degrees.
+
+    Returns
+    -------
+    tuple
+        Rotated longitude and latitude arrays (lon, lat) in radians.
+    """
+    # Convert rotation angle from degrees to radians
     rot = rot * np.pi / 180
 
-    # translate into Cartesian coordinates x,y,z
-    # conventions:  (lon,lat) = (0,0)  corresponds to (x,y,z) = ( 0,-r, 0)
-    #               (lon,lat) = (0,90) corresponds to (x,y,z) = ( 0, 0, r)
+    # Convert spherical coordinates to Cartesian coordinates (x, y, z)
     x1 = np.sin(lon) * np.cos(lat)
     y1 = np.cos(lon) * np.cos(lat)
     z1 = np.sin(lat)
 
-    # We will rotate these points around the small circle defined by
-    # the intersection of the sphere and the plane that
-    # is orthogonal to the line through (lon,lat) (0,0) and (180,0)
-
-    # The rotation is in that plane around its intersection with
-    # aforementioned line.
-
-    # Since the plane is orthogonal to the y-axis (in my definition at least),
-    # Rotations in the plane of the small circle maintain constant y and are around
-    # (x,y,z) = (0,y1,0)
-
+    # Calculate the radial distance in the x-z plane
     rp1 = np.sqrt(x1**2 + z1**2)
 
-    ap1 = np.pi / 2 * np.ones((n, m))
-    ap1[np.abs(x1) > 1e-7] = np.arctan(
-        np.abs(z1[np.abs(x1) > 1e-7] / x1[np.abs(x1) > 1e-7])
-    )
+    # Compute azimuthal angle
+    ap1 = np.arctan2(np.abs(z1), np.abs(x1))
     ap1[x1 < 0] = np.pi - ap1[x1 < 0]
     ap1[z1 < 0] = -ap1[z1 < 0]
 
+    # Apply rotation to the azimuthal angle
     ap2 = ap1 + rot
     x2 = rp1 * np.cos(ap2)
     y2 = y1
     z2 = rp1 * np.sin(ap2)
 
-    lon = np.pi / 2 * np.ones((n, m))
-    lon[abs(y2) > 1e-7] = np.arctan(
-        np.abs(x2[np.abs(y2) > 1e-7] / y2[np.abs(y2) > 1e-7])
-    )
-    lon[y2 < 0] = np.pi - lon[y2 < 0]
-    lon[x2 < 0] = -lon[x2 < 0]
+    # Recompute longitude and latitude
+    lon_rot = np.arctan2(np.abs(x2), np.abs(y2))
+    lon_rot[y2 < 0] = np.pi - lon_rot[y2 < 0]
+    lon_rot[x2 < 0] = -lon_rot[x2 < 0]
 
     pr2 = np.sqrt(x2**2 + y2**2)
-    lat = np.pi / 2 * np.ones((n, m))
-    lat[np.abs(pr2) > 1e-7] = np.arctan(
-        np.abs(z2[np.abs(pr2) > 1e-7] / pr2[np.abs(pr2) > 1e-7])
-    )
-    lat[z2 < 0] = -lat[z2 < 0]
+    lat_rot = np.arctan2(np.abs(z2), pr2)
+    lat_rot[z2 < 0] = -lat_rot[z2 < 0]
 
-    return (lon, lat)
+    return lon_rot, lat_rot
 
 
 def _tra_sphere(lon, lat, tra):
-    (n, m) = np.shape(lon)
-    tra = tra * np.pi / 180  # translation in latitude direction
+    """Translate longitude and latitude coordinates on a sphere in the latitude
+    direction.
 
-    # translate into x,y,z
-    # conventions:  (lon,lat) = (0,0)  corresponds to (x,y,z) = ( 0,-r, 0)
-    #               (lon,lat) = (0,90) corresponds to (x,y,z) = ( 0, 0, r)
+    Parameters
+    ----------
+    lon : ndarray
+        2D array of longitudes in radians.
+    lat : ndarray
+        2D array of latitudes in radians.
+    tra : float
+        Translation angle in degrees.
+
+    Returns
+    -------
+    tuple
+        Translated longitude and latitude arrays (lon, lat) in radians.
+    """
+
+    # Convert translation angle from degrees to radians
+    tra = tra * np.pi / 180
+
+    # Convert spherical coordinates to Cartesian coordinates (x, y, z)
     x1 = np.sin(lon) * np.cos(lat)
     y1 = np.cos(lon) * np.cos(lat)
     z1 = np.sin(lat)
 
-    # We will rotate these points around the small circle defined by
-    # the intersection of the sphere and the plane that
-    # is orthogonal to the line through (lon,lat) (90,0) and (-90,0)
-
-    # The rotation is in that plane around its intersection with
-    # aforementioned line.
-
-    # Since the plane is orthogonal to the x-axis (in my definition at least),
-    # Rotations in the plane of the small circle maintain constant x and are around
-    # (x,y,z) = (x1,0,0)
-
+    # Radial distance in the y-z plane
     rp1 = np.sqrt(y1**2 + z1**2)
 
-    ap1 = np.pi / 2 * np.ones((n, m))
-    ap1[np.abs(y1) > 1e-7] = np.arctan(
-        np.abs(z1[np.abs(y1) > 1e-7] / y1[np.abs(y1) > 1e-7])
-    )
+    # Compute azimuthal angle in the y-z plane
+    ap1 = np.arctan2(np.abs(z1), np.abs(y1))
     ap1[y1 < 0] = np.pi - ap1[y1 < 0]
     ap1[z1 < 0] = -ap1[z1 < 0]
 
+    # Apply translation in the azimuthal angle
     ap2 = ap1 + tra
-    x2 = x1
     y2 = rp1 * np.cos(ap2)
     z2 = rp1 * np.sin(ap2)
 
-    ## transformation from (x,y,z) to (lat,lon)
-    lon = np.pi / 2 * np.ones((n, m))
-    lon[np.abs(y2) > 1e-7] = np.arctan(
-        np.abs(x2[np.abs(y2) > 1e-7] / y2[np.abs(y2) > 1e-7])
-    )
-    lon[y2 < 0] = np.pi - lon[y2 < 0]
-    lon[x2 < 0] = -lon[x2 < 0]
+    # Convert back to spherical coordinates
+    lon_rot = np.arctan2(np.abs(x1), np.abs(y2))
+    lon_rot[y2 < 0] = np.pi - lon_rot[y2 < 0]
+    lon_rot[x1 < 0] = -lon_rot[x1 < 0]
 
-    pr2 = np.sqrt(x2**2 + y2**2)
-    lat = np.pi / (2 * np.ones((n, m)))
-    lat[np.abs(pr2) > 1e-7] = np.arctan(
-        np.abs(z2[np.abs(pr2) > 1e-7] / pr2[np.abs(pr2) > 1e-7])
-    )
-    lat[z2 < 0] = -lat[z2 < 0]
+    pr2 = np.sqrt(x1**2 + y2**2)
+    lat_rot = np.arctan2(np.abs(z2), pr2)
+    lat_rot[z2 < 0] = -lat_rot[z2 < 0]
 
-    return (lon, lat)
+    return lon_rot, lat_rot
 
 
 def _compute_coordinate_metrics(coords):
-    """Compute the curvilinear coordinate metrics pn and pm, defined as 1/grid
-    spacing."""
+    """Compute the reciprocal of grid spacing (`pn` and `pm`) in the latitude and
+    longitude directions.
+
+    Parameters
+    ----------
+    coords : dict
+        A dictionary containing coordinate arrays 'lonu', 'latu', 'lonv', and 'latv' for the u- and v-velocity points.
+
+    Returns
+    -------
+    pn : ndarray
+        The metric for the latitude direction (1/dy).
+
+    pm : ndarray
+        The metric for the longitude direction (1/dx).
+
+    Notes
+    -----
+    Boundary values of `pn` and `pm` are copied from adjacent interior values.
+    """
 
     # pm = 1/dx
     pmu = gc_dist(
@@ -1223,9 +1301,11 @@ def _compute_coordinate_metrics(coords):
         coords["latu"][:, :-1],
         coords["lonu"][:, 1:],
         coords["latu"][:, 1:],
+        input_in_degrees=False,
     )
-    pm = 0 * coords["lon"]
+    pm = np.zeros_like(coords["lon"])
     pm[:, 1:-1] = pmu
+    # Handle boundary conditions
     pm[:, 0] = pm[:, 1]
     pm[:, -1] = pm[:, -2]
     pm = 1 / pm
@@ -1236,9 +1316,11 @@ def _compute_coordinate_metrics(coords):
         coords["latv"][:-1, :],
         coords["lonv"][1:, :],
         coords["latv"][1:, :],
+        input_in_degrees=False,
     )
-    pn = 0 * coords["lon"]
+    pn = np.zeros_like(coords["lon"])
     pn[1:-1, :] = pnv
+    # Handle boundary conditions
     pn[0, :] = pn[1, :]
     pn[-1, :] = pn[-2, :]
     pn = 1 / pn
@@ -1246,44 +1328,46 @@ def _compute_coordinate_metrics(coords):
     return pn, pm
 
 
-def gc_dist(lon1, lat1, lon2, lat2):
-    # Distance between 2 points along a great circle
-    # lat and lon in radians!!
-    # 2008, Jeroen Molemaker, UCLA
-
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-
-    dang = 2 * np.arcsin(
-        np.sqrt(
-            np.sin(dlat / 2) ** 2 + np.cos(lat2) * np.cos(lat1) * np.sin(dlon / 2) ** 2
-        )
-    )  # haversine function
-
-    dis = RADIUS_OF_EARTH * dang
-
-    return dis
-
-
 def _compute_angle(coords):
-    """Compute angles of local grid positive x-axis relative to east."""
+    """Compute angles of the local grid's positive x-axis relative to east.
 
+    The angle is computed for each grid cell using the latitude and longitude
+    differences between neighboring grid points. The result is wrapped to
+    the range [-π, π] and adjusted based on longitude and latitude conditions.
+
+    Parameters
+    ----------
+    coords : dict
+        A dictionary containing 'latu' (latitudes) and 'lonu' (longitudes) arrays.
+
+    Returns
+    -------
+    ang : ndarray
+        An array of angles (in radians) of the local grid's positive x-axis
+        relative to east for each grid point.
+    """
+
+    # Compute differences in latitudes and longitudes
     dellat = coords["latu"][:, 1:] - coords["latu"][:, :-1]
     dellon = coords["lonu"][:, 1:] - coords["lonu"][:, :-1]
-    dellon[dellon > np.pi] = dellon[dellon > np.pi] - 2 * np.pi
-    dellon[dellon < -np.pi] = dellon[dellon < -np.pi] + 2 * np.pi
-    dellon = dellon * np.cos(0.5 * (coords["latu"][:, 1:] + coords["latu"][:, :-1]))
 
-    ang = copy.copy(coords["lon"])
-    ang_s = np.arctan(dellat / (dellon + 1e-16))
-    ang_s[(dellon < 0) & (dellat < 0)] = ang_s[(dellon < 0) & (dellat < 0)] - np.pi
-    ang_s[(dellon < 0) & (dellat >= 0)] = ang_s[(dellon < 0) & (dellat >= 0)] + np.pi
-    ang_s[ang_s > np.pi] = ang_s[ang_s > np.pi] - np.pi
-    ang_s[ang_s < -np.pi] = ang_s[ang_s < -np.pi] + np.pi
+    # Normalize longitude differences to the range [-π, π]
+    dellon = (dellon + np.pi) % (2 * np.pi) - np.pi
+    dellon *= np.cos(0.5 * (coords["latu"][:, 1:] + coords["latu"][:, :-1]))
 
+    # Compute the angle in radians
+    ang_s = np.arctan2(dellat, dellon)
+
+    # Adjust angles based on longitude and latitude conditions
+    ang_s[(dellon < 0) & (dellat < 0)] -= np.pi
+    ang_s[(dellon < 0) & (dellat >= 0)] += np.pi
+    ang_s = np.mod(ang_s + np.pi, 2 * np.pi) - np.pi  # Ensure angles are in [-π, π]
+
+    # Create output array and set angles
+    ang = np.zeros_like(coords["lon"])
     ang[:, 1:-1] = ang_s
-    ang[:, 0] = ang[:, 1]
-    ang[:, -1] = ang[:, -2]
+    ang[:, 0] = ang[:, 1]  # Set first column to the second column
+    ang[:, -1] = ang[:, -2]  # Set last column to the second-to-last column
 
     return ang
 

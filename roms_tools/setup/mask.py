@@ -11,7 +11,18 @@ from roms_tools.setup.utils import (
 
 
 def _add_mask(ds):
+    """Adds a land/water mask to the dataset at rho-points.
 
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Input dataset containing latitude and longitude coordinates at rho-points.
+
+    Returns
+    -------
+    xarray.Dataset
+        The original dataset with an added 'mask_rho' variable, representing land/water mask.
+    """
     land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
 
     # Suppress specific warning
@@ -38,7 +49,21 @@ def _add_mask(ds):
 
 
 def _fill_enclosed_basins(mask) -> np.ndarray:
-    """Fills in enclosed basins with land."""
+    """Fills enclosed basins in the mask with land (value = 1).
+
+    This function identifies the largest connected region in the mask, which is assumed to represent
+    the land, and sets all other regions to water (value = 0).
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        A binary array representing the land/water mask (land = 1, water = 0).
+
+    Returns
+    -------
+    np.ndarray
+        The modified mask with enclosed basins filled with land (1).
+    """
 
     # Label connected regions in the mask
     reg, nreg = label(mask)
@@ -60,7 +85,22 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
 
 
 def _add_velocity_masks(ds):
+    """Adds velocity masks for u- and v-points based on the rho-point mask.
 
+    This function generates masks for u- and v-points by interpolating the rho-point land/water mask.
+    The interpolation method used is "multiplicative", which scales the rho-point mask to the respective
+    u- and v-points.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset containing the land/water mask at rho-points (`mask_rho`).
+
+    Returns
+    -------
+    xarray.Dataset
+        The input dataset with added velocity masks (`mask_u` and `mask_v`) for u- and v-points.
+    """
     # add u- and v-masks
     ds["mask_u"] = interpolate_from_rho_to_u(
         ds["mask_rho"], method="multiplicative"

@@ -454,6 +454,20 @@ class RiverForcing:
                 add_colorbar=False,
                 kwargs=kwargs,
             )
+            # Add gridlines with labels for latitude and longitude
+            gridlines = ax.gridlines(
+                draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
+            )
+            gridlines.top_labels = False  # Hide top labels
+            gridlines.right_labels = False  # Hide right labels
+            gridlines.xlabel_style = {
+                "size": 10,
+                "color": "black",
+            }  # Customize longitude label style
+            gridlines.ylabel_style = {
+                "size": 10,
+                "color": "black",
+            }  # Customize latitude label style
 
         for ax, indices in zip(axs, [self.original_indices, self.updated_indices]):
             for i in range(len(indices["name"])):

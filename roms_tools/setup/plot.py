@@ -77,7 +77,22 @@ def _plot(
     ax.coastlines(
         resolution="50m", linewidth=0.5, color="black"
     )  # add map of coastlines
-    ax.gridlines()
+
+    # Add gridlines with labels for latitude and longitude
+    gridlines = ax.gridlines(
+        draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
+    )
+    gridlines.top_labels = False  # Hide top labels
+    gridlines.right_labels = False  # Hide right labels
+    gridlines.xlabel_style = {
+        "size": 10,
+        "color": "black",
+    }  # Customize longitude label style
+    gridlines.ylabel_style = {
+        "size": 10,
+        "color": "black",
+    }  # Customize latitude label style
+
     ax.set_title(title)
 
 
@@ -409,5 +424,20 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
     ax.coastlines(
         resolution="50m", linewidth=0.5, color="black"
     )  # add map of coastlines
-    ax.gridlines()
+
+    # Add gridlines with labels for latitude and longitude
+    gridlines = ax.gridlines(
+        draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
+    )
+    gridlines.top_labels = False  # Hide top labels
+    gridlines.right_labels = False  # Hide right labels
+    gridlines.xlabel_style = {
+        "size": 10,
+        "color": "black",
+    }  # Customize longitude label style
+    gridlines.ylabel_style = {
+        "size": 10,
+        "color": "black",
+    }  # Customize latitude label style
+
     ax.legend(loc="best")

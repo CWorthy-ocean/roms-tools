@@ -1,14 +1,24 @@
 # Release notes
 
-## v2.1.0 (unreleased)
+## v2.2.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v2.1.0
 
 ### New Features
 
 * Nesting capability ([#204](https://github.com/CWorthy-ocean/roms-tools/pull/204))
 * Option to bypass validation ([#206](https://github.com/CWorthy-ocean/roms-tools/pull/206))
 * Latitude and longitude labels are added to spatial plots ([#208](https://github.com/CWorthy-ocean/roms-tools/pull/208))
-
-### Breaking Changes
 
 ### Internal Changes
 
@@ -19,6 +29,8 @@
 * Release notes have been added to the documentation ([#202](https://github.com/CWorthy-ocean/roms-tools/pull/202)).
 
 ### Bugfixes
+
+* Bug with radiation correction in surface forcing has been fixed ([#209](https://github.com/CWorthy-ocean/roms-tools/pull/209)).
 
 ## v2.0.0
 

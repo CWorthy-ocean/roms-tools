@@ -185,6 +185,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
             start_time=start_time,
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
+            correct_radiation=True,
             use_dask=use_dask,
         )
 

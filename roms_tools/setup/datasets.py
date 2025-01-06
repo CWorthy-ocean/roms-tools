@@ -1369,7 +1369,7 @@ class ERA5Correction(Dataset):
 
         super().__post_init__()
 
-    def choose_subdomain(self, coords, straddle: bool):
+    def choose_subdomain(self, target_coords, straddle: bool):
         """Converts longitude values in the dataset if necessary and selects a subdomain
         based on the specified coordinates.
 
@@ -1378,7 +1378,7 @@ class ERA5Correction(Dataset):
 
         Parameters
         ----------
-        coords : dict
+        target_coords : dict
             A dictionary specifying the target coordinates for selecting the subdomain. Keys should correspond to the
             dimension names of the dataset (e.g., latitude and longitude), and values should be the desired ranges or
             specific coordinate values.
@@ -1397,32 +1397,24 @@ class ERA5Correction(Dataset):
         - The dataset (`self.ds`) is updated in place to reflect the chosen subdomain.
         """
 
-        lon = self.ds[self.dim_names["longitude"]]
+        # Select the subdomain in latitude direction (so that we have to concatenate fewer latitudes below if concatenation is performed)
+        subdomain = self.ds.sel({self.dim_names["latitude"]: target_coords["lat"]})
 
-        if not self.is_global:
-            if lon.min().values < 0 and not straddle:
-                # Convert from [-180, 180] to [0, 360]
-                self.ds[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
+        if self.is_global:
+            # Always concatenate because computational overhead should be managable for 1/4 degree ERA5 resolution
+            subdomain = self.concatenate_longitudes(
+                subdomain, end="both", verbose=False
+            )
 
-            if lon.max().values > 180 and straddle:
-                # Convert from [0, 360] to [-180, 180]
-                self.ds[self.dim_names["longitude"]] = xr.where(
-                    lon > 180, lon - 360, lon
-                )
-
-        # Select the subdomain based on the specified latitude and longitude ranges
-        subdomain = self.ds.sel(**coords)
+        # Select the subdomain in longitude direction
+        subdomain = subdomain.sel({self.dim_names["longitude"]: target_coords["lon"]})
 
         # Check if the selected subdomain contains the specified latitude and longitude values
-        if not subdomain[self.dim_names["latitude"]].equals(
-            coords[self.dim_names["latitude"]]
-        ):
+        if not subdomain[self.dim_names["latitude"]].equals(target_coords["lat"]):
             raise ValueError(
                 "The correction dataset does not contain all specified latitude values."
             )
-        if not subdomain[self.dim_names["longitude"]].equals(
-            coords[self.dim_names["longitude"]]
-        ):
+        if not subdomain[self.dim_names["longitude"]].equals(target_coords["lon"]):
             raise ValueError(
                 "The correction dataset does not contain all specified longitude values."
             )

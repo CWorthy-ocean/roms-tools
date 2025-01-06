@@ -6,6 +6,7 @@
 
 * Nesting capability ([#204](https://github.com/CWorthy-ocean/roms-tools/pull/204))
 * Option to bypass validation ([#206](https://github.com/CWorthy-ocean/roms-tools/pull/206))
+* Latitude and longitude labels are added to spatial plots ([#208](https://github.com/CWorthy-ocean/roms-tools/pull/208))
 
 ### Breaking Changes
 

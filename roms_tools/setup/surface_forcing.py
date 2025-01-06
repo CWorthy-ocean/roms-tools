@@ -268,10 +268,8 @@ class SurfaceForcing:
         correction_data = self._get_correction_data()
         # choose same subdomain as forcing data so that we can use same mask
         coords_correction = {
-            correction_data.dim_names["latitude"]: data.ds[data.dim_names["latitude"]],
-            correction_data.dim_names["longitude"]: data.ds[
-                data.dim_names["longitude"]
-            ],
+            "lat": data.ds[data.dim_names["latitude"]],
+            "lon": data.ds[data.dim_names["longitude"]],
         }
         correction_data.choose_subdomain(
             coords_correction, straddle=self.target_coords["straddle"]

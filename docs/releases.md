@@ -12,6 +12,8 @@
 
 ### Bugfixes
 
+* Fix bug in validation of tidal forcing which led to memory blow-ups ([#211](https://github.com/CWorthy-ocean/roms-tools/pull/211))
+
 ## v2.1.0
 
 ### New Features

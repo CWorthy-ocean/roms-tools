@@ -2052,6 +2052,12 @@ def _load_data(filename, dim_names, use_dask, decode_times=True):
             **combine_kwargs,
             **kwargs,
         )
+
+        # Rechunk the dataset along the tidal constituent dimension ("ntides") after loading
+        # because the original dataset does not have a chunk size of 1 along this dimension.
+        if "ntides" in dim_names:
+            ds = ds.chunk({dim_names["ntides"]: 1})
+
     else:
         ds_list = []
         for file in matching_files:

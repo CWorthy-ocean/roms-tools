@@ -1073,6 +1073,10 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
 
         grid_yaml_data = {**parent_grid_yaml_data, **child_grid_yaml_data}
 
+    # Ensure forcing_object.source.path is a string (convert if it's a pathlib object)
+    if hasattr(forcing_object, "source") and "path" in forcing_object.source:
+        forcing_object.source["path"] = str(forcing_object.source["path"])
+
     # Step 2: Get ROMS Tools version
     # Fetch the version of the 'roms-tools' package for inclusion in the YAML header
     try:

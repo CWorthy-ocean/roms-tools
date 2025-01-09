@@ -270,9 +270,16 @@ class TidalForcing:
         The method utilizes `self.grid.ds.mask_rho` to determine the wet points in the domain.
         """
         for var_name in ds.data_vars:
-            # only validate variables based on "validate" flag if use_dask is false
-            if not self.use_dask or self.variable_info[var_name]["validate"]:
-                nan_check(ds[var_name].isel(ntides=0), self.grid.ds.mask_rho)
+            if self.variable_info[var_name]["validate"]:
+                if self.variable_info[var_name]["location"] == "rho":
+                    mask = self.grid.ds.mask_rho
+                elif self.variable_info[var_name]["location"] == "u":
+                    mask = self.grid.ds.mask_u
+                elif self.variable_info[var_name]["location"] == "v":
+                    mask = self.grid.ds.mask_v
+
+                da = ds[var_name].isel(ntides=0)
+                nan_check(da, mask)
 
     def plot(self, var_name, ntides=0) -> None:
         """Plot the specified tidal forcing variable for a given tidal constituent.

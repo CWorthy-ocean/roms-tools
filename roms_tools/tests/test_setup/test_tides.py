@@ -67,7 +67,7 @@ def grid_that_straddles_180_degree_meridian():
 )
 def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
 
-    fname = download_test_data("TPXO_global_test_data.nc")
+    fname = Path(download_test_data("TPXO_global_test_data.nc"))
 
     grid = request.getfixturevalue(grid_fixture)
 
@@ -94,7 +94,7 @@ def test_successful_initialization_with_regional_data(
     grid_that_lies_within_bounds_of_regional_tpxo_data, use_dask
 ):
 
-    fname = download_test_data("TPXO_regional_test_data.nc")
+    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
 
     tidal_forcing = TidalForcing(
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
@@ -122,7 +122,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
     grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask
 ):
 
-    fname = download_test_data("TPXO_regional_test_data.nc")
+    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
 
     with pytest.raises(ValueError, match="NaN values found"):
         TidalForcing(
@@ -141,7 +141,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
     grid_fixture, request, use_dask
 ):
 
-    fname = download_test_data("TPXO_regional_test_data.nc")
+    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
 
     grid = request.getfixturevalue(grid_fixture)
 
@@ -158,7 +158,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
 
 def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_dask):
 
-    fname = download_test_data("TPXO_global_test_data.nc")
+    fname = Path(download_test_data("TPXO_global_test_data.nc"))
 
     with pytest.raises(ValueError, match="The dataset contains fewer"):
         TidalForcing(

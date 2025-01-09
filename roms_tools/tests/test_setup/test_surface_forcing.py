@@ -174,7 +174,7 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_regional_test_data.nc")
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
 
     grid = request.getfixturevalue(grid_fixture)
 
@@ -235,7 +235,7 @@ def test_nan_detection_initialization_with_regional_data(
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_regional_test_data.nc")
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
 
     grid = request.getfixturevalue(grid_fixture)
 
@@ -264,7 +264,7 @@ def test_no_longitude_intersection_initialization_with_regional_data(
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_regional_test_data.nc")
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
 
     for use_coarse_grid in [True, False]:
         with pytest.raises(
@@ -304,7 +304,7 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_global_test_data.nc")
+    fname = Path(download_test_data("ERA5_global_test_data.nc"))
 
     grid = request.getfixturevalue(grid_fixture)
 
@@ -353,8 +353,8 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_regional_test_data.nc")
-    fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+    fname_bgc = Path(download_test_data("CESM_surface_global_test_data_climatology.nc"))
 
     for use_coarse_grid in [True, False]:
         sfc_forcing = SurfaceForcing(
@@ -417,12 +417,12 @@ def test_time_attr(bgc_surface_forcing):
         (
             "bgc_surface_forcing",
             False,
-            download_test_data("CESM_surface_global_test_data.nc"),
+            Path(download_test_data("CESM_surface_global_test_data.nc")),
         ),
         (
             "bgc_surface_forcing_from_climatology",
             True,
-            download_test_data("CESM_surface_global_test_data_climatology.nc"),
+            Path(download_test_data("CESM_surface_global_test_data_climatology.nc")),
         ),
     ],
 )

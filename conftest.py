@@ -17,6 +17,7 @@ from roms_tools.setup.datasets import (
 )
 from roms_tools.setup.download import download_test_data
 import hashlib
+from pathlib import Path
 
 
 def pytest_addoption(parser):
@@ -85,7 +86,7 @@ def tidal_forcing(request, use_dask):
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
-    fname = download_test_data("TPXO_regional_test_data.nc")
+    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
 
     return TidalForcing(
         grid=grid, source={"name": "TPXO", "path": fname}, ntides=1, use_dask=use_dask
@@ -110,7 +111,7 @@ def initial_conditions(request, use_dask):
         hc=250.0,  # critical depth
     )
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     return InitialConditions(
         grid=grid,
@@ -138,8 +139,8 @@ def initial_conditions_with_bgc(request, use_dask):
         hc=250.0,  # critical depth
     )
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
-    fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("CESM_regional_test_data_one_time_slice.nc"))
 
     return InitialConditions(
         grid=grid,
@@ -168,8 +169,8 @@ def initial_conditions_with_bgc_from_climatology(request, use_dask):
         hc=250.0,  # critical depth
     )
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
-    fname_bgc = download_test_data("CESM_regional_test_data_climatology.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("CESM_regional_test_data_climatology.nc"))
 
     return InitialConditions(
         grid=grid,
@@ -202,7 +203,7 @@ def boundary_forcing(request, use_dask):
         hc=250.0,  # critical depth
     )
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     return BoundaryForcing(
         grid=grid,
@@ -232,7 +233,9 @@ def bgc_boundary_forcing_from_climatology(request, use_dask):
         hc=250.0,  # critical depth
     )
 
-    fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+    fname_bgc = Path(
+        download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+    )
 
     return BoundaryForcing(
         grid=grid,
@@ -262,7 +265,7 @@ def surface_forcing(request, use_dask):
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_global_test_data.nc")
+    fname = Path(download_test_data("ERA5_global_test_data.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -290,7 +293,7 @@ def coarse_surface_forcing(request, use_dask):
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_global_test_data.nc")
+    fname = Path(download_test_data("ERA5_global_test_data.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -320,7 +323,7 @@ def corrected_surface_forcing(request, use_dask):
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = download_test_data("ERA5_global_test_data.nc")
+    fname = Path(download_test_data("ERA5_global_test_data.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -348,7 +351,7 @@ def bgc_surface_forcing(request, use_dask):
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 1)
 
-    fname_bgc = download_test_data("CESM_surface_global_test_data.nc")
+    fname_bgc = Path(download_test_data("CESM_surface_global_test_data.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -376,7 +379,7 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 1)
 
-    fname_bgc = download_test_data("CESM_surface_global_test_data_climatology.nc")
+    fname_bgc = Path(download_test_data("CESM_surface_global_test_data_climatology.nc"))
 
     return SurfaceForcing(
         grid=grid,

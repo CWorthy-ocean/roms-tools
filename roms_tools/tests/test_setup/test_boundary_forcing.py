@@ -19,7 +19,7 @@ import logging
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
     assert boundary_forcing.end_time == datetime(2021, 6, 30)
@@ -59,7 +59,9 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
 def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
 
-    fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+    fname_bgc = Path(
+        download_test_data("CESM_regional_coarse_test_data_climatology.nc")
+    )
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
@@ -103,7 +105,7 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
         hc=250.0,  # critical depth
     )
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     with pytest.raises(ValueError, match="consists entirely of NaNs"):
 
@@ -138,7 +140,7 @@ def test_boundary_divided_by_land_warning(caplog, use_dask):
         nx=5, ny=5, size_x=500, size_y=500, center_lon=-10, center_lat=65, rot=0
     )
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     with caplog.at_level(logging.WARNING):
         BoundaryForcing(
@@ -158,7 +160,7 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
     # this grid lies entirely over open ocean
     grid = Grid(nx=5, ny=5, size_x=300, size_y=300, center_lon=-5, center_lat=65, rot=0)
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     kwargs = {
         "grid": grid,

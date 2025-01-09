@@ -1,6 +1,6 @@
 # Release notes
 
-## v2.2.0 (unreleased)
+## v2.3.0 (unreleased)
 
 ### New Features
 
@@ -11,6 +11,13 @@
 ### Documentation
 
 ### Bugfixes
+
+## v2.2.0
+
+### Bugfixes
+
+* Fix bug in validation of tidal forcing which led to memory blow-ups ([#211](https://github.com/CWorthy-ocean/roms-tools/pull/211))
+* Correctly write Pathlib objects to YAML file ([#212](https://github.com/CWorthy-ocean/roms-tools/pull/212))
 
 ## v2.1.0
 

@@ -26,7 +26,7 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert ic.ini_time == datetime(2021, 6, 29)
     assert ic.source == {
         "name": "GLORYS",
-        "path": download_test_data("GLORYS_coarse_test_data.nc"),
+        "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
         "climatology": False,
     }
     assert isinstance(ic.ds, xr.Dataset)
@@ -83,7 +83,7 @@ def test_initial_conditions_missing_physics_path(example_grid, use_dask):
 # Test initialization with missing 'name' in bgc_source
 def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
         ValueError, match="`bgc_source` must include a 'name' if it is provided."
     ):
@@ -99,7 +99,7 @@ def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
 # Test initialization with missing 'path' in bgc_source
 def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
         ValueError, match="`bgc_source` must include a 'path' if it is provided."
     ):
@@ -115,7 +115,7 @@ def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
 # Test default climatology value
 def test_initial_conditions_default_climatology(example_grid, use_dask):
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     initial_conditions = InitialConditions(
         grid=example_grid,
@@ -130,8 +130,8 @@ def test_initial_conditions_default_climatology(example_grid, use_dask):
 
 def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
 
-    fname = download_test_data("GLORYS_coarse_test_data.nc")
-    fname_bgc = download_test_data("CESM_regional_test_data_one_time_slice.nc")
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("CESM_regional_test_data_one_time_slice.nc"))
 
     initial_conditions = InitialConditions(
         grid=example_grid,

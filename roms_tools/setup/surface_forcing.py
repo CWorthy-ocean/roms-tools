@@ -291,6 +291,8 @@ class SurfaceForcing:
 
         processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
 
+        del corr_factor
+
         return processed_fields
 
     def _write_into_dataset(self, processed_fields, data, d_meta):
@@ -298,8 +300,9 @@ class SurfaceForcing:
         # save in new dataset
         ds = xr.Dataset()
 
-        for var_name in processed_fields.keys():
+        for var_name in list(processed_fields.keys()):
             ds[var_name] = processed_fields[var_name].astype(np.float32)
+            del processed_fields[var_name]
             ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
             ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
@@ -353,9 +356,14 @@ class SurfaceForcing:
         """
 
         for var_name in ds.data_vars:
-            # Only validate variables based on "validate" flag if use_dask is False
-            if not self.use_dask or self.variable_info[var_name]["validate"]:
-                nan_check(ds[var_name].isel(time=0), self.target_coords["mask"])
+            if self.variable_info[var_name]["validate"]:
+                if self.variable_info[var_name]["location"] == "rho":
+                    mask = self.target_coords["mask"]
+                elif self.variable_info[var_name]["location"] == "u":
+                    mask = self.target_coords["mask_u"]
+                elif self.variable_info[var_name]["location"] == "v":
+                    mask = self.target_coords["mask_v"]
+                nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):
 

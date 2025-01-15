@@ -17,6 +17,7 @@
 ### Bugfixes
 
 * Fix bug in validation of tidal forcing which led to memory blow-ups ([#211](https://github.com/CWorthy-ocean/roms-tools/pull/211))
+* Make sure correct masks are used for validation ([#214](https://github.com/CWorthy-ocean/roms-tools/pull/214))
 * Correctly write Pathlib objects to YAML file ([#212](https://github.com/CWorthy-ocean/roms-tools/pull/212))
 
 ## v2.1.0

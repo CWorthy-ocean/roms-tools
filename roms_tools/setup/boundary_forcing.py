@@ -710,8 +710,7 @@ class BoundaryForcing:
         variable in the dataset.
         """
         for var_name in self.variable_info:
-            # only validate variables based on "validate" flag if use_dask is false
-            if not self.use_dask or self.variable_info[var_name]["validate"]:
+            if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
 
                 # Select the appropriate mask based on variable location

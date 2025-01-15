@@ -533,10 +533,15 @@ class InitialConditions:
             variable_info = self.variable_info_physics
 
         for var_name in variable_info:
-            # Only validate variables based on "validate" flag if use_dask is False
-            if not self.use_dask or variable_info[var_name]["validate"]:
+            if variable_info[var_name]["validate"]:
+                if variable_info[var_name]["location"] == "rho":
+                    mask = self.grid.ds.mask_rho
+                elif variable_info[var_name]["location"] == "u":
+                    mask = self.grid.ds.mask_u
+                elif variable_info[var_name]["location"] == "v":
+                    mask = self.grid.ds.mask_v
                 ds[var_name].load()
-                nan_check(ds[var_name].squeeze(), self.grid.ds.mask_rho)
+                nan_check(ds[var_name].squeeze(), mask)
 
     def _add_global_metadata(self, ds):
 

@@ -1,8 +1,6 @@
 import time
-import re
 import xarray as xr
 from dataclasses import dataclass, field
-import glob
 from datetime import datetime, timedelta
 import numpy as np
 from typing import Dict, Optional, Union, List
@@ -22,6 +20,7 @@ from roms_tools.setup.download import (
     download_river_data,
 )
 from roms_tools.setup.fill import LateralFill
+from roms_tools.utils import _load_data
 
 # lat-lon datasets
 
@@ -1943,138 +1942,6 @@ class DaiRiverDataset(RiverDataset):
 
 
 # shared functions
-
-
-def _load_data(filename, dim_names, use_dask, decode_times=True):
-    """Load dataset from the specified file.
-
-    Parameters
-    ----------
-    filename : Union[str, Path, List[Union[str, Path]]]
-        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
-        or a list of strings or Path objects containing multiple files.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    use_dask: bool
-        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
-    decode_times: bool, optional
-        If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
-        Defaults to True.
-
-    Returns
-    -------
-    ds : xr.Dataset
-        The loaded xarray Dataset containing the forcing data.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the specified file does not exist.
-    ValueError
-        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
-    """
-
-    # Precompile the regex for matching wildcard characters
-    wildcard_regex = re.compile(r"[\*\?\[\]]")
-
-    # Convert Path objects to strings
-    if isinstance(filename, (str, Path)):
-        filename_str = str(filename)
-    elif isinstance(filename, list):
-        filename_str = [str(f) for f in filename]
-    else:
-        raise ValueError("filename must be a string, Path, or a list of strings/Paths.")
-    # Handle the case when filename is a string
-    contains_wildcard = False
-    if isinstance(filename_str, str):
-        contains_wildcard = bool(wildcard_regex.search(filename_str))
-        if contains_wildcard:
-            matching_files = glob.glob(filename_str)
-            if not matching_files:
-                raise FileNotFoundError(
-                    f"No files found matching the pattern '{filename_str}'."
-                )
-        else:
-            matching_files = [filename_str]
-
-    # Handle the case when filename is a list
-    elif isinstance(filename_str, list):
-        contains_wildcard = any(wildcard_regex.search(f) for f in filename_str)
-        if contains_wildcard:
-            matching_files = []
-            for f in filename_str:
-                files = glob.glob(f)
-                if not files:
-                    raise FileNotFoundError(
-                        f"No files found matching the pattern '{f}'."
-                    )
-                matching_files.extend(files)
-        else:
-            matching_files = filename_str
-
-    # Check if time dimension is available when multiple files are provided
-    if isinstance(filename_str, list) and "time" not in dim_names:
-        raise ValueError(
-            "A list of files is provided, but time dimension is not available. "
-            "A time dimension must be available to concatenate the files."
-        )
-
-    # Determine the kwargs for combining datasets
-    if contains_wildcard or len(matching_files) == 1:
-        # If there is a wildcard or just one file, use by_coords
-        kwargs = {"combine": "by_coords"}
-    else:
-        # Otherwise, use nested combine based on time
-        kwargs = {"combine": "nested", "concat_dim": dim_names["time"]}
-
-    # Base kwargs used for dataset combination
-    combine_kwargs = {
-        "coords": "minimal",
-        "compat": "override",
-        "combine_attrs": "override",
-    }
-
-    if use_dask:
-
-        chunks = {
-            dim_names["latitude"]: -1,
-            dim_names["longitude"]: -1,
-        }
-        if "depth" in dim_names:
-            chunks[dim_names["depth"]] = -1
-        if "time" in dim_names:
-            chunks[dim_names["time"]] = 1
-
-        ds = xr.open_mfdataset(
-            matching_files,
-            decode_times=decode_times,
-            chunks=chunks,
-            **combine_kwargs,
-            **kwargs,
-        )
-
-        # Rechunk the dataset along the tidal constituent dimension ("ntides") after loading
-        # because the original dataset does not have a chunk size of 1 along this dimension.
-        if "ntides" in dim_names:
-            ds = ds.chunk({dim_names["ntides"]: 1})
-
-    else:
-        ds_list = []
-        for file in matching_files:
-            ds = xr.open_dataset(file, decode_times=decode_times, chunks=None)
-            ds_list.append(ds)
-
-        if kwargs["combine"] == "by_coords":
-            ds = xr.combine_by_coords(ds_list, **combine_kwargs)
-        elif kwargs["combine"] == "nested":
-            ds = xr.combine_nested(
-                ds_list, concat_dim=kwargs["concat_dim"], **combine_kwargs
-            )
-
-    if "time" in dim_names and dim_names["time"] not in ds.dims:
-        ds = ds.expand_dims(dim_names["time"])
-
-    return ds
 
 
 def _check_dataset(

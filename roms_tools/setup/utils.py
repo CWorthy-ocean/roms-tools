@@ -1080,9 +1080,17 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         grid_yaml_data = {**parent_grid_yaml_data, **child_grid_yaml_data}
 
     # Ensure forcing_object.source.path is a string (convert if it's a pathlib object)
-    if hasattr(forcing_object, "source") and forcing_object.source is not None and "path" in forcing_object.source:
+    if (
+        hasattr(forcing_object, "source")
+        and forcing_object.source is not None
+        and "path" in forcing_object.source
+    ):
         forcing_object.source["path"] = str(forcing_object.source["path"])
-    if hasattr(forcing_object, "bgc_source") and forcing_object.bgc_source is not None and "path" in forcing_object.bgc_source:
+    if (
+        hasattr(forcing_object, "bgc_source")
+        and forcing_object.bgc_source is not None
+        and "path" in forcing_object.bgc_source
+    ):
         forcing_object.bgc_source["path"] = str(forcing_object.bgc_source["path"])
 
     # Step 2: Get ROMS Tools version

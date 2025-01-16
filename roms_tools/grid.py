@@ -8,16 +8,16 @@ import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
 from typing import Dict, Union, List
-from roms_tools.setup.topography import _add_topography
-from roms_tools.setup.mask import _add_mask, _add_velocity_masks
-from roms_tools.setup.plot import _plot, _section_plot
+from roms_tools.topography import _add_topography
+from roms_tools.mask import _add_mask, _add_velocity_masks
+from roms_tools.vertical_coordinate import sigma_stretch, compute_depth
+from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_target_coords,
     gc_dist,
 )
-from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
 from pathlib import Path
 
@@ -443,6 +443,84 @@ class Grid:
                 title=title,
                 with_dim_names=with_dim_names,
             )
+
+    def compute_vertical_coordinates(self, type, additional_locations=["u", "v"]):
+        """Retrieve layer and interface depth coordinates.
+    
+        This method computes and updates the layer and interface depth coordinates. It handles depth calculations for rho points and
+        additional specified locations (u and v).
+    
+        Parameters
+        ----------
+        type : str
+            The type of depth coordinate to retrieve. Valid options are:
+            - "layer": Retrieves layer depth coordinates.
+            - "interface": Retrieves interface depth coordinates.
+    
+        additional_locations : list of str, optional
+            Specifies additional locations to compute depth coordinates for. Default is ["u", "v"].
+            Valid options include:
+            - "u": Computes depth coordinates for u points.
+            - "v": Computes depth coordinates for v points.
+    
+        Updates
+        -------
+        self.ds : xarray.Dataset
+            The dataset is updated with the following vertical depth coordinates:
+            - f"{type}_depth_rho": Depth coordinates at rho points.
+            - f"{type}_depth_u": Depth coordinates at u points (if applicable).
+            - f"{type}_depth_v": Depth coordinates at v points (if applicable).
+        """
+    
+        layer_vars = []
+        for location in ["rho"] + additional_locations:
+            layer_vars.append(f"{type}_depth_{location}")
+    
+        if all(layer_var in self.ds for layer_var in layer_vars):
+            # Vertical coordinate data already exists
+            pass
+    
+        elif f"{type}_depth_rho" in self.ds:
+            depth = self.ds[f"{type}_depth_rho"]
+    
+            if "u" in additional_locations or "v" in additional_locations:
+                # interpolation
+                if "u" in additional_locations:
+                    depth_u = interpolate_from_rho_to_u(depth)
+                    depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                    depth_u.attrs["units"] = "m"
+                    self.ds[f"{type}_depth_u"] = depth_u
+                if "v" in additional_locations:
+                    depth_v = interpolate_from_rho_to_v(depth)
+                    depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                    depth_v.attrs["units"] = "m"
+                    self.ds[f"{type}_depth_v"] = depth_v
+        else:
+            h = self.ds["h"]
+            if type == "layer":
+                depth = compute_depth(
+                    0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r
+                )
+            else:
+                depth = compute_depth(
+                    0, h, self.hc, self.ds.Cs_w, self.ds.sigma_w
+                )
+    
+            depth.attrs["long_name"] = f"{type} depth at rho-points"
+            depth.attrs["units"] = "m"
+            self.ds[f"{type}_depth_rho"] = depth
+    
+            if "u" in additional_locations or "v" in additional_locations:
+                # interpolation
+                depth_u = interpolate_from_rho_to_u(depth)
+                depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                depth_u.attrs["units"] = "m"
+                depth_v = interpolate_from_rho_to_v(depth)
+                depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                depth_v.attrs["units"] = "m"
+                self.ds[f"{type}_depth_u"] = depth_u
+                self.ds[f"{type}_depth_v"] = depth_v
+
 
     def plot_vertical_coordinate(
         self,
@@ -1481,3 +1559,4 @@ def _add_lat_lon_at_velocity_points(ds, straddle):
     )
 
     return ds
+

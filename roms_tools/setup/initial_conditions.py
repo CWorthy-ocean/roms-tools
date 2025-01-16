@@ -3,10 +3,14 @@ import numpy as np
 import importlib.metadata
 from dataclasses import dataclass, field
 from typing import Dict, Union, List, Optional
-from roms_tools.setup.grid import Grid
+import matplotlib.pyplot as plt
+from pathlib import Path
 from datetime import datetime
+from roms_tools.grid import Grid
+from roms_tools.vertical_coordinate import compute_depth
+from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
-from roms_tools.setup.vertical_coordinate import compute_depth
 from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
@@ -21,10 +25,6 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
-from roms_tools.setup.plot import _plot, _section_plot, _profile_plot, _line_plot
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -396,54 +396,7 @@ class InitialConditions:
             - f"{type}_depth_v": Depth coordinates at v points (if applicable).
         """
 
-        layer_vars = []
-        for location in ["rho"] + additional_locations:
-            layer_vars.append(f"{type}_depth_{location}")
-
-        if all(layer_var in self.grid.ds for layer_var in layer_vars):
-            # Vertical coordinate data already exists
-            pass
-
-        elif f"{type}_depth_rho" in self.grid.ds:
-            depth = self.grid.ds[f"{type}_depth_rho"]
-
-            if "u" in additional_locations or "v" in additional_locations:
-                # interpolation
-                if "u" in additional_locations:
-                    depth_u = interpolate_from_rho_to_u(depth)
-                    depth_u.attrs["long_name"] = f"{type} depth at u-points"
-                    depth_u.attrs["units"] = "m"
-                    self.grid.ds[f"{type}_depth_u"] = depth_u
-                if "v" in additional_locations:
-                    depth_v = interpolate_from_rho_to_v(depth)
-                    depth_v.attrs["long_name"] = f"{type} depth at v-points"
-                    depth_v.attrs["units"] = "m"
-                    self.grid.ds[f"{type}_depth_v"] = depth_v
-        else:
-            h = self.grid.ds["h"]
-            if type == "layer":
-                depth = compute_depth(
-                    0, h, self.grid.hc, self.grid.ds.Cs_r, self.grid.ds.sigma_r
-                )
-            else:
-                depth = compute_depth(
-                    0, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
-                )
-
-            depth.attrs["long_name"] = f"{type} depth at rho-points"
-            depth.attrs["units"] = "m"
-            self.grid.ds[f"{type}_depth_rho"] = depth
-
-            if "u" in additional_locations or "v" in additional_locations:
-                # interpolation
-                depth_u = interpolate_from_rho_to_u(depth)
-                depth_u.attrs["long_name"] = f"{type} depth at u-points"
-                depth_u.attrs["units"] = "m"
-                depth_v = interpolate_from_rho_to_v(depth)
-                depth_v.attrs["long_name"] = f"{type} depth at v-points"
-                depth_v.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_u"] = depth_u
-                self.grid.ds[f"{type}_depth_v"] = depth_v
+        self.grid.compute_vertical_coordinates(type, additional_locations)
 
     def _write_into_dataset(self, processed_fields, d_meta):
 

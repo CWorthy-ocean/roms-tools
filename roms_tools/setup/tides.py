@@ -3,9 +3,12 @@ import xarray as xr
 import numpy as np
 from typing import Dict, Union, List
 import importlib.metadata
+import matplotlib.pyplot as plt
+from pathlib import Path
 from dataclasses import dataclass, field
-from roms_tools.setup.grid import Grid
-from roms_tools.setup.plot import _plot
+from roms_tools.grid import Grid
+from roms_tools.plot import _plot
+from roms_tools.regrid import LateralRegrid
 from roms_tools.setup.datasets import TPXODataset
 from roms_tools.setup.utils import (
     nan_check,
@@ -20,9 +23,6 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.regrid import LateralRegrid
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)

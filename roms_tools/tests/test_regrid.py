@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 import xarray as xr
-from roms_tools.setup.regrid import VerticalRegrid
+from roms_tools.regrid import VerticalRegrid
 
 
 def vertical_regridder(depth_values, layer_depth_rho_values):

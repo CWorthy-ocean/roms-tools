@@ -6,8 +6,8 @@ import gcm_filters
 from roms_tools.setup.utils import handle_boundaries
 import warnings
 from itertools import count
+from roms_tools.regrid import LateralRegrid
 from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
-from roms_tools.setup.regrid import LateralRegrid
 
 
 def _add_topography(

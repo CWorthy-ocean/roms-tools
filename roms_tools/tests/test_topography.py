@@ -1,6 +1,6 @@
 import pytest
 from roms_tools import Grid
-from roms_tools.setup.topography import _compute_rfactor
+from roms_tools.topography import _compute_rfactor
 from roms_tools.setup.download import download_test_data
 import numpy as np
 import numpy.testing as npt

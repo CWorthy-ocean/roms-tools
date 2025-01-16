@@ -1,11 +1,14 @@
 import xarray as xr
 import importlib.metadata
 from dataclasses import dataclass, field
-from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
 from typing import Dict, Union, List
-from roms_tools.setup.regrid import LateralRegrid
+from roms_tools.grid import Grid
+from roms_tools.regrid import LateralRegrid
+from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
@@ -24,9 +27,6 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.plot import _plot
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)

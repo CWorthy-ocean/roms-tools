@@ -2,12 +2,14 @@ import xarray as xr
 import numpy as np
 import logging
 from dataclasses import dataclass, field
-from roms_tools.setup.grid import Grid
+import cartopy.crs as ccrs
 from datetime import datetime
 from typing import Dict, Union, List
-from roms_tools.setup.datasets import DaiRiverDataset
 from pathlib import Path
 import matplotlib.pyplot as plt
+from roms_tools.grid import Grid
+from roms_tools.plot import _get_projection, _add_field_to_ax
+from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
@@ -18,8 +20,6 @@ from roms_tools.setup.utils import (
     _from_yaml,
     get_variable_metadata,
 )
-from roms_tools.setup.plot import _get_projection, _add_field_to_ax
-import cartopy.crs as ccrs
 
 
 @dataclass(frozen=True, kw_only=True)

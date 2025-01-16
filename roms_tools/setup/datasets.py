@@ -6,6 +6,7 @@ import numpy as np
 from typing import Dict, Optional, Union, List
 from pathlib import Path
 import logging
+from roms_tools.utils import _load_data
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
     interpolate_from_climatology,
@@ -20,7 +21,6 @@ from roms_tools.setup.download import (
     download_river_data,
 )
 from roms_tools.setup.fill import LateralFill
-from roms_tools.utils import _load_data
 
 # lat-lon datasets
 

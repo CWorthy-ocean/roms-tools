@@ -12,6 +12,12 @@
 
 ### Bugfixes
 
+## v2.2.1
+
+### Bugfixes
+
+* Correctly write Pathlib `bgc_source` to YAML file ([#215](https://github.com/CWorthy-ocean/roms-tools/pull/215))
+
 ## v2.2.0
 
 ### Bugfixes

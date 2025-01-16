@@ -250,7 +250,9 @@ def test_initial_conditions_save(
                 expected_filepath.unlink()
 
 
-def test_roundtrip_yaml(initial_conditions, tmp_path, use_dask):
+def test_roundtrip_yaml(
+    initial_conditions_with_bgc_from_climatology, tmp_path, use_dask
+):
     """Test that creating an InitialConditions object, saving its parameters to yaml
     file, and re-opening yaml file creates the same object."""
 
@@ -261,13 +263,15 @@ def test_roundtrip_yaml(initial_conditions, tmp_path, use_dask):
         str(tmp_path / file_str),
     ]:  # test for Path object and str
 
-        initial_conditions.to_yaml(filepath)
+        initial_conditions_with_bgc_from_climatology.to_yaml(filepath)
 
         initial_conditions_from_file = InitialConditions.from_yaml(
             filepath, use_dask=use_dask
         )
 
-        assert initial_conditions == initial_conditions_from_file
+        assert (
+            initial_conditions_with_bgc_from_climatology == initial_conditions_from_file
+        )
 
         filepath = Path(filepath)
         filepath.unlink()

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import matplotlib.pyplot as plt
 from pathlib import Path
-from roms_tools.grid import Grid
+from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.vertical_coordinate import compute_depth
 from roms_tools.plot import _section_plot, _line_plot

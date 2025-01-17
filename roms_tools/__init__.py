@@ -8,7 +8,7 @@ except ImportError:  # pragma: no cover
     __version__ = "9999"
 
 
-from roms_tools.grid import Grid  # noqa: F401
+from roms_tools.setup.grid import Grid  # noqa: F401
 from roms_tools.setup.tides import TidalForcing  # noqa: F401
 from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
 from roms_tools.setup.initial_conditions import InitialConditions  # noqa: F401

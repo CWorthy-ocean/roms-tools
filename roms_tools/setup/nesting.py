@@ -6,7 +6,7 @@ from typing import Dict, Union
 from pathlib import Path
 import logging
 from scipy.interpolate import interp1d
-from roms_tools.grid import Grid
+from roms_tools import Grid
 from roms_tools.plot import _plot_nesting
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,

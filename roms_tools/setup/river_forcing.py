@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Dict, Union, List
 from pathlib import Path
 import matplotlib.pyplot as plt
-from roms_tools.grid import Grid
+from roms_tools import Grid
 from roms_tools.plot import _get_projection, _add_field_to_ax
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (

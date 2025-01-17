@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
 from typing import Dict, Union, List
-from roms_tools.topography import _add_topography
-from roms_tools.mask import _add_mask, _add_velocity_masks
+from roms_tools.setup.topography import _add_topography
+from roms_tools.setup.mask import _add_mask, _add_velocity_masks
 from roms_tools.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.utils import (

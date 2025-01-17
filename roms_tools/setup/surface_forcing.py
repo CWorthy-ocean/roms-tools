@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Union, List
-from roms_tools.grid import Grid
+from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid
 from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (

@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
 from roms_tools import Grid
-from roms_tools.vertical_coordinate import compute_depth
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
+from roms_tools.utils import transpose_dimensions
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
@@ -19,9 +19,6 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    transpose_dimensions,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
     _to_yaml,
     _from_yaml,
 )

@@ -12,6 +12,11 @@ from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.vertical_coordinate import compute_depth
 from roms_tools.plot import _section_plot, _line_plot
+from roms_tools.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    transpose_dimensions,
+)
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     get_variable_metadata,
@@ -20,12 +25,9 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    transpose_dimensions,
     one_dim_fill,
     nan_check,
     substitute_nans_by_fillvalue,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
     convert_to_roms_time,
     get_boundary_coords,
     _to_yaml,

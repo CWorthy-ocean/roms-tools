@@ -1,14 +1,16 @@
 import xarray as xr
 import numpy as np
+import gsw
 from roms_tools.utils import _load_data
 from dataclasses import dataclass, field
-from roms_tools.setup.grid import Grid
-from typing import Union
+from typing import Union, Optional
 from pathlib import Path
 import os
 import re
 import logging
 from datetime import datetime, timedelta
+from roms_tools import Grid
+from roms_tools.vertical_coordinate import retrieve_depth_coordinates
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -39,7 +41,6 @@ class ROMSOutput:
     path: Union[str, Path]
     type: Union[str, Path]
     use_dask: bool = False
-
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -51,9 +52,40 @@ class ROMSOutput:
 
         ds = self._get_model_output()
         self._infer_model_reference_date_from_metadata(ds)
+        self._check_vertical_coordinate(ds)
         ds = self._add_absolute_time(ds)
-
+        ds = self._add_lat_lon_coords(ds)
         object.__setattr__(self, "ds", ds)
+
+    def get_vertical_coordinates(self, type="layer", additional_locations=[]):
+        """Retrieve layer and interface depth coordinates.
+
+        This method computes and updates the layer and interface depth coordinates. It handles depth calculations for rho points and
+        additional specified locations (u and v).
+
+        Parameters
+        ----------
+        type : str, optional
+            The type of depth coordinate to retrieve. Default is "layer". Valid options are:
+            - "layer": Retrieves layer depth coordinates.
+            - "interface": Retrieves interface depth coordinates.
+
+        additional_locations : list of str, optional
+            Specifies additional locations to compute depth coordinates for. Default is ["u", "v"].
+            Valid options include:
+            - "u": Computes depth coordinates for u points.
+            - "v": Computes depth coordinates for v points.
+
+        Updates
+        -------
+        self.ds : xarray.Dataset
+            The dataset is updated with the following vertical depth coordinates:
+            - f"{type}_depth_rho": Depth coordinates at rho points.
+            - f"{type}_depth_u": Depth coordinates at u points (if applicable).
+            - f"{type}_depth_v": Depth coordinates at v points (if applicable).
+        """
+
+        retrieve_depth_coordinates(self.ds, self.grid.ds, type, additional_locations)
 
     def _get_model_output(self) -> xr.Dataset:
         """Load the model output based on the type."""
@@ -158,6 +190,58 @@ class ROMSOutput:
                     "and `self.model_reference_date` is not set."
                 )
 
+    def _check_vertical_coordinate(self, ds: xr.Dataset) -> None:
+        """Check that the vertical coordinate parameters in the dataset are consistent
+        with the model grid.
+
+        This method compares the vertical coordinate parameters (`theta_s`, `theta_b`, `hc`, `Cs_r`, `Cs_w`) in
+        the provided dataset (`ds`) with those in the model grid (`self.grid`). The first three parameters are
+        checked for exact equality, while the last two are checked for numerical closeness.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset containing vertical coordinate parameters in its attributes, such as `theta_s`, `theta_b`,
+            `hc`, `Cs_r`, and `Cs_w`.
+
+        Raises
+        ------
+        ValueError
+            If the vertical coordinate parameters do not match the expected values (based on exact or approximate equality).
+
+        Notes
+        -----
+        - `theta_s`, `theta_b`, and `hc` are checked for exact equality using `np.array_equal`.
+        - `Cs_r` and `Cs_w` are checked for numerical closeness using `np.allclose`.
+        """
+
+        # Check exact equality for theta_s, theta_b, and hc
+        if not np.array_equal(self.grid.theta_s, ds.attrs["theta_s"]):
+            raise ValueError(
+                f"theta_s from grid ({self.grid.theta_s}) does not match dataset ({ds.attrs['theta_s']})."
+            )
+
+        if not np.array_equal(self.grid.theta_b, ds.attrs["theta_b"]):
+            raise ValueError(
+                f"theta_b from grid ({self.grid.theta_b}) does not match dataset ({ds.attrs['theta_b']})."
+            )
+
+        if not np.array_equal(self.grid.hc, ds.attrs["hc"]):
+            raise ValueError(
+                f"hc from grid ({self.grid.hc}) does not match dataset ({ds.attrs['hc']})."
+            )
+
+        # Check numerical closeness for Cs_r and Cs_w
+        if not np.allclose(self.grid.ds.Cs_r, ds.attrs["Cs_r"]):
+            raise ValueError(
+                f"Cs_r from grid ({self.grid.Cs_r}) is not close to dataset ({ds.attrs['Cs_r']})."
+            )
+
+        if not np.allclose(self.grid.ds.Cs_w, ds.attrs["Cs_w"]):
+            raise ValueError(
+                f"Cs_w from grid ({self.grid.Cs_w}) is not close to dataset ({ds.attrs['Cs_w']})."
+            )
+
     def _add_absolute_time(self, ds):
 
         ocean_time_seconds = ds["ocean_time"].values
@@ -174,5 +258,12 @@ class ROMSOutput:
         )
         abs_time.attrs["long_name"] = "absolute time"
         ds = ds.assign_coords({"abs_time": abs_time})
+        ds = ds.drop_vars("time")
+
+        return ds
+
+    def _add_lat_lon_coords(self, ds):
+
+        ds = ds.assign_coords({"lat_rho": self.grid.ds["lat_rho"], "lon_rho": self.grid.ds["lon_rho"]})
 
         return ds

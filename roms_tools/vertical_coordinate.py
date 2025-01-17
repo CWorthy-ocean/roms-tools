@@ -1,6 +1,10 @@
 import numpy as np
 import xarray as xr
-from roms_tools.setup.utils import transpose_dimensions
+from roms_tools.utils import (
+    transpose_dimensions,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+)
 
 
 def compute_cs(sigma, theta_s, theta_b):
@@ -107,3 +111,121 @@ def compute_depth(zeta, h, hc, cs, sigma):
     z = -transpose_dimensions(z)
 
     return z
+
+
+def retrieve_depth_coordinates(
+    ds: "xr.Dataset",
+    grid_ds: "xr.Dataset",
+    type: str,
+    additional_locations: list[str] = ["u", "v"],
+) -> None:
+    """Compute and update vertical depth coordinates for specified locations.
+
+    This function calculates the vertical depth coordinates (layer or interface)
+    for rho points and optionally for additional locations (e.g., u and v points)
+    in the provided dataset. The computed depth coordinates are added as variables
+    in the dataset.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The target dataset where the depth coordinates will be added. This dataset
+        should contain the sea surface height (`zeta`) if available; otherwise,
+        a default value of 0 will be used for calculations.
+
+    grid_ds : xarray.Dataset
+        The grid dataset containing essential information for depth calculations,
+        such as bathymetry (`h`), stretching curves (`Cs_r` and `Cs_w`), and
+        stretching parameters (`sigma_r` and `sigma_w`).
+
+    type : str
+        The type of depth coordinate to compute. Valid options are:
+        - "layer": Compute layer depth coordinates.
+        - "interface": Compute interface depth coordinates.
+
+    additional_locations : list of str, optional
+        Additional locations to compute depth coordinates for. Default is ["u", "v"].
+        Valid options include:
+        - "u": Compute depth coordinates for u points.
+        - "v": Compute depth coordinates for v points.
+
+    Updates
+    -------
+    ds : xarray.Dataset
+        The dataset is updated with the following depth coordinate variables:
+        - f"{type}_depth_rho": Depth coordinates at rho points.
+        - f"{type}_depth_u": Depth coordinates at u points (if "u" is specified).
+        - f"{type}_depth_v": Depth coordinates at v points (if "v" is specified).
+
+    Notes
+    -----
+    - If depth coordinates for all specified locations are already present in
+      the dataset, the function does nothing.
+    - If only the rho-point depth coordinates are available, the function
+      interpolates to calculate the depth coordinates for the additional locations.
+    - If depth coordinates are not present, they are computed using the
+      `compute_depth` function based on grid information and optional free-surface
+      elevation (`zeta`).
+
+    Examples
+    --------
+    >>> retrieve_depth_coordinates(
+    ...     ds, grid_ds, type="layer", additional_locations=["u", "v"]
+    ... )
+    >>> print(ds["layer_depth_rho"])
+    >>> print(ds["layer_depth_u"])
+    >>> print(ds["layer_depth_v"])
+    """
+
+    layer_vars = []
+    for location in ["rho"] + additional_locations:
+        layer_vars.append(f"{type}_depth_{location}")
+
+    if all(layer_var in ds for layer_var in layer_vars):
+        # Vertical coordinate data already exists
+        pass
+
+    elif f"{type}_depth_rho" in ds:
+        depth = ds[f"{type}_depth_rho"]
+
+        if "u" in additional_locations or "v" in additional_locations:
+            # interpolation
+            if "u" in additional_locations:
+                depth_u = interpolate_from_rho_to_u(depth)
+                depth_u.attrs["long_name"] = f"{type} depth at u-points"
+                depth_u.attrs["units"] = "m"
+                ds[f"{type}_depth_u"] = depth_u
+            if "v" in additional_locations:
+                depth_v = interpolate_from_rho_to_v(depth)
+                depth_v.attrs["long_name"] = f"{type} depth at v-points"
+                depth_v.attrs["units"] = "m"
+                ds[f"{type}_depth_v"] = depth_v
+    else:
+        h = grid_ds["h"]
+        if "zeta" in ds.data_vars:
+            eta = ds["zeta"]
+        else:
+            eta = 0
+        if type == "layer":
+            depth = compute_depth(
+                eta, h, grid_ds.attrs["hc"], grid_ds["Cs_r"], grid_ds["sigma_r"]
+            )
+        else:
+            depth = compute_depth(
+                eta, h, grid_ds.attrs["hc"], grid_ds["Cs_w"], grid_ds["sigma_w"]
+            )
+
+        depth.attrs["long_name"] = f"{type} depth at rho-points"
+        depth.attrs["units"] = "m"
+        ds[f"{type}_depth_rho"] = depth
+
+        if "u" in additional_locations or "v" in additional_locations:
+            # interpolation
+            depth_u = interpolate_from_rho_to_u(depth)
+            depth_u.attrs["long_name"] = f"{type} depth at u-points"
+            depth_u.attrs["units"] = "m"
+            depth_v = interpolate_from_rho_to_v(depth)
+            depth_v.attrs["long_name"] = f"{type} depth at v-points"
+            depth_v.attrs["units"] = "m"
+            ds[f"{type}_depth_u"] = depth_u
+            ds[f"{type}_depth_v"] = depth_v

@@ -129,7 +129,6 @@ class ROMSOutput:
 
         return ds
 
-
     def _infer_model_reference_date_from_metadata(self, ds: xr.Dataset) -> None:
         """Infer and validate the model reference date from `ocean_time` metadata.
 
@@ -284,11 +283,12 @@ class ROMSOutput:
 
         return ds
 
+
 def _validate_and_set_filenames(
     filenames: Union[str, list], filetype: str, string: str
 ) -> Union[str, list]:
-    """
-    Validates and adjusts the filename or list of filenames based on the specified type and checks for the presence of a string in the filename.
+    """Validates and adjusts the filename or list of filenames based on the specified
+    type and checks for the presence of a string in the filename.
 
     Parameters
     ----------

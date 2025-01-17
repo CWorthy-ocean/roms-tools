@@ -61,7 +61,7 @@ pup_test_data = pooch.create(
         "srtm15_coarsened.nc": "48bc8f4beecfdca9c192b13f4cbeef1455f49d8261a82563aaec5757e100dff9",
         "eastpac25km_rst.19980106000000.nc": "b621a132ef78d731abc41cbecfc2cd82afd877aa325835742a716b13c3de71a1",
         "eastpac25km_rst.19980126000000.nc": "731f42722f8cf6c160877a1a63e9866b168e9179f0baf3e5aecb89ffaf570711",
-        "epac25km_grd.nc": "ec26c69cda4c4e96abde5b7756c955a7e1074931ab5a0641f598b099778fb617"
+        "epac25km_grd.nc": "ec26c69cda4c4e96abde5b7756c955a7e1074931ab5a0641f598b099778fb617",
     },
 )
 

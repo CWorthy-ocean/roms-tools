@@ -20,8 +20,8 @@ class ROMSOutput:
     ----------
     grid : Grid
         Object representing the grid information.
-    path : Union[str, Path]
-        Directory or filename with model output.
+    path : Union[str, Path, List[Union[str, Path]]]
+        Directory, filename, or list of filenames with model output.
     type : str
         Specifies the type of model output. Options are:
 
@@ -49,7 +49,7 @@ class ROMSOutput:
                 f"Invalid type '{self.type}'. Must be one of 'restart', 'average', or 'snapshot'."
             )
 
-        ds = self._get_model_output()
+        ds = self._load_model_output()
         self._infer_model_reference_date_from_metadata(ds)
         self._check_vertical_coordinate(ds)
         ds = self._add_absolute_time(ds)
@@ -86,48 +86,35 @@ class ROMSOutput:
 
         retrieve_depth_coordinates(self.ds, self.grid.ds, type, additional_locations)
 
-    def _get_model_output(self) -> xr.Dataset:
+    def _load_model_output(self) -> xr.Dataset:
         """Load the model output based on the type."""
-        # Determine if the path is a file or a directory
-        if Path(self.path).is_file():
-            single_file = True
-            filename = self.path
+        if isinstance(self.path, list):
+            filetype = "list"
+            force_combine_nested = True
+            # Check if all items in the list are files
+            if not all(Path(item).is_file() for item in self.path):
+                raise FileNotFoundError(
+                    "All items in the provided list must be valid files."
+                )
+        elif Path(self.path).is_file():
+            filetype = "file"
             force_combine_nested = False
         elif Path(self.path).is_dir():
-            single_file = False
+            filetype = "dir"
             force_combine_nested = True
         else:
             raise FileNotFoundError(
-                f"The specified path '{self.path}' is neither a file nor a directory."
+                f"The specified path '{self.path}' is neither a file, nor a list of files, nor a directory."
             )
 
         time_chunking = True
-        # Match the type and adjust filename pattern
         if self.type == "restart":
             time_chunking = False
-            if single_file:
-                if "rst" not in os.path.basename(filename):
-                    logging.warning(
-                        f"The file '{filename}' does not appear to be a restart file (missing '*rst*' in the name)."
-                    )
-            else:
-                filename = os.path.join(self.path, "*rst.*.nc")
+            filename = _validate_and_set_filenames(self.path, filetype, "rst")
         elif self.type == "average":
-            if single_file:
-                if "avg" not in os.path.basename(filename):
-                    logging.warning(
-                        f"The file '{filename}' does not appear to be an average file (missing '*avg*' in the name)."
-                    )
-            else:
-                filename = os.path.join(self.path, "avg.*.nc")
+            filename = _validate_and_set_filenames(self.path, filetype, "avg")
         elif self.type == "snapshot":
-            if single_file:
-                if "his" not in os.path.basename(filename):
-                    logging.warning(
-                        f"The file '{filename}' does not appear to be a snapshot file (missing '*his*' in the name)."
-                    )
-            else:
-                filename = os.path.join(self.path, "his.*.nc")
+            filename = _validate_and_set_filenames(self.path, filetype, "his")
         else:
             raise ValueError(f"Unsupported type '{self.type}'.")
 
@@ -141,6 +128,7 @@ class ROMSOutput:
         )
 
         return ds
+
 
     def _infer_model_reference_date_from_metadata(self, ds: xr.Dataset) -> None:
         """Infer and validate the model reference date from `ocean_time` metadata.
@@ -295,3 +283,39 @@ class ROMSOutput:
         )
 
         return ds
+
+def _validate_and_set_filenames(
+    filenames: Union[str, list], filetype: str, string: str
+) -> Union[str, list]:
+    """
+    Validates and adjusts the filename or list of filenames based on the specified type and checks for the presence of a string in the filename.
+
+    Parameters
+    ----------
+    filenames : Union[str, list]
+        A single filename (str), a list of filenames, or a directory path.
+    filetype : str
+        The type of input: 'file' for a single file, 'list' for a list of files, or 'dir' for a directory.
+    string : str
+        The string that should be present in each filename.
+
+    Returns
+    -------
+    Union[str, list]
+        The validated filename(s). If a directory is provided, the function returns the adjusted file pattern.
+    """
+    if filetype == "file":
+        if string not in os.path.basename(filenames):
+            logging.warning(
+                f"The file '{filenames}' does not appear to contain '{string}' in the name."
+            )
+    elif filetype == "list":
+        for file in filenames:
+            if string not in os.path.basename(file):
+                logging.warning(
+                    f"The file '{file}' does not appear to contain '{string}' in the name."
+                )
+    elif filetype == "dir":
+        filenames = os.path.join(filenames, f"*{string}.*.nc")
+
+    return filenames

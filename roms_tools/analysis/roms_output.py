@@ -2,7 +2,7 @@ import xarray as xr
 import numpy as np
 from roms_tools.utils import _load_data
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Union, Optional
 from pathlib import Path
 import os
 import re
@@ -29,7 +29,7 @@ class ROMSOutput:
           - "average": for time-averaged files.
           - "snapshot": for snapshot files.
 
-    model_reference_time : datetime, optional
+    model_reference_date : datetime, optional
         If not specified, this is inferred from metadata of the model output
         If specified and does not coincide with metadata, a warning is raised.
     use_dask: bool, optional
@@ -40,6 +40,7 @@ class ROMSOutput:
     path: Union[str, Path]
     type: Union[str, Path]
     use_dask: bool = False
+    model_reference_date: Optional[datetime] = None
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -149,26 +150,44 @@ class ROMSOutput:
         UserWarning
             If `self.model_reference_date` is set but the reference date cannot be inferred.
         """
-        input_string = ds.ocean_time.attrs["long_name"]
-        match = re.search(r"(\d{4})/(\d{2})/(\d{2})", input_string)
+        # Check if 'long_name' exists in the attributes of 'ocean_time'
+        if "long_name" in ds.ocean_time.attrs:
+            input_string = ds.ocean_time.attrs["long_name"]
+            match = re.search(r"(\d{4})/(\d{2})/(\d{2})", input_string)
 
-        if match:
-            year, month, day = map(int, match.groups())
-            inferred_date = datetime(year, month, day)
+            if match:
+                # If a match is found, extract year, month, day and create the inferred date
+                year, month, day = map(int, match.groups())
+                inferred_date = datetime(year, month, day)
 
-            if hasattr(self, "model_reference_date") and self.model_reference_date:
-                if self.model_reference_date != inferred_date:
-                    raise ValueError(
-                        f"Mismatch between `self.model_reference_date` ({self.model_reference_date}) "
-                        f"and inferred reference date ({inferred_date})."
-                    )
+                if hasattr(self, "model_reference_date") and self.model_reference_date:
+                    # Check if the inferred date matches the provided model reference date
+                    if self.model_reference_date != inferred_date:
+                        raise ValueError(
+                            f"Mismatch between `self.model_reference_date` ({self.model_reference_date}) "
+                            f"and inferred reference date ({inferred_date})."
+                        )
+                else:
+                    # Set the model reference date if not already set
+                    object.__setattr__(self, "model_reference_date", inferred_date)
             else:
-                object.__setattr__(self, "model_reference_date", inferred_date)
+                # Handle case where no match is found
+                if hasattr(self, "model_reference_date") and self.model_reference_date:
+                    logging.warning(
+                        "Could not infer the model reference date from the metadata. "
+                        "`self.model_reference_date` will be used.",
+                    )
+                else:
+                    raise ValueError(
+                        "Model reference date could not be inferred from the metadata, "
+                        "and `self.model_reference_date` is not set."
+                    )
         else:
+            # Handle case where 'long_name' attribute doesn't exist
             if hasattr(self, "model_reference_date") and self.model_reference_date:
                 logging.warning(
-                    "Could not infer the model reference date from the metadata. "
-                    "`self.model_reference_date` will be used.",
+                    "`long_name` attribute not found in ocean_time. "
+                    "`self.model_reference_date` will be used instead.",
                 )
             else:
                 raise ValueError(
@@ -220,12 +239,12 @@ class ROMSOutput:
         # Check numerical closeness for Cs_r and Cs_w
         if not np.allclose(self.grid.ds.Cs_r, ds.attrs["Cs_r"]):
             raise ValueError(
-                f"Cs_r from grid ({self.grid.Cs_r}) is not close to dataset ({ds.attrs['Cs_r']})."
+                f"Cs_r from grid ({self.grid.ds.Cs_r}) is not close to dataset ({ds.attrs['Cs_r']})."
             )
 
         if not np.allclose(self.grid.ds.Cs_w, ds.attrs["Cs_w"]):
             raise ValueError(
-                f"Cs_w from grid ({self.grid.Cs_w}) is not close to dataset ({ds.attrs['Cs_w']})."
+                f"Cs_w from grid ({self.grid.ds.Cs_w}) is not close to dataset ({ds.attrs['Cs_w']})."
             )
 
     def _add_absolute_time(self, ds: xr.Dataset) -> xr.Dataset:

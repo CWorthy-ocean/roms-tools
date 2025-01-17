@@ -1,9 +1,8 @@
 import xarray as xr
 import numpy as np
-import gsw
 from roms_tools.utils import _load_data
 from dataclasses import dataclass, field
-from typing import Union, Optional
+from typing import Union
 from pathlib import Path
 import os
 import re
@@ -242,8 +241,22 @@ class ROMSOutput:
                 f"Cs_w from grid ({self.grid.Cs_w}) is not close to dataset ({ds.attrs['Cs_w']})."
             )
 
-    def _add_absolute_time(self, ds):
+    def _add_absolute_time(self, ds: xr.Dataset) -> xr.Dataset:
+        """Add absolute time as a coordinate to the dataset.
 
+        Computes "abs_time" based on "ocean_time" and a reference date,
+        and adds it as a coordinate.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            Dataset containing "ocean_time" in seconds since the model reference date.
+
+        Returns
+        -------
+        xarray.Dataset
+            Dataset with "abs_time" added and "time" removed.
+        """
         ocean_time_seconds = ds["ocean_time"].values
 
         abs_time = np.array(
@@ -262,8 +275,23 @@ class ROMSOutput:
 
         return ds
 
-    def _add_lat_lon_coords(self, ds):
+    def _add_lat_lon_coords(self, ds: xr.Dataset) -> xr.Dataset:
+        """Add latitude and longitude coordinates to the dataset.
 
-        ds = ds.assign_coords({"lat_rho": self.grid.ds["lat_rho"], "lon_rho": self.grid.ds["lon_rho"]})
+        Adds "lat_rho" and "lon_rho" from the grid object to the dataset.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            Dataset to update.
+
+        Returns
+        -------
+        xarray.Dataset
+            Dataset with "lat_rho" and "lon_rho" coordinates added.
+        """
+        ds = ds.assign_coords(
+            {"lat_rho": self.grid.ds["lat_rho"], "lon_rho": self.grid.ds["lon_rho"]}
+        )
 
         return ds

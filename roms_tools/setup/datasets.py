@@ -15,7 +15,7 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     gc_dist,
 )
-from roms_tools.setup.download import (
+from roms_tools.download import (
     download_correction_data,
     download_topo,
     download_river_data,

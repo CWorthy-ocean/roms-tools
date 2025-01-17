@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime
 import xarray as xr
 from roms_tools import Grid, SurfaceForcing
-from roms_tools.setup.download import download_test_data
+from roms_tools.download import download_test_data
 import textwrap
 from pathlib import Path
 from conftest import calculate_file_hash

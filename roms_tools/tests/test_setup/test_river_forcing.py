@@ -6,7 +6,7 @@ import textwrap
 from pathlib import Path
 import pytest
 from conftest import calculate_file_hash
-from roms_tools.setup.download import download_river_data
+from roms_tools.download import download_river_data
 
 
 @pytest.fixture

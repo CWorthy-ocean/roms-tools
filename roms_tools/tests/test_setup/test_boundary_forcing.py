@@ -3,7 +3,7 @@ from datetime import datetime
 import xarray as xr
 from roms_tools import Grid, BoundaryForcing
 import textwrap
-from roms_tools.setup.download import download_test_data
+from roms_tools.download import download_test_data
 from conftest import calculate_file_hash
 from pathlib import Path
 import logging

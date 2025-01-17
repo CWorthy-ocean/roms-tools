@@ -4,7 +4,7 @@ from roms_tools import InitialConditions, Grid
 import xarray as xr
 import numpy as np
 import textwrap
-from roms_tools.setup.download import download_test_data
+from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset
 from pathlib import Path
 from conftest import calculate_file_hash

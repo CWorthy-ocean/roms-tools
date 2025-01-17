@@ -501,3 +501,136 @@ def _load_data(
         ds = ds.expand_dims(dim_names["time"])
 
     return ds
+
+
+def interpolate_from_rho_to_u(field, method="additive"):
+    """Interpolates the given field from rho points to u points.
+
+    This function performs an interpolation from the rho grid (cell centers) to the u grid
+    (cell edges in the xi direction). Depending on the chosen method, it either averages
+    (additive) or multiplies (multiplicative) the field values between adjacent rho points
+    along the xi dimension. It also handles the removal of unnecessary coordinate variables
+    and updates the dimensions accordingly.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The input data array on the rho grid to be interpolated. It is assumed to have a dimension
+        named "xi_rho".
+
+    method : str, optional, default='additive'
+        The method to use for interpolation. Options are:
+        - 'additive': Average the field values between adjacent rho points.
+        - 'multiplicative': Multiply the field values between adjacent rho points. Appropriate for
+          binary masks.
+
+    Returns
+    -------
+    field_interpolated : xr.DataArray
+        The interpolated data array on the u grid with the dimension "xi_u".
+    """
+
+    if method == "additive":
+        field_interpolated = 0.5 * (field + field.shift(xi_rho=1)).isel(
+            xi_rho=slice(1, None)
+        )
+    elif method == "multiplicative":
+        field_interpolated = (field * field.shift(xi_rho=1)).isel(xi_rho=slice(1, None))
+    else:
+        raise NotImplementedError(f"Unsupported method '{method}' specified.")
+
+    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
+    for var in vars_to_drop:
+        if var in field_interpolated.coords:
+            field_interpolated = field_interpolated.drop_vars(var)
+
+    field_interpolated = field_interpolated.swap_dims({"xi_rho": "xi_u"})
+
+    return field_interpolated
+
+
+def interpolate_from_rho_to_v(field, method="additive"):
+    """Interpolates the given field from rho points to v points.
+
+    This function performs an interpolation from the rho grid (cell centers) to the v grid
+    (cell edges in the eta direction). Depending on the chosen method, it either averages
+    (additive) or multiplies (multiplicative) the field values between adjacent rho points
+    along the eta dimension. It also handles the removal of unnecessary coordinate variables
+    and updates the dimensions accordingly.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        The input data array on the rho grid to be interpolated. It is assumed to have a dimension
+        named "eta_rho".
+
+    method : str, optional, default='additive'
+        The method to use for interpolation. Options are:
+        - 'additive': Average the field values between adjacent rho points.
+        - 'multiplicative': Multiply the field values between adjacent rho points. Appropriate for
+          binary masks.
+
+    Returns
+    -------
+    field_interpolated : xr.DataArray
+        The interpolated data array on the v grid with the dimension "eta_v".
+    """
+
+    if method == "additive":
+        field_interpolated = 0.5 * (field + field.shift(eta_rho=1)).isel(
+            eta_rho=slice(1, None)
+        )
+    elif method == "multiplicative":
+        field_interpolated = (field * field.shift(eta_rho=1)).isel(
+            eta_rho=slice(1, None)
+        )
+    else:
+        raise NotImplementedError(f"Unsupported method '{method}' specified.")
+
+    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
+    for var in vars_to_drop:
+        if var in field_interpolated.coords:
+            field_interpolated = field_interpolated.drop_vars(var)
+
+    field_interpolated = field_interpolated.swap_dims({"eta_rho": "eta_v"})
+
+    return field_interpolated
+
+
+def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
+    """Transpose the dimensions of an xarray.DataArray to ensure that 'time', any
+    dimension starting with 's_', 'eta_', and 'xi_' are ordered first, followed by the
+    remaining dimensions in their original order.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The input DataArray whose dimensions are to be reordered.
+
+    Returns
+    -------
+    xarray.DataArray
+        The DataArray with dimensions reordered so that 'time', 's_*', 'eta_*',
+        and 'xi_*' are first, in that order, if they exist.
+    """
+
+    # List of preferred dimension patterns
+    preferred_order = ["time", "s_", "eta_", "xi_"]
+
+    # Get the existing dimensions in the DataArray
+    dims = list(da.dims)
+
+    # Collect dimensions that match any of the preferred patterns
+    matched_dims = []
+    for pattern in preferred_order:
+        # Find dimensions that start with the pattern
+        matched_dims += [dim for dim in dims if dim.startswith(pattern)]
+
+    # Create a new order: first the matched dimensions, then the rest
+    remaining_dims = [dim for dim in dims if dim not in matched_dims]
+    new_order = matched_dims + remaining_dims
+
+    # Transpose the DataArray to the new order
+    transposed_da = da.transpose(*new_order)
+
+    return transposed_da

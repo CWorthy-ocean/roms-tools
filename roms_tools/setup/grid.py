@@ -446,7 +446,7 @@ class Grid:
                 field=field, title=title, with_dim_names=with_dim_names, plot_data=False
             )
 
-    def compute_vertical_coordinates(
+    def compute_depth_coordinates(
         self, type: str, additional_locations: list[str] = ["u", "v"]
     ):
         """Compute and update layer or interface depth coordinates.

@@ -393,7 +393,7 @@ class InitialConditions:
             - f"{type}_depth_v": Depth coordinates at v points (if applicable).
         """
 
-        self.grid.compute_vertical_coordinates(type, additional_locations)
+        self.grid.compute_depth_coordinates(type, additional_locations)
 
     def _write_into_dataset(self, processed_fields, d_meta):
 

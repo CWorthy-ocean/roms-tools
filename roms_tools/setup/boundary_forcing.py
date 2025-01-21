@@ -833,7 +833,6 @@ class BoundaryForcing:
             field = field.assign_coords(
                 {"layer_depth": self.grid.ds[f"layer_depth_{location}_{direction}"]}
             )
-        # chose colorbar
         if var_name.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax

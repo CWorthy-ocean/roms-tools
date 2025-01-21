@@ -1,7 +1,6 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import xarray as xr
-import numpy as np
 
 
 def _plot(
@@ -430,7 +429,3 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
     }  # Customize latitude label style
 
     ax.legend(loc="best")
-
-
-
-

@@ -112,17 +112,18 @@ def compute_depth(zeta, h, hc, cs, sigma):
 
     return z
 
+
 def add_depth_coordinates_to_dataset(
     ds: "xr.Dataset",
     grid_ds: "xr.Dataset",
     depth_type: str,
     locations: list[str] = ["rho", "u", "v"],
 ) -> None:
-    """
-    Add computed vertical depth coordinates to a dataset for specified grid locations.
+    """Add computed vertical depth coordinates to a dataset for specified grid
+    locations.
 
     This function computes vertical depth coordinates (layer or interface) and updates
-    the provided dataset with these coordinates for the specified grid locations. If 
+    the provided dataset with these coordinates for the specified grid locations. If
     the dataset already contains depth coordinates for all specified locations, the function
     does nothing.
 
@@ -154,10 +155,16 @@ def add_depth_coordinates_to_dataset(
     else:
         h = grid_ds["h"]
         zeta = ds.get("zeta", 0)
-        sigma = grid_ds[f"sigma_{depth_type[0]}"].values
-        Cs = grid_ds[f"Cs_{depth_type[0]}"].values
+        if depth_type == "layer":
+            Cs = grid_ds["Cs_r"]
+            sigma = grid_ds["sigma_r"]
+        elif depth_type == "interface":
+            Cs = grid_ds["Cs_w"]
+            sigma = grid_ds["sigma_w"]
         depth_rho = compute_depth(zeta, h, grid_ds.attrs["hc"], Cs, sigma)
-        depth_rho.attrs.update({"long_name": f"{depth_type} depth at rho-points", "units": "m"})
+        depth_rho.attrs.update(
+            {"long_name": f"{depth_type} depth at rho-points", "units": "m"}
+        )
         ds[f"{depth_type}_depth_rho"] = depth_rho
 
     # Interpolate depth to other locations
@@ -169,8 +176,11 @@ def add_depth_coordinates_to_dataset(
             interpolate_from_rho_to_u if loc == "u" else interpolate_from_rho_to_v
         )
         depth_loc = interp_func(depth_rho)
-        depth_loc.attrs.update({"long_name": f"{depth_type} depth at {loc}-points", "units": "m"})
+        depth_loc.attrs.update(
+            {"long_name": f"{depth_type} depth at {loc}-points", "units": "m"}
+        )
         ds[f"{depth_type}_depth_{loc}"] = depth_loc
+
 
 def compute_depth_coordinates(
     ds: "xr.Dataset",
@@ -181,23 +191,23 @@ def compute_depth_coordinates(
     eta: int = None,
     xi: int = None,
 ) -> "xr.DataArray":
-    """
-    Compute vertical depth coordinates efficiently for a specified grid location and optional indices.
+    """Compute vertical depth coordinates efficiently for a specified grid location and
+    optional indices.
 
-    This function calculates vertical depth coordinates (layer or interface) for a given grid 
-    location (`rho`, `u`, or `v`). It performs spatial slicing (meridional or zonal) on the 
-    bathymetry and free-surface elevation (`zeta`) before computing depth coordinates. This 
-    approach minimizes computational overhead by reducing the dataset size before performing 
+    This function calculates vertical depth coordinates (layer or interface) for a given grid
+    location (`rho`, `u`, or `v`). It performs spatial slicing (meridional or zonal) on the
+    bathymetry and free-surface elevation (`zeta`) before computing depth coordinates. This
+    approach minimizes computational overhead by reducing the dataset size before performing
     vertical coordinate calculations.
 
     Parameters
     ----------
     ds : xr.Dataset
-        Dataset containing optional `zeta` (free-surface elevation). If `zeta` is not present, 
+        Dataset containing optional `zeta` (free-surface elevation). If `zeta` is not present,
         static vertical coordinates are computed.
 
     grid_ds : xr.Dataset
-        Grid dataset containing bathymetry (`h`), stretching curves (`Cs`), and sigma-layer 
+        Grid dataset containing bathymetry (`h`), stretching curves (`Cs`), and sigma-layer
         parameters (`sigma`). The attributes of this dataset should include the critical depth (`hc`).
 
     depth_type : str
@@ -212,11 +222,11 @@ def compute_depth_coordinates(
         - `"v"`: Depth at v points (northward velocity points).
 
     s : int, optional
-        Vertical index to extract a single layer or interface slice. If not provided, all vertical 
+        Vertical index to extract a single layer or interface slice. If not provided, all vertical
         layers are included.
 
     eta : int, optional
-        Meridional (north-south) index to extract a slice. If not provided, all meridional indices 
+        Meridional (north-south) index to extract a slice. If not provided, all meridional indices
         are included.
 
     xi : int, optional
@@ -226,7 +236,7 @@ def compute_depth_coordinates(
     -------
     xr.DataArray
         A DataArray containing the computed depth coordinates. If no indices are specified, the
-        array will have the full dimensionality of the depth coordinates. The dimensions of the 
+        array will have the full dimensionality of the depth coordinates. The dimensions of the
         output depend on the provided indices:
         - Full 3D (or 4D if `zeta` includes time) depth coordinates if no indices are provided.
         - Reduced dimensionality for specified slices (e.g., 2D for a single vertical slice).
@@ -275,8 +285,12 @@ def compute_depth_coordinates(
                 zeta = zeta.isel(xi_rho=xi)
 
     # Compute depth
-    sigma = grid_ds[f"sigma_{depth_type[0]}"].values
-    Cs = grid_ds[f"Cs_{depth_type[0]}"].values
+    if depth_type == "layer":
+        Cs = grid_ds["Cs_r"]
+        sigma = grid_ds["sigma_r"]
+    elif depth_type == "interface":
+        Cs = grid_ds["Cs_w"]
+        sigma = grid_ds["sigma_w"]
     depth = compute_depth(zeta, h, grid_ds.attrs["hc"], Cs, sigma)
 
     # Slice vertically

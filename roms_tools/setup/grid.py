@@ -13,7 +13,7 @@ from roms_tools.setup.mask import _add_mask, _add_velocity_masks
 from roms_tools.vertical_coordinate import (
     sigma_stretch,
     compute_depth,
-    add_depth_coordinates_to_dataset
+    add_depth_coordinates_to_dataset,
 )
 from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.utils import (
@@ -449,10 +449,9 @@ class Grid:
     def compute_depth_coordinates(
         self, depth_type: str, locations: list[str] = ["rho", "u", "v"]
     ):
-        """
-        Compute and update vertical depth coordinates.
+        """Compute and update vertical depth coordinates.
 
-        Calculates vertical depth coordinates (layer or interface) for specified locations (e.g., rho, u, v points) 
+        Calculates vertical depth coordinates (layer or interface) for specified locations (e.g., rho, u, v points)
         and updates them in the dataset (`self.ds`).
 
         Parameters
@@ -462,7 +461,7 @@ class Grid:
             - "layer": Compute layer depth coordinates.
             - "interface": Compute interface depth coordinates.
         locations : list[str], optional
-            Locations for which to compute depth coordinates. Default is ["rho", "u", "v"]. 
+            Locations for which to compute depth coordinates. Default is ["rho", "u", "v"].
             Valid options include:
             - "rho": Depth coordinates at rho points.
             - "u": Depth coordinates at u points.

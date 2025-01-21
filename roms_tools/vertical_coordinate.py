@@ -129,9 +129,18 @@ def retrieve_depth_coordinates(
     Parameters
     ----------
     ds : xarray.Dataset
-        The target dataset where the depth coordinates will be added. This dataset
-        should contain the sea surface height (`zeta`) if available; otherwise,
-        a default value of 0 will be used for calculations.
+        The target dataset to which the computed depth coordinates will be added.
+        This dataset should ideally contain the sea surface height variable (`zeta`),
+        which represents the free surface elevation. If `zeta` is not available,
+        a default value of 0 will be used, resulting in static vertical coordinates.
+
+        This dataset may be the same as `grid_ds` if you wish to compute depth
+        coordinates without accounting for variations in `zeta`. If they are the
+        same, the computation will use a static vertical coordinate system based
+        solely on bathymetry and stretching parameters.
+
+        After execution, the dataset will be updated to include the computed
+        depth coordinates for the specified locations (e.g., rho, u, v points).
 
     grid_ds : xarray.Dataset
         The grid dataset containing essential information for depth calculations,

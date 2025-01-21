@@ -13,7 +13,7 @@ from roms_tools.setup.mask import _add_mask, _add_velocity_masks
 from roms_tools.vertical_coordinate import (
     sigma_stretch,
     compute_depth,
-    retrieve_depth_coordinates,
+    add_depth_coordinates_to_dataset
 )
 from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.utils import (
@@ -447,35 +447,40 @@ class Grid:
             )
 
     def compute_depth_coordinates(
-        self, type: str, additional_locations: list[str] = ["u", "v"]
+        self, depth_type: str, locations: list[str] = ["rho", "u", "v"]
     ):
-        """Compute and update layer or interface depth coordinates.
-        This method calculates the vertical depth coordinates (layer or interface) for rho points
-        and optionally for additional specified locations (e.g., u and v points). The computed depth
-        coordinates are added to `self.ds`.
+        """
+        Compute and update vertical depth coordinates.
+
+        Calculates vertical depth coordinates (layer or interface) for specified locations (e.g., rho, u, v points) 
+        and updates them in the dataset (`self.ds`).
+
         Parameters
         ----------
-        type : str
-            The type of depth coordinate to compute. Valid options are:
+        depth_type : str
+            The type of depth coordinate to compute. Valid options:
             - "layer": Compute layer depth coordinates.
             - "interface": Compute interface depth coordinates.
-        additional_locations : list of str, optional
-            Additional locations to compute depth coordinates for. Default is ["u", "v"].
+        locations : list[str], optional
+            Locations for which to compute depth coordinates. Default is ["rho", "u", "v"]. 
             Valid options include:
-            - "u": Compute depth coordinates for u points.
-            - "v": Compute depth coordinates for v points.
+            - "rho": Depth coordinates at rho points.
+            - "u": Depth coordinates at u points.
+            - "v": Depth coordinates at v points.
+
         Updates
         -------
         self.ds : xarray.Dataset
-            The dataset (`self.ds`) is updated with the following vertical depth coordinates:
-            - f"{type}_depth_rho": Depth coordinates at rho points.
-            - f"{type}_depth_u": Depth coordinates at u points (if "u" is specified in `additional_locations`).
-            - f"{type}_depth_v": Depth coordinates at v points (if "v" is specified in `additional_locations`).
+            The dataset (`self.ds`) is updated with the following depth coordinate variables:
+            - f"{depth_type}_depth_rho": Depth coordinates at rho points.
+            - f"{depth_type}_depth_u": Depth coordinates at u points (if included in `locations`).
+            - f"{depth_type}_depth_v": Depth coordinates at v points (if included in `locations`).
+
         Notes
         -----
-        This method internally calls `retrieve_depth_coordinates` to perform the calculations.
+        This method uses the `compute_and_update_depth_coordinates` function to perform calculations and updates.
         """
-        retrieve_depth_coordinates(self.ds, self.ds, type, additional_locations)
+        add_depth_coordinates_to_dataset(self.ds, self.ds, depth_type, locations)
 
     def plot_vertical_coordinate(
         self,

@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
-from roms_tools.plot import _plot_slice_of_field_with_two_horizontal_dims
+from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.utils import transpose_dimensions
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
@@ -606,6 +606,18 @@ class InitialConditions:
             If the field specified by `var_name` is 2D and both `eta` and `xi` are specified.
         """
 
+        if len(self.ds[var_name].squeeze().dims) == 3 and not any(
+            [s is not None, eta is not None, xi is not None]
+        ):
+            raise ValueError(
+                "For 3D fields, at least one of s, eta, or xi must be specified."
+            )
+
+        if len(self.ds[var_name].squeeze().dims) == 2 and all(
+            [eta is not None, xi is not None]
+        ):
+            raise ValueError("For 2D fields, specify either eta or xi, not both.")
+
         if self.use_dask:
             from dask.diagnostics import ProgressBar
 
@@ -614,6 +626,7 @@ class InitialConditions:
 
         field = self.ds[var_name].squeeze()
 
+        # get correct mask and horizontal coordinates
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
             mask = self.grid.ds.mask_rho
             lat_deg = self.grid.ds.lat_rho
@@ -628,13 +641,106 @@ class InitialConditions:
             mask = self.grid.ds.mask_v
             lat_deg = self.grid.ds.lat_v
             lon_deg = self.grid.ds.lon_v
+        else:
+            ValueError("provided field does not have two horizontal dimension")
 
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        # chose colorbar
+        # Retrieve depth coordinates. Note that `layer_depth_rho` has already been
+        # computed during `__post_init__`. Similarly, `layer_depth_[u/v]` has also been
+        # computed if the type is `physics` (i.e., when velocity fields are present).
+        # In other words, if a field exists on a u-grid or v-grid, the corresponding
+        # layer depths have already been pre-computed.
+        if s is not None:
+            layer_contours = False
+
+        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
+            if layer_contours:
+                if "interface_depth_rho" in self.grid.ds:
+                    interface_depth = self.grid.ds.interface_depth_rho
+                else:
+                    self.get_vertical_coordinates(
+                        type="interface", additional_locations=[]
+                    )
+            layer_depth = self.grid.ds.layer_depth_rho
+
+        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
+            if layer_contours:
+                if "interface_depth_u" in self.grid.ds:
+                    interface_depth = self.grid.ds.interface_depth_u
+                else:
+                    self.get_vertical_coordinates(
+                        type="interface", additional_locations=["u", "v"]
+                    )
+            layer_depth = self.grid.ds.layer_depth_u
+
+        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
+            if layer_contours:
+                if "interface_depth_v" in self.grid.ds:
+                    interface_depth = self.grid.ds.interface_depth_v
+                else:
+                    self.get_vertical_coordinates(
+                        type="interface", additional_locations=["u", "v"]
+                    )
+            layer_depth = self.grid.ds.layer_depth_v
+
+        # Slice the field as desired
+        title = field.long_name
+        if s is not None:
+            title = title + f", s_rho = {field.s_rho[s].item()}"
+            field = field.isel(s_rho=s)
+            layer_depth = layer_depth.isel(s_rho=s)
+            field = field.assign_coords({"layer_depth": layer_depth})
+        else:
+            depth_contours = False
+
+        if eta is not None:
+            if "eta_rho" in field.dims:
+                title = title + f", eta_rho = {field.eta_rho[eta].item()}"
+                field = field.isel(eta_rho=eta)
+                layer_depth = layer_depth.isel(eta_rho=eta)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(eta_rho=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
+            elif "eta_v" in field.dims:
+                title = title + f", eta_v = {field.eta_v[eta].item()}"
+                field = field.isel(eta_v=eta)
+                layer_depth = layer_depth.isel(eta_v=eta)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(eta_v=eta)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
+            else:
+                raise ValueError(
+                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{var_name}]."
+                )
+        if xi is not None:
+            if "xi_rho" in field.dims:
+                title = title + f", xi_rho = {field.xi_rho[xi].item()}"
+                field = field.isel(xi_rho=xi)
+                layer_depth = layer_depth.isel(xi_rho=xi)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(xi_rho=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
+            elif "xi_u" in field.dims:
+                title = title + f", xi_u = {field.xi_u[xi].item()}"
+                field = field.isel(xi_u=xi)
+                layer_depth = layer_depth.isel(xi_u=xi)
+                if layer_contours:
+                    interface_depth = interface_depth.isel(xi_u=xi)
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
+            else:
+                raise ValueError(
+                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{var_name}]."
+                )
+
+        # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
@@ -649,19 +755,38 @@ class InitialConditions:
         cmap.set_bad(color="gray")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
-        _plot_slice_of_field_with_two_horizontal_dims(
-            field,
-            mask,
-            self.grid.ds,
-            self.grid.ds,
-            s=s,
-            eta=eta,
-            xi=xi,
-            depth_contours=depth_contours,
-            layer_contours=layer_contours,
-            ax=ax,
-            kwargs=kwargs,
-        )
+        if eta is None and xi is None:
+            _plot(
+                field=field.where(mask),
+                depth_contours=depth_contours,
+                title=title,
+                kwargs=kwargs,
+                c="g",
+            )
+        else:
+            if not layer_contours:
+                interface_depth = None
+            else:
+                # restrict number of layer_contours to 10 for the sake of plot clearity
+                nr_layers = len(interface_depth["s_w"])
+                selected_layers = np.linspace(
+                    0, nr_layers - 1, min(nr_layers, 10), dtype=int
+                )
+                interface_depth = interface_depth.isel(s_w=selected_layers)
+
+            if len(field.dims) == 2:
+                _section_plot(
+                    field,
+                    interface_depth=interface_depth,
+                    title=title,
+                    kwargs=kwargs,
+                    ax=ax,
+                )
+            else:
+                if "s_rho" in field.dims:
+                    _profile_plot(field, title=title, ax=ax)
+                else:
+                    _line_plot(field, title=title, ax=ax)
 
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None

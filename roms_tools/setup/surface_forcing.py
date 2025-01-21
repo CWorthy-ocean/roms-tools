@@ -443,10 +443,12 @@ class SurfaceForcing:
         title = field.long_name
 
         field = field.where(self.target_coords["mask"])
+        lon_deg = self.target_coords["lon"]
+        lat_deg = self.target_coords["lat"]
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
-        field = field.assign_coords(
-            {"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]}
-        )
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         # choose colorbar
         if var_name in ["uwnd", "vwnd"]:
@@ -465,9 +467,7 @@ class SurfaceForcing:
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
         _plot(
-            self.grid.ds,
             field=field,
-            straddle=self.grid.straddle,
             title=title,
             kwargs=kwargs,
             c="g",

@@ -328,24 +328,27 @@ class TidalForcing:
                 field = field.load()
 
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            field = field.where(self.grid.ds.mask_rho)
-            field = field.assign_coords(
-                {"lon": self.grid.ds.lon_rho, "lat": self.grid.ds.lat_rho}
-            )
+            lon_deg = self.grid.ds["lon_rho"]
+            lat_deg = self.grid.ds["lat_rho"]
+            mask = self.grid.ds["mask_rho"]
 
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            field = field.where(self.grid.ds.mask_u)
-            field = field.assign_coords(
-                {"lon": self.grid.ds.lon_u, "lat": self.grid.ds.lat_u}
-            )
+            lon_deg = self.grid.ds["lon_u"]
+            lat_deg = self.grid.ds["lat_u"]
+            mask = self.grid.ds["mask_u"]
 
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            field = field.where(self.grid.ds.mask_v)
-            field = field.assign_coords(
-                {"lon": self.grid.ds.lon_v, "lat": self.grid.ds.lat_v}
-            )
+            lon_deg = self.grid.ds["lon_v"]
+            lat_deg = self.grid.ds["lat_v"]
+            mask = self.grid.ds["mask_v"]
+
         else:
             ValueError("provided field does not have two horizontal dimension")
+
+        field = field.where(mask)
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         title = "%s, ntides = %i" % (field.long_name, self.ds[var_name].ntides[ntides])
 
@@ -357,9 +360,7 @@ class TidalForcing:
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
         _plot(
-            self.grid.ds,
             field=field,
-            straddle=self.grid.straddle,
             c="g",
             kwargs=kwargs,
             title=title,

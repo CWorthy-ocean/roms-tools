@@ -416,13 +416,16 @@ class Grid:
             This method does not return any value. It generates and displays a plot.
         """
 
+        field = self.ds.h.where(self.ds.mask_rho)
+        lat_deg = self.ds.lat_rho
+        lon_deg = self.ds.lon_rho
+        if self.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
         if bathymetry:
             if title is None:
                 title = "ROMS grid and bathymetry"
-            field = self.ds.h.where(self.ds.mask_rho)
-            field = field.assign_coords(
-                {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
-            )
 
             vmax = field.max().values
             vmin = field.min().values
@@ -431,9 +434,7 @@ class Grid:
             kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
             _plot(
-                self.ds,
                 field=field,
-                straddle=self.straddle,
                 title=title,
                 with_dim_names=with_dim_names,
                 kwargs=kwargs,
@@ -442,10 +443,7 @@ class Grid:
             if title is None:
                 title = "ROMS grid"
             _plot(
-                self.ds,
-                straddle=self.straddle,
-                title=title,
-                with_dim_names=with_dim_names,
+                field=field, title=title, with_dim_names=with_dim_names, plot_data=False
             )
 
     def compute_vertical_coordinates(
@@ -520,7 +518,11 @@ class Grid:
             raise ValueError("Exactly one of s, eta, or xi must be specified.")
 
         h = self.ds["h"]
-        h = h.assign_coords({"lon": self.ds.lon_rho, "lat": self.ds.lat_rho})
+        lat_deg = self.ds.lat_rho
+        lon_deg = self.ds.lon_rho
+        if self.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        h = h.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         # slice the bathymetry as desired
         if eta is not None:
@@ -545,9 +547,7 @@ class Grid:
             kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
             _plot(
-                self.ds,
                 field=layer_depth.where(self.ds.mask_rho),
-                straddle=self.straddle,
                 depth_contours=False,
                 title=title,
                 kwargs=kwargs,

@@ -434,23 +434,23 @@ class SurfaceForcing:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
         field = self.ds[var_name].isel(time=time)
+
         if self.use_dask:
             from dask.diagnostics import ProgressBar
 
             with ProgressBar():
                 field = field.load()
 
-        title = field.long_name
-
         field = field.where(self.target_coords["mask"])
+
         lon_deg = self.target_coords["lon"]
         lat_deg = self.target_coords["lat"]
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        # choose colorbar
+        title = field.long_name
+
         if var_name in ["uwnd", "vwnd"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
@@ -469,8 +469,8 @@ class SurfaceForcing:
         _plot(
             field=field,
             title=title,
-            kwargs=kwargs,
             c="g",
+            kwargs=kwargs,
         )
 
     def save(

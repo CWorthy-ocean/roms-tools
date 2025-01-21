@@ -416,16 +416,13 @@ class RiverForcing:
         """Plots the original and updated river locations on a map projection."""
 
         field = self.grid.ds.mask_rho
-        field = field.assign_coords(
-            {"lon": self.grid.ds.lon_rho, "lat": self.grid.ds.lat_rho}
-        )
         vmax = 3
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
-        lon_deg = field.lon
-        lat_deg = field.lat
+        lon_deg = self.grid.ds.lon_rho
+        lat_deg = self.grid.ds.lat_rho
 
         # check if North or South pole are in domain
         if lat_deg.max().values > 89 or lat_deg.min().values < -89:
@@ -435,6 +432,7 @@ class RiverForcing:
 
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         trans = _get_projection(lon_deg, lat_deg)
 

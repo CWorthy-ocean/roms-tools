@@ -319,6 +319,8 @@ class TidalForcing:
         >>> tidal_forcing.plot("ssh_Re", nc=0)
         """
 
+        if var_name not in self.ds:
+            raise ValueError(f"Variable '{var_name}' is not found in dataset.")
         field = self.ds[var_name].isel(ntides=ntides)
 
         if self.use_dask:
@@ -361,9 +363,9 @@ class TidalForcing:
 
         _plot(
             field=field,
+            title=title,
             c="g",
             kwargs=kwargs,
-            title=title,
         )
 
     def save(
@@ -465,7 +467,7 @@ class TidalForcing:
             grid=grid,
             **tidal_forcing_params,
             use_dask=use_dask,
-            bypass_validation=bypass_validation
+            bypass_validation=bypass_validation,
         )
 
     def _correct_tides(self, data):

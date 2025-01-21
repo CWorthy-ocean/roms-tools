@@ -179,7 +179,7 @@ def retrieve_depth_coordinates(
     Examples
     --------
     >>> retrieve_depth_coordinates(
-    ...     ds, grid_ds, type="layer", additional_locations=["u", "v"]
+    ...     grid_ds, grid_ds, type="layer", additional_locations=["u", "v"]
     ... )
     >>> print(ds["layer_depth_rho"])
     >>> print(ds["layer_depth_u"])

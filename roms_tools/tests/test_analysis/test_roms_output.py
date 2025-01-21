@@ -166,7 +166,7 @@ def test_model_reference_date_no_metadata(use_dask, tmp_path, caplog):
     )
 
 
-def test_get_vertical_coordinates(use_dask):
+def test_compute_depth_coordinates(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
 
@@ -179,7 +179,7 @@ def test_get_vertical_coordinates(use_dask):
     assert "layer_depth_rho" not in output.ds.data_vars
 
     # Call the method to get vertical coordinates
-    output.get_vertical_coordinates(type="layer")
+    output.compute_depth_coordinates(depth_type="layer")
 
     # Check if the depth coordinates were added
     assert "layer_depth_rho" in output.ds.data_vars

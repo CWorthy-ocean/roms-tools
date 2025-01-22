@@ -1,6 +1,7 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import xarray as xr
+import numpy as np
 
 
 def _plot(
@@ -275,7 +276,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
     field.plot(**kwargs, **more_kwargs, ax=ax)
 
     if interface_depth is not None:
-        layer_key = "s_rho" if "s_rho" in interface_depth else "s_w"
+        layer_key = "s_rho" if "s_rho" in interface_depth.dims else "s_w"
 
         for i in range(len(interface_depth[layer_key])):
             ax.plot(
@@ -327,7 +328,8 @@ def _profile_plot(field, title="", ax=None):
 
 
 def _line_plot(field, title="", ax=None):
-    """Plots a line graph of the given field.
+    """Plots a line graph of the given field, with grey vertical bars where NaNs are
+    located.
 
     Parameters
     ----------
@@ -346,6 +348,22 @@ def _line_plot(field, title="", ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
     field.plot(ax=ax)
+
+    # Loop through the NaNs in the field and add grey vertical bars
+    nan_mask = np.isnan(field.values)
+    nan_indices = np.where(nan_mask)[0]
+
+    if len(nan_indices) > 0:
+        # Add grey vertical bars for each NaN region
+        start_idx = nan_indices[0]
+        for idx in range(1, len(nan_indices)):
+            if nan_indices[idx] != nan_indices[idx - 1] + 1:
+                ax.axvspan(start_idx, nan_indices[idx - 1] + 1, color="gray", alpha=0.3)
+                start_idx = nan_indices[idx]
+        # Add the last region of NaNs
+        ax.axvspan(start_idx, nan_indices[-1] + 1, color="gray", alpha=0.3)
+
+    # Set plot title and grid
     ax.set_title(title)
     ax.grid()
 

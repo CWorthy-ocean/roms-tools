@@ -9,7 +9,7 @@ from roms_tools.setup.datasets import (
     ERA5Correction,
     CESMBGCDataset,
 )
-from roms_tools.setup.download import download_test_data
+from roms_tools.download import download_test_data
 from pathlib import Path
 
 

@@ -10,14 +10,18 @@ import importlib.metadata
 from typing import Dict, Union, List
 from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.mask import _add_mask, _add_velocity_masks
-from roms_tools.setup.plot import _plot, _section_plot
+from roms_tools.vertical_coordinate import (
+    sigma_stretch,
+    compute_depth,
+    add_depth_coordinates_to_dataset,
+)
+from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_target_coords,
     gc_dist,
 )
-from roms_tools.setup.vertical_coordinate import sigma_stretch, compute_depth
 from roms_tools.setup.utils import extract_single_value, save_datasets
 from pathlib import Path
 
@@ -412,13 +416,16 @@ class Grid:
             This method does not return any value. It generates and displays a plot.
         """
 
+        field = self.ds.h.where(self.ds.mask_rho)
+        lat_deg = self.ds.lat_rho
+        lon_deg = self.ds.lon_rho
+        if self.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
         if bathymetry:
             if title is None:
                 title = "ROMS grid and bathymetry"
-            field = self.ds.h.where(self.ds.mask_rho)
-            field = field.assign_coords(
-                {"lon": self.ds.lon_rho, "lat": self.ds.lat_rho}
-            )
 
             vmax = field.max().values
             vmin = field.min().values
@@ -427,9 +434,7 @@ class Grid:
             kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
             _plot(
-                self.ds,
                 field=field,
-                straddle=self.straddle,
                 title=title,
                 with_dim_names=with_dim_names,
                 kwargs=kwargs,
@@ -438,11 +443,43 @@ class Grid:
             if title is None:
                 title = "ROMS grid"
             _plot(
-                self.ds,
-                straddle=self.straddle,
-                title=title,
-                with_dim_names=with_dim_names,
+                field=field, title=title, with_dim_names=with_dim_names, plot_data=False
             )
+
+    def compute_depth_coordinates(
+        self, depth_type: str, locations: list[str] = ["rho", "u", "v"]
+    ):
+        """Compute and update vertical depth coordinates.
+
+        Calculates vertical depth coordinates (layer or interface) for specified locations (e.g., rho, u, v points)
+        and updates them in the dataset (`self.ds`).
+
+        Parameters
+        ----------
+        depth_type : str
+            The type of depth coordinate to compute. Valid options:
+            - "layer": Compute layer depth coordinates.
+            - "interface": Compute interface depth coordinates.
+        locations : list[str], optional
+            Locations for which to compute depth coordinates. Default is ["rho", "u", "v"].
+            Valid options include:
+            - "rho": Depth coordinates at rho points.
+            - "u": Depth coordinates at u points.
+            - "v": Depth coordinates at v points.
+
+        Updates
+        -------
+        self.ds : xarray.Dataset
+            The dataset (`self.ds`) is updated with the following depth coordinate variables:
+            - f"{depth_type}_depth_rho": Depth coordinates at rho points.
+            - f"{depth_type}_depth_u": Depth coordinates at u points (if included in `locations`).
+            - f"{depth_type}_depth_v": Depth coordinates at v points (if included in `locations`).
+
+        Notes
+        -----
+        This method uses the `compute_and_update_depth_coordinates` function to perform calculations and updates.
+        """
+        add_depth_coordinates_to_dataset(self.ds, self.ds, depth_type, locations)
 
     def plot_vertical_coordinate(
         self,
@@ -480,7 +517,11 @@ class Grid:
             raise ValueError("Exactly one of s, eta, or xi must be specified.")
 
         h = self.ds["h"]
-        h = h.assign_coords({"lon": self.ds.lon_rho, "lat": self.ds.lat_rho})
+        lat_deg = self.ds.lat_rho
+        lon_deg = self.ds.lon_rho
+        if self.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        h = h.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         # slice the bathymetry as desired
         if eta is not None:
@@ -505,9 +546,7 @@ class Grid:
             kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
             _plot(
-                self.ds,
                 field=layer_depth.where(self.ds.mask_rho),
-                straddle=self.straddle,
                 depth_contours=False,
                 title=title,
                 kwargs=kwargs,

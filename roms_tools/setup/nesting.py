@@ -4,7 +4,10 @@ from scipy.interpolate import griddata
 from dataclasses import dataclass, field
 from typing import Dict, Union
 from pathlib import Path
-from roms_tools.setup.grid import Grid
+import logging
+from scipy.interpolate import interp1d
+from roms_tools import Grid
+from roms_tools.plot import _plot_nesting
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
@@ -14,9 +17,6 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.plot import _plot_nesting
-import logging
-from scipy.interpolate import interp1d
 
 
 @dataclass(frozen=True, kw_only=True)

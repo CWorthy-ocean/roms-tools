@@ -4,6 +4,8 @@
 
 ### New Features
 
+* `ROMSOutput` class for analyzing ROMS model output ([#217](https://github.com/CWorthy-ocean/roms-tools/pull/217))
+
 ### Breaking Changes
 
 ### Internal Changes

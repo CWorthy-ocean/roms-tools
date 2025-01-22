@@ -54,6 +54,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    Creating boundary forcing <boundary_forcing>
    Creating river forcing <river_forcing>
    Preparing nested simulations <nesting>
+   Analyzing ROMS output <roms_output>
 
    Partitioning the input files <partition>
 

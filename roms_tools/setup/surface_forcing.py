@@ -1,11 +1,14 @@
 import xarray as xr
 import importlib.metadata
 from dataclasses import dataclass, field
-from roms_tools.setup.grid import Grid
 from datetime import datetime
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
 from typing import Dict, Union, List
-from roms_tools.setup.regrid import LateralRegrid
+from roms_tools import Grid
+from roms_tools.regrid import LateralRegrid
+from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
@@ -24,9 +27,6 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.plot import _plot
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -434,21 +434,23 @@ class SurfaceForcing:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
         field = self.ds[var_name].isel(time=time)
+
         if self.use_dask:
             from dask.diagnostics import ProgressBar
 
             with ProgressBar():
                 field = field.load()
 
-        title = field.long_name
-
         field = field.where(self.target_coords["mask"])
 
-        field = field.assign_coords(
-            {"lon": self.target_coords["lon"], "lat": self.target_coords["lat"]}
-        )
+        lon_deg = self.target_coords["lon"]
+        lat_deg = self.target_coords["lat"]
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        # choose colorbar
+        title = field.long_name
+
         if var_name in ["uwnd", "vwnd"]:
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
@@ -465,12 +467,10 @@ class SurfaceForcing:
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
         _plot(
-            self.grid.ds,
             field=field,
-            straddle=self.grid.straddle,
             title=title,
-            kwargs=kwargs,
             c="g",
+            kwargs=kwargs,
         )
 
     def save(

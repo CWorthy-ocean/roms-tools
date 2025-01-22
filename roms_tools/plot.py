@@ -1,37 +1,35 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import xarray as xr
+import numpy as np
 
 
 def _plot(
-    grid_ds,
-    field=None,
+    field,
     depth_contours=False,
-    straddle=False,
     c="red",
     title="",
     with_dim_names=False,
+    plot_data=True,
     kwargs={},
 ):
     """Plots a grid or field on a map with optional depth contours.
 
     This function plots a map using Cartopy projections. It supports plotting a grid, a field, and adding depth contours if desired.
-    The projection can be customized, and the grid can be adjusted for domains straddling the 180° meridian.
 
     Parameters
     ----------
-    grid_ds : xarray.Dataset
-        The grid dataset containing coordinates (`lon_rho`, `lat_rho`).
     field : xarray.DataArray, optional
         The field to plot. If None, only the grid is plotted.
     depth_contours : bool, optional
         If True, adds depth contours to the plot.
-    straddle : bool, optional
-        If True, adjusts longitude values to straddle across the 180° meridian.
     c : str, optional
         Color for the boundary plot (default is 'red').
     title : str, optional
         Title of the plot.
+    plot_data : bool, optional
+        If True, plots the provided field data on the map. If False, only the grid
+        boundaries and optional depth contours are plotted. Default is True.
     kwargs : dict, optional
         Additional keyword arguments to pass to `pcolormesh` (e.g., colormap or color limits).
 
@@ -40,24 +38,15 @@ def _plot(
     The function raises a `NotImplementedError` if the domain contains the North or South Pole.
     """
 
-    if field is None:
-        lon_deg = grid_ds["lon_rho"]
-        lat_deg = grid_ds["lat_rho"]
+    field = field.squeeze()
+    lon_deg = field.lon
+    lat_deg = field.lat
 
-    else:
-
-        field = field.squeeze()
-        lon_deg = field.lon
-        lat_deg = field.lat
-
-        # check if North or South pole are in domain
-        if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-            raise NotImplementedError(
-                "Plotting is not implemented for the case that the domain contains the North or South pole."
-            )
-
-    if straddle:
-        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+    # check if North or South pole are in domain
+    if lat_deg.max().values > 89 or lat_deg.min().values < -89:
+        raise NotImplementedError(
+            "Plotting is not implemented for the case that the domain contains the North or South pole."
+        )
 
     trans = _get_projection(lon_deg, lat_deg)
 
@@ -71,7 +60,7 @@ def _plot(
             ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names
         )
 
-    if field is not None:
+    if plot_data:
         _add_field_to_ax(ax, lon_deg, lat_deg, field, depth_contours, kwargs=kwargs)
 
     ax.coastlines(
@@ -287,7 +276,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
     field.plot(**kwargs, **more_kwargs, ax=ax)
 
     if interface_depth is not None:
-        layer_key = "s_rho" if "s_rho" in interface_depth else "s_w"
+        layer_key = "s_rho" if "s_rho" in interface_depth.dims else "s_w"
 
         for i in range(len(interface_depth[layer_key])):
             ax.plot(
@@ -339,7 +328,8 @@ def _profile_plot(field, title="", ax=None):
 
 
 def _line_plot(field, title="", ax=None):
-    """Plots a line graph of the given field.
+    """Plots a line graph of the given field, with grey vertical bars where NaNs are
+    located.
 
     Parameters
     ----------
@@ -358,6 +348,22 @@ def _line_plot(field, title="", ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
     field.plot(ax=ax)
+
+    # Loop through the NaNs in the field and add grey vertical bars
+    nan_mask = np.isnan(field.values)
+    nan_indices = np.where(nan_mask)[0]
+
+    if len(nan_indices) > 0:
+        # Add grey vertical bars for each NaN region
+        start_idx = nan_indices[0]
+        for idx in range(1, len(nan_indices)):
+            if nan_indices[idx] != nan_indices[idx - 1] + 1:
+                ax.axvspan(start_idx, nan_indices[idx - 1] + 1, color="gray", alpha=0.3)
+                start_idx = nan_indices[idx]
+        # Add the last region of NaNs
+        ax.axvspan(start_idx, nan_indices[-1] + 1, color="gray", alpha=0.3)
+
+    # Set plot title and grid
     ax.set_title(title)
     ax.grid()
 

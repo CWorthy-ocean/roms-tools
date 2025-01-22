@@ -15,7 +15,7 @@ from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
     TPXODataset,
 )
-from roms_tools.setup.download import download_test_data
+from roms_tools.download import download_test_data
 import hashlib
 from pathlib import Path
 

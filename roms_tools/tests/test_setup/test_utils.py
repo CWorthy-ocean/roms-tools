@@ -1,7 +1,7 @@
 from roms_tools import Grid, BoundaryForcing
 from roms_tools.setup.utils import interpolate_from_climatology
 from roms_tools.setup.datasets import ERA5Correction
-from roms_tools.setup.download import download_test_data
+from roms_tools.download import download_test_data
 import xarray as xr
 import pytest
 from datetime import datetime

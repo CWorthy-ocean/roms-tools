@@ -5,11 +5,19 @@ import logging
 import importlib.metadata
 from typing import Dict, Union, List
 from dataclasses import dataclass, field
-from roms_tools.setup.grid import Grid
-from roms_tools.setup.regrid import LateralRegrid, VerticalRegrid
 from datetime import datetime
+import matplotlib.pyplot as plt
+from pathlib import Path
+from roms_tools import Grid
+from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.vertical_coordinate import compute_depth
+from roms_tools.plot import _section_plot, _line_plot
+from roms_tools.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    transpose_dimensions,
+)
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
-from roms_tools.setup.vertical_coordinate import compute_depth
 from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
@@ -17,20 +25,14 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
-    transpose_dimensions,
     one_dim_fill,
     nan_check,
     substitute_nans_by_fillvalue,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
     convert_to_roms_time,
     get_boundary_coords,
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.plot import _section_plot, _line_plot
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -827,11 +829,20 @@ class BoundaryForcing:
         var_name_wo_direction, direction = var_name.split("_")
         location = self.variable_info[var_name_wo_direction]["location"]
 
+        # Find correct mask
+        if location == "rho":
+            mask = self.grid.ds.mask_rho
+        elif location == "u":
+            mask = self.grid.ds.mask_u
+        elif location == "v":
+            mask = self.grid.ds.mask_v
+
+        mask = mask.isel(**self.bdry_coords[location][direction])
+
         if "s_rho" in field.dims:
             field = field.assign_coords(
                 {"layer_depth": self.grid.ds[f"layer_depth_{location}_{direction}"]}
             )
-        # chose colorbar
         if var_name.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
@@ -872,14 +883,14 @@ class BoundaryForcing:
                 interface_depth = None
 
             _section_plot(
-                field,
+                field.where(mask),
                 interface_depth=interface_depth,
                 title=title,
                 kwargs=kwargs,
                 ax=ax,
             )
         else:
-            _line_plot(field, title=title, ax=ax)
+            _line_plot(field.where(mask), title=title, ax=ax)
 
     def save(
         self,

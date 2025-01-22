@@ -829,6 +829,16 @@ class BoundaryForcing:
         var_name_wo_direction, direction = var_name.split("_")
         location = self.variable_info[var_name_wo_direction]["location"]
 
+        # Find correct mask
+        if location == "rho":
+            mask = self.grid.ds.mask_rho
+        elif location == "u":
+            mask = self.grid.ds.mask_u
+        elif location == "v":
+            mask = self.grid.ds.mask_v
+
+        mask = mask.isel(**self.bdry_coords[location][direction])
+
         if "s_rho" in field.dims:
             field = field.assign_coords(
                 {"layer_depth": self.grid.ds[f"layer_depth_{location}_{direction}"]}
@@ -873,14 +883,14 @@ class BoundaryForcing:
                 interface_depth = None
 
             _section_plot(
-                field,
+                field.where(mask),
                 interface_depth=interface_depth,
                 title=title,
                 kwargs=kwargs,
                 ax=ax,
             )
         else:
-            _line_plot(field, title=title, ax=ax)
+            _line_plot(field.where(mask), title=title, ax=ax)
 
     def save(
         self,

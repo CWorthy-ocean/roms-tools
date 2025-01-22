@@ -1079,22 +1079,20 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
 
         grid_yaml_data = {**parent_grid_yaml_data, **child_grid_yaml_data}
 
-    # Ensure forcing_object.source.path is a string (convert if it's a pathlib object)
-    if (
-        hasattr(forcing_object, "source")
-        and forcing_object.source is not None
-        and "path" in forcing_object.source
-    ):
-        forcing_object.source["path"] = str(forcing_object.source["path"])
-    if (
-        hasattr(forcing_object, "bgc_source")
-        and forcing_object.bgc_source is not None
-        and "path" in forcing_object.bgc_source
-    ):
-        forcing_object.bgc_source["path"] = str(forcing_object.bgc_source["path"])
+    # Step 2: Ensure Paths are Strings
+    def ensure_paths_are_strings(obj, key):
+        attr = getattr(obj, key, None)
+        if attr is not None and "path" in attr:
+            paths = attr["path"]
+            if isinstance(paths, list):
+                attr["path"] = [str(p) if isinstance(p, Path) else p for p in paths]
+            elif isinstance(paths, Path):
+                attr["path"] = str(paths)
 
-    # Step 2: Get ROMS Tools version
-    # Fetch the version of the 'roms-tools' package for inclusion in the YAML header
+    ensure_paths_are_strings(forcing_object, "source")
+    ensure_paths_are_strings(forcing_object, "bgc_source")
+
+    # Step 3: Get ROMS Tools version
     try:
         roms_tools_version = importlib.metadata.version("roms-tools")
     except importlib.metadata.PackageNotFoundError:
@@ -1103,8 +1101,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     # Create YAML header with version information
     header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
 
-    # Step 3: Prepare Forcing Data
-    # Prepare the forcing object fields, excluding 'grid' and 'ds'
+    # Step 4: Prepare Forcing Data
     forcing_data = {}
     field_names = [field.name for field in fields(forcing_object)]
     filtered_field_names = [
@@ -1133,14 +1130,13 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         # Add the field and its value to the forcing_data dictionary
         forcing_data[field_name] = value
 
-    # Step 4: Combine Grid and Forcing Data
-    # Combine grid and forcing data into a single dictionary for the final YAML content
+    # Step 5: Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {
         **grid_yaml_data,  # Add the grid data to the final YAML structure
         forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
     }
 
-    # Step 5: Write to YAML file
+    # Step 6: Write to YAML file
     with filepath.open("w") as file:
         # Write the header first
         file.write(header)
@@ -1186,6 +1182,8 @@ def _from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, An
     ValueError
         If no configuration for the specified class name is found in the YAML file.
     """
+    # Ensure filepath is a Path object
+    filepath = Path(filepath)
 
     # Read the entire file content
     with filepath.open("r") as file:

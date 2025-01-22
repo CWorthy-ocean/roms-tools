@@ -298,4 +298,9 @@ def compute_depth_coordinates(
         vertical_dim = "s_rho" if "s_rho" in depth.dims else "s_w"
         depth = depth.isel({vertical_dim: s})
 
+    # Add metadata
+    depth.attrs.update(
+        {"long_name": f"{depth_type} depth at {location}-points", "units": "m"}
+    )
+
     return depth

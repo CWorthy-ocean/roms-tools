@@ -58,6 +58,16 @@ Nesting
 
    roms_tools.Nesting
 
+Analyzing ROMS output
+----------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.ROMSOutput
+
+=======
+
 =======
 
 Utilities

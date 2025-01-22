@@ -8,18 +8,24 @@ from roms_tools import Grid, ROMSOutput
 from roms_tools.download import download_test_data
 
 
-def test_load_model_output_file(use_dask):
+@pytest.fixture
+def roms_output_from_restart_file(use_dask):
+
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
 
     # Single file
-    output = ROMSOutput(
+    return ROMSOutput(
         grid=grid,
         path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
         type="restart",
         use_dask=use_dask,
     )
-    assert isinstance(output.ds, xr.Dataset)
+
+
+def test_load_model_output_file(roms_output_from_restart_file, use_dask):
+
+    assert isinstance(roms_output_from_restart_file.ds, xr.Dataset)
 
 
 def test_load_model_output_directory(use_dask):
@@ -227,3 +233,37 @@ def test_that_coordinates_are_added(use_dask):
     assert "abs_time" in output.ds.coords
     assert "lat_rho" in output.ds.coords
     assert "lon_rho" in output.ds.coords
+
+
+def test_plot(roms_output_from_restart_file, use_dask):
+
+    kwargs = {}
+    for var_name in ["temp", "u", "v"]:
+        roms_output_from_restart_file.plot(var_name, time=0, s=-1, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, eta=0, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, xi=0, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, eta=0, xi=0, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, s=-1, eta=0, **kwargs)
+
+    kwargs = {"depth_contours": True, "layer_contours": True}
+    for var_name in ["temp", "u", "v"]:
+        roms_output_from_restart_file.plot(var_name, time=0, s=-1, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, eta=0, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, xi=0, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, eta=0, xi=0, **kwargs)
+        roms_output_from_restart_file.plot(var_name, time=0, s=-1, eta=0, **kwargs)
+
+    roms_output_from_restart_file.plot("zeta", time=0, **kwargs)
+    roms_output_from_restart_file.plot("zeta", time=0, eta=0, **kwargs)
+    roms_output_from_restart_file.plot("zeta", time=0, xi=0, **kwargs)
+
+
+def test_plot_errors(roms_output_from_restart_file, use_dask):
+    with pytest.raises(ValueError, match="Invalid time index"):
+        roms_output_from_restart_file.plot("temp", time=10, s=-1)
+    with pytest.raises(ValueError, match="Invalid input"):
+        roms_output_from_restart_file.plot("temp", time=0)
+    with pytest.raises(ValueError, match="Ambiguous input"):
+        roms_output_from_restart_file.plot("temp", time=0, s=-1, eta=0, xi=0)
+    with pytest.raises(ValueError, match="Conflicting input"):
+        roms_output_from_restart_file.plot("zeta", time=0, eta=0, xi=0)

@@ -606,18 +606,24 @@ class InitialConditions:
             If the field specified by `var_name` is 2D and both `eta` and `xi` are specified.
         """
 
-        if len(self.ds[var_name].squeeze().dims) == 3 and not any(
-            [s is not None, eta is not None, xi is not None]
-        ):
+        field = self.ds[var_name].squeeze()
+
+        if len(field.dims) == 3:
+            if not any([s is not None, eta is not None, xi is not None]):
+                raise ValueError(
+                    "Invalid input: For 3D fields, you must specify at least one of the dimensions 's', 'eta', or 'xi'."
+                )
+            if all([s is not None, eta is not None, xi is not None]):
+                raise ValueError(
+                    "Ambiguous input: For 3D fields, specify at most two of 's', 'eta', or 'xi'. Specifying all three is not allowed."
+                )
+
+        if len(field.dims) == 2 and all([eta is not None, xi is not None]):
             raise ValueError(
-                "For 3D fields, at least one of s, eta, or xi must be specified."
+                "Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both."
             )
 
-        if len(self.ds[var_name].squeeze().dims) == 2 and all(
-            [eta is not None, xi is not None]
-        ):
-            raise ValueError("For 2D fields, specify either eta or xi, not both.")
-
+        # Load the data
         if self.use_dask:
             from dask.diagnostics import ProgressBar
 
@@ -626,68 +632,72 @@ class InitialConditions:
 
         field = self.ds[var_name].squeeze()
 
-        # get correct mask and horizontal coordinates
+        # Get correct mask and horizontal coordinates
         if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            mask = self.grid.ds.mask_rho
-            lat_deg = self.grid.ds.lat_rho
-            lon_deg = self.grid.ds.lon_rho
-
+            loc = "rho"
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            mask = self.grid.ds.mask_u
-            lat_deg = self.grid.ds.lat_u
-            lon_deg = self.grid.ds.lon_u
+            loc = "u"
 
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            mask = self.grid.ds.mask_v
-            lat_deg = self.grid.ds.lat_v
-            lon_deg = self.grid.ds.lon_v
+            loc = "v"
         else:
             ValueError("provided field does not have two horizontal dimension")
+
+        mask = self.grid.ds[f"mask_{loc}"]
+        lat_deg = self.grid.ds[f"lat_{loc}"]
+        lon_deg = self.grid.ds[f"lon_{loc}"]
 
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        # Retrieve depth coordinates. Note that `layer_depth_rho` has already been
-        # computed during `__post_init__`. Similarly, `layer_depth_[u/v]` has also been
-        # computed if the type is `physics` (i.e., when velocity fields are present).
-        # In other words, if a field exists on a u-grid or v-grid, the corresponding
-        # layer depths have already been pre-computed.
+        # Retrieve depth coordinates
         if s is not None:
             layer_contours = False
-
-        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            if layer_contours:
-                if "interface_depth_rho" in self.grid.ds:
-                    interface_depth = self.grid.ds.interface_depth_rho
-                else:
+        # Note that `layer_depth_{loc}` has already been computed during `__post_init__`.
+        layer_depth = self.grid.ds[f"layer_depth_{loc}"]
+        if layer_contours:
+            if f"interface_depth_{loc}" not in self.grid.ds:
+                if loc == "rho":
                     self.get_vertical_coordinates(
                         type="interface", additional_locations=[]
                     )
-            layer_depth = self.grid.ds.layer_depth_rho
-
-        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            if layer_contours:
-                if "interface_depth_u" in self.grid.ds:
-                    interface_depth = self.grid.ds.interface_depth_u
                 else:
                     self.get_vertical_coordinates(
                         type="interface", additional_locations=["u", "v"]
                     )
-            layer_depth = self.grid.ds.layer_depth_u
-
-        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            if layer_contours:
-                if "interface_depth_v" in self.grid.ds:
-                    interface_depth = self.grid.ds.interface_depth_v
-                else:
-                    self.get_vertical_coordinates(
-                        type="interface", additional_locations=["u", "v"]
-                    )
-            layer_depth = self.grid.ds.layer_depth_v
+            interface_depth = self.grid.ds[f"interface_depth_{loc}"]
+        else:
+            interface_depth = None
 
         # Slice the field as desired
+        def _slice_and_assign(
+            field,
+            mask,
+            layer_depth,
+            interface_depth,
+            title,
+            dim_name,
+            dim_values,
+            idx,
+            layer_contours=False,
+        ):
+            if dim_name in field.dims:
+                title = title + f", {dim_name} = {dim_values[idx].item()}"
+                field = field.isel(**{dim_name: idx})
+                mask = mask.isel(**{dim_name: idx})
+                layer_depth = layer_depth.isel(**{dim_name: idx})
+                if layer_contours:
+                    interface_depth = interface_depth.isel(**{dim_name: idx})
+                if "s_rho" in field.dims:
+                    field = field.assign_coords({"layer_depth": layer_depth})
+            else:
+                raise ValueError(
+                    f"None of the expected dimensions ({dim_name}) found in field."
+                )
+            return field, mask, layer_depth, interface_depth, title
+
         title = field.long_name
         if s is not None:
             title = title + f", s_rho = {field.s_rho[s].item()}"
@@ -698,47 +708,30 @@ class InitialConditions:
             depth_contours = False
 
         if eta is not None:
-            if "eta_rho" in field.dims:
-                title = title + f", eta_rho = {field.eta_rho[eta].item()}"
-                field = field.isel(eta_rho=eta)
-                layer_depth = layer_depth.isel(eta_rho=eta)
-                if layer_contours:
-                    interface_depth = interface_depth.isel(eta_rho=eta)
-                if "s_rho" in field.dims:
-                    field = field.assign_coords({"layer_depth": layer_depth})
-            elif "eta_v" in field.dims:
-                title = title + f", eta_v = {field.eta_v[eta].item()}"
-                field = field.isel(eta_v=eta)
-                layer_depth = layer_depth.isel(eta_v=eta)
-                if layer_contours:
-                    interface_depth = interface_depth.isel(eta_v=eta)
-                if "s_rho" in field.dims:
-                    field = field.assign_coords({"layer_depth": layer_depth})
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (eta_rho, eta_v) found in ds[{var_name}]."
-                )
+            field, mask, layer_depth, interface_depth, title = _slice_and_assign(
+                field,
+                mask,
+                layer_depth,
+                interface_depth,
+                title,
+                "eta_rho" if "eta_rho" in field.dims else "eta_v",
+                field.eta_rho if "eta_rho" in field.dims else field.eta_v,
+                eta,
+                layer_contours,
+            )
+
         if xi is not None:
-            if "xi_rho" in field.dims:
-                title = title + f", xi_rho = {field.xi_rho[xi].item()}"
-                field = field.isel(xi_rho=xi)
-                layer_depth = layer_depth.isel(xi_rho=xi)
-                if layer_contours:
-                    interface_depth = interface_depth.isel(xi_rho=xi)
-                if "s_rho" in field.dims:
-                    field = field.assign_coords({"layer_depth": layer_depth})
-            elif "xi_u" in field.dims:
-                title = title + f", xi_u = {field.xi_u[xi].item()}"
-                field = field.isel(xi_u=xi)
-                layer_depth = layer_depth.isel(xi_u=xi)
-                if layer_contours:
-                    interface_depth = interface_depth.isel(xi_u=xi)
-                if "s_rho" in field.dims:
-                    field = field.assign_coords({"layer_depth": layer_depth})
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions (xi_rho, xi_u) found in ds[{var_name}]."
-                )
+            field, mask, layer_depth, interface_depth, title = _slice_and_assign(
+                field,
+                mask,
+                layer_depth,
+                interface_depth,
+                title,
+                "xi_rho" if "xi_rho" in field.dims else "xi_u",
+                field.xi_rho if "xi_rho" in field.dims else field.xi_u,
+                xi,
+                layer_contours,
+            )
 
         # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
@@ -776,7 +769,7 @@ class InitialConditions:
 
             if len(field.dims) == 2:
                 _section_plot(
-                    field,
+                    field.where(mask),
                     interface_depth=interface_depth,
                     title=title,
                     kwargs=kwargs,
@@ -784,9 +777,9 @@ class InitialConditions:
                 )
             else:
                 if "s_rho" in field.dims:
-                    _profile_plot(field, title=title, ax=ax)
+                    _profile_plot(field.where(mask), title=title, ax=ax)
                 else:
-                    _line_plot(field, title=title, ax=ax)
+                    _line_plot(field.where(mask), title=title, ax=ax)
 
     def save(
         self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None

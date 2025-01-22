@@ -12,6 +12,8 @@
 
 ### Bugfixes
 
+* Correctly handle list of files in `source` and `bgc_source` in YAML files ([#218](https://github.com/CWorthy-ocean/roms-tools/pull/218))
+
 ## v2.2.1
 
 ### Bugfixes

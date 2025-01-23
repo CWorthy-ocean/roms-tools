@@ -3,7 +3,6 @@ import numpy as np
 from typing import Union, Any, Dict, Type
 import pandas as pd
 import cftime
-from roms_tools.utils import partition
 from pathlib import Path
 from datetime import datetime
 from dataclasses import fields, asdict
@@ -568,8 +567,8 @@ def group_by_year(ds, filepath):
     return dataset_list, output_filenames
 
 
-def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
-    """Save the list of datasets to netCDF4 files, with optional spatial partitioning.
+def save_datasets(dataset_list, output_filenames):
+    """Save the list of datasets to netCDF4 files.
 
     Parameters
     ----------
@@ -577,10 +576,6 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
         List of datasets to be saved.
     output_filenames : list
         List of filenames for the output files.
-    np_eta : int, optional
-        The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
-    np_xi : int, optional
-        The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
 
     Returns
     -------
@@ -590,33 +585,10 @@ def save_datasets(dataset_list, output_filenames, np_eta=None, np_xi=None):
 
     saved_filenames = []
 
-    if np_eta is None and np_xi is None:
-        # Save the dataset as a single file
-        output_filenames = [f"{filename}.nc" for filename in output_filenames]
-        xr.save_mfdataset(dataset_list, output_filenames)
+    output_filenames = [f"{filename}.nc" for filename in output_filenames]
+    xr.save_mfdataset(dataset_list, output_filenames)
 
-        saved_filenames.extend(Path(f) for f in output_filenames)
-
-    else:
-        # Partition the dataset and save each partition as a separate file
-        np_eta = np_eta or 1
-        np_xi = np_xi or 1
-
-        partitioned_datasets = []
-        partitioned_filenames = []
-        for dataset, base_filename in zip(dataset_list, output_filenames):
-            partition_indices, partitions = partition(
-                dataset, np_eta=np_eta, np_xi=np_xi
-            )
-            partition_filenames = [
-                f"{base_filename}.{index}.nc" for index in partition_indices
-            ]
-            partitioned_datasets.extend(partitions)
-            partitioned_filenames.extend(partition_filenames)
-
-        xr.save_mfdataset(partitioned_datasets, partitioned_filenames)
-
-        saved_filenames.extend(Path(f) for f in partitioned_filenames)
+    saved_filenames.extend(Path(f) for f in output_filenames)
 
     return saved_filenames
 

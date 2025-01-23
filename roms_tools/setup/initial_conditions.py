@@ -781,36 +781,18 @@ class InitialConditions:
                 else:
                     _line_plot(field.where(mask), title=title, ax=ax)
 
-    def save(
-        self, filepath: Union[str, Path], np_eta: int = None, np_xi: int = None
-    ) -> None:
-        """Save the initial conditions information to a netCDF4 file.
-
-        This method supports saving the dataset in two modes:
-
-          1. **Single File Mode (default)**:
-
-            If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file
-            with the base filename specified by `filepath.nc`.
-
-          2. **Partitioned Mode**:
-
-            - If either `np_eta` or `np_xi` is specified, the dataset is divided into spatial tiles along the eta-axis and xi-axis.
-            - Each spatial tile is saved as a separate netCDF4 file.
+    def save(self, filepath: Union[str, Path]) -> None:
+        """Save the initial conditions information to one netCDF4 file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path or filename where the dataset should be saved.
-        np_eta : int, optional
-            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
-        np_xi : int, optional
-            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
 
         Returns
         -------
-        List[Path]
-            A list of Path objects for the filenames that were saved.
+        Path
+            A `Path` object representing the location of the saved file.
         """
 
         # Ensure filepath is a Path object
@@ -820,18 +802,10 @@ class InitialConditions:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        if self.use_dask:
-            from dask.diagnostics import ProgressBar
-
-            with ProgressBar():
-                self.ds.load()
-
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(
-            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
-        )
+        saved_filenames = save_datasets(dataset_list, output_filenames)
 
         return saved_filenames
 

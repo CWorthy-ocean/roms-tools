@@ -512,7 +512,9 @@ class SurfaceForcing:
             dataset_list = [self.ds]
             output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(dataset_list, output_filenames)
+        saved_filenames = save_datasets(
+            dataset_list, output_filenames, use_dask=self.use_dask
+        )
 
         return saved_filenames
 

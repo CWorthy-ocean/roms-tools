@@ -1,6 +1,18 @@
 # Release notes
 
-## v2.3.0 (unreleased)
+## v2.4.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v2.3.0
 
 ### New Features
 
@@ -8,9 +20,7 @@
 
 ### Breaking Changes
 
-### Internal Changes
-
-### Documentation
+* Remove support for partitioning files upon saving ([#221](https://github.com/CWorthy-ocean/roms-tools/pull/221))
 
 ### Bugfixes
 

@@ -6,6 +6,8 @@
 
 ### Breaking Changes
 
+* Remove support for partitioning files upon saving ([#221](https://github.com/CWorthy-ocean/roms-tools/pull/221))
+
 ### Internal Changes
 
 ### Documentation
@@ -17,10 +19,6 @@
 ### New Features
 
 * `ROMSOutput` class for analyzing ROMS model output ([#217](https://github.com/CWorthy-ocean/roms-tools/pull/217))
-
-### Breaking Changes
-
-* Remove support for partitioning files upon saving ([#221](https://github.com/CWorthy-ocean/roms-tools/pull/221))
 
 ### Bugfixes
 

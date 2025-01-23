@@ -567,7 +567,7 @@ def group_by_year(ds, filepath):
     return dataset_list, output_filenames
 
 
-def save_datasets(dataset_list, output_filenames):
+def save_datasets(dataset_list, output_filenames, use_dask=False):
     """Save the list of datasets to netCDF4 files.
 
     Parameters
@@ -576,6 +576,8 @@ def save_datasets(dataset_list, output_filenames):
         List of datasets to be saved.
     output_filenames : list
         List of filenames for the output files.
+    use_dask : bool, optional
+        Whether to use Dask diagnostics (e.g., progress bars) when saving the datasets, by default False.
 
     Returns
     -------
@@ -586,7 +588,14 @@ def save_datasets(dataset_list, output_filenames):
     saved_filenames = []
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
-    xr.save_mfdataset(dataset_list, output_filenames)
+
+    if use_dask:
+        from dask.diagnostics import ProgressBar
+
+        with ProgressBar():
+            xr.save_mfdataset(dataset_list, output_filenames)
+    else:
+        xr.save_mfdataset(dataset_list, output_filenames)
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

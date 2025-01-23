@@ -266,7 +266,6 @@ def test_river_forcing_save(river_forcing_with_bgc, tmp_path):
             [tmp_path / grid_file_str, str(tmp_path / grid_file_str)],
         ):  # test for Path object and str
 
-            # Test saving without partitioning
             saved_filenames = river_forcing_with_bgc.save(filepath, grid_filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
@@ -277,21 +276,6 @@ def test_river_forcing_save(river_forcing_with_bgc, tmp_path):
             # Clean up the .nc file
             filepath.unlink()
             grid_filepath.unlink()
-
-            # Test saving with partitioning
-            saved_filenames = river_forcing_with_bgc.save(
-                filepath, grid_filepath, np_eta=3, np_xi=3
-            )
-
-            filepath_str = str(filepath.with_suffix(""))
-            grid_filepath_str = str(grid_filepath.with_suffix(""))
-            expected_filepath_list = [
-                Path(filepath_str + f".{index}.nc") for index in range(9)
-            ] + [Path(grid_filepath_str + f".{index}.nc") for index in range(9)]
-            assert saved_filenames == expected_filepath_list
-            for expected_filepath in expected_filepath_list:
-                assert expected_filepath.exists()
-                expected_filepath.unlink()
 
 
 @pytest.mark.parametrize(

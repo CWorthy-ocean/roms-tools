@@ -417,7 +417,6 @@ class TestNesting:
                 [tmp_path / grid_file_str, str(tmp_path / grid_file_str)],
             ):  # test for Path object and str
 
-                # Test saving without partitioning
                 saved_filenames = nesting.save(filepath, grid_filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
@@ -428,21 +427,6 @@ class TestNesting:
                 # Clean up the .nc file
                 filepath.unlink()
                 grid_filepath.unlink()
-
-                # Test saving with partitioning
-                saved_filenames = nesting.save(
-                    filepath, grid_filepath, np_eta=5, np_xi=5
-                )
-
-                filepath_str = str(filepath.with_suffix(""))
-                grid_filepath_str = str(grid_filepath.with_suffix(""))
-                expected_filepath_list = [
-                    Path(filepath_str + f".{index}.nc") for index in range(25)
-                ] + [Path(grid_filepath_str + f".{index}.nc") for index in range(25)]
-                assert saved_filenames == expected_filepath_list
-                for expected_filepath in expected_filepath_list:
-                    assert expected_filepath.exists()
-                    expected_filepath.unlink()
 
     def test_roundtrip_yaml(self, nesting, tmp_path):
         """Test that creating a Nesting object, saving its parameters to yaml file, and

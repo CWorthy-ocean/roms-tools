@@ -1,16 +1,24 @@
 # Release notes
 
-## v2.3.0 (unreleased)
+## v2.4.0 (unreleased)
 
 ### New Features
 
-* `ROMSOutput` class for analyzing ROMS model output ([#217](https://github.com/CWorthy-ocean/roms-tools/pull/217))
-
 ### Breaking Changes
+
+* Remove support for partitioning files upon saving ([#221](https://github.com/CWorthy-ocean/roms-tools/pull/221))
 
 ### Internal Changes
 
 ### Documentation
+
+### Bugfixes
+
+## v2.3.0
+
+### New Features
+
+* `ROMSOutput` class for analyzing ROMS model output ([#217](https://github.com/CWorthy-ocean/roms-tools/pull/217))
 
 ### Bugfixes
 

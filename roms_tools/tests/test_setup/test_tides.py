@@ -185,7 +185,6 @@ def test_tidal_forcing_save(tidal_forcing, tmp_path):
             str(tmp_path / file_str),
         ]:  # test for Path object and str
 
-            # Test saving without partitioning
             saved_filenames = tidal_forcing.save(filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
@@ -193,18 +192,6 @@ def test_tidal_forcing_save(tidal_forcing, tmp_path):
             assert filepath.exists()
             # Clean up the .nc file
             filepath.unlink()
-
-            # Test saving with partitioning
-            saved_filenames = tidal_forcing.save(filepath, np_eta=3, np_xi=3)
-
-            filepath_str = str(filepath.with_suffix(""))
-            expected_filepath_list = [
-                Path(filepath_str + f".{index}.nc") for index in range(9)
-            ]
-            assert saved_filenames == expected_filepath_list
-            for expected_filepath in expected_filepath_list:
-                assert expected_filepath.exists()
-                expected_filepath.unlink()
 
 
 def test_roundtrip_yaml(tidal_forcing, tmp_path, use_dask):

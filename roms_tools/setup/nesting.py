@@ -114,36 +114,17 @@ class Nesting:
         self,
         filepath: Union[str, Path],
         filepath_child_grid: Union[str, Path],
-        np_eta: int = None,
-        np_xi: int = None,
     ) -> None:
         """Save the nesting and child grid file to netCDF4 files. The child grid file is
         required because the topography and mask of the child grid has been modified.
-
-        This method allows saving the nesting and child grid data either each as a single file or each partitioned into multiple files, based on the provided options. The dataset can be saved in two modes:
-
-        1. **Single File Mode (default)**:
-            - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file.
-            - The file is named based on the provided `filepath`, with `.nc` automatically appended to the filename.
-
-        2. **Partitioned Mode**:
-            - If either `np_eta` or `np_xi` is specified, the dataset is partitioned spatially along the `eta` and `xi` axes into tiles.
-            - Each tile is saved as a separate netCDF4 file. Filenames will be modified with an index to represent each partition, e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
-            If partitioning is used, additional indices will be appended to the filenames, e.g., `"filepath.0.nc"`, `"filepath.1.nc"`, etc.
 
         filepath_child_grid : Union[str, Path]
             The base path and filename for saving the childe grid file.
-
-        np_eta : int, optional
-            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed along the `eta` axis.
-
-        np_xi : int, optional
-            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed along the `xi` axis.
 
         Returns
         -------
@@ -164,9 +145,7 @@ class Nesting:
         dataset_list = [self.ds, self.child_grid.ds]
         output_filenames = [str(filepath), str(filepath_child_grid)]
 
-        saved_filenames = save_datasets(
-            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
-        )
+        saved_filenames = save_datasets(dataset_list, output_filenames)
 
         return saved_filenames
 

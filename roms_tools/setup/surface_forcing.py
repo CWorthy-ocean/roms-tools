@@ -476,42 +476,27 @@ class SurfaceForcing:
     def save(
         self,
         filepath: Union[str, Path],
-        np_eta: int = None,
-        np_xi: int = None,
         group: bool = False,
     ) -> None:
         """Save the surface forcing fields to one or more netCDF4 files.
 
-        This method saves the dataset either as a single file or as multiple files depending on the partitioning and grouping options.
-        The dataset can be saved in two modes:
-
-        1. **Single File Mode (default)**:
-            - If both `np_eta` and `np_xi` are `None`, the entire dataset is saved as a single netCDF4 file.
-            - The file is named based on the `filepath`, with `.nc` automatically appended.
-
-        2. **Partitioned Mode**:
-            - If either `np_eta` or `np_xi` is specified, the dataset is partitioned into spatial tiles along the `eta` and `xi` axes.
-            - Each tile is saved as a separate netCDF4 file, and filenames are modified with an index (e.g., `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`).
-
-        Additionally, if `group` is set to `True`, the dataset is first grouped into temporal subsets, resulting in multiple grouped files before partitioning and saving.
+        This method saves the dataset to disk as either a single netCDF4 file or multiple files, depending on the `group` parameter.
+        If `group` is `True`, the dataset is divided into subsets (e.g., monthly or yearly) based on the temporal frequency
+        of the data, and each subset is saved to a separate file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
-            The base path and filename for the output files. The format of the filenames depends on whether partitioning is used
-            and the temporal range of the data. For partitioned datasets, files will be named with an additional index, e.g.,
-            `"filepath_YYYYMM.0.nc"`, `"filepath_YYYYMM.1.nc"`, etc.
-        np_eta : int, optional
-            The number of partitions along the `eta` direction. If `None`, no spatial partitioning is performed.
-        np_xi : int, optional
-            The number of partitions along the `xi` direction. If `None`, no spatial partitioning is performed.
-        group: bool, optional
-            If `True`, groups the dataset into multiple files based on temporal data frequency. Defaults to `False`.
+            The base path and filename for the output file(s). If `group` is `True`, the filenames will include additional
+            time-based information (e.g., year or month) to distinguish the subsets.
+        group : bool, optional
+            Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `False`, meaning the
+            dataset is saved as a single file.
 
         Returns
         -------
         List[Path]
-            A list of Path objects for the filenames that were saved.
+            A list of `Path` objects representing the filenames of the saved file(s).
         """
 
         # Ensure filepath is a Path object
@@ -521,21 +506,13 @@ class SurfaceForcing:
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
 
-        if self.use_dask:
-            from dask.diagnostics import ProgressBar
-
-            with ProgressBar():
-                self.ds.load()
-
         if group:
             dataset_list, output_filenames = group_dataset(self.ds, str(filepath))
         else:
             dataset_list = [self.ds]
             output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(
-            dataset_list, output_filenames, np_eta=np_eta, np_xi=np_xi
-        )
+        saved_filenames = save_datasets(dataset_list, output_filenames)
 
         return saved_filenames
 

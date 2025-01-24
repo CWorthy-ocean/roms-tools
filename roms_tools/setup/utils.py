@@ -130,8 +130,7 @@ def interpolate_from_climatology(
     time_dim_name: str,
     time: Union[xr.DataArray, pd.DatetimeIndex],
 ) -> Union[xr.DataArray, xr.Dataset]:
-    """
-    Temporally interpolates a field based on specified time points.
+    """Temporally interpolates a field based on specified time points.
 
     This function performs temporal interpolation on the input `field` to match the provided `time` values.
     If the input `field` is an `xarray.Dataset`, the interpolation is applied to all its data variables individually.
@@ -161,8 +160,8 @@ def interpolate_from_climatology(
       For example, you can preprocess the time as follows:
 
       >>> field["time"] = field["time"].dt.dayofyear
-
     """
+
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
 
         if isinstance(time, xr.DataArray):

@@ -238,14 +238,14 @@ class SurfaceForcing:
                 "qair": {**default_info, "validate": True},
                 "rain": {**default_info, "validate": False},
                 "uwnd": {
-                    "location": "u",
+                    "location": "rho",
                     "is_vector": True,
                     "vector_pair": "vwnd",
                     "is_3d": False,
                     "validate": True,
                 },
                 "vwnd": {
-                    "location": "v",
+                    "location": "rho",
                     "is_vector": True,
                     "vector_pair": "uwnd",
                     "is_3d": False,
@@ -357,12 +357,8 @@ class SurfaceForcing:
 
         for var_name in ds.data_vars:
             if self.variable_info[var_name]["validate"]:
-                if self.variable_info[var_name]["location"] == "rho":
-                    mask = self.target_coords["mask"]
-                elif self.variable_info[var_name]["location"] == "u":
-                    mask = self.target_coords["mask_u"]
-                elif self.variable_info[var_name]["location"] == "v":
-                    mask = self.target_coords["mask_v"]
+                # all variables are at rho-points
+                mask = self.target_coords["mask"]
                 nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):

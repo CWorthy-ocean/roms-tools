@@ -130,25 +130,39 @@ def interpolate_from_climatology(
     time_dim_name: str,
     time: Union[xr.DataArray, pd.DatetimeIndex],
 ) -> Union[xr.DataArray, xr.Dataset]:
-    """Interpolates the given field temporally based on the specified time points.
+    """
+    Temporally interpolates a field based on specified time points.
 
-    If `field` is an xarray.Dataset, this function applies the interpolation to all data variables in the dataset.
+    This function performs temporal interpolation on the input `field` to match the provided `time` values.
+    If the input `field` is an `xarray.Dataset`, the interpolation is applied to all its data variables individually.
 
     Parameters
     ----------
     field : xarray.DataArray or xarray.Dataset
-        The field data to be interpolated. Can be a single DataArray or a Dataset.
+        The input field to be interpolated.
+        - If `field` is an `xarray.DataArray`, it should have a time dimension identified by `time_dim_name`.
+        - If `field` is an `xarray.Dataset`, all variables within the dataset are interpolated along the specified time dimension.
+        The time dimension is assumed to represent `day_of_year` for climatological purposes.
     time_dim_name : str
-        The name of the dimension in `field` that represents time.
+        The name of the time dimension in the `field`. This dimension is used for interpolation.
     time : xarray.DataArray or pandas.DatetimeIndex
-        The target time points for interpolation.
+        The target time points for interpolation. The time values should be compatible with the time format used in the `field`.
 
     Returns
     -------
     xarray.DataArray or xarray.Dataset
-        The field values interpolated to the specified time points. The type matches the input type.
-    """
+        The interpolated field, with the same type as the input (`xarray.DataArray` or `xarray.Dataset`),
+        but aligned to the specified `time` values.
 
+    Notes
+    -----
+    - The interpolation assumes the time dimension in `field` corresponds to `day_of_year`.
+      If the input time values are in a datetime format, ensure they are converted to `day_of_year` before calling this function.
+      For example, you can preprocess the time as follows:
+
+      >>> field["time"] = field["time"].dt.dayofyear
+
+    """
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
 
         if isinstance(time, xr.DataArray):
@@ -156,11 +170,11 @@ def interpolate_from_climatology(
             day_of_year = time.dt.dayofyear
         else:
             if np.size(time) == 1:
-                day_of_year = time.timetuple().tm_yday
+                # Convert single datetime64 object to pandas.Timestamp
+                day_of_year = pd.Timestamp(time).dayofyear
             else:
-                day_of_year = np.array([t.timetuple().tm_yday for t in time])
-
-        data_array[time_dim_name] = data_array[time_dim_name].dt.days
+                # Convert each datetime64 object in the array to pandas.Timestamp
+                day_of_year = np.array([pd.Timestamp(t).dayofyear for t in time])
 
         # Concatenate across the beginning and end of the year
         time_concat = xr.concat(

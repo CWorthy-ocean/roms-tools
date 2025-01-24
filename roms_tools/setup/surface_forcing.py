@@ -275,6 +275,8 @@ class SurfaceForcing:
             coords_correction, straddle=self.target_coords["straddle"]
         )
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
+        correction_data.ds["time"] = correction_data.ds["time"].dt.days
+
         correction_data.apply_lateral_fill()
         # regrid
         lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)

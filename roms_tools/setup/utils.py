@@ -200,6 +200,7 @@ def interpolate_from_climatology(
             for var, data_array in field.data_vars.items()
         }
         return xr.Dataset(interpolated_data_vars, attrs=field.attrs)
+
     else:
         raise TypeError("Input 'field' must be an xarray.DataArray or xarray.Dataset.")
 
@@ -633,8 +634,6 @@ def get_target_coords(grid, use_coarse_grid=False):
         mask = grid.ds.get("mask_coarse")
         if mask is not None:
             mask = mask.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
-            mask_u = interpolate_from_rho_to_u(mask, method="multiplicative")
-            mask_v = interpolate_from_rho_to_v(mask, method="multiplicative")
 
         lat_psi = grid.ds.get("lat_psi_coarse")
         lon_psi = grid.ds.get("lon_psi_coarse")
@@ -644,8 +643,6 @@ def get_target_coords(grid, use_coarse_grid=False):
         lon = grid.ds.lon_rho
         angle = grid.ds.angle
         mask = grid.ds.get("mask_rho")
-        mask_u = grid.ds.get("mask_u")
-        mask_v = grid.ds.get("mask_v")
         lat_psi = grid.ds.get("lat_psi")
         lon_psi = grid.ds.get("lon_psi")
 
@@ -668,8 +665,6 @@ def get_target_coords(grid, use_coarse_grid=False):
         "lon_psi": lon_psi,
         "angle": angle,
         "mask": mask,
-        "mask_u": mask_u,
-        "mask_v": mask_v,
         "straddle": straddle,
     }
 

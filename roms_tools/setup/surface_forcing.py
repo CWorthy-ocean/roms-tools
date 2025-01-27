@@ -284,17 +284,25 @@ class SurfaceForcing:
             correction_data.ds[correction_data.var_names["swr_corr"]]
         )
 
-        # Perform temporal interpolation for each time slice to enforce chunking in time.
-        # This reduces memory usage by processing one time step at a time.
-        # The interpolated slices are then concatenated along the "time" dimension.
-        corr_factor = xr.concat([
-            interpolate_from_climatology(
+        if self.use_dask:
+            # Perform temporal interpolation for each time slice to enforce chunking in time.
+            # This reduces memory usage by processing one time step at a time.
+            # The interpolated slices are then concatenated along the "time" dimension.
+            corr_factor = xr.concat(
+                [
+                    interpolate_from_climatology(
+                        corr_factor, correction_data.dim_names["time"], time=time
+                    )
+                    for time in processed_fields["swrad"].time
+                ],
+                dim="time",
+            )
+        else:
+            corr_factor = interpolate_from_climatology(
                 corr_factor,
                 correction_data.dim_names["time"],
-                time=time
+                time=processed_fields["swrad"].time,
             )
-            for time in processed_fields["swrad"].time
-        ], dim="time")
 
         processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
 

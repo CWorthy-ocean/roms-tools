@@ -272,6 +272,7 @@ def surface_forcing(request, use_dask):
         start_time=start_time,
         end_time=end_time,
         source={"name": "ERA5", "path": fname},
+        correct_radiation=False,
         use_dask=use_dask,
     )
 
@@ -301,6 +302,7 @@ def coarse_surface_forcing(request, use_dask):
         end_time=end_time,
         use_coarse_grid=True,
         source={"name": "ERA5", "path": fname},
+        correct_radiation=False,
         use_dask=use_dask,
     )
 

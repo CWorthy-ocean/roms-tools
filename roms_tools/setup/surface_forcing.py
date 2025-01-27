@@ -59,7 +59,7 @@ class SurfaceForcing:
           - "bgc": for biogeochemical forcing.
 
     correct_radiation : bool
-        Whether to correct shortwave radiation. Default is False.
+        Whether to correct shortwave radiation. Default is True.
     use_coarse_grid: bool
         Whether to interpolate to coarsened grid. Default is False.
     model_reference_date : datetime, optional
@@ -88,7 +88,7 @@ class SurfaceForcing:
     end_time: datetime
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
-    correct_radiation: bool = False
+    correct_radiation: bool = True 
     use_coarse_grid: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False

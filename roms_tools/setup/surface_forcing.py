@@ -266,7 +266,7 @@ class SurfaceForcing:
     def _apply_correction(self, processed_fields, data):
 
         correction_data = self._get_correction_data()
-        # choose same subdomain as forcing data so that we can use same mask
+        # Match subdomain to forcing data to reuse the mask
         coords_correction = {
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
@@ -278,12 +278,8 @@ class SurfaceForcing:
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 
         correction_data.apply_lateral_fill()
-        # regrid
-        lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
-        corr_factor = lateral_regrid.apply(
-            correction_data.ds[correction_data.var_names["swr_corr"]]
-        )
 
+        # Temporal interpolation: Perform before spatial regridding for better performance
         if self.use_dask:
             # Perform temporal interpolation for each time slice to enforce chunking in time.
             # This reduces memory usage by processing one time step at a time.
@@ -291,22 +287,27 @@ class SurfaceForcing:
             corr_factor = xr.concat(
                 [
                     interpolate_from_climatology(
-                        corr_factor, correction_data.dim_names["time"], time=time
+                        correction_data.ds[correction_data.var_names["swr_corr"]],
+                        correction_data.dim_names["time"],
+                        time=time,
                     )
                     for time in processed_fields["swrad"].time
                 ],
                 dim="time",
             )
         else:
+            # Interpolate across all time steps at once
             corr_factor = interpolate_from_climatology(
-                corr_factor,
+                correction_data.ds[correction_data.var_names["swr_corr"]],
                 correction_data.dim_names["time"],
                 time=processed_fields["swrad"].time,
             )
 
-        processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
+        # Spatial regridding
+        lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
+        corr_factor = lateral_regrid.apply(corr_factor)
 
-        del corr_factor
+        processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
 
         return processed_fields
 

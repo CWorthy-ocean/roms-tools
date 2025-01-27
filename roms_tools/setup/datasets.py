@@ -2058,6 +2058,7 @@ def _select_relevant_times(
                 )
             if not end_time:
                 # Interpolate from climatology for initial conditions
+                ds["time"] = ds["time"].dt.days
                 ds = interpolate_from_climatology(ds, time_dim, start_time)
         else:
             time_type = get_time_type(ds[time_dim])

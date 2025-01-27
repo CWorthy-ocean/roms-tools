@@ -130,23 +130,36 @@ def interpolate_from_climatology(
     time_dim_name: str,
     time: Union[xr.DataArray, pd.DatetimeIndex],
 ) -> Union[xr.DataArray, xr.Dataset]:
-    """Interpolates the given field temporally based on the specified time points.
+    """Temporally interpolates a field based on specified time points.
 
-    If `field` is an xarray.Dataset, this function applies the interpolation to all data variables in the dataset.
+    This function performs temporal interpolation on the input `field` to match the provided `time` values.
+    If the input `field` is an `xarray.Dataset`, the interpolation is applied to all its data variables individually.
 
     Parameters
     ----------
     field : xarray.DataArray or xarray.Dataset
-        The field data to be interpolated. Can be a single DataArray or a Dataset.
+        The input field to be interpolated.
+        - If `field` is an `xarray.DataArray`, it should have a time dimension identified by `time_dim_name`.
+        - If `field` is an `xarray.Dataset`, all variables within the dataset are interpolated along the specified time dimension.
+        The time dimension is assumed to represent `day_of_year` for climatological purposes.
     time_dim_name : str
-        The name of the dimension in `field` that represents time.
+        The name of the time dimension in the `field`. This dimension is used for interpolation.
     time : xarray.DataArray or pandas.DatetimeIndex
-        The target time points for interpolation.
+        The target time points for interpolation. The time values should be compatible with the time format used in the `field`.
 
     Returns
     -------
     xarray.DataArray or xarray.Dataset
-        The field values interpolated to the specified time points. The type matches the input type.
+        The interpolated field, with the same type as the input (`xarray.DataArray` or `xarray.Dataset`),
+        but aligned to the specified `time` values.
+
+    Notes
+    -----
+    - The interpolation assumes the time dimension in `field` corresponds to `day_of_year`.
+      If the input time values are in a datetime format, ensure they are converted to `day_of_year` before calling this function.
+      For example, you can preprocess the time as follows:
+
+      >>> field["time"] = field["time"].dt.dayofyear
     """
 
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
@@ -156,11 +169,11 @@ def interpolate_from_climatology(
             day_of_year = time.dt.dayofyear
         else:
             if np.size(time) == 1:
-                day_of_year = time.timetuple().tm_yday
+                # Convert single datetime64 object to pandas.Timestamp
+                day_of_year = pd.Timestamp(time).dayofyear
             else:
-                day_of_year = np.array([t.timetuple().tm_yday for t in time])
-
-        data_array[time_dim_name] = data_array[time_dim_name].dt.days
+                # Convert each datetime64 object in the array to pandas.Timestamp
+                day_of_year = np.array([pd.Timestamp(t).dayofyear for t in time])
 
         # Concatenate across the beginning and end of the year
         time_concat = xr.concat(
@@ -200,6 +213,7 @@ def interpolate_from_climatology(
             for var, data_array in field.data_vars.items()
         }
         return xr.Dataset(interpolated_data_vars, attrs=field.attrs)
+
     else:
         raise TypeError("Input 'field' must be an xarray.DataArray or xarray.Dataset.")
 
@@ -633,8 +647,6 @@ def get_target_coords(grid, use_coarse_grid=False):
         mask = grid.ds.get("mask_coarse")
         if mask is not None:
             mask = mask.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
-            mask_u = interpolate_from_rho_to_u(mask, method="multiplicative")
-            mask_v = interpolate_from_rho_to_v(mask, method="multiplicative")
 
         lat_psi = grid.ds.get("lat_psi_coarse")
         lon_psi = grid.ds.get("lon_psi_coarse")
@@ -644,8 +656,6 @@ def get_target_coords(grid, use_coarse_grid=False):
         lon = grid.ds.lon_rho
         angle = grid.ds.angle
         mask = grid.ds.get("mask_rho")
-        mask_u = grid.ds.get("mask_u")
-        mask_v = grid.ds.get("mask_v")
         lat_psi = grid.ds.get("lat_psi")
         lon_psi = grid.ds.get("lon_psi")
 
@@ -668,8 +678,6 @@ def get_target_coords(grid, use_coarse_grid=False):
         "lon_psi": lon_psi,
         "angle": angle,
         "mask": mask,
-        "mask_u": mask_u,
-        "mask_v": mask_v,
         "straddle": straddle,
     }
 

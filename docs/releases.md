@@ -10,9 +10,14 @@
 
 ### Internal Changes
 
+* Parallelize computation of radiation correction, leading to a hugely improved memory footprint for surface forcing generation ([#227](https://github.com/CWorthy-ocean/roms-tools/pull/227))
+* For computation of radiation correction, swap order of temporal and spatial interpolation to further improve memory footprint ([#227](https://github.com/CWorthy-ocean/roms-tools/pull/227))
+
 ### Documentation
 
 ### Bugfixes
+
+* Fix bug in validation step for surface forcing ([#227](https://github.com/CWorthy-ocean/roms-tools/pull/227))
 
 ## v2.3.0
 

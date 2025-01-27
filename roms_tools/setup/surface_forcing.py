@@ -238,14 +238,14 @@ class SurfaceForcing:
                 "qair": {**default_info, "validate": True},
                 "rain": {**default_info, "validate": False},
                 "uwnd": {
-                    "location": "u",
+                    "location": "rho",
                     "is_vector": True,
                     "vector_pair": "vwnd",
                     "is_3d": False,
                     "validate": True,
                 },
                 "vwnd": {
-                    "location": "v",
+                    "location": "rho",
                     "is_vector": True,
                     "vector_pair": "uwnd",
                     "is_3d": False,
@@ -266,7 +266,7 @@ class SurfaceForcing:
     def _apply_correction(self, processed_fields, data):
 
         correction_data = self._get_correction_data()
-        # choose same subdomain as forcing data so that we can use same mask
+        # Match subdomain to forcing data to reuse the mask
         coords_correction = {
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
@@ -275,23 +275,39 @@ class SurfaceForcing:
             coords_correction, straddle=self.target_coords["straddle"]
         )
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
-        correction_data.apply_lateral_fill()
-        # regrid
-        lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
-        corr_factor = lateral_regrid.apply(
-            correction_data.ds[correction_data.var_names["swr_corr"]]
-        )
+        correction_data.ds["time"] = correction_data.ds["time"].dt.days
 
-        # temporal interpolation
-        corr_factor = interpolate_from_climatology(
-            corr_factor,
-            correction_data.dim_names["time"],
-            time=processed_fields["swrad"].time,
-        )
+        correction_data.apply_lateral_fill()
+
+        # Temporal interpolation: Perform before spatial regridding for better performance
+        if self.use_dask:
+            # Perform temporal interpolation for each time slice to enforce chunking in time.
+            # This reduces memory usage by processing one time step at a time.
+            # The interpolated slices are then concatenated along the "time" dimension.
+            corr_factor = xr.concat(
+                [
+                    interpolate_from_climatology(
+                        correction_data.ds[correction_data.var_names["swr_corr"]],
+                        correction_data.dim_names["time"],
+                        time=time,
+                    )
+                    for time in processed_fields["swrad"].time
+                ],
+                dim="time",
+            )
+        else:
+            # Interpolate across all time steps at once
+            corr_factor = interpolate_from_climatology(
+                correction_data.ds[correction_data.var_names["swr_corr"]],
+                correction_data.dim_names["time"],
+                time=processed_fields["swrad"].time,
+            )
+
+        # Spatial regridding
+        lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
+        corr_factor = lateral_regrid.apply(corr_factor)
 
         processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
-
-        del corr_factor
 
         return processed_fields
 
@@ -357,12 +373,8 @@ class SurfaceForcing:
 
         for var_name in ds.data_vars:
             if self.variable_info[var_name]["validate"]:
-                if self.variable_info[var_name]["location"] == "rho":
-                    mask = self.target_coords["mask"]
-                elif self.variable_info[var_name]["location"] == "u":
-                    mask = self.target_coords["mask_u"]
-                elif self.variable_info[var_name]["location"] == "v":
-                    mask = self.target_coords["mask_v"]
+                # all variables are at rho-points
+                mask = self.target_coords["mask"]
                 nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):

@@ -5,6 +5,7 @@ from roms_tools import Grid, SurfaceForcing
 from roms_tools.download import download_test_data
 import textwrap
 from pathlib import Path
+import logging
 from conftest import calculate_file_hash
 
 
@@ -163,7 +164,9 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
         "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
     ],
 )
-def test_successful_initialization_with_regional_data(grid_fixture, request, use_dask):
+def test_successful_initialization_with_regional_data(
+    grid_fixture, request, caplog, use_dask
+):
     """Test the initialization of SurfaceForcing with regional ERA5 data.
 
     The test is performed twice:
@@ -178,16 +181,17 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
 
     grid = request.getfixturevalue(grid_fixture)
 
-    for use_coarse_grid in [False, True]:
-        sfc_forcing = SurfaceForcing(
-            grid=grid,
-            use_coarse_grid=use_coarse_grid,
-            start_time=start_time,
-            end_time=end_time,
-            source={"name": "ERA5", "path": fname},
-            correct_radiation=True,
-            use_dask=use_dask,
-        )
+    for coarse_grid_mode in ["always", "never"]:
+        with caplog.at_level(logging.INFO):
+            sfc_forcing = SurfaceForcing(
+                grid=grid,
+                start_time=start_time,
+                end_time=end_time,
+                source={"name": "ERA5", "path": fname},
+                correct_radiation=True,
+                coarse_grid_mode=coarse_grid_mode,
+                use_dask=use_dask,
+            )
 
         assert sfc_forcing.ds is not None
         assert "uwnd" in sfc_forcing.ds
@@ -208,10 +212,15 @@ def test_successful_initialization_with_regional_data(grid_fixture, request, use
         }
         assert sfc_forcing.ds.coords["time"].attrs["units"] == "days"
 
-        if use_coarse_grid:
+        if coarse_grid_mode == "always":
             assert sfc_forcing.use_coarse_grid
-        else:
+            assert (
+                "Data will be interpolated onto grid coarsened by factor 2."
+                in caplog.text
+            )
+        elif coarse_grid_mode == "never":
             assert not sfc_forcing.use_coarse_grid
+            assert "Data will be interpolated onto fine grid." in caplog.text
 
         sfc_forcing.plot("uwnd", time=0)
         sfc_forcing.plot("vwnd", time=0)
@@ -239,12 +248,12 @@ def test_nan_detection_initialization_with_regional_data(
 
     grid = request.getfixturevalue(grid_fixture)
 
-    for use_coarse_grid in [True, False]:
+    for coarse_grid_mode in ["always", "never"]:
         with pytest.raises(ValueError, match="NaN values found"):
 
             SurfaceForcing(
                 grid=grid,
-                use_coarse_grid=use_coarse_grid,
+                coarse_grid_mode=coarse_grid_mode,
                 start_time=start_time,
                 end_time=end_time,
                 source={"name": "ERA5", "path": fname},
@@ -266,14 +275,14 @@ def test_no_longitude_intersection_initialization_with_regional_data(
 
     fname = Path(download_test_data("ERA5_regional_test_data.nc"))
 
-    for use_coarse_grid in [True, False]:
+    for coarse_grid_mode in ["always", "never"]:
         with pytest.raises(
             ValueError, match="Selected longitude range does not intersect with dataset"
         ):
 
             SurfaceForcing(
                 grid=grid_that_straddles_180_degree_meridian,
-                use_coarse_grid=use_coarse_grid,
+                coarse_grid_mode=coarse_grid_mode,
                 start_time=start_time,
                 end_time=end_time,
                 source={"name": "ERA5", "path": fname},
@@ -308,10 +317,10 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
 
     grid = request.getfixturevalue(grid_fixture)
 
-    for use_coarse_grid in [True, False]:
+    for coarse_grid_mode in ["always", "never"]:
         sfc_forcing = SurfaceForcing(
             grid=grid,
-            use_coarse_grid=use_coarse_grid,
+            coarse_grid_mode=coarse_grid_mode,
             start_time=start_time,
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
@@ -336,9 +345,9 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
         assert sfc_forcing.ds.attrs["source"] == "ERA5"
         assert sfc_forcing.ds.coords["time"].attrs["units"] == "days"
 
-        if use_coarse_grid:
+        if coarse_grid_mode == "always":
             assert sfc_forcing.use_coarse_grid
-        else:
+        elif coarse_grid_mode == "never":
             assert not sfc_forcing.use_coarse_grid
 
 
@@ -356,10 +365,10 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
     fname = Path(download_test_data("ERA5_regional_test_data.nc"))
     fname_bgc = Path(download_test_data("CESM_surface_global_test_data_climatology.nc"))
 
-    for use_coarse_grid in [True, False]:
+    for coarse_grid_mode in ["always", "never"]:
         sfc_forcing = SurfaceForcing(
             grid=grid_that_straddles_dateline,
-            use_coarse_grid=use_coarse_grid,
+            coarse_grid_mode=coarse_grid_mode,
             start_time=start_time,
             end_time=end_time,
             source={"name": "ERA5", "path": fname},
@@ -375,7 +384,7 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
 
         sfc_forcing = SurfaceForcing(
             grid=grid_that_straddles_dateline,
-            use_coarse_grid=use_coarse_grid,
+            coarse_grid_mode=coarse_grid_mode,
             start_time=start_time,
             end_time=end_time,
             source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
@@ -477,6 +486,57 @@ def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
     xr.testing.assert_allclose(
         sfc_forcing.ds.pco2_air, sfc_forcing.ds.pco2_air_alt, rtol=1.0e-5
     )
+
+
+def test_determine_usage_coarse_grid():
+    # ERA5 data with 1/4 degree resolution spanning [-50E, 30E] and [40N, 80N]
+    fname = download_test_data("ERA5_regional_test_data.nc")
+
+    # at 50N, 1/4 degree of longitude is about 17.87 km; to automatically use the coarse grid, the ROMS grid needs to be of resolution < 17.87km / 2 = 8.9km
+    grid_10km = Grid(
+        nx=3, ny=3, size_x=30, size_y=30, center_lon=-10, center_lat=50, rot=0
+    )
+    surface_forcing = SurfaceForcing(
+        grid=grid_10km,
+        start_time=datetime(2020, 2, 1),
+        end_time=datetime(2020, 2, 2),
+        source={"name": "ERA5", "path": fname},
+    )
+    assert not surface_forcing.use_coarse_grid
+
+    grid_7km = Grid(
+        nx=3, ny=3, size_x=21, size_y=21, center_lon=-10, center_lat=50, rot=0
+    )
+    surface_forcing = SurfaceForcing(
+        grid=grid_7km,
+        start_time=datetime(2020, 2, 1),
+        end_time=datetime(2020, 2, 2),
+        source={"name": "ERA5", "path": fname},
+    )
+    assert surface_forcing.use_coarse_grid
+
+    # at 70N, 1/4 degree of longitude is about 9.5 km; to automatically use the coarse grid, the ROMS grid needs to be of resolution < 9.5km / 2 = 4.75km
+    grid_7km = Grid(
+        nx=3, ny=3, size_x=21, size_y=21, center_lon=-10, center_lat=70, rot=0
+    )
+    surface_forcing = SurfaceForcing(
+        grid=grid_7km,
+        start_time=datetime(2020, 2, 1),
+        end_time=datetime(2020, 2, 2),
+        source={"name": "ERA5", "path": fname},
+    )
+    assert not surface_forcing.use_coarse_grid
+
+    grid_4km = Grid(
+        nx=3, ny=3, size_x=12, size_y=12, center_lon=-10, center_lat=70, rot=0
+    )
+    surface_forcing = SurfaceForcing(
+        grid=grid_4km,
+        start_time=datetime(2020, 2, 1),
+        end_time=datetime(2020, 2, 2),
+        source={"name": "ERA5", "path": fname},
+    )
+    assert surface_forcing.use_coarse_grid
 
 
 @pytest.mark.parametrize(

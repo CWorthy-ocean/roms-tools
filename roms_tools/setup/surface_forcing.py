@@ -5,6 +5,7 @@ from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+import logging
 from typing import Dict, Union, List
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid
@@ -60,8 +61,13 @@ class SurfaceForcing:
 
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is True.
-    use_coarse_grid: bool
-        Whether to interpolate to coarsened grid. Default is False.
+    coarse_grid_mode : str, optional
+        Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
+
+          - "auto" (default): Automatically decide based on the comparison of source and target spatial resolutions.
+          - "always": Always interpolate onto the coarse grid.
+          - "never": Never use the coarse grid; interpolate onto the fine grid instead.
+
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
@@ -88,8 +94,8 @@ class SurfaceForcing:
     end_time: datetime
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
-    correct_radiation: bool = True 
-    use_coarse_grid: bool = False
+    correct_radiation: bool = True
+    coarse_grid_mode: str = "auto"
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False
     bypass_validation: bool = False
@@ -99,10 +105,23 @@ class SurfaceForcing:
     def __post_init__(self):
 
         self._input_checks()
+        data = self._get_data()
+
+        if self.coarse_grid_mode == "always":
+            use_coarse_grid = True
+        elif self.coarse_grid_mode == "never":
+            use_coarse_grid = False
+        elif self.coarse_grid_mode == "auto":
+            use_coarse_grid = self._determine_coarse_grid_usage(data)
+        if use_coarse_grid:
+            logging.info("Data will be interpolated onto grid coarsened by factor 2.")
+        else:
+            logging.info("Data will be interpolated onto fine grid.")
+        object.__setattr__(self, "use_coarse_grid", use_coarse_grid)
+
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         object.__setattr__(self, "target_coords", target_coords)
 
-        data = self._get_data()
         data.choose_subdomain(
             target_coords,
             buffer_points=20,  # lateral fill needs some buffer from data margin
@@ -165,6 +184,47 @@ class SurfaceForcing:
             "source",
             {**self.source, "climatology": self.source.get("climatology", False)},
         )
+
+        # Validate 'coarse_grid_mode'
+        valid_modes = ["auto", "always", "never"]
+        if self.coarse_grid_mode not in valid_modes:
+            raise ValueError(
+                f"`coarse_grid_mode` must be one of {valid_modes}, but got '{self.coarse_grid_mode}'."
+            )
+
+    def _determine_coarse_grid_usage(self, data):
+        """Determine if coarse grid interpolation should be used based on the resolution
+        of the dataset and the target grid.
+
+        Parameters
+        ----------
+        data : object
+            The dataset object containing the data to be analyzed for grid spacing.
+
+        Returns
+        -------
+        use_coarse_grid : bool
+            Whether to use the coarse grid or not.
+        """
+        # Get the target coordinates and select the subdomain of the data
+        target_coords = get_target_coords(self.grid, use_coarse_grid=False)
+        data_coords = data.choose_subdomain(
+            target_coords, buffer_points=1, return_coords_only=True
+        )
+
+        # Compute minimal grid spacing in the data subdomain
+        min_grid_spacing_data = data.compute_minimal_grid_spacing(data_coords)
+
+        # Compute the maximum grid spacing in the ROMS grid
+        max_grid_spacing = max((1 / self.grid.ds.pm).max(), (1 / self.grid.ds.pn).max())
+
+        # Determine whether to use coarse grid based on grid spacing comparison
+        if 2 * max_grid_spacing < min_grid_spacing_data:
+            use_coarse_grid = True
+        else:
+            use_coarse_grid = False
+
+        return use_coarse_grid
 
     def _get_data(self):
 

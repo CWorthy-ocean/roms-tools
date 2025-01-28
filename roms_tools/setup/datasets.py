@@ -355,6 +355,47 @@ class Dataset:
         # Set the computed resolution as an attribute
         object.__setattr__(self, "resolution", resolution)
 
+    def compute_minimal_grid_spacing(self, ds: xr.Dataset):
+        """Compute the minimal grid spacing in a dataset based on latitude and longitude
+        spacing, considering Earth's radius.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing latitude and longitude dimensions.
+
+        Returns
+        -------
+        minimal_spacing : float
+            The smallest horizontal grid spacing derived from the latitude
+            and longitude differences, in meters.
+        """
+
+        r_earth = 6371315.0
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+
+        # Get latitude and longitude values from the dataset
+        latitudes = ds[lat_dim].values
+        longitudes = ds[lon_dim].values
+
+        # Compute differences along latitude and longitude
+        lat_diff = np.abs(np.diff(latitudes)).min()  # Minimal latitude spacing
+        lon_diff = np.abs(np.diff(longitudes)).min()  # Minimal longitude spacing
+
+        # Latitude spacing is constant at all longitudes
+        min_lat_spacing = (2 * np.pi * r_earth * lat_diff) / 360
+
+        # Longitude spacing varies with latitude
+        min_lon_spacing = (
+            2 * np.pi * r_earth * lon_diff * np.cos(np.radians(latitudes.min()))
+        ) / 360
+
+        # The minimal spacing is the smaller of the two
+        minimal_spacing = min(min_lat_spacing, min_lon_spacing)
+
+        return minimal_spacing
+
     def check_if_global(self, ds) -> bool:
         """Checks if the dataset covers the entire globe in the longitude dimension.
 
@@ -470,7 +511,12 @@ class Dataset:
         pass
 
     def choose_subdomain(
-        self, target_coords, buffer_points=20, return_copy=False, verbose=False
+        self,
+        target_coords,
+        buffer_points=20,
+        return_copy=False,
+        return_coords_only=False,
+        verbose=False,
     ):
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -488,6 +534,9 @@ class Dataset:
         return_subdomain : bool, optional
             If True, returns the subset of the original dataset representing the chosen
             subdomain. If False, assigns the subset to `self.ds`. Defaults to False.
+        return_coords_only : bool, optional
+            If True, returns a new xarray.Dataset containing only the latitude and longitude
+            of the subdomain. Defaults to False.
         verbose : bool, optional
             If True, print message if dataset is concatenated along longitude dimension.
             Defaults to False.
@@ -591,6 +640,13 @@ class Dataset:
             subdomain[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
         else:
             subdomain[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
+
+        if return_coords_only:
+            # Create and return a dataset with only latitudes and longitudes
+            coords_ds = subdomain[
+                [self.dim_names["latitude"], self.dim_names["longitude"]]
+            ]
+            return coords_ds
 
         if return_copy:
             return Dataset.from_ds(self, subdomain)

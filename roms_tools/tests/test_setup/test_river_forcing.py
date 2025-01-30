@@ -170,7 +170,7 @@ def test_river_locations_are_along_coast(river_forcing_fixture, request):
         eta_rho = indices["eta_rho"][i]
         xi_rho = indices["xi_rho"][i]
         assert coast[eta_rho, xi_rho]
-        assert river_forcing.grid.ds["river_flux"][eta_rho, xi_rho] > 0
+        assert river_forcing.ds["river_location"][eta_rho, xi_rho] > 0
 
 
 def test_missing_source_name():
@@ -224,7 +224,7 @@ def test_reproducibility_same_grid(river_forcing):
     assert river_forcing == the_same_river_forcing
 
 
-def test_update_river_flux_variable_without_conflicts(river_forcing, tmp_path):
+def test_update_river_location_variable_without_conflicts(river_forcing, tmp_path):
 
     fname = download_river_data("dai_trenberth_may2019.nc")
     ds = xr.open_dataset(fname, decode_times=False)
@@ -257,25 +257,17 @@ def test_river_forcing_plot(river_forcing_with_bgc):
 def test_river_forcing_save(river_forcing_with_bgc, tmp_path):
     """Test save method."""
 
-    for file_str, grid_file_str in zip(
-        ["test_rivers", "test_rivers.nc"], ["test_grid", "test_grid.nc"]
-    ):
+    for file_str in ["test_rivers", "test_rivers.nc"]:
         # Create a temporary filepath using the tmp_path fixture
-        for filepath, grid_filepath in zip(
-            [tmp_path / file_str, str(tmp_path / file_str)],
-            [tmp_path / grid_file_str, str(tmp_path / grid_file_str)],
-        ):  # test for Path object and str
+        for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
 
-            saved_filenames = river_forcing_with_bgc.save(filepath, grid_filepath)
+            saved_filenames = river_forcing_with_bgc.save(filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
-            grid_filepath = Path(grid_filepath).with_suffix(".nc")
-            assert saved_filenames == [filepath, grid_filepath]
+            assert saved_filenames == [filepath]
             assert filepath.exists()
-            assert grid_filepath.exists()
             # Clean up the .nc file
             filepath.unlink()
-            grid_filepath.unlink()
 
 
 @pytest.mark.parametrize(
@@ -324,13 +316,11 @@ def test_files_have_same_hash(river_forcing_fixture, request, tmp_path):
     yaml_filepath = tmp_path / "test_yaml.yaml"
     filepath1 = tmp_path / "test1.nc"
     filepath2 = tmp_path / "test2.nc"
-    grid_filepath1 = tmp_path / "grid_test1.nc"
-    grid_filepath2 = tmp_path / "grid_test2.nc"
 
     river_forcing.to_yaml(yaml_filepath)
-    river_forcing.save(filepath1, grid_filepath1)
+    river_forcing.save(filepath1)
     rf_from_file = RiverForcing.from_yaml(yaml_filepath)
-    rf_from_file.save(filepath2, grid_filepath2)
+    rf_from_file.save(filepath2)
 
     hash1 = calculate_file_hash(filepath1)
     hash2 = calculate_file_hash(filepath2)
@@ -340,8 +330,6 @@ def test_files_have_same_hash(river_forcing_fixture, request, tmp_path):
     yaml_filepath.unlink()
     filepath1.unlink()
     filepath2.unlink()
-    grid_filepath1.unlink()
-    grid_filepath2.unlink()
 
 
 def test_from_yaml_missing_river_forcing(tmp_path):

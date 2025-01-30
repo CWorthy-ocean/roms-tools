@@ -91,8 +91,9 @@ class RiverForcing:
         object.__setattr__(self, "original_indices", original_indices)
 
         if len(original_indices["station"]) > 0:
-            self._move_rivers_to_closest_coast(target_coords, data)
             ds = self._create_river_forcing(data)
+            self._move_rivers_to_closest_coast(target_coords, data)
+            ds = self._write_indices_into_dataset(ds)
             self._validate(ds)
 
             for var_name in ds.data_vars:
@@ -345,49 +346,44 @@ class RiverForcing:
             "xi_rho": indices[2],
             "name": names,
         }
-        self._write_indices_into_grid_file(indices)
         object.__setattr__(self, "updated_indices", indices)
 
-    def _write_indices_into_grid_file(self, indices):
-        """Writes river location indices into the grid dataset as the "river_flux"
-        variable.
+    def _write_indices_into_dataset(self, ds):
+        """Adds river location indices to the dataset as the "river_location" variable.
 
-        This method checks if the variable "river_flux" already exists in the grid dataset.
-        If it does, the method removes it. Then, it creates a new variable called "river_flux"
-        based on the provided `indices` and assigns it to the dataset. The `indices` dictionary
-        provides information about the river station locations and their corresponding grid
-        cell indices (eta_rho and xi_rho).
+        This method checks if the "river_location" variable already exists in the dataset.
+        If it does, the method removes it. Then, it creates a new "river_location" variable
+        using river station indices from `self.updated_indices` and assigns it to the dataset.
+        The indices specify the river station locations in terms of eta_rho and xi_rho grid cell indices.
 
-        Parameters:
-        -----------
-        indices : dict
-            A dictionary containing information about river station locations.
-            It must contain the following keys:
-            - "name" (list or array): Names of the river stations.
-            - "station" (list or array): River station identifiers.
-            - "eta_rho" (list or array): The eta (row) index for each river location.
-            - "xi_rho" (list or array): The xi (column) index for each river location.
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to which the "river_location" variable will be added.
 
-        Returns:
-        --------
-        None
-            This method modifies the grid's dataset in-place by adding the "river_flux" variable.
+        Returns
+        -------
+        xarray.Dataset
+            The modified dataset with the "river_location" variable added.
         """
 
-        if "river_flux" in self.grid.ds:
-            ds = self.grid.ds.drop_vars("river_flux")
-            object.__setattr__(self.grid, "ds", ds)
+        if "river_location" in ds:
+            ds = ds.drop_vars("river_location")
 
         river_locations = xr.zeros_like(self.grid.ds.mask_rho)
-        for i in range(len(indices["name"])):
-            station = indices["station"][i]
-            eta_index = indices["eta_rho"][i]
-            xi_index = indices["xi_rho"][i]
+        for i in range(len(self.updated_indices["name"])):
+            station = self.updated_indices["station"][i]
+            eta_index = self.updated_indices["eta_rho"][i]
+            xi_index = self.updated_indices["xi_rho"][i]
             river_locations[eta_index, xi_index] = station + 2
 
-        river_locations.attrs["long_name"] = "River volume flux partition"
+        river_locations.attrs["long_name"] = "River index plus local volume fraction"
         river_locations.attrs["units"] = "none"
-        self.grid.ds["river_flux"] = river_locations
+        ds["river_location"] = river_locations
+
+        ds = ds.drop_vars(["lat_rho", "lon_rho"])
+
+        return ds
 
     def _validate(self, ds):
         """Validates the dataset by checking for NaN values in river forcing data.
@@ -592,18 +588,13 @@ class RiverForcing:
     def save(
         self,
         filepath: Union[str, Path],
-        filepath_grid: Union[str, Path],
     ) -> None:
-        """Save the river forcing and grid file to netCDF4 files. The grid file is
-        required because a new field `river_flux` has been added.
+        """Save the river forcing to netCDF4 file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path and filename for the output files.
-
-        filepath_grid : Union[str, Path]
-            The base path and filename for saving the grid file.
 
         Returns
         -------
@@ -613,16 +604,13 @@ class RiverForcing:
 
         # Ensure filepath is a Path object
         filepath = Path(filepath)
-        filepath_grid = Path(filepath_grid)
 
         # Remove ".nc" suffix if present
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
-        if filepath_grid.suffix == ".nc":
-            filepath_grid = filepath_grid.with_suffix("")
 
-        dataset_list = [self.ds, self.grid.ds]
-        output_filenames = [str(filepath), str(filepath_grid)]
+        dataset_list = [self.ds]
+        output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(dataset_list, output_filenames)
 

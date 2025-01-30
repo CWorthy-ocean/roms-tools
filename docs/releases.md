@@ -19,7 +19,7 @@
 
 ### Documentation
 
-* New featurs and defaults are documented for `SurfaceForcing` (([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
+* New features and defaults are documented for `SurfaceForcing` (([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
 
 ### Bugfixes
 

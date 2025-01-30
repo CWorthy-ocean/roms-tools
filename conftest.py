@@ -272,6 +272,8 @@ def surface_forcing(request, use_dask):
         start_time=start_time,
         end_time=end_time,
         source={"name": "ERA5", "path": fname},
+        correct_radiation=False,
+        coarse_grid_mode="never",
         use_dask=use_dask,
     )
 
@@ -299,8 +301,9 @@ def coarse_surface_forcing(request, use_dask):
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        use_coarse_grid=True,
+        coarse_grid_mode="always",
         source={"name": "ERA5", "path": fname},
+        correct_radiation=False,
         use_dask=use_dask,
     )
 
@@ -331,6 +334,7 @@ def corrected_surface_forcing(request, use_dask):
         end_time=end_time,
         source={"name": "ERA5", "path": fname},
         correct_radiation=True,
+        coarse_grid_mode="never",
         use_dask=use_dask,
     )
 
@@ -359,6 +363,7 @@ def bgc_surface_forcing(request, use_dask):
         end_time=end_time,
         source={"name": "CESM_REGRIDDED", "path": fname_bgc},
         type="bgc",
+        coarse_grid_mode="never",
         use_dask=use_dask,
     )
 
@@ -387,6 +392,7 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
         end_time=end_time,
         source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
         type="bgc",
+        coarse_grid_mode="never",
         use_dask=use_dask,
     )
 

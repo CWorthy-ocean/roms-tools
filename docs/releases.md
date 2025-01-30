@@ -11,11 +11,13 @@
 
 * Remove support for partitioning files upon saving ([#221](https://github.com/CWorthy-ocean/roms-tools/pull/221))
 * Remove parameter `use_coarse_grid` for `SurfaceForcing` class ([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
+* Remove parameter `filepath_grid` from `RiverForcing.save()` method ([#232](https://github.com/CWorthy-ocean/roms-tools/pull/232))
 
 ### Internal Changes
 
 * Parallelize computation of radiation correction, leading to a hugely improved memory footprint for surface forcing generation ([#227](https://github.com/CWorthy-ocean/roms-tools/pull/227))
 * For computation of radiation correction, swap order of temporal and spatial interpolation to further improve memory footprint ([#227](https://github.com/CWorthy-ocean/roms-tools/pull/227))
+* Write river locations into river forcing file rather than into grid file ([#232](https://github.com/CWorthy-ocean/roms-tools/pull/232))
 
 ### Documentation
 

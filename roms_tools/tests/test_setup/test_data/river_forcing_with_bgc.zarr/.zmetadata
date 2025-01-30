@@ -60,6 +60,36 @@
             ],
             "long_name": "Month index (1-12)"
         },
+        "river_location/.zarray": {
+            "chunks": [
+                20,
+                20
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                20,
+                20
+            ],
+            "zarr_format": 2
+        },
+        "river_location/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "eta_rho",
+                "xi_rho"
+            ],
+            "long_name": "River index plus local volume fraction",
+            "units": "none"
+        },
         "river_name/.zarray": {
             "chunks": [
                 6

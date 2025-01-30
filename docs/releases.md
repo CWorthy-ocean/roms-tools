@@ -4,7 +4,7 @@
 
 ### New Features
 
-* Introduce new parameter `coarse_grid_mode` for `SurfaceForcing`. The default `coarse_grid_mode = "auto"` automatically decides whether it makes sense to interpolate onto the coarse grid, which saves computations ([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228)
+* Introduce new parameter `coarse_grid_mode` for `SurfaceForcing`. The default `coarse_grid_mode = "auto"` automatically decides whether it makes sense to interpolate onto the coarse grid, which saves computations ([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
 * New default for `correct_radiation` in `SurfaceForcing` is `True` ([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
 
 ### Breaking Changes

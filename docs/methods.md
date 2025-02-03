@@ -74,7 +74,7 @@ where $\Delta_x h$ and $\Delta_y h$ are the changes in depth along the x- and y-
 
 5. **Depth Clipping (Again)**: Depth values are once again clipped to $h_{min}$ in regions where the ocean depth falls below this threshold. The rationale behind this step is to ensure that tidal excursion does not exceed the water depth at runtime. Since ROMS currently does not support wetting or drying, the model will crash if the water depth becomes negative.
 
-Here are the main steps illustrated for an example domain with 100 x 100 horizontal grid points:
+Here are the main steps illustrated for an example domain with a horizontal resolution of 10 km:
 
 ![Step 1](images/step1.png)
 ![Step 2](images/step2.png)

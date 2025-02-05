@@ -396,14 +396,14 @@ class Grid:
         object.__setattr__(self, "ds", ds)
 
     def plot(
-        self, bathymetry: bool = False, title: str = None, with_dim_names: bool = False
+        self, bathymetry: bool = True, title: str = None, with_dim_names: bool = False
     ) -> None:
         """Plot the grid.
 
         Parameters
         ----------
         bathymetry : bool, optional
-            Whether or not to plot the bathymetry. Default is False.
+            Whether or not to plot the bathymetry. Default is True.
         title : str, optional
             The title of the plot. If not provided, it will be set to a default.
         with_dim_names : bool, optional

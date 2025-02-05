@@ -17,6 +17,7 @@ from roms_tools.setup.datasets import (
 )
 from roms_tools.download import download_test_data
 import hashlib
+import h5py
 from pathlib import Path
 
 
@@ -541,10 +542,25 @@ def cesm_surface_bgc_data(request, use_dask):
     return data
 
 
-def calculate_file_hash(filepath, hash_algorithm="sha256"):
-    """Calculate the hash of a file using the specified hash algorithm."""
-    hash_func = hashlib.new(hash_algorithm)
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_func.update(chunk)
-    return hash_func.hexdigest()
+def calculate_file_hash(filepath):
+    with h5py.File(filepath, 'r') as f:
+        # Create a hash object
+        hash_obj = hashlib.sha256()
+
+        # Iterate over datasets in the file
+        for dataset_name in f:
+            dataset = f[dataset_name]
+
+            # Skip metadata like STORAGE_LAYOUT or any other non-data attributes
+            # You can skip the dataset attributes you don't care about
+            dataset_attrs = list(dataset.attrs)
+            for attr in dataset_attrs:
+                if attr == "STORAGE_LAYOUT":
+                    del dataset.attrs[attr]  # Remove this attribute
+
+            # Update the hash with the actual data (ignoring non-data metadata)
+            data = dataset[()]
+            hash_obj.update(data.tobytes())  # Convert data to bytes
+
+        # Return the computed hash
+        return hash_obj.hexdigest()

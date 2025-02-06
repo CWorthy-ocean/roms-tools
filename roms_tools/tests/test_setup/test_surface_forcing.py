@@ -6,7 +6,7 @@ from roms_tools.download import download_test_data
 import textwrap
 from pathlib import Path
 import logging
-from conftest import calculate_file_hash
+from conftest import calculate_data_hash
 
 
 @pytest.fixture
@@ -700,8 +700,9 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
     expected_filepath1 = f"{filepath_str1}_202002.nc"
     expected_filepath2 = f"{filepath_str2}_202002.nc"
 
-    hash1 = calculate_file_hash(expected_filepath1)
-    hash2 = calculate_file_hash(expected_filepath2)
+    # Only compare hash of datasets because metadata is non-deterministic with dask
+    hash1 = calculate_data_hash(expected_filepath1)
+    hash2 = calculate_data_hash(expected_filepath2)
 
     assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 
@@ -728,8 +729,9 @@ def test_files_have_same_hash_clim(
     expected_filepath1 = f"{filepath_str1}_clim.nc"
     expected_filepath2 = f"{filepath_str2}_clim.nc"
 
-    hash1 = calculate_file_hash(expected_filepath1)
-    hash2 = calculate_file_hash(expected_filepath2)
+    # Only compare hash of datasets because metadata is non-deterministic with dask
+    hash1 = calculate_data_hash(expected_filepath1)
+    hash2 = calculate_data_hash(expected_filepath2)
 
     assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 

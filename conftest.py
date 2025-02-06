@@ -17,6 +17,7 @@ from roms_tools.setup.datasets import (
 )
 from roms_tools.download import download_test_data
 import hashlib
+import h5py
 from pathlib import Path
 
 
@@ -54,7 +55,9 @@ def grid():
 @pytest.fixture(scope="session")
 def grid_that_straddles_dateline():
 
-    grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=0, center_lat=0, rot=20)
+    grid = Grid(
+        nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20
+    )
 
     return grid
 
@@ -548,3 +551,39 @@ def calculate_file_hash(filepath, hash_algorithm="sha256"):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_func.update(chunk)
     return hash_func.hexdigest()
+
+
+def calculate_data_hash(filepath):
+    """Calculate the hash of an HDF5 file's datasets, ignoring certain metadata.
+
+    This function computes a SHA-256 hash based on the actual data stored in the
+    datasets of an HDF5 file. It excludes metadata attributes such as `STORAGE_LAYOUT`
+    to ensure consistency in hashing when metadata differences do not affect data values.
+
+    Parameters:
+        filepath (str): Path to the HDF5 file.
+
+    Returns:
+        str: The computed SHA-256 hash as a hexadecimal string.
+    """
+    with h5py.File(filepath, "r") as f:
+        # Create a hash object
+        hash_obj = hashlib.sha256()
+
+        # Iterate over datasets in the file
+        for dataset_name in f:
+            dataset = f[dataset_name]
+
+            # Skip metadata like STORAGE_LAYOUT or any other non-data attributes
+            # You can skip the dataset attributes you don't care about
+            dataset_attrs = list(dataset.attrs)
+            for attr in dataset_attrs:
+                if attr == "STORAGE_LAYOUT":
+                    del dataset.attrs[attr]  # Remove this attribute
+
+            # Update the hash with the actual data (ignoring non-data metadata)
+            data = dataset[()]
+            hash_obj.update(data.tobytes())  # Convert data to bytes
+
+        # Return the computed hash
+        return hash_obj.hexdigest()

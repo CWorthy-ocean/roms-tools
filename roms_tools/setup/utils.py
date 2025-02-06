@@ -3,6 +3,7 @@ import numpy as np
 from typing import Union, Any, Dict, Type
 import pandas as pd
 import cftime
+import logging
 from pathlib import Path
 from datetime import datetime
 from dataclasses import fields, asdict
@@ -602,6 +603,7 @@ def save_datasets(dataset_list, output_filenames, use_dask=False):
     saved_filenames = []
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
+    logging.info("Saving dataset to NetCDF files: %s", ", ".join(output_filenames))
 
     if use_dask:
         from dask.diagnostics import ProgressBar

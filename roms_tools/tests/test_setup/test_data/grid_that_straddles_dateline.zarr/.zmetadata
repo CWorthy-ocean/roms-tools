@@ -2,13 +2,13 @@
     "metadata": {
         ".zattrs": {
             "center_lat": 0,
-            "center_lon": 0,
+            "center_lon": 0.5,
             "hc": 300.0,
             "hmin": 5.0,
-            "roms_tools_version": "0.1.dev239+dirty",
+            "roms_tools_version": "0.1.dev180+gfb7e1ef.d20250106",
             "rot": 20,
-            "size_x": 100,
-            "size_y": 100,
+            "size_x": 1000,
+            "size_y": 1000,
             "theta_b": 2.0,
             "theta_s": 5.0,
             "title": "ROMS grid created by ROMS-Tools",

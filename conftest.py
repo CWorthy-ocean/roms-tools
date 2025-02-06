@@ -55,7 +55,7 @@ def grid():
 @pytest.fixture(scope="session")
 def grid_that_straddles_dateline():
 
-    grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=0, center_lat=0, rot=20)
+    grid = Grid(nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20)
 
     return grid
 

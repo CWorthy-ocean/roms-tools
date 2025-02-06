@@ -560,7 +560,7 @@ def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
         ]:  # test for Path object and str
 
             # Test saving without grouping
-            saved_filenames = sfc_forcing.save(filepath)
+            saved_filenames = sfc_forcing.save(filepath, group=False)
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")
             assert saved_filenames == [expected_filepath]
@@ -593,7 +593,7 @@ def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
         ]:  # test for Path object and str
 
             # Test saving without grouping
-            saved_filenames = bgc_surface_forcing.save(filepath)
+            saved_filenames = bgc_surface_forcing.save(filepath, group=False)
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")
             assert saved_filenames == [expected_filepath]
@@ -622,7 +622,9 @@ def test_surface_forcing_bgc_from_clim_save(
         ]:  # test for Path object and str
 
             # Test saving without grouping
-            saved_filenames = bgc_surface_forcing_from_climatology.save(filepath)
+            saved_filenames = bgc_surface_forcing_from_climatology.save(
+                filepath, group=False
+            )
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")
             assert saved_filenames == [expected_filepath]

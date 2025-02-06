@@ -7,7 +7,7 @@ import textwrap
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset
 from pathlib import Path
-from conftest import calculate_file_hash
+from conftest import calculate_data_hash
 
 
 @pytest.mark.parametrize(
@@ -273,8 +273,9 @@ def test_files_have_same_hash(initial_conditions, tmp_path, use_dask):
     ic_from_file = InitialConditions.from_yaml(yaml_filepath, use_dask)
     ic_from_file.save(filepath2)
 
-    hash1 = calculate_file_hash(filepath1)
-    hash2 = calculate_file_hash(filepath2)
+    # Only compare hash of datasets because metadata is non-deterministic with dask
+    hash1 = calculate_data_hash(filepath1)
+    hash2 = calculate_data_hash(filepath2)
 
     assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 

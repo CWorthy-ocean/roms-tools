@@ -542,8 +542,29 @@ def cesm_surface_bgc_data(request, use_dask):
     return data
 
 
-def calculate_file_hash(filepath):
-    with h5py.File(filepath, 'r') as f:
+def calculate_file_hash(filepath, hash_algorithm="sha256"):
+    """Calculate the hash of a file using the specified hash algorithm."""
+    hash_func = hashlib.new(hash_algorithm)
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_func.update(chunk)
+    return hash_func.hexdigest()
+
+
+def calculate_data_hash(filepath):
+    """Calculate the hash of an HDF5 file's datasets, ignoring certain metadata.
+
+    This function computes a SHA-256 hash based on the actual data stored in the
+    datasets of an HDF5 file. It excludes metadata attributes such as `STORAGE_LAYOUT`
+    to ensure consistency in hashing when metadata differences do not affect data values.
+
+    Parameters:
+        filepath (str): Path to the HDF5 file.
+
+    Returns:
+        str: The computed SHA-256 hash as a hexadecimal string.
+    """
+    with h5py.File(filepath, "r") as f:
         # Create a hash object
         hash_obj = hashlib.sha256()
 

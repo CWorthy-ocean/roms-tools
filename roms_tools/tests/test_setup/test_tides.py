@@ -4,7 +4,7 @@ import xarray as xr
 from roms_tools.download import download_test_data
 import textwrap
 from pathlib import Path
-from conftest import calculate_file_hash
+from conftest import calculate_data_hash
 
 
 @pytest.fixture
@@ -229,8 +229,9 @@ def test_files_have_same_hash(tidal_forcing, tmp_path, use_dask):
     tidal_forcing_from_file = TidalForcing.from_yaml(yaml_filepath, use_dask=use_dask)
     tidal_forcing_from_file.save(filepath2)
 
-    hash1 = calculate_file_hash(filepath1)
-    hash2 = calculate_file_hash(filepath2)
+    # Only compare hash of datasets because metadata is non-deterministic with dask
+    hash1 = calculate_data_hash(filepath1)
+    hash2 = calculate_data_hash(filepath2)
 
     assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 

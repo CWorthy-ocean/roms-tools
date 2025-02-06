@@ -332,7 +332,7 @@ def partition_netcdf(
 
     # Save the partitioned datasets to files
     saved_filenames = save_datasets(
-        partitioned_datasets, paths_to_partitioned_files, use_dask=True, verbose=False
+        partitioned_datasets, paths_to_partitioned_files, verbose=False
     )
 
     return saved_filenames

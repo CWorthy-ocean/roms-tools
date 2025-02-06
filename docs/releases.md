@@ -18,6 +18,8 @@
 * Parallelize computation of radiation correction, leading to a hugely improved memory footprint for surface forcing generation ([#227](https://github.com/CWorthy-ocean/roms-tools/pull/227))
 * For computation of radiation correction, swap order of temporal and spatial interpolation to further improve memory footprint ([#227](https://github.com/CWorthy-ocean/roms-tools/pull/227))
 * Write river locations into river forcing file rather than into grid file ([#232](https://github.com/CWorthy-ocean/roms-tools/pull/232))
+* When appropriate, only compare data hashes rather than file hashes in automated test suite ([#235](https://github.com/CWorthy-ocean/roms-tools/pull/235))
+* Slightly shift one of the test grids away from the Greenwich meridian ([#235](https://github.com/CWorthy-ocean/roms-tools/pull/235))
 
 ### Documentation
 

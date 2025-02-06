@@ -304,7 +304,7 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
-def save_datasets(dataset_list, output_filenames, use_dask=False):
+def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     """Save the list of datasets to netCDF4 files.
 
     Parameters
@@ -315,6 +315,9 @@ def save_datasets(dataset_list, output_filenames, use_dask=False):
         List of filenames for the output files.
     use_dask : bool, optional
         Whether to use Dask diagnostics (e.g., progress bars) when saving the datasets, by default False.
+    verbose : bool, optional
+        Whether to log information about the files being written. If True, logs the output filenames.
+        Defaults to True.
 
     Returns
     -------
@@ -325,7 +328,10 @@ def save_datasets(dataset_list, output_filenames, use_dask=False):
     saved_filenames = []
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
-    logging.info("Saving dataset to NetCDF files: %s", ", ".join(output_filenames))
+    if verbose:
+        logging.info(
+            "Writing the following NetCDF files:\n%s", "\n".join(output_filenames)
+        )
 
     if use_dask:
         from dask.diagnostics import ProgressBar

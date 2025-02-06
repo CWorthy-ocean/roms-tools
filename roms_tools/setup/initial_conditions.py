@@ -9,13 +9,12 @@ from datetime import datetime
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.utils import transpose_dimensions
+from roms_tools.utils import transpose_dimensions, save_datasets
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
     get_variable_metadata,
-    save_datasets,
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,

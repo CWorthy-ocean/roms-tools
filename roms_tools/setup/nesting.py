@@ -8,12 +8,12 @@ import logging
 from scipy.interpolate import interp1d
 from roms_tools import Grid
 from roms_tools.plot import _plot_nesting
+from roms_tools.utils import save_datasets
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_boundary_coords,
     wrap_longitudes,
-    save_datasets,
     _to_yaml,
     _from_yaml,
 )

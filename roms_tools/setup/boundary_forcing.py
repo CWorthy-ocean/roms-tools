@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.utils import save_datasets
 from roms_tools.vertical_coordinate import compute_depth
 from roms_tools.plot import _section_plot, _line_plot
 from roms_tools.utils import (
@@ -21,7 +22,6 @@ from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
-    save_datasets,
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,

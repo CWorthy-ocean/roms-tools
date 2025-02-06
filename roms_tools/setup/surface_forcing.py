@@ -8,6 +8,7 @@ from pathlib import Path
 import logging
 from typing import Dict, Union, List
 from roms_tools import Grid
+from roms_tools.utils import save_datasets
 from roms_tools.regrid import LateralRegrid
 from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
@@ -22,7 +23,6 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     get_variable_metadata,
     group_dataset,
-    save_datasets,
     rotate_velocities,
     convert_to_roms_time,
     _to_yaml,

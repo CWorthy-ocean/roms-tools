@@ -9,13 +9,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from roms_tools import Grid
 from roms_tools.plot import _get_projection, _add_field_to_ax
+from roms_tools.utils import save_datasets
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
     substitute_nans_by_fillvalue,
     convert_to_roms_time,
-    save_datasets,
     _to_yaml,
     _from_yaml,
     get_variable_metadata,

@@ -4,8 +4,7 @@ import numpy as np
 import xarray as xr
 from typing import Union
 from pathlib import Path
-import re
-import glob
+from roms_tools.utils import save_datasets
 
 
 def partition(
@@ -332,6 +331,8 @@ def partition_netcdf(
     ]
 
     # Save the partitioned datasets to files
-    xr.save_mfdataset(partitioned_datasets, paths_to_partitioned_files)
+    saved_filenames = save_datasets(
+        partitioned_datasets, paths_to_partitioned_files, use_dask=True, verbose=False
+    )
 
-    return paths_to_partitioned_files
+    return saved_filenames

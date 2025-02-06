@@ -895,7 +895,7 @@ class BoundaryForcing:
     def save(
         self,
         filepath: Union[str, Path],
-        group: bool = False,
+        group: bool = True,
     ) -> None:
         """Save the boundary forcing fields to one or more netCDF4 files.
 
@@ -909,8 +909,7 @@ class BoundaryForcing:
             The base path and filename for the output file(s). If `group` is `True`, the filenames will include additional
             time-based information (e.g., year or month) to distinguish the subsets.
         group : bool, optional
-            Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `False`, meaning the
-            dataset is saved as a single file.
+            Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `True`.
 
         Returns
         -------

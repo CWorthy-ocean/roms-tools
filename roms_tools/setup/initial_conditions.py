@@ -95,6 +95,8 @@ class InitialConditions:
     def __post_init__(self):
 
         self._input_checks()
+        # Dataset for depth coordinates
+        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
 
         processed_fields = {}
         processed_fields = self._process_data(processed_fields, type="physics")
@@ -163,24 +165,24 @@ class InitialConditions:
                 if info["location"] == location and info["is_3d"]
             ]
 
-        # compute layer depth coordinates
-        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
+        if type == "bgc":
+            # Ensure time coordinate matches that of physical variables
+            for var_name in variable_info.keys():
+                processed_fields[var_name] = processed_fields[var_name].assign_coords(
+                    {"time": processed_fields["temp"]["time"]}
+                )
 
-        zeta = processed_fields["zeta"]
+        # compute layer depth coordinates
+        zeta = processed_fields[
+            "zeta"
+        ]  # requires time coordinate match (previous step) in case of BGC
         if self.use_dask:
             zeta.persist()
-
         if len(var_names_dict["rho"]) > 0:
-            self.ds_depth_coords["layer_depth_rho"] = compute_depth_coordinates(
-                self.grid.ds, zeta, depth_type="layer", location="rho"
-            )
+            self._get_depth_coordinates(zeta, "rho", "layer")
         if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
-            self.ds_depth_coords["layer_depth_u"] = compute_depth_coordinates(
-                self.grid.ds, zeta, depth_type="layer", location="u"
-            )
-            self.ds_depth_coords["layer_depth_v"] = compute_depth_coordinates(
-                self.grid.ds, zeta, depth_type="layer", location="v"
-            )
+            self._get_depth_coordinates(zeta, "u", "layer")
+            self._get_depth_coordinates(zeta, "v", "layer")
 
         # vertical regridding
         for location in ["rho", "u", "v"]:
@@ -197,23 +199,12 @@ class InitialConditions:
 
         # compute barotropic velocities
         if "u" in variable_info and "v" in variable_info:
-            self.ds_depth_coords["interface_depth_u"] = compute_depth_coordinates(
-                self.grid.ds, zeta, depth_type="interface", location="u"
-            )
-            self.ds_depth_coords["interface_depth_v"] = compute_depth_coordinates(
-                self.grid.ds, zeta, depth_type="interface", location="v"
-            )
+            self._get_depth_coordinates(zeta, "u", "interface")
+            self._get_depth_coordinates(zeta, "v", "interface")
             for location in ["u", "v"]:
                 processed_fields[f"{location}bar"] = compute_barotropic_velocity(
                     processed_fields[location],
                     self.ds_depth_coords[f"interface_depth_{location}"],
-                )
-
-        if type == "bgc":
-            # Ensure time coordinate matches that of physical variables
-            for var_name in variable_info.keys():
-                processed_fields[var_name] = processed_fields[var_name].assign_coords(
-                    {"time": processed_fields["temp"]["time"]}
                 )
 
         for var_name in processed_fields.keys():
@@ -376,6 +367,30 @@ class InitialConditions:
                     variable_info[var_name] = {**default_info, "validate": False}
 
         object.__setattr__(self, f"variable_info_{type}", variable_info)
+
+    def _get_depth_coordinates(
+        self, zeta: xr.DataArray | float, location: str, depth_type: str = "layer"
+    ) -> None:
+        """Ensure depth coordinates are computed and stored for a given location and
+        depth type.
+
+        Parameters
+        ----------
+        zeta : xr.DataArray or float
+            Free-surface elevation (can be a scalar or a DataArray).
+        location : str
+            Grid location for depth computation ("rho", "u", or "v").
+        depth_type : str, optional
+            Type of depth coordinates to compute, by default "layer".
+        """
+        key = f"{depth_type}_depth_{location}"
+
+        if key not in self.ds_depth_coords:
+            self.ds_depth_coords[key] = compute_depth_coordinates(
+                self.grid.ds, zeta, depth_type=depth_type, location=location
+            )
+            if self.use_dask:
+                self.ds_depth_coords[key].persist()
 
     def _write_into_dataset(self, processed_fields, d_meta):
 
@@ -619,7 +634,6 @@ class InitialConditions:
             loc = "rho"
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
             loc = "u"
-
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
             loc = "v"
         else:
@@ -638,7 +652,7 @@ class InitialConditions:
         if s is not None:
             layer_contours = False
         # Note that `layer_depth_{loc}` has already been computed during `__post_init__`.
-        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"]
+        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"].squeeze()
 
         # Slice the field as desired
         def _slice_and_assign(

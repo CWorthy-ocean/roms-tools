@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.utils import save_datasets
 from roms_tools.vertical_coordinate import compute_depth
 from roms_tools.plot import _section_plot, _line_plot
 from roms_tools.utils import (
@@ -21,7 +22,6 @@ from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
-    save_datasets,
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
@@ -895,7 +895,7 @@ class BoundaryForcing:
     def save(
         self,
         filepath: Union[str, Path],
-        group: bool = False,
+        group: bool = True,
     ) -> None:
         """Save the boundary forcing fields to one or more netCDF4 files.
 
@@ -909,8 +909,7 @@ class BoundaryForcing:
             The base path and filename for the output file(s). If `group` is `True`, the filenames will include additional
             time-based information (e.g., year or month) to distinguish the subsets.
         group : bool, optional
-            Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `False`, meaning the
-            dataset is saved as a single file.
+            Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `True`.
 
         Returns
         -------

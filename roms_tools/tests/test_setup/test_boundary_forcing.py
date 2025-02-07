@@ -208,7 +208,7 @@ def test_boundary_forcing_save(boundary_forcing, tmp_path):
         ]:  # test for Path object and str
 
             # Test saving without grouping
-            saved_filenames = boundary_forcing.save(filepath)
+            saved_filenames = boundary_forcing.save(filepath, group=False)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")
@@ -252,7 +252,9 @@ def test_bgc_boundary_forcing_save(bgc_boundary_forcing_from_climatology, tmp_pa
         ]:  # test for Path object and str
 
             # Test saving without partitioning and grouping
-            saved_filenames = bgc_boundary_forcing_from_climatology.save(filepath)
+            saved_filenames = bgc_boundary_forcing_from_climatology.save(
+                filepath, group=False
+            )
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")

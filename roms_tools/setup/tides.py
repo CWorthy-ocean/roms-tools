@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from roms_tools import Grid
 from roms_tools.plot import _plot
 from roms_tools.regrid import LateralRegrid
+from roms_tools.utils import save_datasets
 from roms_tools.setup.datasets import TPXODataset
 from roms_tools.setup.utils import (
     nan_check,
@@ -16,7 +17,6 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     get_variable_metadata,
-    save_datasets,
     get_target_coords,
     rotate_velocities,
     get_vector_pairs,

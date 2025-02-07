@@ -8,6 +8,7 @@ from pathlib import Path
 import logging
 from typing import Dict, Union, List
 from roms_tools import Grid
+from roms_tools.utils import save_datasets
 from roms_tools.regrid import LateralRegrid
 from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
@@ -22,7 +23,6 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     get_variable_metadata,
     group_dataset,
-    save_datasets,
     rotate_velocities,
     convert_to_roms_time,
     _to_yaml,
@@ -548,7 +548,7 @@ class SurfaceForcing:
     def save(
         self,
         filepath: Union[str, Path],
-        group: bool = False,
+        group: bool = True,
     ) -> None:
         """Save the surface forcing fields to one or more netCDF4 files.
 
@@ -562,8 +562,7 @@ class SurfaceForcing:
             The base path and filename for the output file(s). If `group` is `True`, the filenames will include additional
             time-based information (e.g., year or month) to distinguish the subsets.
         group : bool, optional
-            Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `False`, meaning the
-            dataset is saved as a single file.
+            Whether to divide the dataset into multiple files based on temporal frequency. Defaults to `True`.
 
         Returns
         -------

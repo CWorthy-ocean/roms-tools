@@ -187,7 +187,6 @@ def compute_depth_coordinates(
     zeta: xr.DataArray | float = 0,
     depth_type: str = "layer",
     location: str = "rho",
-    s: int = None,
     eta: int = None,
     xi: int = None,
 ) -> "xr.DataArray":
@@ -219,10 +218,6 @@ def compute_depth_coordinates(
         - `"u"`: Depth at eastward velocity points (u points).
         - `"v"`: Depth at northward velocity points (v points).
 
-    s : int, optional
-        Vertical index to extract a specific depth layer or interface. If not provided,
-        all vertical layers are returned.
-
     eta : int, optional
         Meridional (north-south) index to extract a zonal slice. If not provided,
         all meridional indices are included.
@@ -236,14 +231,13 @@ def compute_depth_coordinates(
     xr.DataArray
         Computed depth coordinates. The shape of the output depends on the given indices:
         - Full 3D (or 4D if `zeta` includes time) depth field if no indices are specified.
-        - 2D slice for a single vertical layer (`s` specified).
-        - 1D slice if both `s` and either `eta` or `xi` are specified.
+        - 2D (or 3D if `zeta` includes time) slice if either `eta` or `xi` are specified.
+        - 1D (or 2D if `zeta` includes time) slice if both `eta` and `xi` are specified.
 
     Notes
     -----
     - The function first interpolates `h` and `zeta` to the specified grid location (`rho`, `u`, or `v`).
     - Spatial slicing (`eta`, `xi`) is performed before depth computation to optimize efficiency.
-    - If depth coordinates for the requested configuration already exist in `grid_ds`, they are reused.
     - Depth calculations rely on the ROMS vertical stretching curves (`Cs`) and sigma-layers.
     """
 
@@ -293,11 +287,6 @@ def compute_depth_coordinates(
                 zeta = zeta.isel(xi_rho=xi)
 
     depth = compute_depth(zeta, h, grid_ds.attrs["hc"], Cs, sigma)
-
-    # Slice vertically if a specific layer is requested
-    if s is not None:
-        vertical_dim = "s_rho" if "s_rho" in depth.dims else "s_w"
-        depth = depth.isel({vertical_dim: s})
 
     # Add metadata
     depth.attrs.update(

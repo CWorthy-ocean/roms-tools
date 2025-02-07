@@ -189,20 +189,22 @@ class ROMSOutput:
                 self.ds.zeta.isel(time=time),
                 depth_type="layer",
                 location=loc,
-                s=s,
                 eta=eta,
                 xi=xi,
             )
+            if s is not None:
+                layer_depth = layer_depth.isel(s_rho=s)
         if compute_interface_depth:
             interface_depth = compute_depth_coordinates(
                 self.grid.ds,
                 self.ds.zeta.isel(time=time),
                 depth_type="interface",
                 location=loc,
-                s=s,
                 eta=eta,
                 xi=xi,
             )
+            if s is not None:
+                interface_depth = interface_depth.isel(s_w=s)
 
         # Slice the field as desired
         title = field.long_name
@@ -329,9 +331,11 @@ class ROMSOutput:
         -----
         This method uses the `compute_and_update_depth_coordinates` function to perform calculations and updates.
         """
-    
+
         for location in locations:
-            self.ds[f"{depth_type}_depth_{location}"] = compute_depth_coordinates(self.grid.ds, self.ds.zeta, depth_type, location)
+            self.ds[f"{depth_type}_depth_{location}"] = compute_depth_coordinates(
+                self.grid.ds, self.ds.zeta, depth_type, location
+            )
 
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output based on the type."""

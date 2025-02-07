@@ -11,10 +11,7 @@ from typing import Dict, Union, List
 from roms_tools.utils import save_datasets
 from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.mask import _add_mask, _add_velocity_masks
-from roms_tools.vertical_coordinate import (
-    sigma_stretch,
-    compute_depth,
-)
+from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
 from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.utils import (
     interpolate_from_rho_to_u,
@@ -476,56 +473,48 @@ class Grid:
             If not exactly one of s, eta, xi is specified.
         """
 
-        title = "Layer depth at rho-points"
-
         if sum(s is not None for s in [s, eta, xi]) != 1:
             raise ValueError("Exactly one of s, eta, or xi must be specified.")
 
-        h = self.ds["h"]
-        lat_deg = self.ds.lat_rho
-        lon_deg = self.ds.lon_rho
-        if self.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        h = h.assign_coords({"lon": lon_deg, "lat": lat_deg})
+        depth = compute_depth_coordinates(
+            self.ds, zeta=0, depth_type="layer", location="rho", eta=eta, xi=xi
+        )
 
-        # slice the bathymetry as desired
+        title = "Layer depth at rho-points"
         if eta is not None:
-            title = title + f", eta_rho = {h.eta_rho[eta].item()}"
-            h = h.isel(eta_rho=eta)
+            title = title + f", eta_rho = {self.ds.eta_rho[eta].item()}"
         if xi is not None:
-            title = title + f", xi_rho = {h.xi_rho[xi].item()}"
-            h = h.isel(xi_rho=xi)
+            title = title + f", xi_rho = {self.ds.xi_rho[xi].item()}"
+        if s is not None:
+            title = title + f", s_rho = {depth.s_rho[s].item()}"
+            depth = depth.isel(s_rho=s)
 
-        if eta is None and xi is None:
-            layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
-            title = title + f", s_rho = {layer_depth.s_rho[s].item()}"
-            layer_depth = layer_depth.isel(s_rho=s)
-
-            layer_depth.attrs["long_name"] = "Layer depth"
-            layer_depth.attrs["units"] = "m"
-
-            vmax = layer_depth.max().values
-            vmin = layer_depth.min().values
+            vmax = depth.max().values
+            vmin = depth.min().values
             cmap = plt.colormaps.get_cmap("YlGnBu")
             cmap.set_bad(color="gray")
             kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
+            lat_deg = self.ds.lat_rho
+            lon_deg = self.ds.lon_rho
+            if self.straddle:
+                lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+            depth = depth.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
             _plot(
-                field=layer_depth.where(self.ds.mask_rho),
+                field=depth.where(self.ds.mask_rho),
                 depth_contours=False,
                 title=title,
                 kwargs=kwargs,
             )
         else:
-            layer_depth = compute_depth(0, h, self.hc, self.ds.Cs_r, self.ds.sigma_r)
-            layer_depth.attrs["long_name"] = "Layer depth"
-            layer_depth.attrs["units"] = "m"
-            field = xr.zeros_like(layer_depth)
-            field = field.assign_coords({"layer_depth": layer_depth})
+            field = xr.zeros_like(depth)
+            field = field.assign_coords({"layer_depth": depth})
 
-            interface_depth = compute_depth(
-                0, h, self.hc, self.ds.Cs_w, self.ds.sigma_w
+            interface_depth = compute_depth_coordinates(
+                self.ds, zeta=0, depth_type="interface", eta=eta, xi=xi
             )
+
             cmap = plt.colormaps.get_cmap("YlGnBu")
             cmap.set_bad(color="gray")
             kwargs = {"vmax": 0.0, "vmin": 0.0, "cmap": cmap, "add_colorbar": False}

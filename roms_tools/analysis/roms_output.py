@@ -186,8 +186,8 @@ class ROMSOutput:
 
         if compute_layer_depth:
             layer_depth = compute_depth_coordinates(
-                self.ds.isel(time=time),
                 self.grid.ds,
+                self.ds.zeta.isel(time=time),
                 depth_type="layer",
                 location=loc,
                 s=s,
@@ -196,8 +196,8 @@ class ROMSOutput:
             )
         if compute_interface_depth:
             interface_depth = compute_depth_coordinates(
-                self.ds.isel(time=time),
                 self.grid.ds,
+                self.ds.zeta.isel(time=time),
                 depth_type="interface",
                 location=loc,
                 s=s,

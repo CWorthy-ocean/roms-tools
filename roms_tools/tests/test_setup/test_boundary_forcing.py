@@ -10,50 +10,27 @@ from pathlib import Path
 import logging
 
 
-@pytest.fixture()
-def boundary_forcing_with_two_time_entries(use_dask):
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=100,
-        size_y=100,
-        center_lon=-8,
-        center_lat=60,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
-    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
-    return BoundaryForcing(
-        grid=grid,
-        start_time=datetime(2012, 1, 1),
-        end_time=datetime(2012, 12, 31),
-        source={"name": "GLORYS", "path": [fname1, fname2]},
-        apply_2d_horizontal_fill=True,
-        use_dask=True,
-    )
-
-
 @pytest.mark.parametrize(
     "boundary_forcing_fixture",
     [
         "boundary_forcing",
+        "boundary_forcing_adjusted_for_zeta",
+        "boundary_forcing_with_2d_fill",
+        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
     ],
 )
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
 
-    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
-    assert boundary_forcing.start_time == datetime(2021, 6, 29)
-    assert boundary_forcing.end_time == datetime(2021, 6, 30)
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    assert boundary_forcing.start_time == datetime(2012, 1, 1)
+    assert boundary_forcing.end_time == datetime(2012, 12, 31)
     assert boundary_forcing.source == {
         "name": "GLORYS",
-        "path": fname,
+        "path": [fname1, fname2],
         "climatology": False,
     }
     assert boundary_forcing.model_reference_date == datetime(2000, 1, 1)
@@ -72,7 +49,7 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
         assert f"v_{direction}" in boundary_forcing.ds
         assert f"zeta_{direction}" in boundary_forcing.ds
 
-    assert len(boundary_forcing.ds.bry_time) == 1
+    assert len(boundary_forcing.ds.bry_time) == 2
     assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
     assert not hasattr(boundary_forcing.ds, "climatology")
 
@@ -209,39 +186,95 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
     xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
 
 
-def test_correct_depth_coords(boundary_forcing_with_two_time_entries, use_dask):
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "boundary_forcing_adjusted_for_zeta",
+        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
+    ],
+)
+def test_correct_depth_coords_adjusted_for_zeta(
+    boundary_forcing_fixture, request, use_dask
+):
+
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for direction in ["south", "east", "north", "west"]:
 
         # Test that uppermost interface coincides with sea surface height
         assert np.allclose(
-            boundary_forcing_with_two_time_entries.ds_depth_coords[
-                f"interface_depth_rho_{direction}"
-            ]
+            boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
             .isel(s_w=-1)
             .values,
-            -boundary_forcing_with_two_time_entries.ds[f"zeta_{direction}"].values,
+            -boundary_forcing.ds[f"zeta_{direction}"].values,
             atol=1e-6,
         )
 
 
-def test_boundary_forcing_plot(boundary_forcing):
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "boundary_forcing",
+        "boundary_forcing_with_2d_fill",
+    ],
+)
+def test_correct_depth_coords_zero_zeta(boundary_forcing_fixture, request, use_dask):
+
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
+
+    for direction in ["south", "east", "north", "west"]:
+
+        # Test that uppermost interface coincides with sea surface height
+        assert np.allclose(
+            boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
+            .isel(s_w=-1)
+            .values,
+            0 * boundary_forcing.ds[f"zeta_{direction}"].values,
+            atol=1e-6,
+        )
+
+
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "boundary_forcing",
+        "boundary_forcing_with_2d_fill",
+        "boundary_forcing_adjusted_for_zeta",
+        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
+    ],
+)
+def test_boundary_forcing_plot(boundary_forcing_fixture, request):
     """Test plot."""
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
-    boundary_forcing.plot(var_name="temp_south", layer_contours=True)
-    boundary_forcing.plot(var_name="temp_east", layer_contours=True)
-    boundary_forcing.plot(var_name="temp_north", layer_contours=True)
-    boundary_forcing.plot(var_name="temp_west", layer_contours=True)
-    boundary_forcing.plot(var_name="zeta_south")
-    boundary_forcing.plot(var_name="zeta_east")
-    boundary_forcing.plot(var_name="zeta_north")
-    boundary_forcing.plot(var_name="zeta_west")
-    boundary_forcing.plot(var_name="vbar_north")
-    boundary_forcing.plot(var_name="ubar_west")
+    for direction in ["south", "east", "north", "west"]:
+        for layer_contours in [False, True]:
+            boundary_forcing.plot(
+                var_name=f"temp_{direction}", layer_contours=layer_contours
+            )
+            boundary_forcing.plot(
+                var_name=f"u_{direction}", layer_contours=layer_contours
+            )
+            boundary_forcing.plot(
+                var_name=f"v_{direction}", layer_contours=layer_contours
+            )
+        boundary_forcing.plot(var_name=f"zeta_{direction}")
+        boundary_forcing.plot(var_name=f"vbar_{direction}")
+        boundary_forcing.plot(var_name=f"ubar_{direction}")
 
 
-def test_boundary_forcing_save(boundary_forcing, tmp_path):
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "boundary_forcing",
+        "boundary_forcing_with_2d_fill",
+        "boundary_forcing_adjusted_for_zeta",
+        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
+    ],
+)
+def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):
     """Test save method."""
+    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -264,7 +297,7 @@ def test_boundary_forcing_save(boundary_forcing, tmp_path):
             saved_filenames = boundary_forcing.save(filepath, group=True)
 
             filepath_str = str(Path(filepath).with_suffix(""))
-            expected_filepath = Path(f"{filepath_str}_202106.nc")
+            expected_filepath = Path(f"{filepath_str}_2012.nc")
 
             assert saved_filenames == [expected_filepath]
             assert expected_filepath.exists()
@@ -360,8 +393,8 @@ def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
 
     filepath_str1 = str(Path(filepath1).with_suffix(""))
     filepath_str2 = str(Path(filepath2).with_suffix(""))
-    expected_filepath1 = f"{filepath_str1}_202106.nc"
-    expected_filepath2 = f"{filepath_str2}_202106.nc"
+    expected_filepath1 = f"{filepath_str1}_2012.nc"
+    expected_filepath2 = f"{filepath_str2}_2012.nc"
 
     # Only compare hash of datasets because metadata is non-deterministic with dask
     hash1 = calculate_data_hash(expected_filepath1)

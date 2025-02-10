@@ -745,13 +745,29 @@ class InitialConditions:
                             xi=xi,
                         )
                     elif loc == "u":
-                        interface_depth = self.ds_depth_coords[
-                            f"interface_depth_{loc}"
-                        ].isel(eta_rho=eta, xi_u=xi)
+                        index_kwargs = {}
+                        if eta is not None:
+                            index_kwargs["eta_rho"] = eta
+                        if xi is not None:
+                            index_kwargs["xi_u"] = xi
+
+                        interface_depth = (
+                            self.ds_depth_coords[f"interface_depth_{loc}"]
+                            .isel(**index_kwargs)
+                            .squeeze()
+                        )
                     elif loc == "v":
-                        interface_depth = self.ds_depth_coords[
-                            f"interface_depth_{loc}"
-                        ].isel(eta_v=eta, xi_rho=xi)
+                        index_kwargs = {}
+                        if eta is not None:
+                            index_kwargs["eta_v"] = eta
+                        if xi is not None:
+                            index_kwargs["xi_rho"] = xi
+
+                        interface_depth = (
+                            self.ds_depth_coords[f"interface_depth_{loc}"]
+                            .isel(**index_kwargs)
+                            .squeeze()
+                        )
 
                     # restrict number of layer_contours to 10 for the sake of plot clearity
                     nr_layers = len(interface_depth["s_w"])
@@ -763,7 +779,7 @@ class InitialConditions:
                     interface_depth = None
 
                 _section_plot(
-                    field.where(mask),
+                    field,
                     interface_depth=interface_depth,
                     title=title,
                     kwargs=kwargs,

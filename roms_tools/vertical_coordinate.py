@@ -112,6 +112,7 @@ def compute_depth(zeta, h, hc, cs, sigma):
 
     return z
 
+
 def compute_depth_coordinates(
     grid_ds: "xr.Dataset",
     zeta: xr.DataArray | float = 0,

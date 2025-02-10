@@ -211,37 +211,59 @@ def test_interpolation_from_climatology(
 def test_initial_conditions_plot(initial_conditions_with_bgc_from_climatology):
     """Test plot method."""
 
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="temp", s=0, depth_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="temp", eta=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="temp", xi=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", xi=0)
+    # horizontal slices plots
+    for depth_contours in [True, False]:
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="temp", s=0, depth_contours=depth_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="u", s=0, depth_contours=depth_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="v", s=0, depth_contours=depth_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="ALK", s=0, depth_contours=depth_contours
+        )
+
+    # section plots
+    for layer_contours in [True, False]:
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="temp", eta=0, layer_contours=layer_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="temp", xi=0, layer_contours=layer_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="ALK", eta=0, layer_contours=layer_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="ALK", xi=0, layer_contours=layer_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="u", eta=0, layer_contours=layer_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="u", xi=0, layer_contours=layer_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="v", eta=0, layer_contours=layer_contours
+        )
+        initial_conditions_with_bgc_from_climatology.plot(
+            var_name="v", xi=0, layer_contours=layer_contours
+        )
+
+    # 1D plot in horizontal
     initial_conditions_with_bgc_from_climatology.plot(var_name="temp", s=0, xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", s=0, xi=0)
+
+    # 1D plot in vertical
     initial_conditions_with_bgc_from_climatology.plot(var_name="temp", eta=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="u", s=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(var_name="u", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="u", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="u", xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="v", s=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(var_name="v", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="v", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="v", xi=0)
+    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", eta=0, xi=0)
+
     initial_conditions_with_bgc_from_climatology.plot(var_name="zeta")
     initial_conditions_with_bgc_from_climatology.plot(var_name="ubar")
     initial_conditions_with_bgc_from_climatology.plot(var_name="vbar")
-    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", s=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", eta=0, xi=0)
 
 
 def test_initial_conditions_save(

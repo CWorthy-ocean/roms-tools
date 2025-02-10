@@ -114,6 +114,9 @@ class BoundaryForcing:
     def __post_init__(self):
 
         self._input_checks()
+        # Dataset for depth coordinates
+        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
+
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
@@ -129,6 +132,8 @@ class BoundaryForcing:
         self._set_variable_info(data)
         self._set_boundary_info()
         ds = xr.Dataset()
+
+        _warned_about_zeta = False  # Module-level variable to track warning
 
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
@@ -154,13 +159,14 @@ class BoundaryForcing:
 
                 processed_fields = {}
 
-                # lateral regridding of vector fields
-                vector_var_names = [
-                    name
-                    for name, info in self.variable_info.items()
-                    if info["is_vector"]
-                ]
-                if len(vector_var_names) > 0:
+                # vector fields (velocities) are only present in physics datasets
+                if self.type == "physics":
+                    # lateral regridding of vector fields
+                    vector_var_names = [
+                        name
+                        for name, info in self.variable_info.items()
+                        if info["is_vector"]
+                    ]
                     lon = target_coords["lon"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
@@ -175,6 +181,21 @@ class BoundaryForcing:
                             processed_fields[var_name] = lateral_regrid.apply(
                                 bdry_data.ds[bdry_data.var_names[var_name]]
                             )
+                    # Regrid sea surface height ('zeta') onto a 2-cell-wide margin.
+                    # This is needed to correctly infer depth coordinates at u- and v-points along the boundary.
+                    zeta = lateral_regrid.apply(
+                        bdry_data.ds[bdry_data.var_names["zeta"]]
+                    )
+                    if self.use_dask:
+                        zeta.persist()
+                else:
+                    if not _warned_about_zeta:
+                        logging.warning(
+                            "Sea surface height ('zeta') is not available for BGC fields. "
+                            "Assuming zeta = 0 for depth coordinate computations."
+                        )
+                        _warned_about_zeta = True  # Prevent further warnings
+                    zeta = 0
 
                 # lateral regridding of tracer fields
                 tracer_var_names = [
@@ -234,24 +255,22 @@ class BoundaryForcing:
                         for name, info in self.variable_info.items()
                         if info["location"] == location and info["is_3d"]
                     ]
+
                 # compute layer depth coordinates
+                if len(var_names_dict["rho"]) > 0:
+                    self._get_depth_coordinates(zeta, direction, "rho", "layer")
+                    self._get_depth_coordinates(
+                        zeta, direction, "rho", "interface"
+                    )  # only necessary for plotting
                 if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
-                    self._get_vertical_coordinates(
-                        type="layer",
-                        direction=direction,
-                        additional_locations=["u", "v"],
-                    )
-                else:
-                    if len(var_names_dict["rho"]) > 0:
-                        self._get_vertical_coordinates(
-                            type="layer", direction=direction, additional_locations=[]
-                        )
+                    self._get_depth_coordinates(zeta, direction, "u", "layer")
+                    self._get_depth_coordinates(zeta, direction, "v", "layer")
 
                 # vertical regridding
                 for location in ["rho", "u", "v"]:
                     if len(var_names_dict[location]) > 0:
                         vertical_regrid = VerticalRegrid(
-                            self.grid.ds[f"layer_depth_{location}_{direction}"],
+                            self.ds_depth_coords[f"layer_depth_{location}_{direction}"],
                             bdry_data.ds[bdry_data.dim_names["depth"]],
                         )
                         for var_name in var_names_dict[location]:
@@ -262,17 +281,16 @@ class BoundaryForcing:
 
                 # compute barotropic velocities
                 if "u" in self.variable_info and "v" in self.variable_info:
-                    self._get_vertical_coordinates(
-                        type="interface",
-                        direction=direction,
-                        additional_locations=["u", "v"],
-                    )
+                    self._get_depth_coordinates(zeta, direction, "u", "interface")
+                    self._get_depth_coordinates(zeta, direction, "v", "interface")
                     for location in ["u", "v"]:
                         processed_fields[
                             f"{location}bar"
                         ] = compute_barotropic_velocity(
                             processed_fields[location],
-                            self.grid.ds[f"interface_depth_{location}_{direction}"],
+                            self.ds_depth_coords[
+                                f"interface_depth_{location}_{direction}"
+                            ],
                         )
 
                 # Reorder dimensions
@@ -489,118 +507,85 @@ class BoundaryForcing:
 
         object.__setattr__(self, "bdry_coords", bdry_coords)
 
-    def _get_vertical_coordinates(
-        self, type, direction, additional_locations=["u", "v"]
-    ):
-        """Retrieve layer and interface depth coordinates for a specified grid boundary.
+    def _get_depth_coordinates(
+        self,
+        zeta: xr.DataArray | float,
+        direction: str,
+        location: str,
+        depth_type: str = "layer",
+    ) -> None:
+        """Compute and store depth coordinates for a specified boundary direction, grid
+        location, and depth type.
 
-        This method computes and updates the layer and interface depth coordinates along a specified
-        boundary (north, south, east, or west). It handles depth calculations for rho points and
-        additional specified locations (u and v).
+        This method efficiently computes depth coordinates along the specified boundary without
+        interpolating the entire domain topography. The computed depth values are stored in
+        `self.ds_depth_coords`.
 
         Parameters
         ----------
-        type : str
-            The type of depth coordinate to retrieve. Valid options are:
-            - "layer": Retrieves layer depth coordinates.
-            - "interface": Retrieves interface depth coordinates.
-
+        zeta : xr.DataArray or float
+            Free-surface elevation, either as a scalar value or an `xarray.DataArray` with spatial
+            variations.
         direction : str
-            The direction of the boundary to retrieve coordinates for. Valid options are:
+            The boundary direction for which depth coordinates are computed. Must be one of:
             - "north"
             - "south"
             - "east"
             - "west"
+        location : str
+            Grid location at which depth is computed. Must be one of:
+            - `"rho"`: Depth at scalar grid points.
+            - `"u"`: Depth at U-velocity grid points.
+            - `"v"`: Depth at V-velocity grid points.
+        depth_type : str, optional
+            Type of depth coordinate to compute, either:
+            - `"layer"` (default): Depth at vertical layer midpoints.
+            - `"interface"`: Depth at vertical layer interfaces.
 
-        additional_locations : list of str, optional
-            Specifies additional locations to compute depth coordinates for. Default is ["u", "v"].
-            Valid options include:
-            - "u": Computes depth coordinates for u points.
-            - "v": Computes depth coordinates for v points.
-
-        Updates
-        -------
-        self.grid.ds : xarray.Dataset
-            The dataset is updated with the following vertical depth coordinates:
-            - f"{type}_depth_rho_{direction}": Depth coordinates at rho points.
-            - f"{type}_depth_u_{direction}": Depth coordinates at u points (if applicable).
-            - f"{type}_depth_v_{direction}": Depth coordinates at v points (if applicable).
+        Notes
+        -----
+        - This method is optimized for boundary computations by selecting only the relevant margin
+          (2 grid cells) instead of interpolating the entire domain.
         """
-
-        layer_vars = []
-        for location in ["rho"] + additional_locations:
-            layer_vars.append(f"{type}_depth_{location}_{direction}")
-
-        if all(layer_var in self.grid.ds for layer_var in layer_vars):
-            # Vertical coordinate data already exists
-            pass
-
-        elif f"{type}_depth_rho" in self.grid.ds:
-            depth = self.grid.ds[f"{type}_depth_rho"]
-            depth.attrs["long_name"] = f"{type} depth at rho-points"
-            depth.attrs["units"] = "m"
-            self.grid.ds[f"{type}_depth_rho_{direction}"] = depth.isel(
-                **self.bdry_coords["rho"][direction]
-            )
-
-            if "u" in additional_locations or "v" in additional_locations:
+        key = f"{depth_type}_depth_{location}_{direction}"
+        if key not in self.ds_depth_coords:
+            if location in ["u", "v"]:
                 # selection of margin consisting of 2 grid cells
-                depth = depth.isel(**self.bdry_coords["vector"][direction])
-                # interpolation
-                if "u" in additional_locations:
-                    depth_u = interpolate_from_rho_to_u(depth)
-                    depth_u.attrs["long_name"] = f"{type} depth at u-points"
-                    depth_u.attrs["units"] = "m"
-                    self.grid.ds[f"{type}_depth_u_{direction}"] = depth_u.isel(
-                        **self.bdry_coords["u"][direction]
-                    )
-                if "v" in additional_locations:
-                    depth_v = interpolate_from_rho_to_v(depth)
-                    depth_v.attrs["long_name"] = f"{type} depth at v-points"
-                    depth_v.attrs["units"] = "m"
-                    self.grid.ds[f"{type}_depth_v_{direction}"] = depth_v.isel(
-                        **self.bdry_coords["v"][direction]
-                    )
-        else:
-            if "u" in additional_locations or "v" in additional_locations:
                 h = self.grid.ds["h"].isel(**self.bdry_coords["vector"][direction])
+                if isinstance(zeta, xr.DataArray):
+                    zeta = zeta.isel(**self.bdry_coords["vector"][direction])
             else:
                 h = self.grid.ds["h"].isel(**self.bdry_coords["rho"][direction])
-            if type == "layer":
+                if isinstance(zeta, xr.DataArray):
+                    zeta = zeta.isel(**self.bdry_coords["rho"][direction])
+
+            if depth_type == "layer":
                 depth = compute_depth(
-                    0, h, self.grid.hc, self.grid.ds.Cs_r, self.grid.ds.sigma_r
+                    zeta, h, self.grid.hc, self.grid.ds.Cs_r, self.grid.ds.sigma_r
                 )
             else:
                 depth = compute_depth(
-                    0, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
+                    zeta, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
                 )
 
-            if "u" in additional_locations or "v" in additional_locations:
-                depth.attrs["long_name"] = f"{type} depth at rho-points"
-                depth.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_rho_{direction}"] = depth.isel(
-                    **self.bdry_coords["rho"][direction]
-                )
-                # selection of margin consisting of 2 grid cells
-                depth = depth.isel(**self.bdry_coords["vector"][direction])
+            if location in ["u", "v"]:
                 # interpolation
-                depth_u = interpolate_from_rho_to_u(depth)
-                depth_v = interpolate_from_rho_to_v(depth)
-                # selection of outermost margin
-                depth_u.attrs["long_name"] = f"{type} depth at u-points"
-                depth_u.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_u_{direction}"] = depth_u.isel(
-                    **self.bdry_coords["u"][direction]
-                )
-                depth_v.attrs["long_name"] = f"{type} depth at v-points"
-                depth_v.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_v_{direction}"] = depth_v.isel(
-                    **self.bdry_coords["v"][direction]
-                )
-            else:
-                depth.attrs["long_name"] = f"{type} depth at rho-points"
-                depth.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_rho_{direction}"] = depth
+                if location == "u":
+                    depth = interpolate_from_rho_to_u(depth)
+                elif location == "v":
+                    depth = interpolate_from_rho_to_v(depth)
+                # restrict to outermost margin
+                depth = depth.isel(**self.bdry_coords[location][direction])
+
+            # Add metadata
+            depth.attrs.update(
+                {
+                    "long_name": f"{depth_type} depth at {location}-points along {direction}ern boundary",
+                    "units": "m",
+                }
+            )
+
+            self.ds_depth_coords[key] = depth
 
     def _add_global_metadata(self, data, ds=None):
 
@@ -840,9 +825,12 @@ class BoundaryForcing:
         mask = mask.isel(**self.bdry_coords[location][direction])
 
         if "s_rho" in field.dims:
-            field = field.assign_coords(
-                {"layer_depth": self.grid.ds[f"layer_depth_{location}_{direction}"]}
-            )
+            layer_depth = self.ds_depth_coords[f"layer_depth_{location}_{direction}"]
+            if self.type == "physics":
+                layer_depth = layer_depth.isel(
+                    time=time
+                )  # select appropriate time slice since layer depth varies over time for physics fields
+            field = field.assign_coords({"layer_depth": layer_depth})
         if var_name.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
@@ -859,19 +847,13 @@ class BoundaryForcing:
 
         if len(field.dims) == 2:
             if layer_contours:
-                if location in ["u", "v"]:
-                    additional_locations = ["u", "v"]
-                else:
-                    additional_locations = []
-                self._get_vertical_coordinates(
-                    type="interface",
-                    direction=direction,
-                    additional_locations=additional_locations,
-                )
-
-                interface_depth = self.grid.ds[
+                interface_depth = self.ds_depth_coords[
                     f"interface_depth_{location}_{direction}"
                 ]
+                if self.type == "physics":
+                    interface_depth = interface_depth.isel(
+                        time=time
+                    )  # select appropriate time slice since interface depth varies over time for physics fields
                 # restrict number of layer_contours to 10 for the sake of plot clearity
                 nr_layers = len(interface_depth["s_w"])
                 selected_layers = np.linspace(
@@ -882,6 +864,8 @@ class BoundaryForcing:
             else:
                 interface_depth = None
 
+            print(field)
+            print(interface_depth)
             _section_plot(
                 field.where(mask),
                 interface_depth=interface_depth,

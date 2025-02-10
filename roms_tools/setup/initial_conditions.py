@@ -734,15 +734,25 @@ class InitialConditions:
         else:
             if len(field.dims) == 2:
                 if layer_contours:
-                    if f"interface_depth_{loc}" not in self.ds_depth_coords:
+                    if loc == "rho":
+                        # interface_depth_rho has not been computed yet
                         interface_depth = compute_depth_coordinates(
                             self.grid.ds,
-                            0,
+                            self.ds.zeta,
                             depth_type="interface",
                             location=loc,
                             eta=eta,
                             xi=xi,
                         )
+                    elif loc == "u":
+                        interface_depth = self.ds_depth_coords[
+                            f"interface_depth_{loc}"
+                        ].isel(eta_rho=eta, xi_u=xi)
+                    elif loc == "v":
+                        interface_depth = self.ds_depth_coords[
+                            f"interface_depth_{loc}"
+                        ].isel(eta_v=eta, xi_rho=xi)
+
                     # restrict number of layer_contours to 10 for the sake of plot clearity
                     nr_layers = len(interface_depth["s_w"])
                     selected_layers = np.linspace(

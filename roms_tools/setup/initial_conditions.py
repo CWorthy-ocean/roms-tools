@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Union, List, Optional
 import matplotlib.pyplot as plt
 from pathlib import Path
+import logging
 from datetime import datetime
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
@@ -59,6 +60,9 @@ class InitialConditions:
             - A list of strings or Path objects containing multiple files.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
+    adjust_depth_for_sea_surface_height : bool, optional
+        Whether to account for sea surface height (`zeta`) variations when computing depth coordinates.
+        Defaults to `False`.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
@@ -87,6 +91,7 @@ class InitialConditions:
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     bgc_source: Optional[Dict[str, Union[str, Path, List[Union[str, Path]]]]] = None
     model_reference_date: datetime = datetime(2000, 1, 1)
+    adjust_depth_for_sea_surface_height: bool = False
     use_dask: bool = False
     bypass_validation: bool = False
 
@@ -173,11 +178,14 @@ class InitialConditions:
                 )
 
         # compute layer depth coordinates
-        zeta = processed_fields[
-            "zeta"
-        ]  # requires time coordinate match (previous step) in case of BGC
-        if self.use_dask:
-            zeta.persist()
+        if self.adjust_depth_for_sea_surface_height:
+            zeta = processed_fields[
+                "zeta"
+            ]  # requires time coordinate match (previous step) in case of BGC
+            if self.use_dask:
+                zeta.persist()
+        else:
+            zeta = 0
         if len(var_names_dict["rho"]) > 0:
             self._get_depth_coordinates(zeta, "rho", "layer")
         if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
@@ -246,6 +254,14 @@ class InitialConditions:
                     **self.bgc_source,
                     "climatology": self.bgc_source.get("climatology", False),
                 },
+            )
+        if self.adjust_depth_for_sea_surface_height:
+            logging.info(
+                "Sea surface height ('zeta') will be used to adjust depth coordinates."
+            )
+        else:
+            logging.info(
+                "Sea surface height ('zeta') will NOT be used to adjust depth coordinates."
             )
 
     def _get_data(self):

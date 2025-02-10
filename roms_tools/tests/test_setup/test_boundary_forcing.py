@@ -1,6 +1,7 @@
 import pytest
 from datetime import datetime
 import xarray as xr
+import numpy as np
 from roms_tools import Grid, BoundaryForcing
 import textwrap
 from roms_tools.download import download_test_data
@@ -9,11 +10,38 @@ from pathlib import Path
 import logging
 
 
+@pytest.fixture()
+def boundary_forcing_with_two_time_entries(use_dask):
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=100,
+        size_y=100,
+        center_lon=-8,
+        center_lat=60,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"name": "GLORYS", "path": [fname1, fname2]},
+        apply_2d_horizontal_fill=True,
+        use_dask=True,
+    )
+
+
 @pytest.mark.parametrize(
     "boundary_forcing_fixture",
     [
         "boundary_forcing",
-        # "boundary_forcing_with_2d_fill",
     ],
 )
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
@@ -53,7 +81,6 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     "boundary_forcing_fixture",
     [
         "bgc_boundary_forcing_from_climatology",
-        # "bgc_boundary_forcing_from_climatology_with_2d_fill",
     ],
 )
 def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
@@ -180,6 +207,22 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
     )
 
     xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
+
+
+def test_correct_depth_coords(boundary_forcing_with_two_time_entries, use_dask):
+
+    for direction in ["south", "east", "north", "west"]:
+
+        # Test that uppermost interface coincides with sea surface height
+        assert np.allclose(
+            boundary_forcing_with_two_time_entries.ds_depth_coords[
+                f"interface_depth_rho_{direction}"
+            ]
+            .isel(s_w=-1)
+            .values,
+            -boundary_forcing_with_two_time_entries.ds[f"zeta_{direction}"].values,
+            atol=1e-6,
+        )
 
 
 def test_boundary_forcing_plot(boundary_forcing):

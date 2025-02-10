@@ -144,6 +144,38 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
     assert initial_conditions.bgc_source["climatology"] is False
 
 
+def test_correct_depth_coords(initial_conditions_with_bgc_from_climatology, use_dask):
+
+    # compute interface depth at rho-points and write it into .ds_depth_coords
+    zeta = initial_conditions_with_bgc_from_climatology.ds.zeta
+    initial_conditions_with_bgc_from_climatology._get_depth_coordinates(
+        zeta, location="rho", depth_type="interface"
+    )
+    # Test that lowermost interface coincides with topography
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds_depth_coords[
+            "interface_depth_rho"
+        ]
+        .isel(s_w=0)
+        .squeeze()
+        .values,  # Extract raw NumPy array
+        initial_conditions_with_bgc_from_climatology.grid.ds.h.values,
+        atol=1e-6,  # Adjust tolerance as needed
+    )
+
+    # Test that uppermost interface coincides with sea surface height
+    assert np.allclose(
+        initial_conditions_with_bgc_from_climatology.ds_depth_coords[
+            "interface_depth_rho"
+        ]
+        .isel(s_w=-1)
+        .squeeze()
+        .values,
+        -zeta.values,
+        atol=1e-6,
+    )
+
+
 def test_interpolation_from_climatology(
     initial_conditions_with_bgc_from_climatology, use_dask
 ):

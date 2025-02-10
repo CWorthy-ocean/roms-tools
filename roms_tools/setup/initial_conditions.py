@@ -61,7 +61,7 @@ class InitialConditions:
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     adjust_depth_for_sea_surface_height : bool, optional
-        Whether to account for sea surface height (`zeta`) variations when computing depth coordinates.
+        Whether to account for sea surface height variations when computing depth coordinates.
         Defaults to `False`.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
@@ -256,12 +256,10 @@ class InitialConditions:
                 },
             )
         if self.adjust_depth_for_sea_surface_height:
-            logging.info(
-                "Sea surface height ('zeta') will be used to adjust depth coordinates."
-            )
+            logging.info("Sea surface height will be used to adjust depth coordinates.")
         else:
             logging.info(
-                "Sea surface height ('zeta') will NOT be used to adjust depth coordinates."
+                "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
     def _get_data(self):
@@ -517,6 +515,9 @@ class InitialConditions:
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["ini_time"] = str(self.ini_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["adjust_depth_for_sea_surface_height"] = str(
+            self.adjust_depth_for_sea_surface_height
+        )
         ds.attrs["source"] = self.source["name"]
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]

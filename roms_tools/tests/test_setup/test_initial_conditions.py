@@ -4,6 +4,7 @@ from roms_tools import InitialConditions, Grid
 import xarray as xr
 import numpy as np
 import textwrap
+import logging
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset
 from pathlib import Path
@@ -31,6 +32,7 @@ def test_initial_conditions_creation(ic_fixture, request):
         "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
         "climatology": False,
     }
+    assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
     assert isinstance(ic.ds, xr.Dataset)
     assert "temp" in ic.ds
     assert "salt" in ic.ds
@@ -144,6 +146,55 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
     )
 
     assert initial_conditions.bgc_source["climatology"] is False
+
+
+def test_info_depth(caplog, use_dask):
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+
+    with caplog.at_level(logging.INFO):
+
+        InitialConditions(
+            grid=grid,
+            ini_time=datetime(2021, 6, 29),
+            source={"path": fname, "name": "GLORYS"},
+            adjust_depth_for_sea_surface_height=True,
+            use_dask=use_dask,
+        )
+    # Verify the warning message in the log
+    assert "Sea surface height will be used to adjust depth coordinates." in caplog.text
+
+    # Clear the log before the next test
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+
+        InitialConditions(
+            grid=grid,
+            ini_time=datetime(2021, 6, 29),
+            source={"path": fname, "name": "GLORYS"},
+            adjust_depth_for_sea_surface_height=True,
+            use_dask=use_dask,
+        )
+    # Verify the warning message in the log
+    assert (
+        "Sea surface height will NOT be used to adjust depth coordinates."
+        in caplog.text
+    )
 
 
 @pytest.mark.parametrize(

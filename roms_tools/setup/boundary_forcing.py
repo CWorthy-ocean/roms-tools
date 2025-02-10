@@ -358,12 +358,19 @@ class BoundaryForcing:
             )
             object.__setattr__(self, "adjust_depth_for_sea_surface_height", False)
         elif self.adjust_depth_for_sea_surface_height:
+            logging.info("Sea surface height will be used to adjust depth coordinates.")
+        else:
             logging.info(
-                "Sea surface height ('zeta') will be used to adjust depth coordinates."
+                "Sea surface height will NOT be used to adjust depth coordinates."
+            )
+
+        if self.apply_2d_horizontal_fill:
+            logging.info(
+                "Applying 2D horizontal fill to the source data before regridding."
             )
         else:
             logging.info(
-                "Sea surface height ('zeta') will NOT be used to adjust depth coordinates."
+                "Applying 1D horizontal fill separately to each regridded boundary."
             )
 
     def _get_data(self):
@@ -631,6 +638,10 @@ class BoundaryForcing:
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["source"] = self.source["name"]
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["apply_2d_horizontal_fill"] = str(self.apply_2d_horizontal_fill)
+        ds.attrs["adjust_depth_for_sea_surface_height"] = str(
+            self.adjust_depth_for_sea_surface_height
+        )
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]

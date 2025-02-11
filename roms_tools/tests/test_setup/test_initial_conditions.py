@@ -187,7 +187,7 @@ def test_info_depth(caplog, use_dask):
             grid=grid,
             ini_time=datetime(2021, 6, 29),
             source={"path": fname, "name": "GLORYS"},
-            adjust_depth_for_sea_surface_height=True,
+            adjust_depth_for_sea_surface_height=False,
             use_dask=use_dask,
         )
     # Verify the warning message in the log

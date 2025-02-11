@@ -181,7 +181,7 @@ def test_info_depth(caplog, use_dask):
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
     with caplog.at_level(logging.INFO):
-        BoundaryForcing(
+        bf = BoundaryForcing(
             grid=grid,
             start_time=datetime(2012, 1, 1),
             end_time=datetime(2012, 12, 31),
@@ -243,7 +243,7 @@ def test_info_fill(caplog, use_dask):
         )
 
     # Verify the warning message in the log
-    assert "Sea surface height will be used to adjust depth coordinates." in caplog.text
+    assert "Applying 2D horizontal fill to the source data before regridding." in caplog.text
 
     # Clear the log before the next test
     caplog.clear()

@@ -1,10 +1,12 @@
 {
-    "end_time": "2021-06-30 00:00:00",
+    "adjust_depth_for_sea_surface_height": "False",
+    "apply_2d_horizontal_fill": "False",
+    "end_time": "2012-12-31 00:00:00",
     "hc": 250.0,
     "model_reference_date": "2000-01-01 00:00:00",
-    "roms_tools_version": "0.1.dev157+dirty",
+    "roms_tools_version": "0.1.dev177",
     "source": "GLORYS",
-    "start_time": "2021-06-29 00:00:00",
+    "start_time": "2012-01-01 00:00:00",
     "theta_b": 2.0,
     "theta_s": 5.0,
     "title": "ROMS boundary forcing file created by ROMS-Tools"

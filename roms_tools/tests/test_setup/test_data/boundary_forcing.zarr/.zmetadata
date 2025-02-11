@@ -1,12 +1,14 @@
 {
     "metadata": {
         ".zattrs": {
-            "end_time": "2021-06-30 00:00:00",
+            "adjust_depth_for_sea_surface_height": "False",
+            "apply_2d_horizontal_fill": "False",
+            "end_time": "2012-12-31 00:00:00",
             "hc": 250.0,
             "model_reference_date": "2000-01-01 00:00:00",
-            "roms_tools_version": "0.1.dev157+dirty",
+            "roms_tools_version": "0.1.dev177",
             "source": "GLORYS",
-            "start_time": "2021-06-29 00:00:00",
+            "start_time": "2012-01-01 00:00:00",
             "theta_b": 2.0,
             "theta_s": 5.0,
             "title": "ROMS boundary forcing file created by ROMS-Tools"
@@ -16,7 +18,7 @@
         },
         "abs_time/.zarray": {
             "chunks": [
-                1
+                2
             ],
             "compressor": {
                 "blocksize": 0,
@@ -30,7 +32,7 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1
+                2
             ],
             "zarr_format": 2
         },
@@ -39,11 +41,12 @@
                 "bry_time"
             ],
             "calendar": "gregorian",
-            "units": "seconds since 1970-01-01"
+            "long_name": "absolute time",
+            "units": "hours since 1950-01-01"
         },
         "bry_time/.zarray": {
             "chunks": [
-                1
+                2
             ],
             "compressor": {
                 "blocksize": 0,
@@ -57,7 +60,7 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1
+                2
             ],
             "zarr_format": 2
         },
@@ -65,14 +68,14 @@
             "_ARRAY_DIMENSIONS": [
                 "bry_time"
             ],
-            "long_name": "days since 2000-01-01 00:00:00",
+            "long_name": "relative time: days since 2000-01-01 00:00:00",
             "units": "days"
         },
         "salt_east/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -86,9 +89,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -104,9 +107,9 @@
         },
         "salt_north/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -120,9 +123,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -138,9 +141,9 @@
         },
         "salt_south/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -154,9 +157,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -172,9 +175,9 @@
         },
         "salt_west/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -188,9 +191,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -206,9 +209,9 @@
         },
         "temp_east/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -222,9 +225,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -240,9 +243,9 @@
         },
         "temp_north/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -256,9 +259,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -274,9 +277,9 @@
         },
         "temp_south/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -290,9 +293,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -308,9 +311,9 @@
         },
         "temp_west/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -324,9 +327,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -342,9 +345,9 @@
         },
         "u_east/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -358,9 +361,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -376,9 +379,9 @@
         },
         "u_north/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -392,9 +395,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "zarr_format": 2
         },
@@ -410,9 +413,9 @@
         },
         "u_south/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -426,9 +429,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "zarr_format": 2
         },
@@ -444,9 +447,9 @@
         },
         "u_west/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -460,9 +463,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -478,8 +481,8 @@
         },
         "ubar_east/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -493,8 +496,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -509,8 +512,8 @@
         },
         "ubar_north/.zarray": {
             "chunks": [
-                1,
-                3
+                2,
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -524,8 +527,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                3
+                2,
+                4
             ],
             "zarr_format": 2
         },
@@ -540,8 +543,8 @@
         },
         "ubar_south/.zarray": {
             "chunks": [
-                1,
-                3
+                2,
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -555,8 +558,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                3
+                2,
+                4
             ],
             "zarr_format": 2
         },
@@ -571,8 +574,8 @@
         },
         "ubar_west/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -586,8 +589,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -602,9 +605,9 @@
         },
         "v_east/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -618,9 +621,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "zarr_format": 2
         },
@@ -636,9 +639,9 @@
         },
         "v_north/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -652,9 +655,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -670,9 +673,9 @@
         },
         "v_south/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -686,9 +689,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                4
+                5
             ],
             "zarr_format": 2
         },
@@ -704,9 +707,9 @@
         },
         "v_west/.zarray": {
             "chunks": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -720,9 +723,9 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
+                2,
                 3,
-                3
+                4
             ],
             "zarr_format": 2
         },
@@ -738,8 +741,8 @@
         },
         "vbar_east/.zarray": {
             "chunks": [
-                1,
-                3
+                2,
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -753,8 +756,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                3
+                2,
+                4
             ],
             "zarr_format": 2
         },
@@ -769,8 +772,8 @@
         },
         "vbar_north/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -784,8 +787,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -800,8 +803,8 @@
         },
         "vbar_south/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -815,8 +818,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -831,8 +834,8 @@
         },
         "vbar_west/.zarray": {
             "chunks": [
-                1,
-                3
+                2,
+                4
             ],
             "compressor": {
                 "blocksize": 0,
@@ -846,8 +849,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                3
+                2,
+                4
             ],
             "zarr_format": 2
         },
@@ -862,8 +865,8 @@
         },
         "zeta_east/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -877,8 +880,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -887,14 +890,22 @@
                 "bry_time",
                 "eta_rho"
             ],
+            "_ChunkSizes": [
+                1,
+                681,
+                1440
+            ],
+            "cell_methods": "area: mean",
             "coordinates": "abs_time",
             "long_name": "eastern boundary sea surface height",
+            "standard_name": "sea_surface_height_above_geoid",
+            "unit_long": "Meters",
             "units": "m"
         },
         "zeta_north/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -908,8 +919,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -918,14 +929,22 @@
                 "bry_time",
                 "xi_rho"
             ],
+            "_ChunkSizes": [
+                1,
+                681,
+                1440
+            ],
+            "cell_methods": "area: mean",
             "coordinates": "abs_time",
             "long_name": "northern boundary sea surface height",
+            "standard_name": "sea_surface_height_above_geoid",
+            "unit_long": "Meters",
             "units": "m"
         },
         "zeta_south/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -939,8 +958,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -949,14 +968,22 @@
                 "bry_time",
                 "xi_rho"
             ],
+            "_ChunkSizes": [
+                1,
+                681,
+                1440
+            ],
+            "cell_methods": "area: mean",
             "coordinates": "abs_time",
             "long_name": "southern boundary sea surface height",
+            "standard_name": "sea_surface_height_above_geoid",
+            "unit_long": "Meters",
             "units": "m"
         },
         "zeta_west/.zarray": {
             "chunks": [
-                1,
-                4
+                2,
+                5
             ],
             "compressor": {
                 "blocksize": 0,
@@ -970,8 +997,8 @@
             "filters": null,
             "order": "C",
             "shape": [
-                1,
-                4
+                2,
+                5
             ],
             "zarr_format": 2
         },
@@ -980,8 +1007,16 @@
                 "bry_time",
                 "eta_rho"
             ],
+            "_ChunkSizes": [
+                1,
+                681,
+                1440
+            ],
+            "cell_methods": "area: mean",
             "coordinates": "abs_time",
             "long_name": "western boundary sea surface height",
+            "standard_name": "sea_surface_height_above_geoid",
+            "unit_long": "Meters",
             "units": "m"
         }
     },

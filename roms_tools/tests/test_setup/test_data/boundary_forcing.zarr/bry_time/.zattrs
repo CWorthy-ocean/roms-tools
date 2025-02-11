@@ -2,6 +2,6 @@
     "_ARRAY_DIMENSIONS": [
         "bry_time"
     ],
-    "long_name": "days since 2000-01-01 00:00:00",
+    "long_name": "relative time: days since 2000-01-01 00:00:00",
     "units": "days"
 }

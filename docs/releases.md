@@ -8,6 +8,7 @@
 * New default for `correct_radiation` in `SurfaceForcing` is `True` ([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
 * New default for `bathymetry` in `Grid.plot()` is `True` ([#234](https://github.com/CWorthy-ocean/roms-tools/pull/234))
 * New default for `group` in `SurfaceForcing.save()` and `BoundaryForcing.save()` is `True` ([#236](https://github.com/CWorthy-ocean/roms-tools/pull/236))
+* Option to adjust depth for sea surface height when creating `InitialConditions` and `BoundaryForcing` ([#240](https://github.com/CWorthy-ocean/roms-tools/pull/240))
 
 ### Breaking Changes
 
@@ -23,11 +24,13 @@
 * When appropriate, only compare data hashes rather than file hashes in automated test suite ([#235](https://github.com/CWorthy-ocean/roms-tools/pull/235))
 * Slightly shift one of the test grids away from the Greenwich meridian ([#235](https://github.com/CWorthy-ocean/roms-tools/pull/235))
 * The partitioning functions are moved to their own subdirectory `tiling` ([#236](https://github.com/CWorthy-ocean/roms-tools/pull/236))
+* Internal refactoring of depth coordinate computation ([#240](https://github.com/CWorthy-ocean/roms-tools/pull/240))
 
 ### Documentation
 
 * New features and defaults are documented for `SurfaceForcing` (([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
 * Improvements to the notebook that documents the partioning functionality ([#236](https://github.com/CWorthy-ocean/roms-tools/pull/236))
+* Document the option to adjust depth for sea surface height ([#240](https://github.com/CWorthy-ocean/roms-tools/pull/240))
 
 ### Bugfixes
 

@@ -66,9 +66,13 @@ class BoundaryForcing:
           - "physics": for physical atmospheric forcing.
           - "bgc": for biogeochemical forcing.
 
-    apply_2d_horizontal_fill: bool, optional
+    apply_2d_horizontal_fill : bool, optional
         Indicates whether to perform a two-dimensional horizontal fill on the source data prior to regridding to boundaries.
         If `False`, a one-dimensional horizontal fill is performed separately on each of the four regridded boundaries.
+        Defaults to `False`.
+    adjust_depth_for_sea_surface_height : bool, optional
+        Whether to account for sea surface height (`zeta`) variations when computing depth coordinates.
+        This adjustment is only applicable for `type="physics"`, as for biogeochemical fields usually `zeta` is not available.
         Defaults to `False`.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
@@ -105,6 +109,7 @@ class BoundaryForcing:
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     apply_2d_horizontal_fill: bool = False
+    adjust_depth_for_sea_surface_height: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False
     bypass_validation: bool = False
@@ -114,6 +119,9 @@ class BoundaryForcing:
     def __post_init__(self):
 
         self._input_checks()
+        # Dataset for depth coordinates
+        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
+
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
@@ -154,13 +162,14 @@ class BoundaryForcing:
 
                 processed_fields = {}
 
-                # lateral regridding of vector fields
-                vector_var_names = [
-                    name
-                    for name, info in self.variable_info.items()
-                    if info["is_vector"]
-                ]
-                if len(vector_var_names) > 0:
+                # vector fields (velocities) are only present in physics datasets
+                if self.type == "physics":
+                    # lateral regridding of vector fields
+                    vector_var_names = [
+                        name
+                        for name, info in self.variable_info.items()
+                        if info["is_vector"]
+                    ]
                     lon = target_coords["lon"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
@@ -175,6 +184,13 @@ class BoundaryForcing:
                             processed_fields[var_name] = lateral_regrid.apply(
                                 bdry_data.ds[bdry_data.var_names[var_name]]
                             )
+
+                    if self.adjust_depth_for_sea_surface_height:
+                        # Regrid sea surface height ('zeta') onto a 2-cell-wide margin.
+                        # This is needed to correctly infer depth coordinates at u- and v-points along the boundary.
+                        zeta_vector = lateral_regrid.apply(
+                            bdry_data.ds[bdry_data.var_names["zeta"]]
+                        )
 
                 # lateral regridding of tracer fields
                 tracer_var_names = [
@@ -209,6 +225,9 @@ class BoundaryForcing:
                         angle,
                         interpolate=True,
                     )
+                    if self.adjust_depth_for_sea_surface_height:
+                        zeta_u = interpolate_from_rho_to_u(zeta_vector)
+                        zeta_v = interpolate_from_rho_to_v(zeta_vector)
 
                 # selection of outermost margin for u/v variables
                 for var_name in self.variable_info.keys():
@@ -218,6 +237,9 @@ class BoundaryForcing:
                             processed_fields[var_name] = processed_fields[
                                 var_name
                             ].isel(**self.bdry_coords[location][direction])
+                if self.adjust_depth_for_sea_surface_height:
+                    zeta_u = zeta_u.isel(**self.bdry_coords["u"][direction])
+                    zeta_v = zeta_v.isel(**self.bdry_coords["v"][direction])
 
                 if not self.apply_2d_horizontal_fill:
                     self._validate_1d_fill(
@@ -225,7 +247,24 @@ class BoundaryForcing:
                         direction,
                         bdry_data.dim_names["depth"],
                     )
-                    processed_fields = apply_1d_horizontal_fill(processed_fields)
+                    for var_name in processed_fields.keys():
+                        processed_fields[var_name] = apply_1d_horizontal_fill(
+                            processed_fields[var_name]
+                        )
+                    if self.adjust_depth_for_sea_surface_height:
+                        zeta_u = apply_1d_horizontal_fill(zeta_u)
+                        zeta_v = apply_1d_horizontal_fill(zeta_v)
+
+                if self.adjust_depth_for_sea_surface_height:
+                    zeta = processed_fields["zeta"]
+                    if self.use_dask:
+                        zeta = zeta.persist()
+                        zeta_u = zeta_u.persist()
+                        zeta_v = zeta_v.persist()
+                else:
+                    zeta = 0
+                    zeta_u = 0
+                    zeta_v = 0
 
                 var_names_dict = {}
                 for location in ["rho", "u", "v"]:
@@ -234,24 +273,22 @@ class BoundaryForcing:
                         for name, info in self.variable_info.items()
                         if info["location"] == location and info["is_3d"]
                     ]
+
                 # compute layer depth coordinates
+                if len(var_names_dict["rho"]) > 0:
+                    self._get_depth_coordinates(zeta, direction, "rho", "layer")
+                    self._get_depth_coordinates(
+                        zeta, direction, "rho", "interface"
+                    )  # only necessary for plotting
                 if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
-                    self._get_vertical_coordinates(
-                        type="layer",
-                        direction=direction,
-                        additional_locations=["u", "v"],
-                    )
-                else:
-                    if len(var_names_dict["rho"]) > 0:
-                        self._get_vertical_coordinates(
-                            type="layer", direction=direction, additional_locations=[]
-                        )
+                    self._get_depth_coordinates(zeta_u, direction, "u", "layer")
+                    self._get_depth_coordinates(zeta_v, direction, "v", "layer")
 
                 # vertical regridding
                 for location in ["rho", "u", "v"]:
                     if len(var_names_dict[location]) > 0:
                         vertical_regrid = VerticalRegrid(
-                            self.grid.ds[f"layer_depth_{location}_{direction}"],
+                            self.ds_depth_coords[f"layer_depth_{location}_{direction}"],
                             bdry_data.ds[bdry_data.dim_names["depth"]],
                         )
                         for var_name in var_names_dict[location]:
@@ -262,17 +299,16 @@ class BoundaryForcing:
 
                 # compute barotropic velocities
                 if "u" in self.variable_info and "v" in self.variable_info:
-                    self._get_vertical_coordinates(
-                        type="interface",
-                        direction=direction,
-                        additional_locations=["u", "v"],
-                    )
+                    self._get_depth_coordinates(zeta_u, direction, "u", "interface")
+                    self._get_depth_coordinates(zeta_v, direction, "v", "interface")
                     for location in ["u", "v"]:
                         processed_fields[
                             f"{location}bar"
                         ] = compute_barotropic_velocity(
                             processed_fields[location],
-                            self.grid.ds[f"interface_depth_{location}_{direction}"],
+                            self.ds_depth_coords[
+                                f"interface_depth_{location}_{direction}"
+                            ],
                         )
 
                 # Reorder dimensions
@@ -313,6 +349,29 @@ class BoundaryForcing:
             "source",
             {**self.source, "climatology": self.source.get("climatology", False)},
         )
+
+        # Ensure adjust_depth_for_sea_surface_height is only used with type="physics"
+        if self.type == "bgc" and self.adjust_depth_for_sea_surface_height:
+            logging.warning(
+                "adjust_depth_for_sea_surface_height is not applicable for BGC fields. "
+                "Setting it to False."
+            )
+            object.__setattr__(self, "adjust_depth_for_sea_surface_height", False)
+        elif self.adjust_depth_for_sea_surface_height:
+            logging.info("Sea surface height will be used to adjust depth coordinates.")
+        else:
+            logging.info(
+                "Sea surface height will NOT be used to adjust depth coordinates."
+            )
+
+        if self.apply_2d_horizontal_fill:
+            logging.info(
+                "Applying 2D horizontal fill to the source data before regridding."
+            )
+        else:
+            logging.info(
+                "Applying 1D horizontal fill separately to each regridded boundary."
+            )
 
     def _get_data(self):
 
@@ -489,118 +548,80 @@ class BoundaryForcing:
 
         object.__setattr__(self, "bdry_coords", bdry_coords)
 
-    def _get_vertical_coordinates(
-        self, type, direction, additional_locations=["u", "v"]
-    ):
-        """Retrieve layer and interface depth coordinates for a specified grid boundary.
+    def _get_depth_coordinates(
+        self,
+        zeta: xr.DataArray | float,
+        direction: str,
+        location: str,
+        depth_type: str = "layer",
+    ) -> None:
+        """Compute and store depth coordinates for a specified boundary direction, grid
+        location, and depth type.
 
-        This method computes and updates the layer and interface depth coordinates along a specified
-        boundary (north, south, east, or west). It handles depth calculations for rho points and
-        additional specified locations (u and v).
+        This method efficiently computes depth coordinates along the specified boundary without
+        interpolating the entire domain topography. The computed depth values are stored in
+        `self.ds_depth_coords`.
 
         Parameters
         ----------
-        type : str
-            The type of depth coordinate to retrieve. Valid options are:
-            - "layer": Retrieves layer depth coordinates.
-            - "interface": Retrieves interface depth coordinates.
-
+        zeta : xr.DataArray or float
+            Free-surface elevation (`zeta`). Can be:
+            - A scalar float value (constant sea surface height).
+            - An `xarray.DataArray` with spatial variations. If provided as an array, it may have a
+              time dimension, but must be **1D** (varying only in time).
         direction : str
-            The direction of the boundary to retrieve coordinates for. Valid options are:
+            The boundary direction for which depth coordinates are computed. Must be one of:
             - "north"
             - "south"
             - "east"
             - "west"
+        location : str
+            Grid location at which depth is computed. Must be one of:
+            - `"rho"`: Depth at scalar grid points.
+            - `"u"`: Depth at U-velocity grid points.
+            - `"v"`: Depth at V-velocity grid points.
+        depth_type : str, optional
+            Type of depth coordinate to compute, either:
+            - `"layer"` (default): Depth at vertical layer midpoints.
+            - `"interface"`: Depth at vertical layer interfaces.
 
-        additional_locations : list of str, optional
-            Specifies additional locations to compute depth coordinates for. Default is ["u", "v"].
-            Valid options include:
-            - "u": Computes depth coordinates for u points.
-            - "v": Computes depth coordinates for v points.
-
-        Updates
-        -------
-        self.grid.ds : xarray.Dataset
-            The dataset is updated with the following vertical depth coordinates:
-            - f"{type}_depth_rho_{direction}": Depth coordinates at rho points.
-            - f"{type}_depth_u_{direction}": Depth coordinates at u points (if applicable).
-            - f"{type}_depth_v_{direction}": Depth coordinates at v points (if applicable).
+        Notes
+        -----
+        - This method is optimized for boundary computations by selecting only the relevant margin
+          (2 grid cells) instead of interpolating the entire domain.
         """
-
-        layer_vars = []
-        for location in ["rho"] + additional_locations:
-            layer_vars.append(f"{type}_depth_{location}_{direction}")
-
-        if all(layer_var in self.grid.ds for layer_var in layer_vars):
-            # Vertical coordinate data already exists
-            pass
-
-        elif f"{type}_depth_rho" in self.grid.ds:
-            depth = self.grid.ds[f"{type}_depth_rho"]
-            depth.attrs["long_name"] = f"{type} depth at rho-points"
-            depth.attrs["units"] = "m"
-            self.grid.ds[f"{type}_depth_rho_{direction}"] = depth.isel(
-                **self.bdry_coords["rho"][direction]
-            )
-
-            if "u" in additional_locations or "v" in additional_locations:
+        key = f"{depth_type}_depth_{location}_{direction}"
+        if key not in self.ds_depth_coords:
+            if location in ["u", "v"]:
                 # selection of margin consisting of 2 grid cells
-                depth = depth.isel(**self.bdry_coords["vector"][direction])
-                # interpolation
-                if "u" in additional_locations:
-                    depth_u = interpolate_from_rho_to_u(depth)
-                    depth_u.attrs["long_name"] = f"{type} depth at u-points"
-                    depth_u.attrs["units"] = "m"
-                    self.grid.ds[f"{type}_depth_u_{direction}"] = depth_u.isel(
-                        **self.bdry_coords["u"][direction]
-                    )
-                if "v" in additional_locations:
-                    depth_v = interpolate_from_rho_to_v(depth)
-                    depth_v.attrs["long_name"] = f"{type} depth at v-points"
-                    depth_v.attrs["units"] = "m"
-                    self.grid.ds[f"{type}_depth_v_{direction}"] = depth_v.isel(
-                        **self.bdry_coords["v"][direction]
-                    )
-        else:
-            if "u" in additional_locations or "v" in additional_locations:
                 h = self.grid.ds["h"].isel(**self.bdry_coords["vector"][direction])
+                if location == "u":
+                    h = interpolate_from_rho_to_u(h)
+                    h = h.isel(**self.bdry_coords["u"][direction])
+                elif location == "v":
+                    h = interpolate_from_rho_to_v(h)
+                    h = h.isel(**self.bdry_coords["v"][direction])
             else:
                 h = self.grid.ds["h"].isel(**self.bdry_coords["rho"][direction])
-            if type == "layer":
+
+            if depth_type == "layer":
                 depth = compute_depth(
-                    0, h, self.grid.hc, self.grid.ds.Cs_r, self.grid.ds.sigma_r
+                    zeta, h, self.grid.hc, self.grid.ds.Cs_r, self.grid.ds.sigma_r
                 )
             else:
                 depth = compute_depth(
-                    0, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
+                    zeta, h, self.grid.hc, self.grid.ds.Cs_w, self.grid.ds.sigma_w
                 )
 
-            if "u" in additional_locations or "v" in additional_locations:
-                depth.attrs["long_name"] = f"{type} depth at rho-points"
-                depth.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_rho_{direction}"] = depth.isel(
-                    **self.bdry_coords["rho"][direction]
-                )
-                # selection of margin consisting of 2 grid cells
-                depth = depth.isel(**self.bdry_coords["vector"][direction])
-                # interpolation
-                depth_u = interpolate_from_rho_to_u(depth)
-                depth_v = interpolate_from_rho_to_v(depth)
-                # selection of outermost margin
-                depth_u.attrs["long_name"] = f"{type} depth at u-points"
-                depth_u.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_u_{direction}"] = depth_u.isel(
-                    **self.bdry_coords["u"][direction]
-                )
-                depth_v.attrs["long_name"] = f"{type} depth at v-points"
-                depth_v.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_v_{direction}"] = depth_v.isel(
-                    **self.bdry_coords["v"][direction]
-                )
-            else:
-                depth.attrs["long_name"] = f"{type} depth at rho-points"
-                depth.attrs["units"] = "m"
-                self.grid.ds[f"{type}_depth_rho_{direction}"] = depth
+            # Add metadata
+            depth.attrs.update(
+                {
+                    "long_name": f"{depth_type} depth at {location}-points along {direction}ern boundary",
+                    "units": "m",
+                }
+            )
+
+            self.ds_depth_coords[key] = depth
 
     def _add_global_metadata(self, data, ds=None):
 
@@ -617,6 +638,10 @@ class BoundaryForcing:
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["source"] = self.source["name"]
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["apply_2d_horizontal_fill"] = str(self.apply_2d_horizontal_fill)
+        ds.attrs["adjust_depth_for_sea_surface_height"] = str(
+            self.adjust_depth_for_sea_surface_height
+        )
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
@@ -840,9 +865,10 @@ class BoundaryForcing:
         mask = mask.isel(**self.bdry_coords[location][direction])
 
         if "s_rho" in field.dims:
-            field = field.assign_coords(
-                {"layer_depth": self.grid.ds[f"layer_depth_{location}_{direction}"]}
-            )
+            layer_depth = self.ds_depth_coords[f"layer_depth_{location}_{direction}"]
+            if self.adjust_depth_for_sea_surface_height:
+                layer_depth = layer_depth.isel(time=time)
+            field = field.assign_coords({"layer_depth": layer_depth})
         if var_name.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)
             vmin = -vmax
@@ -859,19 +885,11 @@ class BoundaryForcing:
 
         if len(field.dims) == 2:
             if layer_contours:
-                if location in ["u", "v"]:
-                    additional_locations = ["u", "v"]
-                else:
-                    additional_locations = []
-                self._get_vertical_coordinates(
-                    type="interface",
-                    direction=direction,
-                    additional_locations=additional_locations,
-                )
-
-                interface_depth = self.grid.ds[
+                interface_depth = self.ds_depth_coords[
                     f"interface_depth_{location}_{direction}"
                 ]
+                if self.adjust_depth_for_sea_surface_height:
+                    interface_depth = interface_depth.isel(time=time)
                 # restrict number of layer_contours to 10 for the sake of plot clearity
                 nr_layers = len(interface_depth["s_w"])
                 selected_layers = np.linspace(
@@ -883,7 +901,7 @@ class BoundaryForcing:
                 interface_depth = None
 
             _section_plot(
-                field.where(mask),
+                field,
                 interface_depth=interface_depth,
                 title=title,
                 kwargs=kwargs,
@@ -984,19 +1002,19 @@ class BoundaryForcing:
         )
 
 
-def apply_1d_horizontal_fill(processed_fields: dict) -> dict:
-    """Forward and backward fill NaN values in horizontal direction for open boundaries.
+def apply_1d_horizontal_fill(data_array: xr.DataArray) -> xr.DataArray:
+    """Forward and backward fill NaN values in a single horizontal dimension for open
+    boundaries.
 
     Parameters
     ----------
-    processed_fields : dict
-        A dictionary of variables to be updated, where each value is an
-        `xarray.DataArray`.
+    data_array : xarray.DataArray
+        The data array to be updated.
 
     Returns
     -------
-    dict of str : xarray.DataArray
-        The updated dictionary of variables, with NaN values filled.
+    xarray.DataArray
+        The updated data array with NaN values filled.
 
     Raises
     ------
@@ -1005,29 +1023,22 @@ def apply_1d_horizontal_fill(processed_fields: dict) -> dict:
     """
 
     horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
+    selected_horizontal_dim = None
 
-    for var_name in processed_fields.keys():
-        selected_horizontal_dim = None
-        # Determine the horizontal dimension to fill
-        for dim in horizontal_dims:
-            if dim in processed_fields[var_name].dims:
-                if selected_horizontal_dim is not None:
-                    raise ValueError(
-                        f"More than one horizontal dimension found in variable '{var_name}'."
-                    )
-                selected_horizontal_dim = dim
+    # Determine the horizontal dimension to fill
+    for dim in horizontal_dims:
+        if dim in data_array.dims:
+            if selected_horizontal_dim is not None:
+                raise ValueError(
+                    f"More than one horizontal dimension found in variable '{data_array.name}'."
+                )
+            selected_horizontal_dim = dim
 
-        if selected_horizontal_dim is None:
-            raise ValueError(
-                f"No valid horizontal dimension found for variable '{var_name}'."
-            )
-
-        # Forward and backward fill in the horizontal direction
-        filled = one_dim_fill(
-            processed_fields[var_name], selected_horizontal_dim, direction="forward"
-        )
-        processed_fields[var_name] = one_dim_fill(
-            filled, selected_horizontal_dim, direction="backward"
+    if selected_horizontal_dim is None:
+        raise ValueError(
+            f"No valid horizontal dimension found for variable '{data_array.name}'."
         )
 
-    return processed_fields
+    # Forward and backward fill in the horizontal direction
+    filled = one_dim_fill(data_array, selected_horizontal_dim, direction="forward")
+    return one_dim_fill(filled, selected_horizontal_dim, direction="backward")

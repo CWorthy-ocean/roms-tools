@@ -125,6 +125,35 @@ def initial_conditions(request, use_dask):
 
 
 @pytest.fixture(scope="session")
+def initial_conditions_adjusted_for_zeta(request, use_dask):
+    """Fixture for creating an InitialConditions object."""
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        adjust_depth_for_sea_surface_height=True,
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def initial_conditions_with_bgc(request, use_dask):
     """Fixture for creating an InitialConditions object."""
 
@@ -150,6 +179,37 @@ def initial_conditions_with_bgc(request, use_dask):
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def initial_conditions_with_bgc_adjusted_for_zeta(request, use_dask):
+    """Fixture for creating an InitialConditions object."""
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("CESM_regional_test_data_one_time_slice.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        adjust_depth_for_sea_surface_height=True,
         use_dask=use_dask,
     )
 
@@ -189,31 +249,119 @@ def initial_conditions_with_bgc_from_climatology(request, use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing(request, use_dask):
+def boundary_forcing(use_dask):
     """Fixture for creating a BoundaryForcing object."""
-
     grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
         hc=250.0,  # critical depth
     )
 
-    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
         grid=grid,
-        start_time=datetime(2021, 6, 29),
-        end_time=datetime(2021, 6, 30),
-        source={"name": "GLORYS", "path": fname},
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"name": "GLORYS", "path": [fname1, fname2]},
+        apply_2d_horizontal_fill=False,
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def boundary_forcing_adjusted_for_zeta(use_dask):
+    """Fixture for creating a BoundaryForcing object."""
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"name": "GLORYS", "path": [fname1, fname2]},
+        apply_2d_horizontal_fill=False,
+        adjust_depth_for_sea_surface_height=True,
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def boundary_forcing_with_2d_fill(use_dask):
+    """Fixture for creating a BoundaryForcing object."""
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"name": "GLORYS", "path": [fname1, fname2]},
         apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask):
+    """Fixture for creating a BoundaryForcing object."""
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 12, 31),
+        source={"name": "GLORYS", "path": [fname1, fname2]},
+        apply_2d_horizontal_fill=True,
+        adjust_depth_for_sea_surface_height=True,
         use_dask=use_dask,
     )
 

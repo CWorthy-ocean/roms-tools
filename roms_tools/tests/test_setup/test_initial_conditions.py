@@ -4,6 +4,7 @@ from roms_tools import InitialConditions, Grid
 import xarray as xr
 import numpy as np
 import textwrap
+import logging
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset
 from pathlib import Path
@@ -14,7 +15,9 @@ from conftest import calculate_data_hash
     "ic_fixture",
     [
         "initial_conditions",
+        "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc",
+        "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
     ],
 )
@@ -29,6 +32,7 @@ def test_initial_conditions_creation(ic_fixture, request):
         "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
         "climatology": False,
     }
+    assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
     assert isinstance(ic.ds, xr.Dataset)
     assert "temp" in ic.ds
     assert "salt" in ic.ds
@@ -144,6 +148,128 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
     assert initial_conditions.bgc_source["climatology"] is False
 
 
+def test_info_depth(caplog, use_dask):
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+
+    with caplog.at_level(logging.INFO):
+
+        InitialConditions(
+            grid=grid,
+            ini_time=datetime(2021, 6, 29),
+            source={"path": fname, "name": "GLORYS"},
+            adjust_depth_for_sea_surface_height=True,
+            use_dask=use_dask,
+        )
+    # Verify the warning message in the log
+    assert "Sea surface height will be used to adjust depth coordinates." in caplog.text
+
+    # Clear the log before the next test
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+
+        InitialConditions(
+            grid=grid,
+            ini_time=datetime(2021, 6, 29),
+            source={"path": fname, "name": "GLORYS"},
+            adjust_depth_for_sea_surface_height=False,
+            use_dask=use_dask,
+        )
+    # Verify the warning message in the log
+    assert (
+        "Sea surface height will NOT be used to adjust depth coordinates."
+        in caplog.text
+    )
+
+
+@pytest.mark.parametrize(
+    "initial_conditions_fixture",
+    [
+        "initial_conditions_adjusted_for_zeta",
+        "initial_conditions_with_bgc_adjusted_for_zeta",
+    ],
+)
+def test_correct_depth_coords_adjusted_for_zeta(
+    initial_conditions_fixture, request, use_dask
+):
+
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
+
+    # compute interface depth at rho-points and write it into .ds_depth_coords
+    zeta = initial_conditions.ds.zeta
+    initial_conditions._get_depth_coordinates(
+        zeta, location="rho", depth_type="interface"
+    )
+    # Test that lowermost interface coincides with topography
+    assert np.allclose(
+        initial_conditions.ds_depth_coords["interface_depth_rho"]
+        .isel(s_w=0)
+        .squeeze()
+        .values,  # Extract raw NumPy array
+        initial_conditions.grid.ds.h.values,
+        atol=1e-6,  # Adjust tolerance as needed
+    )
+
+    # Test that uppermost interface coincides with sea surface height
+    assert np.allclose(
+        initial_conditions.ds_depth_coords["interface_depth_rho"]
+        .isel(s_w=-1)
+        .squeeze()
+        .values,
+        -zeta.values,
+        atol=1e-6,
+    )
+
+
+@pytest.mark.parametrize(
+    "initial_conditions_fixture",
+    [
+        "initial_conditions",
+        "initial_conditions",
+    ],
+)
+def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use_dask):
+
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
+
+    # compute interface depth at rho-points and write it into .ds_depth_coords
+    initial_conditions._get_depth_coordinates(0, location="rho", depth_type="interface")
+    # Test that lowermost interface coincides with topography
+    assert np.allclose(
+        initial_conditions.ds_depth_coords["interface_depth_rho"]
+        .isel(s_w=0)
+        .squeeze()
+        .values,  # Extract raw NumPy array
+        initial_conditions.grid.ds.h.values,
+        atol=1e-6,  # Adjust tolerance as needed
+    )
+
+    # Test that uppermost interface coincides with sea surface height
+    assert np.allclose(
+        initial_conditions.ds_depth_coords["interface_depth_rho"]
+        .isel(s_w=-1)
+        .squeeze()
+        .values,
+        0 * initial_conditions.grid.ds.h.values,
+        atol=1e-6,
+    )
+
+
 def test_interpolation_from_climatology(
     initial_conditions_with_bgc_from_climatology, use_dask
 ):
@@ -176,46 +302,60 @@ def test_interpolation_from_climatology(
     )
 
 
-def test_initial_conditions_plot(initial_conditions_with_bgc_from_climatology):
+@pytest.mark.parametrize(
+    "initial_conditions_fixture",
+    [
+        "initial_conditions_with_bgc_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+    ],
+)
+def test_initial_conditions_plot(initial_conditions_fixture, request):
     """Test plot method."""
 
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="temp", s=0, depth_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="temp", eta=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="temp", xi=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", s=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="temp", eta=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="u", s=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(var_name="u", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="u", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="u", xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(
-        var_name="v", s=0, layer_contours=True
-    )
-    initial_conditions_with_bgc_from_climatology.plot(var_name="v", s=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="v", eta=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="v", xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="zeta")
-    initial_conditions_with_bgc_from_climatology.plot(var_name="ubar")
-    initial_conditions_with_bgc_from_climatology.plot(var_name="vbar")
-    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", s=0, xi=0)
-    initial_conditions_with_bgc_from_climatology.plot(var_name="ALK", eta=0, xi=0)
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
+
+    # horizontal slices plots
+    for depth_contours in [True, False]:
+        initial_conditions.plot(var_name="temp", s=0, depth_contours=depth_contours)
+        initial_conditions.plot(var_name="u", s=0, depth_contours=depth_contours)
+        initial_conditions.plot(var_name="v", s=0, depth_contours=depth_contours)
+        initial_conditions.plot(var_name="ALK", s=0, depth_contours=depth_contours)
+
+    # section plots
+    for layer_contours in [True, False]:
+        initial_conditions.plot(var_name="temp", eta=0, layer_contours=layer_contours)
+        initial_conditions.plot(var_name="temp", xi=0, layer_contours=layer_contours)
+        initial_conditions.plot(var_name="ALK", eta=0, layer_contours=layer_contours)
+        initial_conditions.plot(var_name="ALK", xi=0, layer_contours=layer_contours)
+        initial_conditions.plot(var_name="u", eta=0, layer_contours=layer_contours)
+        initial_conditions.plot(var_name="u", xi=0, layer_contours=layer_contours)
+        initial_conditions.plot(var_name="v", eta=0, layer_contours=layer_contours)
+        initial_conditions.plot(var_name="v", xi=0, layer_contours=layer_contours)
+
+    # 1D plot in horizontal
+    initial_conditions.plot(var_name="temp", s=0, xi=0)
+    initial_conditions.plot(var_name="ALK", s=0, xi=0)
+
+    # 1D plot in vertical
+    initial_conditions.plot(var_name="temp", eta=0, xi=0)
+    initial_conditions.plot(var_name="ALK", eta=0, xi=0)
+
+    initial_conditions.plot(var_name="zeta")
+    initial_conditions.plot(var_name="ubar")
+    initial_conditions.plot(var_name="vbar")
 
 
-def test_initial_conditions_save(
-    initial_conditions_with_bgc_from_climatology, tmp_path
-):
+@pytest.mark.parametrize(
+    "initial_conditions_fixture",
+    [
+        "initial_conditions",
+        "initial_conditions_adjusted_for_zeta",
+    ],
+)
+def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
     """Test save method."""
+
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     for file_str in ["test_ic", "test_ic.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -224,9 +364,7 @@ def test_initial_conditions_save(
             str(tmp_path / file_str),
         ]:  # test for Path object and str
 
-            saved_filenames = initial_conditions_with_bgc_from_climatology.save(
-                filepath
-            )
+            saved_filenames = initial_conditions.save(filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
             assert saved_filenames == [filepath]
@@ -235,11 +373,18 @@ def test_initial_conditions_save(
             filepath.unlink()
 
 
-def test_roundtrip_yaml(
-    initial_conditions_with_bgc_from_climatology, tmp_path, use_dask
-):
+@pytest.mark.parametrize(
+    "initial_conditions_fixture",
+    [
+        "initial_conditions",
+        "initial_conditions_adjusted_for_zeta",
+    ],
+)
+def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask):
     """Test that creating an InitialConditions object, saving its parameters to yaml
     file, and re-opening yaml file creates the same object."""
+
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"
@@ -248,21 +393,28 @@ def test_roundtrip_yaml(
         str(tmp_path / file_str),
     ]:  # test for Path object and str
 
-        initial_conditions_with_bgc_from_climatology.to_yaml(filepath)
+        initial_conditions.to_yaml(filepath)
 
         initial_conditions_from_file = InitialConditions.from_yaml(
             filepath, use_dask=use_dask
         )
 
-        assert (
-            initial_conditions_with_bgc_from_climatology == initial_conditions_from_file
-        )
+        assert initial_conditions == initial_conditions_from_file
 
         filepath = Path(filepath)
         filepath.unlink()
 
 
-def test_files_have_same_hash(initial_conditions, tmp_path, use_dask):
+@pytest.mark.parametrize(
+    "initial_conditions_fixture",
+    [
+        "initial_conditions",
+        "initial_conditions_adjusted_for_zeta",
+    ],
+)
+def test_files_have_same_hash(initial_conditions_fixture, request, tmp_path, use_dask):
+
+    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     yaml_filepath = tmp_path / "test_yaml.yaml"
     filepath1 = tmp_path / "test1.nc"

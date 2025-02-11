@@ -5,11 +5,13 @@ from dataclasses import dataclass, field
 from typing import Dict, Union, List, Optional
 import matplotlib.pyplot as plt
 from pathlib import Path
+import logging
 from datetime import datetime
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.utils import transpose_dimensions, save_datasets
+from roms_tools.vertical_coordinate import compute_depth_coordinates
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
@@ -58,6 +60,9 @@ class InitialConditions:
             - A list of strings or Path objects containing multiple files.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
+    adjust_depth_for_sea_surface_height : bool, optional
+        Whether to account for sea surface height variations when computing depth coordinates.
+        Defaults to `False`.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
@@ -86,6 +91,7 @@ class InitialConditions:
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     bgc_source: Optional[Dict[str, Union[str, Path, List[Union[str, Path]]]]] = None
     model_reference_date: datetime = datetime(2000, 1, 1)
+    adjust_depth_for_sea_surface_height: bool = False
     use_dask: bool = False
     bypass_validation: bool = False
 
@@ -94,6 +100,8 @@ class InitialConditions:
     def __post_init__(self):
 
         self._input_checks()
+        # Dataset for depth coordinates
+        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
 
         processed_fields = {}
         processed_fields = self._process_data(processed_fields, type="physics")
@@ -162,20 +170,33 @@ class InitialConditions:
                 if info["location"] == location and info["is_3d"]
             ]
 
+        if type == "bgc":
+            # Ensure time coordinate matches that of physical variables
+            for var_name in variable_info.keys():
+                processed_fields[var_name] = processed_fields[var_name].assign_coords(
+                    {"time": processed_fields["temp"]["time"]}
+                )
+
         # compute layer depth coordinates
-        if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
-            self._get_vertical_coordinates(
-                type="layer",
-                additional_locations=["u", "v"],
-            )
+        if self.adjust_depth_for_sea_surface_height:
+            zeta = processed_fields[
+                "zeta"
+            ]  # requires time coordinate match (previous step) in case of BGC
+            if self.use_dask:
+                zeta.persist()
         else:
-            if len(var_names_dict["rho"]) > 0:
-                self._get_vertical_coordinates(type="layer", additional_locations=[])
+            zeta = 0
+        if len(var_names_dict["rho"]) > 0:
+            self._get_depth_coordinates(zeta, "rho", "layer")
+        if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
+            self._get_depth_coordinates(zeta, "u", "layer")
+            self._get_depth_coordinates(zeta, "v", "layer")
+
         # vertical regridding
         for location in ["rho", "u", "v"]:
             if len(var_names_dict[location]) > 0:
                 vertical_regrid = VerticalRegrid(
-                    self.grid.ds[f"layer_depth_{location}"],
+                    self.ds_depth_coords[f"layer_depth_{location}"],
                     data.ds[data.dim_names["depth"]],
                 )
                 for var_name in var_names_dict[location]:
@@ -186,21 +207,12 @@ class InitialConditions:
 
         # compute barotropic velocities
         if "u" in variable_info and "v" in variable_info:
-            self._get_vertical_coordinates(
-                type="interface",
-                additional_locations=["u", "v"],
-            )
+            self._get_depth_coordinates(zeta, "u", "interface")
+            self._get_depth_coordinates(zeta, "v", "interface")
             for location in ["u", "v"]:
                 processed_fields[f"{location}bar"] = compute_barotropic_velocity(
                     processed_fields[location],
-                    self.grid.ds[f"interface_depth_{location}"],
-                )
-
-        if type == "bgc":
-            # Ensure time coordinate matches that of physical variables
-            for var_name in variable_info.keys():
-                processed_fields[var_name] = processed_fields[var_name].assign_coords(
-                    {"time": processed_fields["temp"]["time"]}
+                    self.ds_depth_coords[f"interface_depth_{location}"],
                 )
 
         for var_name in processed_fields.keys():
@@ -242,6 +254,12 @@ class InitialConditions:
                     **self.bgc_source,
                     "climatology": self.bgc_source.get("climatology", False),
                 },
+            )
+        if self.adjust_depth_for_sea_surface_height:
+            logging.info("Sea surface height will be used to adjust depth coordinates.")
+        else:
+            logging.info(
+                "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
     def _get_data(self):
@@ -364,35 +382,29 @@ class InitialConditions:
 
         object.__setattr__(self, f"variable_info_{type}", variable_info)
 
-    def _get_vertical_coordinates(self, type, additional_locations=["u", "v"]):
-        """Retrieve layer and interface depth coordinates.
-
-        This method computes and updates the layer and interface depth coordinates. It handles depth calculations for rho points and
-        additional specified locations (u and v).
+    def _get_depth_coordinates(
+        self, zeta: xr.DataArray | float, location: str, depth_type: str = "layer"
+    ) -> None:
+        """Ensure depth coordinates are computed and stored for a given location and
+        depth type.
 
         Parameters
         ----------
-        type : str
-            The type of depth coordinate to retrieve. Valid options are:
-            - "layer": Retrieves layer depth coordinates.
-            - "interface": Retrieves interface depth coordinates.
-
-        additional_locations : list of str, optional
-            Specifies additional locations to compute depth coordinates for. Default is ["u", "v"].
-            Valid options include:
-            - "u": Computes depth coordinates for u points.
-            - "v": Computes depth coordinates for v points.
-
-        Updates
-        -------
-        self.grid.ds : xarray.Dataset
-            The dataset is updated with the following vertical depth coordinates:
-            - f"{type}_depth_rho": Depth coordinates at rho points.
-            - f"{type}_depth_u": Depth coordinates at u points (if applicable).
-            - f"{type}_depth_v": Depth coordinates at v points (if applicable).
+        zeta : xr.DataArray or float
+            Free-surface elevation (can be a scalar or a DataArray).
+        location : str
+            Grid location for depth computation ("rho", "u", or "v").
+        depth_type : str, optional
+            Type of depth coordinates to compute, by default "layer".
         """
+        key = f"{depth_type}_depth_{location}"
 
-        self.grid.compute_depth_coordinates(type, additional_locations)
+        if key not in self.ds_depth_coords:
+            self.ds_depth_coords[key] = compute_depth_coordinates(
+                self.grid.ds, zeta, depth_type=depth_type, location=location
+            )
+            if self.use_dask:
+                self.ds_depth_coords[key].persist()
 
     def _write_into_dataset(self, processed_fields, d_meta):
 
@@ -406,7 +418,7 @@ class InitialConditions:
 
         # initialize vertical velocity to zero
         ds["w"] = xr.zeros_like(
-            self.grid.ds["interface_depth_rho"].expand_dims(
+            (self.grid.ds["Cs_w"] * self.grid.ds["h"]).expand_dims(
                 time=processed_fields["u"].time
             )
         ).astype(np.float32)
@@ -503,6 +515,9 @@ class InitialConditions:
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["ini_time"] = str(self.ini_time)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
+        ds.attrs["adjust_depth_for_sea_surface_height"] = str(
+            self.adjust_depth_for_sea_surface_height
+        )
         ds.attrs["source"] = self.source["name"]
         if self.bgc_source is not None:
             ds.attrs["bgc_source"] = self.bgc_source["name"]
@@ -636,7 +651,6 @@ class InitialConditions:
             loc = "rho"
         elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
             loc = "u"
-
         elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
             loc = "v"
         else:
@@ -655,47 +669,30 @@ class InitialConditions:
         if s is not None:
             layer_contours = False
         # Note that `layer_depth_{loc}` has already been computed during `__post_init__`.
-        layer_depth = self.grid.ds[f"layer_depth_{loc}"]
-        if layer_contours:
-            if f"interface_depth_{loc}" not in self.grid.ds:
-                if loc == "rho":
-                    self.get_vertical_coordinates(
-                        type="interface", additional_locations=[]
-                    )
-                else:
-                    self.get_vertical_coordinates(
-                        type="interface", additional_locations=["u", "v"]
-                    )
-            interface_depth = self.grid.ds[f"interface_depth_{loc}"]
-        else:
-            interface_depth = None
+        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"].squeeze()
 
         # Slice the field as desired
         def _slice_and_assign(
             field,
             mask,
             layer_depth,
-            interface_depth,
             title,
             dim_name,
             dim_values,
             idx,
-            layer_contours=False,
         ):
             if dim_name in field.dims:
                 title = title + f", {dim_name} = {dim_values[idx].item()}"
                 field = field.isel(**{dim_name: idx})
                 mask = mask.isel(**{dim_name: idx})
                 layer_depth = layer_depth.isel(**{dim_name: idx})
-                if layer_contours:
-                    interface_depth = interface_depth.isel(**{dim_name: idx})
                 if "s_rho" in field.dims:
                     field = field.assign_coords({"layer_depth": layer_depth})
             else:
                 raise ValueError(
                     f"None of the expected dimensions ({dim_name}) found in field."
                 )
-            return field, mask, layer_depth, interface_depth, title
+            return field, mask, layer_depth, title
 
         title = field.long_name
         if s is not None:
@@ -707,29 +704,25 @@ class InitialConditions:
             depth_contours = False
 
         if eta is not None:
-            field, mask, layer_depth, interface_depth, title = _slice_and_assign(
+            field, mask, layer_depth, title = _slice_and_assign(
                 field,
                 mask,
                 layer_depth,
-                interface_depth,
                 title,
                 "eta_rho" if "eta_rho" in field.dims else "eta_v",
                 field.eta_rho if "eta_rho" in field.dims else field.eta_v,
                 eta,
-                layer_contours,
             )
 
         if xi is not None:
-            field, mask, layer_depth, interface_depth, title = _slice_and_assign(
+            field, mask, layer_depth, title = _slice_and_assign(
                 field,
                 mask,
                 layer_depth,
-                interface_depth,
                 title,
                 "xi_rho" if "xi_rho" in field.dims else "xi_u",
                 field.xi_rho if "xi_rho" in field.dims else field.xi_u,
                 xi,
-                layer_contours,
             )
 
         # Choose colorbar
@@ -756,19 +749,54 @@ class InitialConditions:
                 c="g",
             )
         else:
-            if not layer_contours:
-                interface_depth = None
-            else:
-                # restrict number of layer_contours to 10 for the sake of plot clearity
-                nr_layers = len(interface_depth["s_w"])
-                selected_layers = np.linspace(
-                    0, nr_layers - 1, min(nr_layers, 10), dtype=int
-                )
-                interface_depth = interface_depth.isel(s_w=selected_layers)
-
             if len(field.dims) == 2:
+                if layer_contours:
+                    if loc == "rho":
+                        # interface_depth_rho has not been computed yet
+                        interface_depth = compute_depth_coordinates(
+                            self.grid.ds,
+                            self.ds.zeta,
+                            depth_type="interface",
+                            location=loc,
+                            eta=eta,
+                            xi=xi,
+                        )
+                    elif loc == "u":
+                        index_kwargs = {}
+                        if eta is not None:
+                            index_kwargs["eta_rho"] = eta
+                        if xi is not None:
+                            index_kwargs["xi_u"] = xi
+
+                        interface_depth = (
+                            self.ds_depth_coords[f"interface_depth_{loc}"]
+                            .isel(**index_kwargs)
+                            .squeeze()
+                        )
+                    elif loc == "v":
+                        index_kwargs = {}
+                        if eta is not None:
+                            index_kwargs["eta_v"] = eta
+                        if xi is not None:
+                            index_kwargs["xi_rho"] = xi
+
+                        interface_depth = (
+                            self.ds_depth_coords[f"interface_depth_{loc}"]
+                            .isel(**index_kwargs)
+                            .squeeze()
+                        )
+
+                    # restrict number of layer_contours to 10 for the sake of plot clearity
+                    nr_layers = len(interface_depth["s_w"])
+                    selected_layers = np.linspace(
+                        0, nr_layers - 1, min(nr_layers, 10), dtype=int
+                    )
+                    interface_depth = interface_depth.isel(s_w=selected_layers)
+                else:
+                    interface_depth = None
+
                 _section_plot(
-                    field.where(mask),
+                    field,
                     interface_depth=interface_depth,
                     title=title,
                     kwargs=kwargs,

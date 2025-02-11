@@ -2,6 +2,6 @@
     "_ARRAY_DIMENSIONS": [
         "s_w"
     ],
-    "long_name": "S-coordinate stretching curves at w-points",
+    "long_name": "Vertical stretching function at w-points",
     "units": "nondimensional"
 }

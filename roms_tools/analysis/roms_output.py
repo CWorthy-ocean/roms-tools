@@ -12,7 +12,6 @@ from datetime import datetime, timedelta
 from roms_tools import Grid
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.vertical_coordinate import (
-    add_depth_coordinates_to_dataset,
     compute_depth_coordinates,
 )
 
@@ -186,24 +185,26 @@ class ROMSOutput:
 
         if compute_layer_depth:
             layer_depth = compute_depth_coordinates(
-                self.ds.isel(time=time),
                 self.grid.ds,
+                self.ds.zeta.isel(time=time),
                 depth_type="layer",
                 location=loc,
-                s=s,
                 eta=eta,
                 xi=xi,
             )
+            if s is not None:
+                layer_depth = layer_depth.isel(s_rho=s)
         if compute_interface_depth:
             interface_depth = compute_depth_coordinates(
-                self.ds.isel(time=time),
                 self.grid.ds,
+                self.ds.zeta.isel(time=time),
                 depth_type="interface",
                 location=loc,
-                s=s,
                 eta=eta,
                 xi=xi,
             )
+            if s is not None:
+                interface_depth = interface_depth.isel(s_w=s)
 
         # Slice the field as desired
         title = field.long_name
@@ -331,7 +332,10 @@ class ROMSOutput:
         This method uses the `compute_and_update_depth_coordinates` function to perform calculations and updates.
         """
 
-        add_depth_coordinates_to_dataset(self.ds, self.grid.ds, depth_type, locations)
+        for location in locations:
+            self.ds[f"{depth_type}_depth_{location}"] = compute_depth_coordinates(
+                self.grid.ds, self.ds.zeta, depth_type, location
+            )
 
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output based on the type."""

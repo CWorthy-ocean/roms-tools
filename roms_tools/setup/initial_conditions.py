@@ -67,6 +67,10 @@ class InitialConditions:
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    horizontal_chunk_size : int, optional
+        The chunk size used for horizontal partitioning for the vertical regridding when `use_dask = True`. Defaults to 50.
+        A larger number results in a bigger memory footprint but faster computations.
+        A smaller number results in a smaller memory footprint but slower computations.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
@@ -93,6 +97,7 @@ class InitialConditions:
     model_reference_date: datetime = datetime(2000, 1, 1)
     adjust_depth_for_sea_surface_height: bool = False
     use_dask: bool = False
+    horizontal_chunk_size: int = 50
     bypass_validation: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -124,7 +129,6 @@ class InitialConditions:
         object.__setattr__(self, "ds", ds)
 
     def _process_data(self, processed_fields, type="physics"):
-
         target_coords = get_target_coords(self.grid)
 
         if type == "physics":
@@ -182,10 +186,9 @@ class InitialConditions:
             zeta = processed_fields[
                 "zeta"
             ]  # requires time coordinate match (previous step) in case of BGC
-            if self.use_dask:
-                zeta.persist()
         else:
             zeta = 0
+
         if len(var_names_dict["rho"]) > 0:
             self._get_depth_coordinates(zeta, "rho", "layer")
         if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
@@ -193,6 +196,19 @@ class InitialConditions:
             self._get_depth_coordinates(zeta, "v", "layer")
 
         # vertical regridding
+        if self.use_dask:
+            object.__setattr__(
+                self,
+                "ds_depth_coords",
+                self.ds_depth_coords.chunk(
+                    {
+                        "eta_rho": self.horizontal_chunk_size,
+                        "xi_rho": self.horizontal_chunk_size,
+                        "eta_v": self.horizontal_chunk_size,
+                        "xi_u": self.horizontal_chunk_size,
+                    }
+                ),
+            )
         for location in ["rho", "u", "v"]:
             if len(var_names_dict[location]) > 0:
                 vertical_regrid = VerticalRegrid(

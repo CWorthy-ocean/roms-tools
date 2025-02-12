@@ -147,8 +147,9 @@ class InitialConditions:
             data = self._get_bgc_data()
 
         data.choose_subdomain(
-            target_coords, buffer_points=20 # lateral fill needs good buffer from data margin
-        )  
+            target_coords,
+            buffer_points=20,  # lateral fill needs good buffer from data margin
+        )
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
 
@@ -162,7 +163,9 @@ class InitialConditions:
 
         for var_name in var_names:
             if var_name in data.var_names.keys():
-                processed_fields[var_name] = lateral_regrid.apply(data.ds[data.var_names[var_name]])
+                processed_fields[var_name] = lateral_regrid.apply(
+                    data.ds[data.var_names[var_name]]
+                )
 
         # rotation of velocities and interpolation to u/v points
         if "u" in variable_info and "v" in variable_info:

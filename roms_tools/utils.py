@@ -344,3 +344,26 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     saved_filenames.extend(Path(f) for f in output_filenames)
 
     return saved_filenames
+
+
+def get_dask_chunks(location, chunk_size):
+    """Returns the appropriate Dask chunking dictionary based on grid location.
+
+    Parameters
+    ----------
+    location : str
+        The grid location, one of "rho", "u", or "v".
+    chunk_size : int
+        The chunk size to apply.
+
+    Returns
+    -------
+    dict
+        Dictionary specifying the chunking strategy.
+    """
+    chunk_mapping = {
+        "rho": {"eta_rho": chunk_size, "xi_rho": chunk_size},
+        "u": {"eta_rho": chunk_size, "xi_u": chunk_size},
+        "v": {"eta_v": chunk_size, "xi_rho": chunk_size},
+    }
+    return chunk_mapping.get(location, {})

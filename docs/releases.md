@@ -9,6 +9,7 @@
 * New default for `bathymetry` in `Grid.plot()` is `True` ([#234](https://github.com/CWorthy-ocean/roms-tools/pull/234))
 * New default for `group` in `SurfaceForcing.save()` and `BoundaryForcing.save()` is `True` ([#236](https://github.com/CWorthy-ocean/roms-tools/pull/236))
 * Option to adjust depth for sea surface height when creating `InitialConditions` and `BoundaryForcing` ([#240](https://github.com/CWorthy-ocean/roms-tools/pull/240))
+* New parameter `horizontal_chunk_size` for `InitialConditions`, which ensures the feasibility of processing initial conditions for large domains, both in terms of memory footprint and compute times ([#241](https://github.com/CWorthy-ocean/roms-tools/pull/241))
 
 ### Breaking Changes
 
@@ -31,6 +32,7 @@
 * New features and defaults are documented for `SurfaceForcing` (([#228](https://github.com/CWorthy-ocean/roms-tools/pull/228))
 * Improvements to the notebook that documents the partioning functionality ([#236](https://github.com/CWorthy-ocean/roms-tools/pull/236))
 * Document the option to adjust depth for sea surface height ([#240](https://github.com/CWorthy-ocean/roms-tools/pull/240))
+* More realistic, higher-resolution domains in the example notebooks, which use the SRTM15 topography to discourage the user from employing the default ETOPO5 topography ([#241](https://github.com/CWorthy-ocean/roms-tools/pull/241))
 
 ### Bugfixes
 

@@ -10,8 +10,17 @@ from datetime import datetime
 from roms_tools import Grid
 from roms_tools.regrid import LateralRegrid, VerticalRegrid
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.utils import transpose_dimensions, save_datasets
-from roms_tools.vertical_coordinate import compute_depth_coordinates
+from roms_tools.utils import (
+    transpose_dimensions,
+    save_datasets,
+    get_dask_chunks,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+)
+from roms_tools.vertical_coordinate import (
+    compute_depth_coordinates,
+    compute_depth,
+)
 from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
@@ -67,6 +76,10 @@ class InitialConditions:
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    horizontal_chunk_size : int, optional
+        The chunk size used for horizontal partitioning for the vertical regridding when `use_dask = True`. Defaults to 50.
+        A larger number results in a bigger memory footprint but faster computations.
+        A smaller number results in a smaller memory footprint but slower computations.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
@@ -93,6 +106,7 @@ class InitialConditions:
     model_reference_date: datetime = datetime(2000, 1, 1)
     adjust_depth_for_sea_surface_height: bool = False
     use_dask: bool = False
+    horizontal_chunk_size: int = 50
     bypass_validation: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -136,7 +150,6 @@ class InitialConditions:
             target_coords,
             buffer_points=20,  # lateral fill needs good buffer from data margin
         )
-
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
 
@@ -147,6 +160,7 @@ class InitialConditions:
 
         # lateral regridding
         lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+
         for var_name in var_names:
             if var_name in data.var_names.keys():
                 processed_fields[var_name] = lateral_regrid.apply(
@@ -155,20 +169,21 @@ class InitialConditions:
 
         # rotation of velocities and interpolation to u/v points
         if "u" in variable_info and "v" in variable_info:
-            (processed_fields["u"], processed_fields["v"],) = rotate_velocities(
+            processed_fields["u"], processed_fields["v"] = rotate_velocities(
                 processed_fields["u"],
                 processed_fields["v"],
                 target_coords["angle"],
                 interpolate=True,
             )
 
-        var_names_dict = {}
-        for location in ["rho", "u", "v"]:
-            var_names_dict[location] = [
+        var_names_dict = {
+            location: [
                 name
                 for name, info in variable_info.items()
                 if info["location"] == location and info["is_3d"]
             ]
+            for location in ["rho", "u", "v"]
+        }
 
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
@@ -177,22 +192,16 @@ class InitialConditions:
                     {"time": processed_fields["temp"]["time"]}
                 )
 
-        # compute layer depth coordinates
-        if self.adjust_depth_for_sea_surface_height:
-            zeta = processed_fields[
-                "zeta"
-            ]  # requires time coordinate match (previous step) in case of BGC
-            if self.use_dask:
-                zeta.persist()
-        else:
-            zeta = 0
-        if len(var_names_dict["rho"]) > 0:
-            self._get_depth_coordinates(zeta, "rho", "layer")
-        if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
-            self._get_depth_coordinates(zeta, "u", "layer")
-            self._get_depth_coordinates(zeta, "v", "layer")
+        # Get depth coordinates
+        zeta = (
+            processed_fields["zeta"] if self.adjust_depth_for_sea_surface_height else 0
+        )
 
-        # vertical regridding
+        for location in ["rho", "u", "v"]:
+            if len(var_names_dict[location]) > 0:
+                self._get_depth_coordinates(zeta, location, "layer")
+
+        # Vertical regridding
         for location in ["rho", "u", "v"]:
             if len(var_names_dict[location]) > 0:
                 vertical_regrid = VerticalRegrid(
@@ -201,15 +210,17 @@ class InitialConditions:
                 )
                 for var_name in var_names_dict[location]:
                     if var_name in processed_fields:
-                        processed_fields[var_name] = vertical_regrid.apply(
-                            processed_fields[var_name]
-                        )
+                        field = processed_fields[var_name]
+                        if self.use_dask:
+                            field = field.chunk(
+                                get_dask_chunks(location, self.horizontal_chunk_size)
+                            )
+                        processed_fields[var_name] = vertical_regrid.apply(field)
 
-        # compute barotropic velocities
+        # Compute barotropic velocities
         if "u" in variable_info and "v" in variable_info:
-            self._get_depth_coordinates(zeta, "u", "interface")
-            self._get_depth_coordinates(zeta, "v", "interface")
             for location in ["u", "v"]:
+                self._get_depth_coordinates(zeta, location, "interface")
                 processed_fields[f"{location}bar"] = compute_barotropic_velocity(
                     processed_fields[location],
                     self.ds_depth_coords[f"interface_depth_{location}"],
@@ -396,15 +407,47 @@ class InitialConditions:
             Grid location for depth computation ("rho", "u", or "v").
         depth_type : str, optional
             Type of depth coordinates to compute, by default "layer".
+
+        Notes
+        ------
+        Rather than calling compute_depth_coordinates from the vertical_coordinate.py module,
+        this method computes the depth coordinates from scratch because of optional chunking.
         """
         key = f"{depth_type}_depth_{location}"
 
         if key not in self.ds_depth_coords:
-            self.ds_depth_coords[key] = compute_depth_coordinates(
-                self.grid.ds, zeta, depth_type=depth_type, location=location
-            )
+            # Select the appropriate depth computation parameters
+            if depth_type == "layer":
+                Cs = self.grid.ds["Cs_r"]
+                sigma = self.grid.ds["sigma_r"]
+            elif depth_type == "interface":
+                Cs = self.grid.ds["Cs_w"]
+                sigma = self.grid.ds["sigma_w"]
+            else:
+                raise ValueError(
+                    f"Invalid depth_type: {depth_type}. Choose 'layer' or 'interface'."
+                )
+
+            h = self.grid.ds["h"]
+
+            # Interpolate h and zeta to the specified location
+            if location == "u":
+                h = interpolate_from_rho_to_u(h)
+                if isinstance(zeta, xr.DataArray):
+                    zeta = interpolate_from_rho_to_u(zeta)
+            elif location == "v":
+                h = interpolate_from_rho_to_v(h)
+                if isinstance(zeta, xr.DataArray):
+                    zeta = interpolate_from_rho_to_v(zeta)
+
             if self.use_dask:
-                self.ds_depth_coords[key].persist()
+                h = h.chunk(get_dask_chunks(location, self.horizontal_chunk_size))
+                if self.adjust_depth_for_sea_surface_height:
+                    zeta = zeta.chunk(
+                        get_dask_chunks(location, self.horizontal_chunk_size)
+                    )
+            depth = compute_depth(zeta, h, self.grid.ds.attrs["hc"], Cs, sigma)
+            self.ds_depth_coords[key] = depth
 
     def _write_into_dataset(self, processed_fields, d_meta):
 

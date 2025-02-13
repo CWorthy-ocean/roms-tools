@@ -257,10 +257,6 @@ class BoundaryForcing:
 
                 if self.adjust_depth_for_sea_surface_height:
                     zeta = processed_fields["zeta"]
-                    if self.use_dask:
-                        zeta = zeta.persist()
-                        zeta_u = zeta_u.persist()
-                        zeta_v = zeta_v.persist()
                 else:
                     zeta = 0
                     zeta_u = 0

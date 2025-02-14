@@ -128,6 +128,9 @@ class Dataset:
             # Make sure that depth is ascending
             ds = self.ensure_dimension_is_ascending(ds, dim="depth")
 
+        # Enforce double precision to ensure reproducibility
+        ds = convert_to_float64(ds)
+
         self.infer_horizontal_resolution(ds)
 
         # Check whether the data covers the entire globe
@@ -2199,3 +2202,19 @@ def decode_string(byte_array):
     )
 
     return decoded_string
+
+
+def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
+    """Convert all data variables in an xarray.Dataset to float64.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Input dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with all data variables converted to float64.
+    """
+    return ds.astype({var: "float64" for var in ds.data_vars})

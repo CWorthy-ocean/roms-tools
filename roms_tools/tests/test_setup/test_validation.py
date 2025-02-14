@@ -67,20 +67,7 @@ def test_save_results(forcing_fixture, request):
     ],
 )
 def test_check_results(forcing_fixture, request):
-    """
-    Test that the computed forcing dataset is numerically close to the expected dataset.
 
-    Notes:
-    - We do not test for exact equality due to small variations introduced by Dask when 
-      working with float32 source data.
-    - Using `xr.testing.assert_equal(forcing.ds, expected_forcing_ds)` would fail for 
-      `--use_dask` and the following fixtures:
-      * "initial_conditions_with_bgc_from_climatology"
-      * "bgc_surface_forcing"
-      * "bgc_surface_forcing_from_climatology"
-    - Instead, we use `xr.testing.assert_allclose` with `rtol=1.0e-5` to allow for minor 
-      numerical differences.
-    """
     fname = _get_fname(forcing_fixture)
     expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)
     forcing = request.getfixturevalue(forcing_fixture)

@@ -9,7 +9,7 @@
 ### Internal Changes
 
 * Enforce double precision on source data to ensure reproducible results ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
-* Validation tests in test suite now pass with `xr.testing.assert_equal` rather than only `xr.testing.assert_allclose`, confirming reproducibility ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
+* Results produced with vs. without Dask in test suite now pass with `xr.testing.assert_equal` confirming reproducibility ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
 
 ### Documentation
 

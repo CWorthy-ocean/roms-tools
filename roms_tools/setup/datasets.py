@@ -2203,9 +2203,9 @@ def decode_string(byte_array):
 
     return decoded_string
 
+
 def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
-    """
-    Convert all data variables in an xarray.Dataset to float64.
+    """Convert all data variables in an xarray.Dataset to float64.
 
     Parameters
     ----------

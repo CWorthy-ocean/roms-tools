@@ -4,6 +4,6 @@
         "xi_rho"
     ],
     "coordinates": "lat_rho lon_rho",
-    "long_name": "Final bathymetry at rho-points",
+    "long_name": "Bathymetry at rho-points",
     "units": "meter"
 }

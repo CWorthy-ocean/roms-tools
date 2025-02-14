@@ -3,5 +3,6 @@
         "time"
     ],
     "calendar": "proleptic_gregorian",
+    "long_name": "absolute time",
     "units": "days since 2020-02-01 00:00:00"
 }

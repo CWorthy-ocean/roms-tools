@@ -3,7 +3,7 @@
     "center_lon": -20,
     "hc": 300.0,
     "hmin": 5.0,
-    "roms_tools_version": "0.1.dev157+dirty",
+    "roms_tools_version": "2.1.1.dev3+gef240eb.d20250116",
     "rot": 0,
     "size_x": 100,
     "size_y": 100,

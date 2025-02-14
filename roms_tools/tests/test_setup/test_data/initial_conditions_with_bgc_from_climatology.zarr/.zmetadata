@@ -6,7 +6,7 @@
             "hc": 250.0,
             "ini_time": "2021-06-29 00:00:00",
             "model_reference_date": "2000-01-01 00:00:00",
-            "roms_tools_version": "0.1.dev177",
+            "roms_tools_version": "2.1.1.dev3+gef240eb.d20250116",
             "source": "GLORYS",
             "theta_b": 2.0,
             "theta_s": 5.0,

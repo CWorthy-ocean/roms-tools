@@ -105,6 +105,4 @@ def test_dask_vs_no_dask(forcing_fixture, request, tmp_path, use_dask):
     forcing_without_dask = type(forcing_with_dask).from_yaml(filepath, use_dask=False)
 
     # Compare the two datasets using assert_equal (only within the same platform)
-    xr.testing.assert_equal(
-        forcing_with_dask.ds, forcing_without_dask.ds
-    )
+    xr.testing.assert_equal(forcing_with_dask.ds, forcing_without_dask.ds)

@@ -70,7 +70,6 @@ def test_check_results(forcing_fixture, request):
 
     fname = _get_fname(forcing_fixture)
     expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)
-
     forcing = request.getfixturevalue(forcing_fixture)
 
-    xr.testing.assert_allclose(forcing.ds, expected_forcing_ds, rtol=1.0e-5)
+    xr.testing.assert_equal(forcing.ds, expected_forcing_ds)

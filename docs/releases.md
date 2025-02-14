@@ -1,6 +1,21 @@
 # Release notes
 
-## v2.4.0 (unreleased)
+## v2.5.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+* Enforce double precision on source data to ensure reproducible results ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
+* Validation tests in test suite now pass with `xr.testing.assert_equal` rather than only `xr.testing.assert_allclose`, confirming reproducibility ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
+
+### Documentation
+
+### Bugfixes
+
+## v2.4.0
 
 ### New Features
 

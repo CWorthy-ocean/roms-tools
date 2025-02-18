@@ -13,6 +13,8 @@
 
 ### Documentation
 
+* Documentation on how to use ROMS-Tools with Dask ([#245](https://github.com/CWorthy-ocean/roms-tools/pull/245))
+
 ### Bugfixes
 
 ## v2.4.0

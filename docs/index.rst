@@ -57,6 +57,8 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    Analyzing ROMS output <roms_output>
 
    Partitioning the input files <partition>
+   Using ROMS-Tools with Dask <using_dask>
+
 
 .. toctree::
    :maxdepth: 1

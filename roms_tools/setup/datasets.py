@@ -160,7 +160,7 @@ class Dataset:
 
         return ds
 
-    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+    def clean_up(self, ds: xr.Dataset, **kwargs) -> xr.Dataset:
         """Dummy method to be overridden by child classes to clean up the dataset.
 
         This method is intended as a placeholder and should be implemented in subclasses
@@ -174,9 +174,9 @@ class Dataset:
         Returns
         -------
         xr.Dataset
-            The xarray Dataset cleaned up (as implemented by child classes).
+            The cleaned-up xarray Dataset (as implemented by child classes).
         """
-        return ds
+        return ds  # Default behavior (no-op, subclasses should override)
 
     def check_dataset(self, ds: xr.Dataset) -> None:
         """Check if the dataset contains the specified variables and dimensions.
@@ -210,7 +210,7 @@ class Dataset:
         """
 
         for var in ds.data_vars:
-            if var not in self.var_names.values():
+            if var not in self.var_names.values() and var != "mask":
                 ds = ds.drop_vars(var)
 
         return ds
@@ -758,18 +758,21 @@ class TPXODataset(Dataset):
     ----------
     filename : str
         The path to the TPXO dataset file.
+    grid_filename : str
+        The path to the TPXO grid file.
+    location : str
+        "h", "u", "v"
     var_names : Dict[str, str], optional
         Dictionary of variable names required in the dataset. Defaults to:
         {
-            "h_Re": "h_Re",
-            "h_Im": "h_Im",
+            "h_Re": "hRe",
+            "h_Im": "hIm",
             "sal_Re": "sal_Re",
             "sal_Im": "sal_Im",
-            "u_Re": "u_Re",
-            "u_Im": "u_Im",
-            "v_Re": "v_Re",
-            "v_Im": "v_Im",
-            "depth": "depth"
+            "u_Re": "URe",
+            "u_Im": "UIm",
+            "v_Re": "VRe",
+            "v_Im": "VIm",
         }
     dim_names : Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset. Defaults to:
@@ -786,15 +789,14 @@ class TPXODataset(Dataset):
     filename: str
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
-            "ssh_Re": "h_Re",
-            "ssh_Im": "h_Im",
+            "ssh_Re": "hRe",
+            "ssh_Im": "hIm",
             "sal_Re": "sal_Re",
             "sal_Im": "sal_Im",
-            "u_Re": "u_Re",
-            "u_Im": "u_Im",
-            "v_Re": "v_Re",
-            "v_Im": "v_Im",
-            "depth": "depth",
+            "u_Re": "uRe",
+            "u_Im": "uIm",
+            "v_Re": "vRe",
+            "v_Im": "vIm",
         }
     )
     dim_names: Dict[str, str] = field(
@@ -803,7 +805,77 @@ class TPXODataset(Dataset):
     ds: xr.Dataset = field(init=False, repr=False)
     reference_date: datetime = datetime(1992, 1, 1)
 
-    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+    def set_omega(self, ds):
+        """Adds the omega values associated with tidal constituents to the provided
+        xarray Dataset.
+
+        This method maps the tidal constituent labels (found in the 'con' variable of the dataset) to their
+        corresponding omega values, as defined in the OTPSnc `constit.h` file. Omega values are added as a new
+        variable ('omega') in the dataset.
+
+        The omega values are based on the lookup table provided by the TPXO tidal model. If a tidal constituent
+        label does not exist in the omega lookup table, it will be assigned a NaN value.
+
+        Parameters:
+        -----------
+        ds : xarray.Dataset
+            The dataset containing tidal constituent labels in the 'con' variable. The 'con' variable should
+            contain an array of constituent labels (e.g., b'm2  ', b's2  ', etc.).
+
+        Returns:
+        --------
+        xarray.Dataset
+            The original dataset with the new 'omega' variable added, representing the omega values for each
+            tidal constituent.
+
+        Notes:
+        ------
+        For more details on the omega values, refer to the OTPSnc `constit.h` file:
+        https://www.tpxo.net/otps.
+        """
+        # Omega value lookup table from the OTPSnc constit.h file, see https://www.tpxo.net/otps
+        omega_values = {
+            b"m2  ": 1.405189e-04,
+            b"s2  ": 1.454441e-04,
+            b"n2  ": 1.378797e-04,
+            b"k2  ": 1.458423e-04,
+            b"k1  ": 7.292117e-05,
+            b"o1  ": 6.759774e-05,
+            b"p1  ": 7.252295e-05,
+            b"q1  ": 6.495854e-05,
+            b"mm  ": 0.026392e-04,
+            b"mf  ": 0.053234e-04,
+            b"m4  ": 2.810377e-04,
+            b"mn4 ": 2.783984e-04,
+            b"ms4 ": 2.859630e-04,
+            b"2n2 ": 1.352405e-04,
+            b"s1  ": 7.2722e-05,
+            b"mu2 ": 1.355937e-04,
+            b"nu2 ": 1.382329e-04,
+            b"l2  ": 1.431581e-04,
+            b"t2  ": 1.452450e-04,
+            b"j1  ": 7.556036e-05,
+            b"m1  ": 7.028195e-05,
+            b"oo1 ": 7.824458e-05,
+            b"rho1": 6.531174e-05,
+            b"ssa ": 0.003982e-04,
+            b"m6  ": 4.215566e-04,
+            b"m8  ": 5.620755e-04,
+            b"mk3 ": 2.134402e-04,
+            b"s6  ": 4.363323e-04,
+            b"2sm2": 1.503693e-04,
+            b"2mk3": 2.081166e-04,
+        }
+
+        # Map omega values using the dictionary
+        omega = np.array([omega_values.get(item, np.nan) for item in ds["con"].values])
+
+        # Add omega as a new variable to the Dataset
+        ds["omega"] = ("nc", omega)
+
+        return ds
+
+    def clean_up(self, ds: xr.Dataset, ds_grid: xr.Dataset) -> xr.Dataset:
         """Clean up and standardize the dimensions and coordinates of the dataset for
         further processing.
 
@@ -826,20 +898,38 @@ class TPXODataset(Dataset):
         ds : xr.Dataset
             A cleaned and standardized `xarray.Dataset` with updated coordinates and dimensions.
         """
+        ds = self.set_omega(ds)
+
+        ds_grid = _load_data(self.grid_filename, self.dim_names, self.use_dask)
+
+        if self.location == "h":
+            mask = ds_grid["mz"].isnull()
+            lon = ds["lon_z"]
+            lat = ds["lat_z"]
+        elif self.location == "u":
+            mask = ds_grid["mu"]
+            lon = ds["lon_u"]
+            lat = ds["lat_u"]
+        elif self.location == "v":
+            mask = ds_grid["mv"]
+            lon = ds["lon_v"]
+            lat = ds["lat_v"]
+
         ds = ds.assign_coords(
             {
                 "omega": ds["omega"],
-                "nx": ds["lon_r"].isel(
+                "nx": lon.isel(
                     ny=0
-                ),  # lon_r is constant along ny, i.e., is only a function of nx
-                "ny": ds["lat_r"].isel(
+                ),  # lon is constant along ny, i.e., is only a function of nx
+                "ny": lat.isel(
                     nx=0
-                ),  # lat_r is constant along nx, i.e., is only a function of ny
+                ),  # lat is constant along nx, i.e., is only a function of ny
             }
         )
         ds = ds.rename(
             {"nx": "longitude", "ny": "latitude", self.dim_names["ntides"]: "ntides"}
         )
+        ds["mask"] = mask
 
         object.__setattr__(
             self,
@@ -870,34 +960,6 @@ class TPXODataset(Dataset):
             raise ValueError(
                 f"The dataset contains fewer than {ntides} tidal constituents."
             )
-
-    def post_process(self):
-        """Apply a depth-based mask to the dataset, ensuring only positive depths are
-        retained.
-
-        This method checks if the 'depth' variable is present in the dataset. If found, a mask is created where
-        depths greater than 0 are considered valid (mask value of 1). This mask is applied to all data variables
-        in the dataset, replacing values at invalid depths (depth ≤ 0) with NaN. The mask itself is also stored
-        in the dataset under the variable 'mask'.
-
-        Returns
-        -------
-        None
-            The dataset is modified in-place by applying the mask to each variable.
-        """
-
-        if "depth" in self.var_names.keys():
-            ds = self.ds
-            mask = xr.where(self.ds["depth"] > 0, 1, 0)
-            ds["mask"] = mask
-            ds = ds.drop_vars(["depth"])
-
-            object.__setattr__(self, "ds", ds)
-
-        # Remove "depth" from var_names
-        updated_var_names = {**self.var_names}  # Create a copy of the dictionary
-        updated_var_names.pop("depth", None)  # Remove "depth" if it exists
-        object.__setattr__(self, "var_names", updated_var_names)
 
 
 @dataclass(frozen=True, kw_only=True)

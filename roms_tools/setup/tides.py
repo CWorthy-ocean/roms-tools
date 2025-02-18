@@ -33,11 +33,18 @@ class TidalForcing:
     ----------
     grid : Grid
         The grid object representing the ROMS grid associated with the tidal forcing data.
-    source : Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source : Dict[str, Union[str, Path, Dict[str, Union[str, Path]]]]
         Dictionary specifying the source of the tidal data. Keys include:
 
           - "name" (str): Name of the data source (e.g., "TPXO").
-          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "path" (Union[str, Path, Dict[str, Union[str, Path]]]): If "name" is "TPXO",
+            "path" should be a dictionary with the following keys:
+
+            - "grid" (Union[str, Path]): Path to the TPXO grid file.
+            - "h" (Union[str, Path]): Path to the TPXO h-file.
+            - "u" (Union[str, Path]): Path to the TPXO u-file.
+
+            Otherwise, "path" can be:
 
             - A single string (with or without wildcards).
             - A single Path object.
@@ -59,7 +66,11 @@ class TidalForcing:
     Examples
     --------
     >>> tidal_forcing = TidalForcing(
-    ...     grid=grid, source={"name": "TPXO", "path": "tpxo_data.nc"}
+    ...     grid=grid,
+    ...     source={
+    ...         "name": "TPXO",
+    ...         "path": {"grid": "tpxo_grid.nc", "h": "tpxo_h.nc", "u": "tpxo_u.nc"},
+    ...     },
     ... )
     """
 
@@ -78,12 +89,14 @@ class TidalForcing:
         self._input_checks()
         target_coords = get_target_coords(self.grid)
 
-        data = self._get_data()
-        data.check_number_constituents(self.ntides)
-        data.choose_subdomain(
-            target_coords,
-            buffer_points=20,
-        )
+        data_h, data_u, data_v = self._get_data()
+
+        for data in [data_h, data_u, data_v]:
+            data.check_number_constituents(self.ntides)
+            data.choose_subdomain(
+                target_coords,
+                buffer_points=20,
+            )
         # select desired number of constituents
         object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
         self._correct_tides(data)
@@ -153,10 +166,24 @@ class TidalForcing:
     def _get_data(self):
 
         if self.source["name"] == "TPXO":
-            data = TPXODataset(filename=self.source["path"], use_dask=self.use_dask)
+            data_h = TPXODataset(
+                filename=self.source["path"]["h"],
+                grid_filename=self.source["path"]["grid"],
+                use_dask=self.use_dask,
+            )
+            data_u = TPXODataset(
+                filename=self.source["path"]["u"],
+                grid_filename=self.source["path"]["grid"],
+                use_dask=self.use_dask,
+            )
+            data_v = TPXODataset(
+                filename=self.source["path"]["u"],
+                grid_filename=self.source["path"]["grid"],
+                use_dask=self.use_dask,
+            )
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
-        return data
+        return data_h, data_u, data_v
 
     def _set_variable_info(self):
         """Sets up a dictionary with metadata for variables based on the type.

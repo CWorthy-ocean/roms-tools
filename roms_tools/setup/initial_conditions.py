@@ -234,6 +234,11 @@ class InitialConditions:
         return processed_fields
 
     def _input_checks(self):
+        # Check that ini_time is not None
+        if self.ini_time is None:
+            raise ValueError(
+                "`ini_time` must be a valid datetime object and cannot be None."
+            )
 
         if "name" not in self.source.keys():
             raise ValueError("`source` must include a 'name'.")

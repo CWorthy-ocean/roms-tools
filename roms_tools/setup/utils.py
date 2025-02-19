@@ -936,7 +936,6 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
             "child_grid",
             "ds",
             "use_dask",
-            "bypass_validation",
             "climatology",
         )
     ]

@@ -967,7 +967,6 @@ class BoundaryForcing:
         cls,
         filepath: Union[str, Path],
         use_dask: bool = False,
-        bypass_validation: bool = False,
     ) -> "BoundaryForcing":
         """Create an instance of the BoundaryForcing class from a YAML file.
 
@@ -977,10 +976,6 @@ class BoundaryForcing:
             The path to the YAML file from which the parameters will be read.
         use_dask: bool, optional
             Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-        bypass_validation: bool, optional
-            Indicates whether to skip validation checks in the processed data. When set to True,
-            the validation process that ensures no NaN values exist at wet points
-            in the processed dataset is bypassed. Defaults to False.
 
         Returns
         -------
@@ -993,9 +988,7 @@ class BoundaryForcing:
         params = _from_yaml(cls, filepath)
 
         # Create and return an instance of InitialConditions
-        return cls(
-            grid=grid, **params, use_dask=use_dask, bypass_validation=bypass_validation
-        )
+        return cls(grid=grid, **params, use_dask=use_dask)
 
 
 def apply_1d_horizontal_fill(data_array: xr.DataArray) -> xr.DataArray:

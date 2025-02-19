@@ -2,7 +2,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import griddata
 from dataclasses import dataclass, field
-from typing import Dict, Union
+from typing import Dict, Union, Any
 from pathlib import Path
 import logging
 from scipy.interpolate import interp1d
@@ -20,39 +20,40 @@ from roms_tools.setup.utils import (
 
 
 @dataclass(frozen=True, kw_only=True)
-class Nesting:
-    """Represents the relationship between a parent and a child grid in nested ROMS
-    simulations. This class facilitates mapping the boundaries of the child grid onto
-    the parent grid indices and modifying the child grid topography such that it matches
-    the parent topography at the boundaries.
+class ChildGrid(Grid):
+    """Represents a ROMS child grid that is compatible with the provided parent grid.
+
+    This class establishes the relationship between a parent grid and a child grid in ROMS simulations.
+    It generates two datasets:
+
+    1. `ds`: Contains child grid variables, ensuring compatibility with the parent grid.
+       The child grid’s topography and mask are adjusted to match the parent grid at the boundaries.
+
+    2. `ds_nesting`: Contains boundary mappings, linking the child grid’s boundaries
+       to the corresponding parent grid indices.
 
     Parameters
     ----------
     parent_grid : Grid
-        The parent grid object, containing information about the larger domain.
-    child_grid : Grid
-        The child grid object, containing information about the nested domain.
-    boundaries : Dict[str, bool], optional
-        Dictionary specifying which boundaries of the child grid are used
-        in the nesting process. Keys are "south", "east", "north", and "west",
-        with boolean values indicating inclusion. Defaults to all boundaries (True).
-    child_prefix : str, optional
-        Prefix added to variable names in the generated dataset to distinguish
-        child grid information. Defaults to "child".
-    period : float, optional
-        The temporal resolution or output period for boundary variables in the child grid.
-        Defaults to hourly.
+        The parent grid object, providing the reference for the child grid's topography and mask.
+    boundaries : Dict[str, bool]
+        Specifies which child grid boundaries (south, east, north, west) should be adjusted for topography/mask
+        and included in `ds_nesting`. Defaults to all `True`.
+    metadata : Dict[str, Any]
+        Dictionary configuring the boundary nesting process, including:
+
+        - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
+        - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
 
     Attributes
     ----------
     ds : xr.Dataset
-        An xarray Dataset containing the index mappings between the child and parent grids
-        for each specified boundary. Includes metadata about grid points, angles,
-        and boundary variable outputs.
+        Dataset containing child grid variables aligned with the parent grid’s topography and mask at the boundaries.
+    ds_nesting : xr.Dataset
+        Dataset containing boundary mappings, where child grid boundaries are mapped onto parent grid indices.
     """
 
     parent_grid: Grid
-    child_grid: Grid
     boundaries: Dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
@@ -61,27 +62,33 @@ class Nesting:
             "west": True,
         }
     )
-    child_prefix: str = "child"
-    period: float = 3600.0
+    metadata: Dict[str, Any] = field(
+        default_factory=lambda: {"prefix": "child", "period": 3600.0}
+    )
 
     def __post_init__(self):
+        super().__post_init__()
 
         parent_grid_ds = self.parent_grid.ds
-        child_grid_ds = self.child_grid.ds
+        child_grid_ds = self.ds
 
         # Adjust longitude for dateline crossing to prevent interpolation artifacts
-        for grid_ds in [parent_grid_ds, child_grid_ds]:
-            grid_ds = wrap_longitudes(grid_ds, straddle=self.parent_grid.straddle)
+        parent_grid_ds = wrap_longitudes(
+            parent_grid_ds, straddle=self.parent_grid.straddle
+        )
+        child_grid_ds = wrap_longitudes(
+            child_grid_ds, straddle=self.parent_grid.straddle
+        )
 
         # Map child boundaries onto parent grid indices
-        ds = map_child_boundaries_onto_parent_grid_indices(
+        ds_nesting = map_child_boundaries_onto_parent_grid_indices(
             parent_grid_ds,
             child_grid_ds,
             self.boundaries,
-            self.child_prefix,
-            self.period,
+            self.metadata["prefix"],
+            self.metadata["period"],
         )
-        object.__setattr__(self, "ds", ds)
+        object.__setattr__(self, "ds_nesting", ds_nesting)
 
         # Modify child topography and mask to match the parent grid
         child_grid_ds = modify_child_topography_and_mask(
@@ -89,12 +96,12 @@ class Nesting:
         )
 
         # Convert longitudes back to [0, 360] range
-        for grid_ds in [parent_grid_ds, child_grid_ds]:
-            grid_ds = wrap_longitudes(grid_ds, straddle=False)
-        object.__setattr__(self.parent_grid, "ds", parent_grid_ds)
-        object.__setattr__(self.child_grid, "ds", child_grid_ds)
+        parent_grid_ds = wrap_longitudes(parent_grid_ds, straddle=False)
+        child_grid_ds = wrap_longitudes(child_grid_ds, straddle=False)
 
-    def plot(self, with_dim_names=False) -> None:
+        object.__setattr__(self, "ds", child_grid_ds)
+
+    def plot_nesting(self, with_dim_names=False) -> None:
         """Plot the parent and child grids in a single figure.
 
         Returns
@@ -105,26 +112,21 @@ class Nesting:
 
         _plot_nesting(
             self.parent_grid.ds,
-            self.child_grid.ds,
+            self.ds,
             self.parent_grid.straddle,
             with_dim_names,
         )
 
-    def save(
+    def save_nesting(
         self,
         filepath: Union[str, Path],
-        filepath_child_grid: Union[str, Path],
     ) -> None:
-        """Save the nesting and child grid file to netCDF4 files. The child grid file is
-        required because the topography and mask of the child grid has been modified.
+        """Save the nesting information to netCDF4 files.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
-
-        filepath_child_grid : Union[str, Path]
-            The base path and filename for saving the childe grid file.
 
         Returns
         -------
@@ -134,16 +136,13 @@ class Nesting:
 
         # Ensure filepath is a Path object
         filepath = Path(filepath)
-        filepath_child_grid = Path(filepath_child_grid)
 
         # Remove ".nc" suffix if present
         if filepath.suffix == ".nc":
             filepath = filepath.with_suffix("")
-        if filepath_child_grid.suffix == ".nc":
-            filepath_child_grid = filepath_child_grid.with_suffix("")
 
-        dataset_list = [self.ds, self.child_grid.ds]
-        output_filenames = [str(filepath), str(filepath_child_grid)]
+        dataset_list = [self.ds_nesting]
+        output_filenames = [str(filepath)]
 
         saved_filenames = save_datasets(dataset_list, output_filenames)
 
@@ -188,7 +187,7 @@ def map_child_boundaries_onto_parent_grid_indices(
     parent_grid_ds,
     child_grid_ds,
     boundaries={"south": True, "east": True, "north": True, "west": True},
-    child_prefix="child",
+    prefix="child",
     period=3600.0,
     update_land_indices=True,
 ):
@@ -234,7 +233,7 @@ def map_child_boundaries_onto_parent_grid_indices(
                         i_eta, i_xi, grid_location, parent_grid_ds
                     )
 
-                var_name = f"{child_prefix}_{direction}_{suffix}"
+                var_name = f"{prefix}_{direction}_{suffix}"
                 if grid_location == "rho":
                     ds[var_name] = xr.concat([i_xi, i_eta], dim="two")
                     ds[var_name].attrs[
@@ -265,7 +264,7 @@ def map_child_boundaries_onto_parent_grid_indices(
 
     # Rename dimensions
     dims_to_rename = {
-        dim: f"{child_prefix}_{dim}" for dim in ds.dims if dim not in ["two", "three"]
+        dim: f"{prefix}_{dim}" for dim in ds.dims if dim not in ["two", "three"]
     }
     ds = ds.rename(dims_to_rename)
 

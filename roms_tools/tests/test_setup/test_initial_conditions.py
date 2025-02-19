@@ -116,6 +116,22 @@ def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
         )
 
 
+# Test initialization with missing ini_time
+def test_initial_conditions_missing_ini_time(example_grid, use_dask):
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    with pytest.raises(
+        ValueError,
+        match="`ini_time` must be a valid datetime object and cannot be None.",
+    ):
+        InitialConditions(
+            grid=example_grid,
+            ini_time=None,
+            source={"name": "GLORYS", "path": fname},
+            use_dask=use_dask,
+        )
+
+
 # Test default climatology value
 def test_initial_conditions_default_climatology(example_grid, use_dask):
 

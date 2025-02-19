@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import logging
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Optional
 from roms_tools import Grid
 from roms_tools.utils import save_datasets
 from roms_tools.regrid import LateralRegrid
@@ -38,10 +38,14 @@ class SurfaceForcing:
     ----------
     grid : Grid
         Object representing the grid information.
-    start_time : datetime
-        Start time of the desired surface forcing data.
-    end_time : datetime
-        End time of the desired surface forcing data.
+    start_time : datetime, optional
+        The start time of the desired surface forcing data. This time is used to filter the dataset
+        to include only records on or after this time, with a single record at or before this time.
+        If no time filtering is desired, set it to None. Default is None.
+    end_time : datetime, optional
+        The end time of the desired surface forcing data. This time is used to filter the dataset
+        to include only records on or before this time, with a single record at or after this time.
+        If no time filtering is desired, set it to None. Default is None.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data. Keys include:
 
@@ -90,8 +94,8 @@ class SurfaceForcing:
     """
 
     grid: Grid
-    start_time: datetime
-    end_time: datetime
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     correct_radiation: bool = True
@@ -168,6 +172,18 @@ class SurfaceForcing:
         object.__setattr__(self, "ds", ds)
 
     def _input_checks(self):
+        # Check that start_time and end_time are both None or none of them is
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError(
+                "Both `start_time` and `end_time` must be provided together as datetime objects or both should be None."
+            )
+
+        # Trigger a warning if both are None
+        if self.start_time is None and self.end_time is None:
+            logging.warning(
+                "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
+            )
+
         # Validate the 'type' parameter
         if self.type not in ["physics", "bgc"]:
             raise ValueError("`type` must be either 'physics' or 'bgc'.")
@@ -606,7 +622,6 @@ class SurfaceForcing:
         cls,
         filepath: Union[str, Path],
         use_dask: bool = False,
-        bypass_validation: bool = False,
     ) -> "SurfaceForcing":
         """Create an instance of the SurfaceForcing class from a YAML file.
 
@@ -616,10 +631,6 @@ class SurfaceForcing:
             The path to the YAML file from which the parameters will be read.
         use_dask: bool, optional
             Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-        bypass_validation: bool, optional
-            Indicates whether to skip validation checks in the processed data. When set to True,
-            the validation process that ensures no NaN values exist at wet points
-            in the processed dataset is bypassed. Defaults to False.
 
         Returns
         -------
@@ -631,6 +642,4 @@ class SurfaceForcing:
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
 
-        return cls(
-            grid=grid, **params, use_dask=use_dask, bypass_validation=bypass_validation
-        )
+        return cls(grid=grid, **params, use_dask=use_dask)

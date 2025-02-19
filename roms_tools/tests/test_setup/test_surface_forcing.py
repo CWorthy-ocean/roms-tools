@@ -351,6 +351,53 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
             assert not sfc_forcing.use_coarse_grid
 
 
+def test_start_time_end_time_error(use_dask):
+    """Test error when start_time and end_time are not both provided or both None."""
+    # Case 1: Only start_time provided
+    with pytest.raises(
+        ValueError, match="Both `start_time` and `end_time` must be provided together"
+    ):
+        SurfaceForcing(
+            grid=None,
+            start_time=datetime(2022, 1, 1),
+            end_time=None,  # end_time is None, should raise an error
+            source={"name": "ERA5", "path": "era5_data.nc"},
+            use_dask=use_dask,
+        )
+
+    # Case 2: Only end_time provided
+    with pytest.raises(
+        ValueError, match="Both `start_time` and `end_time` must be provided together"
+    ):
+        SurfaceForcing(
+            grid=None,
+            start_time=None,  # start_time is None, should raise an error
+            end_time=datetime(2022, 1, 2),
+            source={"name": "ERA5", "path": "era5_data.nc"},
+            use_dask=use_dask,
+        )
+
+
+def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, caplog):
+    """Test that a warning is triggered when both start_time and end_time are None."""
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+
+    with caplog.at_level(logging.INFO):
+        SurfaceForcing(
+            grid=grid_that_straddles_dateline,
+            start_time=None,
+            end_time=None,
+            source={"name": "ERA5", "path": fname},
+            use_dask=use_dask,
+        )
+
+    # Verify the warning message in the log
+    assert (
+        "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
+        in caplog.text
+    )
+
+
 def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
     """Test that the surface forcing fields contain no NaNs.
 

@@ -6,10 +6,13 @@
 
 ### Breaking Changes
 
+* Write and read the parameter `bypass_validation` to/from YAML ([#249](https://github.com/CWorthy-ocean/roms-tools/pull/249))
+
 ### Internal Changes
 
 * Enforce double precision on source data to ensure reproducible results ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
 * Results produced with vs. without Dask in test suite now pass with `xr.testing.assert_equal` confirming reproducibility ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
+* Document the option for `start_time = None` and `end_time = None` in the docstrings for `BoundaryForcing` and `SurfaceForcing`, specifying that when both are `None`, no time filtering is applied to the data. Also, ensure a warning is raised in this case to inform the user. ([#249](https://github.com/CWorthy-ocean/roms-tools/pull/249))
 
 ### Documentation
 

@@ -35,10 +35,11 @@ class Dataset:
         The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
         or a list of strings or Path objects containing multiple files.
     start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+        Start time for selecting relevant data. If not provided, no time-based filtering is applied.
     end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
+        End time for selecting relevant data. If not provided, the dataset selects the time entry
+        closest to `start_time` within the range `[start_time, start_time + 24 hours]`.
+        If `start_time` is also not provided, no time-based filtering is applied.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
     var_names: Dict[str, str]
@@ -2053,7 +2054,7 @@ def _check_dataset(
 
 
 def _select_relevant_times(
-    ds, time_dim, start_time=None, end_time=None, climatology=False
+    ds, time_dim, start_time, end_time=None, climatology=False
 ) -> xr.Dataset:
     """Select a subset of the dataset based on the specified time range.
 
@@ -2070,11 +2071,10 @@ def _select_relevant_times(
         The input dataset to be filtered. Must contain a time dimension.
     time_dim: str
         Name of time dimension.
-    start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    start_time : datetime
+        The start time for selecting relevant data.
     end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
 

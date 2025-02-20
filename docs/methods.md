@@ -63,7 +63,7 @@ The topography is generated via the following steps:
 1. **Regridding**: The topography from the specified `topography_source` is regridded onto the ROMS grid.
 2. **Domain-wide Smoothing**: The regridded topography is smoothed over the entire domain with a smoothing factor of 8. This step is carried out using the [GCM-Filters](https://gcm-filters.readthedocs.io/en/latest/) package, and ensures that the topography is smooth at the grid scale, a prerequisite for avoiding grid-scale instabilities during model runtime.
 3. **Depth Clipping**: In regions that correspond to land or where the ocean depth is shallower than $h_{min}$, the depth is clipped to $h_{min}$.
-4. **Local Smoothing**: The regridded, clipped, and smoothed topography field `h` undergoes further local smoothing to limit the slope parameter `r` to a maximum value of 0.2. This slope parameter is calculcated as:
+4. **Local Smoothing**: The regridded, clipped, and smoothed topography field `h` undergoes further local (logarithmic) smoothing to limit the slope parameter `r` to a maximum value of 0.2. This slope parameter is calculcated as:
 
 $$
 

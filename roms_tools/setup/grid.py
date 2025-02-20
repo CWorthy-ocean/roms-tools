@@ -113,7 +113,7 @@ class Grid:
         # Coarsen the dataset if needed
         self._coarsen()
 
-        # Topography and mask
+        # Topography
         self.update_topography(
             topography_source=self.topography_source,
             hmin=self.hmin,
@@ -206,7 +206,7 @@ class Grid:
                 f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ==="
             )
 
-        # Add topography and mask to the dataset
+        # Add topography to the dataset
         ds = _add_topography(
             ds=self.ds,
             target_coords=target_coords,

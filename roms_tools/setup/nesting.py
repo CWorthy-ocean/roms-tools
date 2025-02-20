@@ -73,6 +73,7 @@ class ChildGrid(Grid):
         self._map_child_boundaries_onto_parent_grid_indices()
         self._modify_child_topography_and_mask()
 
+
     def _map_child_boundaries_onto_parent_grid_indices(self):
         """Maps child grid boundary points onto absolute indices of the parent grid."""
         # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
@@ -269,6 +270,16 @@ class ChildGrid(Grid):
         parent_grid_ds = wrap_longitudes(parent_grid_ds, straddle=False)
         child_grid_ds = wrap_longitudes(child_grid_ds, straddle=False)
         return parent_grid_ds, child_grid_ds
+
+    @classmethod
+    def from_file(cls, filepath: Union[str, Path], verbose: bool = False) -> "ChildGrid":
+        """
+        This method is disabled in this subclass.
+
+        .. noindex::
+        """
+        raise NotImplementedError("The 'from_file' method is disabled in this subclass.")
+
 
 
 def map_child_boundaries_onto_parent_grid_indices(

@@ -14,7 +14,7 @@ from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
 from roms_tools.setup.initial_conditions import InitialConditions  # noqa: F401
 from roms_tools.setup.boundary_forcing import BoundaryForcing  # noqa: F401
 from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
-from roms_tools.setup.nesting import Nesting  # noqa: F401
+from roms_tools.setup.nesting import ChildGrid  # noqa: F401
 from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
 from roms_tools.analysis.roms_output import ROMSOutput  # noqa: F401
 

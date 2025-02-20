@@ -56,7 +56,7 @@ Nesting
 .. autosummary::
    :toctree: generated/
 
-   roms_tools.Nesting
+   roms_tools.ChildGrid
 
 Analyzing ROMS output
 ----------------------

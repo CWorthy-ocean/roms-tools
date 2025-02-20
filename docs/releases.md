@@ -7,6 +7,7 @@
 ### Breaking Changes
 
 * Write and read the parameter `bypass_validation` to/from YAML ([#249](https://github.com/CWorthy-ocean/roms-tools/pull/249))
+* Refactor `Nesting` class and renamed it to `ChildGrid` class to ensure definite serialization ([#250](https://github.com/CWorthy-ocean/roms-tools/pull/250))
 
 ### Internal Changes
 

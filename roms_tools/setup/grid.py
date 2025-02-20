@@ -18,6 +18,7 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_v,
     get_target_coords,
     gc_dist,
+    _pop_grid_data,
 )
 from roms_tools.setup.utils import extract_single_value
 from pathlib import Path
@@ -688,9 +689,7 @@ class Grid:
         filepath = Path(filepath)
 
         data = asdict(self)
-        data.pop("ds", None)
-        data.pop("straddle", None)
-        data.pop("verbose", None)
+        data = _pop_grid_data(data)
 
         # Include the version of roms-tools
         try:

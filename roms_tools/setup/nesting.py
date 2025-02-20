@@ -161,8 +161,8 @@ class ChildGrid(Grid):
         _to_yaml(self, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "Nesting":
-        """Create an instance of the Nesting class from a YAML file.
+    def from_yaml(cls, filepath: Union[str, Path]) -> "ChildGrid":
+        """Create an instance of the ChildGrid class from a YAML file.
 
         Parameters
         ----------
@@ -172,15 +172,14 @@ class ChildGrid(Grid):
         Returns
         -------
         Nesting
-            An instance of the Nesting class.
+            An instance of the ChildGrid class.
         """
         filepath = Path(filepath)
 
         parent_grid = Grid.from_yaml(filepath, "ParentGrid")
-        child_grid = Grid.from_yaml(filepath, "ChildGrid")
         params = _from_yaml(cls, filepath)
 
-        return cls(parent_grid=parent_grid, child_grid=child_grid, **params)
+        return cls(parent_grid=parent_grid, **params)
 
 
 def map_child_boundaries_onto_parent_grid_indices(

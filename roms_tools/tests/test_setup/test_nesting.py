@@ -452,9 +452,11 @@ class TestNesting:
                 filepath.unlink()
 
     def test_disabled_from_file_method(self):
-        """Test that parent from_file method is indeed disabled
-        """
-        with pytest.raises(NotImplementedError, match="The 'from_file' method is disabled in this subclass."):
+        """Test that parent from_file method is indeed disabled."""
+        with pytest.raises(
+            NotImplementedError,
+            match="The 'from_file' method is disabled in this subclass.",
+        ):
             ChildGrid.from_file(filepath="some_file.nc")
 
     def test_roundtrip_yaml(self, child_grid, tmp_path):

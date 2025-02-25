@@ -787,137 +787,79 @@ class TPXODataset(Dataset):
     """
 
     filename: str
-    var_names: Dict[str, str] = field(
-        default_factory=lambda: {
-            "ssh_Re": "hRe",
-            "ssh_Im": "hIm",
-            "sal_Re": "sal_Re",
-            "sal_Im": "sal_Im",
-            "u_Re": "uRe",
-            "u_Im": "uIm",
-            "v_Re": "vRe",
-            "v_Im": "vIm",
-        }
-    )
+    grid_filename: str
+    location: str
+    var_names: Dict[str, str]
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
     )
     ds: xr.Dataset = field(init=False, repr=False)
     reference_date: datetime = datetime(1992, 1, 1)
 
-    def set_omega(self, ds):
-        """Adds the omega values associated with tidal constituents to the provided
-        xarray Dataset.
-
-        This method maps the tidal constituent labels (found in the 'con' variable of the dataset) to their
-        corresponding omega values, as defined in the OTPSnc `constit.h` file. Omega values are added as a new
-        variable ('omega') in the dataset.
-
-        The omega values are based on the lookup table provided by the TPXO tidal model. If a tidal constituent
-        label does not exist in the omega lookup table, it will be assigned a NaN value.
-
-        Parameters:
-        -----------
-        ds : xarray.Dataset
-            The dataset containing tidal constituent labels in the 'con' variable. The 'con' variable should
-            contain an array of constituent labels (e.g., b'm2  ', b's2  ', etc.).
-
-        Returns:
-        --------
-        xarray.Dataset
-            The original dataset with the new 'omega' variable added, representing the omega values for each
-            tidal constituent.
-
-        Notes:
-        ------
-        For more details on the omega values, refer to the OTPSnc `constit.h` file:
-        https://www.tpxo.net/otps.
-        """
-        # Omega value lookup table from the OTPSnc constit.h file, see https://www.tpxo.net/otps
-        omega_values = {
-            b"m2  ": 1.405189e-04,
-            b"s2  ": 1.454441e-04,
-            b"n2  ": 1.378797e-04,
-            b"k2  ": 1.458423e-04,
-            b"k1  ": 7.292117e-05,
-            b"o1  ": 6.759774e-05,
-            b"p1  ": 7.252295e-05,
-            b"q1  ": 6.495854e-05,
-            b"mm  ": 0.026392e-04,
-            b"mf  ": 0.053234e-04,
-            b"m4  ": 2.810377e-04,
-            b"mn4 ": 2.783984e-04,
-            b"ms4 ": 2.859630e-04,
-            b"2n2 ": 1.352405e-04,
-            b"s1  ": 7.2722e-05,
-            b"mu2 ": 1.355937e-04,
-            b"nu2 ": 1.382329e-04,
-            b"l2  ": 1.431581e-04,
-            b"t2  ": 1.452450e-04,
-            b"j1  ": 7.556036e-05,
-            b"m1  ": 7.028195e-05,
-            b"oo1 ": 7.824458e-05,
-            b"rho1": 6.531174e-05,
-            b"ssa ": 0.003982e-04,
-            b"m6  ": 4.215566e-04,
-            b"m8  ": 5.620755e-04,
-            b"mk3 ": 2.134402e-04,
-            b"s6  ": 4.363323e-04,
-            b"2sm2": 1.503693e-04,
-            b"2mk3": 2.081166e-04,
-        }
-
-        # Map omega values using the dictionary
-        omega = np.array([omega_values.get(item, np.nan) for item in ds["con"].values])
-
-        # Add omega as a new variable to the Dataset
-        ds["omega"] = ("nc", omega)
-
-        return ds
-
-    def clean_up(self, ds: xr.Dataset, ds_grid: xr.Dataset) -> xr.Dataset:
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Clean up and standardize the dimensions and coordinates of the dataset for
         further processing.
 
-        This method performs the following operations:
-        - Assigns new coordinate variables for 'omega', 'longitude', and 'latitude' based on existing dataset variables.
-          - 'omega' is retained as it is.
-          - 'longitude' is derived from 'lon_r', assuming it is constant along the 'ny' dimension.
-          - 'latitude' is derived from 'lat_r', assuming it is constant along the 'nx' dimension.
-        - Renames the dimensions 'nx' and 'ny' to 'longitude' and 'latitude', respectively, for consistency.
-        - Renames the tidal dimension to 'ntides' for standardization.
+        This method performs several key operations to clean and standardize the dataset:
+        - Assigns new coordinate variables for 'longitude', and 'latitude' based on existing dataset variables.
+        - Adds the `mask` variable to the dataset, which indicates valid data points based on grid conditions.
+        - Renames the dimensions:
+            - The 'nx' dimension is renamed to 'longitude'.
+            - The 'ny' dimension is renamed to 'latitude'.
+            - The tidal dimension is renamed to 'ntides' for standardization.
         - Updates the `dim_names` attribute of the object to reflect the new dimension names: 'longitude', 'latitude', and 'ntides'.
+        - Checks if the longitude and latitude values from the dataset match those from the grid. If a mismatch is found, raises a `ValueError` indicating the mismatch details.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The input dataset to be cleaned and standardized. It should contain the coordinates 'omega', 'lon_r', 'lat_r', and the tidal dimension.
+            The input dataset to be cleaned and standardized.
 
         Returns
         -------
         ds : xr.Dataset
             A cleaned and standardized `xarray.Dataset` with updated coordinates and dimensions.
+
+        Raises
+        ------
+        ValueError
+            If the longitude or latitude values from the dataset do not match those from the grid. The error message will include the mismatched values.
         """
-        ds = self.set_omega(ds)
 
         ds_grid = _load_data(self.grid_filename, self.dim_names, self.use_dask)
 
         if self.location == "h":
             mask = ds_grid["mz"].isnull()
-            lon = ds["lon_z"]
-            lat = ds["lat_z"]
+            lon_name = "lon_z"
+            lat_name = "lat_z"
         elif self.location == "u":
             mask = ds_grid["mu"]
-            lon = ds["lon_u"]
-            lat = ds["lat_u"]
+            lon_name = "lon_u"
+            lat_name = "lat_u"
         elif self.location == "v":
             mask = ds_grid["mv"]
-            lon = ds["lon_v"]
-            lat = ds["lat_v"]
+            lon_name = "lon_v"
+            lat_name = "lat_v"
+
+        lon_from_grid = ds_grid[lon_name]
+        lat_from_grid = ds_grid[lat_name]
+        lon = ds[lon_name]
+        lat = ds[lat_name]
+
+        # Check if the longitude and latitude match between the grid and the dataset
+        if not np.allclose(lon.values, lon_from_grid.values):
+            raise ValueError(
+                f"Longitude values from the dataset do not closely match the grid. Dataset: {lon.values}, Grid: {lon_from_grid.values}"
+            )
+
+        if not np.allclose(lat.values, lat_from_grid.values):
+            raise ValueError(
+                f"Latitude values from the dataset do not closely match the grid. Dataset: {lat.values}, Grid: {lat_from_grid.values}"
+            )
 
         ds = ds.assign_coords(
             {
-                "omega": ds["omega"],
+                "con": [c.decode("utf-8").strip() for c in ds["con"].values],
                 "nx": lon.isel(
                     ny=0
                 ),  # lon is constant along ny, i.e., is only a function of nx
@@ -943,23 +885,104 @@ class TPXODataset(Dataset):
 
         return ds
 
-    def check_number_constituents(self, ntides: int):
-        """Checks if the number of constituents in the dataset is at least `ntides`.
+    def get_omega(self):
+        """Retrieve angular frequencies (omega) for tidal constituents from the TPXO9.v2
+        atlas.
+
+        This method returns the omega values (angular frequencies in radians per second)
+        for 15 tidal constituents, sourced from the TPXO tidal model and defined in the
+        OTPSnc `constit.h` file. These values are commonly used in tidal modeling and analysis.
+
+        The returned dictionary has:
+        - Keys: Byte-encoded tidal constituent labels (e.g., b'm2  ').
+        - Values: Corresponding angular frequencies in radians per second.
+
+        The 15 constituents listed here are typically the ones for which SAL correction data
+        is available when using the `load_file` method from the OTPSnc library (based on TPXO9.v2 data).
+        If a different data source for SAL correction is used in the future, additional constituents
+        may be included.
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are tidal constituent labels (bytes) and the values
+            are their respective angular frequencies (floats, in radians per second).
+        """
+        # Omega lookup table from the OTPSnc constit.h file, see https://www.tpxo.net/otps
+        omega = {
+            "m2": 1.405189e-04,
+            "s2": 1.454441e-04,
+            "n2": 1.378797e-04,
+            "k2": 1.458423e-04,
+            "k1": 7.292117e-05,
+            "o1": 6.759774e-05,
+            "p1": 7.252295e-05,
+            "q1": 6.495854e-05,
+            "mm": 0.026392e-04,
+            "mf": 0.053234e-04,
+            "m4": 2.810377e-04,
+            "mn4": 2.783984e-04,
+            "ms4": 2.859630e-04,
+            "2n2": 1.352405e-04,
+            "s1": 7.2722e-05,
+        }
+        return omega
+
+    def select_constituents_and_write_omega(self, ntides: int):
+        """Selects the first `ntides` tidal constituents based on the first TPXO9v2
+        `ntides` constituents and adds their corresponding omega values to the dataset.
+
+        This method verifies that the tidal constituents in the dataset match the expected constituents based
+        on the first `ntides` tidal constituents from the TPXO9v2 dataset (as defined by the omega values from
+        `self.get_omega()`). It ensures that the dataset contains at least the expected tidal constituents, and
+        then selects the matching tidal constituents from the dataset. The method also adds the omega values corresponding
+        to the selected tidal constituents.
 
         Parameters
         ----------
         ntides : int
-            The required number of tidal constituents.
+            The required number of tidal constituents to retain. The method will select the first `ntides` tidal
+            constituents from the omega values and map their corresponding omega values to the dataset.
 
         Raises
         ------
         ValueError
-            If the number of constituents in the dataset is less than `ntides`.
+            If the dataset does not contain all required first `ntides` tidal constituents from the TPXO9v2 data.
         """
-        if len(self.ds[self.dim_names["ntides"]]) < ntides:
+
+        omega = self.get_omega()
+
+        # Expected constituents based on the first 'ntides' from the omega dictionary
+        expected_constituents = list(omega.keys())[:ntides]
+
+        # Extract the current tidal constituents from the dataset
+        dataset_constituents = self.ds["con"].values.tolist()
+
+        # Check if the dataset contains the expected constituents
+        if not all(c in expected_constituents for c in dataset_constituents):
             raise ValueError(
-                f"The dataset contains fewer than {ntides} tidal constituents."
+                f"The dataset contains tidal constituents {dataset_constituents} that do not match the first {ntides} expected constituents "
+                f"from the TPXO dataset: {expected_constituents}. "
+                "Ensure the dataset includes the required constituents or reduce the 'ntides' parameter."
             )
+
+        # Select only the expected constituents from the dataset
+        filtered_constituents = [
+            c for c in dataset_constituents if c in expected_constituents
+        ]
+
+        # Update the dataset with the filtered constituents
+        ds = self.ds.sel(con=filtered_constituents)
+
+        # Retrieve the omega values for the filtered constituents in the correct order
+        omega_values = np.array(
+            [omega.get(item, np.nan) for item in filtered_constituents]
+        )
+
+        # Add omega as a new variable to the Dataset
+        ds["omega"] = ("ntides", omega_values)
+
+        object.__setattr__(self, "ds", ds)
 
 
 @dataclass(frozen=True, kw_only=True)

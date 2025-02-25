@@ -18,7 +18,6 @@ def roms_output_from_restart_file(use_dask):
     return ROMSOutput(
         grid=grid,
         path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
-        type="restart",
         use_dask=use_dask,
     )
 
@@ -28,20 +27,6 @@ def test_load_model_output_file(roms_output_from_restart_file, use_dask):
     assert isinstance(roms_output_from_restart_file.ds, xr.Dataset)
 
 
-def test_load_model_output_directory(use_dask):
-    fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
-
-    # Download at least two files, so these will be found within the pooch directory
-    _ = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
-    _ = Path(download_test_data("eastpac25km_rst.19980126000000.nc"))
-
-    # Directory
-    directory = os.path.dirname(download_test_data("eastpac25km_rst.19980106000000.nc"))
-    output = ROMSOutput(grid=grid, path=directory, type="restart", use_dask=use_dask)
-    assert isinstance(output.ds, xr.Dataset)
-
-
 def test_load_model_output_file_list(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
@@ -49,24 +34,23 @@ def test_load_model_output_file_list(use_dask):
     # List of files
     file1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     file2 = Path(download_test_data("eastpac25km_rst.19980126000000.nc"))
-    output = ROMSOutput(
-        grid=grid, path=[file1, file2], type="restart", use_dask=use_dask
-    )
+    output = ROMSOutput(grid=grid, path=[file1, file2], use_dask=use_dask)
     assert isinstance(output.ds, xr.Dataset)
 
 
-def test_invalid_type(use_dask):
+def test_load_model_output_with_wildcard(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
 
-    # Invalid type
-    with pytest.raises(ValueError, match="Invalid type 'invalid_type'"):
-        ROMSOutput(
-            grid=grid,
-            path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
-            type="invalid_type",
-            use_dask=use_dask,
-        )
+    # Download at least two files, so these will be found within the pooch directory
+    Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    Path(download_test_data("eastpac25km_rst.19980126000000.nc"))
+    directory = Path(
+        os.path.dirname(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    )
+
+    output = ROMSOutput(grid=grid, path=directory / "*rst*.nc", use_dask=use_dask)
+    assert isinstance(output.ds, xr.Dataset)
 
 
 def test_invalid_path(use_dask):
@@ -78,16 +62,6 @@ def test_invalid_path(use_dask):
         ROMSOutput(
             grid=grid,
             path=Path("/path/to/nonexistent/file.nc"),
-            type="restart",
-            use_dask=use_dask,
-        )
-
-    # Non-existent directory
-    with pytest.raises(FileNotFoundError):
-        ROMSOutput(
-            grid=grid,
-            path=Path("/path/to/nonexistent/directory"),
-            type="restart",
             use_dask=use_dask,
         )
 
@@ -99,7 +73,6 @@ def test_set_correct_model_reference_date(use_dask):
     output = ROMSOutput(
         grid=grid,
         path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
-        type="restart",
         use_dask=use_dask,
     )
     assert output.model_reference_date == datetime(1995, 1, 1)
@@ -117,7 +90,6 @@ def test_model_reference_date_mismatch(use_dask):
         ROMSOutput(
             grid=grid,
             path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
-            type="restart",
             model_reference_date=model_ref_date,
             use_dask=use_dask,
         )
@@ -138,7 +110,7 @@ def test_model_reference_date_no_metadata(use_dask, tmp_path, caplog):
             expected_exception,
             match="Model reference date could not be inferred from the metadata",
         ):
-            ROMSOutput(grid=grid, path=fname_mod, type="restart", use_dask=use_dask)
+            ROMSOutput(grid=grid, path=fname_mod, use_dask=use_dask)
 
         # Test case 2: When a model reference date is explicitly set, verify the warning
         with caplog.at_level(logging.WARNING):
@@ -146,7 +118,6 @@ def test_model_reference_date_no_metadata(use_dask, tmp_path, caplog):
                 grid=grid,
                 path=fname_mod,
                 model_reference_date=datetime(1995, 1, 1),
-                type="restart",
                 use_dask=use_dask,
             )
 
@@ -177,9 +148,7 @@ def test_compute_depth_coordinates(use_dask):
     grid = Grid.from_file(fname_grid)
 
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
-    output = ROMSOutput(
-        grid=grid, path=fname_restart1, type="restart", use_dask=use_dask
-    )
+    output = ROMSOutput(grid=grid, path=fname_restart1, use_dask=use_dask)
 
     # Before calling get_vertical_coordinates, check if the dataset doesn't already have depth coordinates
     assert "layer_depth_rho" not in output.ds.data_vars
@@ -196,9 +165,7 @@ def test_check_vertical_coordinate_mismatch(use_dask):
     grid = Grid.from_file(fname_grid)
 
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
-    output = ROMSOutput(
-        grid=grid, path=fname_restart1, type="restart", use_dask=use_dask
-    )
+    output = ROMSOutput(grid=grid, path=fname_restart1, use_dask=use_dask)
 
     # create a mock dataset with inconsistent vertical coordinate parameters
     ds_mock = output.ds.copy()
@@ -226,9 +193,7 @@ def test_that_coordinates_are_added(use_dask):
     grid = Grid.from_file(fname_grid)
 
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
-    output = ROMSOutput(
-        grid=grid, path=fname_restart1, type="restart", use_dask=use_dask
-    )
+    output = ROMSOutput(grid=grid, path=fname_restart1, use_dask=use_dask)
 
     assert "abs_time" in output.ds.coords
     assert "lat_rho" in output.ds.coords

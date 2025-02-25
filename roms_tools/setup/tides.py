@@ -43,6 +43,7 @@ class TidalForcing:
             - "grid" (Union[str, Path]): Path to the TPXO grid file.
             - "h" (Union[str, Path]): Path to the TPXO h-file.
             - "u" (Union[str, Path]): Path to the TPXO u-file.
+            - "sal" (Union[str, Path]): Path to the TPXO file containing SAL, part of the OTPSnc under "load_file.nc".
 
             Otherwise, "path" can be:
 
@@ -51,7 +52,7 @@ class TidalForcing:
             - A list of strings or Path objects containing multiple files.
 
     ntides : int, optional
-        Number of constituents to consider. Maximum number is 14. Default is 10.
+        Number of constituents to consider. Maximum number is 15. Default is 10.
     allan_factor : float, optional
         The Allan factor used in tidal model computation. Default is 2.0.
     model_reference_date : datetime, optional
@@ -89,19 +90,20 @@ class TidalForcing:
         self._input_checks()
         target_coords = get_target_coords(self.grid)
 
-        data_h, data_u, data_v = self._get_data()
+        data_dict = self._get_data()
 
-        for data in [data_h, data_u, data_v]:
-            data.check_number_constituents(self.ntides)
+        for key, data in data_dict.items():
+
+            data.select_constituents_and_write_omega(self.ntides)
             data.choose_subdomain(
                 target_coords,
                 buffer_points=20,
             )
-        # select desired number of constituents
-        object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
-        self._correct_tides(data)
 
-        data.apply_lateral_fill()
+        self._correct_tides(data_dict)
+
+        for data in data_dict.values():
+            data.apply_lateral_fill()
 
         self._set_variable_info()
         var_names = self.variable_info.keys()
@@ -110,10 +112,11 @@ class TidalForcing:
         # lateral regridding
         lateral_regrid = LateralRegrid(target_coords, data.dim_names)
         for var_name in var_names:
-            if var_name in data.var_names.keys():
-                processed_fields[var_name] = lateral_regrid.apply(
-                    data.ds[data.var_names[var_name]]
-                )
+            for data in data_dict.values():
+                if var_name in data.var_names.keys():
+                    processed_fields[var_name] = lateral_regrid.apply(
+                        data.ds[data.var_names[var_name]]
+                    )
 
         # rotation of velocities and interpolation to u/v points
         vector_pairs = get_vector_pairs(self.variable_info)
@@ -143,7 +146,7 @@ class TidalForcing:
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(processed_fields, d_meta)
-        ds["omega"] = data.ds["omega"]
+        ds["omega"] = data["h"].ds["omega"]
 
         ds = self._add_global_metadata(ds)
 
@@ -162,28 +165,44 @@ class TidalForcing:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source.keys():
             raise ValueError("`source` must include a 'path'.")
+        if self.ntides > 15:
+            raise ValueError("`ntides` must be at most 15.")
 
     def _get_data(self):
 
+        data = {}
         if self.source["name"] == "TPXO":
-            data_h = TPXODataset(
+            data["h"] = TPXODataset(
                 filename=self.source["path"]["h"],
                 grid_filename=self.source["path"]["grid"],
+                location="h",
+                var_names={"ssh_Re": "hRe", "ssh_Im": "hIm"},
                 use_dask=self.use_dask,
             )
-            data_u = TPXODataset(
-                filename=self.source["path"]["u"],
+            data["sal"] = TPXODataset(
+                filename=self.source["path"]["sal"],
                 grid_filename=self.source["path"]["grid"],
+                location="h",
+                var_names={"sal_Re": "hRe", "sal_Im": "hIm"},
                 use_dask=self.use_dask,
             )
-            data_v = TPXODataset(
+            data["u"] = TPXODataset(
                 filename=self.source["path"]["u"],
                 grid_filename=self.source["path"]["grid"],
+                location="u",
+                var_names={"u_Re": "URe", "u_Im": "UIm"},
+                use_dask=self.use_dask,
+            )
+            data["v"] = TPXODataset(
+                filename=self.source["path"]["u"],
+                grid_filename=self.source["path"]["grid"],
+                location="v",
+                var_names={"v_Re": "VRe", "v_Im": "VIm"},
                 use_dask=self.use_dask,
             )
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
-        return data_h, data_u, data_v
+        return data
 
     def _set_variable_info(self):
         """Sets up a dictionary with metadata for variables based on the type.
@@ -493,48 +512,59 @@ class TidalForcing:
 
         # Get equilibrium tides
         tpc = compute_equilibrium_tide(
-            data.ds[data.dim_names["longitude"]], data.ds[data.dim_names["latitude"]]
+            data["sal"].ds[data["sal"].dim_names["longitude"]],
+            data["sal"].ds[data["sal"].dim_names["latitude"]],
         )
-        tpc = tpc.isel(ntides=data.ds["ntides"])
+        tpc = tpc.isel(ntides=slice(None, self.ntides))
         # Correct for SAL
         tsc = self.allan_factor * (
-            data.ds[data.var_names["sal_Re"]] + 1j * data.ds[data.var_names["sal_Im"]]
+            data["sal"].ds[data["sal"].var_names["sal_Re"]]
+            + 1j * data["sal"].ds[data["sal"].var_names["sal_Im"]]
         )
         tpc = tpc - tsc
 
         # Elevations and transports
-        thc = data.ds[data.var_names["ssh_Re"]] + 1j * data.ds[data.var_names["ssh_Im"]]
-        tuc = data.ds[data.var_names["u_Re"]] + 1j * data.ds[data.var_names["u_Im"]]
-        tvc = data.ds[data.var_names["v_Re"]] + 1j * data.ds[data.var_names["v_Im"]]
+        thc = (
+            data["h"].ds[data["h"].var_names["ssh_Re"]]
+            + 1j * data["h"].ds[data["h"].var_names["ssh_Im"]]
+        )
+        tuc = (
+            data["u"].ds[data["u"].var_names["u_Re"]]
+            + 1j * data["u"].ds[data["u"].var_names["u_Im"]]
+        )
+        tvc = (
+            data["v"].ds[data["v"].var_names["v_Re"]]
+            + 1j * data["v"].ds[data["v"].var_names["v_Im"]]
+        )
 
         # Apply correction for phases and amplitudes
         pf, pu, aa = egbert_correction(self.model_reference_date)
-        pf = pf.isel(ntides=data.ds["ntides"])
-        pu = pu.isel(ntides=data.ds["ntides"])
-        aa = aa.isel(ntides=data.ds["ntides"])
+        pf = pf.isel(ntides=slice(None, self.ntides))
+        pu = pu.isel(ntides=slice(None, self.ntides))
+        aa = aa.isel(ntides=slice(None, self.ntides))
 
-        dt = (self.model_reference_date - data.reference_date).days * 3600 * 24
+        dt = (self.model_reference_date - data["h"].reference_date).days * 3600 * 24
 
-        thc = pf * thc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
-        tuc = pf * tuc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
-        tvc = pf * tvc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
-        tpc = pf * tpc * np.exp(1j * (data.ds["omega"] * dt + pu + aa))
+        thc = pf * thc * np.exp(1j * (data["h"].ds["omega"] * dt + pu + aa))
+        tuc = pf * tuc * np.exp(1j * (data["u"].ds["omega"] * dt + pu + aa))
+        tvc = pf * tvc * np.exp(1j * (data["v"].ds["omega"] * dt + pu + aa))
+        tpc = pf * tpc * np.exp(1j * (data["sal"].ds["omega"] * dt + pu + aa))
 
-        data.ds[data.var_names["ssh_Re"]] = thc.real
-        data.ds[data.var_names["ssh_Im"]] = thc.imag
-        data.ds[data.var_names["u_Re"]] = tuc.real
-        data.ds[data.var_names["u_Im"]] = tuc.imag
-        data.ds[data.var_names["v_Re"]] = tvc.real
-        data.ds[data.var_names["v_Im"]] = tvc.imag
-        data.ds["pot_Re"] = tpc.real
-        data.ds["pot_Im"] = tpc.imag
+        data["h"].ds[data["h"].var_names["ssh_Re"]] = thc.real
+        data["h"].ds[data["h"].var_names["ssh_Im"]] = thc.imag
+        data["u"].ds[data["u"].var_names["u_Re"]] = tuc.real
+        data["u"].ds[data["u"].var_names["u_Im"]] = tuc.imag
+        data["v"].ds[data["v"].var_names["v_Re"]] = tvc.real
+        data["v"].ds[data["v"].var_names["v_Im"]] = tvc.imag
+        data["sal"].ds["pot_Re"] = tpc.real
+        data["sal"].ds["pot_Im"] = tpc.imag
 
         # Update var_names dictionary
-        var_names = {**data.var_names, "pot_Re": "pot_Re", "pot_Im": "pot_Im"}
+        var_names = {**data["sal"].var_names, "pot_Re": "pot_Re", "pot_Im": "pot_Im"}
         var_names.pop("sal_Re", None)  # Remove "sal_Re" if it exists
         var_names.pop("sal_Im", None)  # Remove "sal_Im" if it exists
 
-        object.__setattr__(data, "var_names", var_names)
+        object.__setattr__(data["sal"], "var_names", var_names)
 
 
 def modified_julian_days(year, month, day, hour=0):

@@ -6,6 +6,8 @@
 
 ### Breaking Changes
 
+* Deprecate `type` parameter in `ROMSOutput` ([#253](https://github.com/CWorthy-ocean/roms-tools/pull/253))
+
 ### Internal Changes
 
 * Enforce double precision on source data to ensure reproducible results ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))

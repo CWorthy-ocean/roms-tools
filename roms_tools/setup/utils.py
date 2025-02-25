@@ -893,13 +893,9 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
         grid_data = asdict(forcing_object.grid)
         grid_yaml_data = {"Grid": _pop_grid_data(grid_data)}
-    else:
-        parent_grid_data = asdict(forcing_object.parent_grid)
-        parent_grid_yaml_data = {"ParentGrid": _pop_grid_data(parent_grid_data)}
-        child_grid_data = asdict(forcing_object.child_grid)
-        child_grid_yaml_data = {"ChildGrid": _pop_grid_data(child_grid_data)}
-
-        grid_yaml_data = {**parent_grid_yaml_data, **child_grid_yaml_data}
+    elif hasattr(forcing_object, "parent_grid"):
+        grid_data = asdict(forcing_object.parent_grid)
+        grid_yaml_data = {"ParentGrid": _pop_grid_data(grid_data)}
 
     # Step 2: Ensure Paths are Strings
     def ensure_paths_are_strings(obj, key):
@@ -933,11 +929,11 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         not in (
             "grid",
             "parent_grid",
-            "child_grid",
             "ds",
             "use_dask",
-            "bypass_validation",
             "climatology",
+            "verbose",
+            "straddle",
         )
     ]
 

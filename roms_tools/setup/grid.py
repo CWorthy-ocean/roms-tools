@@ -18,6 +18,7 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_v,
     get_target_coords,
     gc_dist,
+    _pop_grid_data,
 )
 from roms_tools.setup.utils import extract_single_value
 from pathlib import Path
@@ -112,7 +113,7 @@ class Grid:
         # Coarsen the dataset if needed
         self._coarsen()
 
-        # Topography and mask
+        # Topography
         self.update_topography(
             topography_source=self.topography_source,
             hmin=self.hmin,
@@ -205,7 +206,7 @@ class Grid:
                 f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ==="
             )
 
-        # Add topography and mask to the dataset
+        # Add topography to the dataset
         ds = _add_topography(
             ds=self.ds,
             target_coords=target_coords,
@@ -688,9 +689,7 @@ class Grid:
         filepath = Path(filepath)
 
         data = asdict(self)
-        data.pop("ds", None)
-        data.pop("straddle", None)
-        data.pop("verbose", None)
+        data = _pop_grid_data(data)
 
         # Include the version of roms-tools
         try:

@@ -89,10 +89,17 @@ def tidal_forcing(request, use_dask):
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
-    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
+    fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
+    fname_h = Path(download_test_data("regional_h_tpxo10.v2.nc"))
+    fname_u = Path(download_test_data("regional_u_tpxo10.v2.nc"))
+    fname_sal = Path(download_test_data("regional_sal_tpxo9.v2a.nc"))
+    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u, "sal": fname_sal}
 
     return TidalForcing(
-        grid=grid, source={"name": "TPXO", "path": fname}, ntides=1, use_dask=use_dask
+        grid=grid,
+        source={"name": "TPXO", "path": fname_dict},
+        ntides=1,
+        use_dask=use_dask,
     )
 
 

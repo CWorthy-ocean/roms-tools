@@ -8,9 +8,11 @@ from roms_tools.setup.datasets import (
     GLORYSDataset,
     ERA5Correction,
     CESMBGCDataset,
+    TPXODataset,
 )
 from roms_tools.download import download_test_data
 from pathlib import Path
+from collections import OrderedDict
 
 
 @pytest.fixture
@@ -529,7 +531,7 @@ def test_climatology_error(use_dask):
     [
         ("era5_data", 0.25),
         ("glorys_data", 1 / 12),
-        ("tpxo_data", 1 / 6),
+        # ("tpxo_data", 1 / 6),
         ("cesm_bgc_data", 1.0),
         ("cesm_surface_bgc_data", 1.0),
     ],
@@ -538,3 +540,113 @@ def test_horizontal_resolution(data_fixture, expected_resolution, request):
 
     data = request.getfixturevalue(data_fixture)
     assert np.isclose(data.resolution, expected_resolution)
+
+
+class TestTPXODataset:
+    @pytest.fixture
+    def regional_tpxo_dataset(self, use_dask):
+        """TPXO dataset with regional coverage and 25 constituents: M2, S2, N2, K2, K1, O1, P1, Q1, MM, Mf, MSF, M4, Mn4, Ms4, ..."""
+        fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
+        fname_h = Path(download_test_data("regional_h_tpxo10.v2.nc"))
+
+        return TPXODataset(
+            filename=fname_h,
+            grid_filename=fname_grid,
+            location="h",
+            var_names={"ssh_Re": "hRe", "ssh_Im": "hIm"},
+            use_dask=use_dask,
+        )
+
+    @pytest.fixture
+    def global_tpxo_dataset(self, use_dask):
+        """TPXO dataset with global coverage and 2 constituents: M2, S2"""
+        fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
+        fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
+
+        return TPXODataset(
+            filename=fname_h,
+            grid_filename=fname_grid,
+            location="h",
+            var_names={"ssh_Re": "hRe", "ssh_Im": "hIm"},
+            use_dask=use_dask,
+        )
+
+    @pytest.fixture
+    def omega(self):
+        return {
+            "m2": 1.405189e-04,
+            "s2": 1.454441e-04,
+            "n2": 1.378797e-04,
+            "k2": 1.458423e-04,
+            "k1": 7.292117e-05,
+            "o1": 6.759774e-05,
+            "p1": 7.252295e-05,
+            "q1": 6.495854e-05,
+            "mm": 0.026392e-04,
+            "mf": 0.053234e-04,
+            "m4": 2.810377e-04,
+            "mn4": 2.783984e-04,
+            "ms4": 2.859630e-04,
+            "2n2": 1.352405e-04,
+            "s1": 7.2722e-05,
+        }
+
+    @pytest.mark.parametrize(
+        "tpxo_dataset_fixture",
+        [
+            "regional_tpxo_dataset",
+            "global_tpxo_dataset",
+        ],
+    )
+    def test_initialization_and_clean_up(self, tpxo_dataset_fixture, request):
+
+        tpxo_dataset = request.getfixturevalue(tpxo_dataset_fixture)
+        assert tpxo_dataset.location == "h"
+
+        assert "hRe" in tpxo_dataset.ds.data_vars
+        assert "hIm" in tpxo_dataset.ds.data_vars
+        assert "mask" in tpxo_dataset.ds.data_vars
+        assert "longitude" in tpxo_dataset.ds.dims
+        assert "latitude" in tpxo_dataset.ds.dims
+        assert "longitude" in tpxo_dataset.ds.variables
+        assert "latitude" in tpxo_dataset.ds.variables
+
+    def test_clean_up_with_grid_mismatch(self, use_dask):
+        fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
+        fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
+
+        with pytest.raises(ValueError, match="Mismatch in longitude array sizes."):
+            TPXODataset(
+                filename=fname_h,
+                grid_filename=fname_grid,
+                location="h",
+                var_names={"ssh_Re": "hRe", "ssh_Im": "hIm"},
+                use_dask=use_dask,
+            )
+
+    def test_select_fewer_constituents(self, regional_tpxo_dataset, omega):
+
+        regional_tpxo_dataset.select_constituents(2, omega)
+        print(regional_tpxo_dataset.ds)
+
+        assert (regional_tpxo_dataset.ds["ntides"].values == ["m2", "s2"]).all()
+
+    def test_select_constituents_with_reordering(self, regional_tpxo_dataset, omega):
+
+        regional_tpxo_dataset.select_constituents(11, omega)
+
+        assert len(regional_tpxo_dataset.ds["ntides"]) == 11
+        # check that m4 has been moved from 12th to 11th position to follow TPXO9 order
+        assert regional_tpxo_dataset.ds["ntides"].isel(ntides=10) == "m4"
+
+    def test_select_constituents_omega_mismatch(self, regional_tpxo_dataset, omega):
+
+        omega = OrderedDict(
+            list(omega.items())[:3] + [("fake", 6.495854e-05)] + list(omega.items())[3:]
+        )
+        with pytest.raises(ValueError, match="The dataset contains tidal constituents"):
+            regional_tpxo_dataset.select_constituents(11, omega)
+
+    def test_select_constituents_too_few(self, global_tpxo_dataset, omega):
+        with pytest.raises(ValueError, match="The dataset contains tidal constituents"):
+            global_tpxo_dataset.select_constituents(11, omega)

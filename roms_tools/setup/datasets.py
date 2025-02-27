@@ -762,18 +762,8 @@ class TPXODataset(Dataset):
         The path to the TPXO grid file.
     location : str
         "h", "u", "v"
-    var_names : Dict[str, str], optional
-        Dictionary of variable names required in the dataset. Defaults to:
-        {
-            "h_Re": "hRe",
-            "h_Im": "hIm",
-            "sal_Re": "sal_Re",
-            "sal_Im": "sal_Im",
-            "u_Re": "URe",
-            "u_Im": "UIm",
-            "v_Re": "VRe",
-            "v_Im": "VIm",
-        }
+    var_names : Dict[str, str]
+        Dictionary of variable names required in the dataset.
     dim_names : Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset. Defaults to:
         {"longitude": "ny", "latitude": "nx", "ntides": "nc"}.
@@ -782,8 +772,6 @@ class TPXODataset(Dataset):
     ----------
     ds : xr.Dataset
         The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
-    reference_date : datetime
-        The reference date for the TPXO data. Default is datetime(1992, 1, 1).
     """
 
     filename: str
@@ -794,7 +782,6 @@ class TPXODataset(Dataset):
         default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
     )
     ds: xr.Dataset = field(init=False, repr=False)
-    reference_date: datetime = datetime(1992, 1, 1)
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Clean up and standardize the dimensions and coordinates of the dataset for
@@ -847,9 +834,20 @@ class TPXODataset(Dataset):
         lat = ds[lat_name]
 
         # Check if the longitude and latitude match between the grid and the dataset
+        if lon.shape != lon_from_grid.shape:
+            raise ValueError(
+                f"Mismatch in longitude array sizes. Dataset: {lon.shape}, Grid: {lon_from_grid.shape}"
+            )
+
         if not np.allclose(lon.values, lon_from_grid.values):
             raise ValueError(
                 f"Longitude values from the dataset do not closely match the grid. Dataset: {lon.values}, Grid: {lon_from_grid.values}"
+            )
+
+        # Check if latitude sizes match before comparing values
+        if lat.shape != lat_from_grid.shape:
+            raise ValueError(
+                f"Mismatch in latitude array sizes. Dataset: {lat.shape}, Grid: {lat_from_grid.shape}"
             )
 
         if not np.allclose(lat.values, lat_from_grid.values):
@@ -857,9 +855,11 @@ class TPXODataset(Dataset):
                 f"Latitude values from the dataset do not closely match the grid. Dataset: {lat.values}, Grid: {lat_from_grid.values}"
             )
 
+        ds["mask"] = mask
+        ds = ds.rename({"con": "nc"})
         ds = ds.assign_coords(
             {
-                "con": [c.decode("utf-8").strip() for c in ds["con"].values],
+                "nc": ("nc", [c.decode("utf-8").strip() for c in ds["nc"].values]),
                 "nx": lon.isel(
                     ny=0
                 ),  # lon is constant along ny, i.e., is only a function of nx
@@ -871,7 +871,6 @@ class TPXODataset(Dataset):
         ds = ds.rename(
             {"nx": "longitude", "ny": "latitude", self.dim_names["ntides"]: "ntides"}
         )
-        ds["mask"] = mask
 
         object.__setattr__(
             self,
@@ -885,83 +884,45 @@ class TPXODataset(Dataset):
 
         return ds
 
-    def get_omega(self):
-        """Retrieve angular frequencies (omega) for tidal constituents from the TPXO9.v2
-        atlas.
+    def select_constituents(self, ntides: int, omega: Dict[str, float]):
+        """Selects the first `ntides` tidal constituents based on the provided omega
+        values.
 
-        This method returns the omega values (angular frequencies in radians per second)
-        for 15 tidal constituents, sourced from the TPXO tidal model and defined in the
-        OTPSnc `constit.h` file. These values are commonly used in tidal modeling and analysis.
-
-        The returned dictionary has:
-        - Keys: Byte-encoded tidal constituent labels (e.g., b'm2  ').
-        - Values: Corresponding angular frequencies in radians per second.
-
-        The 15 constituents listed here are typically the ones for which SAL correction data
-        is available when using the `load_file` method from the OTPSnc library (based on TPXO9.v2 data).
-        If a different data source for SAL correction is used in the future, additional constituents
-        may be included.
-
-        Returns
-        -------
-        dict
-            A dictionary where the keys are tidal constituent labels (bytes) and the values
-            are their respective angular frequencies (floats, in radians per second).
-        """
-        # Omega lookup table from the OTPSnc constit.h file, see https://www.tpxo.net/otps
-        omega = {
-            "m2": 1.405189e-04,
-            "s2": 1.454441e-04,
-            "n2": 1.378797e-04,
-            "k2": 1.458423e-04,
-            "k1": 7.292117e-05,
-            "o1": 6.759774e-05,
-            "p1": 7.252295e-05,
-            "q1": 6.495854e-05,
-            "mm": 0.026392e-04,
-            "mf": 0.053234e-04,
-            "m4": 2.810377e-04,
-            "mn4": 2.783984e-04,
-            "ms4": 2.859630e-04,
-            "2n2": 1.352405e-04,
-            "s1": 7.2722e-05,
-        }
-        return omega
-
-    def select_constituents_and_write_omega(self, ntides: int):
-        """Selects the first `ntides` tidal constituents based on the first TPXO9v2
-        `ntides` constituents and adds their corresponding omega values to the dataset.
-
-        This method verifies that the tidal constituents in the dataset match the expected constituents based
-        on the first `ntides` tidal constituents from the TPXO9v2 dataset (as defined by the omega values from
-        `self.get_omega()`). It ensures that the dataset contains at least the expected tidal constituents, and
-        then selects the matching tidal constituents from the dataset. The method also adds the omega values corresponding
-        to the selected tidal constituents.
+        This method filters the dataset to retain only the tidal constituents that match
+        the first `ntides` from the provided `omega` dictionary. It ensures that the dataset
+        contains the expected constituents before proceeding with the selection. If the dataset
+        does not contain the required constituents, an error is raised.
 
         Parameters
         ----------
         ntides : int
-            The required number of tidal constituents to retain. The method will select the first `ntides` tidal
-            constituents from the omega values and map their corresponding omega values to the dataset.
+            The number of tidal constituents to retain from the omega values. The method selects
+            the first `ntides` constituents based on the provided omega dictionary and maps their
+            corresponding values to the dataset.
+
+        omega : dict
+            A dictionary where keys are tidal constituent names and values are their associated omega
+            values. The first `ntides` keys from this dictionary will be used to filter the tidal
+            constituents in the dataset.
 
         Raises
         ------
         ValueError
-            If the dataset does not contain all required first `ntides` tidal constituents from the TPXO9v2 data.
+            If the dataset does not contain all required tidal constituents from the first `ntides`
+            selected from the `omega` dictionary, a `ValueError` is raised, indicating the mismatch
+            between the expected and present constituents in the dataset.
         """
-
-        omega = self.get_omega()
 
         # Expected constituents based on the first 'ntides' from the omega dictionary
         expected_constituents = list(omega.keys())[:ntides]
 
         # Extract the current tidal constituents from the dataset
-        dataset_constituents = self.ds["con"].values.tolist()
+        dataset_constituents = self.ds["ntides"].values.tolist()
 
         # Check if the dataset contains the expected constituents
-        if not all(c in expected_constituents for c in dataset_constituents):
+        if not all(c in dataset_constituents for c in expected_constituents):
             raise ValueError(
-                f"The dataset contains tidal constituents {dataset_constituents} that do not match the first {ntides} expected constituents "
+                f"The dataset contains tidal constituents {dataset_constituents} that do not match the first {ntides} required constituents "
                 f"from the TPXO dataset: {expected_constituents}. "
                 "Ensure the dataset includes the required constituents or reduce the 'ntides' parameter."
             )
@@ -972,16 +933,7 @@ class TPXODataset(Dataset):
         ]
 
         # Update the dataset with the filtered constituents
-        ds = self.ds.sel(con=filtered_constituents)
-
-        # Retrieve the omega values for the filtered constituents in the correct order
-        omega_values = np.array(
-            [omega.get(item, np.nan) for item in filtered_constituents]
-        )
-
-        # Add omega as a new variable to the Dataset
-        ds["omega"] = ("ntides", omega_values)
-
+        ds = self.ds.sel(ntides=filtered_constituents)
         object.__setattr__(self, "ds", ds)
 
 
@@ -2085,6 +2037,488 @@ class DaiRiverDataset(RiverDataset):
         return ds
 
 
+@dataclass
+class TPXOManager:
+    """Manages multiple TPXODataset instances and selects and processes tidal
+    constituents from the TPXO dataset.
+
+    This class handles data for various tidal constituents ordered according to the TPXO9v2a standard.
+    For later products, the order of the tidal constituents may change after the 10th constituent.
+    These later products will be reordered to the TPXO9v2a order before selecting the first `ntides` constituents.
+    Typically, only the first 10 constituents are used in applications, as the amplitudes of constituents beyond the 10th are minimal.
+
+    Parameters
+    ----------
+    filenames : dict
+        A dictionary containing paths to the TPXO dataset files. Expected keys are:
+        - "h": Path to the elevation file.
+        - "sal": Path to the self-attraction and loading (SAL) file.
+        - "u": Path to the u-velocity component file.
+        - "grid": Path to the grid file.
+
+    ntides : int
+        The number of tidal constituents to select from the dataset for processing.
+
+    reference_date : datetime, optional
+        The reference date for the TPXO data. Defaults to January 1, 1992.
+        This date serves as the baseline for tidal time series calculations.
+
+    allan_factor : float, optional
+        The Allan factor used in tidal model computation. Default is 2.0.
+
+    use_dask: bool
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    """
+
+    filenames: dict
+    ntides: int
+    reference_date: datetime = datetime(1992, 1, 1)
+    allan_factor: float = 2.0
+    use_dask: Optional[bool] = False
+
+    def __post_init__(self):
+
+        # Initialize the data_dict with TPXODataset instances
+        data_dict = {
+            "h": TPXODataset(
+                filename=self.filenames["h"],
+                grid_filename=self.filenames["grid"],
+                location="h",
+                var_names={"ssh_Re": "hRe", "ssh_Im": "hIm"},
+                use_dask=self.use_dask,
+            ),
+            "sal": TPXODataset(
+                filename=self.filenames["sal"],
+                grid_filename=self.filenames["grid"],
+                location="h",
+                var_names={"sal_Re": "hRe", "sal_Im": "hIm"},
+                use_dask=self.use_dask,
+            ),
+            "u": TPXODataset(
+                filename=self.filenames["u"],
+                grid_filename=self.filenames["grid"],
+                location="u",
+                var_names={"u_Re": "URe", "u_Im": "UIm"},
+                use_dask=self.use_dask,
+            ),
+            "v": TPXODataset(
+                filename=self.filenames["u"],
+                grid_filename=self.filenames["grid"],
+                location="v",
+                var_names={"v_Re": "VRe", "v_Im": "VIm"},
+                use_dask=self.use_dask,
+            ),
+        }
+
+        omega = self.get_omega()
+        data_dict["omega"] = list(omega.values())[: self.ntides]
+
+        for data in data_dict.values():
+            data.select_constituents(self.ntides, omega)
+
+        object.__setattr__(self, "datasets", data_dict)
+
+        return data_dict
+
+    def get_omega(self):
+        """Retrieve angular frequencies (omega) for tidal constituents from the TPXO9.v2
+        atlas.
+
+        This method returns the angular frequencies (in radians per second) for 15 tidal constituents,
+        sourced from the TPXO tidal model and defined in the OTPSnc `constit.h` file, see https://www.tpxo.net/otps.
+        These values are essential for tidal modeling and analysis.
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are tidal constituent labels (str) and the values
+            are their respective angular frequencies (float, in radians per second).
+        """
+        omega = {
+            "m2": 1.405189e-04,  # Principal lunar semidiurnal
+            "s2": 1.454441e-04,  # Principal solar semidiurnal
+            "n2": 1.378797e-04,  # Larger lunar elliptic semidiurnal
+            "k2": 1.458423e-04,  # Lunisolar semidiurnal
+            "k1": 7.292117e-05,  # Lunar diurnal
+            "o1": 6.759774e-05,  # Lunar diurnal
+            "p1": 7.252295e-05,  # Solar diurnal
+            "q1": 6.495854e-05,  # Larger lunar elliptic diurnal
+            "mm": 0.026392e-04,  # Lunar monthly
+            "mf": 0.053234e-04,  # Lunar fortnightly
+            "m4": 2.810377e-04,  # Shallow water overtide of M2
+            "mn4": 2.783984e-04,  # Shallow water quarter diurnal
+            "ms4": 2.859630e-04,  # Shallow water quarter diurnal
+            "2n2": 1.352405e-04,  # Shallow water semidiurnal
+            "s1": 7.2722e-05,  # Solar diurnal
+        }
+        return omega
+
+    def compute_equilibrium_tide(self, lon, lat):
+        """Compute equilibrium tide for given longitudes and latitudes.
+
+        Parameters
+        ----------
+        lon : xr.DataArray
+            Longitudes in degrees.
+        lat : xr.DataArray
+            Latitudes in degrees.
+
+        Returns
+        -------
+        tpc : xr.DataArray
+            Equilibrium tide complex amplitude.
+
+        Notes
+        -----
+        This method calculates the equilibrium tide complex amplitude for specified
+        longitudes and latitudes, considering 15 tidal constituents and their corresponding
+        amplitudes and elasticity factors. The order of the tidal constituents corresponds
+        to the order in `self.get_omega()`, which must remain consistent for future use.
+
+        The tidal constituents are categorized as follows:
+        - **2**: Semidiurnal
+        - **1**: Diurnal
+        - **0**: Long-period
+
+        The amplitudes and elasticity factors are sourced from the `constit.h` file in the OTPSnc package.
+        """
+
+        # Amplitudes for 15 tidal constituents (from variable amp_d in constit.h of OTPSnc package)
+        A = xr.DataArray(
+            data=np.array(
+                [
+                    0.242334,  # M2
+                    0.112743,  # S2
+                    0.046397,  # N2
+                    0.030684,  # K2
+                    0.141565,  # K1
+                    0.100661,  # O1
+                    0.046848,  # P1
+                    0.019273,  # Q1
+                    0.022191,  # Mm
+                    0.042041,  # Mf
+                    0.0,  # M4
+                    0.0,  # Mn4
+                    0.0,  # Ms4
+                    0.006141,  # 2n2
+                    0.000764,  # S1
+                ]
+            ),
+            dims="ntides",
+        )
+
+        # Elasticity factors for 15 tidal constituents (from variable alpha_d in constit.h of OTPSnc package)
+        B = xr.DataArray(
+            data=np.array(
+                [
+                    0.693,  # M2
+                    0.693,  # S2
+                    0.693,  # N2
+                    0.693,  # K2
+                    0.736,  # K1
+                    0.695,  # O1
+                    0.706,  # P1
+                    0.695,  # Q1
+                    0.693,  # Mm
+                    0.693,  # Mf
+                    0.693,  # M4
+                    0.693,  # Mn4
+                    0.693,  # Ms4
+                    0.693,  # 2n2
+                    0.693,  # S1
+                ]
+            ),
+            dims="ntides",
+        )
+
+        # Tidal type (from variable ispec_d in constit.h of OTPSnc package)
+        # types: 2 = semidiurnal, 1 = diurnal, 0 = long-term
+        ityp = xr.DataArray(
+            data=np.array(
+                [
+                    2,  # M2
+                    2,  # S2
+                    2,  # N2
+                    2,  # K2
+                    1,  # K1
+                    1,  # O1
+                    1,  # P1
+                    1,  # Q1
+                    0,  # Mm
+                    0,  # Mf
+                    0,  # M4
+                    0,  # Mn4
+                    0,  # Ms4
+                    2,  # 2n2
+                    1,  # S1
+                ]
+            ),
+            dims="ntides",
+        )
+
+        d2r = np.pi / 180
+        coslat2 = np.cos(d2r * lat) ** 2
+        sin2lat = np.sin(2 * d2r * lat)
+
+        p_amp = (
+            xr.where(ityp == 2, 1, 0) * A * B * coslat2  # semidiurnal
+            + xr.where(ityp == 1, 1, 0) * A * B * sin2lat  # diurnal
+            + xr.where(ityp == 0, 1, 0) * A * B * (0.5 - 1.5 * coslat2)  # long-term
+        )
+        p_pha = (
+            xr.where(ityp == 2, 1, 0) * (-2 * lon * d2r)  # semidiurnal
+            + xr.where(ityp == 1, 1, 0) * (-lon * d2r)  # diurnal
+            + xr.where(ityp == 0, 1, 0) * xr.zeros_like(lon)  # long-term
+        )
+
+        tpc = p_amp * np.exp(-1j * p_pha)
+
+        return tpc
+
+    def egbert_correction(self, date):
+        """Correct phases and amplitudes for real-time runs using parts of the post-
+        processing code from Egbert's & Erofeeva's (OSU) TPXO model.
+
+        Parameters
+        ----------
+        date : datetime.datetime
+            The date and time for which corrections are to be applied.
+
+        Returns
+        -------
+        pf : xr.DataArray
+            Amplitude scaling factor for each of the 15 tidal constituents.
+        pu : xr.DataArray
+            Phase correction [radians] for each of the 15 tidal constituents.
+        aa : xr.DataArray
+            Astronomical arguments [radians] associated with the corrections.
+
+        Notes
+        -----
+        The order of the tidal constituents corresponds
+        to the order in `self.get_omega()`, which must remain consistent for future use.
+
+        References
+        ----------
+        - Egbert, G.D., and S.Y. Erofeeva. "Efficient inverse modeling of barotropic ocean
+          tides." Journal of Atmospheric and Oceanic Technology 19, no. 2 (2002): 183-204.
+        """
+
+        year = date.year
+        month = date.month
+        day = date.day
+        hour = date.hour
+        minute = date.minute
+        second = date.second
+
+        rad = np.pi / 180.0
+        deg = 180.0 / np.pi
+        mjd = modified_julian_days(year, month, day)
+        tstart = mjd + hour / 24 + minute / (60 * 24) + second / (60 * 60 * 24)
+
+        # Determine nodal corrections pu & pf : these expressions are valid for period 1990-2010 (Cartwright 1990).
+        # Reset time origin for astronomical arguments to 4th of May 1860:
+        timetemp = tstart - 51544.4993
+
+        # mean longitude of lunar perigee
+        P = 83.3535 + 0.11140353 * timetemp
+        P = np.mod(P, 360.0)
+        if P < 0:
+            P = +360
+        P *= rad
+
+        # mean longitude of ascending lunar node
+        N = 125.0445 - 0.05295377 * timetemp
+        N = np.mod(N, 360.0)
+        if N < 0:
+            N = +360
+        N *= rad
+
+        sinn = np.sin(N)
+        cosn = np.cos(N)
+        sin2n = np.sin(2 * N)
+        cos2n = np.cos(2 * N)
+        sin3n = np.sin(3 * N)
+
+        pftmp = np.sqrt(
+            (1 - 0.03731 * cosn + 0.00052 * cos2n) ** 2
+            + (0.03731 * sinn - 0.00052 * sin2n) ** 2
+        )
+
+        pf = np.zeros(15)
+        pf[0] = pftmp  # M2
+        pf[1] = 1.0  # S2
+        pf[2] = pftmp  # N2
+        pf[3] = np.sqrt(
+            (1 + 0.2852 * cosn + 0.0324 * cos2n) ** 2
+            + (0.3108 * sinn + 0.0324 * sin2n) ** 2
+        )  # K2
+        pf[4] = np.sqrt(
+            (1 + 0.1158 * cosn - 0.0029 * cos2n) ** 2
+            + (0.1554 * sinn - 0.0029 * sin2n) ** 2
+        )  # K1
+        pf[5] = np.sqrt(
+            (1 + 0.189 * cosn - 0.0058 * cos2n) ** 2
+            + (0.189 * sinn - 0.0058 * sin2n) ** 2
+        )  # O1
+        pf[6] = 1.0  # P1
+        pf[7] = np.sqrt((1 + 0.188 * cosn) ** 2 + (0.188 * sinn) ** 2)  # Q1
+        pf[8] = 1.0 - 0.130 * cosn  # Mm
+        pf[9] = 1.043 + 0.414 * cosn  # Mf
+        pf[10] = pftmp**2  # M4
+        pf[11] = pftmp**2  # Mn4
+        pf[12] = pftmp**2  # Ms4
+        pf[13] = pftmp  # 2n2
+        pf[14] = 1.0  # S1
+        pf = xr.DataArray(pf, dims="ntides")
+
+        putmp = (
+            np.arctan(
+                (-0.03731 * sinn + 0.00052 * sin2n)
+                / (1.0 - 0.03731 * cosn + 0.00052 * cos2n)
+            )
+            * deg
+        )
+
+        pu = np.zeros(15)
+        pu[0] = putmp  # M2
+        pu[1] = 0.0  # S2
+        pu[2] = putmp  # N2
+        pu[3] = (
+            np.arctan(
+                -(0.3108 * sinn + 0.0324 * sin2n)
+                / (1.0 + 0.2852 * cosn + 0.0324 * cos2n)
+            )
+            * deg
+        )  # K2
+        pu[4] = (
+            np.arctan(
+                (-0.1554 * sinn + 0.0029 * sin2n)
+                / (1.0 + 0.1158 * cosn - 0.0029 * cos2n)
+            )
+            * deg
+        )  # K1
+        pu[5] = 10.8 * sinn - 1.3 * sin2n + 0.2 * sin3n  # O1
+        pu[6] = 0.0  # P1
+        pu[7] = np.arctan(0.189 * sinn / (1.0 + 0.189 * cosn)) * deg  # Q1
+        pu[8] = 0.0  # Mm
+        pu[9] = -23.7 * sinn + 2.7 * sin2n - 0.4 * sin3n  # Mf
+        pu[10] = putmp * 2.0  # M4
+        pu[11] = putmp * 2.0  # Mn4
+        pu[12] = putmp  # Ms4
+        pu[13] = putmp  # 2n2
+        pu[14] = 0.0  # S1
+        pu = xr.DataArray(pu, dims="ntides")
+        # convert from degrees to radians
+        pu = pu * rad
+
+        aa = xr.DataArray(
+            data=np.array(
+                [
+                    1.731557546,  # M2
+                    0.0,  # S2
+                    6.050721243,  # N2
+                    3.487600001,  # K2
+                    0.173003674,  # K1
+                    1.558553872,  # O1
+                    6.110181633,  # P1
+                    5.877717569,  # Q1
+                    1.964021610,  # Mm
+                    1.756042456,  # Mf
+                    3.463115091,  # M4
+                    1.499093481,  # Mn4
+                    1.731557546,  # Ms4
+                    4.086699633,  # 2n2
+                    0.0,  # S1
+                ]
+            ),
+            dims="ntides",
+        )
+
+        return pf, pu, aa
+
+    def correct_tides(self, model_reference_date):
+        """Apply tidal corrections to the dataset. This method corrects the dataset for
+        equilibrium tides, self-attraction and loading (SAL) effects, and adjusts phases
+        and amplitudes of tidal elevations and transports using Egbert's correction.
+
+        Parameters
+        ----------
+        model_reference_date : datetime
+            The reference date for the ROMS simulation.
+
+        Returns
+        -------
+        None
+            The dataset is modified in-place with corrected real and imaginary components for ssh, u, v, and the
+            potential field ('pot_Re', 'pot_Im').
+        """
+
+        datasets = self.datasets
+        omega = self.datasets["omega"].isel(ntides=slice(None, self.ntides))
+
+        # Get equilibrium tides
+        lon = datasets["sal"].ds[datasets["sal"].dim_names["longitude"]]
+        lat = datasets["sal"].ds[datasets["sal"].dim_names["latitude"]]
+        tpc = self.compute_equilibrium_tide(lon, lat)
+        tpc = tpc.isel(ntides=slice(None, self.ntides))
+
+        # Correct for SAL
+        tsc = self.allan_factor * (
+            datasets["sal"].ds[datasets["sal"].var_names["sal_Re"]]
+            + 1j * datasets["sal"].ds[datasets["sal"].var_names["sal_Im"]]
+        )
+        tpc = tpc - tsc
+
+        # Elevations and transports
+        thc = (
+            datasets["h"].ds[datasets["h"].var_names["ssh_Re"]]
+            + 1j * datasets["h"].ds[datasets["h"].var_names["ssh_Im"]]
+        )
+        tuc = (
+            datasets["u"].ds[datasets["u"].var_names["u_Re"]]
+            + 1j * datasets["u"].ds[datasets["u"].var_names["u_Im"]]
+        )
+        tvc = (
+            datasets["v"].ds[datasets["v"].var_names["v_Re"]]
+            + 1j * datasets["v"].ds[datasets["v"].var_names["v_Im"]]
+        )
+
+        # Apply correction for phases and amplitudes
+        pf, pu, aa = self.egbert_correction()
+        pf = pf.isel(ntides=slice(None, self.ntides))
+        pu = pu.isel(ntides=slice(None, self.ntides))
+        aa = aa.isel(ntides=slice(None, self.ntides))
+
+        dt = (model_reference_date - self.reference_date).days * 3600 * 24
+
+        thc = pf * thc * np.exp(1j * (omega * dt + pu + aa))
+        tuc = pf * tuc * np.exp(1j * (omega * dt + pu + aa))
+        tvc = pf * tvc * np.exp(1j * (omega * dt + pu + aa))
+        tpc = pf * tpc * np.exp(1j * (omega * dt + pu + aa))
+
+        datasets["h"].ds[datasets["h"].var_names["ssh_Re"]] = thc.real
+        datasets["h"].ds[datasets["h"].var_names["ssh_Im"]] = thc.imag
+        datasets["u"].ds[datasets["u"].var_names["u_Re"]] = tuc.real
+        datasets["u"].ds[datasets["u"].var_names["u_Im"]] = tuc.imag
+        datasets["v"].ds[datasets["v"].var_names["v_Re"]] = tvc.real
+        datasets["v"].ds[datasets["v"].var_names["v_Im"]] = tvc.imag
+        datasets["sal"].ds["pot_Re"] = tpc.real
+        datasets["sal"].ds["pot_Im"] = tpc.imag
+
+        object.__setattr__(self, "datasets", datasets)
+
+        # Update var_names dictionary
+        var_names = {
+            **datasets["sal"].var_names,
+            "pot_Re": "pot_Re",
+            "pot_Im": "pot_Im",
+        }
+        var_names.pop("sal_Re", None)  # Remove "sal_Re" if it exists
+        var_names.pop("sal_Im", None)  # Remove "sal_Im" if it exists
+        object.__setattr__(self.datasets["sal"], "var_names", var_names)
+
+
 # shared functions
 
 
@@ -2303,3 +2737,61 @@ def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
         Dataset with all data variables converted to float64.
     """
     return ds.astype({var: "float64" for var in ds.data_vars})
+
+
+def modified_julian_days(year, month, day, hour=0):
+    """Calculate the Modified Julian Day (MJD) for a given date and time.
+
+    The Modified Julian Day (MJD) is a modified Julian day count starting from
+    November 17, 1858 AD. It is commonly used in astronomy and geodesy.
+
+    Parameters
+    ----------
+    year : int
+        The year.
+    month : int
+        The month (1-12).
+    day : int
+        The day of the month.
+    hour : float, optional
+        The hour of the day as a fractional number (0 to 23.999...). Default is 0.
+
+    Returns
+    -------
+    mjd : float
+        The Modified Julian Day (MJD) corresponding to the input date and time.
+
+    Notes
+    -----
+    The algorithm assumes that the input date (year, month, day) is within the
+    Gregorian calendar, i.e., after October 15, 1582. Negative MJD values are
+    allowed for dates before November 17, 1858.
+
+    References
+    ----------
+    - Wikipedia article on Julian Day: https://en.wikipedia.org/wiki/Julian_day
+    - Wikipedia article on Modified Julian Day: https://en.wikipedia.org/wiki/Modified_Julian_day
+
+    Examples
+    --------
+    >>> modified_julian_days(2024, 5, 20, 12)
+    58814.0
+    >>> modified_julian_days(1858, 11, 17)
+    0.0
+    >>> modified_julian_days(1582, 10, 4)
+    -141428.5
+    """
+
+    if month < 3:
+        year -= 1
+        month += 12
+
+    A = year // 100
+    B = A // 4
+    C = 2 - A + B
+    E = int(365.25 * (year + 4716))
+    F = int(30.6001 * (month + 1))
+    jd = C + day + hour / 24 + E + F - 1524.5
+    mjd = jd - 2400000.5
+
+    return mjd

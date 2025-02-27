@@ -2111,14 +2111,15 @@ class TPXOManager:
         }
 
         omega = self.get_omega()
-        data_dict["omega"] = list(omega.values())[: self.ntides]
 
         for data in data_dict.values():
             data.select_constituents(self.ntides, omega)
 
-        object.__setattr__(self, "datasets", data_dict)
+        data_dict["omega"] = xr.DataArray(
+            data=list(omega.values())[: self.ntides], dims="ntides"
+        )
 
-        return data_dict
+        object.__setattr__(self, "datasets", data_dict)
 
     def get_omega(self):
         """Retrieve angular frequencies (omega) for tidal constituents from the TPXO9.v2
@@ -2485,7 +2486,7 @@ class TPXOManager:
         )
 
         # Apply correction for phases and amplitudes
-        pf, pu, aa = self.egbert_correction()
+        pf, pu, aa = self.egbert_correction(model_reference_date)
         pf = pf.isel(ntides=slice(None, self.ntides))
         pu = pu.isel(ntides=slice(None, self.ntides))
         aa = aa.isel(ntides=slice(None, self.ntides))

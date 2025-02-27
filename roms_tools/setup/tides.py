@@ -87,32 +87,33 @@ class TidalForcing:
         self._input_checks()
         target_coords = get_target_coords(self.grid)
 
-        data_dict = self._get_data()
+        tidal_data = self._get_data()
 
-        for key, data in data_dict.items():
+        for key, data in tidal_data.datasets.items():
+            if key != "omega":
+                data.choose_subdomain(
+                    target_coords,
+                    buffer_points=20,
+                )
 
-            data.choose_subdomain(
-                target_coords,
-                buffer_points=20,
-            )
-
-        data_dict._correct_tides(self.model_reference_date)
-
-        for data in data_dict.values():
-            data.apply_lateral_fill()
+        tidal_data.correct_tides(self.model_reference_date)
 
         self._set_variable_info()
         var_names = self.variable_info.keys()
 
         processed_fields = {}
-        # lateral regridding
-        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
-        for var_name in var_names:
-            for data in data_dict.values():
-                if var_name in data.var_names.keys():
-                    processed_fields[var_name] = lateral_regrid.apply(
-                        data.ds[data.var_names[var_name]]
-                    )
+
+        # lateral fill and regridding
+        for key, data in tidal_data.datasets.items():
+            if key != "omega":
+                data.apply_lateral_fill()
+                lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+
+                for var_name in var_names:
+                    if var_name in data.var_names.keys():
+                        processed_fields[var_name] = lateral_regrid.apply(
+                            data.ds[data.var_names[var_name]]
+                        )
 
         # rotation of velocities and interpolation to u/v points
         vector_pairs = get_vector_pairs(self.variable_info)

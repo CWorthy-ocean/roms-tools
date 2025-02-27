@@ -67,12 +67,19 @@ def grid_that_straddles_180_degree_meridian():
 )
 def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
 
-    fname = Path(download_test_data("TPXO_global_test_data.nc"))
+    fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
+    fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
+    fname_u = Path(download_test_data("global_u_tpxo10.v2.nc"))
+    fname_sal = Path(download_test_data("global_sal_tpxo9.v2a.nc"))
+    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u, "sal": fname_sal}
 
     grid = request.getfixturevalue(grid_fixture)
 
     tidal_forcing = TidalForcing(
-        grid=grid, source={"name": "TPXO", "path": fname}, ntides=2, use_dask=use_dask
+        grid=grid,
+        source={"name": "TPXO", "path": fname_dict},
+        ntides=2,
+        use_dask=use_dask,
     )
 
     assert isinstance(tidal_forcing.ds, xr.Dataset)
@@ -86,19 +93,22 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
     assert "v_Re" in tidal_forcing.ds
     assert "v_Im" in tidal_forcing.ds
 
-    assert tidal_forcing.source == {"name": "TPXO", "path": fname}
+    assert tidal_forcing.source == fname_dict
     assert tidal_forcing.ntides == 2
 
 
 def test_successful_initialization_with_regional_data(
     grid_that_lies_within_bounds_of_regional_tpxo_data, use_dask
 ):
-
-    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
+    fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
+    fname_h = Path(download_test_data("regional_h_tpxo10.v2.nc"))
+    fname_u = Path(download_test_data("regional_u_tpxo10.v2.nc"))
+    fname_sal = Path(download_test_data("regional_sal_tpxo9.v2a.nc"))
+    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u, "sal": fname_sal}
 
     tidal_forcing = TidalForcing(
         grid=grid_that_lies_within_bounds_of_regional_tpxo_data,
-        source={"name": "TPXO", "path": fname},
+        source={"name": "TPXO", "path": fname_dict},
         ntides=10,
         use_dask=use_dask,
     )
@@ -114,7 +124,7 @@ def test_successful_initialization_with_regional_data(
     assert "v_Re" in tidal_forcing.ds
     assert "v_Im" in tidal_forcing.ds
 
-    assert tidal_forcing.source == {"name": "TPXO", "path": fname}
+    assert tidal_forcing.source == {"name": "TPXO", "path": fname_dict}
     assert tidal_forcing.ntides == 10
 
 
@@ -122,12 +132,16 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
     grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask
 ):
 
-    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
+    fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
+    fname_h = Path(download_test_data("regional_h_tpxo10.v2.nc"))
+    fname_u = Path(download_test_data("regional_u_tpxo10.v2.nc"))
+    fname_sal = Path(download_test_data("regional_sal_tpxo9.v2a.nc"))
+    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u, "sal": fname_sal}
 
     with pytest.raises(ValueError, match="NaN values found"):
         TidalForcing(
             grid=grid_that_is_out_of_bounds_of_regional_tpxo_data,
-            source={"name": "TPXO", "path": fname},
+            source={"name": "TPXO", "path": fname_dict},
             ntides=10,
             use_dask=use_dask,
         )
@@ -141,7 +155,11 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
     grid_fixture, request, use_dask
 ):
 
-    fname = Path(download_test_data("TPXO_regional_test_data.nc"))
+    fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
+    fname_h = Path(download_test_data("regional_h_tpxo10.v2.nc"))
+    fname_u = Path(download_test_data("regional_u_tpxo10.v2.nc"))
+    fname_sal = Path(download_test_data("regional_sal_tpxo9.v2a.nc"))
+    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u, "sal": fname_sal}
 
     grid = request.getfixturevalue(grid_fixture)
 
@@ -150,7 +168,7 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
     ):
         TidalForcing(
             grid=grid,
-            source={"name": "TPXO", "path": fname},
+            source={"name": "TPXO", "path": fname_dict},
             ntides=10,
             use_dask=use_dask,
         )
@@ -158,12 +176,16 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
 
 def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_dask):
 
-    fname = Path(download_test_data("TPXO_global_test_data.nc"))
+    fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
+    fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
+    fname_u = Path(download_test_data("global_u_tpxo10.v2.nc"))
+    fname_sal = Path(download_test_data("global_sal_tpxo9.v2a.nc"))
+    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u, "sal": fname_sal}
 
     with pytest.raises(ValueError, match="The dataset contains fewer"):
         TidalForcing(
             grid=grid_that_straddles_dateline,
-            source={"name": "TPXO", "path": fname},
+            source={"name": "TPXO", "path": fname_dict},
             ntides=10,
             use_dask=use_dask,
         )

@@ -143,12 +143,13 @@ class TidalForcing:
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(processed_fields, d_meta)
-        ds["omega"] = data["h"].ds["omega"]
 
         ds = self._add_global_metadata(ds)
 
         if not self.bypass_validation:
             self._validate(ds)
+
+        ds["omega"] = tidal_data.datasets["omega"]
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:

@@ -37,19 +37,14 @@ class TidalForcing:
         Dictionary specifying the source of the tidal data. Keys include:
 
           - "name" (str): Name of the data source (e.g., "TPXO").
-          - "path" (Union[str, Path, Dict[str, Union[str, Path]]]): If "name" is "TPXO",
-            "path" should be a dictionary with the following keys:
+          - "path" (Union[str, Path, Dict[str, Union[str, Path]]]):
 
-            - "grid" (Union[str, Path]): Path to the TPXO grid file.
-            - "h" (Union[str, Path]): Path to the TPXO h-file.
-            - "u" (Union[str, Path]): Path to the TPXO u-file.
-            - "sal" (Union[str, Path]): Path to the TPXO file containing SAL, part of the OTPSnc under "load_file.nc".
+            - If a string or Path is provided, it represents a single file.
+            - If "name" is "TPXO", "path" can also be a dictionary with the following keys:
 
-            Otherwise, "path" can be:
-
-            - A single string (with or without wildcards).
-            - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+              - "grid" (Union[str, Path]): Path to the TPXO grid file.
+              - "h" (Union[str, Path]): Path to the TPXO h-file.
+              - "u" (Union[str, Path]): Path to the TPXO u-file.
 
     ntides : int, optional
         Number of constituents to consider. Maximum number is 15. Default is 10.
@@ -64,12 +59,21 @@ class TidalForcing:
 
     Examples
     --------
+    Using a TPXO dataset with separate grid, h, and u files:
+
     >>> tidal_forcing = TidalForcing(
     ...     grid=grid,
     ...     source={
     ...         "name": "TPXO",
     ...         "path": {"grid": "tpxo_grid.nc", "h": "tpxo_h.nc", "u": "tpxo_u.nc"},
     ...     },
+    ... )
+
+    Using a single file as a source:
+
+    >>> tidal_forcing = TidalForcing(
+    ...     grid=grid,
+    ...     source={"name": "TPXO", "path": "tpxo_merged.nc"},
     ... )
     """
 
@@ -149,7 +153,7 @@ class TidalForcing:
         if not self.bypass_validation:
             self._validate(ds)
 
-        ds["omega"] = tidal_data.datasets["omega"]
+        ds = ds.assign_coords({"omega": tidal_data.datasets["omega"]})
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -167,21 +171,36 @@ class TidalForcing:
             raise ValueError("`ntides` must be at most 15.")
 
     def _get_data(self):
+        """Loads tidal forcing data based on the specified source."""
 
         if self.source["name"] == "TPXO":
-            data = TPXOManager(
-                filenames={
+            if isinstance(self.source["path"], dict):
+                fname_dict = {
                     "grid": self.source["path"]["grid"],
                     "h": self.source["path"]["h"],
                     "u": self.source["path"]["u"],
-                    "sal": self.source["path"]["sal"],
-                },
+                }
+
+            elif isinstance(self.source["path"], (str, Path)):
+                fname_dict = {
+                    "grid": self.source["path"],
+                    "h": self.source["path"],
+                    "u": self.source["path"],
+                }
+            else:
+                raise ValueError(
+                    'For TPXO, source["path"] must be either a string, Path, or a dictionary with "grid", "h", and "u" keys.'
+                )
+
+            data = TPXOManager(
+                filenames=fname_dict,
                 ntides=self.ntides,
                 use_dask=self.use_dask,
             )
 
         else:
             raise ValueError('Only "TPXO" is a valid option for source["name"].')
+
         return data
 
     def _set_variable_info(self):
@@ -191,7 +210,6 @@ class TidalForcing:
         - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
         - `is_vector`: Whether the variable is part of a vector (True for velocity components like 'u' and 'v').
         - `vector_pair`: For vector variables, this indicates the associated variable that forms the vector (e.g., 'u' and 'v').
-        - `is_3d`: Indicates whether the variable is 3D (True for variables like 'temp' and 'salt') or 2D (False for 'zeta').
 
         Returns
         -------
@@ -202,7 +220,6 @@ class TidalForcing:
             "location": "rho",
             "is_vector": False,
             "vector_pair": None,
-            "is_3d": False,
         }
 
         # Define a dictionary for variable names and their associated information
@@ -215,28 +232,24 @@ class TidalForcing:
                 "location": "u",
                 "is_vector": True,
                 "vector_pair": "v_Re",
-                "is_3d": False,
                 "validate": True,
             },
             "v_Re": {
                 "location": "v",
                 "is_vector": True,
                 "vector_pair": "u_Re",
-                "is_3d": False,
                 "validate": True,
             },
             "u_Im": {
                 "location": "u",
                 "is_vector": True,
                 "vector_pair": "v_Im",
-                "is_3d": False,
                 "validate": False,
             },
             "v_Im": {
                 "location": "v",
                 "is_vector": True,
                 "vector_pair": "u_Im",
-                "is_3d": False,
                 "validate": False,
             },
         }
@@ -377,7 +390,10 @@ class TidalForcing:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        title = "%s, ntides = %i" % (field.long_name, self.ds[var_name].ntides[ntides])
+        title = "%s, constituent: %s" % (
+            field.long_name,
+            str(self.ds[var_name].ntides[ntides].values),
+        )
 
         vmax = max(field.max(), -field.min())
         vmin = -vmax

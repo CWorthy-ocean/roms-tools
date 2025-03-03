@@ -149,7 +149,7 @@ def _load_data(
 
         # Rechunk the dataset along the tidal constituent dimension ("ntides") after loading
         # because the original dataset does not have a chunk size of 1 along this dimension.
-        if "ntides" in dim_names:
+        if "ntides" in dim_names and "ntides" in ds.dims:
             ds = ds.chunk({dim_names["ntides"]: 1})
 
     else:

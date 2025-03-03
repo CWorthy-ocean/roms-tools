@@ -9,11 +9,11 @@ from roms_tools import (
     RiverForcing,
 )
 from roms_tools.setup.datasets import (
+    TPXODataset,
     GLORYSDataset,
     ERA5Dataset,
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
-    TPXODataset,
 )
 from roms_tools.download import download_test_data
 import hashlib
@@ -89,11 +89,10 @@ def tidal_forcing(request, use_dask):
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
-    fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
-    fname_h = Path(download_test_data("regional_h_tpxo10.v2.nc"))
-    fname_u = Path(download_test_data("regional_u_tpxo10.v2.nc"))
-    fname_sal = Path(download_test_data("regional_sal_tpxo9.v2a.nc"))
-    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u, "sal": fname_sal}
+    fname_grid = Path(download_test_data("regional_grid_tpxo10v2.nc"))
+    fname_h = Path(download_test_data("regional_h_tpxo10v2.nc"))
+    fname_u = Path(download_test_data("regional_u_tpxo10v2.nc"))
+    fname_dict = {"grid": fname_grid, "h": fname_h, "u": fname_u}
 
     return TidalForcing(
         grid=grid,
@@ -641,10 +640,14 @@ def glorys_data(request, use_dask):
 
 @pytest.fixture(scope="session")
 def tpxo_data(request, use_dask):
-    fname = download_test_data("TPXO_regional_test_data.nc")
+    fname = download_test_data("regional_h_tpxo10v2a.nc")
+    fname_grid = download_test_data("regional_grid_tpxo10v2a.nc")
 
     data = TPXODataset(
         filename=fname,
+        grid_filename=fname_grid,
+        location="h",
+        var_names={"ssh_Re": "hRe", "ssh_Im": "hIm"},
         use_dask=use_dask,
     )
 

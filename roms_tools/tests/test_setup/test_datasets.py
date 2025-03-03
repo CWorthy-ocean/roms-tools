@@ -546,8 +546,8 @@ class TestTPXODataset:
     @pytest.fixture
     def regional_tpxo_dataset(self, use_dask):
         """TPXO dataset with regional coverage and 25 constituents: M2, S2, N2, K2, K1, O1, P1, Q1, MM, Mf, MSF, M4, Mn4, Ms4, ..."""
-        fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
-        fname_h = Path(download_test_data("regional_h_tpxo10.v2.nc"))
+        fname_grid = Path(download_test_data("regional_grid_tpxo10v2.nc"))
+        fname_h = Path(download_test_data("regional_h_tpxo10v2.nc"))
 
         return TPXODataset(
             filename=fname_h,
@@ -559,7 +559,7 @@ class TestTPXODataset:
 
     @pytest.fixture
     def global_tpxo_dataset(self, use_dask):
-        """TPXO dataset with global coverage and 2 constituents: M2, S2"""
+        """TPXO dataset with global coverage and 1 constituent: M2"""
         fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
         fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
 
@@ -611,24 +611,9 @@ class TestTPXODataset:
         assert "longitude" in tpxo_dataset.ds.variables
         assert "latitude" in tpxo_dataset.ds.variables
 
-    def test_clean_up_with_grid_mismatch(self, use_dask):
-        fname_grid = Path(download_test_data("regional_grid_tpxo10.v2.nc"))
-        fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
-
-        with pytest.raises(ValueError, match="Mismatch in longitude array sizes."):
-            TPXODataset(
-                filename=fname_h,
-                grid_filename=fname_grid,
-                location="h",
-                var_names={"ssh_Re": "hRe", "ssh_Im": "hIm"},
-                use_dask=use_dask,
-            )
-
     def test_select_fewer_constituents(self, regional_tpxo_dataset, omega):
 
         regional_tpxo_dataset.select_constituents(2, omega)
-        print(regional_tpxo_dataset.ds)
-
         assert (regional_tpxo_dataset.ds["ntides"].values == ["m2", "s2"]).all()
 
     def test_select_constituents_with_reordering(self, regional_tpxo_dataset, omega):

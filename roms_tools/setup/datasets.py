@@ -19,6 +19,7 @@ from roms_tools.download import (
     download_correction_data,
     download_topo,
     download_river_data,
+    download_sal_data,
 )
 from roms_tools.setup.fill import LateralFill
 
@@ -779,91 +780,77 @@ class TPXODataset(Dataset):
     location: str
     var_names: Dict[str, str]
     dim_names: Dict[str, str] = field(
-        default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
+        default_factory=lambda: {"longitude": "nx", "latitude": "ny", "ntides": "nc"}
     )
     ds: xr.Dataset = field(init=False, repr=False)
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """Clean up and standardize the dimensions and coordinates of the dataset for
-        further processing.
+        """Standardize the dataset's dimensions and coordinates for further processing.
 
-        This method performs several key operations to clean and standardize the dataset:
-        - Assigns new coordinate variables for 'longitude', and 'latitude' based on existing dataset variables.
-        - Adds the `mask` variable to the dataset, which indicates valid data points based on grid conditions.
-        - Renames the dimensions:
-            - The 'nx' dimension is renamed to 'longitude'.
-            - The 'ny' dimension is renamed to 'latitude'.
-            - The tidal dimension is renamed to 'ntides' for standardization.
-        - Updates the `dim_names` attribute of the object to reflect the new dimension names: 'longitude', 'latitude', and 'ntides'.
-        - Checks if the longitude and latitude values from the dataset match those from the grid. If a mismatch is found, raises a `ValueError` indicating the mismatch details.
+        This method performs the following operations:
+        - Assigns 'longitude' and 'latitude' coordinates from existing dataset variables.
+        - Adds a `mask` variable indicating valid data points based on grid conditions.
+        - Renames dimensions:
+          - 'nx' → 'longitude'
+          - 'ny' → 'latitude'
+          - Tidal dimension → 'ntides'
+        - Updates `dim_names` to reflect the new dimension names.
+        - Ensures the dataset's longitude and latitude values match those of the grid.
+          If mismatched, raises a `ValueError` with details.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The input dataset to be cleaned and standardized.
+            The dataset to be standardized.
 
         Returns
         -------
-        ds : xr.Dataset
-            A cleaned and standardized `xarray.Dataset` with updated coordinates and dimensions.
+        xr.Dataset
+            The cleaned dataset with updated coordinates and dimensions.
 
         Raises
         ------
         ValueError
-            If the longitude or latitude values from the dataset do not match those from the grid. The error message will include the mismatched values.
+            If longitude or latitude values do not match the grid.
         """
 
         ds_grid = _load_data(self.grid_filename, self.dim_names, self.use_dask)
 
+        # Define mask and coordinate names based on location
         if self.location == "h":
-            mask = ds_grid["mz"].isnull()
+            mask_name = "mz"
             lon_name = "lon_z"
             lat_name = "lat_z"
         elif self.location == "u":
-            mask = ds_grid["mu"]
+            mask_name = "mu"
             lon_name = "lon_u"
             lat_name = "lat_u"
         elif self.location == "v":
-            mask = ds_grid["mv"]
+            mask_name = "mv"
             lon_name = "lon_v"
             lat_name = "lat_v"
 
-        lon_from_grid = ds_grid[lon_name]
-        lat_from_grid = ds_grid[lat_name]
-        lon = ds[lon_name]
-        lat = ds[lat_name]
+        # Assign and rename coordinates
+        ds_grid = ds_grid.assign_coords(
+            {
+                "nx": ds_grid[lon_name].isel(
+                    ny=0
+                ),  # lon is constant along ny, i.e., is only a function of nx
+                "ny": ds_grid[lat_name].isel(
+                    nx=0
+                ),  # lat is constant along nx, i.e., is only a function of ny
+            }
+        )
+        ds_grid = ds_grid.rename({"nx": "longitude", "ny": "latitude"})
 
-        # Check if the longitude and latitude match between the grid and the dataset
-        if lon.shape != lon_from_grid.shape:
-            raise ValueError(
-                f"Mismatch in longitude array sizes. Dataset: {lon.shape}, Grid: {lon_from_grid.shape}"
-            )
-
-        if not np.allclose(lon.values, lon_from_grid.values):
-            raise ValueError(
-                f"Longitude values from the dataset do not closely match the grid. Dataset: {lon.values}, Grid: {lon_from_grid.values}"
-            )
-
-        # Check if latitude sizes match before comparing values
-        if lat.shape != lat_from_grid.shape:
-            raise ValueError(
-                f"Mismatch in latitude array sizes. Dataset: {lat.shape}, Grid: {lat_from_grid.shape}"
-            )
-
-        if not np.allclose(lat.values, lat_from_grid.values):
-            raise ValueError(
-                f"Latitude values from the dataset do not closely match the grid. Dataset: {lat.values}, Grid: {lat_from_grid.values}"
-            )
-
-        ds["mask"] = mask
         ds = ds.rename({"con": "nc"})
         ds = ds.assign_coords(
             {
                 "nc": ("nc", [c.decode("utf-8").strip() for c in ds["nc"].values]),
-                "nx": lon.isel(
+                "nx": ds[lon_name].isel(
                     ny=0
                 ),  # lon is constant along ny, i.e., is only a function of nx
-                "ny": lat.isel(
+                "ny": ds[lat_name].isel(
                     nx=0
                 ),  # lat is constant along nx, i.e., is only a function of ny
             }
@@ -871,7 +858,6 @@ class TPXODataset(Dataset):
         ds = ds.rename(
             {"nx": "longitude", "ny": "latitude", self.dim_names["ntides"]: "ntides"}
         )
-
         object.__setattr__(
             self,
             "dim_names",
@@ -881,6 +867,30 @@ class TPXODataset(Dataset):
                 "ntides": "ntides",
             },
         )
+
+        # Restrict dataset to same lat/lons as grid
+        ds = ds.sel(
+            {
+                "latitude": ds_grid["latitude"],
+                "longitude": ds_grid["longitude"],
+            },
+            method="nearest",
+        )
+
+        # Validate matching lat/lon shapes and values
+        for coord in [lon_name, lat_name]:
+            if ds[coord].shape != ds_grid[coord].shape:
+                raise ValueError(
+                    f"Mismatch in {coord} array sizes. Dataset: {ds[coord].shape}, Grid: {ds_grid[coord].shape}"
+                )
+            if not np.allclose(ds[coord].values, ds_grid[coord].values):
+                raise ValueError(
+                    f"{coord.capitalize()} values from dataset do not match grid. Dataset: {ds[coord].values}, Grid: {ds_grid[coord].values}"
+                )
+        # Restrict dataset so lon/lat matches those of grid file
+
+        # Add mask
+        ds["mask"] = ds_grid[mask_name].isnull()
 
         return ds
 
@@ -2042,32 +2052,35 @@ class TPXOManager:
     """Manages multiple TPXODataset instances and selects and processes tidal
     constituents from the TPXO dataset.
 
-    This class handles data for various tidal constituents ordered according to the TPXO9v2a standard.
-    For later products, the order of the tidal constituents may change after the 10th constituent.
-    These later products will be reordered to the TPXO9v2a order before selecting the first `ntides` constituents.
-    Typically, only the first 10 constituents are used in applications, as the amplitudes of constituents beyond the 10th are minimal.
+    This class handles multiple tidal constituents following the TPXO9v2a standard.
+    The self-attraction and loading (SAL) correction data is sourced internally from TPXO9v2a.
 
     Parameters
     ----------
     filenames : dict
-        A dictionary containing paths to the TPXO dataset files. Expected keys are:
-        - "h": Path to the elevation file.
-        - "sal": Path to the self-attraction and loading (SAL) file.
-        - "u": Path to the u-velocity component file.
-        - "grid": Path to the grid file.
+        Dictionary containing paths to TPXO dataset files. Expected keys:
+        - "h" : Path to the elevation file.
+        - "u" : Path to the u-velocity component file.
+        - "grid" : Path to the grid file.
 
     ntides : int
-        The number of tidal constituents to select from the dataset for processing.
+        Number of tidal constituents to select for processing.
 
     reference_date : datetime, optional
-        The reference date for the TPXO data. Defaults to January 1, 1992.
-        This date serves as the baseline for tidal time series calculations.
+        Reference date for the TPXO data. Defaults to January 1, 1992.
+        Used as the baseline for tidal time series calculations.
 
     allan_factor : float, optional
-        The Allan factor used in tidal model computation. Default is 2.0.
+        Factor used in tidal model computations. Defaults to 2.0.
 
-    use_dask: bool
-        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    use_dask : bool, optional
+        Whether to use Dask for chunking. If True, data is loaded lazily; if False, data is loaded eagerly. Defaults to False.
+
+    Notes
+    -----
+    In TPXO products newer then 9v2a, the order of tidal constituents may change beyond the 10th constituent.
+    Before selecting the first `ntides` constituents, newer products are reordered to match the TPXO9v2a standard.
+    However, this reordering has minimal impact, as constituents beyond the 10th have negligible amplitudes.
     """
 
     filenames: dict
@@ -2077,6 +2090,8 @@ class TPXOManager:
     use_dask: Optional[bool] = False
 
     def __post_init__(self):
+
+        fname_sal = download_sal_data("sal_tpxo9.v2a.nc")
 
         # Initialize the data_dict with TPXODataset instances
         data_dict = {
@@ -2088,7 +2103,7 @@ class TPXOManager:
                 use_dask=self.use_dask,
             ),
             "sal": TPXODataset(
-                filename=self.filenames["sal"],
+                filename=fname_sal,
                 grid_filename=self.filenames["grid"],
                 location="h",
                 var_names={"sal_Re": "hRe", "sal_Im": "hIm"},

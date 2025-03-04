@@ -2752,8 +2752,7 @@ def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
     xr.Dataset
         Dataset with all data variables converted to float64.
     """
-    return ds.astype({var: "float64" for var in ds.data_vars})
-
+    return ds.map(lambda v: v.astype(np.float64) if v.dtype == np.float32 else v)
 
 def modified_julian_days(year, month, day, hour=0):
     """Calculate the Modified Julian Day (MJD) for a given date and time.

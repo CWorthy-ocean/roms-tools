@@ -198,12 +198,18 @@ class RiverForcing:
         river_volume = river_volume.rename(
             {data.dim_names["time"]: "river_time", data.dim_names["station"]: "nriver"}
         )
+
         name = data.ds[data.var_names["name"]].rename(
             {data.dim_names["station"]: "nriver"}
         )
         name.attrs["long_name"] = "River name"
         river_volume.coords["river_name"] = name
+
         ds["river_volume"] = river_volume
+
+        nriver = xr.DataArray(np.arange(1, len(ds.nriver) + 1), dims="nriver")
+        nriver.attrs["long_name"] = "River ID (1-based Fortran indexing)"
+        ds = ds.assign_coords({"nriver": nriver})
 
         if self.include_bgc:
             ntracers = 2 + 32
@@ -273,8 +279,6 @@ class RiverForcing:
 
         ds = ds.assign_coords({"river_time": time})
 
-        ds = ds.drop_vars("nriver")
-
         return ds
 
     def _move_rivers_to_closest_coast(self, target_coords, data):
@@ -342,7 +346,6 @@ class RiverForcing:
             .isel({data.dim_names["station"]: stations})
             .values
         )
-
         # Return the indices in a dictionary format
         river_indices = {}
         for i in range(len(stations)):
@@ -395,7 +398,7 @@ class RiverForcing:
                     + fraction  # Fractional contribution for multiple grid points
                 )
 
-        river_locations.attrs["long_name"] = "River index plus local volume fraction"
+        river_locations.attrs["long_name"] = "River ID plus local volume fraction"
         river_locations.attrs["units"] = "none"
         ds["river_location"] = river_locations
 

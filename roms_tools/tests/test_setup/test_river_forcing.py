@@ -162,10 +162,8 @@ def test_river_locations_are_along_coast(river_forcing_fixture, request):
     coast = (1 - mask) * (faces > 0)
 
     indices = river_forcing.indices
-    for key in indices.keys():
-        eta_rhos = indices[key]["eta_rho"]
-        xi_rhos = indices[key]["xi_rho"]
-        for eta_rho, xi_rho in zip(eta_rhos, xi_rhos):
+    for name in indices.keys():
+        for (eta_rho, xi_rho) in indices[name]:
             assert coast[eta_rho, xi_rho]
             assert river_forcing.ds["river_location"][eta_rho, xi_rho] > 0
 

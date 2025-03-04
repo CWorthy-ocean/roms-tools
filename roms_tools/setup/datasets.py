@@ -1886,16 +1886,15 @@ class RiverDataset:
             eta_rho_values = indices[1]
             xi_rho_values = indices[2]
             names = (
-                self.ds[self.var_names["name"]]
+                ds[self.var_names["name"]]
                 .isel({self.dim_names["station"]: stations})
                 .values
             )
-
             river_indices = {}
             for i in range(len(stations)):
                 river_name = names[i]
                 river_indices[river_name] = {
-                    "nriver": stations[i],  # from python to fortran indexing
+                    "nriver": stations[i] + 1,  # from python to fortran indexing
                     "eta_rho": [eta_rho_values[i]],
                     "xi_rho": [xi_rho_values[i]],
                 }

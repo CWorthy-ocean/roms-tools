@@ -2288,6 +2288,7 @@ class TPXOManager:
         )
 
         tpc = p_amp * np.exp(-1j * p_pha)
+        tpc = tpc.isel(ntides=slice(None, self.ntides))
 
         return tpc
 
@@ -2450,6 +2451,9 @@ class TPXOManager:
             ),
             dims="ntides",
         )
+        pf = pf.isel(ntides=slice(None, self.ntides))
+        pu = pu.isel(ntides=slice(None, self.ntides))
+        aa = aa.isel(ntides=slice(None, self.ntides))
 
         return pf, pu, aa
 
@@ -2477,7 +2481,6 @@ class TPXOManager:
         lon = datasets["sal"].ds[datasets["sal"].dim_names["longitude"]]
         lat = datasets["sal"].ds[datasets["sal"].dim_names["latitude"]]
         tpc = self.compute_equilibrium_tide(lon, lat)
-        tpc = tpc.isel(ntides=slice(None, self.ntides))
 
         # Correct for SAL
         tsc = self.allan_factor * (
@@ -2502,9 +2505,6 @@ class TPXOManager:
 
         # Apply correction for phases and amplitudes
         pf, pu, aa = self.egbert_correction(model_reference_date)
-        pf = pf.isel(ntides=slice(None, self.ntides))
-        pu = pu.isel(ntides=slice(None, self.ntides))
-        aa = aa.isel(ntides=slice(None, self.ntides))
 
         dt = (model_reference_date - self.reference_date).days * 3600 * 24
 

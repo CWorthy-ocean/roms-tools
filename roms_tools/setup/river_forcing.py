@@ -351,9 +351,9 @@ class RiverForcing:
         for i in range(len(stations)):
             river_name = names[i]
             river_indices[river_name] = {
-                "nriver": stations[i] + 1,  # from python to fortran indexing
-                "eta_rho": [eta_rho_values[i]],
-                "xi_rho": [xi_rho_values[i]],
+                "nriver": int(stations[i] + 1),  # from python to fortran indexing
+                "eta_rho": [int(eta_rho_values[i])],
+                "xi_rho": [int(xi_rho_values[i])],
             }
 
         object.__setattr__(self, "indices", river_indices)

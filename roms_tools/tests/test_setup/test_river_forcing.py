@@ -75,7 +75,7 @@ def test_successful_initialization_with_climatological_dai_data(
 
     assert isinstance(river_forcing.ds, xr.Dataset)
     assert len(river_forcing.ds.nriver) > 0
-    assert len(river_forcing.original_indices["name"]) > 0
+    assert len(river_forcing.original_indices) > 0
     assert "river_volume" in river_forcing.ds
     assert "river_tracer" in river_forcing.ds
     assert river_forcing.climatology
@@ -108,9 +108,7 @@ def test_reproducibility(river_forcing, river_forcing_climatology):
     compare_dictionaries(
         river_forcing.original_indices, river_forcing_climatology.original_indices
     )
-    compare_dictionaries(
-        river_forcing.updated_indices, river_forcing_climatology.updated_indices
-    )
+    compare_dictionaries(river_forcing.indices, river_forcing_climatology.indices)
 
 
 def test_reproducibility_indices(river_forcing, river_forcing_no_climatology):
@@ -118,9 +116,7 @@ def test_reproducibility_indices(river_forcing, river_forcing_no_climatology):
     compare_dictionaries(
         river_forcing.original_indices, river_forcing_no_climatology.original_indices
     )
-    compare_dictionaries(
-        river_forcing.updated_indices, river_forcing_no_climatology.updated_indices
-    )
+    compare_dictionaries(river_forcing.indices, river_forcing_no_climatology.indices)
 
 
 @pytest.mark.parametrize(
@@ -165,12 +161,13 @@ def test_river_locations_are_along_coast(river_forcing_fixture, request):
     )
     coast = (1 - mask) * (faces > 0)
 
-    indices = river_forcing.updated_indices
-    for i in range(len(indices["station"])):
-        eta_rho = indices["eta_rho"][i]
-        xi_rho = indices["xi_rho"][i]
-        assert coast[eta_rho, xi_rho]
-        assert river_forcing.ds["river_location"][eta_rho, xi_rho] > 0
+    indices = river_forcing.indices
+    for key in indices.keys():
+        eta_rhos = indices[key]["eta_rho"]
+        xi_rhos = indices[key]["xi_rho"]
+        for eta_rho, xi_rho in zip(eta_rhos, xi_rhos):
+            assert coast[eta_rho, xi_rho]
+            assert river_forcing.ds["river_location"][eta_rho, xi_rho] > 0
 
 
 def test_missing_source_name():

@@ -74,6 +74,7 @@ class RiverForcing:
     include_bgc: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
 
+    indices: dict = field(init=False)
     ds: xr.Dataset = field(init=False, repr=False)
     climatology: xr.Dataset = field(init=False, repr=False)
 
@@ -90,7 +91,7 @@ class RiverForcing:
         original_indices = data.extract_relevant_rivers(target_coords, dx)
         object.__setattr__(self, "original_indices", original_indices)
 
-        if len(original_indices["station"]) > 0:
+        if len(original_indices) > 0:
             ds = self._create_river_forcing(data)
             self._move_rivers_to_closest_coast(target_coords, data)
             ds = self._write_indices_into_dataset(ds)
@@ -299,7 +300,7 @@ class RiverForcing:
         Returns:
         --------
         None
-            This method modifies the `self.updated_indices` attribute and writes the updated indices
+            This method modifies the `self.indices` attribute and writes the updated indices
             of the river mouths to the grid file using `write_indices_into_grid_file`.
         """
 
@@ -333,27 +334,33 @@ class RiverForcing:
 
         # Find the indices of the closest coastal grid cell to the river mouth
         indices = np.where(dist_coast == dist_coast_min)
+        stations = indices[0]
+        eta_rho_values = indices[1]
+        xi_rho_values = indices[2]
         names = (
             data.ds[data.var_names["name"]]
-            .isel({data.dim_names["station"]: indices[0]})
+            .isel({data.dim_names["station"]: stations})
             .values
         )
 
         # Return the indices in a dictionary format
-        indices = {
-            "station": indices[0],
-            "eta_rho": indices[1],
-            "xi_rho": indices[2],
-            "name": names,
-        }
-        object.__setattr__(self, "updated_indices", indices)
+        river_indices = {}
+        for i in range(len(stations)):
+            river_name = names[i]
+            river_indices[river_name] = {
+                "nriver": stations[i] + 1,  # from python to fortran indexing
+                "eta_rho": [eta_rho_values[i]],
+                "xi_rho": [xi_rho_values[i]],
+            }
+
+        object.__setattr__(self, "indices", river_indices)
 
     def _write_indices_into_dataset(self, ds):
         """Adds river location indices to the dataset as the "river_location" variable.
 
         This method checks if the "river_location" variable already exists in the dataset.
         If it does, the method removes it. Then, it creates a new "river_location" variable
-        using river station indices from `self.updated_indices` and assigns it to the dataset.
+        using river station indices from `self.indices` and assigns it to the dataset.
         The indices specify the river station locations in terms of eta_rho and xi_rho grid cell indices.
 
         Parameters
@@ -371,11 +378,22 @@ class RiverForcing:
             ds = ds.drop_vars("river_location")
 
         river_locations = xr.zeros_like(self.grid.ds.mask_rho)
-        for i in range(len(self.updated_indices["name"])):
-            station = self.updated_indices["station"][i]
-            eta_index = self.updated_indices["eta_rho"][i]
-            xi_index = self.updated_indices["xi_rho"][i]
-            river_locations[eta_index, xi_index] = station + 2
+        for key in self.indices.keys():
+            nriver = self.indices[key]["nriver"]
+            eta_indices = self.indices[key]["eta_rho"]
+            xi_indices = self.indices[key]["xi_rho"]
+
+            if len(eta_indices) != len(xi_indices):
+                raise ValueError("Mismatch between eta_rho and xi_rho lengths.")
+            else:
+                fraction = 1 / len(eta_indices)
+
+            # Loop through eta_indices and xi_indices
+            for eta_index, xi_index in zip(eta_indices, xi_indices):
+                river_locations[eta_index, xi_index] = (
+                    nriver  # already in Fortran convention
+                    + fraction  # Fractional contribution for multiple grid points
+                )
 
         river_locations.attrs["long_name"] = "River index plus local volume fraction"
         river_locations.attrs["units"] = "none"
@@ -463,26 +481,28 @@ class RiverForcing:
                 "color": "black",
             }  # Customize latitude label style
 
-        for ax, indices in zip(axs, [self.original_indices, self.updated_indices]):
-            for i in range(len(indices["name"])):
-                name = indices["name"][i]
-                xi_index = indices["xi_rho"][i]
-                eta_index = indices["eta_rho"][i]
+        proj = ccrs.PlateCarree()
+
+        for ax, indices in zip(axs, [self.original_indices, self.indices]):
+            for name in indices.keys():
+                xi_indices = indices[name]["xi_rho"]
+                eta_indices = indices[name]["eta_rho"]
                 # transform coordinates to projected space
-                proj = ccrs.PlateCarree()
-                transformed_lon, transformed_lat = trans.transform_point(
-                    self.grid.ds.lon_rho[eta_index, xi_index],
-                    self.grid.ds.lat_rho[eta_index, xi_index],
-                    proj,
-                )
-                ax.plot(
-                    transformed_lon,
-                    transformed_lat,
-                    marker="x",
-                    markersize=8,
-                    markeredgewidth=2,
-                    label=name,
-                )
+
+                for eta_index, xi_index in zip(eta_indices, xi_indices):
+                    transformed_lon, transformed_lat = trans.transform_point(
+                        self.grid.ds.lon_rho[eta_index, xi_index],
+                        self.grid.ds.lat_rho[eta_index, xi_index],
+                        proj,
+                    )
+                    ax.plot(
+                        transformed_lon,
+                        transformed_lat,
+                        marker="x",
+                        markersize=8,
+                        markeredgewidth=2,
+                        label=name,
+                    )
 
         axs[0].set_title("Original river locations")
         axs[1].set_title("Updated river locations")

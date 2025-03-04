@@ -1882,30 +1882,30 @@ class RiverDataset:
 
             # Find the indices of the closest grid cell to the river mouth
             indices = np.where(dist == dist_min)
+            stations = indices[0]
+            eta_rho_values = indices[1]
+            xi_rho_values = indices[2]
             names = (
                 self.ds[self.var_names["name"]]
-                .isel({self.dim_names["station"]: indices[0]})
+                .isel({self.dim_names["station"]: stations})
                 .values
             )
-            # Return the indices in a dictionary format
-            indices = {
-                "station": indices[0],
-                "eta_rho": indices[1],
-                "xi_rho": indices[2],
-                "name": names,
-            }
+
+            river_indices = {}
+            for i in range(len(stations)):
+                river_name = names[i]
+                river_indices[river_name] = {
+                    "nriver": stations[i],  # from python to fortran indexing
+                    "eta_rho": [eta_rho_values[i]],
+                    "xi_rho": [xi_rho_values[i]],
+                }
         else:
             ds = xr.Dataset()
-            indices = {
-                "station": [],
-                "eta_rho": [],
-                "xi_rho": [],
-                "name": [],
-            }
+            river_indices = {}
 
         object.__setattr__(self, "ds", ds)
 
-        return indices
+        return river_indices
 
 
 @dataclass(frozen=True, kw_only=True)

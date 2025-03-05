@@ -442,8 +442,7 @@ class RiverForcing:
     def _write_indices_into_dataset(self, ds):
         """Adds river location indices to the dataset as the "river_location" variable.
 
-        This method checks if the "river_location" variable already exists in the dataset.
-        If it does, the method removes it. Then, it creates a new "river_location" variable
+        This method creates a new "river_location" variable
         using river station indices from `self.indices` and assigns it to the dataset.
         The indices specify the river station locations in terms of eta_rho and xi_rho grid cell indices.
 
@@ -457,9 +456,6 @@ class RiverForcing:
         xarray.Dataset
             The modified dataset with the "river_location" variable added.
         """
-
-        if "river_location" in ds:
-            ds = ds.drop_vars("river_location")
 
         river_locations = xr.zeros_like(self.grid.ds.h)
 

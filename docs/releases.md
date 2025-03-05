@@ -4,6 +4,9 @@
 
 ### New Features
 
+* Support for creating multi-cell rivers ([#258](https://github.com/CWorthy-ocean/roms-tools/pull/258))
+* Support for writing and reading single-cell and multi-cell rivers to/from YAML ([#258](https://github.com/CWorthy-ocean/roms-tools/pull/258))
+
 ### Breaking Changes
 
 * Deprecate `type` parameter in `ROMSOutput` ([#253](https://github.com/CWorthy-ocean/roms-tools/pull/253))

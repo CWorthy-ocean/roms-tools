@@ -1937,11 +1937,11 @@ class RiverDataset:
 
         # Ensure the dataset is filtered based on the provided river names
         ds_filtered = self.ds.where(
-            self.ds[self.dim_names["name"]].isin(river_names), drop=True
+            self.ds[self.var_names["name"]].isin(river_names), drop=True
         )
 
         # Check that all requested rivers exist in the dataset
-        filtered_river_names = set(ds_filtered[self.dim_names["name"]].values)
+        filtered_river_names = set(ds_filtered[self.var_names["name"]].values)
         missing_rivers = set(river_names) - filtered_river_names
 
         if missing_rivers:

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, Union, List, Optional
 from pathlib import Path
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from roms_tools import Grid
 from roms_tools.plot import _get_projection, _add_field_to_ax
 from roms_tools.utils import save_datasets
@@ -57,14 +58,24 @@ class RiverForcing:
         Whether to include BGC tracers. Defaults to `False`.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
-    indices : Dict[str, Dict[str, Union[int, List[int]]]], optional
-        A dictionary of river indices for each river to be included in the river forcing. This parameter is optional, and if not provided,
-        the river indices will be automatically determined based on the grid and the source dataset. If provided, it allows for explicit
-        specification of river locations and IDs. Each key in the dictionary represents a river name, and the value
-        is another dictionary containing the following keys:
-          - 'nriver' : The river ID (integer).
-          - 'eta_rho' : List of grid cell indices in eta-direction for the river (integer(s)).
-          - 'xi_rho' : List of grid cell indices in xi-direction for the river (integer(s)).
+    indices : dict[str, list[tuple]], optional
+        A dictionary specifying the river indices for each river to be included in the river forcing. This parameter is optional. If not provided,
+        the river indices will be automatically determined based on the grid and the source dataset. If provided, it allows for explicit specification
+        of river locations. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
+        a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+
+        Example:
+            indices = {
+                'Hvita(Olfusa)': [(8, 6), (7, 6)],
+                'Thjorsa': [(8, 6)],
+                'JkulsFjll': [(11, 12)],
+                'Lagarfljot': [(9, 13), (8, 13), (10, 13)],
+                'Bruara': [(8, 6)],
+                'Svarta': [(12, 9)]
+            }
+
+        In the example, the dictionary provides the river names as keys, and the values are lists of tuples, where each tuple represents the
+        `(eta_rho, xi_rho)` indices for a river location.
 
     Attributes
     ----------
@@ -72,7 +83,7 @@ class RiverForcing:
         The xarray Dataset containing the river forcing data.
     climatology : bool
         Indicates whether the final river forcing is climatological.
-    indices : Optional[Dict[str, Dict[str, Union[int, List[int]]]]]
+    Dict[str, Union[int, List[int]]]
         A dictionary of river indices. If not provided during initialization, it will be automatically determined
         based on the grid and the source dataset. The dictionary structure is the same as described in the `indices` parameter docstring.
     """
@@ -154,37 +165,47 @@ class RiverForcing:
                 if not isinstance(river_name, str):
                     raise ValueError(f"River name `{river_name}` must be a string.")
 
-                if not isinstance(river_data, dict):
+                if not isinstance(river_data, list):
                     raise ValueError(
-                        f"Data for river `{river_name}` must be a dictionary."
+                        f"Data for river `{river_name}` must be a list of tuples."
                     )
 
-                required_keys = ["nriver", "eta_rho", "xi_rho"]
-                for key in required_keys:
-                    if key not in river_data:
+                # Ensure each element in the list is a tuple of length 2
+                seen_tuples = set()
+                for idx_pair in river_data:
+                    if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
                         raise ValueError(
-                            f"River `{river_name}` is missing required key '{key}'."
+                            f"Each item for river `{river_name}` must be a tuple of length 2 representing (eta_rho, xi_rho)."
                         )
 
-                # Check 'nriver' is an integer
-                if not isinstance(river_data["nriver"], int):
-                    raise ValueError(
-                        f"River `{river_name}`'s 'nriver' must be an integer."
-                    )
+                    eta_rho, xi_rho = idx_pair
 
-                # Check 'eta_rho' and 'xi_rho' are lists of integers or single integers
-                for grid_key in ["eta_rho", "xi_rho"]:
-                    value = river_data[grid_key]
-                    if not isinstance(value, list):
-                        if not isinstance(value, int):
-                            raise ValueError(
-                                f"River `{river_name}`'s '{grid_key}' must be an integer or a list of integers."
-                            )
-                    else:
-                        if not all(isinstance(v, int) for v in value):
-                            raise ValueError(
-                                f"All values in river `{river_name}`'s '{grid_key}' list must be integers."
-                            )
+                    # Ensure both eta_rho and xi_rho are integers
+                    if not isinstance(eta_rho, int):
+                        raise ValueError(
+                            f"First element of tuple for river `{river_name}` must be an integer (eta_rho), but got {type(eta_rho)}."
+                        )
+                    if not isinstance(xi_rho, int):
+                        raise ValueError(
+                            f"Second element of tuple for river `{river_name}` must be an integer (xi_rho), but got {type(xi_rho)}."
+                        )
+
+                    # Check that eta_rho and xi_rho are within the valid range
+                    if not (0 <= eta_rho < len(self.grid.ds.eta_rho)):
+                        raise ValueError(
+                            f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho)-1}]."
+                        )
+                    if not (0 <= xi_rho < len(self.grid.ds.xi_rho)):
+                        raise ValueError(
+                            f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho)-1}]."
+                        )
+
+                    # Check for duplicate tuples
+                    if idx_pair in seen_tuples:
+                        raise ValueError(
+                            f"Duplicate location {idx_pair} found for river `{river_name}`."
+                        )
+                    seen_tuples.add(idx_pair)
 
     def _get_data(self):
 
@@ -440,12 +461,12 @@ class RiverForcing:
         if "river_location" in ds:
             ds = ds.drop_vars("river_location")
 
-        river_locations = xr.zeros_like(self.grid.ds.mask_rho)
+        river_locations = xr.zeros_like(self.grid.ds.h)
 
         for nriver in ds.nriver:
             river_name = str(ds.river_name.sel(nriver=nriver).values)
             indices = self.indices[river_name]
-            fraction = 1 / len(indices)
+            fraction = 1.0 / len(indices)
 
             for eta_index, xi_index in indices:
 
@@ -542,26 +563,43 @@ class RiverForcing:
 
         proj = ccrs.PlateCarree()
 
+        if len(self.indices) <= 10:
+            color_map = cm.get_cmap("tab10")
+        elif len(self.indices) <= 20:
+            color_map = cm.get_cmap("tab20")
+        else:
+            color_map = cm.get_cmap("tab20b")
+        # Create a dictionary of colors
+        colors = {name: color_map(i) for i, name in enumerate(self.indices.keys())}
+
         for ax, indices in zip(axs, [self.original_indices, self.indices]):
+            added_labels = set()
             for name in indices.keys():
                 for tuple in indices[name]:
                     eta_index = tuple[0]
                     xi_index = tuple[1]
 
                     # transform coordinates to projected space
-
                     transformed_lon, transformed_lat = trans.transform_point(
                         self.grid.ds.lon_rho[eta_index, xi_index],
                         self.grid.ds.lat_rho[eta_index, xi_index],
                         proj,
                     )
+
+                    if name not in added_labels:
+                        added_labels.add(name)
+                        label = name
+                    else:
+                        label = "_None"
+
                     ax.plot(
                         transformed_lon,
                         transformed_lat,
                         marker="x",
                         markersize=8,
                         markeredgewidth=2,
-                        label=name,
+                        label=label,
+                        color=colors[name],
                     )
 
         axs[0].set_title("Original river locations")
@@ -760,10 +798,9 @@ def check_river_locations_are_along_coast(mask, indices):
     coast = (1 - mask) * (faces > 0)
 
     for key, river_data in indices.items():
-        eta_rhos = river_data["eta_rho"]
-        xi_rhos = river_data["xi_rho"]
+        for idx_pair in river_data:
+            eta_rho, xi_rho = idx_pair
 
-        for eta_rho, xi_rho in zip(eta_rhos, xi_rhos):
             # Check if the river location is along the coast
             if not coast[eta_rho, xi_rho]:
                 raise ValueError(

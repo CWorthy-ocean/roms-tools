@@ -5,21 +5,26 @@ from datetime import datetime
 import textwrap
 from pathlib import Path
 import pytest
+import logging
 from conftest import calculate_file_hash
 
 
 @pytest.fixture
-def river_forcing_climatology():
-    """Fixture for creating a RiverForcing object from the global Dai river dataset."""
-    grid = Grid(
+def iceland_test_grid():
+    return Grid(
         nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
     )
+
+
+@pytest.fixture
+def river_forcing_climatology(iceland_test_grid):
+    """Fixture for creating a RiverForcing object from the global Dai river dataset."""
 
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
     return RiverForcing(
-        grid=grid,
+        grid=iceland_test_grid,
         start_time=start_time,
         end_time=end_time,
         convert_to_climatology="always",
@@ -78,38 +83,40 @@ def multi_cell_indices():
 
 
 @pytest.fixture
-def river_forcing_with_prescribed_single_cell_indices(single_cell_indices):
+def river_forcing_with_prescribed_single_cell_indices(
+    single_cell_indices, iceland_test_grid
+):
     """Fixture for creating a RiverForcing object based on the global Dai river dataset,
     using manually specified single-cell river indices instead of relying on automatic
     detection."""
 
-    grid = Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
-    )
-
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
     return RiverForcing(
-        grid=grid, start_time=start_time, end_time=end_time, indices=single_cell_indices
+        grid=iceland_test_grid,
+        start_time=start_time,
+        end_time=end_time,
+        indices=single_cell_indices,
     )
 
 
 @pytest.fixture
-def river_forcing_with_prescribed_multi_cell_indices(multi_cell_indices):
+def river_forcing_with_prescribed_multi_cell_indices(
+    multi_cell_indices, iceland_test_grid
+):
     """Fixture for creating a RiverForcing object based on the global Dai river dataset,
     using manually specified multi-cell river indices instead of relying on automatic
     detection."""
-
-    grid = Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
-    )
 
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
     return RiverForcing(
-        grid=grid, start_time=start_time, end_time=end_time, indices=multi_cell_indices
+        grid=iceland_test_grid,
+        start_time=start_time,
+        end_time=end_time,
+        indices=multi_cell_indices,
     )
 
 
@@ -231,20 +238,10 @@ class TestRiverForcingGeneral:
                 assert coast[eta_rho, xi_rho]
                 assert river_forcing.ds["river_location"][eta_rho, xi_rho] > 0
 
-    def test_missing_source_name(self):
-        grid = Grid(
-            nx=2,
-            ny=2,
-            size_x=500,
-            size_y=1000,
-            center_lon=0,
-            center_lat=55,
-            rot=10,
-            N=3,
-        )
+    def test_missing_source_name(self, iceland_test_grid):
         with pytest.raises(ValueError, match="`source` must include a 'name'."):
             RiverForcing(
-                grid=grid,
+                grid=iceland_test_grid,
                 start_time=datetime(1998, 1, 1),
                 end_time=datetime(1998, 3, 1),
                 source={"path": "river_data.nc"},
@@ -293,7 +290,7 @@ class TestRiverForcingGeneral:
             "river_forcing_with_prescribed_multi_cell_indices",
         ],
     )
-    def test_roundtrip_yaml(self, river_forcing_fixture, request, tmp_path):
+    def test_roundtrip_yaml(self, river_forcing_fixture, request, tmp_path, caplog):
         """Test that creating an RiverForcing object, saving its parameters to yaml
         file, and re-opening yaml file creates the same object."""
 
@@ -308,8 +305,13 @@ class TestRiverForcingGeneral:
 
             river_forcing.to_yaml(filepath)
 
-            river_forcing_from_file = RiverForcing.from_yaml(filepath)
+            # Clear caplog before running the test
+            caplog.clear()
 
+            with caplog.at_level(logging.INFO):
+                river_forcing_from_file = RiverForcing.from_yaml(filepath)
+
+            assert "Use provided river indices." in caplog.text
             assert river_forcing == river_forcing_from_file
 
             filepath = Path(filepath)
@@ -392,6 +394,17 @@ class TestRiverForcingGeneral:
 
 
 class TestRiverForcingWithoutPrescribedIndices:
+    def test_logging_message(self, iceland_test_grid, caplog):
+
+        with caplog.at_level(logging.INFO):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+            )
+        # Verify the info message in the log
+        assert "No river indices provided." in caplog.text
+
     def test_reproducibility(self, river_forcing, river_forcing_climatology):
         """Verify that `river_forcing` and `river_forcing_climatology` produce identical
         outputs.
@@ -407,9 +420,12 @@ class TestRiverForcingWithoutPrescribedIndices:
         compare_dictionaries(river_forcing.indices, river_forcing_climatology.indices)
 
     def test_no_rivers_found(self):
+
+        # Create a grid over open ocean
         grid = Grid(
             nx=2, ny=2, size_x=50, size_y=50, center_lon=0, center_lat=55, rot=10, N=3
         )
+
         with pytest.raises(ValueError, match="No relevant rivers found."):
             RiverForcing(
                 grid=grid,
@@ -419,28 +435,90 @@ class TestRiverForcingWithoutPrescribedIndices:
 
 
 class TestRiverForcingWithPrescribedIndices:
+    def test_logging_message(self, iceland_test_grid, single_cell_indices, caplog):
+
+        with caplog.at_level(logging.INFO):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=single_cell_indices,
+            )
+        # Verify the info message in the log
+        assert "Use provided river indices." in caplog.text
+
     @pytest.mark.parametrize(
         "indices_fixture", ["single_cell_indices", "multi_cell_indices"]
     )
-    def test_indices_stay_untouched(self, indices_fixture, request):
+    def test_indices_stay_untouched(self, iceland_test_grid, indices_fixture, request):
         indices = request.getfixturevalue(indices_fixture)
-
-        grid = Grid(
-            nx=18,
-            ny=18,
-            size_x=800,
-            size_y=800,
-            center_lon=-18,
-            center_lat=65,
-            rot=20,
-            N=3,
-        )
 
         start_time = datetime(1998, 1, 1)
         end_time = datetime(1998, 3, 1)
 
         river_forcing = RiverForcing(
-            grid=grid, start_time=start_time, end_time=end_time, indices=indices
+            grid=iceland_test_grid,
+            start_time=start_time,
+            end_time=end_time,
+            indices=indices,
         )
         river_forcing.original_indices == indices
         river_forcing.indices == indices
+
+    def test_fraction(
+        self,
+        river_forcing_with_prescribed_single_cell_indices,
+        river_forcing_with_prescribed_multi_cell_indices,
+    ):
+        def list_non_zero_values(data_array):
+            non_zero_values = data_array.values
+            return non_zero_values[non_zero_values != 0].tolist()
+
+        # check that all values are integers for single cell rivers
+        non_zero_values = river_forcing_with_prescribed_single_cell_indices.ds[
+            "river_location"
+        ]
+        is_integer = non_zero_values == np.floor(non_zero_values)
+        assert (is_integer).all()
+
+        # check that not all values are integers for multi cell rivers
+        non_zero_values = river_forcing_with_prescribed_multi_cell_indices.ds[
+            "river_location"
+        ]
+        is_integer = non_zero_values == np.floor(non_zero_values)
+        assert not (is_integer).all()
+
+    def test_reproducibility(
+        self, river_forcing, river_forcing_with_prescribed_single_cell_indices
+    ):
+        """river_forcing_with_prescribed_single_cell_indices was created with the
+        indices that were automatically inferred for river_forcing.
+
+        Test that these two are identical.
+        """
+        assert (
+            river_forcing.indices
+            == river_forcing_with_prescribed_single_cell_indices.indices
+        )
+        assert river_forcing.ds.identical(
+            river_forcing_with_prescribed_single_cell_indices.ds
+        )
+        assert river_forcing == river_forcing_with_prescribed_single_cell_indices
+
+    def test_invalid_indices(self, iceland_test_grid):
+        invalid_single_cell_indices = {"Hvita(Olfusa)": [(0, 6)]}
+        invalid_multi_cell_indices = {"Hvita(Olfusa)": [(8, 6), (0, 6)]}
+
+        start_time = datetime(1998, 1, 1)
+        end_time = datetime(1998, 3, 1)
+
+        for indices in [invalid_single_cell_indices, invalid_multi_cell_indices]:
+            with pytest.raises(
+                ValueError, match="is not located on the coast at grid cell"
+            ):
+                RiverForcing(
+                    grid=iceland_test_grid,
+                    start_time=start_time,
+                    end_time=end_time,
+                    indices=indices,
+                )

@@ -370,7 +370,7 @@ class RiverForcing:
         """Move river mouths to the closest coastal grid cell.
 
         This method computes the closest coastal grid point to each river mouth
-        based on geographical distance. It identifies the neareat grid point on the coast and returns the updated river moutn indices.
+        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
 
         Parameters:
         -----------
@@ -388,11 +388,9 @@ class RiverForcing:
 
         Returns
         -------
-        dict
-            A dictionary where keys are river names and values are dictionaries containing:
-            - "nriver" (int): The index of the river (1-based index for Fortran).
-            - "eta_rho" (list of int): The list of eta_rho (y-direction) coordinates of the closest coastal grid cells.
-            - "xi_rho" (list of int): The list of xi_rho (x-direction) coordinates of the closest coastal grid cells.
+        indices : dict[str, list[tuple]]
+            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
 
         # Retrieve longitude and latitude of river mouths

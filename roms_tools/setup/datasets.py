@@ -1847,15 +1847,10 @@ class RiverDataset:
 
         Returns
         -------
-        indices : dict
+        indices : dict[str, list[tuple]]
             A dictionary containing the indices of the rivers that are within the threshold distance from
-            the target coordinates. The dictionary keys are:
-            - "station" : numpy.ndarray
-                The indices of the rivers that satisfy the distance threshold.
-            - "eta_rho" : numpy.ndarray
-                The indices of the `eta_rho` dimension corresponding to the selected stations.
-            - "xi_rho" : numpy.ndarray
-                The indices of the `xi_rho` dimension corresponding to the selected stations.
+            the target coordinates. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
 
         # Retrieve longitude and latitude of river mouths

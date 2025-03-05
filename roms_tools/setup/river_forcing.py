@@ -105,6 +105,9 @@ class RiverForcing:
         data = self._get_data()
 
         if self.indices is None:
+            logging.info(
+                "No river indices provided. Identify all rivers within the ROMS domain and assign each of them to the nearest coastal point."
+            )
             target_coords = get_target_coords(self.grid)
             # maximum dx in grid
             dx = (
@@ -120,6 +123,7 @@ class RiverForcing:
             object.__setattr__(self, "indices", updated_indices)
 
         else:
+            logging.info("Use provided river indices.")
             object.__setattr__(self, "original_indices", self.indices)
             check_river_locations_are_along_coast(self.grid.ds.mask_rho, self.indices)
             data.extract_named_rivers(self.indices)
@@ -760,6 +764,21 @@ class RiverForcing:
 
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
+
+        def convert_indices_format(indices):
+            # Remove the '_convention' key from the dictionary if present
+            indices = {
+                key: value for key, value in indices.items() if key != "_convention"
+            }
+
+            # Convert the string of indices into tuples
+            for river, index_list in indices.items():
+                # Split the string by ',' and convert to tuples of integers
+                indices[river] = [tuple(map(int, idx.split(","))) for idx in index_list]
+
+            return indices
+
+        params["indices"] = convert_indices_format(params["indices"])
 
         return cls(grid=grid, **params)
 

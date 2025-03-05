@@ -961,15 +961,12 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
                 f"{tup[0]}, {tup[1]}" for tup in value
             ]  # Comma-separated string
 
-        indices_yaml_data = {"indices": serialized_indices}
-    else:
-        indices_yaml_data = {}
+        forcing_data["indices"] = serialized_indices
 
     # Step 6: Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {
         **grid_yaml_data,  # Add the grid data to the final YAML structure
         forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
-        **indices_yaml_data,
     }
 
     # Step 7: Write to YAML file

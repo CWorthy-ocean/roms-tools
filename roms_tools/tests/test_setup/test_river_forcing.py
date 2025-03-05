@@ -505,6 +505,59 @@ class TestRiverForcingWithPrescribedIndices:
         )
         assert river_forcing == river_forcing_with_prescribed_single_cell_indices
 
+    def test_reproducibility_with_flipped_dictionary_entries(
+        self, iceland_test_grid, tmp_path
+    ):
+        indices = {
+            "Hvita(Olfusa)": [(8, 6)],
+            "Thjorsa": [(8, 6)],
+            "JkulsFjll": [(11, 12)],
+            "Lagarfljot": [(9, 13), (10, 13)],
+            "Bruara": [(8, 6)],
+            "Svarta": [(12, 8), (12, 9), (12, 10)],
+        }
+
+        flipped_indices = {
+            "Thjorsa": [(8, 6)],
+            "Hvita(Olfusa)": [(8, 6)],
+            "JkulsFjll": [(11, 12)],
+            "Svarta": [(12, 10), (12, 9), (12, 8)],  # also flip order of tuples here
+            "Lagarfljot": [(9, 13), (10, 13)],
+            "Bruara": [(8, 6)],
+        }
+
+        start_time = datetime(1998, 1, 1)
+        end_time = datetime(1998, 3, 1)
+
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=start_time,
+            end_time=end_time,
+            indices=indices,
+        )
+
+        river_forcing_from_flipped_indices = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=start_time,
+            end_time=end_time,
+            indices=flipped_indices,
+        )
+
+        # Create a temporary filepath using the tmp_path fixture
+        file1 = Path(tmp_path / "test1.nc")
+        file2 = Path(tmp_path / "test2.nc")
+
+        river_forcing.save(file1)
+        river_forcing_from_flipped_indices.save(file2)
+
+        hash1 = calculate_file_hash(file1)
+        hash2 = calculate_file_hash(file2)
+
+        assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+        file1.unlink()
+        file2.unlink()
+
     def test_invalid_indices(self, iceland_test_grid):
         invalid_single_cell_indices = {"Hvita(Olfusa)": [(0, 6)]}
         invalid_multi_cell_indices = {"Hvita(Olfusa)": [(8, 6), (0, 6)]}

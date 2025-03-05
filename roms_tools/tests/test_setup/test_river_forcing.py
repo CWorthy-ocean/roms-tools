@@ -28,6 +28,31 @@ def river_forcing_climatology():
 
 
 @pytest.fixture
+def river_forcing_with_prescribed_indices():
+    """Fixture for creating a RiverForcing object from the global Dai river dataset."""
+
+    indices = {
+        "Hvita(Olfusa)": [(8, 6), (7, 6)],
+        "Thjorsa": [(8, 6)],
+        "JkulsFjll": [(11, 12)],
+        "Lagarfljot": [(9, 13), (8, 13), (10, 13)],
+        "Bruara": [(8, 6)],
+        "Svarta": [(12, 9)],
+    }
+
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
+    return RiverForcing(
+        grid=grid, start_time=start_time, end_time=end_time, indices=indices
+    )
+
+
+@pytest.fixture
 def river_forcing_for_grid_that_straddles_dateline():
     """Fixture for creating a RiverForcing object from the global Dai river dataset for
     a grid that straddles the dateline."""
@@ -65,6 +90,7 @@ def compare_dictionaries(dict1, dict2):
         "river_forcing",
         "river_forcing_for_grid_that_straddles_dateline",
         "river_forcing_with_bgc",
+        "river_forcing_with_prescribed_indices",
     ],
 )
 def test_successful_initialization_with_climatological_dai_data(
@@ -119,6 +145,33 @@ def test_reproducibility_indices(river_forcing, river_forcing_no_climatology):
     compare_dictionaries(river_forcing.indices, river_forcing_no_climatology.indices)
 
 
+def test_prescribed_indices():
+
+    # valid river indices
+    indices = {
+        "Hvita(Olfusa)": [(8, 6), (7, 6)],
+        "Thjorsa": [(8, 6)],
+        "JkulsFjll": [(11, 12)],
+        "Lagarfljot": [(9, 13), (8, 13), (10, 13)],
+        "Bruara": [(8, 6)],
+        "Svarta": [(12, 9)],
+    }
+
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
+    river_forcing = RiverForcing(
+        grid=grid, start_time=start_time, end_time=end_time, indices=indices
+    )
+
+    assert river_forcing.original_indices == indices
+    assert river_forcing.indices == indices
+
+
 @pytest.mark.parametrize(
     "river_forcing_fixture",
     [
@@ -147,6 +200,7 @@ def test_constant_tracers(river_forcing_fixture, request):
         "river_forcing_climatology",
         "river_forcing_no_climatology",
         "river_forcing_with_bgc",
+        "river_forcing_with_prescribed_indices",
     ],
 )
 def test_river_locations_are_along_coast(river_forcing_fixture, request):

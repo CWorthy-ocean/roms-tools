@@ -509,16 +509,133 @@ class TestRiverForcingWithPrescribedIndices:
         invalid_single_cell_indices = {"Hvita(Olfusa)": [(0, 6)]}
         invalid_multi_cell_indices = {"Hvita(Olfusa)": [(8, 6), (0, 6)]}
 
-        start_time = datetime(1998, 1, 1)
-        end_time = datetime(1998, 3, 1)
-
         for indices in [invalid_single_cell_indices, invalid_multi_cell_indices]:
             with pytest.raises(
                 ValueError, match="is not located on the coast at grid cell"
             ):
                 RiverForcing(
                     grid=iceland_test_grid,
-                    start_time=start_time,
-                    end_time=end_time,
+                    start_time=datetime(1998, 1, 1),
+                    end_time=datetime(1998, 3, 1),
                     indices=indices,
                 )
+
+    def test_raise_missing_rivers(self, iceland_test_grid):
+        fake_indices = {"Hvita(Olfusa)": [(8, 6)], "fake": [(11, 12)]}
+
+        with pytest.raises(
+            ValueError, match="The following rivers were not found in the dataset"
+        ):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=fake_indices,
+            )
+
+    def test_indices_is_dict(self, iceland_test_grid):
+        with pytest.raises(ValueError, match="`indices` must be a dictionary."):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices="invalid",
+            )
+
+    def test_indices_empty(self, iceland_test_grid):
+        with pytest.raises(
+            ValueError,
+            match="The provided 'indices' dictionary must contain at least one river.",
+        ):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices={},
+            )
+
+    def test_invalid_river_name_type(self, iceland_test_grid):
+        indices = {123: [(8, 6)]}  # Invalid river name (should be a string)
+        with pytest.raises(ValueError, match="River name `123` must be a string."):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )
+
+    def test_invalid_river_data_type(self, iceland_test_grid):
+        indices = {
+            "Hvita(Olfusa)": "8, 6"  # Invalid river data (should be a list of tuples)
+        }
+        with pytest.raises(ValueError, match="must be a list of tuples."):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )
+
+    def test_invalid_tuple_length(self, iceland_test_grid):
+        indices = {
+            "Hvita(Olfusa)": [(8, 6, 7)]  # Invalid tuple length (should be length 2)
+        }
+        with pytest.raises(ValueError, match="must be a tuple of length 2"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )
+
+    def test_invalid_eta_rho_type(self, iceland_test_grid):
+        indices = {
+            "Hvita(Olfusa)": [("a", 6)]  # Invalid eta_rho (should be an integer)
+        }
+        with pytest.raises(ValueError, match="First element of tuple for river"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )
+
+    def test_invalid_xi_rho_type(self, iceland_test_grid):
+        indices = {"Hvita(Olfusa)": [(8, "b")]}  # Invalid xi_rho (should be an integer)
+        with pytest.raises(ValueError, match="Second element of tuple for river"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )
+
+    def test_eta_rho_out_of_range(self, iceland_test_grid):
+        indices = {"Hvita(Olfusa)": [(20, 6)]}  # eta_rho out of valid range [0, 17]
+        with pytest.raises(ValueError, match="Value of eta_rho for river"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )
+
+    def test_xi_rho_out_of_range(self, iceland_test_grid):
+        indices = {"Hvita(Olfusa)": [(8, 20)]}  # xi_rho out of valid range [0, 17]
+        with pytest.raises(ValueError, match="Value of xi_rho for river"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )
+
+    def test_duplicate_location(self, iceland_test_grid):
+        indices = {"Hvita(Olfusa)": [(8, 6), (8, 6)]}  # Duplicate location
+        with pytest.raises(ValueError, match="Duplicate location"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=indices,
+            )

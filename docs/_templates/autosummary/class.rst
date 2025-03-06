@@ -11,8 +11,8 @@
       :toctree:
    {% for item in all_methods %}
       {%- if not item.startswith('_') or item in ['__call__',
-                                                  ] %}
-        {%- if objname == 'ChildGrid' and item != 'from_file' %}  {# Exclude 'from_file' only in ChildGrid #}
+                                                  ] %}a
+        {%- if not (objname == 'ChildGrid' and item == 'from_file') %}
         {{ name }}.{{ item }}
        . {% endif %}
       {% endif %}

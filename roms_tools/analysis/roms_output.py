@@ -5,7 +5,6 @@ from roms_tools.utils import _load_data
 from dataclasses import dataclass, field
 from typing import Union, Optional
 from pathlib import Path
-import os
 import re
 import logging
 from datetime import datetime, timedelta
@@ -25,14 +24,7 @@ class ROMSOutput:
     grid : Grid
         Object representing the grid information.
     path : Union[str, Path, List[Union[str, Path]]]
-        Directory, filename, or list of filenames with model output.
-    type : str
-        Specifies the type of model output. Options are:
-
-          - "restart": for restart files.
-          - "average": for time-averaged files.
-          - "snapshot": for snapshot files.
-
+        Filename, or list of filenames with model output.
     model_reference_date : datetime, optional
         If not specified, this is inferred from metadata of the model output
         If specified and does not coincide with metadata, a warning is raised.
@@ -42,17 +34,11 @@ class ROMSOutput:
 
     grid: Grid
     path: Union[str, Path]
-    type: Union[str, Path]
     use_dask: bool = False
     model_reference_date: Optional[datetime] = None
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-        # Validate `type`
-        if self.type not in {"restart", "average", "snapshot"}:
-            raise ValueError(
-                f"Invalid type '{self.type}'. Must be one of 'restart', 'average', or 'snapshot'."
-            )
 
         ds = self._load_model_output()
         self._infer_model_reference_date_from_metadata(ds)
@@ -370,44 +356,15 @@ class ROMSOutput:
             )
 
     def _load_model_output(self) -> xr.Dataset:
-        """Load the model output based on the type."""
-        if isinstance(self.path, list):
-            filetype = "list"
-            force_combine_nested = True
-            # Check if all items in the list are files
-            if not all(Path(item).is_file() for item in self.path):
-                raise FileNotFoundError(
-                    "All items in the provided list must be valid files."
-                )
-        elif Path(self.path).is_file():
-            filetype = "file"
-            force_combine_nested = False
-        elif Path(self.path).is_dir():
-            filetype = "dir"
-            force_combine_nested = True
-        else:
-            raise FileNotFoundError(
-                f"The specified path '{self.path}' is neither a file, nor a list of files, nor a directory."
-            )
-
-        time_chunking = True
-        if self.type == "restart":
-            time_chunking = False
-            filename = _validate_and_set_filenames(self.path, filetype, "rst")
-        elif self.type == "average":
-            filename = _validate_and_set_filenames(self.path, filetype, "avg")
-        elif self.type == "snapshot":
-            filename = _validate_and_set_filenames(self.path, filetype, "his")
-        else:
-            raise ValueError(f"Unsupported type '{self.type}'.")
+        """Load the model output."""
 
         # Load the dataset
         ds = _load_data(
-            filename,
+            self.path,
             dim_names={"time": "time"},
             use_dask=self.use_dask,
-            time_chunking=time_chunking,
-            force_combine_nested=force_combine_nested,
+            time_chunking=True,
+            force_combine_nested=True,
         )
 
         return ds
@@ -583,40 +540,3 @@ class ROMSOutput:
         )
 
         return ds
-
-
-def _validate_and_set_filenames(
-    filenames: Union[str, list], filetype: str, string: str
-) -> Union[str, list]:
-    """Validates and adjusts the filename or list of filenames based on the specified
-    type and checks for the presence of a string in the filename.
-
-    Parameters
-    ----------
-    filenames : Union[str, list]
-        A single filename (str), a list of filenames, or a directory path.
-    filetype : str
-        The type of input: 'file' for a single file, 'list' for a list of files, or 'dir' for a directory.
-    string : str
-        The string that should be present in each filename.
-
-    Returns
-    -------
-    Union[str, list]
-        The validated filename(s). If a directory is provided, the function returns the adjusted file pattern.
-    """
-    if filetype == "file":
-        if string not in os.path.basename(filenames):
-            logging.warning(
-                f"The file '{filenames}' does not appear to contain '{string}' in the name."
-            )
-    elif filetype == "list":
-        for file in filenames:
-            if string not in os.path.basename(file):
-                logging.warning(
-                    f"The file '{file}' does not appear to contain '{string}' in the name."
-                )
-    elif filetype == "dir":
-        filenames = os.path.join(filenames, f"*{string}.*.nc")
-
-    return filenames

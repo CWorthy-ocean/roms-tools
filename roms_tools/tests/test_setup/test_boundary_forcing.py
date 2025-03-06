@@ -139,6 +139,69 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
         )
 
 
+def test_start_time_end_time_error(use_dask):
+    """Test error when start_time and end_time are not both provided or both None."""
+    # Case 1: Only start_time provided
+    with pytest.raises(
+        ValueError, match="Both `start_time` and `end_time` must be provided together"
+    ):
+        BoundaryForcing(
+            grid=None,
+            start_time=datetime(2022, 1, 1),
+            end_time=None,  # end_time is None, should raise an error
+            source={"name": "GLORYS", "path": "glorys_data.nc"},
+            use_dask=use_dask,
+        )
+
+    # Case 2: Only end_time provided
+    with pytest.raises(
+        ValueError, match="Both `start_time` and `end_time` must be provided together"
+    ):
+        BoundaryForcing(
+            grid=None,
+            start_time=None,  # start_time is None, should raise an error
+            end_time=datetime(2022, 1, 2),
+            source={"name": "GLORYS", "path": "glorys_data.nc"},
+            use_dask=use_dask,
+        )
+
+
+def test_start_time_end_time_warning(use_dask, caplog):
+    """Test that a warning is triggered when both start_time and end_time are None."""
+    # Catching the warning during test
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+
+    with caplog.at_level(logging.INFO):
+        BoundaryForcing(
+            grid=grid,
+            start_time=None,
+            end_time=None,
+            source={"name": "GLORYS", "path": [fname1, fname2]},
+            use_dask=use_dask,
+        )
+
+    # Verify the warning message in the log
+    assert (
+        "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
+        in caplog.text
+    )
+
+
 def test_boundary_divided_by_land_warning(caplog, use_dask):
 
     # Iceland intersects the western boundary of the following grid

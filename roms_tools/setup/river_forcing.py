@@ -4,9 +4,10 @@ import logging
 from dataclasses import dataclass, field
 import cartopy.crs as ccrs
 from datetime import datetime
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Optional
 from pathlib import Path
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from roms_tools import Grid
 from roms_tools.plot import _get_projection, _add_field_to_ax
 from roms_tools.utils import save_datasets
@@ -57,6 +58,24 @@ class RiverForcing:
         Whether to include BGC tracers. Defaults to `False`.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
+    indices : dict[str, list[tuple]], optional
+        A dictionary specifying the river indices for each river to be included in the river forcing. This parameter is optional. If not provided,
+        the river indices will be automatically determined based on the grid and the source dataset. If provided, it allows for explicit specification
+        of river locations. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
+        a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+
+        Example:
+            indices = {
+                'Hvita(Olfusa)': [(8, 6), (7, 6)],
+                'Thjorsa': [(8, 6)],
+                'JkulsFjll': [(11, 12)],
+                'Lagarfljot': [(9, 13), (8, 13), (10, 13)],
+                'Bruara': [(8, 6)],
+                'Svarta': [(12, 9)]
+            }
+
+        In the example, the dictionary provides the river names as keys, and the values are lists of tuples, where each tuple represents the
+        `(eta_rho, xi_rho)` indices for a river location.
 
     Attributes
     ----------
@@ -64,6 +83,9 @@ class RiverForcing:
         The xarray Dataset containing the river forcing data.
     climatology : bool
         Indicates whether the final river forcing is climatological.
+    Dict[str, Union[int, List[int]]]
+        A dictionary of river indices. If not provided during initialization, it will be automatically determined
+        based on the grid and the source dataset. The dictionary structure is the same as described in the `indices` parameter docstring.
     """
 
     grid: Grid
@@ -73,40 +95,47 @@ class RiverForcing:
     convert_to_climatology: str = "if_any_missing"
     include_bgc: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
+    indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
 
     ds: xr.Dataset = field(init=False, repr=False)
     climatology: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
         self._input_checks()
-        target_coords = get_target_coords(self.grid)
-        # maximum dx in grid
-        dx = (
-            np.sqrt((1 / self.grid.ds.pm) ** 2 + (1 / self.grid.ds.pn) ** 2) / 2
-        ).max()
-
         data = self._get_data()
 
-        original_indices = data.extract_relevant_rivers(target_coords, dx)
-        object.__setattr__(self, "original_indices", original_indices)
-
-        if len(original_indices["station"]) > 0:
-            ds = self._create_river_forcing(data)
-            self._move_rivers_to_closest_coast(target_coords, data)
-            ds = self._write_indices_into_dataset(ds)
-            self._validate(ds)
-
-            for var_name in ds.data_vars:
-                ds[var_name] = substitute_nans_by_fillvalue(
-                    ds[var_name], fill_value=0.0
+        if self.indices is None:
+            logging.info(
+                "No river indices provided. Identify all rivers within the ROMS domain and assign each of them to the nearest coastal point."
+            )
+            target_coords = get_target_coords(self.grid)
+            # maximum dx in grid
+            dx = (
+                np.sqrt((1 / self.grid.ds.pm) ** 2 + (1 / self.grid.ds.pn) ** 2) / 2
+            ).max()
+            original_indices = data.extract_relevant_rivers(target_coords, dx)
+            if len(original_indices) == 0:
+                raise ValueError(
+                    "No relevant rivers found. Consider increasing domain size or using a different river dataset."
                 )
-
-            object.__setattr__(self, "ds", ds)
+            object.__setattr__(self, "original_indices", original_indices)
+            updated_indices = self._move_rivers_to_closest_coast(target_coords, data)
+            object.__setattr__(self, "indices", updated_indices)
 
         else:
-            raise ValueError(
-                "No relevant rivers found. Consider increasing domain size or using a different river dataset."
-            )
+            logging.info("Use provided river indices.")
+            object.__setattr__(self, "original_indices", self.indices)
+            check_river_locations_are_along_coast(self.grid.ds.mask_rho, self.indices)
+            data.extract_named_rivers(self.indices)
+
+        ds = self._create_river_forcing(data)
+        ds = self._write_indices_into_dataset(ds)
+        self._validate(ds)
+
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name], fill_value=0.0)
+
+        object.__setattr__(self, "ds", ds)
 
     def _input_checks(self):
         if self.source is None:
@@ -124,6 +153,63 @@ class RiverForcing:
             "source",
             {**self.source, "climatology": self.source.get("climatology", False)},
         )
+
+        # Check if 'indices' is provided and has the correct format
+        if self.indices is not None:
+            if not isinstance(self.indices, dict):
+                raise ValueError("`indices` must be a dictionary.")
+
+            # Ensure the dictionary contains at least one river
+            if len(self.indices) == 0:
+                raise ValueError(
+                    "The provided 'indices' dictionary must contain at least one river."
+                )
+
+            for river_name, river_data in self.indices.items():
+                if not isinstance(river_name, str):
+                    raise ValueError(f"River name `{river_name}` must be a string.")
+
+                if not isinstance(river_data, list):
+                    raise ValueError(
+                        f"Data for river `{river_name}` must be a list of tuples."
+                    )
+
+                # Ensure each element in the list is a tuple of length 2
+                seen_tuples = set()
+                for idx_pair in river_data:
+                    if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
+                        raise ValueError(
+                            f"Each item for river `{river_name}` must be a tuple of length 2 representing (eta_rho, xi_rho)."
+                        )
+
+                    eta_rho, xi_rho = idx_pair
+
+                    # Ensure both eta_rho and xi_rho are integers
+                    if not isinstance(eta_rho, int):
+                        raise ValueError(
+                            f"First element of tuple for river `{river_name}` must be an integer (eta_rho), but got {type(eta_rho)}."
+                        )
+                    if not isinstance(xi_rho, int):
+                        raise ValueError(
+                            f"Second element of tuple for river `{river_name}` must be an integer (xi_rho), but got {type(xi_rho)}."
+                        )
+
+                    # Check that eta_rho and xi_rho are within the valid range
+                    if not (0 <= eta_rho < len(self.grid.ds.eta_rho)):
+                        raise ValueError(
+                            f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho)-1}]."
+                        )
+                    if not (0 <= xi_rho < len(self.grid.ds.xi_rho)):
+                        raise ValueError(
+                            f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho)-1}]."
+                        )
+
+                    # Check for duplicate tuples
+                    if idx_pair in seen_tuples:
+                        raise ValueError(
+                            f"Duplicate location {idx_pair} found for river `{river_name}`."
+                        )
+                    seen_tuples.add(idx_pair)
 
     def _get_data(self):
 
@@ -197,12 +283,18 @@ class RiverForcing:
         river_volume = river_volume.rename(
             {data.dim_names["time"]: "river_time", data.dim_names["station"]: "nriver"}
         )
+
         name = data.ds[data.var_names["name"]].rename(
             {data.dim_names["station"]: "nriver"}
         )
         name.attrs["long_name"] = "River name"
         river_volume.coords["river_name"] = name
+
         ds["river_volume"] = river_volume
+
+        nriver = xr.DataArray(np.arange(1, len(ds.nriver) + 1), dims="nriver")
+        nriver.attrs["long_name"] = "River ID (1-based Fortran indexing)"
+        ds = ds.assign_coords({"nriver": nriver})
 
         if self.include_bgc:
             ntracers = 2 + 32
@@ -272,15 +364,13 @@ class RiverForcing:
 
         ds = ds.assign_coords({"river_time": time})
 
-        ds = ds.drop_vars("nriver")
-
         return ds
 
     def _move_rivers_to_closest_coast(self, target_coords, data):
         """Move river mouths to the closest coastal grid cell.
 
         This method computes the closest coastal grid point to each river mouth
-        based on geographical distance.
+        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
 
         Parameters:
         -----------
@@ -296,11 +386,11 @@ class RiverForcing:
             - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
             - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
 
-        Returns:
-        --------
-        None
-            This method modifies the `self.updated_indices` attribute and writes the updated indices
-            of the river mouths to the grid file using `write_indices_into_grid_file`.
+        Returns
+        -------
+        indices : dict[str, list[tuple]]
+            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
 
         # Retrieve longitude and latitude of river mouths
@@ -333,27 +423,29 @@ class RiverForcing:
 
         # Find the indices of the closest coastal grid cell to the river mouth
         indices = np.where(dist_coast == dist_coast_min)
+        stations = indices[0]
+        eta_rho_values = indices[1]
+        xi_rho_values = indices[2]
         names = (
             data.ds[data.var_names["name"]]
-            .isel({data.dim_names["station"]: indices[0]})
+            .isel({data.dim_names["station"]: stations})
             .values
         )
-
         # Return the indices in a dictionary format
-        indices = {
-            "station": indices[0],
-            "eta_rho": indices[1],
-            "xi_rho": indices[2],
-            "name": names,
-        }
-        object.__setattr__(self, "updated_indices", indices)
+        river_indices = {}
+        for i in range(len(stations)):
+            river_name = names[i]
+            river_indices[river_name] = [
+                (int(eta_rho_values[i]), int(xi_rho_values[i]))
+            ]  # list of tuples
+
+        return river_indices
 
     def _write_indices_into_dataset(self, ds):
         """Adds river location indices to the dataset as the "river_location" variable.
 
-        This method checks if the "river_location" variable already exists in the dataset.
-        If it does, the method removes it. Then, it creates a new "river_location" variable
-        using river station indices from `self.updated_indices` and assigns it to the dataset.
+        This method creates a new "river_location" variable
+        using river station indices from `self.indices` and assigns it to the dataset.
         The indices specify the river station locations in terms of eta_rho and xi_rho grid cell indices.
 
         Parameters
@@ -367,17 +459,21 @@ class RiverForcing:
             The modified dataset with the "river_location" variable added.
         """
 
-        if "river_location" in ds:
-            ds = ds.drop_vars("river_location")
+        river_locations = xr.zeros_like(self.grid.ds.h)
 
-        river_locations = xr.zeros_like(self.grid.ds.mask_rho)
-        for i in range(len(self.updated_indices["name"])):
-            station = self.updated_indices["station"][i]
-            eta_index = self.updated_indices["eta_rho"][i]
-            xi_index = self.updated_indices["xi_rho"][i]
-            river_locations[eta_index, xi_index] = station + 2
+        for nriver in ds.nriver:
+            river_name = str(ds.river_name.sel(nriver=nriver).values)
+            indices = self.indices[river_name]
+            fraction = 1.0 / len(indices)
 
-        river_locations.attrs["long_name"] = "River index plus local volume fraction"
+            for eta_index, xi_index in indices:
+
+                river_locations[eta_index, xi_index] = (
+                    nriver  # assign unique nriver ID (Fortran-based indexing)
+                    + fraction  # Fractional contribution for multiple grid points
+                )
+
+        river_locations.attrs["long_name"] = "River ID plus local volume fraction"
         river_locations.attrs["units"] = "none"
         ds["river_location"] = river_locations
 
@@ -463,26 +559,46 @@ class RiverForcing:
                 "color": "black",
             }  # Customize latitude label style
 
-        for ax, indices in zip(axs, [self.original_indices, self.updated_indices]):
-            for i in range(len(indices["name"])):
-                name = indices["name"][i]
-                xi_index = indices["xi_rho"][i]
-                eta_index = indices["eta_rho"][i]
-                # transform coordinates to projected space
-                proj = ccrs.PlateCarree()
-                transformed_lon, transformed_lat = trans.transform_point(
-                    self.grid.ds.lon_rho[eta_index, xi_index],
-                    self.grid.ds.lat_rho[eta_index, xi_index],
-                    proj,
-                )
-                ax.plot(
-                    transformed_lon,
-                    transformed_lat,
-                    marker="x",
-                    markersize=8,
-                    markeredgewidth=2,
-                    label=name,
-                )
+        proj = ccrs.PlateCarree()
+
+        if len(self.indices) <= 10:
+            color_map = cm.get_cmap("tab10")
+        elif len(self.indices) <= 20:
+            color_map = cm.get_cmap("tab20")
+        else:
+            color_map = cm.get_cmap("tab20b")
+        # Create a dictionary of colors
+        colors = {name: color_map(i) for i, name in enumerate(self.indices.keys())}
+
+        for ax, indices in zip(axs, [self.original_indices, self.indices]):
+            added_labels = set()
+            for name in indices.keys():
+                for tuple in indices[name]:
+                    eta_index = tuple[0]
+                    xi_index = tuple[1]
+
+                    # transform coordinates to projected space
+                    transformed_lon, transformed_lat = trans.transform_point(
+                        self.grid.ds.lon_rho[eta_index, xi_index],
+                        self.grid.ds.lat_rho[eta_index, xi_index],
+                        proj,
+                    )
+
+                    if name not in added_labels:
+                        added_labels.add(name)
+                        label = name
+                    else:
+                        label = "_None"
+
+                    ax.plot(
+                        transformed_lon,
+                        transformed_lat,
+                        marker="x",
+                        markersize=8,
+                        markeredgewidth=2,
+                        label=label,
+                        color=colors[name],
+                    )
 
         axs[0].set_title("Original river locations")
         axs[1].set_title("Updated river locations")
@@ -647,4 +763,59 @@ class RiverForcing:
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
 
+        def convert_indices_format(indices):
+            # Remove the '_convention' key from the dictionary if present
+            indices = {
+                key: value for key, value in indices.items() if key != "_convention"
+            }
+
+            # Convert the string of indices into tuples
+            for river, index_list in indices.items():
+                # Split the string by ',' and convert to tuples of integers
+                indices[river] = [tuple(map(int, idx.split(","))) for idx in index_list]
+
+            return indices
+
+        params["indices"] = convert_indices_format(params["indices"])
+
         return cls(grid=grid, **params)
+
+
+def check_river_locations_are_along_coast(mask, indices):
+    """Check if the river locations are along the coast.
+
+    This function checks if the river locations specified in the `indices` dictionary are located on coastal grid cells.
+    A coastal grid cell is defined as a land grid cell adjacent to an ocean grid cell.
+
+    Parameters
+    ----------
+    mask : xarray.DataArray
+        A mask representing the land and ocean cells in the grid, where 1 represents ocean and 0 represents land.
+
+    indices : dict
+        A dictionary where the keys are river names, and the values are dictionaries containing the river's grid locations (`eta_rho` and `xi_rho`).
+        Each entry should have keys `"eta_rho"` and `"xi_rho"`, which are lists of grid cell indices representing river mouth locations.
+
+    Raises
+    ------
+    ValueError
+        If any river is not located on the coast.
+    """
+
+    faces = (
+        mask.shift(eta_rho=1)
+        + mask.shift(eta_rho=-1)
+        + mask.shift(xi_rho=1)
+        + mask.shift(xi_rho=-1)
+    )
+    coast = (1 - mask) * (faces > 0)
+
+    for key, river_data in indices.items():
+        for idx_pair in river_data:
+            eta_rho, xi_rho = idx_pair
+
+            # Check if the river location is along the coast
+            if not coast[eta_rho, xi_rho]:
+                raise ValueError(
+                    f"River `{key}` is not located on the coast at grid cell ({eta_rho}, {xi_rho})."
+                )

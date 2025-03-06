@@ -35,10 +35,11 @@ class Dataset:
         The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
         or a list of strings or Path objects containing multiple files.
     start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+        Start time for selecting relevant data. If not provided, no time-based filtering is applied.
     end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
+        End time for selecting relevant data. If not provided, the dataset selects the time entry
+        closest to `start_time` within the range `[start_time, start_time + 24 hours]`.
+        If `start_time` is also not provided, no time-based filtering is applied.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
     var_names: Dict[str, str]
@@ -127,9 +128,6 @@ class Dataset:
         if "depth" in self.dim_names:
             # Make sure that depth is ascending
             ds = self.ensure_dimension_is_ascending(ds, dim="depth")
-
-        # Enforce double precision to ensure reproducibility
-        ds = convert_to_float64(ds)
 
         self.infer_horizontal_resolution(ds)
 
@@ -512,6 +510,25 @@ class Dataset:
             This method does not return any value. Subclasses are expected to modify the dataset in-place.
         """
         pass
+
+    def convert_to_float64(self) -> None:
+        """Convert all data variables in the dataset to float64.
+
+        This method updates the dataset by converting all of its data variables to the
+        `float64` data type, ensuring consistency for numerical operations that require
+        high precision. The dataset is modified in place.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+            This method modifies the dataset in place and does not return anything.
+        """
+        ds = self.ds.astype({var: "float64" for var in self.ds.data_vars})
+        object.__setattr__(self, "ds", ds)
 
     def choose_subdomain(
         self,
@@ -1846,15 +1863,10 @@ class RiverDataset:
 
         Returns
         -------
-        indices : dict
+        indices : dict[str, list[tuple]]
             A dictionary containing the indices of the rivers that are within the threshold distance from
-            the target coordinates. The dictionary keys are:
-            - "station" : numpy.ndarray
-                The indices of the rivers that satisfy the distance threshold.
-            - "eta_rho" : numpy.ndarray
-                The indices of the `eta_rho` dimension corresponding to the selected stations.
-            - "xi_rho" : numpy.ndarray
-                The indices of the `xi_rho` dimension corresponding to the selected stations.
+            the target coordinates. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
 
         # Retrieve longitude and latitude of river mouths
@@ -1881,30 +1893,75 @@ class RiverDataset:
 
             # Find the indices of the closest grid cell to the river mouth
             indices = np.where(dist == dist_min)
+            stations = indices[0]
+            eta_rho_values = indices[1]
+            xi_rho_values = indices[2]
             names = (
-                self.ds[self.var_names["name"]]
-                .isel({self.dim_names["station"]: indices[0]})
+                ds[self.var_names["name"]]
+                .isel({self.dim_names["station"]: stations})
                 .values
             )
-            # Return the indices in a dictionary format
-            indices = {
-                "station": indices[0],
-                "eta_rho": indices[1],
-                "xi_rho": indices[2],
-                "name": names,
-            }
+            river_indices = {}
+            for i in range(len(stations)):
+                river_name = names[i]
+                river_indices[river_name] = [
+                    (int(eta_rho_values[i]), int(xi_rho_values[i]))
+                ]  # list of tuples
         else:
             ds = xr.Dataset()
-            indices = {
-                "station": [],
-                "eta_rho": [],
-                "xi_rho": [],
-                "name": [],
-            }
+            river_indices = {}
 
         object.__setattr__(self, "ds", ds)
 
-        return indices
+        return river_indices
+
+    def extract_named_rivers(self, indices):
+        """Extracts a subset of the dataset based on the provided river names in the
+        indices dictionary.
+
+        This method filters the dataset to include only the rivers specified in the `indices` dictionary.
+        The resulting subset is stored in the `ds` attribute of the class.
+
+        Parameters
+        ----------
+        indices : dict
+            A dictionary where the keys are river names (strings) and the values are dictionaries
+            containing river-related data (e.g., river indices, coordinates).
+
+        Returns
+        -------
+        None
+            The method modifies the `self.ds` attribute in place, setting it to the filtered dataset
+            containing only the data related to the specified rivers.
+
+        Raises
+        ------
+        ValueError
+            - If `indices` is not a dictionary.
+            - If any of the requested river names are not found in the dataset.
+        """
+
+        if not isinstance(indices, dict):
+            raise ValueError("`indices` must be a dictionary.")
+
+        river_names = list(indices.keys())
+
+        # Ensure the dataset is filtered based on the provided river names
+        ds_filtered = self.ds.where(
+            self.ds[self.var_names["name"]].isin(river_names), drop=True
+        )
+
+        # Check that all requested rivers exist in the dataset
+        filtered_river_names = set(ds_filtered[self.var_names["name"]].values)
+        missing_rivers = set(river_names) - filtered_river_names
+
+        if missing_rivers:
+            raise ValueError(
+                f"The following rivers were not found in the dataset: {missing_rivers}"
+            )
+
+        # Set the filtered dataset as the new `ds`
+        object.__setattr__(self, "ds", ds_filtered)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -2053,7 +2110,7 @@ def _check_dataset(
 
 
 def _select_relevant_times(
-    ds, time_dim, start_time=None, end_time=None, climatology=False
+    ds, time_dim, start_time, end_time=None, climatology=False
 ) -> xr.Dataset:
     """Select a subset of the dataset based on the specified time range.
 
@@ -2070,11 +2127,10 @@ def _select_relevant_times(
         The input dataset to be filtered. Must contain a time dimension.
     time_dim: str
         Name of time dimension.
-    start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
+    start_time : datetime
+        The start time for selecting relevant data.
     end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
+        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
 
@@ -2202,19 +2258,3 @@ def decode_string(byte_array):
     )
 
     return decoded_string
-
-
-def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
-    """Convert all data variables in an xarray.Dataset to float64.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Input dataset.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with all data variables converted to float64.
-    """
-    return ds.astype({var: "float64" for var in ds.data_vars})

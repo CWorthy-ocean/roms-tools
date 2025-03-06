@@ -893,13 +893,9 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
         grid_data = asdict(forcing_object.grid)
         grid_yaml_data = {"Grid": _pop_grid_data(grid_data)}
-    else:
-        parent_grid_data = asdict(forcing_object.parent_grid)
-        parent_grid_yaml_data = {"ParentGrid": _pop_grid_data(parent_grid_data)}
-        child_grid_data = asdict(forcing_object.child_grid)
-        child_grid_yaml_data = {"ChildGrid": _pop_grid_data(child_grid_data)}
-
-        grid_yaml_data = {**parent_grid_yaml_data, **child_grid_yaml_data}
+    elif hasattr(forcing_object, "parent_grid"):
+        grid_data = asdict(forcing_object.parent_grid)
+        grid_yaml_data = {"ParentGrid": _pop_grid_data(grid_data)}
 
     # Step 2: Ensure Paths are Strings
     def ensure_paths_are_strings(obj, key):
@@ -933,11 +929,12 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         not in (
             "grid",
             "parent_grid",
-            "child_grid",
             "ds",
             "use_dask",
-            "bypass_validation",
             "climatology",
+            "verbose",
+            "straddle",
+            "indices",
         )
     ]
 
@@ -952,18 +949,37 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         # Add the field and its value to the forcing_data dictionary
         forcing_data[field_name] = value
 
-    # Step 5: Combine Grid and Forcing Data into a single dictionary for the final YAML content
+    # Step 5: Serialize `indices` data (conditionally)
+    indices_data = getattr(forcing_object, "indices", None)
+    if indices_data is not None:
+        serialized_indices = {
+            "_convention": "eta_rho, xi_rho"
+        }  # Add convention metadata
+
+        for key, value in indices_data.items():
+            serialized_indices[key] = [
+                f"{tup[0]}, {tup[1]}" for tup in value
+            ]  # Comma-separated string
+
+        forcing_data["indices"] = serialized_indices
+
+    # Step 6: Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {
         **grid_yaml_data,  # Add the grid data to the final YAML structure
         forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
     }
 
-    # Step 6: Write to YAML file
+    # Step 7: Write to YAML file
     with filepath.open("w") as file:
         # Write the header first
         file.write(header)
         # Write the serialized YAML data
-        yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+        yaml.dump(
+            yaml_data,
+            file,
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
 
 def _pop_grid_data(grid_data):

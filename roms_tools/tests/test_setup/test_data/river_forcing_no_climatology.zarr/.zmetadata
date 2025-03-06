@@ -32,6 +32,32 @@
             "long_name": "absolute time",
             "units": "days since 1997-12-15 00:00:00"
         },
+        "nriver/.zarray": {
+            "chunks": [
+                6
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                6
+            ],
+            "zarr_format": 2
+        },
+        "nriver/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "nriver"
+            ],
+            "long_name": "River ID (1-based Fortran indexing)"
+        },
         "river_location/.zarray": {
             "chunks": [
                 20,
@@ -59,7 +85,7 @@
                 "eta_rho",
                 "xi_rho"
             ],
-            "long_name": "River index plus local volume fraction",
+            "long_name": "River ID plus local volume fraction",
             "units": "none"
         },
         "river_name/.zarray": {

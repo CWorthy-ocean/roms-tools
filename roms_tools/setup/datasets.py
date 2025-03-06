@@ -1847,15 +1847,10 @@ class RiverDataset:
 
         Returns
         -------
-        indices : dict
+        indices : dict[str, list[tuple]]
             A dictionary containing the indices of the rivers that are within the threshold distance from
-            the target coordinates. The dictionary keys are:
-            - "station" : numpy.ndarray
-                The indices of the rivers that satisfy the distance threshold.
-            - "eta_rho" : numpy.ndarray
-                The indices of the `eta_rho` dimension corresponding to the selected stations.
-            - "xi_rho" : numpy.ndarray
-                The indices of the `xi_rho` dimension corresponding to the selected stations.
+            the target coordinates. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
 
         # Retrieve longitude and latitude of river mouths
@@ -1882,30 +1877,75 @@ class RiverDataset:
 
             # Find the indices of the closest grid cell to the river mouth
             indices = np.where(dist == dist_min)
+            stations = indices[0]
+            eta_rho_values = indices[1]
+            xi_rho_values = indices[2]
             names = (
-                self.ds[self.var_names["name"]]
-                .isel({self.dim_names["station"]: indices[0]})
+                ds[self.var_names["name"]]
+                .isel({self.dim_names["station"]: stations})
                 .values
             )
-            # Return the indices in a dictionary format
-            indices = {
-                "station": indices[0],
-                "eta_rho": indices[1],
-                "xi_rho": indices[2],
-                "name": names,
-            }
+            river_indices = {}
+            for i in range(len(stations)):
+                river_name = names[i]
+                river_indices[river_name] = [
+                    (int(eta_rho_values[i]), int(xi_rho_values[i]))
+                ]  # list of tuples
         else:
             ds = xr.Dataset()
-            indices = {
-                "station": [],
-                "eta_rho": [],
-                "xi_rho": [],
-                "name": [],
-            }
+            river_indices = {}
 
         object.__setattr__(self, "ds", ds)
 
-        return indices
+        return river_indices
+
+    def extract_named_rivers(self, indices):
+        """Extracts a subset of the dataset based on the provided river names in the
+        indices dictionary.
+
+        This method filters the dataset to include only the rivers specified in the `indices` dictionary.
+        The resulting subset is stored in the `ds` attribute of the class.
+
+        Parameters
+        ----------
+        indices : dict
+            A dictionary where the keys are river names (strings) and the values are dictionaries
+            containing river-related data (e.g., river indices, coordinates).
+
+        Returns
+        -------
+        None
+            The method modifies the `self.ds` attribute in place, setting it to the filtered dataset
+            containing only the data related to the specified rivers.
+
+        Raises
+        ------
+        ValueError
+            - If `indices` is not a dictionary.
+            - If any of the requested river names are not found in the dataset.
+        """
+
+        if not isinstance(indices, dict):
+            raise ValueError("`indices` must be a dictionary.")
+
+        river_names = list(indices.keys())
+
+        # Ensure the dataset is filtered based on the provided river names
+        ds_filtered = self.ds.where(
+            self.ds[self.var_names["name"]].isin(river_names), drop=True
+        )
+
+        # Check that all requested rivers exist in the dataset
+        filtered_river_names = set(ds_filtered[self.var_names["name"]].values)
+        missing_rivers = set(river_names) - filtered_river_names
+
+        if missing_rivers:
+            raise ValueError(
+                f"The following rivers were not found in the dataset: {missing_rivers}"
+            )
+
+        # Set the filtered dataset as the new `ds`
+        object.__setattr__(self, "ds", ds_filtered)
 
 
 @dataclass(frozen=True, kw_only=True)

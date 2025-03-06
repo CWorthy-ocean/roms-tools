@@ -325,6 +325,7 @@ def _profile_plot(field, title="", ax=None):
     kwargs = {"y": depth_label, "yincrease": False}
     field.plot(**kwargs)
     ax.set_title(title)
+    ax.set_ylabel("Depth [m]")
     ax.grid()
 
 

@@ -84,6 +84,9 @@ class TidalForcing:
             target_coords,
             buffer_points=20,
         )
+        # Enforce double precision to ensure reproducibility
+        data.convert_to_float64()
+
         # select desired number of constituents
         object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
         self._correct_tides(data)

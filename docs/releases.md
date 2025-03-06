@@ -18,6 +18,7 @@
 * Enforce double precision on source data to ensure reproducible results ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
 * Results produced with vs. without Dask in test suite now pass with `xr.testing.assert_equal` confirming reproducibility ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
 * Document the option for `start_time = None` and `end_time = None` in the docstrings for `BoundaryForcing` and `SurfaceForcing`, specifying that when both are `None`, no time filtering is applied to the data. Also, ensure a warning is raised in this case to inform the user. ([#249](https://github.com/CWorthy-ocean/roms-tools/pull/249))
+* Move conversion to double precision to after choosing subdomain of source data, ensuring a speed-up in grid generation and other forcing datasets that do not use Dask ([#264](https://github.com/CWorthy-ocean/roms-tools/pull/264))
 
 ### Documentation
 

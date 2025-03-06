@@ -47,6 +47,9 @@ class ROMSOutput:
         ds = self._add_lat_lon_coords(ds)
         object.__setattr__(self, "ds", ds)
 
+        # Dataset for depth coordinates
+        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
+
     def plot(
         self,
         var_name,
@@ -318,8 +321,8 @@ class ROMSOutput:
                 else:
                     _line_plot(field.where(mask), title=title, ax=ax)
 
-    def compute_depth_coordinates(self, depth_type="layer", locations=["rho"]):
-        """Compute and update vertical depth coordinates.
+    def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
+        """Ensure depth coordinates are stored for a given location and depth type.
 
         Calculates vertical depth coordinates (layer or interface) for specified locations (e.g., rho, u, v points)
         and updates them in the dataset (`self.ds`).
@@ -339,19 +342,17 @@ class ROMSOutput:
 
         Updates
         -------
-        self.ds : xarray.Dataset
-            The dataset (`self.ds`) is updated with the following depth coordinate variables:
-            - f"{depth_type}_depth_rho": Depth coordinates at rho points.
-            - f"{depth_type}_depth_u": Depth coordinates at u points (if included in `locations`).
-            - f"{depth_type}_depth_v": Depth coordinates at v points (if included in `locations`).
+        self.ds_depth_coords : xarray.Dataset
 
         Notes
         -----
-        This method uses the `compute_and_update_depth_coordinates` function to perform calculations and updates.
+        This method uses the `compute_depth_coordinates` function to perform calculations and updates.
         """
 
         for location in locations:
-            self.ds[f"{depth_type}_depth_{location}"] = compute_depth_coordinates(
+            self.ds_depth_coords[
+                f"{depth_type}_depth_{location}"
+            ] = compute_depth_coordinates(
                 self.grid.ds, self.ds.zeta, depth_type, location
             )
 

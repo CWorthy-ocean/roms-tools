@@ -28,6 +28,9 @@ class ROMSOutput:
     model_reference_date : datetime, optional
         If not specified, this is inferred from metadata of the model output
         If specified and does not coincide with metadata, a warning is raised.
+    adjust_depth_for_sea_surface_height : bool, optional
+        Whether to account for sea surface height variations when computing depth coordinates.
+        Defaults to `False`.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
     """
@@ -36,6 +39,7 @@ class ROMSOutput:
     path: Union[str, Path]
     use_dask: bool = False
     model_reference_date: Optional[datetime] = None
+    adjust_depth_for_sea_surface_height: Optional[bool] = False
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -178,10 +182,18 @@ class ROMSOutput:
         compute_layer_depth = (depth_contours or s is None) and len(field.dims) > 2
         compute_interface_depth = layer_contours and s is None
 
+        # Compute depth coordinates directly instead of using .ds_depth_coords.
+        # Many cases below require only a 1D or 2D slice, making direct computation
+        # more efficient than triggering a full 3D depth computation just to extract a subset.
+        # This is especially beneficial when using Dask or if .ds_depth_coords is precomputed.
+        if self.adjust_depth_for_sea_surface_height:
+            zeta = self.ds.zeta.isel(time=time)
+        else:
+            zeta = 0
         if compute_layer_depth:
             layer_depth = compute_depth_coordinates(
                 self.grid.ds,
-                self.ds.zeta.isel(time=time),
+                zeta,
                 depth_type="layer",
                 location=loc,
                 eta=eta,
@@ -192,7 +204,7 @@ class ROMSOutput:
         if compute_interface_depth:
             interface_depth = compute_depth_coordinates(
                 self.grid.ds,
-                self.ds.zeta.isel(time=time),
+                zeta,
                 depth_type="interface",
                 location=loc,
                 eta=eta,
@@ -349,12 +361,15 @@ class ROMSOutput:
         This method uses the `compute_depth_coordinates` function to perform calculations and updates.
         """
 
+        if self.adjust_depth_for_sea_surface_height:
+            zeta = self.ds.zeta
+        else:
+            zeta = 0
+
         for location in locations:
             self.ds_depth_coords[
                 f"{depth_type}_depth_{location}"
-            ] = compute_depth_coordinates(
-                self.grid.ds, self.ds.zeta, depth_type, location
-            )
+            ] = compute_depth_coordinates(self.grid.ds, zeta, depth_type, location)
 
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output."""

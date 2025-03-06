@@ -68,6 +68,7 @@ class ROMSOutput:
         s=None,
         eta=None,
         xi=None,
+        include_boundary=False,
         depth_contours=False,
         layer_contours=False,
         ax=None,
@@ -94,6 +95,11 @@ class ROMSOutput:
         xi : int, optional
             The xi-index to plot. Used for vertical sections or horizontal slices.
             Default is None.
+        include_boundary : bool, optional
+            Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
+            In diagnostic ROMS output fields, these boundary cells are set to zero, so excluding them can improve visualization.
+            This option is only relevant for 2D horizontal plots (`eta=None`, `xi=None`).
+            Default is False.
         depth_contours : bool, optional
             If True, depth contours will be overlaid on the plot, showing lines of constant
             depth. This is typically used for plots that show a single vertical layer.
@@ -251,6 +257,32 @@ class ROMSOutput:
 
         if compute_layer_depth:
             field = field.assign_coords({"layer_depth": layer_depth})
+
+        if not include_boundary:
+            slice_dict = None
+
+            if eta is None and xi is None:
+                slice_dict = {
+                    "rho": {"eta_rho": slice(1, -1), "xi_rho": slice(1, -1)},
+                    "u": {"eta_rho": slice(1, -1), "xi_u": slice(1, -1)},
+                    "v": {"eta_v": slice(1, -1), "xi_rho": slice(1, -1)},
+                }
+            elif eta is None:
+                slice_dict = {
+                    "rho": {"eta_rho": slice(1, -1)},
+                    "u": {"eta_rho": slice(1, -1)},
+                    "v": {"eta_v": slice(1, -1)},
+                }
+            elif xi is None:
+                slice_dict = {
+                    "rho": {"xi_rho": slice(1, -1)},
+                    "u": {"xi_u": slice(1, -1)},
+                    "v": {"xi_rho": slice(1, -1)},
+                }
+            if slice_dict is not None:
+                if loc in slice_dict:
+                    field = field.isel(**slice_dict[loc])
+                    mask = mask.isel(**slice_dict[loc])
 
         # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:

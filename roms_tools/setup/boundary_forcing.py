@@ -131,10 +131,13 @@ class BoundaryForcing:
         data = self._get_data()
 
         if self.apply_2d_horizontal_fill:
+
             data.choose_subdomain(
                 target_coords,
                 buffer_points=20,  # lateral fill needs good buffer from data margin
             )
+            # Enforce double precision to ensure reproducibility
+            data.convert_to_float64()
             data.extrapolate_deepest_to_bottom()
             data.apply_lateral_fill()
 
@@ -162,6 +165,8 @@ class BoundaryForcing:
                 )
 
                 if not self.apply_2d_horizontal_fill:
+                    # Enforce double precision to ensure reproducibility
+                    bdry_data.convert_to_float64()
                     bdry_data.extrapolate_deepest_to_bottom()
 
                 processed_fields = {}

@@ -150,6 +150,8 @@ class InitialConditions:
             target_coords,
             buffer_points=20,  # lateral fill needs good buffer from data margin
         )
+        # Enforce double precision to ensure reproducibility
+        data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
 

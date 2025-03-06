@@ -129,9 +129,6 @@ class Dataset:
             # Make sure that depth is ascending
             ds = self.ensure_dimension_is_ascending(ds, dim="depth")
 
-        # Enforce double precision to ensure reproducibility
-        ds = convert_to_float64(ds)
-
         self.infer_horizontal_resolution(ds)
 
         # Check whether the data covers the entire globe
@@ -513,6 +510,25 @@ class Dataset:
             This method does not return any value. Subclasses are expected to modify the dataset in-place.
         """
         pass
+
+    def convert_to_float64(self) -> None:
+        """Convert all data variables in the dataset to float64.
+
+        This method updates the dataset by converting all of its data variables to the
+        `float64` data type, ensuring consistency for numerical operations that require
+        high precision. The dataset is modified in place.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+            This method modifies the dataset in place and does not return anything.
+        """
+        ds = self.ds.astype({var: "float64" for var in self.ds.data_vars})
+        object.__setattr__(self, "ds", ds)
 
     def choose_subdomain(
         self,
@@ -2242,19 +2258,3 @@ def decode_string(byte_array):
     )
 
     return decoded_string
-
-
-def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
-    """Convert all data variables in an xarray.Dataset to float64.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Input dataset.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with all data variables converted to float64.
-    """
-    return ds.astype({var: "float64" for var in ds.data_vars})

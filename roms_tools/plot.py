@@ -19,8 +19,8 @@ def _plot(
 
     Parameters
     ----------
-    field : xarray.DataArray, optional
-        The field to plot. If None, only the grid is plotted.
+    field : xarray.DataArray
+        The field to plot.
     depth_contours : bool, optional
         If True, adds depth contours to the plot.
     c : str, optional
@@ -284,6 +284,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
             )
 
     ax.set_title(title)
+    ax.set_ylabel("Depth [m]")
 
 
 def _profile_plot(field, title="", ax=None):
@@ -324,6 +325,7 @@ def _profile_plot(field, title="", ax=None):
     kwargs = {"y": depth_label, "yincrease": False}
     field.plot(**kwargs)
     ax.set_title(title)
+    ax.set_ylabel("Depth [m]")
     ax.grid()
 
 

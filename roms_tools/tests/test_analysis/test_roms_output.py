@@ -204,23 +204,186 @@ def test_plot(roms_output_from_restart_file, use_dask):
 
     kwargs = {}
     for var_name in ["temp", "u", "v"]:
-        roms_output_from_restart_file.plot(var_name, time=0, s=-1, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, eta=0, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, xi=0, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, eta=0, xi=0, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, s=-1, eta=0, **kwargs)
+        for include_boundary in [False, True]:
+            roms_output_from_restart_file.plot(
+                var_name, time=0, s=-1, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, eta=0, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, eta=1, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, xi=0, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, xi=1, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=0,
+                xi=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=0,
+                xi=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=1,
+                xi=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=1,
+                xi=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                eta=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                eta=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                xi=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                xi=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
 
     kwargs = {"depth_contours": True, "layer_contours": True}
     for var_name in ["temp", "u", "v"]:
-        roms_output_from_restart_file.plot(var_name, time=0, s=-1, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, eta=0, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, xi=0, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, eta=0, xi=0, **kwargs)
-        roms_output_from_restart_file.plot(var_name, time=0, s=-1, eta=0, **kwargs)
+        for include_boundary in [False, True]:
+            roms_output_from_restart_file.plot(
+                var_name, time=0, s=-1, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, eta=0, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, eta=1, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, xi=0, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name, time=0, xi=1, **kwargs, include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=0,
+                xi=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=0,
+                xi=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=1,
+                xi=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                eta=1,
+                xi=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                eta=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                eta=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                xi=0,
+                **kwargs,
+                include_boundary=include_boundary
+            )
+            roms_output_from_restart_file.plot(
+                var_name,
+                time=0,
+                s=-1,
+                xi=1,
+                **kwargs,
+                include_boundary=include_boundary
+            )
 
-    roms_output_from_restart_file.plot("zeta", time=0, **kwargs)
-    roms_output_from_restart_file.plot("zeta", time=0, eta=0, **kwargs)
-    roms_output_from_restart_file.plot("zeta", time=0, xi=0, **kwargs)
+    for include_boundary in [False, True]:
+        roms_output_from_restart_file.plot(
+            "zeta", time=0, **kwargs, include_boundary=include_boundary
+        )
+        roms_output_from_restart_file.plot(
+            "zeta", time=0, eta=0, **kwargs, include_boundary=include_boundary
+        )
+        roms_output_from_restart_file.plot(
+            "zeta", time=0, eta=1, **kwargs, include_boundary=include_boundary
+        )
+        roms_output_from_restart_file.plot(
+            "zeta", time=0, xi=0, **kwargs, include_boundary=include_boundary
+        )
+        roms_output_from_restart_file.plot(
+            "zeta", time=0, xi=1, **kwargs, include_boundary=include_boundary
+        )
 
 
 def test_plot_errors(roms_output_from_restart_file, use_dask):

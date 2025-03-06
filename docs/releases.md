@@ -6,6 +6,8 @@
 
 * Support for creating multi-cell rivers ([#258](https://github.com/CWorthy-ocean/roms-tools/pull/258))
 * Support for writing and reading single-cell and multi-cell rivers to/from YAML ([#258](https://github.com/CWorthy-ocean/roms-tools/pull/258))
+* Enable plotting ROMS output without boundary; helpful because boundary for ROMS diagnostics consists of zeros ([#265](https://github.com/CWorthy-ocean/roms-tools/pull/265))
+* Nicer y-labels for depth plots ([#265](https://github.com/CWorthy-ocean/roms-tools/pull/265))
 
 ### Breaking Changes
 

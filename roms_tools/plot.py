@@ -284,6 +284,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
             )
 
     ax.set_title(title)
+    ax.set_ylabel("Depth [m]")
 
 
 def _profile_plot(field, title="", ax=None):

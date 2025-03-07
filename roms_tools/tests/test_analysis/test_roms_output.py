@@ -146,18 +146,53 @@ def test_model_reference_date_no_metadata(use_dask, tmp_path, caplog):
 def test_compute_depth_coordinates(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
-
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
-    output = ROMSOutput(grid=grid, path=fname_restart1, use_dask=use_dask)
 
-    # Before calling get_vertical_coordinates, check if the dataset doesn't already have depth coordinates
-    assert "layer_depth_rho" not in output.ds.data_vars
+    for adjust_depth_for_sea_surface_height in [True, False]:
+        output = ROMSOutput(
+            grid=grid,
+            path=fname_restart1,
+            use_dask=use_dask,
+            adjust_depth_for_sea_surface_height=adjust_depth_for_sea_surface_height,
+        )
 
-    # Call the method to get vertical coordinates
-    output.compute_depth_coordinates(depth_type="layer")
+        # Before calling get_vertical_coordinates, check if the dataset doesn't already have depth coordinates
+        assert "layer_depth_rho" not in output.ds_depth_coords.data_vars
 
-    # Check if the depth coordinates were added
-    assert "layer_depth_rho" in output.ds.data_vars
+        # Call the method to get vertical coordinates
+        output._get_depth_coordinates(depth_type="layer")
+
+        # Check if the depth coordinates were added
+        assert "layer_depth_rho" in output.ds_depth_coords.data_vars
+
+
+def test_missing_zeta_gets_raised(use_dask):
+    """Test that a ValueError is raised when `zeta` is missing from the dataset and
+    `adjust_depth_for_sea_surface_height` is enabled."""
+    # Load the grid
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+
+    # Load the ROMS output
+    fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    roms_output = ROMSOutput(
+        grid=grid,
+        path=fname_restart1,
+        use_dask=use_dask,
+        adjust_depth_for_sea_surface_height=True,
+    )
+
+    # Remove `zeta` from the dataset
+    object.__setattr__(
+        roms_output, "ds", roms_output.ds.drop_vars("zeta", errors="ignore")
+    )
+
+    # Expect ValueError when calling `_get_depth_coordinates`
+    with pytest.raises(
+        ValueError,
+        match="`zeta` is required in provided ROMS output when `adjust_depth_for_sea_surface_height` is enabled.",
+    ):
+        roms_output._get_depth_coordinates()
 
 
 def test_check_vertical_coordinate_mismatch(use_dask):

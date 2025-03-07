@@ -1,6 +1,18 @@
 # Release notes
 
-## v2.5.0 (unreleased)
+## v2.6.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v2.5.0
 
 ### New Features
 

@@ -356,12 +356,23 @@ class ROMSOutput:
         -------
         self.ds_depth_coords : xarray.Dataset
 
+        Raises
+        ------
+        ValueError
+            If `adjust_depth_for_sea_surface_height` is enabled but `zeta` is missing from `self.ds`.
+
         Notes
         -----
-        This method uses the `compute_depth_coordinates` function to perform calculations and updates.
+        - This method relies on the `compute_depth_coordinates` function to perform calculations.
+        - If `adjust_depth_for_sea_surface_height` is `True`, the method accounts for variations
+          in sea surface height (`zeta`).
         """
 
         if self.adjust_depth_for_sea_surface_height:
+            if "zeta" not in self.ds:
+                raise ValueError(
+                    "`zeta` is required in provided ROMS output when `adjust_depth_for_sea_surface_height` is enabled."
+                )
             zeta = self.ds.zeta
         else:
             zeta = 0

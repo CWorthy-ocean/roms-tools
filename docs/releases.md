@@ -8,6 +8,7 @@
 * Support for writing and reading single-cell and multi-cell rivers to/from YAML ([#258](https://github.com/CWorthy-ocean/roms-tools/pull/258))
 * Enable plotting ROMS output without boundary; helpful because boundary for ROMS diagnostics consists of zeros ([#265](https://github.com/CWorthy-ocean/roms-tools/pull/265))
 * Nicer y-labels for depth plots ([#265](https://github.com/CWorthy-ocean/roms-tools/pull/265))
+* Option to enable or disable adjusting for SSH in depth coordinate calculation for `ROMSOutput` ([#269](https://github.com/CWorthy-ocean/roms-tools/pull/269))
 
 ### Breaking Changes
 
@@ -25,6 +26,7 @@
 ### Documentation
 
 * Documentation on how to use ROMS-Tools with Dask ([#245](https://github.com/CWorthy-ocean/roms-tools/pull/245))
+* More detailed documentation of `ROMSOutput` ([#269](https://github.com/CWorthy-ocean/roms-tools/pull/269))
 
 ### Bugfixes
 

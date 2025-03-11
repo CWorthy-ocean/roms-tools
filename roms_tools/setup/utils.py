@@ -1,6 +1,6 @@
 import xarray as xr
 import numpy as np
-from typing import Union, Any, Dict, Type
+from typing import Union, Any, Dict, Type, Sequence
 import pandas as pd
 import cftime
 from pathlib import Path
@@ -125,41 +125,108 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     return ds
 
 
+def interpolate_cyclic_time(
+    data_array: xr.DataArray,
+    time_dim_name: str,
+    day_of_year: Union[
+        int, float, np.ndarray, xr.DataArray, Sequence[Union[int, float]]
+    ],
+) -> xr.DataArray:
+    """Interpolates a DataArray cyclically across the start and end of the year.
+
+    This function extends the data cyclically by appending the last time step
+    (shifted back by one year) at the beginning and the first time step
+    (shifted forward by one year) at the end. It then performs linear interpolation
+    to match the specified `day_of_year` values.
+
+    Parameters
+    ----------
+    data_array : xr.DataArray
+        The input data array containing a time-like dimension.
+    time_dim_name : str
+        The name of the time dimension in the dataset.
+    day_of_year : Union[int, float, np.ndarray, xr.DataArray, Sequence[Union[int, float]]]
+        The target day(s) of the year for interpolation. This can be:
+        - A single integer or float representing the day of the year.
+        - A NumPy array or xarray DataArray containing multiple days.
+        - A list or tuple of integers or floats for multiple target days.
+
+    Returns
+    -------
+    xr.DataArray
+        The interpolated DataArray, ensuring cyclic continuity across year boundaries.
+
+    Notes
+    -----
+    - This function is useful for interpolating climatological data, where the time axis
+      represents a repeating annual cycle.
+    - The `day_of_year` values should be within the range [1, 365] or [1, 366] for leap years.
+    """
+
+    # Concatenate across the beginning and end of the year
+    time_concat = xr.concat(
+        [
+            data_array[time_dim_name][-1] - 365.25,  # Shift last time backward
+            data_array[time_dim_name],
+            data_array[time_dim_name][0] + 365.25,  # Shift first time forward
+        ],
+        dim=time_dim_name,
+    )
+
+    data_array_concat = xr.concat(
+        [
+            data_array.isel(
+                **{time_dim_name: -1}
+            ),  # Append last value at the beginning
+            data_array,
+            data_array.isel(**{time_dim_name: 0}),  # Append first value at the end
+        ],
+        dim=time_dim_name,
+    )
+    data_array_concat[time_dim_name] = time_concat
+
+    # Interpolate to specified times
+    data_array_interpolated = data_array_concat.interp(
+        **{time_dim_name: day_of_year}, method="linear"
+    )
+
+    return data_array_interpolated
+
+
 def interpolate_from_climatology(
     field: Union[xr.DataArray, xr.Dataset],
     time_dim_name: str,
     time: Union[xr.DataArray, pd.DatetimeIndex],
 ) -> Union[xr.DataArray, xr.Dataset]:
-    """Temporally interpolates a field based on specified time points.
+    """Interpolates a climatological field to specified time points.
 
-    This function performs temporal interpolation on the input `field` to match the provided `time` values.
-    If the input `field` is an `xarray.Dataset`, the interpolation is applied to all its data variables individually.
+    This function interpolates the input `field` based on `day_of_year` values
+    extracted from the provided `time` points. If `field` is an `xarray.Dataset`,
+    interpolation is applied to all its data variables individually.
 
     Parameters
     ----------
     field : xarray.DataArray or xarray.Dataset
         The input field to be interpolated.
-        - If `field` is an `xarray.DataArray`, it should have a time dimension identified by `time_dim_name`.
-        - If `field` is an `xarray.Dataset`, all variables within the dataset are interpolated along the specified time dimension.
+        - If `field` is an `xarray.DataArray`, it must have a time dimension identified by `time_dim_name`.
+        - If `field` is an `xarray.Dataset`, all variables within the dataset are interpolated along `time_dim_name`.
         The time dimension is assumed to represent `day_of_year` for climatological purposes.
     time_dim_name : str
-        The name of the time dimension in the `field`. This dimension is used for interpolation.
+        The name of the time dimension in `field`. This dimension is used for interpolation.
     time : xarray.DataArray or pandas.DatetimeIndex
-        The target time points for interpolation. The time values should be compatible with the time format used in the `field`.
+        The target time points for interpolation. These are internally converted to `day_of_year`
+        before performing interpolation.
 
     Returns
     -------
     xarray.DataArray or xarray.Dataset
-        The interpolated field, with the same type as the input (`xarray.DataArray` or `xarray.Dataset`),
+        The interpolated field, maintaining the same type (`xarray.DataArray` or `xarray.Dataset`)
         but aligned to the specified `time` values.
 
     Notes
     -----
-    - The interpolation assumes the time dimension in `field` corresponds to `day_of_year`.
-      If the input time values are in a datetime format, ensure they are converted to `day_of_year` before calling this function.
-      For example, you can preprocess the time as follows:
-
-      >>> field["time"] = field["time"].dt.dayofyear
+    - This function assumes that `field` represents a climatological dataset, where time is expressed as `day_of_year` (1-365).
+    - The `time` input is automatically converted to `day_of_year`, so manual conversion is not required before calling this function.
     """
 
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
@@ -175,28 +242,8 @@ def interpolate_from_climatology(
                 # Convert each datetime64 object in the array to pandas.Timestamp
                 day_of_year = np.array([pd.Timestamp(t).dayofyear for t in time])
 
-        # Concatenate across the beginning and end of the year
-        time_concat = xr.concat(
-            [
-                data_array[time_dim_name][-1] - 365.25,
-                data_array[time_dim_name],
-                365.25 + data_array[time_dim_name][0],
-            ],
-            dim=time_dim_name,
-        )
-        data_array_concat = xr.concat(
-            [
-                data_array.isel(**{time_dim_name: -1}),
-                data_array,
-                data_array.isel(**{time_dim_name: 0}),
-            ],
-            dim=time_dim_name,
-        )
-        data_array_concat[time_dim_name] = time_concat
-
-        # Interpolate to specified times
-        data_array_interpolated = data_array_concat.interp(
-            **{time_dim_name: day_of_year}, method="linear"
+        data_array_interpolated = interpolate_cyclic_time(
+            data_array, time_dim_name, day_of_year
         )
 
         if np.size(time) == 1:

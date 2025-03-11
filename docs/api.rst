@@ -76,4 +76,4 @@ Utilities
 .. autosummary::
    :toctree: generated/
 
-   roms_tools.utils.partition
+   roms_tools.tiling.partition

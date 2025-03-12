@@ -46,6 +46,10 @@ class Dataset:
         Dictionary of variable names that are required in the dataset.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
+    needs_lateral_fill: bool, optional
+        Indicates whether land values require lateral filling. If `True`, ocean values will be extended into land areas
+        to replace NaNs or non-ocean values (such as atmospheric values in ERA5 data). If `False`, it is assumed that
+        land values are already correctly assigned, and lateral filling will be skipped. Defaults to `True`.
     use_dask: bool
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
     apply_post_processing: bool
@@ -79,6 +83,7 @@ class Dataset:
     )
     var_names: Dict[str, str]
     climatology: Optional[bool] = False
+    needs_lateral_fill: Optional[bool] = True
     use_dask: Optional[bool] = False
     apply_post_processing: Optional[bool] = True
 
@@ -686,34 +691,38 @@ class Dataset:
         dataset variable is filled only once, even if multiple entries in `self.var_names`
         point to the same variable in the dataset.
         """
-        lateral_fill = LateralFill(
-            self.ds["mask"],
-            [self.dim_names["latitude"], self.dim_names["longitude"]],
-        )
 
-        separate_fill_for_velocities = False
-        if "mask_vel" in self.ds.data_vars:
-            lateral_fill_vel = LateralFill(
-                self.ds["mask_vel"],
+        if self.needs_lateral_fill:
+            lateral_fill = LateralFill(
+                self.ds["mask"],
                 [self.dim_names["latitude"], self.dim_names["longitude"]],
             )
-            separate_fill_for_velocities = True
 
-        for var_name in self.ds.data_vars:
-            if var_name.startswith("mask"):
-                # Skip variables that are mask types
-                continue
-            elif (
-                separate_fill_for_velocities
-                and "u" in self.var_names
-                and "v" in self.var_names
-                and var_name in [self.var_names["u"], self.var_names["v"]]
-            ):
-                # Apply lateral fill with velocity mask for velocity variables if present
-                self.ds[var_name] = lateral_fill_vel.apply(self.ds[var_name])
-            else:
-                # Apply standard lateral fill for other variables
-                self.ds[var_name] = lateral_fill.apply(self.ds[var_name])
+            separate_fill_for_velocities = False
+            # TODO: Replace hardcoded mask detection with a dictionary-based mask selection.
+            # This dictionary could assign which mask to use for what fields.
+            if "mask_vel" in self.ds.data_vars:
+                lateral_fill_vel = LateralFill(
+                    self.ds["mask_vel"],
+                    [self.dim_names["latitude"], self.dim_names["longitude"]],
+                )
+                separate_fill_for_velocities = True
+
+            for var_name in self.ds.data_vars:
+                if var_name.startswith("mask"):
+                    # Skip variables that are mask types
+                    continue
+                elif (
+                    separate_fill_for_velocities
+                    and "u" in self.var_names
+                    and "v" in self.var_names
+                    and var_name in [self.var_names["u"], self.var_names["v"]]
+                ):
+                    # Apply lateral fill with velocity mask for velocity variables if present
+                    self.ds[var_name] = lateral_fill_vel.apply(self.ds[var_name])
+                else:
+                    # Apply standard lateral fill for other variables
+                    self.ds[var_name] = lateral_fill.apply(self.ds[var_name])
 
     def extrapolate_deepest_to_bottom(self):
         """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth

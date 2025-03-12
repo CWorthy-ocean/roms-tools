@@ -789,34 +789,10 @@ class TPXODataset(Dataset):
 
     Parameters
     ----------
-    filename : str
-        The path to the TPXO dataset file.
-    var_names : Dict[str, str], optional
-        Dictionary of variable names required in the dataset. Defaults to:
-        {
-            "h_Re": "h_Re",
-            "h_Im": "h_Im",
-            "sal_Re": "sal_Re",
-            "sal_Im": "sal_Im",
-            "u_Re": "u_Re",
-            "u_Im": "u_Im",
-            "v_Re": "v_Re",
-            "v_Im": "v_Im",
-            "depth": "depth"
-        }
-    dim_names : Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset. Defaults to:
-        {"longitude": "ny", "latitude": "nx", "ntides": "nc"}.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
-    reference_date : datetime
+    reference_date : datetime, optional
         The reference date for the TPXO data. Default is datetime(1992, 1, 1).
     """
 
-    filename: str
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
             "ssh_Re": "h_Re",
@@ -833,7 +809,6 @@ class TPXODataset(Dataset):
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {"longitude": "ny", "latitude": "nx", "ntides": "nc"}
     )
-    ds: xr.Dataset = field(init=False, repr=False)
     reference_date: datetime = datetime(1992, 1, 1)
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -935,29 +910,7 @@ class TPXODataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class GLORYSDataset(Dataset):
-    """Represents GLORYS data on original grid.
-
-    Parameters
-    ----------
-    filename : str
-        The path to the data files. Can contain wildcards.
-    start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
-    end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
-    var_names: Dict[str, str], optional
-        Dictionary of variable names that are required in the dataset.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the GLORYS data on its original grid.
-    """
+    """Represents GLORYS data on original grid."""
 
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
@@ -1014,29 +967,7 @@ class GLORYSDataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class CESMDataset(Dataset):
-    """Represents CESM data on original grid.
-
-    Parameters
-    ----------
-    filename : str
-        The path to the data files. Can contain wildcards.
-    start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
-    end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
-    var_names: Dict[str, str], optional
-        Dictionary of variable names that are required in the dataset.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the CESM data on its original grid.
-    """
+    """Represents CESM data on original grid."""
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -1100,29 +1031,7 @@ class CESMDataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCDataset(CESMDataset):
-    """Represents CESM BGC data on original grid.
-
-    Parameters
-    ----------
-    filename : str
-        The path to the data files. Can contain wildcards.
-    start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
-    end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
-    var_names: Dict[str, str], optional
-        Dictionary of variable names that are required in the dataset.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the CESM data on its original grid.
-    """
+    """Represents CESM BGC data on original grid."""
 
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
@@ -1220,29 +1129,7 @@ class CESMBGCDataset(CESMDataset):
 
 @dataclass(frozen=True, kw_only=True)
 class CESMBGCSurfaceForcingDataset(CESMDataset):
-    """Represents CESM BGC surface forcing data on original grid.
-
-    Parameters
-    ----------
-    filename : str
-        The path to the data files. Can contain wildcards.
-    start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
-    end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
-    var_names: Dict[str, str], optional
-        Dictionary of variable names that are required in the dataset.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the CESM data on its original grid.
-    """
+    """Represents CESM BGC surface forcing data on original grid."""
 
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
@@ -1289,29 +1176,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
 @dataclass(frozen=True, kw_only=True)
 class ERA5Dataset(Dataset):
-    """Represents ERA5 data on original grid.
-
-    Parameters
-    ----------
-    filename : str
-        The path to the data files. Can contain wildcards.
-    start_time : Optional[datetime], optional
-        The start time for selecting relevant data. If not provided, the data is not filtered by start time.
-    end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided,
-        or no filtering is applied if start_time is not provided.
-    var_names: Dict[str, str], optional
-        Dictionary of variable names that are required in the dataset.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the ERA5 data on its original grid.
-    """
+    """Represents ERA5 data on original grid."""
 
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
@@ -1409,27 +1274,10 @@ class ERA5Dataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class ERA5Correction(Dataset):
-    """Global dataset to correct ERA5 radiation. The dataset contains multiplicative
-    correction factors for the ERA5 shortwave radiation, obtained by comparing the
-    COREv2 climatology to the ERA5 climatology.
+    """Global dataset to correct ERA5 radiation.
 
-    Parameters
-    ----------
-    filename : str, optional
-        The path to the correction files. Defaults to download_correction_data('SSR_correction.nc').
-    var_names: Dict[str, str], optional
-        Dictionary of variable names that are required in the dataset.
-        Defaults to {"swr_corr": "ssr_corr"}.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-        Defaults to {"longitude": "longitude", "latitude": "latitude", "time": "time"}.
-    climatology : bool, optional
-        Indicates if the correction data is a climatology. Defaults to True.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The loaded xarray Dataset containing the correction data.
+    The dataset contains multiplicative correction factors for the ERA5 shortwave
+    radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
     """
 
     filename: str = field(
@@ -1448,8 +1296,6 @@ class ERA5Correction(Dataset):
         }
     )
     climatology: Optional[bool] = True
-
-    ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
 
@@ -1514,27 +1360,7 @@ class ERA5Correction(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class ETOPO5Dataset(Dataset):
-    """Represents topography data on the original grid from the ETOPO5 dataset.
-
-    Parameters
-    ----------
-    filename : str, optional
-        The path to the ETOPO5 dataset file. If not provided, the dataset will be downloaded
-        automatically via the `pooch` library.
-    var_names : Dict[str, str], optional
-        Dictionary of variable names required in the dataset. Defaults to:
-        {
-            "topo": "topo",
-        }
-    dim_names : Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset. Defaults to:
-        {"longitude": "lon", "latitude": "lat"}.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the ETOPO5 data, loaded from the specified file.
-    """
+    """Represents topography data on the original grid from the ETOPO5 dataset."""
 
     filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
     var_names: Dict[str, str] = field(
@@ -1545,7 +1371,6 @@ class ETOPO5Dataset(Dataset):
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
-    ds: xr.Dataset = field(init=False, repr=False)
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Assign lat and lon as coordinates.
@@ -1571,28 +1396,8 @@ class ETOPO5Dataset(Dataset):
 
 @dataclass(frozen=True, kw_only=True)
 class SRTM15Dataset(Dataset):
-    """Represents topography data on the original grid from the SRTM15 dataset.
+    """Represents topography data on the original grid from the SRTM15 dataset."""
 
-    Parameters
-    ----------
-    filename : str
-        The path to the SRTM15 dataset file.
-    var_names : Dict[str, str], optional
-        Dictionary of variable names required in the dataset. Defaults to:
-        {
-            "topo": "z",
-        }
-    dim_names : Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset. Defaults to:
-        {"longitude": "lon", "latitude": "lat"}.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the SRTM15 data, loaded from the specified file.
-    """
-
-    filename: str
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
             "topo": "z",
@@ -1601,7 +1406,6 @@ class SRTM15Dataset(Dataset):
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
-    ds: xr.Dataset = field(init=False, repr=False)
 
 
 # river datasets
@@ -1982,37 +1786,11 @@ class RiverDataset:
 
 @dataclass(frozen=True, kw_only=True)
 class DaiRiverDataset(RiverDataset):
-    """Represents river data from the Dai river dataset.
-
-    Parameters
-    ----------
-    filename : Union[str, Path, List[Union[str, Path]]], optional
-        The path to the Dai River dataset file. If not provided, the dataset will be downloaded
-        automatically via the `pooch` library.
-    start_time : datetime
-        The start time for selecting relevant data.
-    end_time : datetime
-        The end time for selecting relevant data.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    var_names: Dict[str, str], optional
-        Dictionary of variable names that are required in the dataset.
-    opt_var_names: Dict[str, str], optional
-        Dictionary of variable names that are optional in the dataset.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the forcing data on its original grid.
-    """
+    """Represents river data from the Dai river dataset."""
 
     filename: Union[str, Path, List[Union[str, Path]]] = field(
         default_factory=lambda: download_river_data("dai_trenberth_may2019.nc")
     )
-    start_time: datetime
-    end_time: datetime
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {
             "station": "station",
@@ -2034,7 +1812,6 @@ class DaiRiverDataset(RiverDataset):
         }
     )
     climatology: Optional[bool] = False
-    ds: xr.Dataset = field(init=False, repr=False)
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Adds time information to the dataset based on the climatology flag and

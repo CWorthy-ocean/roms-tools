@@ -44,6 +44,9 @@ class Dataset:
         Dictionary specifying the names of dimensions in the dataset.
     var_names: Dict[str, str]
         Dictionary of variable names that are required in the dataset.
+    opt_var_names: Dict[str, str], optional
+        Dictionary of variable names that are optional in the dataset.
+        Defaults to an empty dictionary.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
     needs_lateral_fill: bool, optional
@@ -82,6 +85,7 @@ class Dataset:
         }
     )
     var_names: Dict[str, str]
+    opt_var_names: Optional[Dict[str, str]] = field(default_factory=dict)
     climatology: Optional[bool] = False
     needs_lateral_fill: Optional[bool] = True
     use_dask: Optional[bool] = False
@@ -213,7 +217,10 @@ class Dataset:
         """
 
         for var in ds.data_vars:
-            if var not in self.var_names.values():
+            if (
+                var not in self.var_names.values()
+                and var not in self.opt_var_names.values()
+            ):
                 ds = ds.drop_vars(var)
 
         return ds

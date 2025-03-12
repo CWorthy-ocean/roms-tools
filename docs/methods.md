@@ -18,7 +18,9 @@ The horizontal grid parameters are as follows:
 | `center_lat` | Latitude of the center of the domain                              | Degrees                     |
 | `rot`        | Rotation of the grid's x-direction from lines of constant longitude | Degrees (counter-clockwise) |
 
-To generate the horizontal grid from these parameters, `ROMS-Tools` follows a series of steps to define the domain and coordinate system:
+Using these parameters, `ROMS-Tools` generates a curvilinear orthogonal grid designed to minimize variations in grid cell size across the domain. To achieve this, `ROMS-Tools` employs a Transverse Mercator projection.
+
+**Detailed Steps**:
 
 1. **Domain Orientation**: Given the `size_x` and `size_y` parameters, the domain is initially oriented to prioritize the x-direction as longer than the y-direction. This may involve swapping `size_x` with `size_y` and `nx` with `ny`. This step is performed to minimize grid distortion.
 
@@ -35,6 +37,7 @@ To generate the horizontal grid from these parameters, `ROMS-Tools` follows a se
 7. **Grid Metrics Computation**: Grid metrics `pm = 1 / dx` and `pn = 1 / dy` are computed, where `dx` and `dy` represent the grid spacing in the x and y directions, respectively.
 
 8. **Angle computation**: The angle between the positive x-axis of the local grid and East is computed to establish the orientation relative to geographic directions.
+
 
 ## Mask
 
@@ -63,7 +66,7 @@ The topography is generated via the following steps:
 1. **Regridding**: The topography from the specified `topography_source` is regridded onto the ROMS grid.
 2. **Domain-wide Smoothing**: The regridded topography is smoothed over the entire domain with a smoothing factor of 8. This step is carried out using the [GCM-Filters](https://gcm-filters.readthedocs.io/en/latest/) package, and ensures that the topography is smooth at the grid scale, a prerequisite for avoiding grid-scale instabilities during model runtime.
 3. **Depth Clipping**: In regions that correspond to land or where the ocean depth is shallower than $h_{min}$, the depth is clipped to $h_{min}$.
-4. **Local Smoothing**: The regridded, clipped, and smoothed topography field `h` undergoes further local (logarithmic) smoothing to limit the slope parameter `r` to a maximum value of 0.2. This slope parameter is calculcated as:
+4. **Local Smoothing**: The regridded, clipped, and smoothed topography field `h` undergoes further local (logarithmic) smoothing to limit the slope parameter `r` to a maximum value of 0.2. This step helps minimize pressure gradient errors. The slope parameter is calculcated as:
 
 $$
 

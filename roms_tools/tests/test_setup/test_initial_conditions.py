@@ -6,9 +6,37 @@ import numpy as np
 import textwrap
 import logging
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import CESMBGCDataset
+from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
 from pathlib import Path
 from conftest import calculate_data_hash
+
+
+@pytest.fixture
+def initial_conditions_with_unified_bgc_from_climatology(use_dask):
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        use_dask=use_dask,
+    )
 
 
 @pytest.mark.parametrize(
@@ -19,6 +47,7 @@ from conftest import calculate_data_hash
         "initial_conditions_with_bgc",
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_initial_conditions_creation(ic_fixture, request):
@@ -256,7 +285,8 @@ def test_correct_depth_coords_adjusted_for_zeta(
     "initial_conditions_fixture",
     [
         "initial_conditions",
-        "initial_conditions",
+        "initial_conditions_with_bgc",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use_dask):
@@ -286,10 +316,9 @@ def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use
     )
 
 
-def test_interpolation_from_climatology(
-    initial_conditions_with_bgc_from_climatology, use_dask
-):
+def test_interpolation_from_climatology(use_dask):
 
+    # CESM climatology
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
     ds = xr.open_dataset(fname_bgc)
 
@@ -317,12 +346,42 @@ def test_interpolation_from_climatology(
         equal_nan=True,
     )
 
+    # Unified BGC climatology
+    fname_bgc = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+    ds = xr.open_dataset(fname_bgc)
+
+    # check if interpolated value for Feb 14 is indeed February value from climatology
+    bgc_data = UnifiedBGCDataset(
+        filename=fname_bgc,
+        start_time=datetime(2012, 2, 14),
+        climatology=True,
+        use_dask=use_dask,
+        apply_post_processing=False,
+    )
+    assert np.allclose(ds["Alk"].isel(month=1), bgc_data.ds["Alk"], equal_nan=True)
+
+    # check if interpolated value for Jan 30.25 is indeed average of January and February value from climatology
+    bgc_data = UnifiedBGCDataset(
+        filename=fname_bgc,
+        start_time=datetime(2012, 1, 30, 6),  # time: 6 am, Jan 30
+        climatology=True,
+        use_dask=use_dask,
+        apply_post_processing=False,
+    )
+
+    assert np.allclose(
+        0.5 * (ds["Alk"].isel(month=0) + ds["Alk"].isel(month=1)),
+        bgc_data.ds["Alk"],
+        equal_nan=True,
+    )
+
 
 @pytest.mark.parametrize(
     "initial_conditions_fixture",
     [
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_initial_conditions_plot(initial_conditions_fixture, request):
@@ -366,6 +425,8 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
     [
         "initial_conditions",
         "initial_conditions_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
@@ -394,6 +455,8 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
     [
         "initial_conditions",
         "initial_conditions_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask):
@@ -426,6 +489,8 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
     [
         "initial_conditions",
         "initial_conditions_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_files_have_same_hash(initial_conditions_fixture, request, tmp_path, use_dask):

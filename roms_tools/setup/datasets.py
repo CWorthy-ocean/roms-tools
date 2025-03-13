@@ -1015,31 +1015,35 @@ class UnifiedDataset(Dataset):
 
         # Handle time dimension
         if "time" not in self.dim_names:
-            if "month" in ds.dims:
-                # Interpolate season to month so all variables have same time dimension
-                for var_name in list(self.var_names.values()) + list(
-                    self.opt_var_names.values()
-                ):
-                    if var_name in ds.data_vars:
-                        if "season" in ds[var_name].dims:
+            if "month" in ds.dims or "season" in ds.dims:
+                time_dim = "month" if "month" in ds.dims else "season"
+
+                if time_dim == "month":
+                    # Interpolate season to month so all variables have the same time dimension
+                    for var_name in list(self.var_names.values()) + list(
+                        self.opt_var_names.values()
+                    ):
+                        if var_name in ds.data_vars and "season" in ds[var_name].dims:
                             ds[var_name] = interpolate_cyclic_time(
                                 ds[var_name],
                                 time_dim_name="season",
                                 day_of_year=ds["month"],
                             )
 
-                # Rename dimension
-                ds = ds.rename({"month": "time"})
+                # Rename dimension and convert from float64 days to timedelta
+                ds = ds.rename({time_dim: "time"})
                 self.dim_names["time"] = "time"
 
-            elif "season" in ds.dims:
-                # Rename dimension
-                ds = ds.rename({"season": "time"})
-                self.dim_names["time"] = "time"
+                print(ds["time"])
+                ds["time"] = xr.DataArray(
+                    (ds["time"].values * 86400 * 1e9).astype("timedelta64[ns]"),
+                    dims="time",
+                )
+                print(ds["time"])
 
             else:
                 # Handle case where all variables are time-invariant
-                ds = ds.expand_dims({"time": 1})
+                ds = ds.expand_dims(time=1)
                 self.dim_names["time"] = "time"
 
         return ds
@@ -2122,9 +2126,8 @@ def _select_relevant_times(
                     f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
                 )
             if not end_time:
-                # Ensure "time" is a datetime object before accessing .dt
-                if np.issubdtype(ds["time"].dtype, np.timedelta64):
-                    ds["time"] = ds["time"].dt.days
+                # Convert from timedelta64[ns] to fractional days
+                ds["time"] = ds["time"] / np.timedelta64(1, "D")
                 # Interpolate from climatology for initial conditions
                 ds = interpolate_from_climatology(ds, time_dim, start_time)
         else:

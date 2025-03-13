@@ -21,7 +21,7 @@ from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
     compute_depth,
 )
-from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
+from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
@@ -303,6 +303,14 @@ class InitialConditions:
                 climatology=self.bgc_source["climatology"],
                 use_dask=self.use_dask,
             )
+        elif self.bgc_source["name"] == "UNIFIED":
+            data = UnifiedBGCDataset(
+                filename=self.bgc_source["path"],
+                start_time=self.ini_time,
+                climatology=self.bgc_source["climatology"],
+                use_dask=self.use_dask,
+            )
+
         else:
             raise ValueError(
                 'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'

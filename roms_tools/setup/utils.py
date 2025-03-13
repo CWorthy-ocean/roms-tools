@@ -489,6 +489,47 @@ def get_variable_metadata():
     return d
 
 
+def compute_missing_bgc_variables(bgc_data):
+    """Fills in missing biogeochemical (BGC) variables in the input dictionary.
+
+    This function checks if specific BGC variables are missing from the provided
+    dictionary and computes them using predefined relationships with existing
+    variables. The computed variables are added to the dictionary.
+
+    Parameters
+    ----------
+    bgc_data : dict
+        A dictionary containing biogeochemical variables. Missing variables will
+        be computed and added.
+
+    Returns
+    -------
+    dict
+        The updated dictionary with missing BGC variables filled in.
+    """
+
+    # Define the relationships for missing variables
+    variable_relations = {
+        "Lig": ("Fe", 3),
+        "DIC_ALT_CO2": ("DIC", 1),
+        "ALK_ALT_CO2": ("ALK", 1),
+        "spP": ("CHL", 0.03),
+        "diatP": ("CHL", 0.02),
+        "diazP": ("CHL", 0.01),
+        "DOCr": (None, 10**-6),  # A constant value, no base variable
+    }
+
+    # Fill in missing variables using the defined relationships
+    for var_name, (base_var, factor) in variable_relations.items():
+        if var_name not in bgc_data:
+            if base_var:
+                bgc_data[var_name] = bgc_data[base_var] * factor
+            else:
+                bgc_data[var_name] = factor * xr.ones_like(bgc_data["ALK"])
+
+    return bgc_data
+
+
 def extract_single_value(data):
     """Extracts a single value from an xarray.DataArray or numpy array.
 

@@ -313,7 +313,7 @@ class InitialConditions:
 
         else:
             raise ValueError(
-                'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
+                'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for bgc_source["name"].'
             )
 
         return data

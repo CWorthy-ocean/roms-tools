@@ -416,7 +416,7 @@ class BoundaryForcing:
                 data = UnifiedBGCDataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
                 )
 
         return data

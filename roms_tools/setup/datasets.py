@@ -628,7 +628,7 @@ class Dataset:
             if concats:
                 end = "both" if len(concats) == 2 else concats[0]
                 subdomain = self.concatenate_longitudes(
-                    subdomain, end=end, verbose=True
+                    subdomain, end=end, verbose=False
                 )
                 lon = subdomain[self.dim_names["longitude"]]
 
@@ -1034,12 +1034,10 @@ class UnifiedDataset(Dataset):
                 ds = ds.rename({time_dim: "time"})
                 self.dim_names["time"] = "time"
 
-                print(ds["time"])
                 ds["time"] = xr.DataArray(
                     (ds["time"].values * 86400 * 1e9).astype("timedelta64[ns]"),
                     dims="time",
                 )
-                print(ds["time"])
 
             else:
                 # Handle case where all variables are time-invariant

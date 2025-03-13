@@ -237,10 +237,24 @@ def interpolate_from_climatology(
         else:
             if np.size(time) == 1:
                 # Convert single datetime64 object to pandas.Timestamp
-                day_of_year = pd.Timestamp(time).dayofyear
+                date = pd.Timestamp(time)
+                day_of_year = (
+                    date.dayofyear
+                    + (date.hour / 24)
+                    + (date.minute / 1440)
+                    + (date.second / 86400)
+                )
             else:
-                # Convert each datetime64 object in the array to pandas.Timestamp
-                day_of_year = np.array([pd.Timestamp(t).dayofyear for t in time])
+                # Convert each datetime64 object in the array to pandas.Timestamp and compute fractional day of year
+                day_of_year = np.array(
+                    [
+                        pd.Timestamp(t).dayofyear
+                        + (pd.Timestamp(t).hour / 24)
+                        + (pd.Timestamp(t).minute / 1440)
+                        + (pd.Timestamp(t).second / 86400)
+                        for t in time
+                    ]
+                )
 
         data_array_interpolated = interpolate_cyclic_time(
             data_array, time_dim_name, day_of_year

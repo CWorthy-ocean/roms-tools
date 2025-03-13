@@ -18,7 +18,7 @@ from roms_tools.utils import (
     interpolate_from_rho_to_v,
     transpose_dimensions,
 )
-from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
+from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
@@ -412,6 +412,8 @@ class BoundaryForcing:
             if self.source["name"] == "CESM_REGRIDDED":
 
                 data = CESMBGCDataset(**data_dict)
+            elif self.source["name"] == "UNIFIED":
+                data = UnifiedBGCDataset(**data_dict)
             else:
                 raise ValueError(
                     'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'

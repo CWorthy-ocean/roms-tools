@@ -391,29 +391,26 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
 
     # horizontal slices plots
     for depth_contours in [True, False]:
-        initial_conditions.plot(var_name="temp", s=0, depth_contours=depth_contours)
-        initial_conditions.plot(var_name="u", s=0, depth_contours=depth_contours)
-        initial_conditions.plot(var_name="v", s=0, depth_contours=depth_contours)
-        initial_conditions.plot(var_name="ALK", s=0, depth_contours=depth_contours)
+        for var_name in ["temp", "u", "v", "ALK", "DOC"]:
+            initial_conditions.plot(
+                var_name=var_name, s=0, depth_contours=depth_contours
+            )
 
     # section plots
     for layer_contours in [True, False]:
-        initial_conditions.plot(var_name="temp", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="temp", xi=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="ALK", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="ALK", xi=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="u", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="u", xi=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="v", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="v", xi=0, layer_contours=layer_contours)
+        for var_name in ["temp", "u", "v", "ALK", "DOC"]:
+            initial_conditions.plot(
+                var_name=var_name, eta=0, layer_contours=layer_contours
+            )
+            initial_conditions.plot(
+                var_name=var_name, xi=0, layer_contours=layer_contours
+            )
 
-    # 1D plot in horizontal
-    initial_conditions.plot(var_name="temp", s=0, xi=0)
-    initial_conditions.plot(var_name="ALK", s=0, xi=0)
-
-    # 1D plot in vertical
-    initial_conditions.plot(var_name="temp", eta=0, xi=0)
-    initial_conditions.plot(var_name="ALK", eta=0, xi=0)
+    for var_name in ["temp", "ALK", "DOC"]:
+        # 1D plot in horizontal
+        initial_conditions.plot(var_name=var_name, s=0, xi=0)
+        # 1D plot in vertical
+        initial_conditions.plot(var_name=var_name, eta=0, xi=0)
 
     initial_conditions.plot(var_name="zeta")
     initial_conditions.plot(var_name="ubar")

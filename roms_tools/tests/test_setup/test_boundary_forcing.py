@@ -111,7 +111,7 @@ def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
     }
 
     for direction in ["south", "east", "north", "west"]:
-        for var in ["ALK", "PO4"]:
+        for var in ["ALK", "PO4", "DOC"]:
             assert f"{var}_{direction}" in boundary_forcing.ds
 
     assert len(boundary_forcing.ds.bry_time) == 12

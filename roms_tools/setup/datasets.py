@@ -10,6 +10,7 @@ from roms_tools.utils import _load_data
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
     interpolate_from_climatology,
+    interpolate_cyclic_time,
     get_time_type,
     convert_cftime_to_datetime,
     one_dim_fill,
@@ -118,6 +119,9 @@ class Dataset:
         ds = self.clean_up(ds)
         self.check_dataset(ds)
 
+        # Select relevant fields
+        ds = self.select_relevant_fields(ds)
+
         # Select relevant times
         if "time" in self.dim_names and self.start_time is not None:
             ds = self.add_time_info(ds)
@@ -125,9 +129,6 @@ class Dataset:
 
             if self.dim_names["time"] != "time":
                 ds = ds.rename({self.dim_names["time"]: "time"})
-
-        # Select relevant fields
-        ds = self.select_relevant_fields(ds)
 
         # Make sure that latitude is ascending
         ds = self.ensure_dimension_is_ascending(ds, dim="latitude")
@@ -603,6 +604,7 @@ class Dataset:
         lon = subdomain[self.dim_names["longitude"]]
 
         if self.is_global:
+            concats = []
             # Concatenate only if necessary
             if lon_max + margin > lon.max():
                 # See if shifting by +360 degrees helps
@@ -612,10 +614,7 @@ class Dataset:
                     subdomain[self.dim_names["longitude"]] = lon + 360
                     lon = subdomain[self.dim_names["longitude"]]
                 else:
-                    subdomain = self.concatenate_longitudes(
-                        subdomain, end="upper", verbose=verbose
-                    )
-                    lon = subdomain[self.dim_names["longitude"]]
+                    concats.append("upper")
             if lon_min - margin < lon.min():
                 # See if shifting by -360 degrees helps
                 if (lon_min - margin > (lon - 360).min()) and (
@@ -624,10 +623,14 @@ class Dataset:
                     subdomain[self.dim_names["longitude"]] = lon - 360
                     lon = subdomain[self.dim_names["longitude"]]
                 else:
-                    subdomain = self.concatenate_longitudes(
-                        subdomain, end="lower", verbose=verbose
-                    )
-                    lon = subdomain[self.dim_names["longitude"]]
+                    concats.append("lower")
+
+            if concats:
+                end = "both" if len(concats) == 2 else concats[0]
+                subdomain = self.concatenate_longitudes(
+                    subdomain, end=end, verbose=True
+                )
+                lon = subdomain[self.dim_names["longitude"]]
 
         else:
             # Adjust longitude range if needed to match the expected range
@@ -651,6 +654,7 @@ class Dataset:
                         lon_min += 360
                         lon_max += 360
         # Select the subdomain in longitude direction
+
         subdomain = subdomain.sel(
             **{
                 self.dim_names["longitude"]: slice(lon_min - margin, lon_max + margin),
@@ -963,6 +967,159 @@ class GLORYSDataset(Dataset):
 
         self.ds["mask"] = mask
         self.ds["mask_vel"] = mask_vel
+
+
+@dataclass(frozen=True, kw_only=True)
+class UnifiedDataset(Dataset):
+    """Represents unified BGC data on original grid.
+
+    Notes
+    -----
+    Pierre has already addressed lateral filling during preprocessing,
+    and since the dataset does not contain a mask, the `needs_lateral_fill`
+    attribute is set to `False`.
+    """
+
+    needs_lateral_fill: Optional[bool] = False
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method verifies that the time dimension exists in the dataset and assigns it appropriately. If the "time" dimension is missing, the method attempts to assign an existing "time" or "month" dimension. If neither exists, it expands the dataset to include a "time" dimension with a size of one.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with the correct time dimension assigned or added.
+        """
+
+        ds = ds.rename({"lon": "longitude", "lat": "latitude", "dep": "depth"})
+        ds = ds.assign_coords(
+            {
+                "latitude": ds["latitude"],
+                "longitude": ds["longitude"],
+                "depth": ds["depth"],
+            }
+        )
+
+        object.__setattr__(
+            self,
+            "dim_names",
+            {
+                "latitude": "latitude",
+                "longitude": "longitude",
+                "depth": "depth",
+            },
+        )
+
+        # Handle time dimension
+        if "time" not in self.dim_names:
+            if "month" in ds.dims:
+                # Interpolate season to month so all variables have same time dimension
+                for var_name in list(self.var_names.values()) + list(
+                    self.opt_var_names.values()
+                ):
+                    if var_name in ds.data_vars:
+                        if "season" in ds[var_name].dims:
+                            ds[var_name] = interpolate_cyclic_time(
+                                ds[var_name],
+                                time_dim_name="season",
+                                day_of_year=ds["month"],
+                            )
+
+                # Rename dimension
+                ds = ds.rename({"month": "time"})
+                self.dim_names["time"] = "time"
+
+            elif "season" in ds.dims:
+                # Rename dimension
+                ds = ds.rename({"season": "time"})
+                self.dim_names["time"] = "time"
+
+            else:
+                # Handle case where all variables are time-invariant
+                ds = ds.expand_dims({"time": 1})
+                self.dim_names["time"] = "time"
+
+        return ds
+
+
+@dataclass(frozen=True, kw_only=True)
+class UnifiedBGCDataset(UnifiedDataset):
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "dep",
+        }
+    )
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "SiO3",
+            "Fe": "Fe",
+            "O2": "O2",
+            "DIC": "DIC",
+            "ALK": "Alk",
+        }
+    )
+    opt_var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "NH4": "NH4",
+            "Lig": "Lig",
+            "DIC_ALT_CO2": "DIC_ALT_CO2",
+            "ALK_ALT_CO2": "Alk_ALT_CO2",
+            "DOC": "DOC",
+            "DON": "DON",
+            "DOP": "DOP",
+            "DOPr": "DOPr",
+            "DONr": "DONr",
+            "DOCr": "DOCr",
+            "spChl": "spChl",
+            "spC": "spC",
+            "spP": "spP",
+            "spFe": "spFe",
+            "diatChl": "diatChl",
+            "diatC": "diatC",
+            "diatP": "diatP",
+            "diatFe": "diatFe",
+            "diatSi": "diatSi",
+            "diazChl": "diazChl",
+            "diazC": "diazC",
+            "diazP": "diazP",
+            "diazFe": "diazFe",
+            "spCaCO3": "spCaCO3",
+            "zooC": "zooC",
+            "N2O": "N2O",
+            "CHL": "CHL",
+        }
+    )
+
+    climatology: Optional[bool] = True
+
+
+@dataclass(frozen=True, kw_only=True)
+class UnifiedBGCSurfaceDataset(UnifiedDataset):
+    dim_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+        }
+    )
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {"pco2_air": "pco2_air", "dust": "dust", "iron": "iron"}
+    )
+    opt_var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "pco2_air_alt": "pco2_air_alt",
+            "nox": "nox",
+            "nhy": "nhy",
+        }
+    )
+
+    climatology: Optional[bool] = True
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1965,8 +2122,10 @@ def _select_relevant_times(
                     f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
                 )
             if not end_time:
+                # Ensure "time" is a datetime object before accessing .dt
+                if np.issubdtype(ds["time"].dtype, np.timedelta64):
+                    ds["time"] = ds["time"].dt.days
                 # Interpolate from climatology for initial conditions
-                ds["time"] = ds["time"].dt.days
                 ds = interpolate_from_climatology(ds, time_dim, start_time)
         else:
             time_type = get_time_type(ds[time_dim])

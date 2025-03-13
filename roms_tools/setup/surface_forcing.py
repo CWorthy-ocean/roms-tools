@@ -15,6 +15,7 @@ from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
     CESMBGCSurfaceForcingDataset,
+    UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
     get_target_coords,
@@ -266,9 +267,12 @@ class SurfaceForcing:
             if self.source["name"] == "CESM_REGRIDDED":
 
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
+            elif self.source["name"] == "UNIFIED":
+
+                data = UnifiedBGCSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
                 )
 
         return data

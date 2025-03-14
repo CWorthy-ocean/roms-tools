@@ -510,13 +510,33 @@ def compute_missing_bgc_variables(bgc_data):
 
     # Define the relationships for missing variables
     variable_relations = {
-        "Lig": ("Fe", 3),
-        "DIC_ALT_CO2": ("DIC", 1),
-        "ALK_ALT_CO2": ("ALK", 1),
-        "spP": ("CHL", 0.03),
-        "diatP": ("CHL", 0.02),
-        "diazP": ("CHL", 0.01),
-        "DOCr": (None, 10**-6),  # A constant value, no base variable
+        "NH4": (None, 0.0),
+        # Pierre's Fe has units mmol m-3
+        "Lig": ("Fe", 3),  # is that in mmol m-3?
+        "DIC_ALT_CO2": ("DIC", 1),  # mmol m-3
+        "ALK_ALT_CO2": ("ALK", 1),  # meq m-3 = mmol m-3
+        "DOC": (None, 0.0),
+        "DON": (None, 1.0),  # is that in mmom m-3?
+        "DOP": (None, 0.1),  # is that in mmol m-3?
+        "DOCr": (None, 10**-6),  # is that in mmol m-3?
+        "DONr": (None, 0.8),  # is that in mmol m-3?
+        "DOPr": (None, 0.003),  # is that in mmol m-3?
+        # Pierre's CHL has units mg m-3
+        "zooC": ("CHL", 1.35),  # is that in mmol m-3?
+        "spChl": ("CHL", 0.675),  # is that in mg m-3?
+        "spC": ("CHL", 3.375),  # is that in mmol m-3?
+        "spP": ("CHL", 0.03),  # is that in mmol m-3?
+        "spFe": ("CHL", 1.35e-5),  # is that in mmol m-3?
+        "spCaCO3": ("CHL", 0.0675),  # is that in mmol m-3?
+        "diatChl": ("CHL", 0.0675),  # is that in mg m-3?
+        "diatC": ("CHL", 0.2025),  # is that in mmol m-3?
+        "diatP": ("CHL", 0.02),  # is that in mmol m-3?
+        "diatFe": ("CHL", 1.35e-6),  # is that in mmol m-3?
+        "diatSi": ("CHL", 0.0675),  # is that in mmol m-3?
+        "diazChl": ("CHL", 0.0075),  # is that in mg m-3?
+        "diazC": ("CHL", 0.0375),  # is that in mmol m-3?
+        "diazP": ("CHL", 0.01),  # is that in mmol m-3?
+        "diazFe": ("CHL", 7.5e-7),  # is that in mmol m-3?
     }
 
     # Fill in missing variables using the defined relationships
@@ -526,6 +546,45 @@ def compute_missing_bgc_variables(bgc_data):
                 bgc_data[var_name] = bgc_data[base_var] * factor
             else:
                 bgc_data[var_name] = factor * xr.ones_like(bgc_data["ALK"])
+
+    bgc_data.pop("CHL", None)
+
+    return bgc_data
+
+
+def compute_missing_surface_bgc_variables(bgc_data):
+    """Fills in missing surface biogeochemical (BGC) variables in the input dictionary.
+
+    This function checks if specific surface BGC variables are missing from the provided
+    dictionary and computes them using predefined relationships with existing
+    variables. The computed variables are added to the dictionary.
+
+    Parameters
+    ----------
+    bgc_data : dict
+        A dictionary containing surface biogeochemical variables. Missing variables will
+        be computed and added.
+
+    Returns
+    -------
+    dict
+        The updated dictionary with missing BGC variables filled in.
+    """
+
+    # Define the relationships for missing variables
+    variable_relations = {
+        "pco2_air_alt": ("pco2_air", 1.0),  # ppmv
+        "nox": (None, 1e-13),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
+        "nhy": (None, 5e-12),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
+    }
+
+    # Fill in missing variables using the defined relationships
+    for var_name, (base_var, factor) in variable_relations.items():
+        if var_name not in bgc_data:
+            if base_var:
+                bgc_data[var_name] = bgc_data[base_var] * factor
+            else:
+                bgc_data[var_name] = factor * xr.ones_like(bgc_data["pco2_air"])
 
     return bgc_data
 

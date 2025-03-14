@@ -1094,7 +1094,6 @@ class UnifiedBGCDataset(UnifiedDataset):
             "diazFe": "diazFe",
             "spCaCO3": "spCaCO3",
             "zooC": "zooC",
-            "N2O": "N2O",
             "CHL": "CHL",
         }
     )

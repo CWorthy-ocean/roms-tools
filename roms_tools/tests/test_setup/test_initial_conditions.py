@@ -71,6 +71,59 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
 
 
+@pytest.mark.parametrize(
+    "ic_fixture",
+    [
+        "initial_conditions_with_bgc",
+        "initial_conditions_with_bgc_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
+    ],
+)
+def test_initial_condition_creation_with_bgc(ic_fixture, request):
+    """Test the creation of the BoundaryForcing object."""
+
+    ic = request.getfixturevalue(ic_fixture)
+
+    expected_bgc_variables = [
+        "PO4",
+        "NO3",
+        "SiO3",
+        "NH4",
+        "Fe",
+        "Lig",
+        "O2",
+        "DIC",
+        "DIC_ALT_CO2",
+        "ALK",
+        "ALK_ALT_CO2",
+        "DOC",
+        "DON",
+        "DOP",
+        "DOCr",
+        "DONr",
+        "DOPr",
+        "zooC",
+        "spChl",
+        "spC",
+        "spP",
+        "spFe",
+        "spCaCO3",
+        "diatChl",
+        "diatC",
+        "diatP",
+        "diatFe",
+        "diatSi",
+        "diazChl",
+        "diazC",
+        "diazP",
+        "diazFe",
+    ]
+
+    for var in expected_bgc_variables:
+        assert var in ic.ds
+
+
 @pytest.fixture
 def example_grid():
 

@@ -13,6 +13,8 @@ from roms_tools.setup.datasets import (
     ERA5Dataset,
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
+    UnifiedBGCDataset,
+    UnifiedBGCSurfaceDataset,
     TPXODataset,
 )
 from roms_tools.download import download_test_data
@@ -685,6 +687,38 @@ def cesm_surface_bgc_data(request, use_dask):
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2013, 1, 1),
         climatology=False,
+        use_dask=use_dask,
+    )
+    data.post_process()
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def unified_bgc_data(request, use_dask):
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+
+    data = UnifiedBGCDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=True,
+        use_dask=use_dask,
+    )
+    data.post_process()
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def unified_surface_bgc_data(request, use_dask):
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+
+    data = UnifiedBGCSurfaceDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=True,
         use_dask=use_dask,
     )
     data.post_process()

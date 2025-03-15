@@ -25,6 +25,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
+    compute_missing_bgc_variables,
     one_dim_fill,
     nan_check,
     substitute_nans_by_fillvalue,
@@ -145,6 +146,26 @@ class BoundaryForcing:
         self._set_boundary_info()
         ds = xr.Dataset()
 
+        var_names = {
+            var: {
+                "name": data.var_names[var],
+                "location": self.variable_info[var]["location"],
+            }
+            for var in data.var_names.keys()
+            if data.var_names[var] in data.ds.data_vars
+        }
+        # Update the dictionary with optional variables and their locations
+        var_names.update(
+            {
+                var: {
+                    "name": data.opt_var_names[var],
+                    "location": self.variable_info[var]["location"],
+                }
+                for var in data.opt_var_names.keys()
+                if data.opt_var_names[var] in data.ds.data_vars
+            }
+        )
+
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
 
@@ -171,14 +192,15 @@ class BoundaryForcing:
 
                 processed_fields = {}
 
-                # vector fields (velocities) are only present in physics datasets
-                if self.type == "physics":
-                    # lateral regridding of vector fields
-                    vector_var_names = [
-                        name
-                        for name, info in self.variable_info.items()
-                        if info["is_vector"]
-                    ]
+                # Filter var_names by vector fields
+                filtered_vars = [
+                    var_name
+                    for var_name, info in var_names.items()
+                    if self.variable_info[var_name]["is_vector"]
+                ]
+
+                # lateral regridding of vector fields
+                if filtered_vars:
                     lon = target_coords["lon"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
@@ -188,26 +210,27 @@ class BoundaryForcing:
                     lateral_regrid = LateralRegrid(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
-                    for var_name in vector_var_names:
-                        if var_name in bdry_data.var_names.keys():
-                            processed_fields[var_name] = lateral_regrid.apply(
-                                bdry_data.ds[bdry_data.var_names[var_name]]
-                            )
+                    for var_name in filtered_vars:
+                        processed_fields[var_name] = lateral_regrid.apply(
+                            bdry_data.ds[var_names[var_name]["name"]]
+                        )
 
                     if self.adjust_depth_for_sea_surface_height:
                         # Regrid sea surface height ('zeta') onto a 2-cell-wide margin.
                         # This is needed to correctly infer depth coordinates at u- and v-points along the boundary.
                         zeta_vector = lateral_regrid.apply(
-                            bdry_data.ds[bdry_data.var_names["zeta"]]
+                            bdry_data.ds[var_names["zeta"]["name"]]
                         )
 
-                # lateral regridding of tracer fields
-                tracer_var_names = [
-                    name
-                    for name, info in self.variable_info.items()
-                    if not info["is_vector"]
+                # Filter var_names by tracer fields
+                filtered_vars = [
+                    var_name
+                    for var_name, info in var_names.items()
+                    if not self.variable_info[var_name]["is_vector"]
                 ]
-                if len(tracer_var_names) > 0:
+
+                # lateral regridding of tracer fields
+                if filtered_vars:
                     lon = target_coords["lon"].isel(
                         **self.bdry_coords["rho"][direction]
                     )
@@ -217,14 +240,13 @@ class BoundaryForcing:
                     lateral_regrid = LateralRegrid(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
-                    for var_name in tracer_var_names:
-                        if var_name in bdry_data.var_names.keys():
-                            processed_fields[var_name] = lateral_regrid.apply(
-                                bdry_data.ds[bdry_data.var_names[var_name]]
-                            )
+                    for var_name in filtered_vars:
+                        processed_fields[var_name] = lateral_regrid.apply(
+                            bdry_data.ds[var_names[var_name]["name"]]
+                        )
 
                 # rotation of velocities and interpolation to u/v points
-                if "u" in self.variable_info and "v" in self.variable_info:
+                if "u" in processed_fields and "v" in processed_fields:
                     angle = target_coords["angle"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
@@ -239,24 +261,27 @@ class BoundaryForcing:
                         zeta_v = interpolate_from_rho_to_v(zeta_vector)
 
                 # selection of outermost margin for u/v variables
-                for var_name in self.variable_info.keys():
-                    if var_name in processed_fields:
-                        location = self.variable_info[var_name]["location"]
-                        if location in ["u", "v"]:
-                            processed_fields[var_name] = processed_fields[
-                                var_name
-                            ].isel(**self.bdry_coords[location][direction])
+                for var_name in processed_fields:
+                    location = self.variable_info[var_name]["location"]
+                    if location in ["u", "v"]:
+                        processed_fields[var_name] = processed_fields[var_name].isel(
+                            **self.bdry_coords[location][direction]
+                        )
+
                 if self.adjust_depth_for_sea_surface_height:
                     zeta_u = zeta_u.isel(**self.bdry_coords["u"][direction])
                     zeta_v = zeta_v.isel(**self.bdry_coords["v"][direction])
 
-                if not self.apply_2d_horizontal_fill:
+                if not self.apply_2d_horizontal_fill and bdry_data.needs_lateral_fill:
+                    logging.info(
+                        f"Applying 1D horizontal fill to {direction}ern boundary."
+                    )
                     self._validate_1d_fill(
                         processed_fields,
                         direction,
                         bdry_data.dim_names["depth"],
                     )
-                    for var_name in processed_fields.keys():
+                    for var_name in processed_fields:
                         processed_fields[var_name] = apply_1d_horizontal_fill(
                             processed_fields[var_name]
                         )
@@ -271,39 +296,39 @@ class BoundaryForcing:
                     zeta_u = 0
                     zeta_v = 0
 
-                var_names_dict = {}
                 for location in ["rho", "u", "v"]:
-                    var_names_dict[location] = [
-                        name
-                        for name, info in self.variable_info.items()
-                        if info["location"] == location and info["is_3d"]
+                    # Filter var_names by location and check for 3D variables
+                    filtered_vars = [
+                        var_name
+                        for var_name, info in var_names.items()
+                        if info["location"] == location
+                        and self.variable_info[var_name]["is_3d"]
                     ]
 
-                # compute layer depth coordinates
-                if len(var_names_dict["rho"]) > 0:
-                    self._get_depth_coordinates(zeta, direction, "rho", "layer")
-                    self._get_depth_coordinates(
-                        zeta, direction, "rho", "interface"
-                    )  # only necessary for plotting
-                if len(var_names_dict["u"]) > 0 or len(var_names_dict["v"]) > 0:
-                    self._get_depth_coordinates(zeta_u, direction, "u", "layer")
-                    self._get_depth_coordinates(zeta_v, direction, "v", "layer")
+                    if filtered_vars:
+                        # compute layer depth coordinates
+                        if location == "rho":
+                            self._get_depth_coordinates(zeta, direction, "rho", "layer")
+                            self._get_depth_coordinates(
+                                zeta, direction, "rho", "interface"
+                            )  # only necessary for plotting
+                        else:
+                            self._get_depth_coordinates(zeta_u, direction, "u", "layer")
+                            self._get_depth_coordinates(zeta_v, direction, "v", "layer")
 
-                # vertical regridding
-                for location in ["rho", "u", "v"]:
-                    if len(var_names_dict[location]) > 0:
+                        # vertical regridding
                         vertical_regrid = VerticalRegrid(
                             self.ds_depth_coords[f"layer_depth_{location}_{direction}"],
                             bdry_data.ds[bdry_data.dim_names["depth"]],
                         )
-                        for var_name in var_names_dict[location]:
+                        for var_name in filtered_vars:
                             if var_name in processed_fields:
                                 processed_fields[var_name] = vertical_regrid.apply(
                                     processed_fields[var_name]
                                 )
 
                 # compute barotropic velocities
-                if "u" in self.variable_info and "v" in self.variable_info:
+                if "u" in var_names and "v" in var_names:
                     self._get_depth_coordinates(zeta_u, direction, "u", "interface")
                     self._get_depth_coordinates(zeta_v, direction, "v", "interface")
                     for location in ["u", "v"]:
@@ -317,10 +342,13 @@ class BoundaryForcing:
                         )
 
                 # Reorder dimensions
-                for var_name in processed_fields.keys():
+                for var_name in processed_fields:
                     processed_fields[var_name] = transpose_dimensions(
                         processed_fields[var_name]
                     )
+
+                if self.type == "bgc":
+                    processed_fields = compute_missing_bgc_variables(processed_fields)
 
                 # Write the boundary data into dataset
                 ds = self._write_into_dataset(direction, processed_fields, ds)
@@ -379,15 +407,6 @@ class BoundaryForcing:
         else:
             logging.info(
                 "Sea surface height will NOT be used to adjust depth coordinates."
-            )
-
-        if self.apply_2d_horizontal_fill:
-            logging.info(
-                "Applying 2D horizontal fill to the source data before regridding."
-            )
-        else:
-            logging.info(
-                "Applying 1D horizontal fill separately to each regridded boundary."
             )
 
     def _get_data(self):
@@ -491,7 +510,9 @@ class BoundaryForcing:
             }
         elif self.type == "bgc":
             variable_info = {}
-            for var_name in data.var_names.keys():
+            for var_name in list(data.var_names.keys()) + list(
+                data.opt_var_names.keys()
+            ):
                 if var_name == "ALK":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
@@ -701,8 +722,7 @@ class BoundaryForcing:
         """
 
         for var_name in processed_fields.keys():
-            # Only validate variables based on "validate" flag if use_dask is False
-            if not self.use_dask or self.variable_info[var_name]["validate"]:
+            if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
 
                 # Select the appropriate mask based on variable location

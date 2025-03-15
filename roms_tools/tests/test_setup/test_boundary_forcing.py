@@ -94,7 +94,7 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
         "bgc_boundary_forcing_from_unified_climatology",
     ],
 )
-def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
+def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
 
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
@@ -110,8 +110,43 @@ def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
         "west": True,
     }
 
+    expected_bgc_variables = [
+        "PO4",
+        "NO3",
+        "SiO3",
+        "NH4",
+        "Fe",
+        "Lig",
+        "O2",
+        "DIC",
+        "DIC_ALT_CO2",
+        "ALK",
+        "ALK_ALT_CO2",
+        "DOC",
+        "DON",
+        "DOP",
+        "DOCr",
+        "DONr",
+        "DOPr",
+        "zooC",
+        "spChl",
+        "spC",
+        "spP",
+        "spFe",
+        "spCaCO3",
+        "diatChl",
+        "diatC",
+        "diatP",
+        "diatFe",
+        "diatSi",
+        "diazChl",
+        "diazC",
+        "diazP",
+        "diazFe",
+    ]
+
     for direction in ["south", "east", "north", "west"]:
-        for var in ["ALK", "PO4", "DOC"]:
+        for var in expected_bgc_variables:
             assert f"{var}_{direction}" in boundary_forcing.ds
 
     assert len(boundary_forcing.ds.bry_time) == 12

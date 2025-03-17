@@ -353,10 +353,8 @@ def test_info_fill(caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert (
-        "Applying 1D horizontal fill separately to each regridded boundary."
-        in caplog.text
-    )
+    for direction in ["south", "east", "north", "west"]:
+        assert f"Applying 1D horizontal fill to {direction}ern boundary." in caplog.text
 
 
 def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):

@@ -11,34 +11,6 @@ from pathlib import Path
 from conftest import calculate_data_hash
 
 
-@pytest.fixture
-def initial_conditions_with_unified_bgc_from_climatology(use_dask):
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
-
-    return InitialConditions(
-        grid=grid,
-        ini_time=datetime(2021, 6, 29),
-        source={"path": fname, "name": "GLORYS"},
-        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
-        use_dask=use_dask,
-    )
-
-
 @pytest.mark.parametrize(
     "ic_fixture",
     [

@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "ocean_time",
+        "eta_v",
+        "xi_rho"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "vertically integrated v-flux component",
+    "units": "m/s"
+}

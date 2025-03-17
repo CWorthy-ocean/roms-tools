@@ -1,0 +1,11 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "ocean_time",
+        "s_rho",
+        "eta_rho",
+        "xi_rho"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "diazotroph iron",
+    "units": "mmol/m^3"
+}

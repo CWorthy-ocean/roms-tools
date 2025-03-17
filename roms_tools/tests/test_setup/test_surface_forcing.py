@@ -9,35 +9,6 @@ import logging
 from conftest import calculate_data_hash
 
 
-@pytest.fixture(scope="session")
-def bgc_surface_forcing_from_unified_climatology(request, use_dask):
-    """Fixture for creating a SurfaceForcing object with BGC from climatology."""
-    grid = Grid(
-        nx=5,
-        ny=5,
-        size_x=1800,
-        size_y=2400,
-        center_lon=180,
-        center_lat=61,
-        rot=20,
-    )
-
-    start_time = datetime(2020, 2, 1)
-    end_time = datetime(2020, 2, 1)
-
-    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
-
-    return SurfaceForcing(
-        grid=grid,
-        start_time=start_time,
-        end_time=end_time,
-        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},
-        type="bgc",
-        coarse_grid_mode="never",
-        use_dask=use_dask,
-    )
-
-
 @pytest.fixture
 def grid_that_straddles_dateline():
     """Fixture for creating a domain that straddles the dateline and lies within the
@@ -503,27 +474,30 @@ def test_time_attr(bgc_surface_forcing):
 
 
 @pytest.mark.parametrize(
-    "sfc_forcing_fixture, expected_climatology, expected_fname",
+    "sfc_forcing_fixture, expected_name, expected_climatology, expected_fname",
     [
         (
             "bgc_surface_forcing",
+            "CESM_REGRIDDED",
             False,
             Path(download_test_data("CESM_surface_global_test_data.nc")),
         ),
         (
             "bgc_surface_forcing_from_climatology",
+            "CESM_REGRIDDED",
             True,
             Path(download_test_data("CESM_surface_global_test_data_climatology.nc")),
         ),
         (
             "bgc_surface_forcing_from_unified_climatology",
+            "UNIFIED",
             True,
             Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
         ),
     ],
 )
 def test_surface_forcing_creation(
-    sfc_forcing_fixture, expected_climatology, expected_fname, request
+    sfc_forcing_fixture, expected_name, expected_climatology, expected_fname, request
 ):
     """Test the creation and initialization of the SurfaceForcing object with BGC.
 
@@ -535,23 +509,19 @@ def test_surface_forcing_creation(
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     assert sfc_forcing.ds is not None
-    assert "pco2_air" in sfc_forcing.ds
-    assert "pco2_air_alt" in sfc_forcing.ds
-    assert "iron" in sfc_forcing.ds
-    assert "dust" in sfc_forcing.ds
-    assert "nox" in sfc_forcing.ds
-    assert "nhy" in sfc_forcing.ds
+    for var_name in ["pco2_air", "pco2_air_alt", "iron", "dust", "nox", "nhy"]:
+        assert var_name in sfc_forcing.ds
 
     assert sfc_forcing.start_time == datetime(2020, 2, 1)
     assert sfc_forcing.end_time == datetime(2020, 2, 1)
     assert sfc_forcing.type == "bgc"
     assert sfc_forcing.source == {
-        "name": "CESM_REGRIDDED",
+        "name": expected_name,
         "path": expected_fname,
         "climatology": expected_climatology,
     }
     assert not sfc_forcing.use_coarse_grid
-    assert sfc_forcing.ds.attrs["source"] == "CESM_REGRIDDED"
+    assert sfc_forcing.ds.attrs["source"] == expected_name
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 

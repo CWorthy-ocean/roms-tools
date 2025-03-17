@@ -125,6 +125,11 @@ class InitialConditions:
             processed_fields = self._process_data(processed_fields, type="bgc")
             processed_fields = compute_missing_bgc_variables(processed_fields)
 
+        for var_name in processed_fields:
+            processed_fields[var_name] = transpose_dimensions(
+                processed_fields[var_name]
+            )
+
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(processed_fields, d_meta)
 
@@ -249,11 +254,6 @@ class InitialConditions:
                     processed_fields[location],
                     self.ds_depth_coords[f"interface_depth_{location}"],
                 )
-
-        for var_name in var_names:
-            processed_fields[var_name] = transpose_dimensions(
-                processed_fields[var_name]
-            )
 
         return processed_fields
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import logging
 from typing import Dict, Union, List, Optional
 from roms_tools import Grid
-from roms_tools.utils import save_datasets
+from roms_tools.utils import save_datasets, transpose_dimensions
 from roms_tools.regrid import LateralRegrid
 from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
@@ -25,6 +25,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     rotate_velocities,
+    compute_missing_surface_bgc_variables,
     convert_to_roms_time,
     _to_yaml,
     _from_yaml,
@@ -160,6 +161,15 @@ class SurfaceForcing:
         # correct radiation
         if self.type == "physics" and self.correct_radiation:
             processed_fields = self._apply_correction(processed_fields, data)
+
+        if self.type == "bgc":
+            processed_fields = compute_missing_surface_bgc_variables(processed_fields)
+
+        # Reorder dimensions
+        for var_name in processed_fields:
+            processed_fields[var_name] = transpose_dimensions(
+                processed_fields[var_name]
+            )
 
         d_meta = get_variable_metadata()
 
@@ -336,7 +346,9 @@ class SurfaceForcing:
             }
         elif self.type == "bgc":
             variable_info = {}
-            for var_name in data.var_names.keys():
+            for var_name in list(data.var_names.keys()) + list(
+                data.opt_var_names.keys()
+            ):
                 variable_info[var_name] = default_info
                 if var_name == "pco2_air":
                     variable_info[var_name] = {**default_info, "validate": True}

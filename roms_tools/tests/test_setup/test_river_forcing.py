@@ -394,13 +394,16 @@ class TestRiverForcingGeneral:
 
 
 class TestRiverForcingWithoutPrescribedIndices:
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
     def test_logging_message(self, iceland_test_grid, caplog):
 
         with caplog.at_level(logging.INFO):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
             )
         # Verify the info message in the log
         assert "No river indices provided." in caplog.text
@@ -427,21 +430,20 @@ class TestRiverForcingWithoutPrescribedIndices:
         )
 
         with pytest.raises(ValueError, match="No relevant rivers found."):
-            RiverForcing(
-                grid=grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
-            )
+            RiverForcing(grid=grid, start_time=self.start_time, end_time=self.end_time)
 
 
 class TestRiverForcingWithPrescribedIndices:
-    def test_logging_message(self, iceland_test_grid, single_cell_indices, caplog):
+    start_time = datetime(1998, 1, 1)
+    end_time = datetime(1998, 3, 1)
+
+    def test_logging_message(self, single_cell_indices, caplog, iceland_test_grid):
 
         with caplog.at_level(logging.INFO):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=single_cell_indices,
             )
         # Verify the info message in the log
@@ -450,16 +452,13 @@ class TestRiverForcingWithPrescribedIndices:
     @pytest.mark.parametrize(
         "indices_fixture", ["single_cell_indices", "multi_cell_indices"]
     )
-    def test_indices_stay_untouched(self, iceland_test_grid, indices_fixture, request):
+    def test_indices_stay_untouched(self, indices_fixture, request, iceland_test_grid):
         indices = request.getfixturevalue(indices_fixture)
-
-        start_time = datetime(1998, 1, 1)
-        end_time = datetime(1998, 3, 1)
 
         river_forcing = RiverForcing(
             grid=iceland_test_grid,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=self.start_time,
+            end_time=self.end_time,
             indices=indices,
         )
         river_forcing.original_indices == indices
@@ -506,7 +505,7 @@ class TestRiverForcingWithPrescribedIndices:
         assert river_forcing == river_forcing_with_prescribed_single_cell_indices
 
     def test_reproducibility_with_flipped_dictionary_entries(
-        self, iceland_test_grid, tmp_path
+        self, tmp_path, iceland_test_grid
     ):
         indices = {
             "Hvita(Olfusa)": [(8, 6)],
@@ -526,20 +525,17 @@ class TestRiverForcingWithPrescribedIndices:
             "Bruara": [(8, 6)],
         }
 
-        start_time = datetime(1998, 1, 1)
-        end_time = datetime(1998, 3, 1)
-
         river_forcing = RiverForcing(
             grid=iceland_test_grid,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=self.start_time,
+            end_time=self.end_time,
             indices=indices,
         )
 
         river_forcing_from_flipped_indices = RiverForcing(
             grid=iceland_test_grid,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=self.start_time,
+            end_time=self.end_time,
             indices=flipped_indices,
         )
 
@@ -568,8 +564,8 @@ class TestRiverForcingWithPrescribedIndices:
             ):
                 RiverForcing(
                     grid=iceland_test_grid,
-                    start_time=datetime(1998, 1, 1),
-                    end_time=datetime(1998, 3, 1),
+                    start_time=self.start_time,
+                    end_time=self.end_time,
                     indices=indices,
                 )
 
@@ -581,8 +577,8 @@ class TestRiverForcingWithPrescribedIndices:
         ):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=fake_indices,
             )
 
@@ -590,8 +586,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="`indices` must be a dictionary."):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices="invalid",
             )
 
@@ -602,8 +598,8 @@ class TestRiverForcingWithPrescribedIndices:
         ):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices={},
             )
 
@@ -612,8 +608,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="River name `123` must be a string."):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )
 
@@ -624,8 +620,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="must be a list of tuples."):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )
 
@@ -636,8 +632,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="must be a tuple of length 2"):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )
 
@@ -648,8 +644,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="First element of tuple for river"):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )
 
@@ -658,8 +654,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="Second element of tuple for river"):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )
 
@@ -668,8 +664,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="Value of eta_rho for river"):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )
 
@@ -678,8 +674,8 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="Value of xi_rho for river"):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )
 
@@ -688,7 +684,7 @@ class TestRiverForcingWithPrescribedIndices:
         with pytest.raises(ValueError, match="Duplicate location"):
             RiverForcing(
                 grid=iceland_test_grid,
-                start_time=datetime(1998, 1, 1),
-                end_time=datetime(1998, 3, 1),
+                start_time=self.start_time,
+                end_time=self.end_time,
                 indices=indices,
             )

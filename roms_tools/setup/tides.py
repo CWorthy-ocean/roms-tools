@@ -25,7 +25,7 @@ from roms_tools.setup.utils import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class TidalForcing:
     """Represents tidal forcing for ROMS.
 
@@ -88,7 +88,7 @@ class TidalForcing:
         data.convert_to_float64()
 
         # select desired number of constituents
-        object.__setattr__(data, "ds", data.ds.isel(ntides=slice(None, self.ntides)))
+        data.ds = data.ds.isel(ntides=slice(None, self.ntides))
         self._correct_tides(data)
 
         data.apply_lateral_fill()
@@ -144,7 +144,7 @@ class TidalForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _input_checks(self):
 
@@ -218,7 +218,7 @@ class TidalForcing:
             },
         }
 
-        object.__setattr__(self, "variable_info", variable_info)
+        self.variable_info = variable_info
 
     def _write_into_dataset(self, processed_fields, d_meta):
 
@@ -504,7 +504,7 @@ class TidalForcing:
         var_names.pop("sal_Re", None)  # Remove "sal_Re" if it exists
         var_names.pop("sal_Im", None)  # Remove "sal_Im" if it exists
 
-        object.__setattr__(data, "var_names", var_names)
+        data.var_names = var_names
 
 
 def modified_julian_days(year, month, day, hour=0):

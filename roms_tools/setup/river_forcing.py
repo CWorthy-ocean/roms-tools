@@ -23,7 +23,7 @@ from roms_tools.setup.utils import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class RiverForcing:
     """Represents river forcing input data for ROMS.
 
@@ -118,13 +118,13 @@ class RiverForcing:
                 raise ValueError(
                     "No relevant rivers found. Consider increasing domain size or using a different river dataset."
                 )
-            object.__setattr__(self, "original_indices", original_indices)
+            self.original_indices = original_indices
             updated_indices = self._move_rivers_to_closest_coast(target_coords, data)
-            object.__setattr__(self, "indices", updated_indices)
+            self.indices = updated_indices
 
         else:
             logging.info("Use provided river indices.")
-            object.__setattr__(self, "original_indices", self.indices)
+            self.original_indices = self.indices
             check_river_locations_are_along_coast(self.grid.ds.mask_rho, self.indices)
             data.extract_named_rivers(self.indices)
 
@@ -135,11 +135,11 @@ class RiverForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name], fill_value=0.0)
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _input_checks(self):
         if self.source is None:
-            object.__setattr__(self, "source", {"name": "DAI"})
+            self.source = {"name": "DAI"}
 
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
@@ -148,11 +148,10 @@ class RiverForcing:
                 raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
-        object.__setattr__(
-            self,
-            "source",
-            {**self.source, "climatology": self.source.get("climatology", False)},
-        )
+        self.source = {
+            **self.source,
+            "climatology": self.source.get("climatology", False),
+        }
 
         # Check if 'indices' is provided and has the correct format
         if self.indices is not None:
@@ -255,23 +254,23 @@ class RiverForcing:
             - `river_tracer`: A `DataArray` representing tracer data for temperature, salinity and BGC tracers (if specified) for each river over time.
         """
         if self.source["climatology"]:
-            object.__setattr__(self, "climatology", True)
+            self.climatology = True
         else:
             if self.convert_to_climatology in ["never", "if_any_missing"]:
                 data_ds = data.select_relevant_times(data.ds)
                 if self.convert_to_climatology == "if_any_missing":
                     if data_ds[data.var_names["flux"]].isnull().any():
                         data.compute_climatology()
-                        object.__setattr__(self, "climatology", True)
+                        self.climatology = True
                     else:
-                        object.__setattr__(data, "ds", data_ds)
-                        object.__setattr__(self, "climatology", False)
+                        data.ds = data_ds
+                        self.climatology = False
                 else:
-                    object.__setattr__(data, "ds", data_ds)
-                    object.__setattr__(self, "climatology", False)
+                    data.ds = data_ds
+                    self.climatology = False
             elif self.convert_to_climatology == "always":
                 data.compute_climatology()
-                object.__setattr__(self, "climatology", True)
+                self.climatology = True
 
         ds = xr.Dataset()
 

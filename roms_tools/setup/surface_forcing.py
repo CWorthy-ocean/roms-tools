@@ -30,7 +30,7 @@ from roms_tools.setup.utils import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class SurfaceForcing:
     """Represents surface forcing input data for ROMS.
 
@@ -121,10 +121,10 @@ class SurfaceForcing:
             logging.info("Data will be interpolated onto grid coarsened by factor 2.")
         else:
             logging.info("Data will be interpolated onto fine grid.")
-        object.__setattr__(self, "use_coarse_grid", use_coarse_grid)
+        self.use_coarse_grid = use_coarse_grid
 
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
-        object.__setattr__(self, "target_coords", target_coords)
+        self.target_coords = target_coords
 
         data.choose_subdomain(
             target_coords,
@@ -171,7 +171,7 @@ class SurfaceForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is
@@ -197,11 +197,10 @@ class SurfaceForcing:
             raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
-        object.__setattr__(
-            self,
-            "source",
-            {**self.source, "climatology": self.source.get("climatology", False)},
-        )
+        self.source = {
+            **self.source,
+            "climatology": self.source.get("climatology", False),
+        }
 
         # Validate 'coarse_grid_mode'
         valid_modes = ["auto", "always", "never"]
@@ -339,7 +338,7 @@ class SurfaceForcing:
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
 
-        object.__setattr__(self, "variable_info", variable_info)
+        self.variable_info = variable_info
 
     def _apply_correction(self, processed_fields, data):
 

@@ -25,7 +25,7 @@ from roms_tools.setup.fill import LateralFill
 # lat-lon datasets
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class Dataset:
     """Represents forcing data on original grid.
 
@@ -132,8 +132,8 @@ class Dataset:
         self.infer_horizontal_resolution(ds)
 
         # Check whether the data covers the entire globe
-        object.__setattr__(self, "is_global", self.check_if_global(ds))
-        object.__setattr__(self, "ds", ds)
+        self.is_global = self.check_if_global(ds)
+        self.ds = ds
 
         if self.apply_post_processing:
             self.post_process()
@@ -354,7 +354,7 @@ class Dataset:
         resolution = np.mean([lat_resolution, lon_resolution])
 
         # Set the computed resolution as an attribute
-        object.__setattr__(self, "resolution", resolution)
+        self.resolution = resolution
 
     def compute_minimal_grid_spacing(self, ds: xr.Dataset):
         """Compute the minimal grid spacing in a dataset based on latitude and longitude
@@ -528,7 +528,7 @@ class Dataset:
             This method modifies the dataset in place and does not return anything.
         """
         ds = self.ds.astype({var: "float64" for var in self.ds.data_vars})
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def choose_subdomain(
         self,
@@ -671,7 +671,7 @@ class Dataset:
         if return_copy:
             return Dataset.from_ds(self, subdomain)
         else:
-            object.__setattr__(self, "ds", subdomain)
+            self.ds = subdomain
 
     def apply_lateral_fill(self):
         """Apply lateral fill to variables using the dataset's mask and grid dimensions.
@@ -757,7 +757,7 @@ class Dataset:
         dataset = cls.__new__(cls)
 
         # Directly set the provided dataset as the 'ds' attribute
-        object.__setattr__(dataset, "ds", ds)
+        dataset.ds = ds
 
         # Copy all other attributes from the original data instance
         for attr in vars(original_dataset):
@@ -767,7 +767,7 @@ class Dataset:
         return dataset
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class TPXODataset(Dataset):
     """Represents tidal data on the original grid from the TPXO dataset.
 
@@ -858,15 +858,11 @@ class TPXODataset(Dataset):
             {"nx": "longitude", "ny": "latitude", self.dim_names["ntides"]: "ntides"}
         )
 
-        object.__setattr__(
-            self,
-            "dim_names",
-            {
-                "latitude": "latitude",
-                "longitude": "longitude",
-                "ntides": "ntides",
-            },
-        )
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "ntides": "ntides",
+        }
 
         return ds
 
@@ -909,15 +905,15 @@ class TPXODataset(Dataset):
             ds["mask"] = mask
             ds = ds.drop_vars(["depth"])
 
-            object.__setattr__(self, "ds", ds)
+            self.ds = ds
 
         # Remove "depth" from var_names
         updated_var_names = {**self.var_names}  # Create a copy of the dictionary
         updated_var_names.pop("depth", None)  # Remove "depth" if it exists
-        object.__setattr__(self, "var_names", updated_var_names)
+        self.var_names = updated_var_names
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class GLORYSDataset(Dataset):
     """Represents GLORYS data on original grid.
 
@@ -996,7 +992,7 @@ class GLORYSDataset(Dataset):
         self.ds["mask_vel"] = mask_vel
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class CESMDataset(Dataset):
     """Represents CESM data on original grid.
 
@@ -1077,12 +1073,12 @@ class CESMDataset(Dataset):
             # Update dimension names
             updated_dim_names = self.dim_names.copy()
             updated_dim_names["time"] = "time"
-            object.__setattr__(self, "dim_names", updated_dim_names)
+            self.dim_names = updated_dim_names
 
         return ds
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class CESMBGCDataset(CESMDataset):
     """Represents CESM BGC data on original grid.
 
@@ -1184,12 +1180,12 @@ class CESMBGCDataset(CESMDataset):
             if "z_t_150m" in ds.variables:
                 ds = ds.drop_vars("z_t_150m")
             # update dataset
-            object.__setattr__(self, "ds", ds)
+            self.ds = ds
 
             # Update dim_names with "depth": "depth" key-value pair
             updated_dim_names = self.dim_names.copy()
             updated_dim_names["depth"] = "depth"
-            object.__setattr__(self, "dim_names", updated_dim_names)
+            self.dim_names = updated_dim_names
 
         mask = xr.where(
             self.ds[self.var_names["PO4"]]
@@ -1202,7 +1198,7 @@ class CESMBGCDataset(CESMDataset):
         self.ds["mask"] = mask
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class CESMBGCSurfaceForcingDataset(CESMDataset):
     """Represents CESM BGC surface forcing data on original grid.
 
@@ -1258,7 +1254,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
         if "z_t" in self.ds.variables:
             ds = self.ds.drop_vars("z_t")
-            object.__setattr__(self, "ds", ds)
+            self.ds = ds
 
         mask = xr.where(
             self.ds[self.var_names["pco2_air"]]
@@ -1271,7 +1267,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
         self.ds["mask"] = mask
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class ERA5Dataset(Dataset):
     """Represents ERA5 data on original grid.
 
@@ -1371,27 +1367,27 @@ class ERA5Dataset(Dataset):
             ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
             ds["qair"].attrs["units"] = "kg/kg"
             ds = ds.drop_vars([self.var_names["d2m"]])
-            object.__setattr__(self, "ds", ds)
+            self.ds = ds
 
             # Update var_names dictionary
             var_names = {**self.var_names, "qair": "qair"}
             var_names.pop("d2m")
-            object.__setattr__(self, "var_names", var_names)
+            self.var_names = var_names
 
         if "mask" in self.var_names.keys():
             ds = self.ds
             mask = xr.where(self.ds[self.var_names["mask"]].isel(time=0).isnull(), 0, 1)
             ds["mask"] = mask
             ds = ds.drop_vars([self.var_names["mask"]])
-            object.__setattr__(self, "ds", ds)
+            self.ds = ds
 
             # Remove mask from var_names dictionary
             var_names = self.var_names
             var_names.pop("mask")
-            object.__setattr__(self, "var_names", var_names)
+            self.var_names = var_names
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class ERA5Correction(Dataset):
     """Global dataset to correct ERA5 radiation. The dataset contains multiplicative
     correction factors for the ERA5 shortwave radiation, obtained by comparing the
@@ -1493,10 +1489,10 @@ class ERA5Correction(Dataset):
             raise ValueError(
                 "The correction dataset does not contain all specified longitude values."
             )
-        object.__setattr__(self, "ds", subdomain)
+        self.ds = subdomain
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class ETOPO5Dataset(Dataset):
     """Represents topography data on the original grid from the ETOPO5 dataset.
 
@@ -1553,7 +1549,7 @@ class ETOPO5Dataset(Dataset):
         return ds
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class SRTM15Dataset(Dataset):
     """Represents topography data on the original grid from the SRTM15 dataset.
 
@@ -1589,7 +1585,7 @@ class SRTM15Dataset(Dataset):
 
 
 # river datasets
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class RiverDataset:
     """Represents river data.
 
@@ -1647,7 +1643,7 @@ class RiverDataset:
 
         # Select relevant times
         ds = self.add_time_info(ds)
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def load_data(self) -> xr.Dataset:
         """Load dataset from the specified file.
@@ -1785,13 +1781,13 @@ class RiverDataset:
 
         ds = assign_dates_to_climatology(self.ds, "month")
         ds = ds.swap_dims({"month": "time"})
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
         updated_dim_names = {**self.dim_names}
         updated_dim_names["time"] = "time"
-        object.__setattr__(self, "dim_names", updated_dim_names)
+        self.dim_names = updated_dim_names
 
-        object.__setattr__(self, "climatology", True)
+        self.climatology = True
 
     def sort_by_river_volume(self, ds: xr.Dataset) -> xr.Dataset:
         """Sorts the dataset by river volume in descending order (largest rivers first),
@@ -1911,7 +1907,7 @@ class RiverDataset:
             ds = xr.Dataset()
             river_indices = {}
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
         return river_indices
 
@@ -1961,10 +1957,10 @@ class RiverDataset:
             )
 
         # Set the filtered dataset as the new `ds`
-        object.__setattr__(self, "ds", ds_filtered)
+        self.ds = ds_filtered
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class DaiRiverDataset(RiverDataset):
     """Represents river data from the Dai river dataset.
 

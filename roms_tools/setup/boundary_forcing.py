@@ -35,7 +35,7 @@ from roms_tools.setup.utils import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class BoundaryForcing:
     """Represents boundary forcing input data for ROMS.
 
@@ -124,7 +124,7 @@ class BoundaryForcing:
 
         self._input_checks()
         # Dataset for depth coordinates
-        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
+        self.ds_depth_coords = xr.Dataset()
 
         target_coords = get_target_coords(self.grid)
 
@@ -335,7 +335,7 @@ class BoundaryForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _input_checks(self):
         # Check that start_time and end_time are both None or none of them is
@@ -361,11 +361,10 @@ class BoundaryForcing:
             raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
-        object.__setattr__(
-            self,
-            "source",
-            {**self.source, "climatology": self.source.get("climatology", False)},
-        )
+        self.source = {
+            **self.source,
+            "climatology": self.source.get("climatology", False),
+        }
 
         # Ensure adjust_depth_for_sea_surface_height is only used with type="physics"
         if self.type == "bgc" and self.adjust_depth_for_sea_surface_height:
@@ -373,7 +372,7 @@ class BoundaryForcing:
                 "adjust_depth_for_sea_surface_height is not applicable for BGC fields. "
                 "Setting it to False."
             )
-            object.__setattr__(self, "adjust_depth_for_sea_surface_height", False)
+            self.adjust_depth_for_sea_surface_height = False
         elif self.adjust_depth_for_sea_surface_height:
             logging.info("Sea surface height will be used to adjust depth coordinates.")
         else:
@@ -495,7 +494,7 @@ class BoundaryForcing:
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
 
-        object.__setattr__(self, "variable_info", variable_info)
+        self.variable_info = variable_info
 
     def _write_into_dataset(self, direction, processed_fields, ds=None):
         if ds is None:
@@ -563,7 +562,7 @@ class BoundaryForcing:
 
         bdry_coords = get_boundary_coords()
 
-        object.__setattr__(self, "bdry_coords", bdry_coords)
+        self.bdry_coords = bdry_coords
 
     def _get_depth_coordinates(
         self,

@@ -24,7 +24,7 @@ from roms_tools.setup.utils import extract_single_value
 from pathlib import Path
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class Grid:
     """A single ROMS grid, used for creating, plotting, and then saving a new ROMS
     domain grid.
@@ -131,7 +131,7 @@ class Grid:
 
     def _input_checks(self):
         if self.topography_source is None:
-            object.__setattr__(self, "topography_source", {"name": "ETOPO5"})
+            self.topography_source = {"name": "ETOPO5"}
 
         if "name" not in self.topography_source:
             raise ValueError(
@@ -157,7 +157,7 @@ class Grid:
                 "========================================================================================================"
             )
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False
@@ -223,9 +223,9 @@ class Grid:
             )
 
         # Update the grid's dataset and related attributes
-        object.__setattr__(self, "ds", ds)
-        object.__setattr__(self, "topography_source", topography_source)
-        object.__setattr__(self, "hmin", hmin)
+        self.ds = ds
+        self.topography_source = topography_source
+        self.hmin = hmin
 
     def update_vertical_coordinate(
         self, N=None, theta_s=None, theta_b=None, hc=None, verbose=False
@@ -321,11 +321,11 @@ class Grid:
                 "========================================================================================================"
             )
 
-        object.__setattr__(self, "ds", ds)
-        object.__setattr__(self, "theta_s", theta_s)
-        object.__setattr__(self, "theta_b", theta_b)
-        object.__setattr__(self, "hc", hc)
-        object.__setattr__(self, "N", N)
+        self.ds = ds
+        self.theta_s = theta_s
+        self.theta_b = theta_b
+        self.hc = hc
+        self.N = N
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.
@@ -342,9 +342,9 @@ class Grid:
             np.abs(self.ds.lon_rho.diff("xi_rho")).max() > 300
             or np.abs(self.ds.lon_rho.diff("eta_rho")).max() > 300
         ):
-            object.__setattr__(self, "straddle", True)
+            self.straddle = True
         else:
-            object.__setattr__(self, "straddle", False)
+            self.straddle = False
 
     def _coarsen(self):
         """Update the grid by adding grid variables that are coarsened versions of the
@@ -391,7 +391,7 @@ class Grid:
             ds[coarse_var].attrs["long_name"] = f"{long_name} on coarsened grid"
             ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def plot(
         self, bathymetry: bool = True, title: str = None, with_dim_names: bool = False
@@ -581,14 +581,14 @@ class Grid:
         grid = cls.__new__(cls)
 
         # Set the dataset for the grid instance
-        object.__setattr__(grid, "ds", ds)
+        grid.ds = ds
 
         # Check if the Greenwich meridian goes through the domain.
         grid._straddle()
 
         if not all(coord in grid.ds for coord in ["lat_u", "lon_u", "lat_v", "lon_v"]):
             ds = _add_lat_lon_at_velocity_points(grid.ds, grid.straddle)
-            object.__setattr__(grid, "ds", ds)
+            grid.ds = ds
 
         # Coarsen the grid if necessary
         if not all(
@@ -606,7 +606,7 @@ class Grid:
         for var in ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]:
             if var not in ds.coords:
                 ds = grid.ds.set_coords(var)
-                object.__setattr__(grid, "ds", ds)
+                grid.ds = ds
 
         # Update vertical coordinate if necessary
         if not all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
@@ -620,14 +620,14 @@ class Grid:
                 N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=True
             )
         else:
-            object.__setattr__(grid, "theta_s", ds.attrs["theta_s"].item())
-            object.__setattr__(grid, "theta_b", ds.attrs["theta_b"].item())
-            object.__setattr__(grid, "hc", ds.attrs["hc"].item())
-            object.__setattr__(grid, "N", len(ds.s_rho))
+            grid.theta_s = ds.attrs["theta_s"].item()
+            grid.theta_b = ds.attrs["theta_b"].item()
+            grid.hc = ds.attrs["hc"].item()
+            grid.N = len(ds.s_rho)
 
         # Manually set the remaining attributes by extracting parameters from dataset
-        object.__setattr__(grid, "nx", ds.sizes["xi_rho"] - 2)
-        object.__setattr__(grid, "ny", ds.sizes["eta_rho"] - 2)
+        grid.nx = ds.sizes["xi_rho"] - 2
+        grid.ny = ds.sizes["eta_rho"] - 2
         if "center_lon" in ds.attrs:
             center_lon = ds.attrs["center_lon"]
         elif "tra_lon" in ds:
@@ -637,7 +637,7 @@ class Grid:
                 "Missing grid information: 'center_lon' attribute or 'tra_lon' variable "
                 "must be present in the dataset."
             )
-        object.__setattr__(grid, "center_lon", center_lon)
+        grid.center_lon = center_lon
         if "center_lat" in ds.attrs:
             center_lat = ds.attrs["center_lat"]
         elif "tra_lat" in ds:
@@ -647,7 +647,7 @@ class Grid:
                 "Missing grid information: 'center_lat' attribute or 'tra_lat' variable "
                 "must be present in the dataset."
             )
-        object.__setattr__(grid, "center_lat", center_lat)
+        grid.center_lat = center_lat
         if "rot" in ds.attrs:
             rot = ds.attrs["rot"]
         elif "rotate" in ds:
@@ -657,7 +657,7 @@ class Grid:
                 "Missing grid information: 'rot' attribute or 'rotate' variable "
                 "must be present in the dataset."
             )
-        object.__setattr__(grid, "rot", rot)
+        grid.rot = rot
 
         for attr in [
             "size_x",
@@ -848,7 +848,7 @@ class Grid:
                 "========================================================================================================"
             )
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _add_global_metadata(self, ds):
         """Add global metadata and attributes to the dataset.

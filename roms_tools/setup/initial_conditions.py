@@ -34,7 +34,7 @@ from roms_tools.setup.utils import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class InitialConditions:
     """Represents initial conditions for ROMS, including physical and biogeochemical
     data.
@@ -115,7 +115,7 @@ class InitialConditions:
 
         self._input_checks()
         # Dataset for depth coordinates
-        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
+        self.ds_depth_coords = xr.Dataset()
 
         processed_fields = {}
         processed_fields = self._process_data(processed_fields, type="physics")
@@ -135,7 +135,7 @@ class InitialConditions:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _process_data(self, processed_fields, type="physics"):
 
@@ -247,14 +247,10 @@ class InitialConditions:
         if "path" not in self.source.keys():
             raise ValueError("`source` must include a 'path'.")
         # set self.source["climatology"] to False if not provided
-        object.__setattr__(
-            self,
-            "source",
-            {
-                **self.source,
-                "climatology": self.source.get("climatology", False),
-            },
-        )
+        self.source = {
+            **self.source,
+            "climatology": self.source.get("climatology", False),
+        }
         if self.bgc_source is not None:
             if "name" not in self.bgc_source.keys():
                 raise ValueError(
@@ -265,14 +261,10 @@ class InitialConditions:
                     "`bgc_source` must include a 'path' if it is provided."
                 )
             # set self.bgc_source["climatology"] to False if not provided
-            object.__setattr__(
-                self,
-                "bgc_source",
-                {
-                    **self.bgc_source,
-                    "climatology": self.bgc_source.get("climatology", False),
-                },
-            )
+            self.bgc_source = {
+                **self.bgc_source,
+                "climatology": self.bgc_source.get("climatology", False),
+            }
         if self.adjust_depth_for_sea_surface_height:
             logging.info("Sea surface height will be used to adjust depth coordinates.")
         else:

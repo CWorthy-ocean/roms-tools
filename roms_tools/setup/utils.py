@@ -492,36 +492,48 @@ def get_variable_metadata():
 def compute_missing_bgc_variables(bgc_data):
     """Fills in missing biogeochemical (BGC) variables in the input dictionary.
 
-    This function checks if specific BGC variables are missing from the provided
-    dictionary and computes them using predefined relationships with existing
-    variables. The computed variables are added to the dictionary.
+    This function checks for missing BGC variables in the provided dictionary and
+    computes them based on predefined relationships with existing variables. The
+    relationships specify either a multiplication factor applied to an existing
+    variable or a constant value if no related variable is available. The resulting
+    variables are added to the dictionary.
 
     Parameters
     ----------
     bgc_data : dict
-        A dictionary containing biogeochemical variables. Missing variables will
-        be computed and added.
+        A dictionary containing biogeochemical variables as xarray DataArrays.
+        Missing variables are computed and added to this dictionary.
+
+        Assumptions:
+        - If `Fe` is part of the input dictionary, it is in units of mmol m-3.
+        - If `CHL` is part of the input dictionary, it is in units of mg m-3.
+        - If `ALK` is part of the input dictionary, it is in units of meq m-3 = mmol m-3.
+        - If `DIC` is part of the input dictionary, it is in units of mmol m-3.
 
     Returns
     -------
     dict
         The updated dictionary with missing BGC variables filled in.
+
+    Notes
+    -----
+    - If `NH4`, `DOC`, `DON`, `DOP`, `DOCr`, `DONr`, and `DOPr` are not part of the input
+      dictionary, they are filled with constant values.
+    - `CHL` is removed from the dictionary after the necessary calculations.
     """
 
     # Define the relationships for missing variables
     variable_relations = {
         "NH4": (None, 0.0),
-        # Pierre's Fe has units mmol m-3
         "Lig": ("Fe", 3),  # is that in mmol m-3?
-        "DIC_ALT_CO2": ("DIC", 1),  # mmol m-3
-        "ALK_ALT_CO2": ("ALK", 1),  # meq m-3 = mmol m-3
+        "DIC_ALT_CO2": ("DIC", 1),
+        "ALK_ALT_CO2": ("ALK", 1),
         "DOC": (None, 0.0),
         "DON": (None, 1.0),  # is that in mmom m-3?
         "DOP": (None, 0.1),  # is that in mmol m-3?
         "DOCr": (None, 10**-6),  # is that in mmol m-3?
         "DONr": (None, 0.8),  # is that in mmol m-3?
         "DOPr": (None, 0.003),  # is that in mmol m-3?
-        # Pierre's CHL has units mg m-3
         "zooC": ("CHL", 1.35),  # is that in mmol m-3?
         "spChl": ("CHL", 0.675),  # is that in mg m-3?
         "spC": ("CHL", 3.375),  # is that in mmol m-3?
@@ -555,25 +567,33 @@ def compute_missing_bgc_variables(bgc_data):
 def compute_missing_surface_bgc_variables(bgc_data):
     """Fills in missing surface biogeochemical (BGC) variables in the input dictionary.
 
-    This function checks if specific surface BGC variables are missing from the provided
-    dictionary and computes them using predefined relationships with existing
-    variables. The computed variables are added to the dictionary.
+    This function checks for missing surface BGC variables in the provided dictionary and
+    computes them based on predefined relationships with existing variables. The relationships
+    specify either a multiplication factor applied to an existing variable or a constant value
+    if no related variable is available. The resulting variables are added to the dictionary.
 
     Parameters
     ----------
     bgc_data : dict
-        A dictionary containing surface biogeochemical variables. Missing variables will
-        be computed and added.
+        A dictionary containing surface biogeochemical variables as xarray DataArrays.
+        Missing variables are computed and added to this dictionary.
+
+        Assumptions:
+        - If `pco2_air` is part of the input dictionary, it is in units of ppmv.
 
     Returns
     -------
     dict
-        The updated dictionary with missing BGC variables filled in.
+        The updated dictionary with missing surface BGC variables filled in.
+
+    Notes
+    -----
+    - If `nox` and `nhy` are not part of the input dictionary, the are assigned constant values.
     """
 
     # Define the relationships for missing variables
     variable_relations = {
-        "pco2_air_alt": ("pco2_air", 1.0),  # ppmv
+        "pco2_air_alt": ("pco2_air", 1.0),
         "nox": (None, 1e-13),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
         "nhy": (None, 5e-12),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
     }

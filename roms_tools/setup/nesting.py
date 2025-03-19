@@ -20,7 +20,7 @@ from roms_tools.setup.utils import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class ChildGrid(Grid):
     """Represents a ROMS child grid that is compatible with the provided parent grid.
 
@@ -87,7 +87,7 @@ class ChildGrid(Grid):
             self.metadata["period"],
         )
 
-        object.__setattr__(self, "ds_nesting", ds_nesting)
+        self.ds_nesting = ds_nesting
 
     def _modify_child_topography_and_mask(self):
         """Adjust the child grid's topography and mask to align with the parent grid.
@@ -107,7 +107,7 @@ class ChildGrid(Grid):
             parent_grid_ds, child_grid_ds
         )
 
-        object.__setattr__(self, "ds", child_grid_ds)
+        self.ds = child_grid_ds
 
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False

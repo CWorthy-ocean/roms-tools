@@ -8,6 +8,8 @@
 
 ### Internal Changes
 
+* Unfreeze arguments in all dataclasses ([#276](https://github.com/CWorthy-ocean/roms-tools/pull/276))
+
 ### Documentation
 
 ### Bugfixes

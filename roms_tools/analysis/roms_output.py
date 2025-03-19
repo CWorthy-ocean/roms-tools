@@ -15,7 +15,7 @@ from roms_tools.vertical_coordinate import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class ROMSOutput:
     """Represents ROMS model output.
 
@@ -49,10 +49,10 @@ class ROMSOutput:
         self._check_vertical_coordinate(ds)
         ds = self._add_absolute_time(ds)
         ds = self._add_lat_lon_coords(ds)
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
         # Dataset for depth coordinates
-        object.__setattr__(self, "ds_depth_coords", xr.Dataset())
+        self.ds_depth_coords = xr.Dataset()
 
     def plot(
         self,
@@ -435,7 +435,7 @@ class ROMSOutput:
                         )
                 else:
                     # Set the model reference date if not already set
-                    object.__setattr__(self, "model_reference_date", inferred_date)
+                    self.model_reference_date = inferred_date
             else:
                 # Handle case where no match is found
                 if hasattr(self, "model_reference_date") and self.model_reference_date:

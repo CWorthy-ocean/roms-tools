@@ -44,6 +44,7 @@ class RiverForcing:
             - A single string (with or without wildcards).
             - A single Path object.
             - A list of strings or Path objects containing multiple files.
+
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
         The default is the Dai and Trenberth global river dataset (updated in May 2019), which does not require a path.

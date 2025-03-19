@@ -1,0 +1,8 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "bry_time"
+    ],
+    "calendar": "proleptic_gregorian",
+    "long_name": "absolute time",
+    "units": "hours since 2000-01-16 12:00:00"
+}

@@ -6,7 +6,7 @@ import gcm_filters
 from roms_tools.setup.utils import handle_boundaries
 import warnings
 from itertools import count
-from roms_tools.regrid import LateralRegrid
+from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
 
 
@@ -150,7 +150,7 @@ def _make_raw_topography(
 
     if verbose:
         start_time = time.time()
-    lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+    lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
     hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]], method=method)
     if verbose:
         logging.info(

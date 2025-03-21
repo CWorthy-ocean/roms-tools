@@ -1,7 +1,7 @@
 import xarray as xr
 
 
-class LateralRegrid:
+class LateralRegridToROMS:
     """Handles lateral regridding of data onto a new spatial grid."""
 
     def __init__(self, target_coords, source_dim_names):
@@ -48,8 +48,7 @@ class LateralRegrid:
         )
         return regridded
 
-
-class VerticalRegrid:
+class VerticalRegridToROMS:
     """Interpolates data onto new vertical (depth) coordinates.
 
     Parameters

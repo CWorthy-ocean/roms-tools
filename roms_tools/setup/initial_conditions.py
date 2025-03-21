@@ -8,7 +8,7 @@ from pathlib import Path
 import logging
 from datetime import datetime
 from roms_tools import Grid
-from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.utils import (
     transpose_dimensions,
@@ -161,7 +161,7 @@ class InitialConditions:
         var_names = variable_info.keys()
 
         # lateral regridding
-        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
 
         for var_name in var_names:
             if var_name in data.var_names.keys():
@@ -206,7 +206,7 @@ class InitialConditions:
         # Vertical regridding
         for location in ["rho", "u", "v"]:
             if len(var_names_dict[location]) > 0:
-                vertical_regrid = VerticalRegrid(
+                vertical_regrid = VerticalRegridToROMS(
                     self.ds_depth_coords[f"layer_depth_{location}"],
                     data.ds[data.dim_names["depth"]],
                 )

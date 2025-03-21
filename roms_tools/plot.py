@@ -258,8 +258,8 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         )
 
     depths_to_check = [
-        "layer_depth",
-        "interface_depth",
+        "layer",
+        "interface",
     ]
     try:
         depth_label = next(
@@ -269,7 +269,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         )
     except StopIteration:
         raise ValueError(
-            "None of the coordinates found in field.coords starts with (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v)"
+            "None of the coordinates found in field.coords starts with (layer_depth, interface_depth)"
         )
 
     more_kwargs = {"x": xdim, "y": depth_label, "yincrease": False}
@@ -317,13 +317,13 @@ def _profile_plot(field, title="", ax=None):
         )
     except StopIteration:
         raise ValueError(
-            "None of the expected coordinates (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v) found in field.coords"
+            "None of the coordinates found in field.coords starts with (layer_depth, interface_depth)"
         )
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(4, 7))
     kwargs = {"y": depth_label, "yincrease": False}
-    field.plot(**kwargs)
+    field.plot(**kwargs, linewidth=2)
     ax.set_title(title)
     ax.set_ylabel("Depth [m]")
     ax.grid()
@@ -349,7 +349,7 @@ def _line_plot(field, title="", ax=None):
     """
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-    field.plot(ax=ax)
+    field.plot(ax=ax, linewidth=2)
 
     # Loop through the NaNs in the field and add grey vertical bars
     nan_mask = np.isnan(field.values)

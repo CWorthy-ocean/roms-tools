@@ -381,7 +381,9 @@ class SurfaceForcing:
             )
 
         # Spatial regridding
-        lateral_regrid = LateralRegridToROMS(self.target_coords, correction_data.dim_names)
+        lateral_regrid = LateralRegridToROMS(
+            self.target_coords, correction_data.dim_names
+        )
         corr_factor = lateral_regrid.apply(corr_factor)
 
         processed_fields["swrad"] = processed_fields["swrad"] * corr_factor

@@ -1,6 +1,5 @@
 def _validate_plot_inputs(field, time, s, eta, xi, depth, lat, lon, include_boundary):
-    """
-    Validate input parameters for the plot method.
+    """Validate input parameters for the plot method.
 
     Parameters
     ----------
@@ -40,38 +39,51 @@ def _validate_plot_inputs(field, time, s, eta, xi, depth, lat, lon, include_boun
         if time >= len(field.time):
             raise ValueError(
                 f"Invalid time index: The specified time index ({time}) exceeds the maximum index "
-                f"({len(field.time) - 1}) for the 'time' dimension in variable '{var_name}'."
-            )   
-    else:       
+                f"({len(field.time) - 1}) for the 'time' dimension."
+            )
+    else:
         if time > 0:
             raise ValueError(
-                f"Invalid input: The variable '{var_name}' does not have a 'time' dimension, "
+                f"Invalid input: The field does not have a 'time' dimension, "
                 f"but a time index ({time}) greater than 0 was provided."
             )
-        
+
     # Check for unsupported lat/lon combinations
-    if (lat is None) != (lon is None): 
-        raise NotImplementedError("Both `lat` and `lon` must be specified together, or neither.")
-            
+    if (lat is None) != (lon is None):
+        raise NotImplementedError(
+            "Both `lat` and `lon` must be specified together, or neither."
+        )
+
     # Check if depth is specified, which is not yet supported
     if depth is not None:
         raise NotImplementedError(
             "Plotting at a specific depth is not implemented yet."
-        )   
-        
+        )
+
     # Check conflicting dimension choices
-    if (s is not None and depth is not None):
+    if s is not None and depth is not None:
         raise ValueError(
             "Conflicting input: You cannot specify both 's' and 'depth' at the same time."
-        )       
-    if any([eta is not None, xi is not None]) and any([lat is not None, lon is not None]):
+        )
+    if any([eta is not None, xi is not None]) and any(
+        [lat is not None, lon is not None]
+    ):
         raise ValueError(
             "Conflicting input: You cannot specify 'lat' or 'lon' simultaneously with 'eta' or 'xi'."
-        )   
-                
+        )
+
     # 3D fields: Check for valid dimension specification
     if len(field.dims) == 3:
-        if not any([s is not None, eta is not None, xi is not None, depth is not None, lat is not None, lon is not None]):
+        if not any(
+            [
+                s is not None,
+                eta is not None,
+                xi is not None,
+                depth is not None,
+                lat is not None,
+                lon is not None,
+            ]
+        ):
             raise ValueError(
                 "Invalid input: For 3D fields, you must specify at least one of the dimensions 's', 'eta', 'xi', 'depth', 'lat', or 'lon'."
             )
@@ -79,7 +91,7 @@ def _validate_plot_inputs(field, time, s, eta, xi, depth, lat, lon, include_boun
             raise ValueError(
                 "Ambiguous input: For 3D fields, specify at most two of 's', 'eta', 'xi', 'depth', 'lat', or 'lon'. Specifying more than two is not allowed."
             )
-      
+
     # 2D fields: Check for conflicts in dimension choices
     if len(field.dims) == 2:
         if all([eta is not None, xi is not None]):
@@ -95,7 +107,9 @@ def _validate_plot_inputs(field, time, s, eta, xi, depth, lat, lon, include_boun
     if eta is not None:
         dim = "eta_rho" if "eta_rho" in field.dims else "eta_v"
         if not eta < len(field[dim]):
-            raise ValueError(f"Invalid eta index: {eta} is out of bounds. Must be between 0 and {len(field[dim]) - 1}.")
+            raise ValueError(
+                f"Invalid eta index: {eta} is out of bounds. Must be between 0 and {len(field[dim]) - 1}."
+            )
         if not include_boundary:
             if eta == 0 or eta == len(field[dim]) - 1:
                 raise ValueError(
@@ -106,11 +120,12 @@ def _validate_plot_inputs(field, time, s, eta, xi, depth, lat, lon, include_boun
     if xi is not None:
         dim = "xi_rho" if "xi_rho" in field.dims else "xi_u"
         if not xi < len(field[dim]):
-            raise ValueError(f"Invalid eta index: {xi} is out of bounds. Must be between 0 and {len(field[dim]) - 1}.")
+            raise ValueError(
+                f"Invalid eta index: {xi} is out of bounds. Must be between 0 and {len(field[dim]) - 1}."
+            )
         if not include_boundary:
             if xi == 0 or xi == len(field[dim]) - 1:
                 raise ValueError(
                     f"Invalid xi index: {xi} lies on the boundary, which is excluded when `include_boundary = False`. "
                     "Either set `include_boundary = True`, or adjust eta to avoid boundary values."
                 )
-

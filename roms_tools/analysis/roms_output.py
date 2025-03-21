@@ -245,9 +245,8 @@ class ROMSOutput:
                 )
 
         # Prepare figure title
-        title = field.long_name
         formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
-        title = title + f", time: {formatted_time}"
+        title = f"time: {formatted_time}"
 
         # Slice or regrid the field horizontally as desired
         def _slice_along_dimension(field, title, dim_name, idx):

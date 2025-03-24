@@ -70,7 +70,8 @@ class ROMSOutput:
         depth_contours=False,
         ax=None,
     ) -> None:
-        """Generate a plot of a ROMS output field for a specified vertical or horizontal slice.
+        """Generate a plot of a ROMS output field for a specified vertical or horizontal
+        slice.
 
         Parameters
         ----------

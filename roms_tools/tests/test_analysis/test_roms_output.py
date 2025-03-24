@@ -7,6 +7,11 @@ from datetime import datetime
 from roms_tools import Grid, ROMSOutput
 from roms_tools.download import download_test_data
 
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
+
 
 @pytest.fixture
 def roms_output_from_restart_file(use_dask):
@@ -235,7 +240,7 @@ def test_that_coordinates_are_added(use_dask):
     assert "lon_rho" in output.ds.coords
 
 
-def test_plot(roms_output_from_restart_file, use_dask):
+def test_plot_on_native_model_grid(roms_output_from_restart_file, use_dask):
 
     for include_boundary in [False, True]:
         for depth_contours in [False, True]:
@@ -247,7 +252,6 @@ def test_plot(roms_output_from_restart_file, use_dask):
                     "depth_contours": depth_contours,
                 }
 
-                # plot on native model grid
                 roms_output_from_restart_file.plot(var_name, time=1, s=-1, **kwargs)
                 roms_output_from_restart_file.plot(var_name, time=1, eta=1, **kwargs)
                 roms_output_from_restart_file.plot(var_name, time=1, xi=1, **kwargs)
@@ -273,7 +277,24 @@ def test_plot(roms_output_from_restart_file, use_dask):
                     **kwargs,
                 )
 
-                # plot on lat, lon, depth
+            # 2D fields
+            roms_output_from_restart_file.plot("zeta", time=1, **kwargs)
+            roms_output_from_restart_file.plot("zeta", time=1, eta=1, **kwargs)
+            roms_output_from_restart_file.plot("zeta", time=1, xi=1, **kwargs)
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_plot_on_lat_lon(roms_output_from_restart_file, use_dask):
+
+    for include_boundary in [False, True]:
+        for depth_contours in [False, True]:
+
+            # 3D fields
+            for var_name in ["temp", "u", "v"]:
+                kwargs = {
+                    "include_boundary": include_boundary,
+                    "depth_contours": depth_contours,
+                }
                 roms_output_from_restart_file.plot(
                     var_name,
                     time=1,
@@ -281,12 +302,6 @@ def test_plot(roms_output_from_restart_file, use_dask):
                     lon=-128,
                     **kwargs,
                 )
-
-            # 2D fields
-            # plot on native model grid
-            roms_output_from_restart_file.plot("zeta", time=1, **kwargs)
-            roms_output_from_restart_file.plot("zeta", time=1, eta=1, **kwargs)
-            roms_output_from_restart_file.plot("zeta", time=1, xi=1, **kwargs)
 
 
 def test_plot_errors(roms_output_from_restart_file, use_dask):

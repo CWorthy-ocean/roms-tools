@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 import xarray as xr
-from roms_tools.regrid import VerticalRegrid
+from roms_tools.regrid import VerticalRegridToROMS
 
 
 def vertical_regridder(depth_values, layer_depth_rho_values):
@@ -21,7 +21,7 @@ def vertical_regridder(depth_values, layer_depth_rho_values):
     target_depth = xr.DataArray(data=layer_depth_rho_values, dims=["s_rho"])
     source_depth = xr.DataArray(data=depth_values, dims=["depth"])
 
-    return VerticalRegrid(target_depth, source_depth)
+    return VerticalRegridToROMS(target_depth, source_depth)
 
 
 @pytest.mark.parametrize(

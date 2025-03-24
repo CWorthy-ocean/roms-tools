@@ -245,7 +245,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
-    dims_to_check = ["eta_rho", "eta_u", "eta_v", "xi_rho", "xi_u", "xi_v"]
+    dims_to_check = ["eta_rho", "eta_v", "xi_rho", "xi_u", "lat", "lon"]
     try:
         xdim = next(
             dim
@@ -254,7 +254,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         )
     except StopIteration:
         raise ValueError(
-            "None of the dimensions found in field.dims starts with (eta_rho, eta_u, eta_v, xi_rho, xi_u, xi_v)"
+            "None of the dimensions found in field.dims starts with (eta_rho, eta_v, xi_rho, xi_u, lat, lon)"
         )
 
     depths_to_check = [
@@ -272,7 +272,11 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
             "None of the coordinates found in field.coords starts with (layer_depth, interface_depth)"
         )
 
+    # Handle NaNs on either horizontal end
+    field = field.where(~field[depth_label].isnull(), drop=True)
+
     more_kwargs = {"x": xdim, "y": depth_label, "yincrease": False}
+
     field.plot(**kwargs, **more_kwargs, ax=ax)
 
     if interface_depth is not None:
@@ -285,6 +289,14 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
 
     ax.set_title(title)
     ax.set_ylabel("Depth [m]")
+
+    if xdim == "lon":
+        xlabel = "Longitude [°E]"
+    elif xdim == "lat":
+        xlabel = "Latitude [°N]"
+    else:
+        xlabel = xdim
+    ax.set_xlabel(xlabel)
 
 
 def _profile_plot(field, title="", ax=None):
@@ -347,11 +359,44 @@ def _line_plot(field, title="", ax=None):
     None
         Modifies the plot in-place.
     """
+
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+
+    # Handle NaNs on either horizontal end
+    depths_to_check = [
+        "layer_depth",
+        "interface_depth",
+    ]
+    # Try to find the relevant depth coordinate.
+    depth_label = next(
+        (
+            depth_label
+            for depth_label in field.coords
+            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
+        ),
+        None,  # If no depth label is found, return None.
+    )
+
+    # If a depth label is found, drop NaN values along it.
+    if depth_label:
+        field = field.where(~field[depth_label].isnull(), drop=True)
+
     field.plot(ax=ax, linewidth=2)
 
     # Loop through the NaNs in the field and add grey vertical bars
+    dims_to_check = ["eta_rho", "eta_v", "xi_rho", "xi_u", "lat", "lon"]
+    try:
+        xdim = next(
+            dim
+            for dim in field.dims
+            if any(dim.startswith(prefix) for prefix in dims_to_check)
+        )
+    except StopIteration:
+        raise ValueError(
+            "None of the dimensions found in field.dims starts with (eta_rho, eta_v, xi_rho, xi_u, lat, lon)"
+        )
+
     nan_mask = np.isnan(field.values)
     nan_indices = np.where(nan_mask)[0]
 
@@ -360,14 +405,33 @@ def _line_plot(field, title="", ax=None):
         start_idx = nan_indices[0]
         for idx in range(1, len(nan_indices)):
             if nan_indices[idx] != nan_indices[idx - 1] + 1:
-                ax.axvspan(start_idx, nan_indices[idx - 1] + 1, color="gray", alpha=0.3)
+                ax.axvspan(
+                    field[xdim][start_idx],
+                    field[xdim][nan_indices[idx - 1] + 1],
+                    color="gray",
+                    alpha=0.3,
+                )
                 start_idx = nan_indices[idx]
-        # Add the last region of NaNs
-        ax.axvspan(start_idx, nan_indices[-1] + 1, color="gray", alpha=0.3)
+        # Add the last region of NaNs, making sure we don't go out of bounds
+        ax.axvspan(
+            field[xdim][start_idx],
+            field[xdim][nan_indices[-1]],
+            color="gray",
+            alpha=0.3,
+        )
 
     # Set plot title and grid
     ax.set_title(title)
     ax.grid()
+    ax.set_xlim([field[xdim][0], field[xdim][-1]])
+
+    if xdim == "lon":
+        xlabel = "Longitude [°E]"
+    elif xdim == "lat":
+        xlabel = "Latitude [°N]"
+    else:
+        xlabel = xdim
+    ax.set_xlabel(xlabel)
 
 
 def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):

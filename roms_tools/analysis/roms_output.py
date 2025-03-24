@@ -147,7 +147,23 @@ class ROMSOutput:
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in the dataset.")
 
+        # Pick the variable
         field = self.ds[var_name]
+
+        # Check and pick time
+        if "time" in field.dims:
+            if time >= len(field.time):
+                raise ValueError(
+                    f"Invalid time index: The specified time index ({time}) exceeds the maximum index "
+                    f"({len(field.time) - 1}) for the 'time' dimension."
+                )
+            field = field.isel(time=time)
+        else:
+            if time > 0:
+                raise ValueError(
+                    f"Invalid input: The field does not have a 'time' dimension, "
+                    f"but a time index ({time}) greater than 0 was provided."
+                )
 
         # Get horizontal dimensions and grid location
         horizontal_dims_dict = {
@@ -164,21 +180,15 @@ class ROMSOutput:
             index = field[dim_name].isel(**{dim_name: idx}).item()
             return index
 
-        if eta is not None:
+        if eta is not None and eta < 0:
             eta = _get_absolute_index(eta, field, horizontal_dims["eta"])
-        if xi is not None:
+        if xi is not None and xi < 0:
             xi = _get_absolute_index(xi, field, horizontal_dims["xi"])
-        if s is not None:
+        if s is not None and s < 0:
             s = _get_absolute_index(s, field, "s_rho")
 
         # Input checks with absolute indices
-        _validate_plot_inputs(
-            field, time, s, eta, xi, depth, lat, lon, include_boundary
-        )
-
-        # Choose time slice
-        if "time" in field.dims:
-            field = field.isel(time=time)
+        _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
 
         # Load the data
         if self.use_dask:

@@ -8,19 +8,21 @@ ROMS-Tools can be installed via conda forge::
 
     conda install -c conda-forge roms-tools
 
-This command installs ROMS-Tools along with its dask dependency.
+This command installs ``ROMS-Tools`` along with its ``dask`` and ``xesmf`` dependencies.
 
 Installation from pip
 =====================
 
-ROMS-Tools can be installed using pip::
+``ROMS-Tools`` can be installed using pip::
 
     pip install roms-tools
 
-If you want to use ROMS-Tools together with dask (which we recommend), you can
-install ROMS-Tools along with the additional dependency via::
+If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend for parallel and out-of-core computation), you can install ``ROMS-Tools`` along with the additional dependency via::
 
     pip install roms-tools[dask]
+
+Note: The ``ROMS-Tools`` versions installed from pip do not include ``xesmf``, so some features will be unavailable.
+
 
 Installation from GitHub
 ========================
@@ -31,11 +33,16 @@ To obtain the latest development version, first clone
     git clone https://github.com/CWorthy-ocean/roms-tools.git
     cd roms-tools
 
-Then, install ROMS-Tools via::
+Then, install and activate the following conda environment::
 
-    pip install .
+    conda env create -f ci/environment-with-xesmf.yml
+    conda activate romstools-test
 
-If you want to use ROMS-Tools together with dask (which we recommend), you can
-install ROMS-Tools along with the additional dependency via::
+Finally, install ``ROMS-Tools`` in the same environment::
+
+    pip install -e .
+
+If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend), you can
+install ``ROMS-Tools`` along with the additional dependency via::
 
     pip install ".[dask]"

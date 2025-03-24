@@ -304,7 +304,7 @@ class RiverForcing:
         )
         tracer_data[:, 0, :] = 17.0
         tracer_data[:, 1, :] = 1.0
-        tracer_data[:, 2:, :] = 0.0
+        tracer_data[:, 2:, :] = 10.0
 
         river_tracer = xr.DataArray(
             tracer_data, dims=("river_time", "ntracers", "nriver")

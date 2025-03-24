@@ -302,6 +302,32 @@ def test_plot_on_lat_lon(roms_output_from_restart_file, use_dask):
                     lon=-128,
                     **kwargs,
                 )
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    lat=9,
+                    **kwargs,
+                )
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    lat=9,
+                    s=-1,
+                    **kwargs,
+                )
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    lon=-128,
+                    **kwargs,
+                )
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    lon=-128,
+                    s=-1,
+                    **kwargs,
+                )
 
 
 def test_plot_errors(roms_output_from_restart_file, use_dask):
@@ -320,6 +346,12 @@ def test_plot_errors(roms_output_from_restart_file, use_dask):
     with pytest.raises(ValueError, match="Ambiguous input"):
         roms_output_from_restart_file.plot("temp", time=1, s=-1, eta=0, xi=0)
 
+    # Vertical dimension specified for 2D fields
+    with pytest.raises(
+        ValueError, match="Vertical dimension 's' should be None for 2D fields"
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, s=-1)
+
     # Conflicting input: Both eta and xi specified for 2D fields
     with pytest.raises(
         ValueError,
@@ -333,13 +365,6 @@ def test_plot_errors(roms_output_from_restart_file, use_dask):
         match="Conflicting input: You cannot specify 'lat' or 'lon' simultaneously with 'eta' or 'xi'.",
     ):
         roms_output_from_restart_file.plot("temp", time=1, lat=10, lon=20, eta=5)
-
-    # NotImplementedError: Only one of lat or lon provided
-    with pytest.raises(
-        NotImplementedError,
-        match="Both `lat` and `lon` must be specified together, or neither.",
-    ):
-        roms_output_from_restart_file.plot("temp", time=1, lat=10)
 
     # NotImplementedError: depth specified
     with pytest.raises(

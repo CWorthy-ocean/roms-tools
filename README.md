@@ -9,7 +9,7 @@
 > [!Warning]
 > **This project is still in an early phase of development.**
 >
-> The [python API](https://roms-tools.readthedocs.io/en/latest/api.html) is not yet stable.
+> The [Python API](https://roms-tools.readthedocs.io/en/latest/api.html) is not yet stable.
 > Therefore whilst you are welcome to try out using the package, we cannot yet guarantee backwards compatibility.
 > We expect to reach a more stable version in Q1 2025.
 
@@ -70,7 +70,7 @@ Finally, install `ROMS-Tools` in the same environment:
 pip install -e .
 ```
 
-If you want to use `ROMS-Tools` with dask (recommended for parallel and out-of-core computation), you can
+If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of-core computation), you can
 install `ROMS-Tools` along with the additional dependency via:
 
 ```bash

@@ -7,7 +7,7 @@ Welcome to the ROMS-Tools Documentation!
 ========================================
 
 **ROMS-Tools** is a Python package designed for creating the input files necessary
-to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ or ROMS-MARBL simulation. This tool simplifies the process of generating:
+to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation, with or without MARBL. This tool simplifies the process of generating:
 
 - **Grid**
 - **Tidal forcing**
@@ -32,6 +32,8 @@ to run a `ROMS <https://github.com/CESR-lab/ucla-roms>`_ or ROMS-MARBL simulatio
 
 - **Nesting**
 
+Additionally, it provides several analysis tools.
+
 This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
 
 
@@ -45,7 +47,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
 
 .. toctree::
    :maxdepth: 1
-   :caption: Examples
+   :caption: Preparing a UCLA-ROMS Simulation
 
    Creating a grid <grid>
    Creating tidal forcing <tides>
@@ -54,9 +56,18 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    Creating boundary forcing <boundary_forcing>
    Creating river forcing <river_forcing>
    Preparing nested simulations <nesting>
+   Partitioning the input files <partition>
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Analyzing a UCLA-ROMS Simulation
+
    Analyzing ROMS output <roms_output>
 
-   Partitioning the input files <partition>
+.. toctree::
+   :maxdepth: 1
+   :caption: Advanced Topics
+
    Using ROMS-Tools with Dask <using_dask>
 
 

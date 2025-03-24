@@ -1,7 +1,8 @@
 import xarray as xr
+import warnings
 
 
-class LateralRegrid:
+class LateralRegridToROMS:
     """Handles lateral regridding of data onto a new spatial grid."""
 
     def __init__(self, target_coords, source_dim_names):
@@ -49,7 +50,90 @@ class LateralRegrid:
         return regridded
 
 
-class VerticalRegrid:
+class LateralRegridFromROMS:
+    """Regrids data from a curvilinear ROMS grid onto latitude-longitude coordinates
+    using xESMF.
+
+    It requires the `xesmf` library, which can be installed by installing `roms-tools` via conda.
+
+    Parameters
+    ----------
+    source_grid_ds : xarray.Dataset
+        The source dataset containing the curvilinear ROMS grid with 'lat_rho' and 'lon_rho'.
+
+    target_coords : dict
+        A dictionary containing 'lat' and 'lon' arrays representing the target
+        latitude and longitude coordinates for regridding.
+
+    method : str, optional
+        The regridding method to use. Default is "bilinear". Other options include "nearest_s2d" and "conservative".
+
+    Raises
+    ------
+    ImportError
+        If xESMF is not installed.
+    """
+
+    def __init__(self, ds_in, target_coords, method="bilinear"):
+        """Initializes the regridder with the source and target grids.
+
+        Parameters
+        ----------
+        ds_in : xarray.Dataset or xarray.DataArray
+            The source dataset or dataarray containing the curvilinear ROMS grid with coordinates 'lat' and 'lon'.
+
+        target_coords : dict
+            A dictionary containing 'lat' and 'lon' arrays representing the target latitude
+            and longitude coordinates for regridding.
+
+        method : str, optional
+            The regridding method to use. Default is "bilinear". Other options include
+            "nearest_s2d" and "conservative".
+
+        Raises
+        ------
+        ImportError
+            If xESMF is not installed.
+        """
+
+        try:
+            import xesmf as xe
+
+        except ImportError:
+            raise ImportError(
+                "xesmf is required for this regridding task. Please install `roms-tools` via conda, which includes xesmf."
+            )
+
+        ds_out = xr.Dataset()
+        ds_out["lat"] = target_coords["lat"]
+        ds_out["lon"] = target_coords["lon"]
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+            self.regridder = xe.Regridder(ds_in, ds_out, method=method)
+
+    def apply(self, da):
+        """Applies the regridding to the provided data array.
+
+        Parameters
+        ----------
+        da : xarray.DataArray
+            The data array to regrid. This should have the same dimension names as the
+            source grid (e.g., 'lat' and 'lon').
+
+        Returns
+        -------
+        xarray.DataArray
+            The regridded data array.
+        """
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+            regridded = self.regridder(da, keep_attrs=True)
+        return regridded
+
+
+class VerticalRegridToROMS:
     """Interpolates data onto new vertical (depth) coordinates.
 
     Parameters

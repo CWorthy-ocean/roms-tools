@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Union, List, Optional
 from roms_tools import Grid
 from roms_tools.utils import save_datasets
-from roms_tools.regrid import LateralRegrid
+from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
     ERA5Dataset,
@@ -140,7 +140,7 @@ class SurfaceForcing:
 
         processed_fields = {}
         # lateral regridding
-        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
         for var_name in var_names:
             if var_name in data.var_names.keys():
                 processed_fields[var_name] = lateral_regrid.apply(
@@ -381,7 +381,9 @@ class SurfaceForcing:
             )
 
         # Spatial regridding
-        lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
+        lateral_regrid = LateralRegridToROMS(
+            self.target_coords, correction_data.dim_names
+        )
         corr_factor = lateral_regrid.apply(corr_factor)
 
         processed_fields["swrad"] = processed_fields["swrad"] * corr_factor

@@ -9,7 +9,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from pathlib import Path
 from roms_tools import Grid
-from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.utils import save_datasets
 from roms_tools.vertical_coordinate import compute_depth
 from roms_tools.plot import _section_plot, _line_plot
@@ -185,7 +185,7 @@ class BoundaryForcing:
                     lat = target_coords["lat"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
-                    lateral_regrid = LateralRegrid(
+                    lateral_regrid = LateralRegridToROMS(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
                     for var_name in vector_var_names:
@@ -214,7 +214,7 @@ class BoundaryForcing:
                     lat = target_coords["lat"].isel(
                         **self.bdry_coords["rho"][direction]
                     )
-                    lateral_regrid = LateralRegrid(
+                    lateral_regrid = LateralRegridToROMS(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
                     for var_name in tracer_var_names:
@@ -292,7 +292,7 @@ class BoundaryForcing:
                 # vertical regridding
                 for location in ["rho", "u", "v"]:
                     if len(var_names_dict[location]) > 0:
-                        vertical_regrid = VerticalRegrid(
+                        vertical_regrid = VerticalRegridToROMS(
                             self.ds_depth_coords[f"layer_depth_{location}_{direction}"],
                             bdry_data.ds[bdry_data.dim_names["depth"]],
                         )

@@ -237,196 +237,123 @@ def test_that_coordinates_are_added(use_dask):
 
 def test_plot(roms_output_from_restart_file, use_dask):
 
-    kwargs = {}
-    for var_name in ["temp", "u", "v"]:
-        for include_boundary in [False, True]:
-            roms_output_from_restart_file.plot(
-                var_name, time=0, s=-1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-
-    kwargs = {"depth_contours": True, "layer_contours": True}
-    for var_name in ["temp", "u", "v"]:
-        for include_boundary in [False, True]:
-            roms_output_from_restart_file.plot(
-                var_name, time=0, s=-1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-
     for include_boundary in [False, True]:
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, eta=0, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, eta=1, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, xi=0, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, xi=1, **kwargs, include_boundary=include_boundary
-        )
+        for depth_contours in [False, True]:
+
+            # 3D fields
+            for var_name in ["temp", "u", "v"]:
+                kwargs = {
+                    "include_boundary": include_boundary,
+                    "depth_contours": depth_contours,
+                }
+
+                # plot on native model grid
+                roms_output_from_restart_file.plot(var_name, time=1, s=-1, **kwargs)
+                roms_output_from_restart_file.plot(var_name, time=1, eta=1, **kwargs)
+                roms_output_from_restart_file.plot(var_name, time=1, xi=1, **kwargs)
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    eta=1,
+                    xi=1,
+                    **kwargs,
+                )
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    s=-1,
+                    eta=1,
+                    **kwargs,
+                )
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    s=-1,
+                    xi=1,
+                    **kwargs,
+                )
+
+                # plot on lat, lon, depth
+                roms_output_from_restart_file.plot(
+                    var_name,
+                    time=1,
+                    lat=9,
+                    lon=-128,
+                    **kwargs,
+                )
+
+            # 2D fields
+            # plot on native model grid
+            roms_output_from_restart_file.plot("zeta", time=1, **kwargs)
+            roms_output_from_restart_file.plot("zeta", time=1, eta=1, **kwargs)
+            roms_output_from_restart_file.plot("zeta", time=1, xi=1, **kwargs)
 
 
 def test_plot_errors(roms_output_from_restart_file, use_dask):
+    """Test error conditions for the ROMSOutput.plot() method."""
+
+    # Invalid time index
     with pytest.raises(ValueError, match="Invalid time index"):
         roms_output_from_restart_file.plot("temp", time=10, s=-1)
-    with pytest.raises(ValueError, match="Invalid input"):
-        roms_output_from_restart_file.plot("temp", time=0)
+
+    # Conflicting inputs: Both 's' and 'depth' specified
+    # TODO: Uncomment the following test once plotting and 'depth' is implemented
+    # with pytest.raises(ValueError, match="Conflicting input: You cannot specify both 's' and 'depth' at the same time."):
+    #     roms_output_from_restart_file.plot("temp", time=0, s=-1, depth=10)
+
+    # Ambiguous input: Too many dimensions specified for 3D fields
     with pytest.raises(ValueError, match="Ambiguous input"):
-        roms_output_from_restart_file.plot("temp", time=0, s=-1, eta=0, xi=0)
-    with pytest.raises(ValueError, match="Conflicting input"):
-        roms_output_from_restart_file.plot("zeta", time=0, eta=0, xi=0)
+        roms_output_from_restart_file.plot("temp", time=1, s=-1, eta=0, xi=0)
+
+    # Conflicting input: Both eta and xi specified for 2D fields
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both.",
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, eta=0, xi=0)
+
+    # Conflicting input: lat or lon provided with eta or xi
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: You cannot specify 'lat' or 'lon' simultaneously with 'eta' or 'xi'.",
+    ):
+        roms_output_from_restart_file.plot("temp", time=1, lat=10, lon=20, eta=5)
+
+    # NotImplementedError: Only one of lat or lon provided
+    with pytest.raises(
+        NotImplementedError,
+        match="Both `lat` and `lon` must be specified together, or neither.",
+    ):
+        roms_output_from_restart_file.plot("temp", time=1, lat=10)
+
+    # NotImplementedError: depth specified
+    with pytest.raises(
+        NotImplementedError,
+        match="Plotting at a specific depth is not implemented yet.",
+    ):
+        roms_output_from_restart_file.plot("temp", time=1, depth=5)
+
+    # Invalid eta index out of bounds
+    with pytest.raises(ValueError, match="Invalid eta index"):
+        roms_output_from_restart_file.plot("temp", time=1, eta=999)
+
+    # Invalid xi index out of bounds
+    with pytest.raises(ValueError, match="Invalid eta index"):
+        roms_output_from_restart_file.plot("temp", time=1, xi=999)
+
+    # Boundary exclusion error for eta
+    with pytest.raises(ValueError, match="Invalid eta index.*boundary.*excluded"):
+        roms_output_from_restart_file.plot(
+            "temp", time=1, eta=0, include_boundary=False
+        )
+
+    # Boundary exclusion error for xi
+    with pytest.raises(ValueError, match="Invalid xi index.*boundary.*excluded"):
+        roms_output_from_restart_file.plot("temp", time=1, xi=0, include_boundary=False)
+
+    # No dimension specified for 3D field
+    with pytest.raises(
+        ValueError,
+        match="Invalid input: For 3D fields, you must specify at least one of the dimensions",
+    ):
+        roms_output_from_restart_file.plot("temp", time=1)

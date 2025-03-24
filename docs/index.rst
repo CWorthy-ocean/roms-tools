@@ -7,7 +7,7 @@ Welcome to the ROMS-Tools Documentation!
 ========================================
 
 **ROMS-Tools** is a Python package designed for creating the input files necessary
-to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ or ROMS-MARBL simulation. This tool simplifies the process of generating:
+to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation, with or without MARBL. This tool simplifies the process of generating:
 
 - **Grid**
 - **Tidal forcing**
@@ -47,7 +47,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
 
 .. toctree::
    :maxdepth: 1
-   :caption: Tutorials for Preparing a UCLA-ROMS Simulation
+   :caption: Preparing a UCLA-ROMS Simulation
 
    Creating a grid <grid>
    Creating tidal forcing <tides>
@@ -60,7 +60,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
 
 .. toctree::
    :maxdepth: 1
-   :caption: Tutorials for Analyzing a UCLA-ROMS Simulation
+   :caption: Analyzing a UCLA-ROMS Simulation
 
    Analyzing ROMS output <roms_output>
 

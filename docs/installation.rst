@@ -1,17 +1,18 @@
 Installation
 ############
 
-Installation from conda forge
+Installation from Conda-Forge
 =============================
 
-ROMS-Tools can be installed via conda forge::
+To install ``ROMS-Tools`` with all dependencies, including ``xesmf`` and ``dask``, use::
 
     conda install -c conda-forge roms-tools
 
-This command installs ``ROMS-Tools`` along with its ``dask`` and ``xesmf`` dependencies.
+Installation from Conda-Forge is the recommended installation method to ensure all features of ``ROMS-Tools`` are available.
 
-Installation from pip
-=====================
+
+Installation from PyPI (pip)
+============================
 
 ``ROMS-Tools`` can be installed using pip::
 
@@ -21,7 +22,7 @@ If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend for
 
     pip install roms-tools[dask]
 
-Note: The ``ROMS-Tools`` versions installed from pip do not include ``xesmf``, so some features will be unavailable.
+Note: The PyPI versions of ``ROMS-Tools`` do not include ``xesmf``, so some features will be unavailable.
 
 
 Installation from GitHub

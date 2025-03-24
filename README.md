@@ -45,7 +45,7 @@ pip install roms-tools[dask]
 ```
 
 > [!Note]
->  The PyPI version of `ROMS-Tools` does not include `xesmf`, so some features will be unavailable.
+>  The PyPI versions of `ROMS-Tools` do not include `xesmf`, so some features will be unavailable.
 
 
 ### Installation from GitHub

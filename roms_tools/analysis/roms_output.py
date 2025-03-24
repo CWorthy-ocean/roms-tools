@@ -70,8 +70,7 @@ class ROMSOutput:
         depth_contours=False,
         ax=None,
     ) -> None:
-        """Plot a ROMS output field for a given vertical (s_rho) or horizontal (eta, xi)
-        slice.
+        """Generate a plot of a ROMS output field for a specified vertical or horizontal slice.
 
         Parameters
         ----------

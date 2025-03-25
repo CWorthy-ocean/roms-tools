@@ -679,13 +679,6 @@ class InitialConditions:
                 "Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both."
             )
 
-        # Load the data
-        if self.use_dask:
-            from dask.diagnostics import ProgressBar
-
-            with ProgressBar():
-                self.ds[var_name].load()
-
         field = self.ds[var_name].squeeze()
 
         # Get correct mask and horizontal coordinates
@@ -707,11 +700,18 @@ class InitialConditions:
 
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
+        # Load the data
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds[var_name].load()
+
         # Retrieve depth coordinates
         if s is not None:
             layer_contours = False
         # Note that `layer_depth_{loc}` has already been computed during `__post_init__`.
-        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"].squeeze()
+        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"].squeeze().load()
 
         # Slice the field as desired
         def _slice_and_assign(

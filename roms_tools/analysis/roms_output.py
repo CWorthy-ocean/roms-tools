@@ -190,13 +190,6 @@ class ROMSOutput:
         if s is not None and s < 0:
             s = _get_absolute_index(s, field, "s_rho")
 
-        # Load the data
-        if self.use_dask:
-            from dask.diagnostics import ProgressBar
-
-            with ProgressBar():
-                field.load()
-
         # Set spatial coordinates
         lat_deg = self.grid.ds[f"lat_{loc}"]
         lon_deg = self.grid.ds[f"lon_{loc}"]
@@ -220,6 +213,13 @@ class ROMSOutput:
         }
         if not include_boundary:
             field = field.isel(**slice_dict[loc])
+
+        # Load the data
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field.load()
 
         # Compute layer depth for 3D fields when depth contours are requested or no vertical layer is specified,
         # or when lat/lon slicing is applied (regardless of 2D or 3D field), where regridded depth also serves as a mask.
@@ -248,6 +248,8 @@ class ROMSOutput:
             else:
                 self._get_depth_coordinates(depth_type="layer", locations=[loc])
                 layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"]
+                if self.adjust_depth_for_sea_surface_height:
+                    layer_depth = layer_depth.isel(time=time).load()
 
             if not include_boundary:
                 # Apply valid slices only for dimensions that exist in layer_depth.dims

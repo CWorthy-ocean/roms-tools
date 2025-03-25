@@ -62,7 +62,8 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    :maxdepth: 1
    :caption: Analyzing a ROMS Simulation
 
-   Visualizing ROMS output <roms_output>
+   Reading ROMS Output <reading_roms_output>
+   Visualizing ROMS Output <plotting_roms_output>
 
 .. toctree::
    :maxdepth: 1

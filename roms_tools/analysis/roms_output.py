@@ -152,7 +152,6 @@ class ROMSOutput:
         NotImplementedError
 
             - If `depth` is specified (feature not yet implemented).
-
         """
         # Check if variable exists
         if var_name not in self.ds:

@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.utils import _load_data
-from roms_tools.regrid import LateralRegridFromROMS
+from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from dataclasses import dataclass, field
 from typing import Union, Optional
 from pathlib import Path
@@ -138,7 +138,6 @@ class ROMSOutput:
         Raises
         ------
         ValueError
-
             - If the specified `var_name` is not one of the valid options.
             - If the field specified by `var_name` is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
             - If the field specified by `var_name` is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
@@ -148,10 +147,6 @@ class ROMSOutput:
             - If `time` is specified for a field that does not have a time dimension.
             - If `eta` or `xi` indices are out of bounds.
             - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
-
-        NotImplementedError
-
-            - If `depth` is specified (feature not yet implemented).
         """
         # Check if variable exists
         if var_name not in self.ds:
@@ -231,13 +226,8 @@ class ROMSOutput:
             with ProgressBar():
                 field.load()
 
-        # Compute layer depth for 3D fields when depth contours are requested or no vertical layer is specified,
-        # or when lat/lon slicing is applied (regardless of 2D or 3D field), where regridded depth also serves as a mask.
-        compute_layer_depth = (
-            len(field.dims) > 2 and (depth_contours or s is None)
-        ) or (  # 3D field and conditions to compute depth
-            (lat is None and lon is not None) or (lat is not None and lon is None)
-        )  # lat/lon slicing in which case regridded layer depth serves as mask
+        # Compute layer depth for 3D fields when depth contours are requested or no vertical layer is specified.
+        compute_layer_depth = len(field.dims) > 2 and (depth_contours or s is None)
         if compute_layer_depth:
             if eta is not None or xi is not None:
                 # Computing depth coordinates directly for the slice in question is more efficient
@@ -276,7 +266,7 @@ class ROMSOutput:
         formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
         title = f"time: {formatted_time}"
 
-        # Slice or regrid the field horizontally as desired
+        # Slice the field horizontally as desired
         def _slice_along_dimension(field, title, dim_name, idx):
             field = field.sel(**{dim_name: idx})
             title = title + f", {dim_name} = {idx}"
@@ -290,7 +280,14 @@ class ROMSOutput:
             field, title = _slice_along_dimension(
                 field, title, horizontal_dims["xi"], xi
             )
+        if s is not None:
+            field, title = _slice_along_dimension(field, title, "s_rho", s)
+            if compute_layer_depth:
+                layer_depth = layer_depth.isel(s_rho=s)
+        else:
+            depth_contours = False
 
+        # Regrid laterally
         if lat is not None or lon is not None:
 
             if lat is not None:
@@ -319,17 +316,53 @@ class ROMSOutput:
             if compute_layer_depth:
                 layer_depth = lateral_regrid.apply(layer_depth).squeeze()
 
-        # Slice or regrid the field vertically as desired
-        if s is not None:
-            field, title = _slice_along_dimension(field, title, "s_rho", s)
-            if compute_layer_depth:
-                layer_depth = layer_depth.isel(s_rho=s)
-        else:
-            depth_contours = False
-
         # Assign depth as coordinate
         if compute_layer_depth:
             field = field.assign_coords({"layer_depth": layer_depth})
+
+        def _remove_edge_nans(field, xdim, layer_depth=None):
+            """Removes NaNs from the edges along the specified dimension."""
+            if xdim in field.dims:
+                if layer_depth is not None:
+                    nan_mask = layer_depth.isnull().sum(
+                        dim=[dim for dim in layer_depth.dims if dim != xdim]
+                    )
+                else:
+                    nan_mask = field.isnull().sum(
+                        dim=[dim for dim in field.dims if dim != xdim]
+                    )
+
+                # Find the valid indices where the sum of the nans is 0
+                valid_indices = np.where(nan_mask.values == 0)[0]
+
+                if len(valid_indices) > 0:
+                    first_valid = valid_indices[0]
+                    last_valid = valid_indices[-1]
+
+                    field = field.isel({xdim: slice(first_valid, last_valid + 1)})
+                    if layer_depth is not None:
+                        layer_depth = layer_depth.isel(
+                            {xdim: slice(first_valid, last_valid + 1)}
+                        )
+
+            return field, layer_depth
+
+        if lat is not None:
+            field, layer_depth = _remove_edge_nans(
+                field, "lon", layer_depth if "layer_depth" in locals() else None
+            )
+        if lon is not None:
+            field, layer_depth = _remove_edge_nans(
+                field, "lat", layer_depth if "layer_depth" in locals() else None
+            )
+
+        # Regrid vertically
+        if depth is not None:
+            vertical_regrid = VerticalRegridFromROMS(self.ds)
+            field = vertical_regrid.apply(
+                field, layer_depth, np.array([depth])
+            ).squeeze()
+            title = title + f", depth = {depth}m"
 
         # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:

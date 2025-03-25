@@ -647,7 +647,7 @@ class InitialConditions:
             visualize the layering of the water column. For clarity, the number of layer
             contours displayed is limited to a maximum of 10. Default is False.
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots. Default is None.
 
         Returns
         -------

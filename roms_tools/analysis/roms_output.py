@@ -128,7 +128,7 @@ class ROMSOutput:
             By default, depth contours are not shown (False).
 
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time. Default is None.
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots. Default is None.
 
         Returns
         -------

@@ -256,7 +256,7 @@ class ROMSOutput:
                 self._get_depth_coordinates(depth_type="layer", locations=[loc])
                 layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"]
                 if self.adjust_depth_for_sea_surface_height:
-                    layer_depth = layer_depth.isel(time=time).load()
+                    layer_depth = layer_depth.isel(time=time)
 
             if not include_boundary:
                 # Apply valid slices only for dimensions that exist in layer_depth.dims
@@ -267,6 +267,7 @@ class ROMSOutput:
                         if dim in layer_depth.dims
                     }
                 )
+            layer_depth.load()
 
         # Prepare figure title
         formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")

@@ -27,9 +27,32 @@ def roms_output_from_restart_file(use_dask):
     )
 
 
-def test_load_model_output_file(roms_output_from_restart_file, use_dask):
+@pytest.fixture
+def roms_output_from_restart_file_adjusted_for_zeta(use_dask):
 
-    assert isinstance(roms_output_from_restart_file.ds, xr.Dataset)
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+
+    # Single file
+    return ROMSOutput(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        adjust_depth_for_sea_surface_height=True,
+        use_dask=use_dask,
+    )
+
+
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+    ],
+)
+def test_load_model_output_file(roms_output_fixture, use_dask, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
+
+    assert isinstance(roms_output.ds, xr.Dataset)
 
 
 def test_load_model_output_file_list(use_dask):
@@ -240,7 +263,15 @@ def test_that_coordinates_are_added(use_dask):
     assert "lon_rho" in output.ds.coords
 
 
-def test_plot_on_native_model_grid(roms_output_from_restart_file, use_dask):
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+    ],
+)
+def test_plot_on_native_model_grid(roms_output_fixture, use_dask, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
 
     for include_boundary in [False, True]:
         for depth_contours in [False, True]:
@@ -252,24 +283,24 @@ def test_plot_on_native_model_grid(roms_output_from_restart_file, use_dask):
                     "depth_contours": depth_contours,
                 }
 
-                roms_output_from_restart_file.plot(var_name, time=1, s=-1, **kwargs)
-                roms_output_from_restart_file.plot(var_name, time=1, eta=1, **kwargs)
-                roms_output_from_restart_file.plot(var_name, time=1, xi=1, **kwargs)
-                roms_output_from_restart_file.plot(
+                roms_output.plot(var_name, time=1, s=-1, **kwargs)
+                roms_output.plot(var_name, time=1, eta=1, **kwargs)
+                roms_output.plot(var_name, time=1, xi=1, **kwargs)
+                roms_output.plot(
                     var_name,
                     time=1,
                     eta=1,
                     xi=1,
                     **kwargs,
                 )
-                roms_output_from_restart_file.plot(
+                roms_output.plot(
                     var_name,
                     time=1,
                     s=-1,
                     eta=1,
                     **kwargs,
                 )
-                roms_output_from_restart_file.plot(
+                roms_output.plot(
                     var_name,
                     time=1,
                     s=-1,
@@ -278,13 +309,21 @@ def test_plot_on_native_model_grid(roms_output_from_restart_file, use_dask):
                 )
 
             # 2D fields
-            roms_output_from_restart_file.plot("zeta", time=1, **kwargs)
-            roms_output_from_restart_file.plot("zeta", time=1, eta=1, **kwargs)
-            roms_output_from_restart_file.plot("zeta", time=1, xi=1, **kwargs)
+            roms_output.plot("zeta", time=1, **kwargs)
+            roms_output.plot("zeta", time=1, eta=1, **kwargs)
+            roms_output.plot("zeta", time=1, xi=1, **kwargs)
 
 
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+    ],
+)
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_plot_on_lat_lon(roms_output_from_restart_file, use_dask):
+def test_plot_on_lat_lon(roms_output_fixture, use_dask, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
 
     for include_boundary in [False, True]:
         for depth_contours in [False, True]:
@@ -295,33 +334,33 @@ def test_plot_on_lat_lon(roms_output_from_restart_file, use_dask):
                     "include_boundary": include_boundary,
                     "depth_contours": depth_contours,
                 }
-                roms_output_from_restart_file.plot(
+                roms_output.plot(
                     var_name,
                     time=1,
                     lat=9,
                     lon=-128,
                     **kwargs,
                 )
-                roms_output_from_restart_file.plot(
+                roms_output.plot(
                     var_name,
                     time=1,
                     lat=9,
                     **kwargs,
                 )
-                roms_output_from_restart_file.plot(
+                roms_output.plot(
                     var_name,
                     time=1,
                     lat=9,
                     s=-1,
                     **kwargs,
                 )
-                roms_output_from_restart_file.plot(
+                roms_output.plot(
                     var_name,
                     time=1,
                     lon=-128,
                     **kwargs,
                 )
-                roms_output_from_restart_file.plot(
+                roms_output.plot(
                     var_name,
                     time=1,
                     lon=-128,

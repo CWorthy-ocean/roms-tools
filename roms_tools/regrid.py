@@ -110,7 +110,9 @@ class LateralRegridFromROMS:
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
-            self.regridder = xe.Regridder(ds_in, ds_out, method=method)
+            self.regridder = xe.Regridder(
+                ds_in, ds_out, method=method, unmapped_to_nan=True
+            )
 
     def apply(self, da):
         """Applies the regridding to the provided data array.

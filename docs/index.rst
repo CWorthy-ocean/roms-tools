@@ -47,7 +47,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
 
 .. toctree::
    :maxdepth: 1
-   :caption: Preparing a UCLA-ROMS Simulation
+   :caption: Preparing a ROMS Simulation
 
    Creating a grid <grid>
    Creating tidal forcing <tides>
@@ -60,9 +60,10 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
 
 .. toctree::
    :maxdepth: 1
-   :caption: Analyzing a UCLA-ROMS Simulation
+   :caption: Analyzing a ROMS Simulation
 
-   Analyzing ROMS output <roms_output>
+   Reading ROMS Output <reading_roms_output>
+   Visualizing ROMS Output <plotting_roms_output>
 
 .. toctree::
    :maxdepth: 1

@@ -14,7 +14,7 @@ from roms_tools import Grid
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
-from roms_tools.analysis.utils import _validate_plot_inputs
+from roms_tools.analysis.utils import _validate_plot_inputs, _generate_coordinate_range
 
 
 @dataclass(kw_only=True)
@@ -87,17 +87,17 @@ class ROMSOutput:
         s : int, optional
             The index of the vertical layer (`s_rho`) to plot. If specified, the plot
             will display a horizontal slice at that layer. Cannot be used simultaneously
-            with `depth`.
+            with `depth`. Default is None.
 
         eta : int, optional
             The eta-index to plot. Used for generating vertical sections or plotting
             horizontal slices along a constant eta-coordinate. Cannot be used simultaneously
-            with `lat` or `lon`, but can be combined with `xi`.
+            with `lat` or `lon`, but can be combined with `xi`. Default is None.
 
         xi : int, optional
             The xi-index to plot. Used for generating vertical sections or plotting
             horizontal slices along a constant xi-coordinate. Cannot be used simultaneously
-            with `lat` or `lon`, but can be combined with `eta`.
+            with `lat` or `lon`, but can be combined with `eta`. Default is None.
 
         depth : float, optional
             Depth (in meters) to plot a horizontal slice at a specific depth level.
@@ -120,7 +120,6 @@ class ROMSOutput:
         include_boundary : bool, optional
             Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
             In diagnostic ROMS output fields, these boundary cells are set to zero, so excluding them can improve visualization.
-            This option is only relevant for 2D horizontal plots (`eta=None`, `xi=None`).
             Default is False.
 
         depth_contours : bool, optional
@@ -129,7 +128,7 @@ class ROMSOutput:
             By default, depth contours are not shown (False).
 
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots. Default is None.
 
         Returns
         -------
@@ -139,9 +138,20 @@ class ROMSOutput:
         Raises
         ------
         ValueError
-            If the specified `var_name` is not one of the valid options.
-            If the field specified by `var_name` is 3D and none of `s`, `eta`, or `xi` are specified.
-            If the field specified by `var_name` is 2D and both `eta` and `xi` are specified.
+
+            - If the specified `var_name` is not one of the valid options.
+            - If the field specified by `var_name` is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
+            - If the field specified by `var_name` is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
+            - If conflicting dimensions are specified (e.g., specifying `eta`/`xi` with `lat`/`lon` or both `s` and `depth`).
+            - If more than two dimensions are specified for a 3D field.
+            - If `time` exceeds the bounds of the time dimension.
+            - If `time` is specified for a field that does not have a time dimension.
+            - If `eta` or `xi` indices are out of bounds.
+            - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
+
+        NotImplementedError
+
+            - If `depth` is specified (feature not yet implemented).
         """
         # Check if variable exists
         if var_name not in self.ds:
@@ -165,6 +175,9 @@ class ROMSOutput:
                     f"but a time index ({time}) greater than 0 was provided."
                 )
 
+        # Input checks
+        _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
+
         # Get horizontal dimensions and grid location
         horizontal_dims_dict = {
             "rho": {"eta": "eta_rho", "xi": "xi_rho"},
@@ -186,16 +199,6 @@ class ROMSOutput:
             xi = _get_absolute_index(xi, field, horizontal_dims["xi"])
         if s is not None and s < 0:
             s = _get_absolute_index(s, field, "s_rho")
-
-        # Input checks with absolute indices
-        _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
-
-        # Load the data
-        if self.use_dask:
-            from dask.diagnostics import ProgressBar
-
-            with ProgressBar():
-                field.load()
 
         # Set spatial coordinates
         lat_deg = self.grid.ds[f"lat_{loc}"]
@@ -221,8 +224,20 @@ class ROMSOutput:
         if not include_boundary:
             field = field.isel(**slice_dict[loc])
 
-        # Retrieve depth coordinates unless this is a 2D field or s is set with no desired depth_contours
-        compute_layer_depth = len(field.dims) > 2 and (depth_contours or s is None)
+        # Load the data
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field.load()
+
+        # Compute layer depth for 3D fields when depth contours are requested or no vertical layer is specified,
+        # or when lat/lon slicing is applied (regardless of 2D or 3D field), where regridded depth also serves as a mask.
+        compute_layer_depth = (
+            len(field.dims) > 2 and (depth_contours or s is None)
+        ) or (  # 3D field and conditions to compute depth
+            (lat is None and lon is not None) or (lat is not None and lon is None)
+        )  # lat/lon slicing in which case regridded layer depth serves as mask
         if compute_layer_depth:
             if eta is not None or xi is not None:
                 # Computing depth coordinates directly for the slice in question is more efficient
@@ -243,6 +258,8 @@ class ROMSOutput:
             else:
                 self._get_depth_coordinates(depth_type="layer", locations=[loc])
                 layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"]
+                if self.adjust_depth_for_sea_surface_height:
+                    layer_depth = layer_depth.isel(time=time)
 
             if not include_boundary:
                 # Apply valid slices only for dimensions that exist in layer_depth.dims
@@ -253,6 +270,7 @@ class ROMSOutput:
                         if dim in layer_depth.dims
                     }
                 )
+            layer_depth.load()
 
         # Prepare figure title
         formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
@@ -273,13 +291,33 @@ class ROMSOutput:
                 field, title, horizontal_dims["xi"], xi
             )
 
-        if lat is not None and lon is not None:
-            target_coords = {"lat": [lat], "lon": [lon]}
+        if lat is not None or lon is not None:
+
+            if lat is not None:
+                lats = [lat]
+                title = title + f", lat = {lat}°N"
+            else:
+                resolution = self._infer_nominal_horizontal_resolution()
+                lats = _generate_coordinate_range(
+                    field.lat.min().values, field.lat.max().values, resolution
+                )
+            lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
+
+            if lon is not None:
+                lons = [lon]
+                title = title + f", lon = {lon}°E"
+            else:
+                resolution = self._infer_nominal_horizontal_resolution(lat)
+                lons = _generate_coordinate_range(
+                    field.lon.min().values, field.lon.max().values, resolution
+                )
+            lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
+
+            target_coords = {"lat": lats, "lon": lons}
             lateral_regrid = LateralRegridFromROMS(field, target_coords)
             field = lateral_regrid.apply(field).squeeze()
-            layer_depth = lateral_regrid.apply(layer_depth).squeeze()
-
-            title = title + f", lat = {lat}°N, lon = {lon}°E"
+            if compute_layer_depth:
+                layer_depth = lateral_regrid.apply(layer_depth).squeeze()
 
         # Slice or regrid the field vertically as desired
         if s is not None:
@@ -566,3 +604,47 @@ class ROMSOutput:
         )
 
         return ds
+
+    def _infer_nominal_horizontal_resolution(self, lat=None):
+        """Estimate the nominal horizontal resolution of the grid in degrees at a
+        specified latitude.
+
+        This method calculates the nominal horizontal resolution of the grid by first
+        determining the average grid spacing in meters. The spacing is then converted
+        to degrees, accounting for the Earth's curvature, and the latitude where the
+        resolution is being computed.
+
+        Parameters
+        ----------
+        lat : float, optional
+            Latitude (in degrees) at which to estimate the horizontal resolution.
+            If not provided, the resolution is calculated at the average latitude of
+            the grid (`lat_rho`).
+
+        Returns
+        -------
+        float
+            The estimated horizontal resolution in degrees, adjusted for the Earth's curvature.
+        """
+        # Earth radius in meters
+        r_earth = 6371315.0
+
+        if lat is None:
+            # Center latitude in degrees
+            lat = (self.grid.ds.lat_rho.max() + self.grid.ds.lat_rho.min()) / 2
+
+        # Convert latitude to radians
+        lat_rad = np.deg2rad(lat)
+
+        # Mean resolution in meters
+        resolution_in_m = (
+            (1 / self.grid.ds.pm).mean() + (1 / self.grid.ds.pn).mean()
+        ) / 2
+
+        # Meters per degree at the equator
+        meters_per_degree = 2 * np.pi * r_earth / 360
+
+        # Correct for latitude by multiplying by cos(latitude) for longitude
+        resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
+
+        return resolution_in_degrees

@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
     """Validate input parameters for the plot method.
 
@@ -30,12 +33,6 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
         If only one of `lat` or `lon` is provided (feature not yet implemented)
         If `depth` is specified (feature not yet implemented).
     """
-
-    # Check for unsupported lat/lon combinations
-    if (lat is None) != (lon is None):
-        raise NotImplementedError(
-            "Both `lat` and `lon` must be specified together, or neither."
-        )
 
     # Check if depth is specified, which is not yet supported
     if depth is not None:
@@ -77,6 +74,8 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
 
     # 2D fields: Check for conflicts in dimension choices
     if len(field.dims) == 2:
+        if s is not None:
+            raise ValueError("Vertical dimension 's' should be None for 2D fields.")
         if all([eta is not None, xi is not None]):
             raise ValueError(
                 "Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both."
@@ -112,3 +111,34 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
                     f"Invalid xi index: {xi} lies on the boundary, which is excluded when `include_boundary = False`. "
                     "Either set `include_boundary = True`, or adjust eta to avoid boundary values."
                 )
+
+
+def _generate_coordinate_range(min, max, resolution):
+    """Generate an array of target latitude or longitude coordinates within a specified
+    range.
+
+    This method generates an array of target coordinates between the provided `min` and `max`
+    values, with a specified resolution (spacing) between each coordinate. Both `min` and `max`
+    are included in the generated range.
+
+    Parameters
+    ----------
+    min : float
+        The minimum value (in degrees) of the coordinate range (inclusive).
+
+    max : float
+        The maximum value (in degrees) of the coordinate range (inclusive).
+
+    resolution : float
+        The spacing (in degrees) between each coordinate in the array.
+
+    Returns
+    -------
+    numpy.ndarray
+        An array of target coordinates generated from the specified range and resolution.
+    """
+
+    # Generate the array including both min and max values
+    target = np.arange(min, max + resolution, resolution)
+
+    return target

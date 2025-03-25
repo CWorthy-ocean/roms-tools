@@ -138,6 +138,7 @@ class ROMSOutput:
         Raises
         ------
         ValueError
+
             - If the specified `var_name` is not one of the valid options.
             - If the field specified by `var_name` is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
             - If the field specified by `var_name` is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
@@ -147,8 +148,11 @@ class ROMSOutput:
             - If `time` is specified for a field that does not have a time dimension.
             - If `eta` or `xi` indices are out of bounds.
             - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
+
         NotImplementedError
+
             - If `depth` is specified (feature not yet implemented).
+
         """
         # Check if variable exists
         if var_name not in self.ds:

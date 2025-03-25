@@ -1,3 +1,4 @@
+import xgcm
 import xarray as xr
 import warnings
 
@@ -192,13 +193,13 @@ class VerticalRegridToROMS:
             }
         )
 
-    def apply(self, var, fill_nans=True):
+    def apply(self, da, fill_nans=True):
         """Interpolates the variable onto the new depth grid using precomputed
         coefficients for linear interpolation between layers.
 
         Parameters
         ----------
-        var : xarray.DataArray
+        da : xarray.DataArray
             The input data to be regridded along the depth dimension. This should be
             an array with the same depth coordinates as the original grid.
         fill_nans : bool, optional
@@ -216,16 +217,74 @@ class VerticalRegridToROMS:
 
         dims = {"dim": self.depth_dim}
 
-        var_below = var.where(self.coeff["is_below"]).sum(**dims)
-        var_above = var.where(self.coeff["is_above"]).sum(**dims)
+        da_below = da.where(self.coeff["is_below"]).sum(**dims)
+        da_above = da.where(self.coeff["is_above"]).sum(**dims)
 
-        result = var_below + (var_above - var_below) * self.coeff["factor"]
+        result = da_below + (da_above - da_below) * self.coeff["factor"]
         if fill_nans:
-            result = result.where(self.coeff["upper_mask"], var.isel({dims["dim"]: 0}))
-            result = result.where(self.coeff["lower_mask"], var.isel({dims["dim"]: -1}))
+            result = result.where(self.coeff["upper_mask"], da.isel({dims["dim"]: 0}))
+            result = result.where(self.coeff["lower_mask"], da.isel({dims["dim"]: -1}))
         else:
             result = result.where(self.coeff["upper_mask"]).where(
                 self.coeff["lower_mask"]
             )
 
         return result
+
+
+class VerticalRegridFromROMS:
+    """A class for regridding data from the ROMS vertical coordinate system to target
+    depth levels.
+
+    This class uses the `xgcm` package to perform the transformation from the ROMS depth coordinates to
+    a user-defined set of target depth levels. It assumes that the input dataset `ds` contains the necessary
+    vertical coordinate information (`s_rho`).
+
+    Attributes
+    ----------
+    grid : xgcm.Grid
+        The grid object used for regridding, initialized with the given dataset `ds`.
+    """
+
+    def __init__(self, ds):
+        """Initializes the `VerticalRegridFromROMS` object by creating an `xgcm.Grid`
+        instance.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset containing the ROMS output data, which must include the vertical coordinate `s_rho`.
+        """
+        self.grid = xgcm.Grid(ds, coords={"s_rho": {"center": "s_rho"}}, periodic=False)
+
+    def apply(self, da, depth_coords, target_depth_levels):
+        """Applies vertical regridding from ROMS to the specified target depth levels.
+
+        This method transforms the input data array `da` from the ROMS vertical coordinate (`s_rho`)
+        to a set of target depth levels defined by `target_depth_levels`.
+
+        Parameters
+        ----------
+        da : xarray.DataArray
+            The data array containing the ROMS output field to be regridded. It must have a vertical
+            dimension corresponding to `s_rho`.
+
+        depth_coords : array-like
+            The depth coordinates of the input data array `da` (typically the `s_rho` coordinate in ROMS).
+
+        target_depth_levels : array-like
+            The target depth levels to which the input data `da` will be regridded.
+
+        Returns
+        -------
+        xarray.DataArray
+            A new `xarray.DataArray` containing the regridded data at the specified target depth levels.
+        """
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
+            transformed = self.grid.transform(
+                da, "s_rho", target_depth_levels, target_data=depth_coords
+            )
+
+        return transformed

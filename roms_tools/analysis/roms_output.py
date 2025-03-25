@@ -87,17 +87,17 @@ class ROMSOutput:
         s : int, optional
             The index of the vertical layer (`s_rho`) to plot. If specified, the plot
             will display a horizontal slice at that layer. Cannot be used simultaneously
-            with `depth`.
+            with `depth`. Default is None.
 
         eta : int, optional
             The eta-index to plot. Used for generating vertical sections or plotting
             horizontal slices along a constant eta-coordinate. Cannot be used simultaneously
-            with `lat` or `lon`, but can be combined with `xi`.
+            with `lat` or `lon`, but can be combined with `xi`. Default is None.
 
         xi : int, optional
             The xi-index to plot. Used for generating vertical sections or plotting
             horizontal slices along a constant xi-coordinate. Cannot be used simultaneously
-            with `lat` or `lon`, but can be combined with `eta`.
+            with `lat` or `lon`, but can be combined with `eta`. Default is None.
 
         depth : float, optional
             Depth (in meters) to plot a horizontal slice at a specific depth level.
@@ -120,7 +120,6 @@ class ROMSOutput:
         include_boundary : bool, optional
             Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
             In diagnostic ROMS output fields, these boundary cells are set to zero, so excluding them can improve visualization.
-            This option is only relevant for 2D horizontal plots (`eta=None`, `xi=None`).
             Default is False.
 
         depth_contours : bool, optional
@@ -129,7 +128,7 @@ class ROMSOutput:
             By default, depth contours are not shown (False).
 
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time. Default is None.
 
         Returns
         -------
@@ -140,8 +139,16 @@ class ROMSOutput:
         ------
         ValueError
             If the specified `var_name` is not one of the valid options.
-            If the field specified by `var_name` is 3D and none of `s`, `eta`, or `xi` are specified.
-            If the field specified by `var_name` is 2D and both `eta` and `xi` are specified.
+            If the field specified by `var_name` is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
+            If the field specified by `var_name` is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
+            If conflicting dimensions are specified (e.g., specifying `eta`/`xi` with `lat`/`lon` or both `s` and `depth`).
+            If more than two dimensions are specified for a 3D field.
+            If `time` exceeds the bounds of the time dimension.
+            If `time` is specified for a field that does not have a time dimension.
+            If `eta` or `xi` indices are out of bounds.
+            If `eta` or `xi` lie on the boundary when `include_boundary=False`.
+        NotImplementedError
+            If `depth` is specified (feature not yet implemented).
         """
         # Check if variable exists
         if var_name not in self.ds:

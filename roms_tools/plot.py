@@ -363,25 +363,6 @@ def _line_plot(field, title="", ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
 
-    # Handle NaNs on either horizontal end
-    depths_to_check = [
-        "layer_depth",
-        "interface_depth",
-    ]
-    # Try to find the relevant depth coordinate.
-    depth_label = next(
-        (
-            depth_label
-            for depth_label in field.coords
-            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
-        ),
-        None,  # If no depth label is found, return None.
-    )
-
-    # If a depth label is found, drop NaN values along it.
-    if depth_label:
-        field = field.where(~field[depth_label].isnull(), drop=True)
-
     field.plot(ax=ax, linewidth=2)
 
     # Loop through the NaNs in the field and add grey vertical bars

@@ -5,6 +5,7 @@
 ### New Features
 
 * Support to plot ROMS output data at lat/lon locations ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
+* Support to plot ROMS output data along sections of fixed latitude or longitude ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
 
 ### Breaking Changes
 
@@ -12,6 +13,7 @@
 
 * Unfreeze arguments in all dataclasses ([#276](https://github.com/CWorthy-ocean/roms-tools/pull/276))
 * Integration with xesmf ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
+* Computation of nominal horizontal resolution in degrees ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
 
 ### Documentation
 

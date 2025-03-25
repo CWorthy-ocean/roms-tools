@@ -359,9 +359,13 @@ class ROMSOutput:
         # Regrid vertically
         if depth is not None:
             vertical_regrid = VerticalRegridFromROMS(self.ds)
+            # Save attributes before vertical regridding
+            attrs = field.attrs
             field = vertical_regrid.apply(
                 field, layer_depth, np.array([depth])
             ).squeeze()
+            # Reset attributes
+            field.attrs = attrs
             title = title + f", depth = {depth}m"
 
         # Choose colorbar

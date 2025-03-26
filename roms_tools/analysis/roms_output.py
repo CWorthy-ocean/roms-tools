@@ -69,6 +69,7 @@ class ROMSOutput:
         include_boundary=False,
         depth_contours=False,
         ax=None,
+        save_path=None,
     ) -> None:
         """Generate a plot of a ROMS output field for a specified vertical or horizontal
         slice.
@@ -129,6 +130,10 @@ class ROMSOutput:
 
         ax : matplotlib.axes.Axes, optional
             The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots. Default is None.
+
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
 
         Returns
         -------
@@ -385,7 +390,7 @@ class ROMSOutput:
 
         # Plotting
         if (eta is None and xi is None) and (lat is None and lon is None):
-            _plot(
+            fig = _plot(
                 field=field,
                 depth_contours=depth_contours,
                 title=title,
@@ -394,7 +399,7 @@ class ROMSOutput:
             )
         else:
             if len(field.dims) == 2:
-                _section_plot(
+                fig = _section_plot(
                     field,
                     interface_depth=None,
                     title=title,
@@ -403,9 +408,12 @@ class ROMSOutput:
                 )
             else:
                 if "s_rho" in field.dims:
-                    _profile_plot(field, title=title, ax=ax)
+                    fig = _profile_plot(field, title=title, ax=ax)
                 else:
-                    _line_plot(field, title=title, ax=ax)
+                    fig = _line_plot(field, title=title, ax=ax)
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
 
     def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
         """Ensure depth coordinates are stored for a given location and depth type.

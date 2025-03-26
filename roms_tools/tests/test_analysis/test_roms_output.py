@@ -477,3 +477,12 @@ def test_plot_errors(roms_output_from_restart_file, use_dask):
         match="Invalid input: For 3D fields, you must specify at least one of the dimensions",
     ):
         roms_output_from_restart_file.plot("temp", time=1)
+
+
+def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):
+
+    filename = tmp_path / "figure.png"
+    roms_output_from_restart_file.plot("temp", time=0, depth=1000, save_path=filename)
+
+    assert filename.exists()
+    filename.unlink()

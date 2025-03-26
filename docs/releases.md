@@ -15,7 +15,7 @@
 * Unfreeze arguments in all dataclasses ([#276](https://github.com/CWorthy-ocean/roms-tools/pull/276))
 * Integration with xesmf for horizontal regridding from ROMS ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
 * Computation of nominal horizontal resolution in degrees ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
-* Integration with xgcm for vertical regridding from ROMS ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
+* Integration with xgcm and numba for vertical regridding from ROMS ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
 
 ### Documentation
 

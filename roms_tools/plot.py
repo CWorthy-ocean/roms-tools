@@ -33,9 +33,15 @@ def _plot(
     kwargs : dict, optional
         Additional keyword arguments to pass to `pcolormesh` (e.g., colormap or color limits).
 
-    Notes
-    -----
-    The function raises a `NotImplementedError` if the domain contains the North or South Pole.
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure with the plotted data.
+
+    Raises
+    ------
+    NotImplementedError
+        If the domain contains the North or South Pole.
     """
 
     field = field.squeeze()
@@ -83,6 +89,8 @@ def _plot(
     }  # Customize latitude label style
 
     ax.set_title(title)
+
+    return fig
 
 
 def _add_boundary_to_ax(
@@ -241,6 +249,39 @@ def _get_projection(lon, lat):
 
 
 def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
+    """Plots a vertical section of a field with optional interface depths.
+
+    Parameters
+    ----------
+    field : xarray.DataArray
+        The field to plot, typically representing a vertical section of ocean data.
+    interface_depth : xarray.DataArray, optional
+        Interface depth values to overlay on the plot, useful for visualizing vertical layers.
+        Defaults to None.
+    title : str, optional
+        Title of the plot. Defaults to an empty string.
+    kwargs : dict, optional
+        Additional keyword arguments to pass to `xarray.plot`. Defaults to an empty dictionary.
+    ax : matplotlib.axes.Axes, optional
+        Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure with the plotted section.
+
+    Raises
+    ------
+    ValueError
+        If no dimension in `field.dims` starts with any of the recognized horizontal dimension
+        prefixes (`eta_rho`, `eta_v`, `xi_rho`, `xi_u`, `lat`, `lon`).
+    ValueError
+        If no coordinate in `field.coords` starts with either `layer` or `interface`.
+
+    Notes
+    -----
+    - NaN values at the horizontal ends are dropped before plotting.
+    """
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
@@ -298,23 +339,38 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         xlabel = xdim
     ax.set_xlabel(xlabel)
 
+    return fig
+
 
 def _profile_plot(field, title="", ax=None):
-    """Plots a profile of the given field against depth.
+    """Plots a vertical profile of the given field against depth.
+
+    This function generates a profile plot by plotting the field values against
+    depth. It automatically detects the appropriate depth coordinate and
+    reverses the y-axis to follow the convention of increasing depth downward.
 
     Parameters
     ----------
     field : xarray.DataArray
-        Data to plot.
+        The field to plot, typically representing vertical profile data.
     title : str, optional
-        Title of the plot.
+        Title of the plot. Defaults to an empty string.
     ax : matplotlib.axes.Axes, optional
-        Axes to plot on. If None, a new figure is created.
+        Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure with the plotted profile.
 
     Raises
     ------
     ValueError
-        If no expected depth coordinate is found in the field.
+        If no coordinate in `field.coords` starts with either `layer_depth` or `interface_depth`.
+
+    Notes
+    -----
+    - The y-axis is inverted to ensure that depth increases downward.
     """
 
     depths_to_check = [
@@ -340,24 +396,36 @@ def _profile_plot(field, title="", ax=None):
     ax.set_ylabel("Depth [m]")
     ax.grid()
 
+    return fig
+
 
 def _line_plot(field, title="", ax=None):
-    """Plots a line graph of the given field, with grey vertical bars where NaNs are
-    located.
+    """Plots a line graph of the given field with grey vertical bars indicating NaN
+    regions.
 
     Parameters
     ----------
     field : xarray.DataArray
-        Data to plot.
+        The field to plot, typically a 1D or 2D field with one spatial dimension.
     title : str, optional
-        Title of the plot.
+        Title of the plot. Defaults to an empty string.
     ax : matplotlib.axes.Axes, optional
-        Axes to plot on. If None, a new figure is created.
+        Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
 
     Returns
     -------
-    None
-        Modifies the plot in-place.
+    matplotlib.figure.Figure
+        The generated figure with the plotted data and highlighted NaN regions.
+
+    Raises
+    ------
+    ValueError
+        If none of the dimensions in `field.dims` starts with one of the expected
+        prefixes: `eta_rho`, `eta_v`, `xi_rho`, `xi_u`, `lat`, or `lon`.
+
+    Notes
+    -----
+    - NaN regions are identified and marked using `axvspan` with a grey shade.
     """
 
     if ax is None:
@@ -414,8 +482,30 @@ def _line_plot(field, title="", ax=None):
         xlabel = xdim
     ax.set_xlabel(xlabel)
 
+    return fig
+
 
 def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
+    """Plots nested parent and child grids with boundary overlays and grid masking.
+
+    Parameters
+    ----------
+    parent_grid_ds : xarray.Dataset
+        The parent grid dataset containing `lon_rho`, `lat_rho`, and `mask_rho` variables.
+    child_grid_ds : xarray.Dataset
+        The child grid dataset containing `lon_rho` and `lat_rho` variables.
+    parent_straddle : bool
+        Whether the parent grid straddles the 180-degree meridian. If True, longitudes
+        greater than 180° are wrapped to the -180° to 180° range.
+    with_dim_names : bool, optional
+        Whether to include dimension names in the plotted grid boundaries. Defaults to False.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure displaying the parent and child grid boundaries, mask,
+        and additional map features.
+    """
 
     parent_lon_deg = parent_grid_ds["lon_rho"]
     parent_lat_deg = parent_grid_ds["lat_rho"]
@@ -494,3 +584,5 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
     }  # Customize latitude label style
 
     ax.legend(loc="best")
+
+    return fig

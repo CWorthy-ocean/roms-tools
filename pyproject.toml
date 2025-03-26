@@ -33,7 +33,9 @@ dependencies = [
     "PyYAML",
     "pyamg",
     "bottleneck",
-    "regionmask"
+    "regionmask",
+    "xgcm",
+    "numba"
 ]
 dynamic = ["version"]
 

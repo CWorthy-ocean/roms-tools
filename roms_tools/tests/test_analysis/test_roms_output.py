@@ -284,8 +284,11 @@ def test_plot_on_native_model_grid(roms_output_fixture, use_dask, request):
                 }
 
                 roms_output.plot(var_name, time=1, s=-1, **kwargs)
+                roms_output.plot(var_name, time=1, depth=1000, **kwargs)
+
                 roms_output.plot(var_name, time=1, eta=1, **kwargs)
                 roms_output.plot(var_name, time=1, xi=1, **kwargs)
+
                 roms_output.plot(
                     var_name,
                     time=1,
@@ -293,6 +296,7 @@ def test_plot_on_native_model_grid(roms_output_fixture, use_dask, request):
                     xi=1,
                     **kwargs,
                 )
+
                 roms_output.plot(
                     var_name,
                     time=1,
@@ -303,7 +307,22 @@ def test_plot_on_native_model_grid(roms_output_fixture, use_dask, request):
                 roms_output.plot(
                     var_name,
                     time=1,
+                    depth=1000,
+                    eta=1,
+                    **kwargs,
+                )
+
+                roms_output.plot(
+                    var_name,
+                    time=1,
                     s=-1,
+                    xi=1,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    depth=1000,
                     xi=1,
                     **kwargs,
                 )
@@ -357,6 +376,13 @@ def test_plot_on_lat_lon(roms_output_fixture, use_dask, request):
                 roms_output.plot(
                     var_name,
                     time=1,
+                    lat=9,
+                    depth=1000,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
                     lon=-128,
                     **kwargs,
                 )
@@ -367,6 +393,17 @@ def test_plot_on_lat_lon(roms_output_fixture, use_dask, request):
                     s=-1,
                     **kwargs,
                 )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lon=-128,
+                    depth=1000,
+                    **kwargs,
+                )
+
+            # 2D fields
+            roms_output.plot("zeta", time=1, lat=9, **kwargs)
+            roms_output.plot("zeta", time=1, lon=-128, **kwargs)
 
 
 def test_plot_errors(roms_output_from_restart_file, use_dask):
@@ -376,10 +413,11 @@ def test_plot_errors(roms_output_from_restart_file, use_dask):
     with pytest.raises(ValueError, match="Invalid time index"):
         roms_output_from_restart_file.plot("temp", time=10, s=-1)
 
-    # Conflicting inputs: Both 's' and 'depth' specified
-    # TODO: Uncomment the following test once plotting and 'depth' is implemented
-    # with pytest.raises(ValueError, match="Conflicting input: You cannot specify both 's' and 'depth' at the same time."):
-    #     roms_output_from_restart_file.plot("temp", time=0, s=-1, depth=10)
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: You cannot specify both 's' and 'depth' at the same time.",
+    ):
+        roms_output_from_restart_file.plot("temp", time=0, s=-1, depth=10)
 
     # Ambiguous input: Too many dimensions specified for 3D fields
     with pytest.raises(ValueError, match="Ambiguous input"):
@@ -390,6 +428,10 @@ def test_plot_errors(roms_output_from_restart_file, use_dask):
         ValueError, match="Vertical dimension 's' should be None for 2D fields"
     ):
         roms_output_from_restart_file.plot("zeta", time=1, s=-1)
+    with pytest.raises(
+        ValueError, match="Vertical dimension 'depth' should be None for 2D fields"
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, depth=100)
 
     # Conflicting input: Both eta and xi specified for 2D fields
     with pytest.raises(
@@ -397,6 +439,12 @@ def test_plot_errors(roms_output_from_restart_file, use_dask):
         match="Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both.",
     ):
         roms_output_from_restart_file.plot("zeta", time=1, eta=0, xi=0)
+    # Conflicting input: Both lat and lon specified for 2D fields
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: For 2D fields, specify only one dimension, either 'lat' or 'lon', not both.",
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, lat=0, lon=0)
 
     # Conflicting input: lat or lon provided with eta or xi
     with pytest.raises(
@@ -404,13 +452,6 @@ def test_plot_errors(roms_output_from_restart_file, use_dask):
         match="Conflicting input: You cannot specify 'lat' or 'lon' simultaneously with 'eta' or 'xi'.",
     ):
         roms_output_from_restart_file.plot("temp", time=1, lat=10, lon=20, eta=5)
-
-    # NotImplementedError: depth specified
-    with pytest.raises(
-        NotImplementedError,
-        match="Plotting at a specific depth is not implemented yet.",
-    ):
-        roms_output_from_restart_file.plot("temp", time=1, depth=5)
 
     # Invalid eta index out of bounds
     with pytest.raises(ValueError, match="Invalid eta index"):

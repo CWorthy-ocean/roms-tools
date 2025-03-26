@@ -220,6 +220,7 @@ def compute_depth_coordinates(
     depth = compute_depth(zeta, h, grid_ds.attrs["hc"], Cs, sigma)
 
     # Add metadata
+    depth.name = f"{depth_type}_depth_{location}"
     depth.attrs.update(
         {"long_name": f"{depth_type} depth at {location}-points", "units": "m"}
     )

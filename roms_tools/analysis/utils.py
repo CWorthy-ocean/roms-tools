@@ -29,16 +29,7 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
         If conflicting dimensions are specified.
         If eta or xi indices are out of bounds.
         If eta or xi lie on the boundary when `include_boundary=False`.
-    NotImplementedError
-        If only one of `lat` or `lon` is provided (feature not yet implemented)
-        If `depth` is specified (feature not yet implemented).
     """
-
-    # Check if depth is specified, which is not yet supported
-    if depth is not None:
-        raise NotImplementedError(
-            "Plotting at a specific depth is not implemented yet."
-        )
 
     # Check conflicting dimension choices
     if s is not None and depth is not None:
@@ -76,6 +67,8 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
     if len(field.dims) == 2:
         if s is not None:
             raise ValueError("Vertical dimension 's' should be None for 2D fields.")
+        if depth is not None:
+            raise ValueError("Vertical dimension 'depth' should be None for 2D fields.")
         if all([eta is not None, xi is not None]):
             raise ValueError(
                 "Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both."

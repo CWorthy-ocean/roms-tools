@@ -34,7 +34,6 @@ dependencies = [
     "pyamg",
     "bottleneck",
     "regionmask",
-    "xgcm"
     "xgcm",
     "numba"
 ]

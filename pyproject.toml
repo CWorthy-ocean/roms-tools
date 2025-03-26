@@ -35,6 +35,8 @@ dependencies = [
     "bottleneck",
     "regionmask",
     "xgcm"
+    "xgcm",
+    "numba"
 ]
 dynamic = ["version"]
 

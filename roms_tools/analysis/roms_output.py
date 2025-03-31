@@ -415,6 +415,90 @@ class ROMSOutput:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
 
+    def regrid(self, var_names=None, horizontal_resolution=None, depth_levels=None):
+
+        if var_names is None:
+            var_names = list(self.ds.data_vars)
+
+        # Retain only the variables in var_names and drop others
+        ds = self.ds[var_names]
+
+        # Prepare lateral regrid
+        lat_deg = self.grid.ds["lat_rho"]
+        lon_deg = self.grid.ds["lon_rho"]
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+
+        if horizontal_resolution is None:
+            horizontal_resolution = self._infer_nominal_horizontal_resolution()
+        lons = _generate_coordinate_range(
+            lon_deg.min().values, lon_deg.max().values, horizontal_resolution
+        )
+        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
+        lats = _generate_coordinate_range(
+            lat_deg.min().values, lat_deg.max().values, horizontal_resolution
+        )
+        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
+        target_coords = {"lat": lats, "lon": lons}
+
+        # Prepare vertical regrid
+        if depth_levels is None:
+            depth_levels = self._set_dynamic_depth_levels()
+            depth_levels = xr.DataArray(
+                depth_levels, dims=["depth"], attrs={"units": "m"}
+            )
+
+        # Initialize list to hold regridded datasets
+        regridded_datasets = []
+
+        for loc, dims in [
+            ("rho", ("eta_rho", "xi_rho")),
+            ("u", ("eta_rho", "xi_u")),
+            ("v", ("eta_v", "xi_rho")),
+        ]:
+            var_names_loc = [
+                var_name
+                for var_name in var_names
+                if all(dim in ds[var_name].dims for dim in dims)
+            ]
+            if var_names_loc:
+                ds_loc = ds[var_names_loc].rename(
+                    {f"lat_{loc}": "lat", f"lon_{loc}": "lon"}
+                )
+                self._get_depth_coordinates(depth_type="layer", locations=loc)
+                layer_depth_loc = self.ds_depth_coords[f"layer_depth_{loc}"]
+
+                # Exclude the horizontal boundary cells since diagnostic variables may contain zeros there
+                ds_loc = ds_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
+                layer_depth_loc = layer_depth_loc.isel(
+                    {dims[0]: slice(1, -1), dims[1]: slice(1, -1)}
+                )
+
+                # Lateral regridding
+                lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
+                ds_loc = lateral_regrid.apply(ds_loc)
+                layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
+
+                ## Vertical regridding
+                vertical_regrid = VerticalRegridFromROMS(ds_loc)
+                for var_name in var_names_loc:
+                    if "s_rho" in ds_loc[var_name].dims:
+                        attrs = ds_loc[var_name].attrs
+                        regridded = vertical_regrid.apply(
+                            ds_loc[var_name], layer_depth_loc, depth_levels
+                        )
+                        ds_loc[var_name] = regridded
+                        ds_loc[var_name].attrs = attrs
+
+                # Collect regridded dataset for merging
+                regridded_datasets.append(ds_loc)
+
+        # Merge all regridded datasets
+        if regridded_datasets:
+            ds = xr.merge(regridded_datasets)
+
+        return ds
+
     def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
         """Ensure depth coordinates are stored for a given location and depth type.
 

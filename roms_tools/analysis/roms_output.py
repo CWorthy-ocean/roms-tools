@@ -720,7 +720,8 @@ class ROMSOutput:
         across the depth range. The result is rounded to two decimal places (in m) for readability.
         """
 
-        layer_depth_rho = compute_depth_coordinates(self.grid.ds, 0, "layer", "rho")
+        self._get_depth_coordinates(depth_type="layer", locations=["rho"])
+        layer_depth_rho = self.ds_depth_coords["layer_depth_rho"]
 
         if Nz is None:
             Nz = len(self.ds.s_rho)

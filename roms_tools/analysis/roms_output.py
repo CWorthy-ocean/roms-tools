@@ -460,9 +460,11 @@ class ROMSOutput:
             zeta = 0
 
         for location in locations:
-            self.ds_depth_coords[
-                f"{depth_type}_depth_{location}"
-            ] = compute_depth_coordinates(self.grid.ds, zeta, depth_type, location)
+            var_name = f"{depth_type}_depth_{location}"
+            if var_name not in self.ds_depth_coords:
+                self.ds_depth_coords[var_name] = compute_depth_coordinates(
+                    self.grid.ds, zeta, depth_type, location
+                )
 
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output."""

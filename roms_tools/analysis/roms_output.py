@@ -632,24 +632,40 @@ class ROMSOutput:
         return ds
 
     def _add_lat_lon_coords(self, ds: xr.Dataset) -> xr.Dataset:
-        """Add latitude and longitude coordinates to the dataset.
+        """Add latitude and longitude coordinates to the dataset based on the grid.
 
-        Adds "lat_rho" and "lon_rho" from the grid object to the dataset.
+        This method assigns latitude and longitude coordinates from the grid to the dataset.
+        It always adds the "lat_rho" and "lon_rho" coordinates. If the dataset contains the
+        "xi_u" or "eta_v" dimensions, it also adds the corresponding "lat_u", "lon_u",
+        "lat_v", and "lon_v" coordinates.
 
         Parameters
         ----------
         ds : xarray.Dataset
-            Dataset to update.
+            Input dataset to which latitude and longitude coordinates will be added.
 
         Returns
         -------
         xarray.Dataset
-            Dataset with "lat_rho" and "lon_rho" coordinates added.
+            Updated dataset with the appropriate latitude and longitude coordinates
+            assigned to "rho", "u", and "v" points if applicable.
         """
-        ds = ds.assign_coords(
-            {"lat_rho": self.grid.ds["lat_rho"], "lon_rho": self.grid.ds["lon_rho"]}
-        )
+        coords_to_add = {
+            "lat_rho": self.grid.ds["lat_rho"],
+            "lon_rho": self.grid.ds["lon_rho"],
+        }
 
+        if "xi_u" in ds.dims:
+            coords_to_add.update(
+                {"lat_u": self.grid.ds["lat_u"], "lon_u": self.grid.ds["lon_u"]}
+            )
+        if "eta_v" in ds.dims:
+            coords_to_add.update(
+                {"lat_v": self.grid.ds["lat_v"], "lon_v": self.grid.ds["lon_v"]}
+            )
+
+        # Add all necessary coordinates in one go
+        ds = ds.assign_coords(coords_to_add)
         return ds
 
     def _infer_nominal_horizontal_resolution(self, lat=None):

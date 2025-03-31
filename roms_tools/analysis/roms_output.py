@@ -695,3 +695,38 @@ class ROMSOutput:
         resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
 
         return resolution_in_degrees
+
+    def _set_dynamic_depth_levels(self, Nz=None):
+        """Compute dynamic depth levels for regridding a terrain-following vertical
+        coordinate.
+
+        The depth levels are determined by computing the percentiles of the depth data (`layer_depth_rho`)
+        at specified intervals. If the number of depth levels (`Nz`) is not provided, it defaults to the
+        length of the `s_rho` array.
+
+        Parameters
+        ----------
+        Nz : int, optional
+            The number of depth levels to generate. If None, defaults to the length of the `s_rho` array.
+
+        Returns
+        -------
+        depths : numpy.ndarray
+            A 1D array of dynamically computed depth levels in meters, rounded to two decimal places.
+
+        Notes
+        -----
+        The depth levels are computed using percentiles, which ensures that the data is evenly distributed
+        across the depth range. The result is rounded to two decimal places (in m) for readability.
+        """
+
+        layer_depth_rho = compute_depth_coordinates(self.grid.ds, 0, "layer", "rho")
+
+        if Nz is None:
+            Nz = len(self.ds.s_rho)
+
+        depths = np.round(
+            np.percentile(layer_depth_rho.values.flatten(), np.linspace(0, 100, Nz)), 2
+        )
+
+        return depths

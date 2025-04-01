@@ -416,6 +416,26 @@ class ROMSOutput:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
 
     def regrid(self, var_names=None, horizontal_resolution=None, depth_levels=None):
+        """Regrid the dataset both horizontally and vertically.
+
+        This method selects the specified variables, interpolates them onto a lat-lon-z horizontal grid. The horizontal target resolution and vertical target depth levels are either specified or inferred dynamically.
+
+        Parameters
+        ----------
+        var_names : list of str, optional
+            List of variable names to be regridded. If None, all variables in the dataset
+            are used.
+        horizontal_resolution : float, optional
+            Target horizontal resolution in degrees. If None, the nominal horizontal resolution is inferred from the grid.
+        depth_levels : xarray.DataArray, numpy.ndarray, list, optional
+            Target depth levels. If None, depth levels are determined dynamically.
+            If provided as a list or numpy array, it is safely converted to an `xarray.DataArray`.
+
+        Returns
+        -------
+        xarray.Dataset
+            The regridded dataset.
+        """
 
         if var_names is None:
             var_names = list(self.ds.data_vars)
@@ -444,8 +464,11 @@ class ROMSOutput:
         # Prepare vertical regrid
         if depth_levels is None:
             depth_levels = self._set_dynamic_depth_levels()
+
+        # Ensure depth_levels is an xarray.DataArray
+        if not isinstance(depth_levels, xr.DataArray):
             depth_levels = xr.DataArray(
-                depth_levels, dims=["depth"], attrs={"units": "m"}
+                np.asarray(depth_levels), dims=["depth"], attrs={"units": "m"}
             )
 
         # Initialize list to hold regridded datasets

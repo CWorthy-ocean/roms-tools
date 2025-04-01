@@ -1,6 +1,18 @@
 # Release notes
 
-## v2.6.0 (unreleased)
+## v2.7.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v2.6.0
 
 ### New Features
 
@@ -9,18 +21,12 @@
 * Support to plot ROMS output data at fixed depth ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
 * Support for saving a figure of ROMS output data ([#280](https://github.com/CWorthy-ocean/roms-tools/pull/280))
 
-### Breaking Changes
-
 ### Internal Changes
 
 * Unfreeze arguments in all dataclasses ([#276](https://github.com/CWorthy-ocean/roms-tools/pull/276))
 * Integration with xesmf for horizontal regridding from ROMS ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
 * Computation of nominal horizontal resolution in degrees ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
 * Integration with xgcm and numba for vertical regridding from ROMS ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
-
-### Documentation
-
-### Bugfixes
 
 ## v2.5.0
 

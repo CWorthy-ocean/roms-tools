@@ -502,7 +502,7 @@ class ROMSOutput:
                 ds_loc = lateral_regrid.apply(ds_loc)
                 layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
 
-                ## Vertical regridding
+                # Vertical regridding
                 vertical_regrid = VerticalRegridFromROMS(ds_loc)
                 for var_name in var_names_loc:
                     if "s_rho" in ds_loc[var_name].dims:
@@ -513,12 +513,16 @@ class ROMSOutput:
                         ds_loc[var_name] = regridded
                         ds_loc[var_name].attrs = attrs
 
+                ds_loc = ds_loc.assign_coords({"depth": depth_levels})
+
                 # Collect regridded dataset for merging
                 regridded_datasets.append(ds_loc)
 
         # Merge all regridded datasets
         if regridded_datasets:
             ds = xr.merge(regridded_datasets)
+
+        ds = ds.rename({"abs_time": "time"}).set_index(time="time")
 
         return ds
 

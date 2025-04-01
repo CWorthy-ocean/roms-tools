@@ -236,7 +236,7 @@ class TestRiverForcingGeneral:
         for name in indices.keys():
             for (eta_rho, xi_rho) in indices[name]:
                 assert coast[eta_rho, xi_rho]
-                assert river_forcing.ds["river_location"][eta_rho, xi_rho] > 0
+                assert river_forcing.ds["river_flux"][eta_rho, xi_rho] > 0
 
     def test_missing_source_name(self, iceland_test_grid):
         with pytest.raises(ValueError, match="`source` must include a 'name'."):
@@ -475,14 +475,14 @@ class TestRiverForcingWithPrescribedIndices:
 
         # check that all values are integers for single cell rivers
         non_zero_values = river_forcing_with_prescribed_single_cell_indices.ds[
-            "river_location"
+            "river_flux"
         ]
         is_integer = non_zero_values == np.floor(non_zero_values)
         assert (is_integer).all()
 
         # check that not all values are integers for multi cell rivers
         non_zero_values = river_forcing_with_prescribed_multi_cell_indices.ds[
-            "river_location"
+            "river_flux"
         ]
         is_integer = non_zero_values == np.floor(non_zero_values)
         assert not (is_integer).all()

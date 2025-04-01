@@ -58,7 +58,7 @@
             ],
             "long_name": "River ID (1-based Fortran indexing)"
         },
-        "river_location/.zarray": {
+        "river_flux/.zarray": {
             "chunks": [
                 20,
                 20
@@ -80,7 +80,7 @@
             ],
             "zarr_format": 2
         },
-        "river_location/.zattrs": {
+        "river_flux/.zattrs": {
             "_ARRAY_DIMENSIONS": [
                 "eta_rho",
                 "xi_rho"

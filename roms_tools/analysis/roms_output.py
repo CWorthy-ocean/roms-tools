@@ -9,11 +9,13 @@ from typing import Union, Optional
 from pathlib import Path
 import re
 import logging
+import warnings
 from datetime import datetime, timedelta
 from roms_tools import Grid
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
+from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.analysis.utils import _validate_plot_inputs, _generate_coordinate_range
 
 
@@ -485,23 +487,31 @@ class ROMSOutput:
                 if all(dim in ds[var_name].dims for dim in dims)
             ]
             if var_names_loc:
-                ds_loc = ds[var_names_loc].rename(
-                    {f"lat_{loc}": "lat", f"lon_{loc}": "lon"}
+                ds_loc = (
+                    ds[var_names_loc]
+                    .rename({f"lat_{loc}": "lat", f"lon_{loc}": "lon"})
+                    .where(self.grid.ds[f"mask_{loc}"])
                 )
                 self._get_depth_coordinates(depth_type="layer", locations=[loc])
                 layer_depth_loc = self.ds_depth_coords[f"layer_depth_{loc}"]
+                h_loc = self.grid.ds.h
+                if loc == "u":
+                    h_loc = interpolate_from_rho_to_u(h_loc)
+                elif loc == "v":
+                    h_loc = interpolate_from_rho_to_v(h_loc)
 
                 # Exclude the horizontal boundary cells since diagnostic variables may contain zeros there
                 ds_loc = ds_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
                 layer_depth_loc = layer_depth_loc.isel(
                     {dims[0]: slice(1, -1), dims[1]: slice(1, -1)}
                 )
+                h_loc = h_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
 
                 # Lateral regridding
                 lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
                 ds_loc = lateral_regrid.apply(ds_loc)
                 layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
-
+                h_loc = lateral_regrid.apply(h_loc)
                 # Vertical regridding
                 vertical_regrid = VerticalRegridFromROMS(ds_loc)
                 for var_name in var_names_loc:
@@ -513,6 +523,7 @@ class ROMSOutput:
                             depth_levels,
                             mask_edges=False,
                         )
+                        regridded = regridded.where(regridded.depth < h_loc)
                         ds_loc[var_name] = regridded
                         ds_loc[var_name].attrs = attrs
 
@@ -525,7 +536,9 @@ class ROMSOutput:
         if regridded_datasets:
             ds = xr.merge(regridded_datasets)
 
-        ds = ds.rename({"abs_time": "time"}).set_index(time="time")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            ds = ds.rename({"abs_time": "time"}).set_index(time="time")
 
         return ds
 
@@ -863,14 +876,14 @@ class ROMSOutput:
 
         # Normalize
         z_faces -= z_faces[0]
-        z_faces *= -depth / z_faces[-1]
+        z_faces *= depth / z_faces[-1]
         z_faces[0] = 0.0
 
         # Calculate center depths (average between adjacent face depths)
         z_centers = (z_faces[:-1] + z_faces[1:]) / 2
 
         # Round both z_faces and z_centers to two decimal places
-        z_faces = np.round(np.flip(z_faces), 2)
+        z_faces = np.round(z_faces, 2)
         z_centers = np.round(z_centers, 2)
 
         return z_centers, z_faces

@@ -442,6 +442,13 @@ class ROMSOutput:
         if var_names is None:
             var_names = list(self.ds.data_vars)
 
+        # Check that all var_names exist in self.ds
+        missing_vars = [var for var in var_names if var not in self.ds.data_vars]
+        if missing_vars:
+            raise ValueError(
+                f"The following variables are not found in the dataset: {', '.join(missing_vars)}"
+            )
+
         # Retain only the variables in var_names and drop others
         ds = self.ds[var_names]
 
@@ -470,7 +477,9 @@ class ROMSOutput:
         # Ensure depth_levels is an xarray.DataArray
         if not isinstance(depth_levels, xr.DataArray):
             depth_levels = xr.DataArray(
-                np.asarray(depth_levels), dims=["depth"], attrs={"units": "m"}
+                np.asarray(depth_levels),
+                dims=["depth"],
+                attrs={"long_name": "Depth", "units": "m"},
             )
 
         # Initialize list to hold regridded datasets
@@ -536,11 +545,14 @@ class ROMSOutput:
         if regridded_datasets:
             ds = xr.merge(regridded_datasets)
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning)
-            ds = ds.rename({"abs_time": "time"}).set_index(time="time")
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                ds = ds.rename({"abs_time": "time"}).set_index(time="time")
+            ds["time"].attrs = {"long_name": "Time"}
+            ds["lon"].attrs = {"long_name": "Longitude", "units": "Degrees East"}
+            ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}
 
-        return ds
+            return ds
 
     def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
         """Ensure depth coordinates are stored for a given location and depth type.

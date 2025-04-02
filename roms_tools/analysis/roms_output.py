@@ -508,7 +508,10 @@ class ROMSOutput:
                     if "s_rho" in ds_loc[var_name].dims:
                         attrs = ds_loc[var_name].attrs
                         regridded = vertical_regrid.apply(
-                            ds_loc[var_name], layer_depth_loc, depth_levels
+                            ds_loc[var_name],
+                            layer_depth_loc,
+                            depth_levels,
+                            mask_edges=False,
                         )
                         ds_loc[var_name] = regridded
                         ds_loc[var_name].attrs = attrs

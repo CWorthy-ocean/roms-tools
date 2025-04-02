@@ -257,7 +257,7 @@ class VerticalRegridFromROMS:
         """
         self.grid = xgcm.Grid(ds, coords={"s_rho": {"center": "s_rho"}}, periodic=False)
 
-    def apply(self, da, depth_coords, target_depth_levels):
+    def apply(self, da, depth_coords, target_depth_levels, mask_edges=True):
         """Applies vertical regridding from ROMS to the specified target depth levels.
 
         This method transforms the input data array `da` from the ROMS vertical coordinate (`s_rho`)
@@ -275,6 +275,9 @@ class VerticalRegridFromROMS:
         target_depth_levels : array-like
             The target depth levels to which the input data `da` will be regridded.
 
+        mask_edges: bool, optional
+            If activated, target values outside the range of depth_coords are masked with nan. Defaults to True.
+
         Returns
         -------
         xarray.DataArray
@@ -284,7 +287,11 @@ class VerticalRegridFromROMS:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
             transformed = self.grid.transform(
-                da, "s_rho", target_depth_levels, target_data=depth_coords
+                da,
+                "s_rho",
+                target_depth_levels,
+                target_data=depth_coords,
+                mask_edges=mask_edges,
             )
 
         return transformed

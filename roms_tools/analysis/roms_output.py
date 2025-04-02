@@ -463,7 +463,7 @@ class ROMSOutput:
 
         # Prepare vertical regrid
         if depth_levels is None:
-            depth_levels = self._set_dynamic_depth_levels()
+            depth_levels, _ = self._compute_exponential_depth_levels()
 
         # Ensure depth_levels is an xarray.DataArray
         if not isinstance(depth_levels, xr.DataArray):
@@ -488,7 +488,7 @@ class ROMSOutput:
                 ds_loc = ds[var_names_loc].rename(
                     {f"lat_{loc}": "lat", f"lon_{loc}": "lon"}
                 )
-                self._get_depth_coordinates(depth_type="layer", locations=loc)
+                self._get_depth_coordinates(depth_type="layer", locations=[loc])
                 layer_depth_loc = self.ds_depth_coords[f"layer_depth_{loc}"]
 
                 # Exclude the horizontal boundary cells since diagnostic variables may contain zeros there
@@ -826,38 +826,51 @@ class ROMSOutput:
 
         return resolution_in_degrees
 
-    def _set_dynamic_depth_levels(self, Nz=None):
-        """Compute dynamic depth levels for regridding a terrain-following vertical
-        coordinate.
-
-        The depth levels are determined by computing the percentiles of the depth data (`layer_depth_rho`)
-        at specified intervals. If the number of depth levels (`Nz`) is not provided, it defaults to the
-        length of the `s_rho` array.
+    def _compute_exponential_depth_levels(self, Nz=None, depth=None, h=None):
+        """Compute vertical grid center and face depths using an exponential profile.
 
         Parameters
         ----------
         Nz : int, optional
-            The number of depth levels to generate. If None, defaults to the length of the `s_rho` array.
+            Number of vertical levels. Defaults to `len(self.ds.s_rho)`.
+
+        depth : float, optional
+            Total depth of the domain. Defaults to `grid.ds.h.max().values`.
+
+        h : float, optional
+            Scaling parameter for the exponential profile. Defaults to `Nz / 4.5`.
 
         Returns
         -------
-        depths : numpy.ndarray
-            A 1D array of dynamically computed depth levels in meters, rounded to two decimal places.
-
-        Notes
-        -----
-        The depth levels are computed using percentiles, which ensures that the data is evenly distributed
-        across the depth range. The result is rounded to two decimal places (in m) for readability.
+        tuple of numpy.ndarray
+            Depth values at the vertical grid centers (`z_centers`) and grid faces (`z_faces`),
+            both rounded to two decimal places.
         """
-
-        self._get_depth_coordinates(depth_type="layer", locations=["rho"])
-        layer_depth_rho = self.ds_depth_coords["layer_depth_rho"]
-
         if Nz is None:
             Nz = len(self.ds.s_rho)
+        if depth is None:
+            depth = self.grid.ds.h.max().values
+        if h is None:
+            h = Nz / 4.5
 
-        depths = np.round(
-            np.percentile(layer_depth_rho.values.flatten(), np.linspace(0, 100, Nz)), 2
-        )
+        k = np.arange(1, Nz + 2)
 
-        return depths
+        # Define the exponential profile function
+        def exponential_profile(k, Nz, h):
+            return np.exp(k / h)
+
+        z_faces = np.vectorize(exponential_profile)(k, Nz, h)
+
+        # Normalize
+        z_faces -= z_faces[0]
+        z_faces *= -depth / z_faces[-1]
+        z_faces[0] = 0.0
+
+        # Calculate center depths (average between adjacent face depths)
+        z_centers = (z_faces[:-1] + z_faces[1:]) / 2
+
+        # Round both z_faces and z_centers to two decimal places
+        z_faces = np.round(np.flip(z_faces), 2)
+        z_centers = np.round(z_centers, 2)
+
+        return z_centers, z_faces

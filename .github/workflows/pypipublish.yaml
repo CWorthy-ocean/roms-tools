@@ -67,7 +67,7 @@ jobs:
 
   upload-to-test-pypi:
     needs: test-built-dist
-    if: github.ref == 'refs/heads/update-pypi-action'
+    if: contains(github.head_ref_branch, 'update-pypi-action')
     runs-on: ubuntu-latest
     permissions:
       id-token: write

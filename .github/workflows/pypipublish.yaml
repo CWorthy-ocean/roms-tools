@@ -65,6 +65,23 @@ jobs:
           python -m pip install dist/roms_tools*.whl
           python -c "import roms_tools; print(roms_tools.__version__)"
 
+  upload-to-test-pypi:
+    needs: test-built-dist
+    if: github.ref == 'refs/heads/update-pypi-action'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: releases
+          path: dist
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.12.4
+        with:
+          repository-url: https://upload.test.pypi.org/legacy/
+  
   upload-to-pypi:
     needs: test-built-dist
     if: github.event_name == 'release'
@@ -78,6 +95,6 @@ jobs:
           name: releases
           path: dist
       - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.8.10
+        uses: pypa/gh-action-pypi-publish@v1.12.4
         with:
           repository-url: https://upload.pypi.org/legacy/

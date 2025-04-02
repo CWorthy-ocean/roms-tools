@@ -486,3 +486,16 @@ def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):
 
     assert filename.exists()
     filename.unlink()
+
+
+def test_regrid(roms_output_from_restart_file):
+
+    ds = roms_output_from_restart_file.regrid(var_names=[])
+    assert ds is None
+
+    with pytest.raises(
+        ValueError, match="The following variables are not found in the dataset"
+    ):
+        ds = roms_output_from_restart_file.regrid(
+            var_names=["zeta", "temp", "salt", "u", "v", "ALK", "fake"]
+        )

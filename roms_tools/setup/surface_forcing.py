@@ -8,13 +8,14 @@ from pathlib import Path
 import logging
 from typing import Dict, Union, List, Optional
 from roms_tools import Grid
-from roms_tools.utils import save_datasets
+from roms_tools.utils import save_datasets, transpose_dimensions
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
     CESMBGCSurfaceForcingDataset,
+    UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
     get_target_coords,
@@ -24,6 +25,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     rotate_velocities,
+    compute_missing_surface_bgc_variables,
     convert_to_roms_time,
     _to_yaml,
     _from_yaml,
@@ -160,6 +162,15 @@ class SurfaceForcing:
         if self.type == "physics" and self.correct_radiation:
             processed_fields = self._apply_correction(processed_fields, data)
 
+        if self.type == "bgc":
+            processed_fields = compute_missing_surface_bgc_variables(processed_fields)
+
+        # Reorder dimensions
+        for var_name in processed_fields:
+            processed_fields[var_name] = transpose_dimensions(
+                processed_fields[var_name]
+            )
+
         d_meta = get_variable_metadata()
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
@@ -265,9 +276,12 @@ class SurfaceForcing:
             if self.source["name"] == "CESM_REGRIDDED":
 
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
+            elif self.source["name"] == "UNIFIED":
+
+                data = UnifiedBGCSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
                 )
 
         return data
@@ -331,7 +345,9 @@ class SurfaceForcing:
             }
         elif self.type == "bgc":
             variable_info = {}
-            for var_name in data.var_names.keys():
+            for var_name in list(data.var_names.keys()) + list(
+                data.opt_var_names.keys()
+            ):
                 variable_info[var_name] = default_info
                 if var_name == "pco2_air":
                     variable_info[var_name] = {**default_info, "validate": True}

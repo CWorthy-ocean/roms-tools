@@ -1,0 +1,11 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "ocean_time",
+        "s_w",
+        "eta_rho",
+        "xi_rho"
+    ],
+    "coordinates": "abs_time",
+    "long_name": "w-flux component",
+    "units": "m/s"
+}

@@ -9,11 +9,13 @@ from typing import Union, Optional
 from pathlib import Path
 import re
 import logging
+import warnings
 from datetime import datetime, timedelta
 from roms_tools import Grid
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
+from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 from roms_tools.analysis.utils import _validate_plot_inputs, _generate_coordinate_range
 
 
@@ -415,6 +417,145 @@ class ROMSOutput:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
 
+    def regrid(self, var_names=None, horizontal_resolution=None, depth_levels=None):
+        """Regrid the dataset both horizontally and vertically.
+
+        This method selects the specified variables, interpolates them onto a lat-lon-z horizontal grid. The horizontal target resolution and vertical target depth levels are either specified or inferred dynamically.
+
+        Parameters
+        ----------
+        var_names : list of str, optional
+            List of variable names to be regridded. If None, all variables in the dataset
+            are used.
+        horizontal_resolution : float, optional
+            Target horizontal resolution in degrees. If None, the nominal horizontal resolution is inferred from the grid.
+        depth_levels : xarray.DataArray, numpy.ndarray, list, optional
+            Target depth levels. If None, depth levels are determined dynamically.
+            If provided as a list or numpy array, it is safely converted to an `xarray.DataArray`.
+
+        Returns
+        -------
+        xarray.Dataset
+            The regridded dataset.
+        """
+
+        if var_names is None:
+            var_names = list(self.ds.data_vars)
+
+        # Check that all var_names exist in self.ds
+        missing_vars = [var for var in var_names if var not in self.ds.data_vars]
+        if missing_vars:
+            raise ValueError(
+                f"The following variables are not found in the dataset: {', '.join(missing_vars)}"
+            )
+
+        # Retain only the variables in var_names and drop others
+        ds = self.ds[var_names]
+
+        # Prepare lateral regrid
+        lat_deg = self.grid.ds["lat_rho"]
+        lon_deg = self.grid.ds["lon_rho"]
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+
+        if horizontal_resolution is None:
+            horizontal_resolution = self._infer_nominal_horizontal_resolution()
+        lons = _generate_coordinate_range(
+            lon_deg.min().values, lon_deg.max().values, horizontal_resolution
+        )
+        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
+        lats = _generate_coordinate_range(
+            lat_deg.min().values, lat_deg.max().values, horizontal_resolution
+        )
+        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
+        target_coords = {"lat": lats, "lon": lons}
+
+        # Prepare vertical regrid
+        if depth_levels is None:
+            depth_levels, _ = self._compute_exponential_depth_levels()
+
+        # Ensure depth_levels is an xarray.DataArray
+        if not isinstance(depth_levels, xr.DataArray):
+            depth_levels = xr.DataArray(
+                np.asarray(depth_levels),
+                dims=["depth"],
+                attrs={"long_name": "Depth", "units": "m"},
+            )
+
+        depth_levels = depth_levels.astype(np.float32)
+
+        # Initialize list to hold regridded datasets
+        regridded_datasets = []
+
+        for loc, dims in [
+            ("rho", ("eta_rho", "xi_rho")),
+            ("u", ("eta_rho", "xi_u")),
+            ("v", ("eta_v", "xi_rho")),
+        ]:
+            var_names_loc = [
+                var_name
+                for var_name in var_names
+                if all(dim in ds[var_name].dims for dim in dims)
+            ]
+            if var_names_loc:
+                ds_loc = (
+                    ds[var_names_loc]
+                    .rename({f"lat_{loc}": "lat", f"lon_{loc}": "lon"})
+                    .where(self.grid.ds[f"mask_{loc}"])
+                )
+                self._get_depth_coordinates(depth_type="layer", locations=[loc])
+                layer_depth_loc = self.ds_depth_coords[f"layer_depth_{loc}"]
+                h_loc = self.grid.ds.h
+                if loc == "u":
+                    h_loc = interpolate_from_rho_to_u(h_loc)
+                elif loc == "v":
+                    h_loc = interpolate_from_rho_to_v(h_loc)
+
+                # Exclude the horizontal boundary cells since diagnostic variables may contain zeros there
+                ds_loc = ds_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
+                layer_depth_loc = layer_depth_loc.isel(
+                    {dims[0]: slice(1, -1), dims[1]: slice(1, -1)}
+                )
+                h_loc = h_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
+
+                # Lateral regridding
+                lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
+                ds_loc = lateral_regrid.apply(ds_loc)
+                layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
+                h_loc = lateral_regrid.apply(h_loc)
+                # Vertical regridding
+                vertical_regrid = VerticalRegridFromROMS(ds_loc)
+                for var_name in var_names_loc:
+                    if "s_rho" in ds_loc[var_name].dims:
+                        attrs = ds_loc[var_name].attrs
+                        regridded = vertical_regrid.apply(
+                            ds_loc[var_name],
+                            layer_depth_loc,
+                            depth_levels,
+                            mask_edges=False,
+                        )
+                        regridded = regridded.where(regridded.depth < h_loc)
+                        ds_loc[var_name] = regridded
+                        ds_loc[var_name].attrs = attrs
+
+                ds_loc = ds_loc.assign_coords({"depth": depth_levels})
+
+                # Collect regridded dataset for merging
+                regridded_datasets.append(ds_loc)
+
+        # Merge all regridded datasets
+        if regridded_datasets:
+            ds = xr.merge(regridded_datasets)
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                ds = ds.rename({"abs_time": "time"}).set_index(time="time")
+            ds["time"].attrs = {"long_name": "Time"}
+            ds["lon"].attrs = {"long_name": "Longitude", "units": "Degrees East"}
+            ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}
+
+            return ds
+
     def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
         """Ensure depth coordinates are stored for a given location and depth type.
 
@@ -460,9 +601,11 @@ class ROMSOutput:
             zeta = 0
 
         for location in locations:
-            self.ds_depth_coords[
-                f"{depth_type}_depth_{location}"
-            ] = compute_depth_coordinates(self.grid.ds, zeta, depth_type, location)
+            var_name = f"{depth_type}_depth_{location}"
+            if var_name not in self.ds_depth_coords:
+                self.ds_depth_coords[var_name] = compute_depth_coordinates(
+                    self.grid.ds, zeta, depth_type, location
+                )
 
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output."""
@@ -630,24 +773,40 @@ class ROMSOutput:
         return ds
 
     def _add_lat_lon_coords(self, ds: xr.Dataset) -> xr.Dataset:
-        """Add latitude and longitude coordinates to the dataset.
+        """Add latitude and longitude coordinates to the dataset based on the grid.
 
-        Adds "lat_rho" and "lon_rho" from the grid object to the dataset.
+        This method assigns latitude and longitude coordinates from the grid to the dataset.
+        It always adds the "lat_rho" and "lon_rho" coordinates. If the dataset contains the
+        "xi_u" or "eta_v" dimensions, it also adds the corresponding "lat_u", "lon_u",
+        "lat_v", and "lon_v" coordinates.
 
         Parameters
         ----------
         ds : xarray.Dataset
-            Dataset to update.
+            Input dataset to which latitude and longitude coordinates will be added.
 
         Returns
         -------
         xarray.Dataset
-            Dataset with "lat_rho" and "lon_rho" coordinates added.
+            Updated dataset with the appropriate latitude and longitude coordinates
+            assigned to "rho", "u", and "v" points if applicable.
         """
-        ds = ds.assign_coords(
-            {"lat_rho": self.grid.ds["lat_rho"], "lon_rho": self.grid.ds["lon_rho"]}
-        )
+        coords_to_add = {
+            "lat_rho": self.grid.ds["lat_rho"],
+            "lon_rho": self.grid.ds["lon_rho"],
+        }
 
+        if "xi_u" in ds.dims:
+            coords_to_add.update(
+                {"lat_u": self.grid.ds["lat_u"], "lon_u": self.grid.ds["lon_u"]}
+            )
+        if "eta_v" in ds.dims:
+            coords_to_add.update(
+                {"lat_v": self.grid.ds["lat_v"], "lon_v": self.grid.ds["lon_v"]}
+            )
+
+        # Add all necessary coordinates in one go
+        ds = ds.assign_coords(coords_to_add)
         return ds
 
     def _infer_nominal_horizontal_resolution(self, lat=None):
@@ -693,3 +852,52 @@ class ROMSOutput:
         resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
 
         return resolution_in_degrees
+
+    def _compute_exponential_depth_levels(self, Nz=None, depth=None, h=None):
+        """Compute vertical grid center and face depths using an exponential profile.
+
+        Parameters
+        ----------
+        Nz : int, optional
+            Number of vertical levels. Defaults to `len(self.ds.s_rho)`.
+
+        depth : float, optional
+            Total depth of the domain. Defaults to `grid.ds.h.max().values`.
+
+        h : float, optional
+            Scaling parameter for the exponential profile. Defaults to `Nz / 4.5`.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            Depth values at the vertical grid centers (`z_centers`) and grid faces (`z_faces`),
+            both rounded to two decimal places.
+        """
+        if Nz is None:
+            Nz = len(self.ds.s_rho)
+        if depth is None:
+            depth = self.grid.ds.h.max().values
+        if h is None:
+            h = Nz / 4.5
+
+        k = np.arange(1, Nz + 2)
+
+        # Define the exponential profile function
+        def exponential_profile(k, Nz, h):
+            return np.exp(k / h)
+
+        z_faces = np.vectorize(exponential_profile)(k, Nz, h)
+
+        # Normalize
+        z_faces -= z_faces[0]
+        z_faces *= depth / z_faces[-1]
+        z_faces[0] = 0.0
+
+        # Calculate center depths (average between adjacent face depths)
+        z_centers = (z_faces[:-1] + z_faces[1:]) / 2
+
+        # Round both z_faces and z_centers to two decimal places
+        z_faces = np.round(z_faces, 2)
+        z_centers = np.round(z_centers, 2)
+
+        return z_centers, z_faces

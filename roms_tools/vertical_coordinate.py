@@ -171,6 +171,12 @@ def compute_depth_coordinates(
     - Spatial slicing (`eta`, `xi`) is performed before depth computation to optimize efficiency.
     - Depth calculations rely on the ROMS vertical stretching curves (`Cs`) and sigma-layers.
     """
+    # Validate location
+    valid_locations = {"rho", "u", "v"}
+    if location not in valid_locations:
+        raise ValueError(
+            f"Invalid location: {location}. Must be one of {valid_locations}."
+        )
 
     # Select the appropriate depth computation parameters
     if depth_type == "layer":

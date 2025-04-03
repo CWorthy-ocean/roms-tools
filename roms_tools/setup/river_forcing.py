@@ -441,21 +441,21 @@ class RiverForcing:
         return river_indices
 
     def _write_indices_into_dataset(self, ds):
-        """Adds river location indices to the dataset as the "river_location" variable.
+        """Adds river location indices to the dataset as the "river_flux" variable.
 
-        This method creates a new "river_location" variable
+        This method creates a new "river_flux" variable
         using river station indices from `self.indices` and assigns it to the dataset.
         The indices specify the river station locations in terms of eta_rho and xi_rho grid cell indices.
 
         Parameters
         ----------
         ds : xarray.Dataset
-            The dataset to which the "river_location" variable will be added.
+            The dataset to which the "river_flux" variable will be added.
 
         Returns
         -------
         xarray.Dataset
-            The modified dataset with the "river_location" variable added.
+            The modified dataset with the "river_flux" variable added.
         """
 
         river_locations = xr.zeros_like(self.grid.ds.h)
@@ -474,7 +474,7 @@ class RiverForcing:
 
         river_locations.attrs["long_name"] = "River ID plus local volume fraction"
         river_locations.attrs["units"] = "none"
-        ds["river_location"] = river_locations
+        ds["river_flux"] = river_locations
 
         ds = ds.drop_vars(["lat_rho", "lon_rho"])
 

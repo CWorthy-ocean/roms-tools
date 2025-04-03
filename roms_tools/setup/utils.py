@@ -524,31 +524,31 @@ def compute_missing_bgc_variables(bgc_data):
 
     # Define the relationships for missing variables
     variable_relations = {
-        "NH4": (None, 0.0),
-        "Lig": ("Fe", 3),  # is that in mmol m-3?
-        "DIC_ALT_CO2": ("DIC", 1),
-        "ALK_ALT_CO2": ("ALK", 1),
-        "DOC": (None, 0.0),
-        "DON": (None, 1.0),  # is that in mmom m-3?
-        "DOP": (None, 0.1),  # is that in mmol m-3?
-        "DOCr": (None, 10**-6),  # is that in mmol m-3?
-        "DONr": (None, 0.8),  # is that in mmol m-3?
-        "DOPr": (None, 0.003),  # is that in mmol m-3?
-        "zooC": ("CHL", 1.35),  # is that in mmol m-3?
-        "spChl": ("CHL", 0.675),  # is that in mg m-3?
-        "spC": ("CHL", 3.375),  # is that in mmol m-3?
-        "spP": ("CHL", 0.03),  # is that in mmol m-3?
-        "spFe": ("CHL", 1.35e-5),  # is that in mmol m-3?
-        "spCaCO3": ("CHL", 0.0675),  # is that in mmol m-3?
-        "diatChl": ("CHL", 0.0675),  # is that in mg m-3?
-        "diatC": ("CHL", 0.2025),  # is that in mmol m-3?
-        "diatP": ("CHL", 0.02),  # is that in mmol m-3?
-        "diatFe": ("CHL", 1.35e-6),  # is that in mmol m-3?
-        "diatSi": ("CHL", 0.0675),  # is that in mmol m-3?
-        "diazChl": ("CHL", 0.0075),  # is that in mg m-3?
-        "diazC": ("CHL", 0.0375),  # is that in mmol m-3?
-        "diazP": ("CHL", 0.01),  # is that in mmol m-3?
-        "diazFe": ("CHL", 7.5e-7),  # is that in mmol m-3?
+        "NH4": (None, 10**-6),  # mmol m-3
+        "Lig": ("Fe", 3),  # mmol m-3
+        "DIC_ALT_CO2": ("DIC", 1),  # mmol m-3
+        "ALK_ALT_CO2": ("ALK", 1),  # meq m-3 = mmol m-3
+        "DOC": (None, 10**-6),  # mmol m-3
+        "DON": (None, 1.0),  # mmol m-3
+        "DOP": (None, 0.1),  # mmol m-3
+        "DOCr": (None, 10**-6),  # mmol m-3
+        "DONr": (None, 0.8),  # mmol m-3
+        "DOPr": (None, 0.003),  # mmol m-3
+        "zooC": ("CHL", 1.35),  # mmol m-3
+        "spChl": ("CHL", 0.675),  # mg m-3
+        "spC": ("CHL", 3.375),  # mmol m-3
+        "spP": ("CHL", 0.03),  # mmol m-3
+        "spFe": ("CHL", 1.35e-5),  # mmol m-3
+        "spCaCO3": ("CHL", 0.0675),  # mmol m-3
+        "diatChl": ("CHL", 0.0675),  # mg m-3
+        "diatC": ("CHL", 0.2025),  # mmol m-3
+        "diatP": ("CHL", 0.02),  # mmol m-3
+        "diatFe": ("CHL", 1.35e-6),  # mmol m-3
+        "diatSi": ("CHL", 0.0675),  # mmol m-3
+        "diazChl": ("CHL", 0.0075),  # mg m-3
+        "diazC": ("CHL", 0.0375),  # mmol m-3
+        "diazP": ("CHL", 0.01),  # mmol m-3
+        "diazFe": ("CHL", 7.5e-7),  # mmol m-3
     }
 
     # Fill in missing variables using the defined relationships

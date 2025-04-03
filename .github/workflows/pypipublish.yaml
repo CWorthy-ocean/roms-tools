@@ -67,7 +67,10 @@ jobs:
 
   upload-to-test-pypi:
     needs: test-built-dist
-    if: startsWith(github.ref, 'refs/tags/')
+    # Consider using GitFlow and triggering on commits to develop?
+    # this will run after a PR is merged to main, and will notify us "late"
+    # need to avoid running on forks....
+    if: contains(fromJSON('["push", "release"]'), github.event_name)
     runs-on: ubuntu-latest
     environment:
       name: testpypi

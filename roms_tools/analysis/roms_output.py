@@ -482,6 +482,8 @@ class ROMSOutput:
                 attrs={"long_name": "Depth", "units": "m"},
             )
 
+        depth_levels = depth_levels.astype(np.float32)
+
         # Initialize list to hold regridded datasets
         regridded_datasets = []
 

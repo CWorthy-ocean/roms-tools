@@ -166,4 +166,4 @@ def _generate_coordinate_range(min, max, resolution):
     # Truncate any values that exceed max (including small floating point errors)
     target = target[target <= end_int + 1e-10]
 
-    return target
+    return target.astype(np.float32)

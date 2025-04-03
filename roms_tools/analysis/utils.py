@@ -107,12 +107,13 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
 
 
 def _generate_coordinate_range(min, max, resolution):
-    """Generate an array of target latitude or longitude coordinates within a specified
-    range.
+    """Generate an array of target coordinates (e.g., latitude or longitude) within a
+    specified range, with a resolution that is rounded to the nearest value of the form
+    `1/n` (or integer).
 
     This method generates an array of target coordinates between the provided `min` and `max`
-    values, with a specified resolution (spacing) between each coordinate. Both `min` and `max`
-    are included in the generated range.
+    values, ensuring that both `min` and `max` are included in the resulting range. The resolution
+    is rounded to the nearest fraction of the form `1/n` or an integer, based on the input.
 
     Parameters
     ----------
@@ -123,15 +124,46 @@ def _generate_coordinate_range(min, max, resolution):
         The maximum value (in degrees) of the coordinate range (inclusive).
 
     resolution : float
-        The spacing (in degrees) between each coordinate in the array.
+        The spacing (in degrees) between each coordinate in the array. The resolution will
+        be rounded to the nearest value of the form `1/n` or an integer, depending on the size
+        of the resolution value.
 
     Returns
     -------
     numpy.ndarray
-        An array of target coordinates generated from the specified range and resolution.
+        An array of target coordinates generated from the specified range, with the resolution
+        rounded to a suitable fraction (e.g., `1/n`) or integer, depending on the input resolution.
     """
 
-    # Generate the array including both min and max values
-    target = np.arange(min, max + resolution, resolution)
+    # Find the closest fraction of the form 1/n or integer to match the resolution
+    resolution_rounded = None
+    min_diff = float("inf")  # Initialize the minimum difference as infinity
 
-    return target
+    # Search for the best fraction or integer approximation to the resolution
+    for n in range(1, 1000):  # Try fractions 1/n, where n ranges from 1 to 999
+        if resolution <= 1:
+            fraction = (
+                1 / n
+            )  # For small resolutions (<= 1), consider fractions of the form 1/n
+        else:
+            fraction = n  # For larger resolutions (>1), consider integers (n)
+
+        diff = abs(
+            fraction - resolution
+        )  # Calculate the difference between the fraction and the resolution
+
+        if diff < min_diff:  # If the current fraction is a better approximation
+            min_diff = diff
+            resolution_rounded = fraction  # Update the best fraction (or integer) found
+
+    # Adjust the start and end of the range to include integer values
+    start_int = np.floor(min)  # Round the minimum value down to the nearest integer
+    end_int = np.ceil(max)  # Round the maximum value up to the nearest integer
+
+    # Generate the array of target coordinates, including both the min and max values
+    target = np.arange(start_int, end_int + resolution_rounded, resolution_rounded)
+
+    # Truncate any values that exceed max (including small floating point errors)
+    target = target[target <= end_int + 1e-10]
+
+    return target.astype(np.float32)

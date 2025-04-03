@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
 import xarray as xr
+import numpy as np
 import os
 import logging
 from datetime import datetime
@@ -488,14 +489,50 @@ def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):
     filename.unlink()
 
 
-def test_regrid(roms_output_from_restart_file):
+def test_regrid_all_variables(roms_output_from_restart_file):
+    ds_regridded = roms_output_from_restart_file.regrid()
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert set(ds_regridded.data_vars).issubset(
+        set(roms_output_from_restart_file.ds.data_vars)
+    )
+    assert "lon" in ds_regridded.coords
+    assert "lat" in ds_regridded.coords
+    assert "depth" in ds_regridded.coords
+    assert "time" in ds_regridded.coords
+
+
+def test_regrid_specific_variables(roms_output_from_restart_file):
+    var_names = ["temp", "salt"]
+    ds_regridded = roms_output_from_restart_file.regrid(var_names=var_names)
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert set(ds_regridded.data_vars) == set(var_names)
 
     ds = roms_output_from_restart_file.regrid(var_names=[])
     assert ds is None
 
+
+def test_regrid_missing_variable_raises_error(roms_output_from_restart_file):
     with pytest.raises(
         ValueError, match="The following variables are not found in the dataset"
     ):
-        ds = roms_output_from_restart_file.regrid(
-            var_names=["zeta", "temp", "salt", "u", "v", "ALK", "fake"]
-        )
+        roms_output_from_restart_file.regrid(var_names=["fake_variable"])
+
+
+def test_regrid_with_custom_horizontal_resolution(roms_output_from_restart_file):
+    ds_regridded = roms_output_from_restart_file.regrid(horizontal_resolution=0.1)
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert "lon" in ds_regridded.coords
+    assert "lat" in ds_regridded.coords
+
+    assert np.allclose(ds_regridded.lon.diff(dim="lon"), 0.1, atol=0.0)
+    assert np.allclose(ds_regridded.lat.diff(dim="lat"), 0.1, atol=0.0)
+
+
+def test_regrid_with_custom_depth_levels(roms_output_from_restart_file):
+    depth_levels = xr.DataArray(
+        np.linspace(0, 500, 51), dims=["depth"], attrs={"units": "m"}
+    )
+    ds_regridded = roms_output_from_restart_file.regrid(depth_levels=depth_levels)
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert "depth" in ds_regridded.coords
+    np.allclose(ds_regridded.depth, depth_levels, atol=0.0)

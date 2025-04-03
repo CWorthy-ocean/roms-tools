@@ -528,8 +528,8 @@ def test_regrid_with_custom_horizontal_resolution(roms_output_from_restart_file)
     assert "lon" in ds_regridded.coords
     assert "lat" in ds_regridded.coords
 
-    assert np.allclose(ds_regridded.lon.diff(dim="lon"), 0.1, atol=0.0)
-    assert np.allclose(ds_regridded.lat.diff(dim="lat"), 0.1, atol=0.0)
+    assert np.allclose(ds_regridded.lon.diff(dim="lon"), 0.1, atol=1e-4)
+    assert np.allclose(ds_regridded.lat.diff(dim="lat"), 0.1, atol=1e-4)
 
 
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")

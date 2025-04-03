@@ -8,7 +8,16 @@
 
 ### Internal Changes
 
+
 ### Documentation
+
+### Bugfixes
+
+## v2.6.1
+
+### Internal Changes
+
+* Rename `river_location` to `river_flux` ([#283](https://github.com/CWorthy-ocean/roms-tools/pull/283))
 
 ### Bugfixes
 

@@ -33,7 +33,9 @@ dependencies = [
     "PyYAML",
     "pyamg",
     "bottleneck",
-    "regionmask"
+    "regionmask",
+    "xgcm",
+    "numba"
 ]
 dynamic = ["version"]
 
@@ -52,7 +54,7 @@ Documentation = "https://roms-tools.readthedocs.io/en/latest/"
 requires = [
     "setuptools>=61.0.0",
     "wheel",
-    "setuptools_scm[toml]>=7.0",
+    "setuptools_scm[toml]>=8.0",
     "check-manifest"
 ]
 

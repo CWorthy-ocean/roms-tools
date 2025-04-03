@@ -8,7 +8,7 @@ from pathlib import Path
 import logging
 from datetime import datetime
 from roms_tools import Grid
-from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
 from roms_tools.utils import (
     transpose_dimensions,
@@ -192,7 +192,7 @@ class InitialConditions:
         )
 
         # lateral regridding
-        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
 
         for var_name in var_names:
             processed_fields[var_name] = lateral_regrid.apply(
@@ -233,7 +233,7 @@ class InitialConditions:
                 self._get_depth_coordinates(zeta, location, "layer")
 
                 # Vertical regridding
-                vertical_regrid = VerticalRegrid(
+                vertical_regrid = VerticalRegridToROMS(
                     self.ds_depth_coords[f"layer_depth_{location}"],
                     data.ds[data.dim_names["depth"]],
                 )
@@ -683,7 +683,7 @@ class InitialConditions:
             visualize the layering of the water column. For clarity, the number of layer
             contours displayed is limited to a maximum of 10. Default is False.
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots. Default is None.
 
         Returns
         -------
@@ -715,13 +715,6 @@ class InitialConditions:
                 "Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both."
             )
 
-        # Load the data
-        if self.use_dask:
-            from dask.diagnostics import ProgressBar
-
-            with ProgressBar():
-                self.ds[var_name].load()
-
         field = self.ds[var_name].squeeze()
 
         # Get correct mask and horizontal coordinates
@@ -743,11 +736,18 @@ class InitialConditions:
 
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
+        # Load the data
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                self.ds[var_name].load()
+
         # Retrieve depth coordinates
         if s is not None:
             layer_contours = False
         # Note that `layer_depth_{loc}` has already been computed during `__post_init__`.
-        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"].squeeze()
+        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"].squeeze().load()
 
         # Slice the field as desired
         def _slice_and_assign(

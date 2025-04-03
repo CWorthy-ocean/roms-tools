@@ -15,14 +15,6 @@ project = "ROMS-Tools"
 copyright = "2024, ROMS-Tools developers"
 author = "ROMS-Tools developers"
 
-# -- Early stage of development Warning banner -----------------------------------------------------
-rst_prolog = """.. attention::
-    **This project is still in an early phase of development.**
-    The `python API <https://roms-tools.readthedocs.io/en/latest/api.html>`_ is not yet stable.
-    Therefore whilst you are welcome to try out using the package, we cannot yet guarantee backwards compatibility.
-    We expect to reach a more stable version in Q1 2025.
-"""
-
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 

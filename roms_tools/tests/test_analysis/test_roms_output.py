@@ -1,11 +1,17 @@
 import pytest
 from pathlib import Path
 import xarray as xr
+import numpy as np
 import os
 import logging
 from datetime import datetime
 from roms_tools import Grid, ROMSOutput
 from roms_tools.download import download_test_data
+
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
 
 
 @pytest.fixture
@@ -22,9 +28,32 @@ def roms_output_from_restart_file(use_dask):
     )
 
 
-def test_load_model_output_file(roms_output_from_restart_file, use_dask):
+@pytest.fixture
+def roms_output_from_restart_file_adjusted_for_zeta(use_dask):
 
-    assert isinstance(roms_output_from_restart_file.ds, xr.Dataset)
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+
+    # Single file
+    return ROMSOutput(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        adjust_depth_for_sea_surface_height=True,
+        use_dask=use_dask,
+    )
+
+
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+    ],
+)
+def test_load_model_output_file(roms_output_fixture, use_dask, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
+
+    assert isinstance(roms_output.ds, xr.Dataset)
 
 
 def test_load_model_output_file_list(use_dask):
@@ -235,198 +264,280 @@ def test_that_coordinates_are_added(use_dask):
     assert "lon_rho" in output.ds.coords
 
 
-def test_plot(roms_output_from_restart_file, use_dask):
-
-    kwargs = {}
-    for var_name in ["temp", "u", "v"]:
-        for include_boundary in [False, True]:
-            roms_output_from_restart_file.plot(
-                var_name, time=0, s=-1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-
-    kwargs = {"depth_contours": True, "layer_contours": True}
-    for var_name in ["temp", "u", "v"]:
-        for include_boundary in [False, True]:
-            roms_output_from_restart_file.plot(
-                var_name, time=0, s=-1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, eta=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=0, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name, time=0, xi=1, **kwargs, include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=0,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                eta=1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                eta=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=0,
-                **kwargs,
-                include_boundary=include_boundary
-            )
-            roms_output_from_restart_file.plot(
-                var_name,
-                time=0,
-                s=-1,
-                xi=1,
-                **kwargs,
-                include_boundary=include_boundary
-            )
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+    ],
+)
+def test_plot_on_native_model_grid(roms_output_fixture, use_dask, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
 
     for include_boundary in [False, True]:
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, eta=0, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, eta=1, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, xi=0, **kwargs, include_boundary=include_boundary
-        )
-        roms_output_from_restart_file.plot(
-            "zeta", time=0, xi=1, **kwargs, include_boundary=include_boundary
-        )
+        for depth_contours in [False, True]:
+
+            # 3D fields
+            for var_name in ["temp", "u", "v"]:
+                kwargs = {
+                    "include_boundary": include_boundary,
+                    "depth_contours": depth_contours,
+                }
+
+                roms_output.plot(var_name, time=1, s=-1, **kwargs)
+                roms_output.plot(var_name, time=1, depth=1000, **kwargs)
+
+                roms_output.plot(var_name, time=1, eta=1, **kwargs)
+                roms_output.plot(var_name, time=1, xi=1, **kwargs)
+
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    eta=1,
+                    xi=1,
+                    **kwargs,
+                )
+
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    s=-1,
+                    eta=1,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    depth=1000,
+                    eta=1,
+                    **kwargs,
+                )
+
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    s=-1,
+                    xi=1,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    depth=1000,
+                    xi=1,
+                    **kwargs,
+                )
+
+            # 2D fields
+            roms_output.plot("zeta", time=1, **kwargs)
+            roms_output.plot("zeta", time=1, eta=1, **kwargs)
+            roms_output.plot("zeta", time=1, xi=1, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+    ],
+)
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_plot_on_lat_lon(roms_output_fixture, use_dask, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
+
+    for include_boundary in [False, True]:
+        for depth_contours in [False, True]:
+
+            # 3D fields
+            for var_name in ["temp", "u", "v"]:
+                kwargs = {
+                    "include_boundary": include_boundary,
+                    "depth_contours": depth_contours,
+                }
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lat=9,
+                    lon=-128,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lat=9,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lat=9,
+                    s=-1,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lat=9,
+                    depth=1000,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lon=-128,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lon=-128,
+                    s=-1,
+                    **kwargs,
+                )
+                roms_output.plot(
+                    var_name,
+                    time=1,
+                    lon=-128,
+                    depth=1000,
+                    **kwargs,
+                )
+
+            # 2D fields
+            roms_output.plot("zeta", time=1, lat=9, **kwargs)
+            roms_output.plot("zeta", time=1, lon=-128, **kwargs)
 
 
 def test_plot_errors(roms_output_from_restart_file, use_dask):
+    """Test error conditions for the ROMSOutput.plot() method."""
+
+    # Invalid time index
     with pytest.raises(ValueError, match="Invalid time index"):
         roms_output_from_restart_file.plot("temp", time=10, s=-1)
-    with pytest.raises(ValueError, match="Invalid input"):
-        roms_output_from_restart_file.plot("temp", time=0)
+
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: You cannot specify both 's' and 'depth' at the same time.",
+    ):
+        roms_output_from_restart_file.plot("temp", time=0, s=-1, depth=10)
+
+    # Ambiguous input: Too many dimensions specified for 3D fields
     with pytest.raises(ValueError, match="Ambiguous input"):
-        roms_output_from_restart_file.plot("temp", time=0, s=-1, eta=0, xi=0)
-    with pytest.raises(ValueError, match="Conflicting input"):
-        roms_output_from_restart_file.plot("zeta", time=0, eta=0, xi=0)
+        roms_output_from_restart_file.plot("temp", time=1, s=-1, eta=0, xi=0)
+
+    # Vertical dimension specified for 2D fields
+    with pytest.raises(
+        ValueError, match="Vertical dimension 's' should be None for 2D fields"
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, s=-1)
+    with pytest.raises(
+        ValueError, match="Vertical dimension 'depth' should be None for 2D fields"
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, depth=100)
+
+    # Conflicting input: Both eta and xi specified for 2D fields
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both.",
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, eta=0, xi=0)
+    # Conflicting input: Both lat and lon specified for 2D fields
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: For 2D fields, specify only one dimension, either 'lat' or 'lon', not both.",
+    ):
+        roms_output_from_restart_file.plot("zeta", time=1, lat=0, lon=0)
+
+    # Conflicting input: lat or lon provided with eta or xi
+    with pytest.raises(
+        ValueError,
+        match="Conflicting input: You cannot specify 'lat' or 'lon' simultaneously with 'eta' or 'xi'.",
+    ):
+        roms_output_from_restart_file.plot("temp", time=1, lat=10, lon=20, eta=5)
+
+    # Invalid eta index out of bounds
+    with pytest.raises(ValueError, match="Invalid eta index"):
+        roms_output_from_restart_file.plot("temp", time=1, eta=999)
+
+    # Invalid xi index out of bounds
+    with pytest.raises(ValueError, match="Invalid eta index"):
+        roms_output_from_restart_file.plot("temp", time=1, xi=999)
+
+    # Boundary exclusion error for eta
+    with pytest.raises(ValueError, match="Invalid eta index.*boundary.*excluded"):
+        roms_output_from_restart_file.plot(
+            "temp", time=1, eta=0, include_boundary=False
+        )
+
+    # Boundary exclusion error for xi
+    with pytest.raises(ValueError, match="Invalid xi index.*boundary.*excluded"):
+        roms_output_from_restart_file.plot("temp", time=1, xi=0, include_boundary=False)
+
+    # No dimension specified for 3D field
+    with pytest.raises(
+        ValueError,
+        match="Invalid input: For 3D fields, you must specify at least one of the dimensions",
+    ):
+        roms_output_from_restart_file.plot("temp", time=1)
+
+
+def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):
+
+    filename = tmp_path / "figure.png"
+    roms_output_from_restart_file.plot("temp", time=0, depth=1000, save_path=filename)
+
+    assert filename.exists()
+    filename.unlink()
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_regrid_all_variables(roms_output_from_restart_file):
+    ds_regridded = roms_output_from_restart_file.regrid()
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert set(ds_regridded.data_vars).issubset(
+        set(roms_output_from_restart_file.ds.data_vars)
+    )
+    assert "lon" in ds_regridded.coords
+    assert "lat" in ds_regridded.coords
+    assert "depth" in ds_regridded.coords
+    assert "time" in ds_regridded.coords
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_regrid_specific_variables(roms_output_from_restart_file):
+    var_names = ["temp", "salt"]
+    ds_regridded = roms_output_from_restart_file.regrid(var_names=var_names)
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert set(ds_regridded.data_vars) == set(var_names)
+
+    ds = roms_output_from_restart_file.regrid(var_names=[])
+    assert ds is None
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_regrid_missing_variable_raises_error(roms_output_from_restart_file):
+    with pytest.raises(
+        ValueError, match="The following variables are not found in the dataset"
+    ):
+        roms_output_from_restart_file.regrid(var_names=["fake_variable"])
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_regrid_with_custom_horizontal_resolution(roms_output_from_restart_file):
+    ds_regridded = roms_output_from_restart_file.regrid(horizontal_resolution=0.1)
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert "lon" in ds_regridded.coords
+    assert "lat" in ds_regridded.coords
+
+    assert np.allclose(ds_regridded.lon.diff(dim="lon"), 0.1, atol=1e-4)
+    assert np.allclose(ds_regridded.lat.diff(dim="lat"), 0.1, atol=1e-4)
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_regrid_with_custom_depth_levels(roms_output_from_restart_file):
+    depth_levels = xr.DataArray(
+        np.linspace(0, 500, 51), dims=["depth"], attrs={"units": "m"}
+    )
+    ds_regridded = roms_output_from_restart_file.regrid(depth_levels=depth_levels)
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert "depth" in ds_regridded.coords
+    np.allclose(ds_regridded.depth, depth_levels, atol=0.0)

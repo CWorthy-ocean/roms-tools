@@ -461,7 +461,7 @@ class Grid:
         xi : int, optional
             The xi-index to plot. Default is None.
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for horizontal plots that display the eta- and xi-dimensions at the same time.
+            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots.
 
         Returns
         -------

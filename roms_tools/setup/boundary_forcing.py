@@ -9,7 +9,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from pathlib import Path
 from roms_tools import Grid
-from roms_tools.regrid import LateralRegrid, VerticalRegrid
+from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.utils import save_datasets
 from roms_tools.vertical_coordinate import compute_depth
 from roms_tools.plot import _section_plot, _line_plot
@@ -207,7 +207,7 @@ class BoundaryForcing:
                     lat = target_coords["lat"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
-                    lateral_regrid = LateralRegrid(
+                    lateral_regrid = LateralRegridToROMS(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
                     for var_name in filtered_vars:
@@ -237,7 +237,7 @@ class BoundaryForcing:
                     lat = target_coords["lat"].isel(
                         **self.bdry_coords["rho"][direction]
                     )
-                    lateral_regrid = LateralRegrid(
+                    lateral_regrid = LateralRegridToROMS(
                         {"lat": lat, "lon": lon}, bdry_data.dim_names
                     )
                     for var_name in filtered_vars:
@@ -317,7 +317,7 @@ class BoundaryForcing:
                             self._get_depth_coordinates(zeta_v, direction, "v", "layer")
 
                         # vertical regridding
-                        vertical_regrid = VerticalRegrid(
+                        vertical_regrid = VerticalRegridToROMS(
                             self.ds_depth_coords[f"layer_depth_{location}_{direction}"],
                             bdry_data.ds[bdry_data.dim_names["depth"]],
                         )
@@ -882,12 +882,6 @@ class BoundaryForcing:
 
         field = self.ds[var_name].isel(bry_time=time)
 
-        if self.use_dask:
-            from dask.diagnostics import ProgressBar
-
-            with ProgressBar():
-                field = field.load()
-
         title = field.long_name
         var_name_wo_direction, direction = var_name.split("_")
         location = self.variable_info[var_name_wo_direction]["location"]
@@ -902,10 +896,17 @@ class BoundaryForcing:
 
         mask = mask.isel(**self.bdry_coords[location][direction])
 
+        # Load the data
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field = field.load()
+
         if "s_rho" in field.dims:
             layer_depth = self.ds_depth_coords[f"layer_depth_{location}_{direction}"]
             if self.adjust_depth_for_sea_surface_height:
-                layer_depth = layer_depth.isel(time=time)
+                layer_depth = layer_depth.isel(time=time).load()
             field = field.assign_coords({"layer_depth": layer_depth})
         if var_name.startswith(("u", "v", "ubar", "vbar", "zeta")):
             vmax = max(field.max().values, -field.min().values)

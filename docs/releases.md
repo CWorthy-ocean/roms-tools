@@ -1,6 +1,6 @@
 # Release notes
 
-## v2.6.0 (unreleased)
+## v2.7.0 (unreleased)
 
 ### New Features
 
@@ -10,15 +10,40 @@
 
 ### Internal Changes
 
-* Unfreeze arguments in all dataclasses ([#276](https://github.com/CWorthy-ocean/roms-tools/pull/276))
 * Refactoring of `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` to accommodate optional variable names ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
 * Modification of the `Dataset` class including the `choose_subdomain` method, the capability to handle fractional days in a climatology, and the addition of a `needs_lateral_fill` attribute ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
-
-hanges to handle fractional days in climatologies correctly (necessary for unified BGC dataset)
 
 ### Documentation
 
 ### Bugfixes
+
+## v2.6.1
+
+### New Features
+
+* Support to regrid ROMS output data onto lat-lon-z grid ([#286](https://github.com/CWorthy-ocean/roms-tools/pull/286))
+
+### Internal Changes
+
+* Rename `river_location` to `river_flux` ([#283](https://github.com/CWorthy-ocean/roms-tools/pull/283))
+
+### Bugfixes
+
+## v2.6.0
+
+### New Features
+
+* Support to plot ROMS output data at lat/lon locations ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
+* Support to plot ROMS output data along sections of fixed latitude or longitude ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
+* Support to plot ROMS output data at fixed depth ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
+* Support for saving a figure of ROMS output data ([#280](https://github.com/CWorthy-ocean/roms-tools/pull/280))
+
+### Internal Changes
+
+* Unfreeze arguments in all dataclasses ([#276](https://github.com/CWorthy-ocean/roms-tools/pull/276))
+* Integration with xesmf for horizontal regridding from ROMS ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
+* Computation of nominal horizontal resolution in degrees ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
+* Integration with xgcm and numba for vertical regridding from ROMS ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
 
 ## v2.5.0
 

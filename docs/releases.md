@@ -4,18 +4,19 @@
 
 ### New Features
 
-* Support to regrid ROMS output data onto lat-lon-z grid ([#286](https://github.com/CWorthy-ocean/roms-tools/pull/286))
-
 ### Breaking Changes
 
 ### Internal Changes
-
 
 ### Documentation
 
 ### Bugfixes
 
 ## v2.6.1
+
+### New Features
+
+* Support to regrid ROMS output data onto lat-lon-z grid ([#286](https://github.com/CWorthy-ocean/roms-tools/pull/286))
 
 ### Internal Changes
 

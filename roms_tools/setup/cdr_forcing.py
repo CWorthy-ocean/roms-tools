@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Union
 import numpy as np
 import xarray as xr
+import matplotlib.pyplot as plt
 from roms_tools import Grid
 
 
@@ -44,6 +45,7 @@ class CDRPipeForcing:
                 # "cdr_tracer": (["time", "ntracers", "ncdr"], np.empty((0, 0))),
             },
             coords={
+                "time": (["time"], np.empty(0)),
                 "experiment_name": (["ncdr"], np.empty(0, dtype=str)),
             },
         )
@@ -153,26 +155,31 @@ class CDRPipeForcing:
             times = [release_start_time, release_end_time]
         elif times and not (release_start_time and release_end_time):
             release_start_time, release_end_time = times[0], times[-1]
-        else:
-            raise ValueError(
-                "Specify either `times`, or both `release_start_time` and `release_end_time`."
-            )
+
+        times = np.array(times)
 
         # Convert times to model-relative days
-        times = np.array(times)
-        times = (times - self.model_reference_date).astype(
+        rel_times = (times - self.model_reference_date).astype(
             "timedelta64[ns]"
         ) / np.timedelta64(1, "D")
 
         # Merge with existing time dimension
         existing_times = (
+            self.ds["time"].values
+            if len(self.ds["time"]) > 0
+            else np.array([], dtype="datetime64[ns]")
+        )
+        existing_rel_times = (
             self.ds["cdr_time"].values if len(self.ds["cdr_time"]) > 0 else []
         )
+        times = np.array(times, dtype="datetime64[ns]")
         union_time = np.union1d(existing_times, times)
+        union_rel_time = np.union1d(existing_rel_times, rel_times)
 
         # Initialize updated dataset
         ds = xr.Dataset()
-        ds["cdr_time"] = ("time", union_time)
+        ds["cdr_time"] = ("time", union_rel_time)
+        ds["time"] = ("time", union_time)
 
         experiment_names = np.concatenate([self.ds.experiment_name.values, [name]])
         ds = ds.assign_coords({"experiment_name": (["ncdr"], experiment_names)})
@@ -202,6 +209,44 @@ class CDRPipeForcing:
 
         self.ds = ds
         self._add_global_metadata()
+
+    def plot(self, var_name):
+
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+
+        for ncdr in range(len(self.ds.ncdr)):
+            self.ds[var_name].isel(ncdr=ncdr).plot(
+                ax=ax,
+                linewidth=2,
+                label=self.ds["experiment_name"].isel(ncdr=ncdr).item(),
+            )
+
+        if len(self.ds.ncdr) > 0:
+            ax.legend()
+
+        title = ""
+        ylabel = ""
+
+        if var_name == "cdr_volume":
+            title = "Volume flux of CDR release"
+            ylabel = r"m$^3$/s"
+
+        ax.set(title=title, ylabel=ylabel)
+
+    def plot_locations(self, top_view=True):
+        """Plot the locations of CDR releases.
+
+        Parameters
+        ----------
+        top_view : bool, optional
+            If True (default), plot a top-down (bird's-eye) view.
+            If False, plot side views: longitude vs. depth and latitude vs. depth.
+        """
+
+        # if top_view:
+        #    self._plot_locations_top()
+        # else:
+        #    self.plot_locaitons_side()
 
     def _input_checks(
         self,

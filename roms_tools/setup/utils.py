@@ -865,11 +865,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
 
     This function serializes a dataclass object (forcing_object) and its associated
     `grid` attribute into a YAML file. It includes additional metadata, such as
-    the version of the `roms-tools` package, and omits fields like `grid` and `ds`
-    that are not serializable or meant to be excluded.
-
-    The function also converts datetime fields to ISO format strings for proper
-    serialization.
+    the version of the `roms-tools` package.
 
     Parameters
     ----------
@@ -888,8 +884,52 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     # Convert the filepath to a Path object
     filepath = Path(filepath)
 
-    # Step 1: Serialize Grid data
-    # Check if the forcing_object has a grid attribute
+    # Serialize object into dictionary
+    yaml_data = _to_dict(forcing_object)
+
+    # Create YAML header with version information
+    try:
+        roms_tools_version = importlib.metadata.version("roms-tools")
+    except importlib.metadata.PackageNotFoundError:
+        roms_tools_version = "unknown"
+
+    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+    # Write to YAML file
+    with filepath.open("w") as file:
+        # Write the header first
+        file.write(header)
+        # Write the serialized YAML data
+        yaml.dump(
+            yaml_data,
+            file,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
+
+def _to_dict(forcing_object) -> None:
+    """Serialize a forcing object (including its grid) into a dictionary.
+
+    This function serializes a dataclass object (forcing_object) and its associated
+    `grid` attribute into a dictionary. It omits fields like `grid` and `ds`
+    that are not serializable or meant to be excluded.
+
+    The function also converts datetime fields to ISO format strings for proper
+    serialization.
+
+    Parameters
+    ----------
+    forcing_object : object
+        The object that contains the forcing data, typically a dataclass with attributes
+        such as `grid`, `start_time`, `end_time`, etc.
+
+    Returns
+    -------
+    dict
+    """
+
+    # Serialize Grid data
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
         grid_data = asdict(forcing_object.grid)
         grid_yaml_data = {"Grid": _pop_grid_data(grid_data)}
@@ -897,7 +937,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         grid_data = asdict(forcing_object.parent_grid)
         grid_yaml_data = {"ParentGrid": _pop_grid_data(grid_data)}
 
-    # Step 2: Ensure Paths are Strings
+    # Ensure Paths are Strings
     def ensure_paths_are_strings(obj, key):
         attr = getattr(obj, key, None)
         if attr is not None and "path" in attr:
@@ -910,16 +950,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     ensure_paths_are_strings(forcing_object, "source")
     ensure_paths_are_strings(forcing_object, "bgc_source")
 
-    # Step 3: Get ROMS Tools version
-    try:
-        roms_tools_version = importlib.metadata.version("roms-tools")
-    except importlib.metadata.PackageNotFoundError:
-        roms_tools_version = "unknown"
-
-    # Create YAML header with version information
-    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-    # Step 4: Prepare Forcing Data
+    # Prepare Forcing Data
     forcing_data = {}
     field_names = [field.name for field in fields(forcing_object)]
     filtered_field_names = [
@@ -949,7 +980,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         # Add the field and its value to the forcing_data dictionary
         forcing_data[field_name] = value
 
-    # Step 5: Serialize `indices` data (conditionally)
+    # Serialize `indices` data (conditionally)
     indices_data = getattr(forcing_object, "indices", None)
     if indices_data is not None:
         serialized_indices = {
@@ -963,23 +994,13 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
 
         forcing_data["indices"] = serialized_indices
 
-    # Step 6: Combine Grid and Forcing Data into a single dictionary for the final YAML content
+    # Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {
         **grid_yaml_data,  # Add the grid data to the final YAML structure
         forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
     }
 
-    # Step 7: Write to YAML file
-    with filepath.open("w") as file:
-        # Write the header first
-        file.write(header)
-        # Write the serialized YAML data
-        yaml.dump(
-            yaml_data,
-            file,
-            default_flow_style=False,
-            sort_keys=False,
-        )
+    return yaml_data
 
 
 def _pop_grid_data(grid_data):

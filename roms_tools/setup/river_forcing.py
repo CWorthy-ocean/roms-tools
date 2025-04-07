@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from roms_tools import Grid
-from roms_tools.plot import _get_projection, _add_field_to_ax
+from roms_tools.plot import _plot, _get_projection
 from roms_tools.utils import save_datasets
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
@@ -507,56 +507,25 @@ class RiverForcing:
         """Plots the original and updated river locations on a map projection."""
 
         field = self.grid.ds.mask_rho
+        lon_deg = self.grid.ds.lon_rho
+        lat_deg = self.grid.ds.lat_rho
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
         vmax = 3
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
-        lon_deg = self.grid.ds.lon_rho
-        lat_deg = self.grid.ds.lat_rho
-
-        # check if North or South pole are in domain
-        if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-            raise NotImplementedError(
-                "Plotting is not implemented for the case that the domain contains the North or South pole."
-            )
-
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
         trans = _get_projection(lon_deg, lat_deg)
-
-        lon_deg = lon_deg.values
-        lat_deg = lat_deg.values
 
         fig, axs = plt.subplots(
             1, 2, figsize=(13, 13), subplot_kw={"projection": trans}
         )
 
         for ax in axs:
-            _add_field_to_ax(
-                ax,
-                lon_deg,
-                lat_deg,
-                field,
-                add_colorbar=False,
-                kwargs=kwargs,
-            )
-            # Add gridlines with labels for latitude and longitude
-            gridlines = ax.gridlines(
-                draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
-            )
-            gridlines.top_labels = False  # Hide top labels
-            gridlines.right_labels = False  # Hide right labels
-            gridlines.xlabel_style = {
-                "size": 10,
-                "color": "black",
-            }  # Customize longitude label style
-            gridlines.ylabel_style = {
-                "size": 10,
-                "color": "black",
-            }  # Customize latitude label style
+            _plot(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         proj = ccrs.PlateCarree()
 

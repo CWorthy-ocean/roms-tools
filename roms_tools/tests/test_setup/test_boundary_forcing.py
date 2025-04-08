@@ -60,23 +60,17 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     "boundary_forcing_fixture",
     [
         "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
     ],
 )
-def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
+def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
 
-    fname_bgc = Path(
-        download_test_data("CESM_regional_coarse_test_data_climatology.nc")
-    )
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
     assert boundary_forcing.end_time == datetime(2021, 6, 30)
-    assert boundary_forcing.source == {
-        "path": fname_bgc,
-        "name": "CESM_REGRIDDED",
-        "climatology": True,
-    }
+    assert boundary_forcing.source["climatology"]
     assert boundary_forcing.model_reference_date == datetime(2000, 1, 1)
     assert boundary_forcing.boundaries == {
         "south": True,
@@ -85,9 +79,43 @@ def test_boundary_forcing_creation_with_bgc(boundary_forcing_fixture, request):
         "west": True,
     }
 
-    assert boundary_forcing.ds.source == "CESM_REGRIDDED"
+    expected_bgc_variables = [
+        "PO4",
+        "NO3",
+        "SiO3",
+        "NH4",
+        "Fe",
+        "Lig",
+        "O2",
+        "DIC",
+        "DIC_ALT_CO2",
+        "ALK",
+        "ALK_ALT_CO2",
+        "DOC",
+        "DON",
+        "DOP",
+        "DOCr",
+        "DONr",
+        "DOPr",
+        "zooC",
+        "spChl",
+        "spC",
+        "spP",
+        "spFe",
+        "spCaCO3",
+        "diatChl",
+        "diatC",
+        "diatP",
+        "diatFe",
+        "diatSi",
+        "diazChl",
+        "diazC",
+        "diazP",
+        "diazFe",
+    ]
+
     for direction in ["south", "east", "north", "west"]:
-        for var in ["ALK", "PO4"]:
+        for var in expected_bgc_variables:
             assert f"{var}_{direction}" in boundary_forcing.ds
 
     assert len(boundary_forcing.ds.bry_time) == 12
@@ -325,10 +353,48 @@ def test_info_fill(caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert (
-        "Applying 1D horizontal fill separately to each regridded boundary."
-        in caplog.text
+    for direction in ["south", "east", "north", "west"]:
+        assert f"Applying 1D horizontal fill to {direction}ern boundary." in caplog.text
+
+
+def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
     )
+
+    # this climatology has already filled land values and horizontal fill is skipped
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    kwargs = {
+        "grid": grid,
+        "start_time": datetime(2021, 6, 29),
+        "end_time": datetime(2021, 6, 29),
+        "source": {"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        "type": "bgc",
+        "use_dask": use_dask,
+    }
+
+    bf_1d_fill = BoundaryForcing(
+        **kwargs,
+        apply_2d_horizontal_fill=False,
+    )
+    bf_2d_fill = BoundaryForcing(
+        **kwargs,
+        apply_2d_horizontal_fill=True,
+    )
+
+    xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
 
 
 def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
@@ -476,21 +542,35 @@ def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):
             expected_filepath.unlink()
 
 
-def test_bgc_boundary_forcing_plot(bgc_boundary_forcing_from_climatology):
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
+    ],
+)
+def test_bgc_boundary_forcing_plot(boundary_forcing_fixture, request):
     """Test plot method."""
 
-    bgc_boundary_forcing_from_climatology.plot(
-        var_name="ALK_south", layer_contours=True
-    )
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_east", layer_contours=True)
-    bgc_boundary_forcing_from_climatology.plot(
-        var_name="ALK_north", layer_contours=True
-    )
-    bgc_boundary_forcing_from_climatology.plot(var_name="ALK_west", layer_contours=True)
+    bgc_boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
+
+    bgc_boundary_forcing.plot(var_name="ALK_south", layer_contours=True)
+    bgc_boundary_forcing.plot(var_name="ALK_east", layer_contours=True)
+    bgc_boundary_forcing.plot(var_name="ALK_north", layer_contours=True)
+    bgc_boundary_forcing.plot(var_name="ALK_west", layer_contours=True)
 
 
-def test_bgc_boundary_forcing_save(bgc_boundary_forcing_from_climatology, tmp_path):
+@pytest.mark.parametrize(
+    "boundary_forcing_fixture",
+    [
+        "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
+    ],
+)
+def test_bgc_boundary_forcing_save(boundary_forcing_fixture, tmp_path, request):
     """Test save method."""
+
+    bgc_boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for file_str in ["test_bf", "test_bf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -500,9 +580,7 @@ def test_bgc_boundary_forcing_save(bgc_boundary_forcing_from_climatology, tmp_pa
         ]:  # test for Path object and str
 
             # Test saving without partitioning and grouping
-            saved_filenames = bgc_boundary_forcing_from_climatology.save(
-                filepath, group=False
-            )
+            saved_filenames = bgc_boundary_forcing.save(filepath, group=False)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")
@@ -511,9 +589,7 @@ def test_bgc_boundary_forcing_save(bgc_boundary_forcing_from_climatology, tmp_pa
             expected_filepath.unlink()
 
             # Test saving without partitioning but with grouping
-            saved_filenames = bgc_boundary_forcing_from_climatology.save(
-                filepath, group=True
-            )
+            saved_filenames = bgc_boundary_forcing.save(filepath, group=True)
 
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")
@@ -527,6 +603,7 @@ def test_bgc_boundary_forcing_save(bgc_boundary_forcing_from_climatology, tmp_pa
     [
         "boundary_forcing",
         "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
     ],
 )
 def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
@@ -579,16 +656,22 @@ def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
     Path(expected_filepath2).unlink()
 
 
-def test_files_have_same_hash_clim(
-    bgc_boundary_forcing_from_climatology, tmp_path, use_dask
-):
+@pytest.mark.parametrize(
+    "bdry_forcing_fixture",
+    [
+        "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
+    ],
+)
+def test_files_have_same_hash_clim(bdry_forcing_fixture, tmp_path, use_dask, request):
+    bgc_boundary_forcing = request.getfixturevalue(bdry_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"
     filepath2 = tmp_path / "test2.nc"
 
-    bgc_boundary_forcing_from_climatology.to_yaml(yaml_filepath)
-    bgc_boundary_forcing_from_climatology.save(filepath1, group=True)
+    bgc_boundary_forcing.to_yaml(yaml_filepath)
+    bgc_boundary_forcing.save(filepath1, group=True)
     bdry_forcing_from_file = BoundaryForcing.from_yaml(yaml_filepath, use_dask=use_dask)
     bdry_forcing_from_file.save(filepath2, group=True)
 
@@ -608,7 +691,7 @@ def test_files_have_same_hash_clim(
     Path(expected_filepath2).unlink()
 
 
-def test_from_yaml_missing_boundary_forcing(tmp_path, request, use_dask):
+def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
     yaml_content = textwrap.dedent(
         """\
     ---

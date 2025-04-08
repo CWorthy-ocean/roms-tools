@@ -267,7 +267,7 @@ Biogeochemical (BGC) initial conditions, compatible with ROMS-MARBL:
 - **Zooplankton carbon** (mmol/m$^3$): `zooC`
 - **Small phytoplankton chlorophyll** (mg/m$^3$): `spChl`
 - **Small phytoplankton carbon** (mmol/m$^3$): `spC`
-- **Small phytoplankton phosphorous** (mmol/m$^3$): `spC`
+- **Small phytoplankton phosphorous** (mmol/m$^3$): `spP`
 - **Small phytoplankton iron** (mmol/m$^3$): `spFe`
 - **Small phytoplankton CaCO3** (mmol/m$^3$): `spCaCO3`
 - **Diatom chloropyll** (mg/m$^3$): `diatChl`
@@ -353,7 +353,7 @@ Biogeochemical (BGC) boundary forcing, compatible with ROMS-MARBL:
 - **Zooplankton carbon** (mmol/m$^3$): `zooC`
 - **Small phytoplankton chlorophyll** (mg/m$^3$): `spChl`
 - **Small phytoplankton carbon** (mmol/m$^3$): `spC`
-- **Small phytoplankton phosphorous** (mmol/m$^3$): `spC`
+- **Small phytoplankton phosphorous** (mmol/m$^3$): `spP`
 - **Small phytoplankton iron** (mmol/m$^3$): `spFe`
 - **Small phytoplankton CaCO3** (mmol/m$^3$): `spCaCO3`
 - **Diatom chloropyll** (mg/m$^3$): `diatChl`

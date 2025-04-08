@@ -21,7 +21,7 @@ from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
     compute_depth,
 )
-from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset
+from roms_tools.setup.datasets import GLORYSDataset, CESMBGCDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
     nan_check,
     substitute_nans_by_fillvalue,
@@ -29,6 +29,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     compute_barotropic_velocity,
+    compute_missing_bgc_variables,
     _to_yaml,
     _from_yaml,
 )
@@ -122,6 +123,12 @@ class InitialConditions:
 
         if self.bgc_source is not None:
             processed_fields = self._process_data(processed_fields, type="bgc")
+            processed_fields = compute_missing_bgc_variables(processed_fields)
+
+        for var_name in processed_fields:
+            processed_fields[var_name] = transpose_dimensions(
+                processed_fields[var_name]
+            )
 
         d_meta = get_variable_metadata()
         ds = self._write_into_dataset(processed_fields, d_meta)
@@ -158,19 +165,42 @@ class InitialConditions:
         self._set_variable_info(data, type=type)
         attr_name = f"variable_info_{type}"
         variable_info = getattr(self, attr_name)
-        var_names = variable_info.keys()
+
+        # Create the var_names dictionary, associating each variable with its location
+        # Avoid looping over processed_fields.keys() directly, as they may already contain
+        # finalized physics variables. This is especially important when transitioning
+        # to processing biogeochemical (BGC) variables, ensuring that only relevant
+        # variables are processed.
+        var_names = {
+            var: {
+                "name": data.var_names[var],
+                "location": variable_info[var]["location"],
+            }
+            for var in data.var_names.keys()
+            if data.var_names[var] in data.ds.data_vars
+        }
+        # Update the dictionary with optional variables and their locations
+        var_names.update(
+            {
+                var: {
+                    "name": data.opt_var_names[var],
+                    "location": variable_info[var]["location"],
+                }
+                for var in data.opt_var_names.keys()
+                if data.opt_var_names[var] in data.ds.data_vars
+            }
+        )
 
         # lateral regridding
         lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
 
         for var_name in var_names:
-            if var_name in data.var_names.keys():
-                processed_fields[var_name] = lateral_regrid.apply(
-                    data.ds[data.var_names[var_name]]
-                )
+            processed_fields[var_name] = lateral_regrid.apply(
+                data.ds[var_names[var_name]["name"]]
+            )
 
         # rotation of velocities and interpolation to u/v points
-        if "u" in variable_info and "v" in variable_info:
+        if "u" in var_names and "v" in var_names:
             processed_fields["u"], processed_fields["v"] = rotate_velocities(
                 processed_fields["u"],
                 processed_fields["v"],
@@ -178,18 +208,9 @@ class InitialConditions:
                 interpolate=True,
             )
 
-        var_names_dict = {
-            location: [
-                name
-                for name, info in variable_info.items()
-                if info["location"] == location and info["is_3d"]
-            ]
-            for location in ["rho", "u", "v"]
-        }
-
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
-            for var_name in variable_info.keys():
+            for var_name in var_names:
                 processed_fields[var_name] = processed_fields[var_name].assign_coords(
                     {"time": processed_fields["temp"]["time"]}
                 )
@@ -200,17 +221,23 @@ class InitialConditions:
         )
 
         for location in ["rho", "u", "v"]:
-            if len(var_names_dict[location]) > 0:
+            # Filter var_names by location and check for 3D variables
+            filtered_vars = [
+                var_name
+                for var_name, info in var_names.items()
+                if info["location"] == location and variable_info[var_name]["is_3d"]
+            ]
+
+            if filtered_vars:
+                # Handle depth coordinates
                 self._get_depth_coordinates(zeta, location, "layer")
 
-        # Vertical regridding
-        for location in ["rho", "u", "v"]:
-            if len(var_names_dict[location]) > 0:
+                # Vertical regridding
                 vertical_regrid = VerticalRegridToROMS(
                     self.ds_depth_coords[f"layer_depth_{location}"],
                     data.ds[data.dim_names["depth"]],
                 )
-                for var_name in var_names_dict[location]:
+                for var_name in filtered_vars:
                     if var_name in processed_fields:
                         field = processed_fields[var_name]
                         if self.use_dask:
@@ -220,18 +247,13 @@ class InitialConditions:
                         processed_fields[var_name] = vertical_regrid.apply(field)
 
         # Compute barotropic velocities
-        if "u" in variable_info and "v" in variable_info:
+        if "u" in var_names and "v" in var_names:
             for location in ["u", "v"]:
                 self._get_depth_coordinates(zeta, location, "interface")
                 processed_fields[f"{location}bar"] = compute_barotropic_velocity(
                     processed_fields[location],
                     self.ds_depth_coords[f"interface_depth_{location}"],
                 )
-
-        for var_name in processed_fields.keys():
-            processed_fields[var_name] = transpose_dimensions(
-                processed_fields[var_name]
-            )
 
         return processed_fields
 
@@ -295,9 +317,17 @@ class InitialConditions:
                 climatology=self.bgc_source["climatology"],
                 use_dask=self.use_dask,
             )
+        elif self.bgc_source["name"] == "UNIFIED":
+            data = UnifiedBGCDataset(
+                filename=self.bgc_source["path"],
+                start_time=self.ini_time,
+                climatology=self.bgc_source["climatology"],
+                use_dask=self.use_dask,
+            )
+
         else:
             raise ValueError(
-                'Only "CESM_REGRIDDED" is a valid option for bgc_source["name"].'
+                'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for bgc_source["name"].'
             )
 
         return data
@@ -384,7 +414,10 @@ class InitialConditions:
 
         if type == "bgc":
             variable_info = {}
-            for var_name in data.var_names.keys():
+
+            for var_name in list(data.var_names.keys()) + list(
+                data.opt_var_names.keys()
+            ):
                 if var_name == "ALK":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
@@ -453,10 +486,13 @@ class InitialConditions:
         # save in new dataset
         ds = xr.Dataset()
 
-        for var_name in processed_fields.keys():
-            ds[var_name] = processed_fields[var_name].astype(np.float32)
-            ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
-            ds[var_name].attrs["units"] = d_meta[var_name]["units"]
+        for var_name in processed_fields:
+            if var_name in d_meta:
+
+                # drop auxiliary variables
+                ds[var_name] = processed_fields[var_name].astype(np.float32)
+                ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
+                ds[var_name].attrs["units"] = d_meta[var_name]["units"]
 
         # initialize vertical velocity to zero
         ds["w"] = xr.zeros_like(

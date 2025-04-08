@@ -74,7 +74,15 @@ def _plot(
         )
 
     if plot_data:
-        _add_field_to_ax(ax, lon_deg, lat_deg, field, depth_contours, kwargs=kwargs)
+        _add_field_to_ax(
+            ax,
+            lon_deg,
+            lat_deg,
+            field,
+            depth_contours,
+            add_colorbar=add_colorbar,
+            kwargs=kwargs,
+        )
 
     ax.coastlines(
         resolution="50m", linewidth=0.5, color="black"

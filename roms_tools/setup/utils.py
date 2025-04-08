@@ -1,6 +1,6 @@
 import xarray as xr
 import numpy as np
-from typing import Union, Any, Dict, Type
+from typing import Union, Any, Dict, Type, Sequence
 import pandas as pd
 import cftime
 from pathlib import Path
@@ -125,41 +125,108 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     return ds
 
 
+def interpolate_cyclic_time(
+    data_array: xr.DataArray,
+    time_dim_name: str,
+    day_of_year: Union[
+        int, float, np.ndarray, xr.DataArray, Sequence[Union[int, float]]
+    ],
+) -> xr.DataArray:
+    """Interpolates a DataArray cyclically across the start and end of the year.
+
+    This function extends the data cyclically by appending the last time step
+    (shifted back by one year) at the beginning and the first time step
+    (shifted forward by one year) at the end. It then performs linear interpolation
+    to match the specified `day_of_year` values.
+
+    Parameters
+    ----------
+    data_array : xr.DataArray
+        The input data array containing a time-like dimension.
+    time_dim_name : str
+        The name of the time dimension in the dataset.
+    day_of_year : Union[int, float, np.ndarray, xr.DataArray, Sequence[Union[int, float]]]
+        The target day(s) of the year for interpolation. This can be:
+        - A single integer or float representing the day of the year.
+        - A NumPy array or xarray DataArray containing multiple days.
+        - A list or tuple of integers or floats for multiple target days.
+
+    Returns
+    -------
+    xr.DataArray
+        The interpolated DataArray, ensuring cyclic continuity across year boundaries.
+
+    Notes
+    -----
+    - This function is useful for interpolating climatological data, where the time axis
+      represents a repeating annual cycle.
+    - The `day_of_year` values should be within the range [1, 365] or [1, 366] for leap years.
+    """
+
+    # Concatenate across the beginning and end of the year
+    time_concat = xr.concat(
+        [
+            data_array[time_dim_name][-1] - 365.25,  # Shift last time backward
+            data_array[time_dim_name],
+            data_array[time_dim_name][0] + 365.25,  # Shift first time forward
+        ],
+        dim=time_dim_name,
+    )
+
+    data_array_concat = xr.concat(
+        [
+            data_array.isel(
+                **{time_dim_name: -1}
+            ),  # Append last value at the beginning
+            data_array,
+            data_array.isel(**{time_dim_name: 0}),  # Append first value at the end
+        ],
+        dim=time_dim_name,
+    )
+    data_array_concat[time_dim_name] = time_concat
+
+    # Interpolate to specified times
+    data_array_interpolated = data_array_concat.interp(
+        **{time_dim_name: day_of_year}, method="linear"
+    )
+
+    return data_array_interpolated
+
+
 def interpolate_from_climatology(
     field: Union[xr.DataArray, xr.Dataset],
     time_dim_name: str,
     time: Union[xr.DataArray, pd.DatetimeIndex],
 ) -> Union[xr.DataArray, xr.Dataset]:
-    """Temporally interpolates a field based on specified time points.
+    """Interpolates a climatological field to specified time points.
 
-    This function performs temporal interpolation on the input `field` to match the provided `time` values.
-    If the input `field` is an `xarray.Dataset`, the interpolation is applied to all its data variables individually.
+    This function interpolates the input `field` based on `day_of_year` values
+    extracted from the provided `time` points. If `field` is an `xarray.Dataset`,
+    interpolation is applied to all its data variables individually.
 
     Parameters
     ----------
     field : xarray.DataArray or xarray.Dataset
         The input field to be interpolated.
-        - If `field` is an `xarray.DataArray`, it should have a time dimension identified by `time_dim_name`.
-        - If `field` is an `xarray.Dataset`, all variables within the dataset are interpolated along the specified time dimension.
+        - If `field` is an `xarray.DataArray`, it must have a time dimension identified by `time_dim_name`.
+        - If `field` is an `xarray.Dataset`, all variables within the dataset are interpolated along `time_dim_name`.
         The time dimension is assumed to represent `day_of_year` for climatological purposes.
     time_dim_name : str
-        The name of the time dimension in the `field`. This dimension is used for interpolation.
+        The name of the time dimension in `field`. This dimension is used for interpolation.
     time : xarray.DataArray or pandas.DatetimeIndex
-        The target time points for interpolation. The time values should be compatible with the time format used in the `field`.
+        The target time points for interpolation. These are internally converted to `day_of_year`
+        before performing interpolation.
 
     Returns
     -------
     xarray.DataArray or xarray.Dataset
-        The interpolated field, with the same type as the input (`xarray.DataArray` or `xarray.Dataset`),
+        The interpolated field, maintaining the same type (`xarray.DataArray` or `xarray.Dataset`)
         but aligned to the specified `time` values.
 
     Notes
     -----
-    - The interpolation assumes the time dimension in `field` corresponds to `day_of_year`.
-      If the input time values are in a datetime format, ensure they are converted to `day_of_year` before calling this function.
-      For example, you can preprocess the time as follows:
-
-      >>> field["time"] = field["time"].dt.dayofyear
+    - This function assumes that `field` represents a climatological dataset, where time is expressed as `day_of_year` (1-365).
+    - The `time` input is automatically converted to `day_of_year`, so manual conversion is not required before calling this function.
     """
 
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
@@ -170,33 +237,27 @@ def interpolate_from_climatology(
         else:
             if np.size(time) == 1:
                 # Convert single datetime64 object to pandas.Timestamp
-                day_of_year = pd.Timestamp(time).dayofyear
+                date = pd.Timestamp(time)
+                day_of_year = (
+                    date.dayofyear
+                    + (date.hour / 24)
+                    + (date.minute / 1440)
+                    + (date.second / 86400)
+                )
             else:
-                # Convert each datetime64 object in the array to pandas.Timestamp
-                day_of_year = np.array([pd.Timestamp(t).dayofyear for t in time])
+                # Convert each datetime64 object in the array to pandas.Timestamp and compute fractional day of year
+                day_of_year = np.array(
+                    [
+                        pd.Timestamp(t).dayofyear
+                        + (pd.Timestamp(t).hour / 24)
+                        + (pd.Timestamp(t).minute / 1440)
+                        + (pd.Timestamp(t).second / 86400)
+                        for t in time
+                    ]
+                )
 
-        # Concatenate across the beginning and end of the year
-        time_concat = xr.concat(
-            [
-                data_array[time_dim_name][-1] - 365.25,
-                data_array[time_dim_name],
-                365.25 + data_array[time_dim_name][0],
-            ],
-            dim=time_dim_name,
-        )
-        data_array_concat = xr.concat(
-            [
-                data_array.isel(**{time_dim_name: -1}),
-                data_array,
-                data_array.isel(**{time_dim_name: 0}),
-            ],
-            dim=time_dim_name,
-        )
-        data_array_concat[time_dim_name] = time_concat
-
-        # Interpolate to specified times
-        data_array_interpolated = data_array_concat.interp(
-            **{time_dim_name: day_of_year}, method="linear"
+        data_array_interpolated = interpolate_cyclic_time(
+            data_array, time_dim_name, day_of_year
         )
 
         if np.size(time) == 1:
@@ -426,6 +487,126 @@ def get_variable_metadata():
         "nhy": {"long_name": "NHy decomposition", "units": "kg/m^2/s"},
     }
     return d
+
+
+def compute_missing_bgc_variables(bgc_data):
+    """Fills in missing biogeochemical (BGC) variables in the input dictionary.
+
+    This function checks for missing BGC variables in the provided dictionary and
+    computes them based on predefined relationships with existing variables. The
+    relationships specify either a multiplication factor applied to an existing
+    variable or a constant value if no related variable is available. The resulting
+    variables are added to the dictionary.
+
+    Parameters
+    ----------
+    bgc_data : dict
+        A dictionary containing biogeochemical variables as xarray DataArrays.
+        Missing variables are computed and added to this dictionary.
+
+        Assumptions:
+        - If `Fe` is part of the input dictionary, it is in units of mmol m-3.
+        - If `CHL` is part of the input dictionary, it is in units of mg m-3.
+        - If `ALK` is part of the input dictionary, it is in units of meq m-3 = mmol m-3.
+        - If `DIC` is part of the input dictionary, it is in units of mmol m-3.
+
+    Returns
+    -------
+    dict
+        The updated dictionary with missing BGC variables filled in.
+
+    Notes
+    -----
+    - If `NH4`, `DOC`, `DON`, `DOP`, `DOCr`, `DONr`, and `DOPr` are not part of the input
+      dictionary, they are filled with constant values.
+    - `CHL` is removed from the dictionary after the necessary calculations.
+    """
+
+    # Define the relationships for missing variables
+    variable_relations = {
+        "NH4": (None, 10**-6),  # mmol m-3
+        "Lig": ("Fe", 3),  # mmol m-3
+        "DIC_ALT_CO2": ("DIC", 1),  # mmol m-3
+        "ALK_ALT_CO2": ("ALK", 1),  # meq m-3 = mmol m-3
+        "DOC": (None, 10**-6),  # mmol m-3
+        "DON": (None, 1.0),  # mmol m-3
+        "DOP": (None, 0.1),  # mmol m-3
+        "DOCr": (None, 10**-6),  # mmol m-3
+        "DONr": (None, 0.8),  # mmol m-3
+        "DOPr": (None, 0.003),  # mmol m-3
+        "zooC": ("CHL", 1.35),  # mmol m-3
+        "spChl": ("CHL", 0.675),  # mg m-3
+        "spC": ("CHL", 3.375),  # mmol m-3
+        "spP": ("CHL", 0.03),  # mmol m-3
+        "spFe": ("CHL", 1.35e-5),  # mmol m-3
+        "spCaCO3": ("CHL", 0.0675),  # mmol m-3
+        "diatChl": ("CHL", 0.0675),  # mg m-3
+        "diatC": ("CHL", 0.2025),  # mmol m-3
+        "diatP": ("CHL", 0.02),  # mmol m-3
+        "diatFe": ("CHL", 1.35e-6),  # mmol m-3
+        "diatSi": ("CHL", 0.0675),  # mmol m-3
+        "diazChl": ("CHL", 0.0075),  # mg m-3
+        "diazC": ("CHL", 0.0375),  # mmol m-3
+        "diazP": ("CHL", 0.01),  # mmol m-3
+        "diazFe": ("CHL", 7.5e-7),  # mmol m-3
+    }
+
+    # Fill in missing variables using the defined relationships
+    for var_name, (base_var, factor) in variable_relations.items():
+        if var_name not in bgc_data:
+            if base_var:
+                bgc_data[var_name] = bgc_data[base_var] * factor
+            else:
+                bgc_data[var_name] = factor * xr.ones_like(bgc_data["ALK"])
+
+    bgc_data.pop("CHL", None)
+
+    return bgc_data
+
+
+def compute_missing_surface_bgc_variables(bgc_data):
+    """Fills in missing surface biogeochemical (BGC) variables in the input dictionary.
+
+    This function checks for missing surface BGC variables in the provided dictionary and
+    computes them based on predefined relationships with existing variables. The relationships
+    specify either a multiplication factor applied to an existing variable or a constant value
+    if no related variable is available. The resulting variables are added to the dictionary.
+
+    Parameters
+    ----------
+    bgc_data : dict
+        A dictionary containing surface biogeochemical variables as xarray DataArrays.
+        Missing variables are computed and added to this dictionary.
+
+        Assumptions:
+        - If `pco2_air` is part of the input dictionary, it is in units of ppmv.
+
+    Returns
+    -------
+    dict
+        The updated dictionary with missing surface BGC variables filled in.
+
+    Notes
+    -----
+    - If `nox` and `nhy` are not part of the input dictionary, the are assigned constant values.
+    """
+
+    # Define the relationships for missing variables
+    variable_relations = {
+        "pco2_air_alt": ("pco2_air", 1.0),
+        "nox": (None, 1e-13),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
+        "nhy": (None, 5e-12),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
+    }
+
+    # Fill in missing variables using the defined relationships
+    for var_name, (base_var, factor) in variable_relations.items():
+        if var_name not in bgc_data:
+            if base_var:
+                bgc_data[var_name] = bgc_data[base_var] * factor
+            else:
+                bgc_data[var_name] = factor * xr.ones_like(bgc_data["pco2_air"])
+
+    return bgc_data
 
 
 def extract_single_value(data):

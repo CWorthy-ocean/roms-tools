@@ -4,9 +4,14 @@
 
 ### New Features
 
+* Enable reading from unified BGC dataset ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
+
 ### Breaking Changes
 
 ### Internal Changes
+
+* Refactoring of `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` to accommodate optional variable names ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
+* Modification of the `Dataset` class including the `choose_subdomain` method, the capability to handle fractional days in a climatology, and the addition of a `needs_lateral_fill` attribute ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
 
 ### Documentation
 

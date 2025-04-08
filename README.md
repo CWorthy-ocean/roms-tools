@@ -77,7 +77,6 @@ install `ROMS-Tools` along with the additional dependency via:
 pip install -e ".[dask]"
 ```
 
-
 ### Run the tests
 
 Before running the tests, you can activate the conda environment created in the previous section:

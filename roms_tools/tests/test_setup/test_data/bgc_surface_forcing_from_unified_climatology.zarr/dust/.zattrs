@@ -1,0 +1,12 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "eta_rho",
+        "xi_rho"
+    ],
+    "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
+    "long_name": "dust decomposition",
+    "source": "Kok et al. (2020)",
+    "source file": "/data/project7/pdamien/DATA/BGC/Srf_BGC_Flx/KoK2021/DustCOMM_totdep_seas_bin.nc",
+    "units": "kg/m^2/s"
+}

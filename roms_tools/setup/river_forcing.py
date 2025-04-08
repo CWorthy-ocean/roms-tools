@@ -525,7 +525,7 @@ class RiverForcing:
         )
 
         for ax in axs:
-            _plot(field, kwargs=kwargs, ax=ax, add_colorbar=False)
+            _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
 
         proj = ccrs.PlateCarree()
 

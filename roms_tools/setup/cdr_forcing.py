@@ -11,7 +11,11 @@ from roms_tools import Grid
 from roms_tools.plot import _plot, _get_projection
 from roms_tools.regrid import LateralRegridFromROMS
 from roms_tools.utils import _generate_coordinate_range, _remove_edge_nans
-from roms_tools.setup.utils import gc_dist
+from roms_tools.setup.utils import (
+    gc_dist,
+    get_river_tracer_defaults,
+    add_tracer_metadata,
+)
 
 
 @dataclass(kw_only=True)
@@ -54,63 +58,25 @@ class CDRPointSource:
 
         if not self.releases:
 
-            self.ds = xr.Dataset(
+            ds = xr.Dataset(
                 {
                     "cdr_time": (["time"], np.empty(0)),
                     "cdr_volume": (["time", "ncdr"], np.empty((0, 0))),
-                    # "cdr_tracer": (["time", "ntracers", "ncdr"], np.empty((0, 0))),
+                    "cdr_tracer": (["time", "ntracers", "ncdr"], np.empty((0, 34, 0))),
                 },
                 coords={
                     "time": (["time"], np.empty(0)),
                     "release_name": (["ncdr"], np.empty(0, dtype=str)),
                 },
             )
-            self._add_global_metadata()
+            ds = add_tracer_metadata(ds)
+            self.ds = ds
         else:
             for name, params in self.releases.items():
                 self._add_grid_indices_to_dict(
                     name=name, lat=params["lat"], lon=params["lon"]
                 )
                 self._add_release_to_ds(name=name, **params)
-
-    def _add_global_metadata(self):
-        tracer_names = [
-            "temp",
-            "salt",
-            "PO4",
-            "NO3",
-            "SiO3",
-            "NH4",
-            "Fe",
-            "Lig",
-            "O2",
-            "DIC",
-            "DIC_ALT_CO2",
-            "ALK",
-            "ALK_ALT_CO2",
-            "DOC",
-            "DON",
-            "DOP",
-            "DOPr",
-            "DONr",
-            "DOCr",
-            "zooC",
-            "spChl",
-            "spC",
-            "spP",
-            "spFe",
-            "spCaCO3",
-            "diatChl",
-            "diatC",
-            "diatP",
-            "diatFe",
-            "diatSi",
-            "diazChl",
-            "diazC",
-            "diazP",
-            "diazFe",
-        ]
-        self.ds = self.ds.assign_coords({"tracer_name": (["ntracers"], tracer_names)})
 
     def add_release(
         self,
@@ -122,7 +88,7 @@ class CDRPointSource:
         release_start_time: Optional[datetime] = None,
         release_end_time: Optional[datetime] = None,
         times: Optional[List[datetime]] = None,
-        # tracer_conentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
+        tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         volume: Union[float, List[float]] = 0.0,
         fill_values: Optional[str] = "auto_fill",
     ):
@@ -163,8 +129,21 @@ class CDRPointSource:
             release_start_time=release_start_time,
             release_end_time=release_end_time,
             times=times,
+            tracer_concentrations=tracer_concentrations,
             volume=volume,
         )
+
+        # Fill in missing tracer concentrations
+        if fill_values == "auto_fill":
+            defaults = get_river_tracer_defaults()
+
+        for tracer_name in self.ds.tracer_name.values:
+            if tracer_name not in tracer_concentrations:
+                if fill_values == "auto_fill":
+                    tracer_concentrations[tracer_name] = defaults[tracer_name]
+                elif fill_values == "zero_fill":
+                    tracer_concentrations[tracer_name] = 0.0
+
         self._add_release_to_ds(
             name=name,
             lat=lat,
@@ -173,6 +152,7 @@ class CDRPointSource:
             release_start_time=release_start_time,
             release_end_time=release_end_time,
             times=times,
+            tracer_concentrations=tracer_concentrations,
             volume=volume,
         )
 
@@ -234,37 +214,72 @@ class CDRPointSource:
 
         # Initialize updated dataset
         ds = xr.Dataset()
+        ds = add_tracer_metadata(ds)
         ds["cdr_time"] = ("time", union_rel_time)
         ds["time"] = ("time", union_time)
 
         release_names = np.concatenate([self.ds.release_name.values, [name]])
         ds = ds.assign_coords({"release_name": (["ncdr"], release_names)})
         ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr)
-        # ds["cdr_tracer"] = xr.zeros_like(ds.cdr_time * ds.ncdr)
+        ds["cdr_tracer"] = xr.zeros_like(ds.cdr_time * ds.ntracers * ds.ncdr)
 
         # Interpolate and retain previous experiment volumes and tracer concentrations
         if len(self.ds["ncdr"]) > 0:
             for i in range(len(self.ds.ncdr)):
-                for key in ["volume"]:  # , "tracer"]:
+                interpolated = np.interp(
+                    union_time.astype(np.float64),
+                    self.ds["cdr_time"].values.astype(np.float64),
+                    self.ds["cdr_volume"].isel(ncdr=i).values,
+                )
+                ds["cdr_volume"].loc[{"ncdr": i}] = interpolated
+
+                for n in range(len(self.ds.ntracers)):
+                    # interpolation for tracer concentrations is weighted by volume to conserve tracers
                     interpolated = np.interp(
                         union_time.astype(np.float64),
                         self.ds["cdr_time"].values.astype(np.float64),
-                        self.ds[f"cdr_{key}"].isel(ncdr=i).values,
+                        self.ds["cdr_tracer"].isel(ntracers=n, ncdr=i).values
+                        * self.ds["cdr_volume"].isel(ncdr=i).values,
                     )
-                    ds[f"cdr_{key}"].loc[{"ncdr": i}] = interpolated
+                    ds["cdr_tracer"].loc[{"ntracers": n, "ncdr": i}] = (
+                        interpolated / ds["cdr_volume"].loc[{"ncdr": i}]
+                    )
 
         # Handle new experiment volume and tracer concentrations
         if isinstance(volume, list):
-            new_volume = np.interp(
+            interpolated = np.interp(
                 union_time.astype(np.float64), times.astype(np.float64), volume
             )
         else:
-            new_volume = np.full(len(union_time), volume)
+            interpolated = np.full(len(union_time), volume)
 
-        ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = new_volume
+        ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = interpolated
+
+        for n in range(len(self.ds.ntracers)):
+            tracer_name = ds.tracer_name[n].item()
+            # interpolation for tracer concentrations is weighted by volume to conserve tracers
+            if isinstance(tracer_concentrations[tracer_name], list) or isinstance(
+                volume, list
+            ):
+                interpolated = np.interp(
+                    union_time.astype(np.float64),
+                    times.astype(np.float64),
+                    tracer_concentrations[tracer_name] * volume,
+                )
+            else:
+                interpolated = np.full(
+                    len(union_time), tracer_concentrations[tracer_name] * volume
+                )
+
+            interpolated = (
+                interpolated / ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}]
+            )
+
+            ds["cdr_tracer"].loc[
+                {"ntracers": n, "ncdr": ds.sizes["ncdr"] - 1}
+            ] = interpolated
 
         self.ds = ds
-        self._add_global_metadata()
 
     def _add_release_to_dict(self, name: str, **params):
         """Add the release data for a specific 'name' to the releases dictionary.

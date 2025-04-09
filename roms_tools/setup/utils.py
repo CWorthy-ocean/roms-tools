@@ -609,6 +609,55 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
+def define_river_tracer_defaults():
+    """Returns default tracer concentrations for river inputs in ROMS.
+
+    These values represent typical physical and biogeochemical tracer levels
+    (e.g., temperature, salinity, nutrients, carbon) in river water.
+
+    Returns
+    -------
+    dict
+        Dictionary of tracer names and their default concentrations
+    """
+    return {
+        "temp": 17.0,  # degrees C
+        "salt": 1.0,  # psu
+        "PO4": 2.7,  # mmol m-3
+        "NO3": 24.2,  # mmol m-3
+        "SiO3": 13.2,  # mmol m-3
+        "NH4": 2.2,  # mmol m-3
+        "Fe": 1.79,  # mmol m-3
+        "Lig": 3 * 1.79,  # mmol m-3, inferred from Fe
+        "O2": 187.5,  # mmol m-3
+        "DIC": 2370.0,  # mmol m-3
+        "DIC_ALT_CO2": 2370.0,  # mmol m-3
+        "ALK": 2310.0,  # meq m-3
+        "ALK_ALT_CO2": 2310.0,  # meq m-3
+        "DOC": 1e-4,  # mmol m-3
+        "DON": 1.0,  # mmol m-3
+        "DOP": 0.1,  # mmol m-3
+        "DOPr": 0.003,  # mmol m-3
+        "DONr": 0.8,  # mmol m-3
+        "DOCr": 1e-6,  # mmol m-3
+        "zooC": 2.7,  # mmol m-3
+        "spChl": 1.35,  # mg m-3
+        "spC": 6.75,  # mmol m-3
+        "spP": 1.5 * 0.03,  # mmol m-3, inferred from ?
+        "spFe": 2.7e-5,  # mmol m-3
+        "spCaCO3": 0.135,  # mmol m-3
+        "diatChl": 0.135,  # mg m-3
+        "diatC": 0.405,  # mmol m-3
+        "diatP": 1.5 * 0.02,  # mmol m-3, inferred from ?
+        "diatFe": 2.7e-6,  # mmol m-3
+        "diatSi": 0.135,  # mmol m-3
+        "diazChl": 0.015,  # mg m-3
+        "diazC": 0.075,  # mmol m-3
+        "diazP": 1.5 * 0.01,  # mmol m-3, inferred from ?
+        "diazFe": 1.5e-6,  # mmol m-3
+    }
+
+
 def extract_single_value(data):
     """Extracts a single value from an xarray.DataArray or numpy array.
 

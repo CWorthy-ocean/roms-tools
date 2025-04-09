@@ -19,6 +19,7 @@ from roms_tools.setup.utils import (
     convert_to_roms_time,
     _to_yaml,
     _from_yaml,
+    add_tracer_metadata,
     get_variable_metadata,
 )
 
@@ -311,52 +312,8 @@ class RiverForcing:
             tracer_data, dims=("river_time", "ntracers", "nriver")
         )
         river_tracer.attrs["long_name"] = "River tracer data"
-
-        if self.include_bgc:
-            tracer_names = xr.DataArray(
-                [
-                    "temp",
-                    "salt",
-                    "PO4",
-                    "NO3",
-                    "SiO3",
-                    "NH4",
-                    "Fe",
-                    "Lig",
-                    "O2",
-                    "DIC",
-                    "DIC_ALT_CO2",
-                    "ALK",
-                    "ALK_ALT_CO2",
-                    "DOC",
-                    "DON",
-                    "DOP",
-                    "DOPr",
-                    "DONr",
-                    "DOCr",
-                    "zooC",
-                    "spChl",
-                    "spC",
-                    "spP",
-                    "spFe",
-                    "spCaCO3",
-                    "diatChl",
-                    "diatC",
-                    "diatP",
-                    "diatFe",
-                    "diatSi",
-                    "diazChl",
-                    "diazC",
-                    "diazP",
-                    "diazFe",
-                ],
-                dims="ntracers",
-            )
-        else:
-            tracer_names = xr.DataArray(["temp", "salt"], dims="ntracers")
-        tracer_names.attrs["long_name"] = "Tracer name"
-        river_tracer.coords["tracer_name"] = tracer_names
         ds["river_tracer"] = river_tracer
+        ds = add_tracer_metadata(ds, self.include_bgc)
 
         ds, time = convert_to_roms_time(
             ds, self.model_reference_date, self.climatology, time_name="river_time"

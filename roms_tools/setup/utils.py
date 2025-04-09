@@ -609,7 +609,74 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
-def define_river_tracer_defaults():
+def add_tracer_metadata(ds, include_bgc=True):
+    """Assigns tracer metadata to a dataset by defining a 'tracer_name' coordinate.
+
+    Useful for river and Carbon Dioxide Removal (CDR) forcing datasets, this function
+    sets the names of tracers associated with each column in the forcing array. The
+    list of tracers can include only physical tracers (temperature and salinity) or
+    an extended set including biogeochemical (BGC) tracers.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset to which the 'tracer_name' coordinate will be added.
+    include_bgc : bool
+        If True, includes biogeochemical tracers in addition to temperature and salinity.
+        Defaults to True.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with the 'tracer_name' coordinate added to the 'ntracers' dimension.
+    """
+
+    if include_bgc:
+        tracer_names = [
+            "temp",
+            "salt",
+            "PO4",
+            "NO3",
+            "SiO3",
+            "NH4",
+            "Fe",
+            "Lig",
+            "O2",
+            "DIC",
+            "DIC_ALT_CO2",
+            "ALK",
+            "ALK_ALT_CO2",
+            "DOC",
+            "DON",
+            "DOP",
+            "DOPr",
+            "DONr",
+            "DOCr",
+            "zooC",
+            "spChl",
+            "spC",
+            "spP",
+            "spFe",
+            "spCaCO3",
+            "diatChl",
+            "diatC",
+            "diatP",
+            "diatFe",
+            "diatSi",
+            "diazChl",
+            "diazC",
+            "diazP",
+            "diazFe",
+        ]
+    else:
+        tracer_names = ["temp", "salt"]
+
+    return ds.assign_coords(
+        tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"})
+    )
+
+
+def get_river_tracer_defaults():
     """Returns default tracer concentrations for river inputs in ROMS.
 
     These values represent typical physical and biogeochemical tracer levels

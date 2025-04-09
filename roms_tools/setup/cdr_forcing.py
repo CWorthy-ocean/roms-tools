@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from roms_tools import Grid
 from roms_tools.plot import _plot, _get_projection
+from roms_tools.regrid import LateralRegridFromROMS
+from roms_tools.utils import _generate_coordinate_range, _remove_edge_nans
 from roms_tools.setup.utils import gc_dist
 
 
@@ -307,70 +309,48 @@ class CDRPipeForcing:
 
         ax.set(title=title, ylabel=ylabel)
 
-    def plot_locations(self, top_view=True, releases="all"):
-        """Plot the locations of Carbon Dioxide Removal (CDR) releases.
+    def plot_location_top(self, releases="all"):
+        """Plot the top-down view of Carbon Dioxide Removal (CDR) release locations.
 
         Parameters
         ----------
-        top_view : bool, optional
-            If True (default), a top-down (bird's-eye) view is plotted, showing the locations on a 2D map.
-            If False, side views are plotted: longitude vs. depth and latitude vs. depth, showing the
-            vertical profiles of the CDR releases.
-
-        releases : list or str, optional
-            The specific release locations to be plotted. Can either be a list of release names
-            or the string "all" (default), which plots locations for all releases.
-            If top_view is False, only one release is valid, as the lat/lon sections depend on a
-            single release's data for the side views.
+        releases : list of str or str, optional
+            A single release name (string) or a list of release names (strings) to plot.
+            Each release should correspond to a key in `self.releases`. Default is 'all', which will plot all releases.
 
         Raises
         ------
         ValueError
-            If `top_view` is False and more than one release is provided in `releases`.
-            If any release in `releases` is not found in `self.ds["release_name"]`.
+            If any of the specified releases do not exist in `self.releases`.
+            If `releases` is not a string or list of strings.
+            If `self.grid` is not set.
         """
-
+        # Ensure that the grid is provided
         if self.grid is None:
             raise ValueError(
-                "A grid must be provided when instantiating this class in order to plot data. "
-                "Please pass a valid `Grid` object."
+                "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
-        # Check that all experiment names are valid if experiments is provided as a list
-        if releases != "all":
-            invalid_releases = [
-                exp for exp in releases if exp not in self.ds["relase_name"]
-            ]
-            if invalid_releases:
-                raise ValueError(
-                    f"The following releases are not valid: {', '.join(invalid_releases)}"
-                )
-
-        # Validate that if top_view is False, only one experiment is passed
-        if not top_view:
-            if releases == "all":
-                raise ValueError(
-                    "When `top_view` is set to False, only one release can be plotted at a time. "
-                    "Please specify a single release name in the `releases` parameter, instead of 'all'."
-                )
-            if isinstance(releases, list) and len(releases) > 1:
-                raise ValueError(
-                    f"When `top_view` is set to False, only one release can be plotted at a time. "
-                    f"You provided: {releases}"
-                )
+        # Handle "all" releases case
         if releases == "all":
             releases = list(self.releases.keys())
-        elif isinstance(releases, str):
-            releases = [releases]
 
-        if top_view:
-            self._plot_locations_top(releases)
-        else:
-            self._plot_locations_side(releases)
+        # Validate the releases input
+        if isinstance(releases, str):
+            releases = [releases]  # Convert to list if a single string is provided
+        elif not isinstance(releases, list):
+            raise ValueError(
+                "`releases` should be a string (single release name) or a list of strings (release names)."
+            )
 
-    def _plot_locations_top(self, releases):
-        """Plots the CDR release locations on a bird-eye map projection."""
+        # Validate that the specified releases exist in self.releases
+        invalid_releases = [
+            release for release in releases if release not in self.releases
+        ]
+        if invalid_releases:
+            raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
 
+        # Proceed with plotting
         field = self.grid.ds.mask_rho
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
@@ -423,6 +403,148 @@ class CDRPipeForcing:
 
         ax.set_title("CDR release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
+
+    def plot_location_side(self, release: str):
+        """Plots the Carbon Dioxide Removal (CDR) release locations from a side view,
+        displaying bathymetry sections along both fixed longitude and latitude.
+
+        This method creates two plots:
+
+        - The first plot shows a bathymetry section along a fixed longitude (latitudinal view),
+        with the CDR release location marked by a red "x".
+        - The second plot shows a bathymetry section along a fixed latitude (longitudinal view),
+        with the CDR release location marked by a red "x".
+
+        Parameters
+        ----------
+        release : str
+            The name of the CDR release to plot. This should correspond to a key in `self.releases`.
+
+        Raises
+        ------
+        ValueError
+            If the specified `release` does not exist in `self.releases`.
+        """
+
+        # Validate if the release exists in the dataset
+        if release not in self.releases:
+            raise ValueError(
+                f"Invalid release: {release}. It does not exist in self.releases."
+            )
+
+        def _plot_bathymetry_section(
+            ax, h, dim, fixed_val, coord_deg, resolution, title
+        ):
+            """Plots a bathymetry section along a fixed latitude or longitude.
+
+            Parameters
+            ----------
+            ax : matplotlib.axes.Axes
+                The axis on which the plot will be drawn.
+
+            h : xarray.DataArray
+                The bathymetry data to plot.
+
+            dim : str
+                The dimension along which to plot the section, either "lat" or "lon".
+
+            fixed_val : float
+                The fixed value of latitude or longitude for the section.
+
+            coord_deg : xarray.DataArray
+                The array of latitude or longitude coordinates.
+
+            resolution : float
+                The resolution at which to generate the coordinate range.
+
+            title : str
+                The title for the plot.
+
+            Returns
+            -------
+            None
+                The function does not return anything. It directly plots the bathymetry section on the provided axis.
+            """
+            # Determine coordinate names and build target range
+            var_range = _generate_coordinate_range(
+                coord_deg.min().values, coord_deg.max().values, resolution
+            )
+            var_name = "lat" if dim == "lon" else "lon"
+            range_da = xr.DataArray(
+                var_range,
+                dims=[var_name],
+                attrs={"units": "°N" if var_name == "lat" else "°E"},
+            )
+
+            # Construct target coordinates for regridding
+            target_coords = {dim: [fixed_val], var_name: range_da}
+            regridder = LateralRegridFromROMS(h, target_coords)
+            section = regridder.apply(h)
+            section, _ = _remove_edge_nans(section, var_name)
+
+            # Plot the bathymetry section
+            section.plot(ax=ax, color="k")
+            ax.fill_between(
+                section[var_name], section.squeeze(), y2=0, color="lightblue"
+            )
+            ax.invert_yaxis()
+            ax.set_xlabel("Latitude [°N]" if var_name == "lat" else "Longitude [°E]")
+            ax.set_ylabel("Depth [m]")
+            ax.set_title(title)
+
+        # Prepare grid coordinates
+        lon_deg = self.grid.ds.lon_rho
+        lat_deg = self.grid.ds.lat_rho
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+
+        resolution = self.grid._infer_nominal_horizontal_resolution()
+        h = self.grid.ds.h.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
+        # Set up plot
+        fig, axs = plt.subplots(2, 1, figsize=(7, 8))
+
+        # Plot along fixed longitude
+        _plot_bathymetry_section(
+            ax=axs[0],
+            h=h,
+            dim="lon",
+            fixed_val=self.releases[release]["lon"],
+            coord_deg=lat_deg,
+            resolution=resolution,
+            title=f"Longitude: {self.releases[release]['lon']}°E",
+        )
+        axs[0].plot(
+            self.releases[release]["lat"],
+            self.releases[release]["depth"],
+            color="r",
+            marker="x",
+            markersize=8,
+            markeredgewidth=2,
+        )
+
+        # Plot along fixed latitude
+        _plot_bathymetry_section(
+            ax=axs[1],
+            h=h,
+            dim="lat",
+            fixed_val=self.releases[release]["lat"],
+            coord_deg=lon_deg,
+            resolution=resolution,
+            title=f"Latitude: {self.releases[release]['lat']}°N",
+        )
+        axs[1].plot(
+            self.releases[release]["lon"],
+            self.releases[release]["depth"],
+            color="r",
+            marker="x",
+            markersize=8,
+            markeredgewidth=2,
+        )
+
+        # Adjust layout and title
+        fig.subplots_adjust(hspace=0.4)
+        fig.suptitle(f"CDR release location for: {release}")
 
     def _input_checks(
         self,
@@ -513,7 +635,28 @@ class CDRPipeForcing:
         #        )
 
     def _add_grid_indices_to_dict(self, name, lat, lon):
+        """Adds the closest grid indices (eta_rho, xi_rho) for a given release location
+        (lat, lon) to the releases dictionary.
 
+        Adjusts longitude for the International Date Line, checks that the release
+        location is within the grid domain and not on land, and adds the indices.
+
+        Parameters
+        ----------
+        name : str
+            Unique name for the release.
+        lat : float
+            Latitude of the release location.
+        lon : float
+            Longitude of the release location.
+
+        Raises
+        ------
+        ValueError
+            If the location is outside the grid or on land.
+        Warning
+            If no grid is provided for validation.
+        """
         if self.grid:
             # Adjust longitude based on whether it crosses the International Date Line (straddle case)
             if self.grid.straddle:

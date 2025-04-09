@@ -2,7 +2,6 @@ import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.utils import _load_data, _remove_edge_nans
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from dataclasses import dataclass, field
 from typing import Union, Optional
@@ -15,8 +14,14 @@ from roms_tools import Grid
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
-from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
-from roms_tools.analysis.utils import _validate_plot_inputs, _generate_coordinate_range
+from roms_tools.utils import (
+    _load_data,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    _generate_coordinate_range,
+    _remove_edge_nans,
+)
+from roms_tools.analysis.utils import _validate_plot_inputs
 
 
 @dataclass(kw_only=True)

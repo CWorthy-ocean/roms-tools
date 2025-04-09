@@ -58,7 +58,7 @@
             ],
             "long_name": "River ID (1-based Fortran indexing)"
         },
-        "river_flux/.zarray": {
+        "river_fraction/.zarray": {
             "chunks": [
                 20,
                 20
@@ -80,12 +80,42 @@
             ],
             "zarr_format": 2
         },
-        "river_flux/.zattrs": {
+        "river_fraction/.zattrs": {
             "_ARRAY_DIMENSIONS": [
                 "eta_rho",
                 "xi_rho"
             ],
-            "long_name": "River ID plus local volume fraction",
+            "long_name": "River volume fraction",
+            "units": "none"
+        },
+        "river_index/.zarray": {
+            "chunks": [
+                20,
+                20
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                20,
+                20
+            ],
+            "zarr_format": 2
+        },
+        "river_index/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "eta_rho",
+                "xi_rho"
+            ],
+            "long_name": "River ID",
             "units": "none"
         },
         "river_name/.zarray": {

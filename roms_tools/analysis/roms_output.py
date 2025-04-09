@@ -2,7 +2,7 @@ import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.utils import _load_data
+from roms_tools.utils import _load_data, _remove_edge_nans
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from dataclasses import dataclass, field
 from typing import Union, Optional
@@ -326,33 +326,6 @@ class ROMSOutput:
         # Assign depth as coordinate
         if compute_layer_depth:
             field = field.assign_coords({"layer_depth": layer_depth})
-
-        def _remove_edge_nans(field, xdim, layer_depth=None):
-            """Removes NaNs from the edges along the specified dimension."""
-            if xdim in field.dims:
-                if layer_depth is not None:
-                    nan_mask = layer_depth.isnull().sum(
-                        dim=[dim for dim in layer_depth.dims if dim != xdim]
-                    )
-                else:
-                    nan_mask = field.isnull().sum(
-                        dim=[dim for dim in field.dims if dim != xdim]
-                    )
-
-                # Find the valid indices where the sum of the nans is 0
-                valid_indices = np.where(nan_mask.values == 0)[0]
-
-                if len(valid_indices) > 0:
-                    first_valid = valid_indices[0]
-                    last_valid = valid_indices[-1]
-
-                    field = field.isel({xdim: slice(first_valid, last_valid + 1)})
-                    if layer_depth is not None:
-                        layer_depth = layer_depth.isel(
-                            {xdim: slice(first_valid, last_valid + 1)}
-                        )
-
-            return field, layer_depth
 
         if lat is not None:
             field, layer_depth = _remove_edge_nans(

@@ -1,4 +1,5 @@
 import xarray as xr
+import numpy as np
 from pathlib import Path
 import re
 import glob
@@ -371,3 +372,53 @@ def get_dask_chunks(location, chunk_size):
         "v": {"eta_v": chunk_size, "xi_rho": chunk_size},
     }
     return chunk_mapping.get(location, {})
+
+
+def _remove_edge_nans(field, xdim, layer_depth=None):
+    """Trim NaN-only edges along a specified dimension.
+
+    Useful when a ROMS grid has been regridded to a fixed lat/lon section,
+    leaving NaN-filled edges (e.g., over land or outside the domain).
+    Removes leading/trailing slices along `xdim` where all values are NaN,
+    based on `field` or optionally `layer_depth`.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        Data to trim.
+    xdim : str
+        Dimension along which to remove NaN edges.
+    layer_depth : xr.DataArray, optional
+        Optional field to determine where NaNs occur.
+
+    Returns
+    -------
+    field : xr.DataArray
+        Trimmed data.
+    layer_depth : xr.DataArray or None
+        Trimmed `layer_depth` if provided.
+    """
+    if xdim in field.dims:
+        if layer_depth is not None:
+            nan_mask = layer_depth.isnull().sum(
+                dim=[dim for dim in layer_depth.dims if dim != xdim]
+            )
+        else:
+            nan_mask = field.isnull().sum(
+                dim=[dim for dim in field.dims if dim != xdim]
+            )
+
+        # Find the valid indices where the sum of the nans is 0
+        valid_indices = np.where(nan_mask.values == 0)[0]
+
+        if len(valid_indices) > 0:
+            first_valid = valid_indices[0]
+            last_valid = valid_indices[-1]
+
+            field = field.isel({xdim: slice(first_valid, last_valid + 1)})
+            if layer_depth is not None:
+                layer_depth = layer_depth.isel(
+                    {xdim: slice(first_valid, last_valid + 1)}
+                )
+
+    return field, layer_depth

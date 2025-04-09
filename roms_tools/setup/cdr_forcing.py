@@ -15,9 +15,13 @@ from roms_tools.setup.utils import gc_dist
 
 
 @dataclass(kw_only=True)
-class CDRPipeForcing:
-    """Represents CDR pipe forcing data for ROMS, supporting both constant and time-
-    varying tracer concentrations and volumes.
+class CDRPointSource:
+    """Represents a point source of Carbon Dioxide Removal (CDR) forcing data for ROMS,
+    including the addition of a volume flux of water and tracer concentrations.
+
+    This class models the introduction of water, along with tracers (such as alkalinity),
+    at specific point locations in the model grid. It supports both constant and time-varying
+    tracer concentrations and volume fluxes, simulating the release of CDR agents over time.
 
     Parameters
     ----------
@@ -122,7 +126,7 @@ class CDRPipeForcing:
         volume: Union[float, List[float]] = 0.0,
         fill_values: Optional[str] = "auto_fill",
     ):
-        """Adds a CDR pipe release to the forcing dataset and dictionary.
+        """Adds a CDR point source to the forcing dataset and dictionary.
 
         Parameters
         ----------
@@ -185,7 +189,7 @@ class CDRPipeForcing:
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         volume: Union[float, List[float]] = 0.0,
     ):
-        """Adds a CDR pipe release to the forcing dataset."""
+        """Adds a CDR point release to the forcing dataset."""
 
         self._input_checks(
             name,

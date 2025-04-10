@@ -402,13 +402,11 @@ class CDRPointSource:
         colors = {name: color_map(i) for i, name in enumerate(self.releases.keys())}
 
         for name in releases:
-            eta_index = self.releases[name]["eta_rho"]
-            xi_index = self.releases[name]["xi_rho"]
 
             # transform coordinates to projected space
             transformed_lon, transformed_lat = trans.transform_point(
-                self.grid.ds.lon_rho[eta_index, xi_index],
-                self.grid.ds.lat_rho[eta_index, xi_index],
+                self.releases[name]["lon"],
+                self.releases[name]["lat"],
                 proj,
             )
 

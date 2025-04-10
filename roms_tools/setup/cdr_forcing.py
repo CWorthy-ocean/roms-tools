@@ -73,8 +73,11 @@ class CDRPointSource:
             self.ds = ds
         else:
             for name, params in self.releases.items():
-                self._add_grid_indices_to_dict(
-                    name=name, lat=params["lat"], lon=params["lon"]
+                self._validate_release_location(
+                    name=name,
+                    lat=params["lat"],
+                    lon=params["lon"],
+                    depth=params["depth"],
                 )
                 self._add_release_to_ds(name=name, **params)
 
@@ -295,10 +298,9 @@ class CDRPointSource:
         if name in self.releases:
             raise ValueError(f"Release name '{name}' already exists in the dictionary.")
 
-        # Extract lat and lon from params
-        lat = params.get("lat")
-        lon = params.get("lon")
-        self._add_grid_indices_to_dict(name=name, lat=lat, lon=lon)
+        self._validate_release_location(
+            name=name, lat=params["lat"], lon=params["lon"], depth=params["depth"]
+        )
 
         # Add the parameters to the dictionary under the given name
         if name not in self.releases:
@@ -653,28 +655,37 @@ class CDRPointSource:
         #            f"The length of tracer '{key}' ({len(tracer_values)}) does not match the length of 'times' ({num_times})."
         #        )
 
-    def _add_grid_indices_to_dict(self, name, lat, lon):
-        """Adds the closest grid indices (eta_rho, xi_rho) for a given release location
-        (lat, lon) to the releases dictionary.
+    def _validate_release_location(self, name, lat, lon, depth):
+        """Validates the closest grid location for a release site.
 
-        Adjusts longitude for the International Date Line, checks that the release
-        location is within the grid domain and not on land, and adds the indices.
+        This function ensures that the given release site (lat, lon, depth) lies
+        within the ocean portion of the model grid domain. It:
+
+        - Checks if the point is within the grid domain (with buffer for boundary artifacts).
+        - Verifies that the location is not on land.
+        - Verifies that the location is not below the seafloor.
 
         Parameters
         ----------
         name : str
-            Unique name for the release.
+            A unique identifier for the release location.
         lat : float
             Latitude of the release location.
         lon : float
             Longitude of the release location.
+        depth : float
+            Depth (positive, in meters) of the release location.
 
         Raises
         ------
         ValueError
-            If the location is outside the grid or on land.
+            If the location is:
+                - Outside the model grid.
+                - On the boundary of the grid domain (eta_rho, xi_rho = 0 or max).
+                - On land (based on `mask_rho`).
+                - Below the ocean bottom (`h < depth`).
         Warning
-            If no grid is provided for validation.
+            If no grid is available to validate the location.
         """
         if self.grid:
             # Adjust longitude based on whether it crosses the International Date Line (straddle case)
@@ -683,19 +694,45 @@ class CDRPointSource:
             else:
                 lon = xr.where(lon < 0, lon + 360, lon)
 
-            # maximum dx in grid
-            dx = (
-                np.sqrt((1 / self.grid.ds.pm) ** 2 + (1 / self.grid.ds.pn) ** 2) / 2
-            ).max()
+            dx = 1 / self.grid.ds.pm
+            dy = 1 / self.grid.ds.pn
+            max_grid_spacing = np.sqrt(dx**2 + dy**2) / 2
 
-            # Calculate the distance between the grid coordinates and the CDR release location
+            # Compute great-circle distance to all grid points
             dist = gc_dist(self.grid.ds.lon_rho, self.grid.ds.lat_rho, lon, lat)
             dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
-            if (dist_min > dx).all():
+            if (dist_min > max_grid_spacing).all():
                 raise ValueError(
-                    "The specified release location lies outside the model grid domain. "
-                    "Please ensure the provided latitude and longitude fall within the grid boundaries."
+                    f"Release site '{name}' is outside of the grid domain. "
+                    "Ensure the provided (lat, lon) falls within the model grid extent."
+                )
+
+            # Find the indices of the closest grid cell
+            indices = np.where(dist == dist_min)
+            eta_rho = indices[0][0]
+            xi_rho = indices[1][0]
+
+            eta_max = self.grid.ds.sizes["eta_rho"] - 1
+            xi_max = self.grid.ds.sizes["xi_rho"] - 1
+
+            if eta_rho in [0, eta_max] or xi_rho in [0, xi_max]:
+                raise ValueError(
+                    f"Release site '{name}' is located too close to the grid boundary. "
+                    "Place release location (lat, lon) away from grid boundaries."
+                )
+
+            if self.grid.ds.mask_rho[eta_rho, xi_rho].values == 0:
+                raise ValueError(
+                    f"Release site '{name}' is on land. "
+                    "Please provide coordinates (lat, lon) over ocean."
+                )
+
+            if self.grid.ds.h[eta_rho, xi_rho].values < depth:
+                raise ValueError(
+                    f"Release site '{name}' lies below the seafloor. "
+                    f"Seafloor depth is {self.grid.ds.h[eta_rho, xi_rho].values:.2f} m, "
+                    f"but requested depth is {depth:.2f} m. Adjust depth or location (lat, lon)."
                 )
 
         else:
@@ -703,21 +740,3 @@ class CDRPointSource:
                 "Grid not provided: cannot verify whether the specified lat/lon/depth location is within the domain or on land. "
                 "Please check manually or provide a grid when instantiating the class."
             )
-
-        # Find the indices of the closest grid cell
-        indices = np.where(dist == dist_min)
-        eta_rho = indices[0][0]
-        xi_rho = indices[1][0]
-
-        if self.grid.ds.mask_rho[eta_rho, xi_rho].values == 0:
-            raise ValueError(
-                f"The specified release location at grid indices (eta_rho={eta_rho}, xi_rho={xi_rho}) lies on land. "
-                "Please ensure that the provided latitude and longitude fall over ocean in the model grid domain. "
-                "You may need to adjust the release coordinates or provide a grid of finer resolution."
-            )
-
-        if name not in self.releases:
-            self.releases[name] = {}
-
-        self.releases[name]["eta_rho"] = int(eta_rho)
-        self.releases[name]["xi_rho"] = int(xi_rho)

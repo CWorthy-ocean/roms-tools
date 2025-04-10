@@ -1,0 +1,8 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "eta_rho",
+        "xi_rho"
+    ],
+    "long_name": "River volume fraction",
+    "units": "none"
+}

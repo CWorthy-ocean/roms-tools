@@ -88,11 +88,9 @@ class CDRPointSource:
         lat: float,
         lon: float,
         depth: float,
-        release_start_time: Optional[datetime] = None,
-        release_end_time: Optional[datetime] = None,
         times: Optional[List[datetime]] = None,
-        tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
-        volume: Union[float, List[float]] = 0.0,
+        volumes: Union[float, List[float]] = 0.0,
+        tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = {},
         fill_values: Optional[str] = "auto_fill",
     ):
         """Adds a CDR point source to the forcing dataset and dictionary.
@@ -104,37 +102,51 @@ class CDRPointSource:
         lat : float
             Latitude of the release location. Must be between -90 and 90.
         lon : float
-            Longitude of the release location. No restrictions on bounds; longitude can be any value.
+            Longitude of the release location. No restrictions on bounds.
         depth : float
-            Depth of the release.
-        release_start_time : datetime, optional
-            Start time of the release. Required if `times` is `None`.
-        release_end_time : datetime, optional
-            End time of the release. Required if `times` is `None`.
-        times : List[datetime], optional
-            Explicit time points for time-varying tracer concentrations and volumes.
-        tracer_concentrations : dict, optional
-            A dictionary of tracer names and their corresponding concentration values, which can be constant or time-varying.
-            Example formats:
-            - Constant tracer concentrations: {"temp": 20.0, "salt": 1.0, "ALK": 2000.0}
-            - Time-varying tracer concentrations: {"temp": [19.5, 20, 20, 20], "salt": [1.1, 2, 1, 1], "ALK": [2000.0, 2014.3, 2001.0, 2004.2]} (with `times` set to four corresponding datetime entries)
-        volume : float or list of float, optional
-            Volume of release over time.
-        fill_values : str, optional
-            Strategy for filling missing tracer concentration values. Options: "auto_fill", "zero_fill".
-        """
+            Depth of the release. Must be non-negative.
+        times : list of datetime.datetime, optional
+            Explicit time points for volumes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
+            Must contain at least two datetime objects if provided.
 
-        self._add_release_to_dict(
-            name=name,
-            lat=lat,
-            lon=lon,
-            depth=depth,
-            release_start_time=release_start_time,
-            release_end_time=release_end_time,
-            times=times,
-            tracer_concentrations=tracer_concentrations,
-            volume=volume,
-        )
+            Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
+
+        volumes : float or list of float, optional
+            Volume of the release over time.
+            - Constant: applies uniformly from `times[0]` to `times[-1]`.
+            - Time-varying: must match the length of `times`.
+
+            Example:
+            - Constant: `volumes=1000.0` (uniform across the time period).
+            - Time-varying: `volumes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
+
+        tracer_concentrations : dict, optional
+            Dictionary of tracer names and their concentration values. Can be either constant or time-varying.
+            - Constant: applies uniformly from `times[0]` to `times[-1]`.
+            - Time-varying: must match the length of `times`.
+
+            Default is an empty dictionary (`{}`) if not provided.
+            Example:
+            - Constant: `{"ALK": 2000.0, "DIC": 1900.0}`
+            - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
+            - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
+
+        fill_values : str, optional
+            Strategy for filling missing tracer values. Options:
+            - "auto_fill" (default): automatically set values
+            - "zero_fill": fill missing values with 0.0
+        """
+        # Check that the name is unique
+        if name in self.releases:
+            raise ValueError(f"A release with the name '{name}' already exists.")
+
+        # Set times if not provided
+        if not times:
+            times = [self.start_time, self.end_time]
+
+        # Set default for tracer_concentrations if None
+        if tracer_concentrations is None:
+            tracer_concentrations = {}
 
         # Fill in missing tracer concentrations
         if fill_values == "auto_fill":
@@ -147,16 +159,38 @@ class CDRPointSource:
                 elif fill_values == "zero_fill":
                     tracer_concentrations[tracer_name] = 0.0
 
+        # Check input parameters
+        self._input_checks(
+            name=name,
+            lat=lat,
+            lon=lon,
+            depth=depth,
+            times=times,
+            tracer_concentrations=tracer_concentrations,
+            volumes=volumes,
+        )
+
+        # Validate release location
+        self._validate_release_location(name=name, lat=lat, lon=lon, depth=depth)
+
+        self._add_release_to_dict(
+            name=name,
+            lat=lat,
+            lon=lon,
+            depth=depth,
+            times=times,
+            tracer_concentrations=tracer_concentrations,
+            volumes=volumes,
+        )
+
         self._add_release_to_ds(
             name=name,
             lat=lat,
             lon=lon,
             depth=depth,
-            release_start_time=release_start_time,
-            release_end_time=release_end_time,
             times=times,
             tracer_concentrations=tracer_concentrations,
-            volume=volume,
+            volumes=volumes,
         )
 
     def _add_release_to_ds(
@@ -166,34 +200,11 @@ class CDRPointSource:
         lat: float,
         lon: float,
         depth: float,
-        release_start_time: Optional[datetime] = None,
-        release_end_time: Optional[datetime] = None,
         times: Optional[List[datetime]] = None,
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
-        volume: Union[float, List[float]] = 0.0,
+        volumes: Union[float, List[float]] = 0.0,
     ):
         """Adds a CDR point release to the forcing dataset."""
-
-        self._input_checks(
-            name,
-            lat,
-            lon,
-            depth,
-            release_start_time,
-            release_end_time,
-            times,
-            tracer_concentrations,
-            volume,
-        )
-
-        # Check that the name is unique
-        if name in self.ds["release_name"].values:
-            raise ValueError(f"A release with the name '{name}' already exists.")
-
-        if release_start_time and release_end_time and not times:
-            times = [release_start_time, release_end_time]
-        elif times and not (release_start_time and release_end_time):
-            release_start_time, release_end_time = times[0], times[-1]
 
         times = np.array(times)
 
@@ -249,12 +260,12 @@ class CDRPointSource:
                     )
 
         # Handle new experiment volume and tracer concentrations
-        if isinstance(volume, list):
+        if isinstance(volumes, list):
             interpolated = np.interp(
-                union_time.astype(np.float64), times.astype(np.float64), volume
+                union_time.astype(np.float64), times.astype(np.float64), volumes
             )
         else:
-            interpolated = np.full(len(union_time), volume)
+            interpolated = np.full(len(union_time), volumes)
 
         ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = interpolated
 
@@ -262,16 +273,16 @@ class CDRPointSource:
             tracer_name = ds.tracer_name[n].item()
             # interpolation for tracer concentrations is weighted by volume to conserve tracers
             if isinstance(tracer_concentrations[tracer_name], list) or isinstance(
-                volume, list
+                volumes, list
             ):
                 interpolated = np.interp(
                     union_time.astype(np.float64),
                     times.astype(np.float64),
-                    tracer_concentrations[tracer_name] * volume,
+                    tracer_concentrations[tracer_name] * volumes,
                 )
             else:
                 interpolated = np.full(
-                    len(union_time), tracer_concentrations[tracer_name] * volume
+                    len(union_time), tracer_concentrations[tracer_name] * volumes
                 )
 
             interpolated = (
@@ -292,16 +303,8 @@ class CDRPointSource:
         name : str
             The unique name for the release to be added to the dictionary.
         **params : keyword arguments
-            Parameters to be added for the specific release (e.g., location, volume, etc.).
+            Parameters to be added for the specific release (e.g., location, volumes, etc.).
         """
-        # Check if the name already exists in the dictionary
-        if name in self.releases:
-            raise ValueError(f"Release name '{name}' already exists in the dictionary.")
-
-        self._validate_release_location(
-            name=name, lat=params["lat"], lon=params["lon"], depth=params["depth"]
-        )
-
         # Add the parameters to the dictionary under the given name
         if name not in self.releases:
             self.releases[name] = {}
@@ -571,87 +574,87 @@ class CDRPointSource:
         lat,
         lon,
         depth,
-        release_start_time,
-        release_end_time,
         times,
         tracer_concentrations,
-        volume,
+        volumes,
     ):
         # Check that lat is valid
         if not (-90 <= lat <= 90):
-            raise ValueError("Latitude must be between -90 and 90.")
+            raise ValueError(
+                f"Invalid latitude {lat}. Latitude must be between -90 and 90."
+            )
 
         # Check that depth is non-negative
         if depth < 0:
-            raise ValueError("Depth must be a non-negative number.")
+            raise ValueError(
+                f"Invalid depth {depth}. Depth must be a non-negative number."
+            )
 
-        if release_start_time >= release_end_time:
-            raise ValueError("`release_start_time` must be before `release_end_time`.")
+        # Ensure that times is either None (for constant volumes and tracer concentrations) or a list of datetimes
+        if not all(isinstance(t, datetime) for t in times):
+            raise ValueError(
+                f"If 'times' is provided, all entries must be datetime objects. Got: {[type(t) for t in times]}"
+            )
 
-        # Check that release_start_time is not before start_time
-        if release_start_time:
-            if release_start_time < self.start_time:
+        # Check that times has at least two entries
+        if len(times) < 2:
+            raise ValueError(
+                f"If 'times' is provided, it must contain at least two datetime objects. Got: {[t for t in times]}"
+            )
+
+        # Check that times is monotonically increasing sequence
+        if not all(t1 <= t2 for t1, t2 in zip(times, times[1:])):
+            raise ValueError(
+                f"The 'times' list must be monotonically increasing. Got: {[t for t in times]}"
+            )
+
+        # Check that first time is not before start_time
+        if times[0] < self.start_time:
+            raise ValueError(
+                f"First entry in `times` ({times[0]}) cannot be before `self.start_time` ({self.start_time})."
+            )
+
+        # Check that last time is not after end_time
+        if times[-1] > self.end_time:
+            raise ValueError(
+                f"Last entry in `times` ({times[-1]}) cannot be after `self.end_time` ({self.end_time})."
+            )
+
+        # Ensure that time series for 'times', 'volumes', and 'tracer_concentrations' are all the same length
+        num_times = len(times)
+
+        # Check that volumes is either a constant or has the same length as 'times'
+        if isinstance(volumes, list) and len(volumes) != num_times:
+            raise ValueError(
+                f"The length of `volumes` ({len(volumes)}) does not match the length of `times` ({num_times})."
+            )
+
+        # Check that tracer_concentrations are either constants or have the same length as 'times'
+        for key, tracer_values in tracer_concentrations.items():
+            if isinstance(tracer_values, list) and len(tracer_values) != num_times:
                 raise ValueError(
-                    "`release_start_time` cannot be before `self.start_time`."
+                    f"The length of tracer '{key}' ({len(tracer_values)}) does not match the length of `times` ({num_times})."
                 )
 
-        # Check that release_end_time is not after end_time
-        if release_end_time:
-            if release_end_time > self.end_time:
-                raise ValueError("`release_end_time` cannot be after `self.end_time`.")
-
-        # Check that release_start_time is before release_end_time
-        if release_start_time and release_end_time:
-            if release_start_time >= release_end_time:
-                raise ValueError("release_start_time must be before release_end_time.")
-
-        # Ensure that times is either None (for constant tracer concentrations) or a list of datetimes
-        if times is not None and not all(isinstance(t, datetime) for t in times):
+        # Check that volumes and tracer concentrations are valid
+        if isinstance(volumes, (float, int)) and volumes < 0:
+            raise ValueError(f"Volume must be non-negative. Got: {volumes}")
+        elif isinstance(volumes, list) and not all(v >= 0 for v in volumes):
             raise ValueError(
-                "If 'times' is provided, all entries must be datetime objects."
+                f"All entries in `volumes` must be non-negative. Got: {volumes}"
             )
-
-        if times is not None and times[0] < release_start_time:
-            raise ValueError(
-                "First entry in `times` cannot be before `release_start_time`."
-            )
-
-        if times is not None and times[-1] > release_end_time:
-            raise ValueError(
-                "Last entry in `times` cannot be after `release_end_time`."
-            )
-
-        # Ensure that tracer concentrations dictionary is not empty for time-varying forcing
-        # if times is not None and not tracer_concentrations:
-        #    raise ValueError(
-        #        "The 'tracer_concenrations' dictionary cannot be empty when 'times' is provided."
-        #    )
-        #    raise ValueError("The 'tracer_concentrations' dictionary cannot be empty.")
-
-        # Check that volume is valid
-        if isinstance(volume, float) and volume < 0:
-            raise ValueError("Volume must be a non-negative number.")
-        elif isinstance(volume, list) and not all(v >= 0 for v in volume):
-            raise ValueError(
-                "All entries in 'volume' list must be non-negative numbers."
-            )
-
-        # Ensure that time series for 'times', 'volume', and tracer_concentrations are all the same length
-        if times is not None:
-            num_times = len(times)
-
-        # Check that volume is either a constant or has the same length as 'times'
-        if isinstance(volume, list) and len(volume) != num_times:
-            raise ValueError(
-                f"The length of 'volume' ({len(volume)}) does not match the length of 'times' ({num_times})."
-            )
-
-        # Check that each time-varying tracer_concentrations has the same length as 'times'
-        # for key, tracer_values in tracer_concentrations.items():
-        #    if isinstance(tracer_values, list) and len(tracer_values) != num_times:
-        #        raise ValueError(
-        #            f"The length of tracer '{key}' ({len(tracer_values)}) does not match the length of 'times' ({num_times})."
-        #        )
+        for key, tracer_values in tracer_concentrations.items():
+            if key != "temp":
+                if isinstance(tracer_values, (float, int)) and tracer_values < 0:
+                    raise ValueError(
+                        f"The concentration of tracer '{key}' must be non-negative. Got: {tracer_values}"
+                    )
+                elif isinstance(tracer_values, list) and not all(
+                    c >= 0 for c in tracer_values
+                ):
+                    raise ValueError(
+                        f"All entries in `tracer_concentrations['{key}']` must be non-negative. Got: {tracer_values}"
+                    )
 
     def _validate_release_location(self, name, lat, lon, depth):
         """Validates the closest grid location for a release site.

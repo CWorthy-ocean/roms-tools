@@ -671,8 +671,18 @@ def add_tracer_metadata(ds, include_bgc=True):
     else:
         tracer_names = ["temp", "salt"]
 
+    metadata = get_variable_metadata()
+    tracer_units = [metadata[tracer]["units"] for tracer in tracer_names]
+    tracer_long_names = [metadata[tracer]["long_name"] for tracer in tracer_names]
+
     return ds.assign_coords(
-        tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"})
+        tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"}),
+        tracer_unit=("ntracers", tracer_units, {"long_name": "Tracer unit"}),
+        tracer_long_name=(
+            "ntracers",
+            tracer_long_names,
+            {"long_name": "Tracer long name"},
+        ),
     )
 
 

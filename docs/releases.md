@@ -8,6 +8,8 @@
 
 ### Internal Changes
 
+* Correct default value for NOx from 1e-13 to 1e-12 kg/m2/s ([#294](https://github.com/CWorthy-ocean/roms-tools/pull/294))
+
 ### Documentation
 
 ### Bugfixes

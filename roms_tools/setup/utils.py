@@ -594,8 +594,8 @@ def compute_missing_surface_bgc_variables(bgc_data):
     # Define the relationships for missing variables
     variable_relations = {
         "pco2_air_alt": ("pco2_air", 1.0),
-        "nox": (None, 1e-13),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
-        "nhy": (None, 5e-12),  # has incorrect unit nmol/cm2/s, we need kg/m2/s
+        "nox": (None, 1e-12),  # kg/m2/s
+        "nhy": (None, 5e-12),  # kg/m2/s
     }
 
     # Fill in missing variables using the defined relationships

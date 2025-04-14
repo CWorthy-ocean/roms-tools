@@ -149,15 +149,17 @@ class CDRPointSource:
             tracer_concentrations = {}
 
         # Fill in missing tracer concentrations
-        if fill_values == "auto_fill":
-            defaults = get_river_tracer_defaults()
+        defaults = get_river_tracer_defaults()
 
         for tracer_name in self.ds.tracer_name.values:
             if tracer_name not in tracer_concentrations:
-                if fill_values == "auto_fill":
+                if tracer_name in ["temp", "salt"]:
                     tracer_concentrations[tracer_name] = defaults[tracer_name]
-                elif fill_values == "zero_fill":
-                    tracer_concentrations[tracer_name] = 0.0
+                else:
+                    if fill_values == "auto_fill":
+                        tracer_concentrations[tracer_name] = defaults[tracer_name]
+                    elif fill_values == "zero_fill":
+                        tracer_concentrations[tracer_name] = 0.0
 
         # Check input parameters
         self._input_checks(

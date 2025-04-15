@@ -90,7 +90,7 @@ class CDRPointSource:
         depth: float,
         times: Optional[List[datetime]] = None,
         volumes: Union[float, List[float]] = 0.0,
-        tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = {},
+        tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         fill_values: Optional[str] = "auto_fill",
     ):
         """Adds a CDR point source to the forcing dataset and dictionary.
@@ -150,9 +150,9 @@ class CDRPointSource:
 
         # Fill in missing tracer concentrations
         defaults = get_river_tracer_defaults()
-
         for tracer_name in self.ds.tracer_name.values:
             if tracer_name not in tracer_concentrations:
+                tracer_name = str(tracer_name)
                 if tracer_name in ["temp", "salt"]:
                     tracer_concentrations[tracer_name] = defaults[tracer_name]
                 else:
@@ -280,7 +280,7 @@ class CDRPointSource:
                 interpolated = np.interp(
                     union_time.astype(np.float64),
                     times.astype(np.float64),
-                    tracer_concentrations[tracer_name] * volumes,
+                    np.asarray(tracer_concentrations[tracer_name], dtype=np.float64) * np.asarray(volumes, dtype=np.float64),
                 )
             else:
                 interpolated = np.full(

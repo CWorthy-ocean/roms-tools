@@ -61,6 +61,11 @@ class CDRPointSource:
             ds = xr.Dataset(
                 {
                     "cdr_time": (["time"], np.empty(0)),
+                    "cdr_lon": (["ncdr"], np.empty(0)),
+                    "cdr_lat": (["ncdr"], np.empty(0)),
+                    "cdr_dep": (["ncdr"], np.empty(0)),
+                    "cdr_hsc": (["ncdr"], np.empty(0)),
+                    "cdr_vsc": (["ncdr"], np.empty(0)),
                     "cdr_volume": (["time", "ncdr"], np.empty((0, 0))),
                     "cdr_tracer": (["time", "ntracers", "ncdr"], np.empty((0, 34, 0))),
                 },
@@ -69,9 +74,15 @@ class CDRPointSource:
                     "release_name": (["ncdr"], np.empty(0, dtype=str)),
                 },
             )
-            ds = add_tracer_metadata(ds)
+            ds, tracer_metadata = add_tracer_metadata(ds, return_dict=True)
             self.ds = ds
+            self.releases["_tracer_metadata"] = tracer_metadata
+
         else:
+            if "_metadata" not in self.releases:
+                tracer_metadata = add_tracer_metadata(ds=None, return_dict=True)
+                self.releases["_tracer_metadata"] = tracer_metadata
+
             for name, params in self.releases.items():
                 self._validate_release_location(
                     name=name,
@@ -88,7 +99,7 @@ class CDRPointSource:
         lat: float,
         lon: float,
         depth: float,
-        times: Optional[List[datetime]] = None, 
+        times: Optional[List[datetime]] = None,
         volumes: Union[float, List[float]] = 0.0,
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         fill_values: Optional[str] = "auto_fill",
@@ -172,13 +183,10 @@ class CDRPointSource:
             volumes=volumes,
         )
 
-        # Ensure times includes start and end times, avoiding duplication
-        if not times:
-            times = [self.start_time, self.end_time]
-        else:
-            times = [self.start_time] + [
-                t for t in times if t != self.start_time and t != self.end_time
-            ] + [self.end_time]
+        # Make sure times include self.start_time and self.end_time, and interpolate volumes and tracer concentrations across
+        times, volumes, tracer_concentrations = self._handle_simulation_endpoints(
+            times, volumes, tracer_concentrations
+        )
 
         # Validate release location
         self._validate_release_location(name=name, lat=lat, lon=lon, depth=depth)
@@ -236,16 +244,38 @@ class CDRPointSource:
         union_time = np.union1d(existing_times, times)
         union_rel_time = np.union1d(existing_rel_times, rel_times)
 
-        # Initialize updated dataset
+        # Initialize a fresh dataset to accommodate the new release.
+        # xarray does not handle dynamic resizing of dimensions well (e.g., increasing 'ncdr' by 1),
+        # so we recreate the dataset with the updated size.
         ds = xr.Dataset()
-        ds = add_tracer_metadata(ds)
-        ds["cdr_time"] = ("time", union_rel_time)
         ds["time"] = ("time", union_time)
+        ds["cdr_time"] = ("time", union_rel_time)
+        ds = add_tracer_metadata(ds)
 
         release_names = np.concatenate([self.ds.release_name.values, [name]])
         ds = ds.assign_coords({"release_name": (["ncdr"], release_names)})
-        ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr)
-        ds["cdr_tracer"] = xr.zeros_like(ds.cdr_time * ds.ntracers * ds.ncdr)
+        ds["cdr_lon"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_lat"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_dep"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_hsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_vsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+
+        ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
+        ds["cdr_tracer"] = xr.zeros_like(
+            ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
+        )
+
+        # Retain previous experiment locations
+        if len(self.ds["ncdr"]) > 0:
+            for i in range(len(self.ds.ncdr)):
+                for var_name in ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"]:
+                    ds[var_name].loc[{"ncdr": i}] = self.ds[var_name].isel(ncdr=i)
+        # Add the new experiment location
+        for var_name, value in zip(
+            ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"],
+            [lon, lat, depth, 0.0, 0.0],
+        ):
+            ds[var_name].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = np.float64(value)
 
         # Interpolate and retain previous experiment volumes and tracer concentrations
         if len(self.ds["ncdr"]) > 0:
@@ -288,7 +318,8 @@ class CDRPointSource:
                 interpolated = np.interp(
                     union_time.astype(np.float64),
                     times.astype(np.float64),
-                    np.asarray(tracer_concentrations[tracer_name], dtype=np.float64) * np.asarray(volumes, dtype=np.float64),
+                    np.asarray(tracer_concentrations[tracer_name], dtype=np.float64)
+                    * np.asarray(volumes, dtype=np.float64),
                 )
             else:
                 interpolated = np.full(
@@ -588,6 +619,18 @@ class CDRPointSource:
         tracer_concentrations,
         volumes,
     ):
+        """Perform various input checks on release parameters.
+
+        - Checks that latitude is between -90 and 90.
+        - Checks that depth is non-negative.
+        - Ensures 'times' is a list of datetime objects and is monotonically increasing.
+        - Verifies that times are within the defined start and end time.
+        - Ensures volumes is either a list of floats/ints or a single float/int.
+        - Ensures each tracer concentration is either a float/int or a list of floats/ints.
+        - Ensures the lengths of 'volumes' and 'tracer_concentrations' match the length of 'times' if they are lists.
+        - Ensures all entries in 'volumes' and 'tracer_concentrations' are non-negative.
+        """
+
         # Check that lat is valid
         if not (-90 <= lat <= 90):
             raise ValueError(
@@ -605,25 +648,44 @@ class CDRPointSource:
             raise ValueError(
                 f"If 'times' is provided, all entries must be datetime objects. Got: {[type(t) for t in times]}"
             )
-        
-        if len(times) > 1:
-            # Check that times is monotonically increasing sequence
-            if not all(t1 <= t2 for t1, t2 in zip(times, times[1:])):
+
+        if len(times) > 0:
+            if len(times) > 1:
+                # Check that times is monotonically increasing sequence
+                if not all(t1 <= t2 for t1, t2 in zip(times, times[1:])):
+                    raise ValueError(
+                        f"The 'times' list must be monotonically increasing. Got: {[t for t in times]}"
+                    )
+
+            # Check that first time is not before start_time
+            if times[0] < self.start_time:
                 raise ValueError(
-                    f"The 'times' list must be monotonically increasing. Got: {[t for t in times]}"
+                    f"First entry in `times` ({times[0]}) cannot be before `self.start_time` ({self.start_time})."
                 )
-        
-        # Check that first time is not before start_time
-        if times[0] < self.start_time:
+
+            # Check that last time is not after end_time
+            if times[-1] > self.end_time:
+                raise ValueError(
+                    f"Last entry in `times` ({times[-1]}) cannot be after `self.end_time` ({self.end_time})."
+                )
+
+        # Ensure volumes is either a list of floats/ints or a single float/int
+        if not isinstance(volumes, (float, int)) and not (
+            isinstance(volumes, list)
+            and all(isinstance(v, (float, int)) for v in volumes)
+        ):
             raise ValueError(
-                f"First entry in `times` ({times[0]}) cannot be before `self.start_time` ({self.start_time})."
+                "Invalid 'volumes' input: must be a float/int or a list of floats/ints."
             )
-        
-        # Check that last time is not after end_time
-        if times[-1] > self.end_time:
-            raise ValueError(
-                f"Last entry in `times` ({times[-1]}) cannot be after `self.end_time` ({self.end_time})."
-            )
+
+        # Ensure each tracer concentration is either a float/int or a list of floats/ints
+        for key, val in tracer_concentrations.items():
+            if not isinstance(val, (float, int)) and not (
+                isinstance(val, list) and all(isinstance(v, (float, int)) for v in val)
+            ):
+                raise ValueError(
+                    f"Invalid tracer concentration for '{key}': must be a float/int or a list of floats/ints."
+                )
 
         # Ensure that time series for 'times', 'volumes', and 'tracer_concentrations' are all the same length
         num_times = len(times)
@@ -661,63 +723,95 @@ class CDRPointSource:
                         f"All entries in `tracer_concentrations['{key}']` must be non-negative. Got: {tracer_values}"
                     )
 
-        # Info messages for how to handle endpoints
+    def _handle_simulation_endpoints(self, times, volumes, tracer_concentrations):
+        """Ensure that the release time series starts at self.start_time and ends at
+        self.end_time.
+
+        If volumes is a list and does not cover the endpoints, zero volumes are added.
+        Tracer concentrations are extended accordingly by duplicating endpoint values.
+        """
+
+        # Make shallow copies of lists to modify safely
+        times = list(times)
+        tracer_concentrations = {
+            k: (v if isinstance(v, (float, int)) else list(v))
+            for k, v in tracer_concentrations.items()
+        }
+
+        constant_tracers = [
+            k for k, v in tracer_concentrations.items() if isinstance(v, (float, int))
+        ]
+
+        # Log constant volumes fluxes and tracers
         if isinstance(volumes, (float, int)):
             logging.info(
-                f"Using constant volume release: {volumes} m³ applied uniformly "
+                f"Using constant volume release: {volumes} m³/s applied uniformly "
                 f"from {self.start_time} to {self.end_time}."
             )
-        else:
-            if times[0] != self.start_time:
-                logging.info(
-                    f"No volume specified at start_time ({self.start_time}). "
-                    f"Assuming zero volume at the start and linearly interpolating "
-                    f"to the first provided time point: {times[0]}."
-                )
-            if times[-1] != self.end_time:
-                logging.info(
-                    f"No volume specified at end_time ({self.end_time}). "
-                    f"Assuming zero volume at the end and linearly interpolating "
-                    f"from the last provided time point: {times[-1]}."
-                )
+        if constant_tracers:
+            entries = [
+                f"{tracer} = {tracer_concentrations[tracer]} {self.releases['_tracer_metadata'][tracer]['units']}"
+                for tracer in constant_tracers
+            ]
+            logging.info(
+                f"Using constant tracer concentrations applied uniformly from {self.start_time} to {self.end_time}: "
+                + ", ".join(entries)
+            )
 
-        # Same for tracers
-        constant_tracers = []
-        missing_start = []
-        missing_end = []
-        
-        for key, tracer_values in tracer_concentrations.items():
-            if isinstance(tracer_values, (float, int)):
-                constant_tracers.append(key)
-            else:
-                if times[0] != self.start_time:
-                    missing_start.append(key)
-                if times[-1] != self.end_time:
-                    missing_end.append(key)
- 
-        # Constant tracer concentrations
-        for tracer in constant_tracers:
-            logging.info(
-                f"Using constant concentration for tracer '{tracer}': {tracer_concentrations[tracer]} "
-                f"applied uniformly from {self.start_time} to {self.end_time}."
-            )
-        
-        # Tracers missing start time
-        if missing_start:
-            tracers_list = ", ".join(missing_start)
-            logging.info(
-                f"{len(missing_start)} tracer(s) missing values at start_time ({self.start_time}): "
-                f"{tracers_list}. Assuming zero concentration at the start and interpolating to the first provided time point: {times[0]}."
-            )
-        
-        # Tracers missing end time
-        if missing_end:
-            tracers_list = ", ".join(missing_end)
-            logging.info(
-                f"{len(missing_end)} tracer(s) missing values at end_time ({self.end_time}): "
-                f"{tracers_list}. Assuming zero concentration at the end and interpolating from the last provided time point: {times[-1]}."
-            )
-    
+        if len(times) > 0:
+            # Handle start_time
+            if times[0] != self.start_time:
+                if isinstance(volumes, list):
+                    logging.info(
+                        f"No volume specified at start_time ({self.start_time}). "
+                        f"Assuming zero volume at the start and linearly interpolating "
+                        f"to the first provided time point: {times[0]}."
+                    )
+                    volumes.insert(0, 0.0)
+
+                modified_tracers = []
+                for key, vals in tracer_concentrations.items():
+                    if isinstance(vals, list):
+                        vals.insert(0, vals[0])
+                        modified_tracers.append(key)
+
+                if modified_tracers:
+                    logging.info(
+                        f"Extended tracer concentration time series at start_time ({self.start_time}) "
+                        f"by repeating the value from first provided time point {times[0]} for: {', '.join(modified_tracers)}."
+                    )
+
+                times.insert(0, self.start_time)
+
+            # Handle end_time
+            if times[-1] != self.end_time:
+                if isinstance(volumes, list):
+                    logging.info(
+                        f"No volume specified at end_time ({self.end_time}). "
+                        f"Assuming zero volume at the end and linearly interpolating "
+                        f"from the last provided time point: {times[-1]}."
+                    )
+                    volumes.append(0.0)
+
+                modified_tracers = []
+                for key, vals in tracer_concentrations.items():
+                    if isinstance(vals, list):
+                        vals.append(vals[-1])
+                        modified_tracers.append(key)
+
+                if modified_tracers:
+                    logging.info(
+                        f"Extended tracer concentration time series at end_time ({self.end_time}) "
+                        f"by repeating the value from last provided time point {times[-1]} for: {', '.join(modified_tracers)}."
+                    )
+
+                times.append(self.end_time)
+
+        else:
+            times = [self.start_time, self.end_time]
+
+        return times, volumes, tracer_concentrations
+
     def _validate_release_location(self, name, lat, lon, depth):
         """Validates the closest grid location for a release site.
 

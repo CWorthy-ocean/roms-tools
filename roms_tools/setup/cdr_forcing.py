@@ -88,7 +88,7 @@ class CDRPointSource:
         lat: float,
         lon: float,
         depth: float,
-        times: Optional[List[datetime]] = None,
+        times: Optional[List[datetime]] = None, 
         volumes: Union[float, List[float]] = 0.0,
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         fill_values: Optional[str] = "auto_fill",
@@ -140,9 +140,9 @@ class CDRPointSource:
         if name in self.releases:
             raise ValueError(f"A release with the name '{name}' already exists.")
 
-        # Set times if not provided
-        if not times:
-            times = [self.start_time, self.end_time]
+        # Set default for times if None
+        if times is None:
+            times = []
 
         # Set default for tracer_concentrations if None
         if tracer_concentrations is None:
@@ -171,6 +171,14 @@ class CDRPointSource:
             tracer_concentrations=tracer_concentrations,
             volumes=volumes,
         )
+
+        # Ensure times includes start and end times, avoiding duplication
+        if not times:
+            times = [self.start_time, self.end_time]
+        else:
+            times = [self.start_time] + [
+                t for t in times if t != self.start_time and t != self.end_time
+            ] + [self.end_time]
 
         # Validate release location
         self._validate_release_location(name=name, lat=lat, lon=lon, depth=depth)
@@ -592,30 +600,25 @@ class CDRPointSource:
                 f"Invalid depth {depth}. Depth must be a non-negative number."
             )
 
-        # Ensure that times is either None (for constant volumes and tracer concentrations) or a list of datetimes
+        # Ensure that times is a list of datetimes
         if not all(isinstance(t, datetime) for t in times):
             raise ValueError(
                 f"If 'times' is provided, all entries must be datetime objects. Got: {[type(t) for t in times]}"
             )
-
-        # Check that times has at least two entries
-        if len(times) < 2:
-            raise ValueError(
-                f"If 'times' is provided, it must contain at least two datetime objects. Got: {[t for t in times]}"
-            )
-
-        # Check that times is monotonically increasing sequence
-        if not all(t1 <= t2 for t1, t2 in zip(times, times[1:])):
-            raise ValueError(
-                f"The 'times' list must be monotonically increasing. Got: {[t for t in times]}"
-            )
-
+        
+        if len(times) > 1:
+            # Check that times is monotonically increasing sequence
+            if not all(t1 <= t2 for t1, t2 in zip(times, times[1:])):
+                raise ValueError(
+                    f"The 'times' list must be monotonically increasing. Got: {[t for t in times]}"
+                )
+        
         # Check that first time is not before start_time
         if times[0] < self.start_time:
             raise ValueError(
                 f"First entry in `times` ({times[0]}) cannot be before `self.start_time` ({self.start_time})."
             )
-
+        
         # Check that last time is not after end_time
         if times[-1] > self.end_time:
             raise ValueError(
@@ -658,6 +661,63 @@ class CDRPointSource:
                         f"All entries in `tracer_concentrations['{key}']` must be non-negative. Got: {tracer_values}"
                     )
 
+        # Info messages for how to handle endpoints
+        if isinstance(volumes, (float, int)):
+            logging.info(
+                f"Using constant volume release: {volumes} m³ applied uniformly "
+                f"from {self.start_time} to {self.end_time}."
+            )
+        else:
+            if times[0] != self.start_time:
+                logging.info(
+                    f"No volume specified at start_time ({self.start_time}). "
+                    f"Assuming zero volume at the start and linearly interpolating "
+                    f"to the first provided time point: {times[0]}."
+                )
+            if times[-1] != self.end_time:
+                logging.info(
+                    f"No volume specified at end_time ({self.end_time}). "
+                    f"Assuming zero volume at the end and linearly interpolating "
+                    f"from the last provided time point: {times[-1]}."
+                )
+
+        # Same for tracers
+        constant_tracers = []
+        missing_start = []
+        missing_end = []
+        
+        for key, tracer_values in tracer_concentrations.items():
+            if isinstance(tracer_values, (float, int)):
+                constant_tracers.append(key)
+            else:
+                if times[0] != self.start_time:
+                    missing_start.append(key)
+                if times[-1] != self.end_time:
+                    missing_end.append(key)
+ 
+        # Constant tracer concentrations
+        for tracer in constant_tracers:
+            logging.info(
+                f"Using constant concentration for tracer '{tracer}': {tracer_concentrations[tracer]} "
+                f"applied uniformly from {self.start_time} to {self.end_time}."
+            )
+        
+        # Tracers missing start time
+        if missing_start:
+            tracers_list = ", ".join(missing_start)
+            logging.info(
+                f"{len(missing_start)} tracer(s) missing values at start_time ({self.start_time}): "
+                f"{tracers_list}. Assuming zero concentration at the start and interpolating to the first provided time point: {times[0]}."
+            )
+        
+        # Tracers missing end time
+        if missing_end:
+            tracers_list = ", ".join(missing_end)
+            logging.info(
+                f"{len(missing_end)} tracer(s) missing values at end_time ({self.end_time}): "
+                f"{tracers_list}. Assuming zero concentration at the end and interpolating from the last provided time point: {times[-1]}."
+            )
+    
     def _validate_release_location(self, name, lat, lon, depth):
         """Validates the closest grid location for a release site.
 

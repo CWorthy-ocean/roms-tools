@@ -651,10 +651,10 @@ class CDRPointSource:
 
         if len(times) > 0:
             if len(times) > 1:
-                # Check that times is monotonically increasing sequence
-                if not all(t1 <= t2 for t1, t2 in zip(times, times[1:])):
+                # Check that times is strictly monotonically increasing sequence
+                if not all(t1 < t2 for t1, t2 in zip(times, times[1:])):
                     raise ValueError(
-                        f"The 'times' list must be monotonically increasing. Got: {[t for t in times]}"
+                        f"The 'times' list must be strictly monotonically increasing. Got: {[t for t in times]}"
                     )
 
             # Check that first time is not before start_time

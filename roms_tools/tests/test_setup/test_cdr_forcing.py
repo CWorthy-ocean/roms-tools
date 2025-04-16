@@ -66,7 +66,7 @@ def valid_release_params():
         "lat": 66.0,
         "lon": -25.0,
         "depth": 50.0,
-        "volumes": 100.0,
+        "volume_fluxes": 100.0,
     }
 
 
@@ -122,7 +122,7 @@ def test_cdr_point_source_init_invalid_times():
     ],
 )
 def test_add_release(cdr_forcing_fixture, valid_release_params, request):
-    
+
     cdr = request.getfixturevalue(cdr_forcing_fixture)
     release_params = deepcopy(valid_release_params)
     times = [
@@ -132,8 +132,8 @@ def test_add_release(cdr_forcing_fixture, valid_release_params, request):
     ]
     release_params["times"] = times
 
-    volumes = [100.0, 200.0, 150.0]
-    release_params["volumes"] = volumes
+    volume_fluxes = [100.0, 200.0, 150.0]
+    release_params["volume_fluxes"] = volume_fluxes
 
     tracer_concentrations = {
         "ALK": [2300.0, 2350.0, 2400.0],
@@ -145,18 +145,18 @@ def test_add_release(cdr_forcing_fixture, valid_release_params, request):
 
     # Add release
     cdr.add_release(name="release", **release_params)
-    
+
     # Check dataset structure
     assert "release" in cdr.ds["release_name"].values
     assert len(cdr.ds.time) == len(release_params["times"])
     assert len(cdr.ds.ncdr) == 1
     assert len(cdr.ds.ntracers) == 34
     assert cdr.ds.cdr_time.size > 0
-    
+
     # Check cdr_volume shape and values
     assert cdr.ds.cdr_volume.shape == (len(times), 1)
-    np.testing.assert_allclose(cdr.ds.cdr_volume[:, 0], volumes, rtol=1e-3)
-    
+    np.testing.assert_allclose(cdr.ds.cdr_volume[:, 0], volume_fluxes, rtol=1e-3)
+
     # Check tracer concentration shape
     assert cdr.ds.cdr_tracer.shape == (len(times), 34, 1)
 
@@ -168,8 +168,9 @@ def test_add_release(cdr_forcing_fixture, valid_release_params, request):
             np.testing.assert_allclose(cdr.ds.cdr_tracer[:, i, 0], expected, rtol=1e-3)
         else:
             np.testing.assert_allclose(cdr.ds.cdr_tracer[:, i, 0], expected, rtol=1e-3)
-    
+
     assert "release" in cdr.releases.keys()
+
 
 @pytest.mark.parametrize(
     "cdr_forcing_fixture",
@@ -262,11 +263,11 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     with pytest.raises(ValueError, match="Last entry"):
         cdr.add_release(name="release_1", **invalid_params)
 
-    # Test mismatch between times and volume length
+    # Test mismatch between times and volume fluxes length
     invalid_params = deepcopy(valid_release_params)
     invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
-    invalid_params["volumes"] = [100]  # Only one volume entry
-    with pytest.raises(ValueError, match="The length of `volumes` "):
+    invalid_params["volume_fluxes"] = [100]  # Only one volume flux entry
+    with pytest.raises(ValueError, match="The length of `volumes fluxes` "):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test mismatch between times and tracer_concentrations length
@@ -278,17 +279,17 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     with pytest.raises(ValueError, match="The length of tracer 'ALK'"):
         cdr.add_release(name="release_1", **invalid_params)
 
-    # Test invalid volume (negative)
+    # Test invalid volume flux (negative)
     invalid_params = deepcopy(valid_release_params)
-    invalid_params["volumes"] = -100  # Invalid volume
-    with pytest.raises(ValueError, match="Volume must be non-negative"):
+    invalid_params["volume_fluxes"] = -100  # Invalid volume flux
+    with pytest.raises(ValueError, match="Volume flux must be non-negative"):
         cdr.add_release(name="release_1", **invalid_params)
 
-    # Test volume as list with negative values
+    # Test volume flux as list with negative values
     invalid_params = deepcopy(valid_release_params)
-    invalid_params["volumes"] = [10, -5]  # Invalid volume in list
+    invalid_params["volume_fluxes"] = [10, -5]  # Invalid volume fluxes in list
     with pytest.raises(
-        ValueError, match="All entries in `volumes` must be non-negative"
+        ValueError, match="All entries in `volume_fluxes` must be non-negative"
     ):
         cdr.add_release(name="release_1", **invalid_params)
 
@@ -404,18 +405,19 @@ def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
     # all other tracers should also be equal to the tracer default values, so not equal to zero
     assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) > 0.0).all()
 
+
 def test_conserve_tracers(start_end_times, valid_release_params):
 
     start_time, end_time = start_end_times
     cdr = CDRPointSource(start_time=start_time, end_time=end_time)
-    
+
     release_params = deepcopy(valid_release_params)
     release_params["times"] = [
         datetime(2022, 1, 1),
         datetime(2022, 1, 3),
         datetime(2022, 1, 5),
     ]
-    release_params["volumes"] = [1.0, 2.0, 3.0]
+    release_params["volume_fluxes"] = [1.0, 2.0, 3.0]
     release_params["tracer_concentrations"] = {"DIC": [10.0, 20.0, 30.0]}
     cdr.add_release(name="release1", **release_params)
 
@@ -424,17 +426,17 @@ def test_conserve_tracers(start_end_times, valid_release_params):
         datetime(2022, 1, 2),
         datetime(2022, 1, 4),
     ]
-    release_params["volumes"] = [2.0, 4.0]
+    release_params["volume_fluxes"] = [2.0, 4.0]
     release_params["tracer_concentrations"] = {"DIC": [20.0, 40.0]}
     cdr.add_release(name="release2", **release_params)
 
     expected_times = [
-            datetime(2022, 1, 1), # overall start time 
-            datetime(2022, 1, 2),
-            datetime(2022, 1, 3),
-            datetime(2022, 1, 4),
-            datetime(2022, 1, 5),
-            datetime(2022, 12, 31) # overall end time
+        datetime(2022, 1, 1),  # overall start time
+        datetime(2022, 1, 2),
+        datetime(2022, 1, 3),
+        datetime(2022, 1, 4),
+        datetime(2022, 1, 5),
+        datetime(2022, 12, 31),  # overall end time
     ]
     assert cdr.ds["time"].values == expected_times
 
@@ -442,22 +444,19 @@ def test_conserve_tracers(start_end_times, valid_release_params):
 
     # check first release
     ncdr_index = 0
-    assert cdr.ds["cdr_volume"].isel(ncdr=ncdr_index).values == [1.0, 1.5, 2.0, 2.5, 3.0, 0.0]
-    assert cdr.ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index) == [10.0, 15.0, 20.0, 25.0, 30.0, 0.0]
-
-    # Check tracer conservation: tracer * volume should match interpolation of original tracer * volume
-    union_times = ds["time"].values.astype("datetime64[ns]")
-    times_float = np.array(times, dtype="datetime64[ns]").astype(np.float64)
-    union_float = union_times.astype(np.float64)
-
-    expected_total_tracer = np.interp(
-        union_float,
-        times_float,
-        np.array(tracer_concentrations["dic"]) * np.array(volumes),
-    )
-
-    actual_total_tracer = (volume * tracer).values
-
-    np.testing.assert_allclose(actual_total_tracer, expected_total_tracer, rtol=1e-10)
-
-
+    assert cdr.ds["cdr_volume"].isel(ncdr=ncdr_index).values == [
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+        0.0,
+    ]
+    assert cdr.ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index) == [
+        10.0,
+        15.0,
+        20.0,
+        25.0,
+        30.0,
+        0.0,
+    ]

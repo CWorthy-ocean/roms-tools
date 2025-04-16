@@ -597,3 +597,67 @@ def test_merge_multiple_releases(start_end_times, valid_release_params):
         cdr.ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index).values,
         np.array(expected_dics),
     )
+
+
+def test_plot(start_end_times, iceland_test_grid, valid_release_params):
+
+    start_time, end_time = start_end_times
+    cdr = CDRPointSource(
+        grid=iceland_test_grid, start_time=start_time, end_time=end_time
+    )
+    release_params = deepcopy(valid_release_params)
+    release_params["times"] = [
+        datetime(2022, 1, 1),
+        datetime(2022, 1, 3),
+        datetime(2022, 1, 5),
+    ]
+    release_params["volume_fluxes"] = [1.0, 2.0, 3.0]
+    release_params["tracer_concentrations"] = {"DIC": [10.0, 20.0, 30.0]}
+    cdr.add_release(name="release1", **release_params)
+
+    cdr.plot_volume_flux()
+    cdr.plot_tracer_concentration("ALK")
+    cdr.plot_tracer_concentration("DIC")
+
+    cdr.plot_location_top_view()
+    cdr.plot_location_side_view()
+
+
+def test_plot_error_when_no_grid(start_end_times, valid_release_params):
+
+    start_time, end_time = start_end_times
+    cdr = CDRPointSource(start_time=start_time, end_time=end_time)
+    release_params = deepcopy(valid_release_params)
+    cdr.add_release(name="release1", **release_params)
+
+    with pytest.raises(ValueError, match="A grid must be provided for plotting"):
+        cdr.plot_location_top_view("all")
+
+    with pytest.raises(ValueError, match="A grid must be provided for plotting"):
+        cdr.plot_location_side_view("release1")
+
+
+def test_plot_more_errors(start_end_times, iceland_test_grid, valid_release_params):
+
+    start_time, end_time = start_end_times
+    cdr = CDRPointSource(
+        grid=iceland_test_grid, start_time=start_time, end_time=end_time
+    )
+    release_params = deepcopy(valid_release_params)
+    cdr.add_release(name="release1", **release_params)
+    cdr.add_release(name="release2", **release_params)
+
+    with pytest.raises(ValueError, match="Multiple releases found"):
+        cdr.plot_location_side_view()
+
+    with pytest.raises(ValueError, match="Invalid release"):
+        cdr.plot_location_side_view(release="fake")
+
+    with pytest.raises(ValueError, match="Invalid releases"):
+        cdr.plot_location_top_view(releases=["fake"])
+
+    with pytest.raises(ValueError, match="should be a string"):
+        cdr.plot_location_top_view(releases=4)
+
+    with pytest.raises(ValueError, match="list must be strings"):
+        cdr.plot_location_top_view(releases=[4])

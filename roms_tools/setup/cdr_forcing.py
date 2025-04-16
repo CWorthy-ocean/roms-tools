@@ -337,30 +337,61 @@ class CDRPointSource:
             self.releases[name] = {}
         self.releases[name].update(params)
 
-    def plot(self, var_name):
+    def plot_volume_flux(self):
+        """Plot the volume flux for each CDR release."""
+        self._plot_line(
+            self.ds["cdr_volume"],
+            title="Volume flux of CDR release",
+            ylabel=r"m$^3$/s",
+        )
 
+    def plot_tracer_concentration(self, name: str):
+        """Plot the concentration of a given tracer for each CDR release.
+
+        Parameters
+        ----------
+        name : str
+            Name of the tracer to plot, e.g., "ALK", "DIC", etc.
+        """
+        tracer_names = list(self.ds["tracer_name"].values)
+        if name not in tracer_names:
+            raise ValueError(
+                f"Tracer '{name}' not found. Available: {', '.join(tracer_names)}"
+            )
+
+        tracer_index = tracer_names.index(name)
+        data = self.ds["cdr_tracer"].isel(ntracers=tracer_index)
+
+        if name == "temp":
+            title = "Temperature of CDR release water"
+        elif name == "salt":
+            title = "Salinity of CDR release water"
+        else:
+            title = f"{name} concentration of CDR release"
+
+        self._plot_line(
+            data,
+            title=title,
+            ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
+        )
+
+    def _plot_line(self, data, title="", ylabel=""):
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
 
         for ncdr in range(len(self.ds.ncdr)):
-            self.ds[var_name].isel(ncdr=ncdr).plot(
+            data.isel(ncdr=ncdr).plot(
                 ax=ax,
                 linewidth=2,
                 label=self.ds["release_name"].isel(ncdr=ncdr).item(),
+                marker="x",
             )
 
         if len(self.ds.ncdr) > 0:
             ax.legend()
 
-        title = ""
-        ylabel = ""
-
-        if var_name == "cdr_volume":
-            title = "Volume flux of CDR release"
-            ylabel = r"m$^3$/s"
-
         ax.set(title=title, ylabel=ylabel)
 
-    def plot_location_top(self, releases="all"):
+    def plot_location_top_view(self, releases="all"):
         """Plot the top-down view of Carbon Dioxide Removal (CDR) release locations.
 
         Parameters
@@ -453,7 +484,7 @@ class CDRPointSource:
         ax.set_title("CDR release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
-    def plot_location_side(self, release: str):
+    def plot_location_side_view(self, release: str):
         """Plots the Carbon Dioxide Removal (CDR) release locations from a side view,
         displaying bathymetry sections along both fixed longitude and latitude.
 

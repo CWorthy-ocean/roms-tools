@@ -100,7 +100,7 @@ class CDRPointSource:
         lon: float,
         depth: float,
         times: Optional[List[datetime]] = None,
-        volumes: Union[float, List[float]] = 0.0,
+        volume_fluxes: Union[float, List[float]] = 0.0,
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         fill_values: Optional[str] = "auto_fill",
     ):
@@ -117,19 +117,19 @@ class CDRPointSource:
         depth : float
             Depth of the release. Must be non-negative.
         times : list of datetime.datetime, optional
-            Explicit time points for volumes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
+            Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
             Must contain at least two datetime objects if provided.
 
             Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
 
-        volumes : float or list of float, optional
-            Volume of the release over time.
+        volume_fluxes : float or list of float, optional
+            Volume flux(es) of the release in m³/s over time.
             - Constant: applies uniformly from `times[0]` to `times[-1]`.
             - Time-varying: must match the length of `times`.
 
             Example:
-            - Constant: `volumes=1000.0` (uniform across the time period).
-            - Time-varying: `volumes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
+            - Constant: `volume_fluxes=1000.0` (uniform across the time period).
+            - Time-varying: `volume_fluxes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
 
         tracer_concentrations : dict, optional
             Dictionary of tracer names and their concentration values. Can be either constant or time-varying.
@@ -179,13 +179,13 @@ class CDRPointSource:
             lon=lon,
             depth=depth,
             times=times,
+            volume_fluxes=volume_fluxes,
             tracer_concentrations=tracer_concentrations,
-            volumes=volumes,
         )
 
-        # Make sure times include self.start_time and self.end_time, and interpolate volumes and tracer concentrations across
-        times, volumes, tracer_concentrations = self._handle_simulation_endpoints(
-            times, volumes, tracer_concentrations
+        # Extend volume fluxes and tracer_concentrations across simulation period if necessary
+        times, volume_fluxes, tracer_concentrations = self._handle_simulation_endpoints(
+            times, volume_fluxes, tracer_concentrations
         )
 
         # Validate release location
@@ -197,8 +197,8 @@ class CDRPointSource:
             lon=lon,
             depth=depth,
             times=times,
+            volume_fluxes=volume_fluxes,
             tracer_concentrations=tracer_concentrations,
-            volumes=volumes,
         )
 
         self._add_release_to_ds(
@@ -207,8 +207,8 @@ class CDRPointSource:
             lon=lon,
             depth=depth,
             times=times,
+            volume_fluxes=volume_fluxes,
             tracer_concentrations=tracer_concentrations,
-            volumes=volumes,
         )
 
     def _add_release_to_ds(
@@ -220,7 +220,7 @@ class CDRPointSource:
         depth: float,
         times: Optional[List[datetime]] = None,
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
-        volumes: Union[float, List[float]] = 0.0,
+        volume_fluxes: Union[float, List[float]] = 0.0,
     ):
         """Adds a CDR point release to the forcing dataset."""
 
@@ -277,7 +277,7 @@ class CDRPointSource:
         ):
             ds[var_name].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = np.float64(value)
 
-        # Interpolate and retain previous experiment volumes and tracer concentrations
+        # Interpolate and retain previous experiment volume fluxes and tracer concentrations
         if len(self.ds["ncdr"]) > 0:
             for i in range(len(self.ds.ncdr)):
                 interpolated = np.interp(
@@ -299,13 +299,13 @@ class CDRPointSource:
                         interpolated / ds["cdr_volume"].loc[{"ncdr": i}]
                     )
 
-        # Handle new experiment volume and tracer concentrations
-        if isinstance(volumes, list):
+        # Handle new experiment volume fluxes and tracer concentrations
+        if isinstance(volume_fluxes, list):
             interpolated = np.interp(
-                union_time.astype(np.float64), times.astype(np.float64), volumes
+                union_time.astype(np.float64), times.astype(np.float64), volume_fluxes
             )
         else:
-            interpolated = np.full(len(union_time), volumes)
+            interpolated = np.full(len(union_time), volume_fluxes)
 
         ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = interpolated
 
@@ -313,17 +313,17 @@ class CDRPointSource:
             tracer_name = ds.tracer_name[n].item()
             # interpolation for tracer concentrations is weighted by volume to conserve tracers
             if isinstance(tracer_concentrations[tracer_name], list) or isinstance(
-                volumes, list
+                volume_fluxes, list
             ):
                 interpolated = np.interp(
                     union_time.astype(np.float64),
                     times.astype(np.float64),
                     np.asarray(tracer_concentrations[tracer_name], dtype=np.float64)
-                    * np.asarray(volumes, dtype=np.float64),
+                    * np.asarray(volume_fluxes, dtype=np.float64),
                 )
             else:
                 interpolated = np.full(
-                    len(union_time), tracer_concentrations[tracer_name] * volumes
+                    len(union_time), tracer_concentrations[tracer_name] * volume_fluxes
                 )
 
             interpolated = (
@@ -344,7 +344,7 @@ class CDRPointSource:
         name : str
             The unique name for the release to be added to the dictionary.
         **params : keyword arguments
-            Parameters to be added for the specific release (e.g., location, volumes, etc.).
+            Parameters to be added for the specific release (e.g., location, volume fluxes, etc.).
         """
         # Add the parameters to the dictionary under the given name
         if name not in self.releases:
@@ -616,8 +616,8 @@ class CDRPointSource:
         lon,
         depth,
         times,
+        volume_fluxes,
         tracer_concentrations,
-        volumes,
     ):
         """Perform various input checks on release parameters.
 
@@ -625,10 +625,10 @@ class CDRPointSource:
         - Checks that depth is non-negative.
         - Ensures 'times' is a list of datetime objects and is monotonically increasing.
         - Verifies that times are within the defined start and end time.
-        - Ensures volumes is either a list of floats/ints or a single float/int.
+        - Ensures volume fluxes is either a list of floats/ints or a single float/int.
         - Ensures each tracer concentration is either a float/int or a list of floats/ints.
-        - Ensures the lengths of 'volumes' and 'tracer_concentrations' match the length of 'times' if they are lists.
-        - Ensures all entries in 'volumes' and 'tracer_concentrations' are non-negative.
+        - Ensures the lengths of 'volume_fluxes' and 'tracer_concentrations' match the length of 'times' if they are lists.
+        - Ensures all entries in 'volume_fluxes' and 'tracer_concentrations' are non-negative.
         """
 
         # Check that lat is valid
@@ -669,13 +669,13 @@ class CDRPointSource:
                     f"Last entry in `times` ({times[-1]}) cannot be after `self.end_time` ({self.end_time})."
                 )
 
-        # Ensure volumes is either a list of floats/ints or a single float/int
-        if not isinstance(volumes, (float, int)) and not (
-            isinstance(volumes, list)
-            and all(isinstance(v, (float, int)) for v in volumes)
+        # Ensure volume fluxes is either a list of floats/ints or a single float/int
+        if not isinstance(volume_fluxes, (float, int)) and not (
+            isinstance(volume_fluxes, list)
+            and all(isinstance(v, (float, int)) for v in volume_fluxes)
         ):
             raise ValueError(
-                "Invalid 'volumes' input: must be a float/int or a list of floats/ints."
+                "Invalid 'volume_fluxes' input: must be a float/int or a list of floats/ints."
             )
 
         # Ensure each tracer concentration is either a float/int or a list of floats/ints
@@ -687,13 +687,13 @@ class CDRPointSource:
                     f"Invalid tracer concentration for '{key}': must be a float/int or a list of floats/ints."
                 )
 
-        # Ensure that time series for 'times', 'volumes', and 'tracer_concentrations' are all the same length
+        # Ensure that time series for 'times', 'volume_fluxes', and 'tracer_concentrations' are all the same length
         num_times = len(times)
 
-        # Check that volumes is either a constant or has the same length as 'times'
-        if isinstance(volumes, list) and len(volumes) != num_times:
+        # Check that volume fluxes is either a constant or has the same length as 'times'
+        if isinstance(volume_fluxes, list) and len(volume_fluxes) != num_times:
             raise ValueError(
-                f"The length of `volumes` ({len(volumes)}) does not match the length of `times` ({num_times})."
+                f"The length of `volume_fluxes` ({len(volume_fluxes)}) does not match the length of `times` ({num_times})."
             )
 
         # Check that tracer_concentrations are either constants or have the same length as 'times'
@@ -703,12 +703,12 @@ class CDRPointSource:
                     f"The length of tracer '{key}' ({len(tracer_values)}) does not match the length of `times` ({num_times})."
                 )
 
-        # Check that volumes and tracer concentrations are valid
-        if isinstance(volumes, (float, int)) and volumes < 0:
-            raise ValueError(f"Volume must be non-negative. Got: {volumes}")
-        elif isinstance(volumes, list) and not all(v >= 0 for v in volumes):
+        # Check that volume fluxes and tracer concentrations are valid
+        if isinstance(volume_fluxes, (float, int)) and volume_fluxes < 0:
+            raise ValueError(f"Volume flux must be non-negative. Got: {volume_fluxes}")
+        elif isinstance(volume_fluxes, list) and not all(v >= 0 for v in volume_fluxes):
             raise ValueError(
-                f"All entries in `volumes` must be non-negative. Got: {volumes}"
+                f"All entries in `volume_fluxes` must be non-negative. Got: {volume_fluxes}"
             )
         for key, tracer_values in tracer_concentrations.items():
             if key != "temp":
@@ -723,94 +723,41 @@ class CDRPointSource:
                         f"All entries in `tracer_concentrations['{key}']` must be non-negative. Got: {tracer_values}"
                     )
 
-    def _handle_simulation_endpoints(self, times, volumes, tracer_concentrations):
+    def _handle_simulation_endpoints(self, times, volume_fluxes, tracer_concentrations):
         """Ensure that the release time series starts at self.start_time and ends at
         self.end_time.
 
-        If volumes is a list and does not cover the endpoints, zero volumes are added.
+        If `volume_fluxes` is a list and does not cover the endpoints, zero volume fluxes are added.
         Tracer concentrations are extended accordingly by duplicating endpoint values.
         """
-
-        # Make shallow copies of lists to modify safely
-        times = list(times)
-        tracer_concentrations = {
-            k: (v if isinstance(v, (float, int)) else list(v))
-            for k, v in tracer_concentrations.items()
-        }
-
-        constant_tracers = [
-            k for k, v in tracer_concentrations.items() if isinstance(v, (float, int))
-        ]
-
-        # Log constant volumes fluxes and tracers
-        if isinstance(volumes, (float, int)):
-            logging.info(
-                f"Using constant volume release: {volumes} m³/s applied uniformly "
-                f"from {self.start_time} to {self.end_time}."
-            )
-        if constant_tracers:
-            entries = [
-                f"{tracer} = {tracer_concentrations[tracer]} {self.releases['_tracer_metadata'][tracer]['units']}"
-                for tracer in constant_tracers
-            ]
-            logging.info(
-                f"Using constant tracer concentrations applied uniformly from {self.start_time} to {self.end_time}: "
-                + ", ".join(entries)
-            )
 
         if len(times) > 0:
             # Handle start_time
             if times[0] != self.start_time:
-                if isinstance(volumes, list):
-                    logging.info(
-                        f"No volume specified at start_time ({self.start_time}). "
-                        f"Assuming zero volume at the start and linearly interpolating "
-                        f"to the first provided time point: {times[0]}."
-                    )
-                    volumes.insert(0, 0.0)
+                if isinstance(volume_fluxes, list):
+                    volume_fluxes.insert(0, 0.0)
 
-                modified_tracers = []
                 for key, vals in tracer_concentrations.items():
                     if isinstance(vals, list):
                         vals.insert(0, vals[0])
-                        modified_tracers.append(key)
-
-                if modified_tracers:
-                    logging.info(
-                        f"Extended tracer concentration time series at start_time ({self.start_time}) "
-                        f"by repeating the value from first provided time point {times[0]} for: {', '.join(modified_tracers)}."
-                    )
 
                 times.insert(0, self.start_time)
 
             # Handle end_time
             if times[-1] != self.end_time:
-                if isinstance(volumes, list):
-                    logging.info(
-                        f"No volume specified at end_time ({self.end_time}). "
-                        f"Assuming zero volume at the end and linearly interpolating "
-                        f"from the last provided time point: {times[-1]}."
-                    )
-                    volumes.append(0.0)
+                if isinstance(volume_fluxes, list):
+                    volume_fluxes.append(0.0)
 
-                modified_tracers = []
                 for key, vals in tracer_concentrations.items():
                     if isinstance(vals, list):
                         vals.append(vals[-1])
-                        modified_tracers.append(key)
-
-                if modified_tracers:
-                    logging.info(
-                        f"Extended tracer concentration time series at end_time ({self.end_time}) "
-                        f"by repeating the value from last provided time point {times[-1]} for: {', '.join(modified_tracers)}."
-                    )
 
                 times.append(self.end_time)
 
         else:
             times = [self.start_time, self.end_time]
 
-        return times, volumes, tracer_concentrations
+        return times, volume_fluxes, tracer_concentrations
 
     def _validate_release_location(self, name, lat, lon, depth):
         """Validates the closest grid location for a release site.

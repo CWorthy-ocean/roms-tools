@@ -224,12 +224,14 @@ class CDRPointSource:
     ):
         """Adds a CDR point release to the forcing dataset."""
 
-        times = np.array(times)
+        # Convert times to datetime64[ns]
+        times = np.array(times, dtype="datetime64[ns]")
 
-        # Convert times to model-relative days
-        rel_times = (times - self.model_reference_date).astype(
-            "timedelta64[ns]"
-        ) / np.timedelta64(1, "D")
+        # Ensure reference date is also datetime64[ns]
+        ref = np.datetime64(self.model_reference_date, "ns")
+
+        # Compute model-relative times in days
+        rel_times = (times - ref) / np.timedelta64(1, "D")
 
         # Merge with existing time dimension
         existing_times = (
@@ -240,16 +242,15 @@ class CDRPointSource:
         existing_rel_times = (
             self.ds["cdr_time"].values if len(self.ds["cdr_time"]) > 0 else []
         )
-        times = np.array(times, dtype="datetime64[ns]")
-        union_time = np.union1d(existing_times, times)
-        union_rel_time = np.union1d(existing_rel_times, rel_times)
+        union_times = np.union1d(existing_times, times)
+        union_rel_times = np.union1d(existing_rel_times, rel_times)
 
         # Initialize a fresh dataset to accommodate the new release.
         # xarray does not handle dynamic resizing of dimensions well (e.g., increasing 'ncdr' by 1),
         # so we recreate the dataset with the updated size.
         ds = xr.Dataset()
-        ds["time"] = ("time", union_time)
-        ds["cdr_time"] = ("time", union_rel_time)
+        ds["time"] = ("time", union_times)
+        ds["cdr_time"] = ("time", union_rel_times)
         ds = add_tracer_metadata(ds)
 
         release_names = np.concatenate([self.ds.release_name.values, [name]])
@@ -270,6 +271,7 @@ class CDRPointSource:
             for i in range(len(self.ds.ncdr)):
                 for var_name in ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"]:
                     ds[var_name].loc[{"ncdr": i}] = self.ds[var_name].isel(ncdr=i)
+
         # Add the new experiment location
         for var_name, value in zip(
             ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"],
@@ -281,54 +283,38 @@ class CDRPointSource:
         if len(self.ds["ncdr"]) > 0:
             for i in range(len(self.ds.ncdr)):
                 interpolated = np.interp(
-                    union_time.astype(np.float64),
-                    self.ds["cdr_time"].values.astype(np.float64),
+                    union_rel_times,
+                    self.ds["cdr_time"].values,
                     self.ds["cdr_volume"].isel(ncdr=i).values,
                 )
                 ds["cdr_volume"].loc[{"ncdr": i}] = interpolated
 
                 for n in range(len(self.ds.ntracers)):
-                    # interpolation for tracer concentrations is weighted by volume to conserve tracers
                     interpolated = np.interp(
-                        union_time.astype(np.float64),
-                        self.ds["cdr_time"].values.astype(np.float64),
-                        self.ds["cdr_tracer"].isel(ntracers=n, ncdr=i).values
-                        * self.ds["cdr_volume"].isel(ncdr=i).values,
+                        union_rel_times,
+                        self.ds["cdr_time"].values,
+                        self.ds["cdr_tracer"].isel(ntracers=n, ncdr=i).values,
                     )
-                    ds["cdr_tracer"].loc[{"ntracers": n, "ncdr": i}] = (
-                        interpolated / ds["cdr_volume"].loc[{"ncdr": i}]
-                    )
+                    ds["cdr_tracer"].loc[{"ntracers": n, "ncdr": i}] = interpolated
 
         # Handle new experiment volume fluxes and tracer concentrations
         if isinstance(volume_fluxes, list):
-            interpolated = np.interp(
-                union_time.astype(np.float64), times.astype(np.float64), volume_fluxes
-            )
+            interpolated = np.interp(union_rel_times, rel_times, volume_fluxes)
         else:
-            interpolated = np.full(len(union_time), volume_fluxes)
+            interpolated = np.full(len(union_rel_times), volume_fluxes)
 
         ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = interpolated
 
         for n in range(len(self.ds.ntracers)):
             tracer_name = ds.tracer_name[n].item()
-            # interpolation for tracer concentrations is weighted by volume to conserve tracers
-            if isinstance(tracer_concentrations[tracer_name], list) or isinstance(
-                volume_fluxes, list
-            ):
+            if isinstance(tracer_concentrations[tracer_name], list):
                 interpolated = np.interp(
-                    union_time.astype(np.float64),
-                    times.astype(np.float64),
-                    np.asarray(tracer_concentrations[tracer_name], dtype=np.float64)
-                    * np.asarray(volume_fluxes, dtype=np.float64),
+                    union_rel_times, rel_times, tracer_concentrations[tracer_name]
                 )
             else:
                 interpolated = np.full(
-                    len(union_time), tracer_concentrations[tracer_name] * volume_fluxes
+                    len(union_rel_times), tracer_concentrations[tracer_name]
                 )
-
-            interpolated = (
-                interpolated / ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}]
-            )
 
             ds["cdr_tracer"].loc[
                 {"ntracers": n, "ncdr": ds.sizes["ncdr"] - 1}

@@ -403,9 +403,9 @@ class CDRPointSource:
         Raises
         ------
         ValueError
-            If any of the specified releases do not exist in `self.releases`.
-            If `releases` is not a string or list of strings.
             If `self.grid` is not set.
+            If `releases` is not a string or list of strings.
+            If any of the specified releases do not exist in `self.releases`.
         """
         # Ensure that the grid is provided
         if self.grid is None:
@@ -415,19 +415,23 @@ class CDRPointSource:
 
         # Handle "all" releases case
         if releases == "all":
-            releases = list(self.releases.keys())
+            releases = [k for k in self.releases if k != "_tracer_metadata"]
 
         # Validate the releases input
         if isinstance(releases, str):
             releases = [releases]  # Convert to list if a single string is provided
-        elif not isinstance(releases, list):
+        elif isinstance(releases, list):
+            if not all(isinstance(r, str) for r in releases):
+                raise ValueError("All elements in `releases` list must be strings.")
+        else:
             raise ValueError(
                 "`releases` should be a string (single release name) or a list of strings (release names)."
             )
 
         # Validate that the specified releases exist in self.releases
+        valid_release_names = [k for k in self.releases if k != "_tracer_metadata"]
         invalid_releases = [
-            release for release in releases if release not in self.releases
+            release for release in releases if release not in valid_release_names
         ]
         if invalid_releases:
             raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
@@ -463,7 +467,6 @@ class CDRPointSource:
         colors = {name: color_map(i) for i, name in enumerate(self.releases.keys())}
 
         for name in releases:
-
             # transform coordinates to projected space
             transformed_lon, transformed_lat = trans.transform_point(
                 self.releases[name]["lon"],
@@ -484,32 +487,48 @@ class CDRPointSource:
         ax.set_title("CDR release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
-    def plot_location_side_view(self, release: str):
-        """Plots the Carbon Dioxide Removal (CDR) release locations from a side view,
-        displaying bathymetry sections along both fixed longitude and latitude.
+    def plot_location_side_view(self, release: str = None):
+        """Plot the Carbon Dioxide Removal (CDR) release location from a side view,
+        showing bathymetry sections along both fixed longitude and latitude.
 
         This method creates two plots:
 
-        - The first plot shows a bathymetry section along a fixed longitude (latitudinal view),
-        with the CDR release location marked by a red "x".
-        - The second plot shows a bathymetry section along a fixed latitude (longitudinal view),
-        with the CDR release location marked by a red "x".
+        - A bathymetry section along a fixed longitude (latitudinal view),
+          with the CDR release location marked by a red "x".
+        - A bathymetry section along a fixed latitude (longitudinal view),
+          also marked with a red "x".
 
         Parameters
         ----------
-        release : str
-            The name of the CDR release to plot. This should correspond to a key in `self.releases`.
+        release : str, optional
+            Name of the CDR release to plot. If only one release is available,
+            it is used by default. If multiple releases are available, this must be specified.
 
         Raises
         ------
         ValueError
+            If `self.grid` is not set.
             If the specified `release` does not exist in `self.releases`.
+            If no `release` is provided when multiple releases are available.
         """
-
-        # Validate if the release exists in the dataset
-        if release not in self.releases:
+        if self.grid is None:
             raise ValueError(
-                f"Invalid release: {release}. It does not exist in self.releases."
+                "A grid must be provided for plotting. Please pass a valid `Grid` object."
+            )
+
+        valid_releases = [r for r in self.releases if r != "_tracer_metadata"]
+
+        if release is None:
+            if len(valid_releases) == 1:
+                release = valid_releases[0]
+            else:
+                raise ValueError(
+                    f"Multiple releases found: {valid_releases}. Please specify a release to plot."
+                )
+
+        if release not in valid_releases:
+            raise ValueError(
+                f"Invalid release: {release}. Valid options are: {valid_releases}"
             )
 
         def _plot_bathymetry_section(

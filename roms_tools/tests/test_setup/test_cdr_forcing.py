@@ -1,7 +1,7 @@
 import pytest
 from copy import deepcopy
 from datetime import datetime
-from roms_tools import CDRPointSource, Grid
+from roms_tools import VolumeSourceWithTracers, Grid
 import xarray as xr
 import numpy as np
 import logging
@@ -10,6 +10,7 @@ from roms_tools.setup.utils import get_river_tracer_defaults
 # Fixtures
 @pytest.fixture
 def iceland_test_grid():
+    """Returns a grid surrouding Iceland."""
     return Grid(
         nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=0, N=3
     )
@@ -17,6 +18,7 @@ def iceland_test_grid():
 
 @pytest.fixture
 def test_grid_that_straddles():
+    """Returns a grid that straddles the prime meridian."""
     return Grid(
         nx=18, ny=18, size_x=800, size_y=800, center_lon=0, center_lat=65, rot=0, N=3
     )
@@ -24,6 +26,7 @@ def test_grid_that_straddles():
 
 @pytest.fixture
 def start_end_times():
+    """Returns test start and end times."""
     start_time = datetime(2022, 1, 1)
     end_time = datetime(2022, 12, 31)
     return start_time, end_time
@@ -31,8 +34,9 @@ def start_end_times():
 
 @pytest.fixture
 def empty_cdr_point_source_without_grid(start_end_times):
+    """Returns an empty CDR point source without a grid."""
     start_time, end_time = start_end_times
-    return CDRPointSource(
+    return VolumeSourceWithTracers(
         start_time=start_time,
         end_time=end_time,
     )
@@ -40,8 +44,9 @@ def empty_cdr_point_source_without_grid(start_end_times):
 
 @pytest.fixture
 def empty_cdr_point_source_with_grid(iceland_test_grid, start_end_times):
+    """Returns an empty CDR point source with the Iceland test grid."""
     start_time, end_time = start_end_times
-    return CDRPointSource(
+    return VolumeSourceWithTracers(
         grid=iceland_test_grid,
         start_time=start_time,
         end_time=end_time,
@@ -52,8 +57,9 @@ def empty_cdr_point_source_with_grid(iceland_test_grid, start_end_times):
 def empty_cdr_point_source_with_grid_that_straddles(
     test_grid_that_straddles, start_end_times
 ):
+    """Returns an empty CDR point source with a grid straddling the prime meridian."""
     start_time, end_time = start_end_times
-    return CDRPointSource(
+    return VolumeSourceWithTracers(
         grid=test_grid_that_straddles,
         start_time=start_time,
         end_time=end_time,
@@ -62,6 +68,8 @@ def empty_cdr_point_source_with_grid_that_straddles(
 
 @pytest.fixture
 def valid_release_params():
+    """Returns a dictionary with valid parameters for a CDR point source release within
+    the Iceland test domain."""
     return {
         "lat": 66.0,
         "lon": -25.0,
@@ -79,6 +87,7 @@ def valid_release_params():
     ],
 )
 def test_cdr_point_source_init(cdr_forcing_fixture, start_end_times, request):
+    """Tests the initialization of CDR point source fixtures."""
     cdr = request.getfixturevalue(cdr_forcing_fixture)
     start_time, end_time = start_end_times
     assert cdr.start_time == start_time
@@ -110,15 +119,6 @@ def test_cdr_point_source_init(cdr_forcing_fixture, start_end_times, request):
     assert set(cdr.releases.keys()) == {"_tracer_metadata"}
 
 
-def test_cdr_point_source_init_invalid_times():
-    start_time = datetime(2022, 5, 1)
-    end_time = datetime(2022, 5, 1)
-    with pytest.raises(
-        ValueError, match="`start_time` must be earlier than `end_time`"
-    ):
-        CDRPointSource(start_time=start_time, end_time=end_time)
-
-
 @pytest.mark.parametrize(
     "cdr_forcing_fixture",
     [
@@ -127,6 +127,8 @@ def test_cdr_point_source_init_invalid_times():
     ],
 )
 def test_add_release(cdr_forcing_fixture, valid_release_params, request):
+    """Test some basic features of the `add_release` method for updating forcing dataset
+    and dictionary."""
 
     cdr = request.getfixturevalue(cdr_forcing_fixture)
     release_params = deepcopy(valid_release_params)
@@ -188,262 +190,12 @@ def test_add_release(cdr_forcing_fixture, valid_release_params, request):
     assert "release" in cdr.releases.keys()
 
 
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_without_grid",
-        "empty_cdr_point_source_with_grid",
-    ],
-)
-def test_add_duplicate_release(cdr_forcing_fixture, valid_release_params, request):
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
-    release_params = deepcopy(valid_release_params)
-    cdr.add_release(name="release_1", **release_params)
-    with pytest.raises(
-        ValueError, match="A release with the name 'release_1' already exists."
-    ):
-        cdr.add_release(name="release_1", **release_params)
-
-
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_without_grid",
-        "empty_cdr_point_source_with_grid",
-    ],
-)
-def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, request):
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
-
-    # Test invalid latitude
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lat"] = 100.0
-    with pytest.raises(ValueError, match="Latitude must be between -90 and 90."):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid depth (negative value)
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["depth"] = -10.0
-    with pytest.raises(ValueError, match="Depth must be a non-negative number."):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test times not being datetime objects
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        "2023-01-01",
-        "2023-02-01",
-    ]  # Invalid times format (strings)
-    with pytest.raises(
-        ValueError,
-        match="If 'times' is provided, all entries must be datetime objects.",
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test times being not monotonically increasing
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2022, 2, 1),
-        datetime(2022, 1, 15),  # Out of order date
-        datetime(2022, 3, 1),
-    ]
-    with pytest.raises(
-        ValueError, match="The 'times' list must be strictly monotonically increasing."
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test times being not strictly monotonically increasing
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2022, 2, 1),
-        datetime(2022, 2, 1),  # Duplicated time
-        datetime(2022, 3, 1),
-    ]
-    with pytest.raises(
-        ValueError, match="The 'times' list must be strictly monotonically increasing."
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test first time earlier than self.start_time
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2000, 1, 1),
-        datetime(2022, 2, 1),
-    ]  # Earlier than self.start_time
-    with pytest.raises(ValueError, match="First entry"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test last time later than self.end_time
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2025, 1, 1),
-    ]  # Later than self.end_time
-    with pytest.raises(ValueError, match="Last entry"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid volume_fluxes: not a float/int or list of float/int
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["volume_fluxes"] = ["not", "valid"]
-    with pytest.raises(ValueError, match="Invalid 'volume_fluxes' input"):
-        cdr.add_release(name="release_invalid_volume", **invalid_params)
-
-    # Test invalid tracer_concentrations: not a float/int or list of float/int
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["tracer_concentrations"] = {"ALK": ["not", "valid"]}
-    with pytest.raises(ValueError, match="Invalid tracer concentration for 'ALK'"):
-        cdr.add_release(name="release_invalid_tracer", **invalid_params)
-
-    # Test mismatch between times and volume fluxes length
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
-    invalid_params["volume_fluxes"] = [100]  # Only one volume flux entry
-    with pytest.raises(ValueError, match="The length of `volume_fluxes` "):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test mismatch between times and tracer_concentrations length
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
-    invalid_params["tracer_concentrations"] = {
-        "ALK": [1]
-    }  # Only one tracer concentration
-    with pytest.raises(ValueError, match="The length of tracer 'ALK'"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid volume flux (negative)
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["volume_fluxes"] = -100  # Invalid volume flux
-    with pytest.raises(ValueError, match="Volume flux must be non-negative"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test volume flux as list with negative values
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [cdr.start_time, cdr.end_time]
-    invalid_params["volume_fluxes"] = [10, -5]  # Invalid volume fluxes in list
-    with pytest.raises(
-        ValueError, match="All entries in `volume_fluxes` must be non-negative"
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid tracer concentration (negative)
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["tracer_concentrations"] = {"ALK": -1}
-    with pytest.raises(ValueError, match="The concentration of tracer"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test tracer_concentration as list with negative values
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [cdr.start_time, cdr.end_time]
-    invalid_params["tracer_concentrations"] = {
-        "ALK": [10, -5]
-    }  # Invalid concentration in list
-    with pytest.raises(ValueError, match="All entries in "):
-        cdr.add_release(name="release_1", **invalid_params)
-
-
-def test_warning_no_grid(
-    empty_cdr_point_source_without_grid, valid_release_params, caplog
-):
-
-    with caplog.at_level(logging.WARNING):
-        empty_cdr_point_source_without_grid.add_release(
-            name="release_1", **valid_release_params
-        )
-
-    assert "Grid not provided"
-
-
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_with_grid",
-        "empty_cdr_point_source_with_grid_that_straddles",
-    ],
-)
-def test_invalid_release_longitude(cdr_forcing_fixture, valid_release_params, request):
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
-
-    # Release location outside of domain
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = -30
-    invalid_params["lat"] = 60
-    with pytest.raises(ValueError, match="outside of the grid domain"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Release location outside of domain
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = 360 - 30
-    invalid_params["lat"] = 60
-    with pytest.raises(ValueError, match="outside of the grid domain"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-
-def test_invalid_release_location(
-    empty_cdr_point_source_with_grid, valid_release_params
-):
-
-    # Release location too close to boundary of Iceland domain; lat_rho[0, 0] = 60.97, lon_rho[0, 0] = 334.17
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = 334.17
-    invalid_params["lat"] = 60.97
-    with pytest.raises(ValueError, match="too close to the grid boundary"):
-        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
-
-    # Release location lies on land
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = -20.0
-    invalid_params["lat"] = 64.5
-    with pytest.raises(ValueError, match="on land"):
-        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
-
-    # Release location lies below seafloor
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["depth"] = 4000
-    with pytest.raises(ValueError, match="below the seafloor"):
-        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
-
-
-def test_add_release_tracer_zero_fill(start_end_times, valid_release_params):
-
-    start_time, end_time = start_end_times
-    cdr = CDRPointSource(start_time=start_time, end_time=end_time)
-    release_params = deepcopy(valid_release_params)
-    release_params["fill_values"] = "zero_fill"
-    cdr.add_release(name="filled_release", **release_params)
-    defaults = get_river_tracer_defaults()
-    # temp
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
-    # salt
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=1) == defaults["salt"]).all()
-    # all other tracers should be zero
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) == 0.0).all()
-
-
-def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
-
-    start_time, end_time = start_end_times
-    # Check that the tracer concentrations are auto-filled where missing
-    cdr = CDRPointSource(start_time=start_time, end_time=end_time)
-    release_params = deepcopy(valid_release_params)
-    release_params["fill_values"] = "auto_fill"
-    cdr.add_release(name="filled_release", **release_params)
-
-    defaults = get_river_tracer_defaults()
-    # temp
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
-    # salt
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=1) == defaults["salt"]).all()
-    # ALK
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=11) == defaults["ALK"]).all()
-    # all other tracers should also be equal to the tracer default values, so not equal to zero
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) > 0.0).all()
-
-
 def test_merge_multiple_releases(start_end_times, valid_release_params):
+    """Test merging multiple releases in the dataset, including endpoint filling,
+    timestamp adjustment, and interpolation."""
 
     start_time, end_time = start_end_times
-    cdr = CDRPointSource(start_time=start_time, end_time=end_time)
+    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
     dic_index = 9
 
     # add first release
@@ -599,10 +351,277 @@ def test_merge_multiple_releases(start_end_times, valid_release_params):
     )
 
 
-def test_plot(start_end_times, iceland_test_grid, valid_release_params):
+def test_cdr_point_source_init_invalid_times():
+    """Test that initializing a CDR point source with the same start and end time raises
+    a ValueError."""
+    start_time = datetime(2022, 5, 1)
+    end_time = datetime(2022, 5, 1)
+    with pytest.raises(
+        ValueError, match="`start_time` must be earlier than `end_time`"
+    ):
+        VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
 
+
+@pytest.mark.parametrize(
+    "cdr_forcing_fixture",
+    [
+        "empty_cdr_point_source_without_grid",
+        "empty_cdr_point_source_with_grid",
+    ],
+)
+def test_add_duplicate_release(cdr_forcing_fixture, valid_release_params, request):
+    """Test that adding a duplicate release raises a ValueError."""
+    cdr = request.getfixturevalue(cdr_forcing_fixture)
+    release_params = deepcopy(valid_release_params)
+    cdr.add_release(name="release_1", **release_params)
+    with pytest.raises(
+        ValueError, match="A release with the name 'release_1' already exists."
+    ):
+        cdr.add_release(name="release_1", **release_params)
+
+
+@pytest.mark.parametrize(
+    "cdr_forcing_fixture",
+    [
+        "empty_cdr_point_source_without_grid",
+        "empty_cdr_point_source_with_grid",
+    ],
+)
+def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, request):
+    """Test that invalid release parameters raise the appropriate ValueErrors."""
+    cdr = request.getfixturevalue(cdr_forcing_fixture)
+
+    # Test invalid latitude
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["lat"] = 100.0
+    with pytest.raises(ValueError, match="Latitude must be between -90 and 90."):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test invalid depth (negative value)
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["depth"] = -10.0
+    with pytest.raises(ValueError, match="Depth must be a non-negative number."):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test times not being datetime objects
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [
+        "2023-01-01",
+        "2023-02-01",
+    ]  # Invalid times format (strings)
+    with pytest.raises(
+        ValueError,
+        match="If 'times' is provided, all entries must be datetime objects.",
+    ):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test times being not monotonically increasing
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [
+        datetime(2022, 1, 1),
+        datetime(2022, 2, 1),
+        datetime(2022, 1, 15),  # Out of order date
+        datetime(2022, 3, 1),
+    ]
+    with pytest.raises(
+        ValueError, match="The 'times' list must be strictly monotonically increasing."
+    ):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test times being not strictly monotonically increasing
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [
+        datetime(2022, 1, 1),
+        datetime(2022, 2, 1),
+        datetime(2022, 2, 1),  # Duplicated time
+        datetime(2022, 3, 1),
+    ]
+    with pytest.raises(
+        ValueError, match="The 'times' list must be strictly monotonically increasing."
+    ):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test first time earlier than self.start_time
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [
+        datetime(2000, 1, 1),
+        datetime(2022, 2, 1),
+    ]  # Earlier than self.start_time
+    with pytest.raises(ValueError, match="First entry"):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test last time later than self.end_time
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [
+        datetime(2022, 1, 1),
+        datetime(2025, 1, 1),
+    ]  # Later than self.end_time
+    with pytest.raises(ValueError, match="Last entry"):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test invalid volume_fluxes: not a float/int or list of float/int
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["volume_fluxes"] = ["not", "valid"]
+    with pytest.raises(ValueError, match="Invalid 'volume_fluxes' input"):
+        cdr.add_release(name="release_invalid_volume", **invalid_params)
+
+    # Test invalid tracer_concentrations: not a float/int or list of float/int
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["tracer_concentrations"] = {"ALK": ["not", "valid"]}
+    with pytest.raises(ValueError, match="Invalid tracer concentration for 'ALK'"):
+        cdr.add_release(name="release_invalid_tracer", **invalid_params)
+
+    # Test mismatch between times and volume fluxes length
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
+    invalid_params["volume_fluxes"] = [100]  # Only one volume flux entry
+    with pytest.raises(ValueError, match="The length of `volume_fluxes` "):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test mismatch between times and tracer_concentrations length
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
+    invalid_params["tracer_concentrations"] = {
+        "ALK": [1]
+    }  # Only one tracer concentration
+    with pytest.raises(ValueError, match="The length of tracer 'ALK'"):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test invalid volume flux (negative)
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["volume_fluxes"] = -100  # Invalid volume flux
+    with pytest.raises(ValueError, match="Volume flux must be non-negative"):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test volume flux as list with negative values
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [cdr.start_time, cdr.end_time]
+    invalid_params["volume_fluxes"] = [10, -5]  # Invalid volume fluxes in list
+    with pytest.raises(
+        ValueError, match="All entries in `volume_fluxes` must be non-negative"
+    ):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test invalid tracer concentration (negative)
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["tracer_concentrations"] = {"ALK": -1}
+    with pytest.raises(ValueError, match="The concentration of tracer"):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Test tracer_concentration as list with negative values
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["times"] = [cdr.start_time, cdr.end_time]
+    invalid_params["tracer_concentrations"] = {
+        "ALK": [10, -5]
+    }  # Invalid concentration in list
+    with pytest.raises(ValueError, match="All entries in "):
+        cdr.add_release(name="release_1", **invalid_params)
+
+
+def test_warning_no_grid(
+    empty_cdr_point_source_without_grid, valid_release_params, caplog
+):
+    """Test warning if no grid is provided."""
+    with caplog.at_level(logging.WARNING):
+        empty_cdr_point_source_without_grid.add_release(
+            name="release_1", **valid_release_params
+        )
+
+    assert "Grid not provided"
+
+
+@pytest.mark.parametrize(
+    "cdr_forcing_fixture",
+    [
+        "empty_cdr_point_source_with_grid",
+        "empty_cdr_point_source_with_grid_that_straddles",
+    ],
+)
+def test_invalid_release_longitude(cdr_forcing_fixture, valid_release_params, request):
+    """Test that error is raised if release location is outside grid."""
+
+    cdr = request.getfixturevalue(cdr_forcing_fixture)
+
+    # Release location outside of domain
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["lon"] = -30
+    invalid_params["lat"] = 60
+    with pytest.raises(ValueError, match="outside of the grid domain"):
+        cdr.add_release(name="release_1", **invalid_params)
+
+    # Release location outside of domain
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["lon"] = 360 - 30
+    invalid_params["lat"] = 60
+    with pytest.raises(ValueError, match="outside of the grid domain"):
+        cdr.add_release(name="release_1", **invalid_params)
+
+
+def test_invalid_release_location(
+    empty_cdr_point_source_with_grid, valid_release_params
+):
+    """Test that error is raised if release location is outside grid or on land."""
+    # Release location too close to boundary of Iceland domain; lat_rho[0, 0] = 60.97, lon_rho[0, 0] = 334.17
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["lon"] = 334.17
+    invalid_params["lat"] = 60.97
+    with pytest.raises(ValueError, match="too close to the grid boundary"):
+        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
+
+    # Release location lies on land
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["lon"] = -20.0
+    invalid_params["lat"] = 64.5
+    with pytest.raises(ValueError, match="on land"):
+        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
+
+    # Release location lies below seafloor
+    invalid_params = deepcopy(valid_release_params)
+    invalid_params["depth"] = 4000
+    with pytest.raises(ValueError, match="below the seafloor"):
+        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
+
+
+def test_add_release_tracer_zero_fill(start_end_times, valid_release_params):
+    """Test that zero fill of tracer concentrations works as expected."""
     start_time, end_time = start_end_times
-    cdr = CDRPointSource(
+    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    release_params = deepcopy(valid_release_params)
+    release_params["fill_values"] = "zero_fill"
+    cdr.add_release(name="filled_release", **release_params)
+    defaults = get_river_tracer_defaults()
+    # temp
+    assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
+    # salt
+    assert (cdr.ds["cdr_tracer"].isel(ntracers=1) == defaults["salt"]).all()
+    # all other tracers should be zero
+    assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) == 0.0).all()
+
+
+def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
+    """Test that auto fill of tracer concentrations works as expected."""
+    start_time, end_time = start_end_times
+    # Check that the tracer concentrations are auto-filled where missing
+    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    release_params = deepcopy(valid_release_params)
+    release_params["fill_values"] = "auto_fill"
+    cdr.add_release(name="filled_release", **release_params)
+
+    defaults = get_river_tracer_defaults()
+    # temp
+    assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
+    # salt
+    assert (cdr.ds["cdr_tracer"].isel(ntracers=1) == defaults["salt"]).all()
+    # ALK
+    assert (cdr.ds["cdr_tracer"].isel(ntracers=11) == defaults["ALK"]).all()
+    # all other tracers should also be equal to the tracer default values, so not equal to zero
+    assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) > 0.0).all()
+
+
+def test_plot(start_end_times, iceland_test_grid, valid_release_params):
+    """Test that plotting method run without error."""
+    start_time, end_time = start_end_times
+    cdr = VolumeSourceWithTracers(
         grid=iceland_test_grid, start_time=start_time, end_time=end_time
     )
     release_params = deepcopy(valid_release_params)
@@ -624,9 +643,9 @@ def test_plot(start_end_times, iceland_test_grid, valid_release_params):
 
 
 def test_plot_error_when_no_grid(start_end_times, valid_release_params):
-
+    """Test that error is raised if plotting without a grid."""
     start_time, end_time = start_end_times
-    cdr = CDRPointSource(start_time=start_time, end_time=end_time)
+    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
     release_params = deepcopy(valid_release_params)
     cdr.add_release(name="release1", **release_params)
 
@@ -638,9 +657,9 @@ def test_plot_error_when_no_grid(start_end_times, valid_release_params):
 
 
 def test_plot_more_errors(start_end_times, iceland_test_grid, valid_release_params):
-
+    """Test that error is raised on bad plot args or ambiguous release."""
     start_time, end_time = start_end_times
-    cdr = CDRPointSource(
+    cdr = VolumeSourceWithTracers(
         grid=iceland_test_grid, start_time=start_time, end_time=end_time
     )
     release_params = deepcopy(valid_release_params)

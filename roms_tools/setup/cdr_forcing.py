@@ -19,13 +19,12 @@ from roms_tools.setup.utils import (
 
 
 @dataclass(kw_only=True)
-class CDRPointSource:
-    """Represents a point source of Carbon Dioxide Removal (CDR) forcing data for ROMS,
-    including the addition of a volume flux of water and tracer concentrations.
-
-    This class models the introduction of water, along with tracers (such as alkalinity),
-    at specific point locations in the model grid. It supports both constant and time-varying
-    tracer concentrations and volume fluxes, simulating the release of CDR agents over time.
+class VolumeSourceWithTracers:
+    """Represents one or several volume sources of water with tracers, simulating the
+    introduction of water and tracer concentrations at specific location(s). This class
+    is particularly useful for modeling point sources of Carbon Dioxide Removal (CDR)
+    forcing data, such as the injection of water and biogeochemical tracers (e.g.,
+    alkalinity (ALK) or dissolved inorganic carbon (DIC)) through a pipe.
 
     Parameters
     ----------
@@ -38,12 +37,12 @@ class CDRPointSource:
     model_reference_date : datetime, optional
         Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
     releases : dict, optional
-        A dictionary of existing CDR releases. Defaults to empty dictionary.
+        A dictionary of existing releases. Defaults to empty dictionary.
 
     Attributes
     ----------
     ds : xr.Dataset
-        The xarray dataset containing CDR release metadata and forcing variables.
+        The xarray dataset containing release metadata and forcing variables.
     """
 
     grid: Optional["Grid"] = None
@@ -104,7 +103,12 @@ class CDRPointSource:
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         fill_values: Optional[str] = "auto_fill",
     ):
-        """Adds a CDR point source to the forcing dataset and dictionary.
+        """Adds a release (point source) of water with tracers to the forcing dataset
+        and dictionary.
+
+        This method registers a point source at a specific location (latitude, longitude, and depth).
+        The release includes both a volume flux of water and tracer
+        concentrations, which can be constant or time-varying.
 
         Parameters
         ----------
@@ -222,7 +226,7 @@ class CDRPointSource:
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
         volume_fluxes: Union[float, List[float]] = 0.0,
     ):
-        """Adds a CDR point release to the forcing dataset."""
+        """Add the release data for a specific release to the forcing dataset."""
 
         # Convert times to datetime64[ns]
         times = np.array(times, dtype="datetime64[ns]")
@@ -338,15 +342,15 @@ class CDRPointSource:
         self.releases[name].update(params)
 
     def plot_volume_flux(self):
-        """Plot the volume flux for each CDR release."""
+        """Plot the volume flux for each release."""
         self._plot_line(
             self.ds["cdr_volume"],
-            title="Volume flux of CDR release",
+            title="Volume flux of release",
             ylabel=r"m$^3$/s",
         )
 
     def plot_tracer_concentration(self, name: str):
-        """Plot the concentration of a given tracer for each CDR release.
+        """Plot the concentration of a given tracer for each release.
 
         Parameters
         ----------
@@ -363,11 +367,11 @@ class CDRPointSource:
         data = self.ds["cdr_tracer"].isel(ntracers=tracer_index)
 
         if name == "temp":
-            title = "Temperature of CDR release water"
+            title = "Temperature of release water"
         elif name == "salt":
-            title = "Salinity of CDR release water"
+            title = "Salinity of release water"
         else:
-            title = f"{name} concentration of CDR release"
+            title = f"{name} concentration of release"
 
         self._plot_line(
             data,
@@ -392,13 +396,13 @@ class CDRPointSource:
         ax.set(title=title, ylabel=ylabel)
 
     def plot_location_top_view(self, releases="all"):
-        """Plot the top-down view of Carbon Dioxide Removal (CDR) release locations.
+        """Plot the top-down view of release locations.
 
         Parameters
         ----------
         releases : list of str or str, optional
             A single release name (string) or a list of release names (strings) to plot.
-            Each release should correspond to a key in `self.releases`. Default is 'all', which will plot all releases.
+            Default is 'all', which will plot all releases.
 
         Raises
         ------
@@ -484,24 +488,24 @@ class CDRPointSource:
                 color=colors[name],
             )
 
-        ax.set_title("CDR release locations")
+        ax.set_title("Release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
     def plot_location_side_view(self, release: str = None):
-        """Plot the Carbon Dioxide Removal (CDR) release location from a side view,
-        showing bathymetry sections along both fixed longitude and latitude.
+        """Plot the release location from a side view, showing bathymetry sections along
+        both fixed longitude and latitude.
 
         This method creates two plots:
 
         - A bathymetry section along a fixed longitude (latitudinal view),
-          with the CDR release location marked by a red "x".
+          with the release location marked by a red "x".
         - A bathymetry section along a fixed latitude (longitudinal view),
-          also marked with a red "x".
+          with the release location also marked by a red "x".
 
         Parameters
         ----------
         release : str, optional
-            Name of the CDR release to plot. If only one release is available,
+            Name of the release to plot. If only one release is available,
             it is used by default. If multiple releases are available, this must be specified.
 
         Raises
@@ -643,7 +647,7 @@ class CDRPointSource:
 
         # Adjust layout and title
         fig.subplots_adjust(hspace=0.4)
-        fig.suptitle(f"CDR release location for: {release}")
+        fig.suptitle(f"Release location for: {release}")
 
     def _input_checks(
         self,

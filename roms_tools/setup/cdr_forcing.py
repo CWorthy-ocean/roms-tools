@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List, Dict, Union
 import numpy as np
 import xarray as xr
@@ -15,6 +16,7 @@ from roms_tools.setup.utils import (
     gc_dist,
     get_river_tracer_defaults,
     add_tracer_metadata,
+    _to_yaml,
 )
 
 
@@ -101,7 +103,7 @@ class VolumeSourceWithTracers:
         times: Optional[List[datetime]] = None,
         volume_fluxes: Union[float, List[float]] = 0.0,
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
-        fill_values: Optional[str] = "auto_fill",
+        fill_values: Optional[str] = "auto",
     ):
         """Adds a release (point source) of water with tracers to the forcing dataset
         and dictionary.
@@ -147,13 +149,20 @@ class VolumeSourceWithTracers:
             - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
 
         fill_values : str, optional
-            Strategy for filling missing tracer values. Options:
-            - "auto_fill" (default): automatically set values
-            - "zero_fill": fill missing values with 0.0
+            Strategy for filling missing tracer concentration values. Options:
+            - "auto" (default): automatically set values
+            - "zero": fill missing values with 0.0
         """
         # Check that the name is unique
         if name in self.releases:
             raise ValueError(f"A release with the name '{name}' already exists.")
+
+        # Check that fill_values has proper string
+        if fill_values not in ("auto", "zero"):
+            raise ValueError(
+                f"Invalid fill_values option: '{fill_values}'. "
+                "Must be 'auto' or 'zero'."
+            )
 
         # Set default for times if None
         if times is None:
@@ -171,9 +180,9 @@ class VolumeSourceWithTracers:
                 if tracer_name in ["temp", "salt"]:
                     tracer_concentrations[tracer_name] = defaults[tracer_name]
                 else:
-                    if fill_values == "auto_fill":
+                    if fill_values == "auto":
                         tracer_concentrations[tracer_name] = defaults[tracer_name]
-                    elif fill_values == "zero_fill":
+                    elif fill_values == "zero":
                         tracer_concentrations[tracer_name] = 0.0
 
         # Check input parameters
@@ -681,6 +690,18 @@ class VolumeSourceWithTracers:
         # Adjust layout and title
         fig.subplots_adjust(hspace=0.4)
         fig.suptitle(f"Release location for: {release}")
+
+    def to_yaml(self, filepath: Union[str, Path]) -> None:
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The path to the YAML file where the parameters will be saved.
+        """
+
+        _to_yaml(self, filepath)
 
     def _input_checks(
         self,

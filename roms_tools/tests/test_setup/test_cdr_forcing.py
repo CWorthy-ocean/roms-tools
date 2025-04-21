@@ -617,6 +617,7 @@ def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
     # all other tracers should also be equal to the tracer default values, so not equal to zero
     assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) > 0.0).all()
 
+
 def test_add_release_invalid_fill(start_end_times, valid_release_params):
     """Test that invalid fill method of tracer concentrations raises error."""
     start_time, end_time = start_end_times
@@ -627,6 +628,7 @@ def test_add_release_invalid_fill(start_end_times, valid_release_params):
     with pytest.raises(ValueError, match="Invalid fill_values option"):
 
         cdr.add_release(name="filled_release", **release_params)
+
 
 def test_plot(start_end_times, iceland_test_grid, valid_release_params):
     """Test that plotting method run without error."""

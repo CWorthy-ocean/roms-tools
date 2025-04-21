@@ -16,6 +16,7 @@ from roms_tools.setup.utils import (
     gc_dist,
     get_river_tracer_defaults,
     add_tracer_metadata,
+    to_float,
     _to_yaml,
 )
 
@@ -116,11 +117,11 @@ class VolumeSourceWithTracers:
         ----------
         name : str
             Unique identifier for the release.
-        lat : float
+        lat : float or int
             Latitude of the release location. Must be between -90 and 90.
-        lon : float
+        lon : float or int
             Longitude of the release location. No restrictions on bounds.
-        depth : float
+        depth : float or int
             Depth of the release. Must be non-negative.
         times : list of datetime.datetime, optional
             Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
@@ -128,7 +129,7 @@ class VolumeSourceWithTracers:
 
             Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
 
-        volume_fluxes : float or list of float, optional
+        volume_fluxes : float, int, or list of float/int, optional
             Volume flux(es) of the release in m³/s over time.
             - Constant: applies uniformly from `times[0]` to `times[-1]`.
             - Time-varying: must match the length of `times`.
@@ -138,7 +139,8 @@ class VolumeSourceWithTracers:
             - Time-varying: `volume_fluxes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
 
         tracer_concentrations : dict, optional
-            Dictionary of tracer names and their concentration values. Can be either constant or time-varying.
+            Dictionary of tracer names and their concentration values. The concentration values can be either
+            a float/int (constant in time) or a list of float/int (time-varying).
             - Constant: applies uniformly from `times[0]` to `times[-1]`.
             - Time-varying: must match the length of `times`.
 
@@ -195,6 +197,15 @@ class VolumeSourceWithTracers:
             volume_fluxes=volume_fluxes,
             tracer_concentrations=tracer_concentrations,
         )
+
+        # Convert integers to floats
+        lat = float(lat)
+        lon = float(lon)
+        depth = float(depth)
+        volume_fluxes = to_float(volume_fluxes)
+        tracer_concentrations = {
+            tracer: to_float(vals) for tracer, vals in tracer_concentrations.items()
+        }
 
         # Extend volume fluxes and tracer_concentrations across simulation period if necessary
         times, volume_fluxes, tracer_concentrations = self._handle_simulation_endpoints(

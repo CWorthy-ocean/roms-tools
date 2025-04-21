@@ -1521,3 +1521,21 @@ def wrap_longitudes(grid_ds, straddle):
             )
 
     return grid_ds
+
+
+def to_float(val):
+    """Convert a value or list of values to float.
+
+    Parameters
+    ----------
+    val : float, int, or list of float/int
+        A numeric value or a list of numeric values.
+
+    Returns
+    -------
+    float or list of float
+        The input value(s) converted to float type.
+    """
+    if isinstance(val, list):
+        return [float(v) for v in val]
+    return float(val)

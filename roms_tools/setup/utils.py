@@ -1186,6 +1186,11 @@ def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"
     return ds, time
 
 
+class NoAliasDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data):
+        return True
+
+
 def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     """Serialize a forcing object (including its grid) into a YAML file.
 
@@ -1229,6 +1234,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         yaml.dump(
             yaml_data,
             file,
+            Dumper=NoAliasDumper,
             default_flow_style=False,
             sort_keys=False,
         )
@@ -1302,6 +1308,9 @@ def _to_dict(forcing_object) -> None:
         # If the field is a datetime object, convert it to ISO format
         if isinstance(value, datetime):
             value = value.isoformat()
+        # Convert list of datetimes to list of ISO strings
+        elif isinstance(value, list) and all(isinstance(v, datetime) for v in value):
+            value = [v.isoformat() for v in value]
 
         # Add the field and its value to the forcing_data dictionary
         forcing_data[field_name] = value

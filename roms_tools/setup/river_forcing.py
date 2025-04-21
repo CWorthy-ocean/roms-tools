@@ -471,7 +471,7 @@ class RiverForcing:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        vmax = 3
+        vmax = 6
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}

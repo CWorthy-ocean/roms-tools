@@ -341,22 +341,43 @@ class VolumeSourceWithTracers:
             self.releases[name] = {}
         self.releases[name].update(params)
 
-    def plot_volume_flux(self):
-        """Plot the volume flux for each release."""
+    def plot_volume_flux(self, start=None, end=None):
+        """Plot the volume flux for each release.
+
+        Parameters
+        ----------
+        start : datetime or None
+            Start datetime. Defaults to self.start_time.
+        end : datetime or None
+            End datetime. Defaults to self.end_time.
+        """
+        start = start or self.start_time
+        end = end or self.end_time
+
+        data = self.ds["cdr_volume"]
+
         self._plot_line(
-            self.ds["cdr_volume"],
+            data,
+            start,
+            end,
             title="Volume flux of release",
             ylabel=r"m$^3$/s",
         )
 
-    def plot_tracer_concentration(self, name: str):
+    def plot_tracer_concentration(self, name: str, start=None, end=None):
         """Plot the concentration of a given tracer for each release.
 
         Parameters
         ----------
         name : str
             Name of the tracer to plot, e.g., "ALK", "DIC", etc.
+        start : datetime or None
+            Start datetime. Defaults to self.start_time.
+        end : datetime or None
+            End datetime. Defaults to self.end_time.
         """
+        start = start or self.start_time
+        end = end or self.end_time
         tracer_names = list(self.ds["tracer_name"].values)
         if name not in tracer_names:
             raise ValueError(
@@ -375,11 +396,13 @@ class VolumeSourceWithTracers:
 
         self._plot_line(
             data,
+            start,
+            end,
             title=title,
             ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
         )
 
-    def _plot_line(self, data, title="", ylabel=""):
+    def _plot_line(self, data, start, end, title="", ylabel=""):
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
 
         for ncdr in range(len(self.ds.ncdr)):
@@ -394,6 +417,7 @@ class VolumeSourceWithTracers:
             ax.legend()
 
         ax.set(title=title, ylabel=ylabel)
+        ax.set_xlim([start, end])
 
     def plot_location_top_view(self, releases="all"):
         """Plot the top-down view of release locations.
@@ -448,7 +472,7 @@ class VolumeSourceWithTracers:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        vmax = 3
+        vmax = 6
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
@@ -468,7 +492,7 @@ class VolumeSourceWithTracers:
         else:
             color_map = cm.get_cmap("tab20b")
         # Create a dictionary of colors
-        colors = {name: color_map(i) for i, name in enumerate(self.releases.keys())}
+        colors = {name: color_map(i) for i, name in enumerate(releases)}
 
         for name in releases:
             # transform coordinates to projected space
@@ -587,9 +611,7 @@ class VolumeSourceWithTracers:
 
             # Plot the bathymetry section
             section.plot(ax=ax, color="k")
-            ax.fill_between(
-                section[var_name], section.squeeze(), y2=0, color="lightblue"
-            )
+            ax.fill_between(section[var_name], section.squeeze(), y2=0, color="#deebf7")
             ax.invert_yaxis()
             ax.set_xlabel("Latitude [°N]" if var_name == "lat" else "Longitude [°E]")
             ax.set_ylabel("Depth [m]")
@@ -617,10 +639,21 @@ class VolumeSourceWithTracers:
             resolution=resolution,
             title=f"Longitude: {self.releases[release]['lon']}°E",
         )
+
+        # Use same colors as in top view
+        if len(valid_releases) <= 10:
+            color_map = cm.get_cmap("tab10")
+        elif len(valid_releases) <= 20:
+            color_map = cm.get_cmap("tab20")
+        else:
+            color_map = cm.get_cmap("tab20b")
+        color_index = valid_releases.index(release)
+        color = color_map(color_index)
+
         axs[0].plot(
             self.releases[release]["lat"],
             self.releases[release]["depth"],
-            color="r",
+            color=color,
             marker="x",
             markersize=8,
             markeredgewidth=2,
@@ -639,7 +672,7 @@ class VolumeSourceWithTracers:
         axs[1].plot(
             self.releases[release]["lon"],
             self.releases[release]["depth"],
-            color="r",
+            color=color,
             marker="x",
             markersize=8,
             markeredgewidth=2,

@@ -587,7 +587,7 @@ def test_add_release_tracer_zero_fill(start_end_times, valid_release_params):
     start_time, end_time = start_end_times
     cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
     release_params = deepcopy(valid_release_params)
-    release_params["fill_values"] = "zero_fill"
+    release_params["fill_values"] = "zero"
     cdr.add_release(name="filled_release", **release_params)
     defaults = get_river_tracer_defaults()
     # temp
@@ -604,7 +604,7 @@ def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
     # Check that the tracer concentrations are auto-filled where missing
     cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
     release_params = deepcopy(valid_release_params)
-    release_params["fill_values"] = "auto_fill"
+    release_params["fill_values"] = "auto"
     cdr.add_release(name="filled_release", **release_params)
 
     defaults = get_river_tracer_defaults()
@@ -617,6 +617,16 @@ def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
     # all other tracers should also be equal to the tracer default values, so not equal to zero
     assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) > 0.0).all()
 
+def test_add_release_invalid_fill(start_end_times, valid_release_params):
+    """Test that invalid fill method of tracer concentrations raises error."""
+    start_time, end_time = start_end_times
+    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    release_params = deepcopy(valid_release_params)
+    release_params["fill_values"] = "zero_fill"
+
+    with pytest.raises(ValueError, match="Invalid fill_values option"):
+
+        cdr.add_release(name="filled_release", **release_params)
 
 def test_plot(start_end_times, iceland_test_grid, valid_release_params):
     """Test that plotting method run without error."""

@@ -11,13 +11,18 @@ import matplotlib.cm as cm
 from roms_tools import Grid
 from roms_tools.plot import _plot, _get_projection
 from roms_tools.regrid import LateralRegridFromROMS
-from roms_tools.utils import _generate_coordinate_range, _remove_edge_nans
+from roms_tools.utils import (
+    _generate_coordinate_range,
+    _remove_edge_nans,
+    save_datasets,
+)
 from roms_tools.setup.utils import (
     gc_dist,
     get_river_tracer_defaults,
     add_tracer_metadata,
     to_float,
     _to_yaml,
+    _from_yaml,
 )
 
 
@@ -58,34 +63,35 @@ class VolumeSourceWithTracers:
         if self.start_time >= self.end_time:
             raise ValueError("`start_time` must be earlier than `end_time`.")
 
-        if not self.releases:
+        # Start with an empty dataset representing zero releases
+        ds = xr.Dataset(
+            {
+                "cdr_time": (["time"], np.empty(0)),
+                "cdr_lon": (["ncdr"], np.empty(0)),
+                "cdr_lat": (["ncdr"], np.empty(0)),
+                "cdr_dep": (["ncdr"], np.empty(0)),
+                "cdr_hsc": (["ncdr"], np.empty(0)),
+                "cdr_vsc": (["ncdr"], np.empty(0)),
+                "cdr_volume": (["time", "ncdr"], np.empty((0, 0))),
+                "cdr_tracer": (["time", "ntracers", "ncdr"], np.empty((0, 34, 0))),
+            },
+            coords={
+                "time": (["time"], np.empty(0)),
+                "release_name": (["ncdr"], np.empty(0, dtype=str)),
+            },
+        )
+        ds, tracer_metadata = add_tracer_metadata(ds, return_dict=True)
+        self.ds = ds
+        self.releases["_tracer_metadata"] = tracer_metadata
 
-            ds = xr.Dataset(
-                {
-                    "cdr_time": (["time"], np.empty(0)),
-                    "cdr_lon": (["ncdr"], np.empty(0)),
-                    "cdr_lat": (["ncdr"], np.empty(0)),
-                    "cdr_dep": (["ncdr"], np.empty(0)),
-                    "cdr_hsc": (["ncdr"], np.empty(0)),
-                    "cdr_vsc": (["ncdr"], np.empty(0)),
-                    "cdr_volume": (["time", "ncdr"], np.empty((0, 0))),
-                    "cdr_tracer": (["time", "ntracers", "ncdr"], np.empty((0, 34, 0))),
-                },
-                coords={
-                    "time": (["time"], np.empty(0)),
-                    "release_name": (["ncdr"], np.empty(0, dtype=str)),
-                },
-            )
-            ds, tracer_metadata = add_tracer_metadata(ds, return_dict=True)
-            self.ds = ds
-            self.releases["_tracer_metadata"] = tracer_metadata
-
-        else:
+        if self.releases:
             if "_metadata" not in self.releases:
                 tracer_metadata = add_tracer_metadata(ds=None, return_dict=True)
                 self.releases["_tracer_metadata"] = tracer_metadata
 
             for name, params in self.releases.items():
+                if name == "_tracer_metadata":
+                    continue  # skip metadata entry
                 self._validate_release_location(
                     name=name,
                     lat=params["lat"],
@@ -702,6 +708,37 @@ class VolumeSourceWithTracers:
         fig.subplots_adjust(hspace=0.4)
         fig.suptitle(f"Release location for: {release}")
 
+    def save(
+        self,
+        filepath: Union[str, Path],
+    ) -> None:
+        """Save the volume source with tracers to netCDF4 file.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The base path and filename for the output files.
+
+        Returns
+        -------
+        List[Path]
+            A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
+        """
+
+        # Ensure filepath is a Path object
+        filepath = Path(filepath)
+
+        # Remove ".nc" suffix if present
+        if filepath.suffix == ".nc":
+            filepath = filepath.with_suffix("")
+
+        dataset_list = [self.ds]
+        output_filenames = [str(filepath)]
+
+        saved_filenames = save_datasets(dataset_list, output_filenames)
+
+        return saved_filenames
+
     def to_yaml(self, filepath: Union[str, Path]) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
@@ -713,6 +750,27 @@ class VolumeSourceWithTracers:
         """
 
         _to_yaml(self, filepath)
+
+    @classmethod
+    def from_yaml(cls, filepath: Union[str, Path]) -> "VolumeSourceWithTracers":
+        """Create an instance of the VolumeSourceWithTracers class from a YAML file.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The path to the YAML file from which the parameters will be read.
+
+        Returns
+        -------
+        VolumeSourceWithTracers
+            An instance of the VolumeSourceWithTracers class.
+        """
+        filepath = Path(filepath)
+
+        grid = Grid.from_yaml(filepath)
+        params = _from_yaml(cls, filepath)
+
+        return cls(grid=grid, **params)
 
     def _input_checks(
         self,

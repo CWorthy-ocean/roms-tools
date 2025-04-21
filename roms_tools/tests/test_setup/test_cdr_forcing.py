@@ -1,11 +1,13 @@
 import pytest
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from roms_tools import VolumeSourceWithTracers, Grid
 import xarray as xr
 import numpy as np
 import logging
 from roms_tools.setup.utils import get_river_tracer_defaults
+from conftest import calculate_file_hash
 
 # Fixtures
 @pytest.fixture
@@ -76,6 +78,30 @@ def valid_release_params():
         "depth": 50.0,
         "volume_fluxes": 100.0,
     }
+
+
+@pytest.fixture
+def cdr_point_source_with_two_releases(
+    iceland_test_grid, start_end_times, valid_release_params
+):
+    """"Returns a CDR point source with one release."""
+    start_time, end_time = start_end_times
+    cdr = VolumeSourceWithTracers(
+        grid=iceland_test_grid, start_time=start_time, end_time=end_time
+    )
+    cdr.add_release(name="release1", **valid_release_params)
+
+    release_params = deepcopy(valid_release_params)
+    release_params["times"] = [
+        datetime(2022, 1, 1),
+        datetime(2022, 1, 3),
+        datetime(2022, 1, 5),
+    ]
+    release_params["volume_fluxes"] = [1.0, 2.0, 3.0]
+    release_params["tracer_concentrations"] = {"DIC": [10.0, 20.0, 30.0]}
+    cdr.add_release(name="release2", **release_params)
+
+    return cdr
 
 
 # Tests
@@ -630,30 +656,6 @@ def test_add_release_invalid_fill(start_end_times, valid_release_params):
         cdr.add_release(name="filled_release", **release_params)
 
 
-def test_plot(start_end_times, iceland_test_grid, valid_release_params):
-    """Test that plotting method run without error."""
-    start_time, end_time = start_end_times
-    cdr = VolumeSourceWithTracers(
-        grid=iceland_test_grid, start_time=start_time, end_time=end_time
-    )
-    release_params = deepcopy(valid_release_params)
-    release_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2022, 1, 3),
-        datetime(2022, 1, 5),
-    ]
-    release_params["volume_fluxes"] = [1.0, 2.0, 3.0]
-    release_params["tracer_concentrations"] = {"DIC": [10.0, 20.0, 30.0]}
-    cdr.add_release(name="release1", **release_params)
-
-    cdr.plot_volume_flux()
-    cdr.plot_tracer_concentration("ALK")
-    cdr.plot_tracer_concentration("DIC")
-
-    cdr.plot_location_top_view()
-    cdr.plot_location_side_view()
-
-
 def test_plot_error_when_no_grid(start_end_times, valid_release_params):
     """Test that error is raised if plotting without a grid."""
     start_time, end_time = start_end_times
@@ -668,27 +670,89 @@ def test_plot_error_when_no_grid(start_end_times, valid_release_params):
         cdr.plot_location_side_view("release1")
 
 
-def test_plot_more_errors(start_end_times, iceland_test_grid, valid_release_params):
+def test_plot(cdr_point_source_with_two_releases):
+    """Test that plotting method run without error."""
+
+    cdr_point_source_with_two_releases.plot_volume_flux()
+    cdr_point_source_with_two_releases.plot_tracer_concentration("ALK")
+    cdr_point_source_with_two_releases.plot_tracer_concentration("DIC")
+
+    cdr_point_source_with_two_releases.plot_location_top_view()
+    cdr_point_source_with_two_releases.plot_location_side_view("release1")
+
+
+def test_plot_more_errors(cdr_point_source_with_two_releases):
     """Test that error is raised on bad plot args or ambiguous release."""
-    start_time, end_time = start_end_times
-    cdr = VolumeSourceWithTracers(
-        grid=iceland_test_grid, start_time=start_time, end_time=end_time
-    )
-    release_params = deepcopy(valid_release_params)
-    cdr.add_release(name="release1", **release_params)
-    cdr.add_release(name="release2", **release_params)
 
     with pytest.raises(ValueError, match="Multiple releases found"):
-        cdr.plot_location_side_view()
+        cdr_point_source_with_two_releases.plot_location_side_view()
 
     with pytest.raises(ValueError, match="Invalid release"):
-        cdr.plot_location_side_view(release="fake")
+        cdr_point_source_with_two_releases.plot_location_side_view(release="fake")
 
     with pytest.raises(ValueError, match="Invalid releases"):
-        cdr.plot_location_top_view(releases=["fake"])
+        cdr_point_source_with_two_releases.plot_location_top_view(releases=["fake"])
 
     with pytest.raises(ValueError, match="should be a string"):
-        cdr.plot_location_top_view(releases=4)
+        cdr_point_source_with_two_releases.plot_location_top_view(releases=4)
 
     with pytest.raises(ValueError, match="list must be strings"):
-        cdr.plot_location_top_view(releases=[4])
+        cdr_point_source_with_two_releases.plot_location_top_view(releases=[4])
+
+
+def test_river_forcing_save(cdr_point_source_with_two_releases, tmp_path):
+    """Test save method."""
+
+    for file_str in ["test_cdr_forcing", "test_cdr_forcing.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
+
+            saved_filenames = cdr_point_source_with_two_releases.save(filepath)
+            # Check if the .nc file was created
+            filepath = Path(filepath).with_suffix(".nc")
+            assert saved_filenames == [filepath]
+            assert filepath.exists()
+            # Clean up the .nc file
+            filepath.unlink()
+
+
+def test_roundtrip_yaml(cdr_point_source_with_two_releases, tmp_path):
+    """Test that creating a VolumeSourceWithTracers object, saving its parameters to
+    yaml file, and re-opening yaml file creates the same object."""
+
+    # Create a temporary filepath using the tmp_path fixture
+    file_str = "test_yaml"
+    for filepath in [
+        tmp_path / file_str,
+        str(tmp_path / file_str),
+    ]:  # test for Path object and str
+
+        cdr_point_source_with_two_releases.to_yaml(filepath)
+
+        cdr_forcing_from_file = VolumeSourceWithTracers.from_yaml(filepath)
+
+        assert cdr_point_source_with_two_releases == cdr_forcing_from_file
+
+        filepath = Path(filepath)
+        filepath.unlink()
+
+
+def test_files_have_same_hash(cdr_point_source_with_two_releases, tmp_path):
+
+    yaml_filepath = tmp_path / "test_yaml.yaml"
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+
+    cdr_point_source_with_two_releases.to_yaml(yaml_filepath)
+    cdr_point_source_with_two_releases.save(filepath1)
+    cdr_from_file = VolumeSourceWithTracers.from_yaml(yaml_filepath)
+    cdr_from_file.save(filepath2)
+
+    hash1 = calculate_file_hash(filepath1)
+    hash2 = calculate_file_hash(filepath2)
+
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    filepath1.unlink()
+    filepath2.unlink()

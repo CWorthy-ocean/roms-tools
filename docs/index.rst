@@ -30,7 +30,7 @@ to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation, with o
 
   - Physical forcing: river volume flux, river temperature, river salinity
 
-- **Carbon Dioxide Removal (CDR) forcing**:
+- **Carbon Dioxide Removal (CDR) forcing**
 
 - **Nesting**
 

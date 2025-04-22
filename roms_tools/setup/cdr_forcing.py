@@ -131,7 +131,6 @@ class CDRVolumePointSource:
             Depth of the release. Must be non-negative.
         times : list of datetime.datetime, optional
             Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
-            Must contain at least two datetime objects if provided.
 
             Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
 
@@ -511,19 +510,7 @@ class CDRVolumePointSource:
 
         proj = ccrs.PlateCarree()
 
-        if len(releases) <= 10:
-            color_map = cm.get_cmap("tab10")
-        elif len(releases) <= 20:
-            color_map = cm.get_cmap("tab20")
-        else:
-            color_map = cm.get_cmap("tab20b")
-
-        # Find the indices of the releases in valid_releases such that we get consistent colors
-        release_indices = [valid_releases.index(release) for release in releases]
-        # Create a dictionary of colors
-        colors = {
-            name: color_map(release_indices[i]) for i, name in enumerate(releases)
-        }
+        colors = get_release_colors(valid_releases)
 
         for name in releases:
             # transform coordinates to projected space
@@ -671,20 +658,12 @@ class CDRVolumePointSource:
             title=f"Longitude: {self.releases[release]['lon']}°E",
         )
 
-        # Use same colors as in top view
-        if len(valid_releases) <= 10:
-            color_map = cm.get_cmap("tab10")
-        elif len(valid_releases) <= 20:
-            color_map = cm.get_cmap("tab20")
-        else:
-            color_map = cm.get_cmap("tab20b")
-        color_index = valid_releases.index(release)
-        color = color_map(color_index)
+        colors = get_release_colors(valid_releases)
 
         axs[0].plot(
             self.releases[release]["lat"],
             self.releases[release]["depth"],
-            color=color,
+            color=colors[release],
             marker="x",
             markersize=8,
             markeredgewidth=2,
@@ -703,7 +682,7 @@ class CDRVolumePointSource:
         axs[1].plot(
             self.releases[release]["lon"],
             self.releases[release]["depth"],
-            color=color,
+            color=colors[release],
             marker="x",
             markersize=8,
             markeredgewidth=2,
@@ -1012,3 +991,39 @@ class CDRVolumePointSource:
                 "Grid not provided: cannot verify whether the specified lat/lon/depth location is within the domain or on land. "
                 "Please check manually or provide a grid when instantiating the class."
             )
+
+def get_release_colors(valid_releases):
+    """
+    Returns a dictionary of colors for the valid releases, based on a consistent colormap.
+
+    Parameters
+    ----------
+    valid_releases : list of str
+        A list of all valid release names to ensure consistent color assignment.
+
+    Returns
+    -------
+    dict
+        A dictionary with release names as keys and their corresponding colors as values.
+
+    Notes
+    -----
+    The colormap is chosen based on the number of releases.
+    """
+
+    # Determine the colormap based on the number of releases
+    if len(valid_releases) <= 10:
+        color_map = cm.get_cmap("tab10")
+    elif len(valid_releases) <= 20:
+        color_map = cm.get_cmap("tab20")
+    else:
+        color_map = cm.get_cmap("tab20b")
+
+    # Ensure the number of releases doesn't exceed the available colormap capacity
+    if len(valid_releases) > color_map.N:
+        raise ValueError(f"Too many releases. The selected colormap supports up to {color_map.N} releases.")
+
+    # Create a dictionary of colors based on the release indices
+    colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
+
+    return colors

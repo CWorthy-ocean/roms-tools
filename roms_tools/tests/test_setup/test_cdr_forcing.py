@@ -9,6 +9,10 @@ import logging
 from roms_tools.setup.utils import get_river_tracer_defaults
 from conftest import calculate_file_hash
 
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
 
 # Fixtures
 @pytest.fixture
@@ -679,6 +683,12 @@ def test_plot(cdr_point_source_with_two_releases):
     cdr_point_source_with_two_releases.plot_tracer_concentration("DIC")
 
     cdr_point_source_with_two_releases.plot_location_top_view()
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_plot_side_view(cdr_point_source_with_two_releases):
+    """Test that plotting method run without error."""
+
     cdr_point_source_with_two_releases.plot_location_side_view("release1")
 
 

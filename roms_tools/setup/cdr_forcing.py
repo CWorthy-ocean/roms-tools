@@ -87,10 +87,6 @@ class CDRVolumePointSource:
         self.releases["_tracer_metadata"] = tracer_metadata
 
         if self.releases:
-            if "_metadata" not in self.releases:
-                tracer_metadata = add_tracer_metadata(ds=None, return_dict=True)
-                self.releases["_tracer_metadata"] = tracer_metadata
-
             for name, params in self.releases.items():
                 if name == "_tracer_metadata":
                     continue  # skip metadata entry

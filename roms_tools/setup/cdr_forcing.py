@@ -366,43 +366,69 @@ class CDRVolumePointSource:
             self.releases[name] = {}
         self.releases[name].update(params)
 
-    def plot_volume_flux(self, start=None, end=None):
-        """Plot the volume flux for each release.
+    def plot_volume_flux(self, start=None, end=None, releases="all"):
+        """Plot the volume flux for each specified release within the given time range.
 
         Parameters
         ----------
         start : datetime or None
-            Start datetime. Defaults to self.start_time.
+            Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
-            End datetime. Defaults to self.end_time.
+            End datetime for the plot. If None, defaults to `self.end_time`.
+        releases : str, list of str, or "all", optional
+            A string or list of release names to plot.
+            If "all", the method will plot all releases.
+            The default is "all".
         """
+
         start = start or self.start_time
         end = end or self.end_time
+
+        # Handle "all" releases case
+        if releases == "all":
+            releases = [k for k in self.releases if k != "_tracer_metadata"]
+        # Validate input for release names
+        self._validate_release_input(releases)
 
         data = self.ds["cdr_volume"]
 
         self._plot_line(
             data,
+            releases,
             start,
             end,
             title="Volume flux of release(s)",
             ylabel=r"m$^3$/s",
         )
 
-    def plot_tracer_concentration(self, name: str, start=None, end=None):
-        """Plot the concentration of a given tracer for each release.
+    def plot_tracer_concentration(
+        self, name: str, start=None, end=None, releases="all"
+    ):
+        """Plot the concentration of a given tracer for each specified release within
+        the given time range.
 
         Parameters
         ----------
         name : str
             Name of the tracer to plot, e.g., "ALK", "DIC", etc.
         start : datetime or None
-            Start datetime. Defaults to self.start_time.
+            Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
-            End datetime. Defaults to self.end_time.
+            End datetime for the plot. If None, defaults to `self.end_time`.
+        releases : str, list of str, or "all", optional
+            A string or list of release names to plot.
+            If "all", the method will plot all releases.
+            The default is "all".
         """
         start = start or self.start_time
         end = end or self.end_time
+
+        # Handle "all" releases case
+        if releases == "all":
+            releases = [k for k in self.releases if k != "_tracer_metadata"]
+        # Validate input for release names
+        self._validate_release_input(releases)
+
         tracer_names = list(self.ds["tracer_name"].values)
         if name not in tracer_names:
             raise ValueError(
@@ -421,24 +447,29 @@ class CDRVolumePointSource:
 
         self._plot_line(
             data,
+            releases,
             start,
             end,
             title=title,
             ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
         )
 
-    def _plot_line(self, data, start, end, title="", ylabel=""):
-        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+    def _plot_line(self, data, releases, start, end, title="", ylabel=""):
+        """Plots a line graph for the specified releases and time range."""
+        colors = self._get_release_colors()
 
-        for ncdr in range(len(self.ds.ncdr)):
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+        for release in releases:
+            ncdr = np.where(self.ds["release_name"].values == release)[0][0]
             data.isel(ncdr=ncdr).plot(
                 ax=ax,
                 linewidth=2,
-                label=self.ds["release_name"].isel(ncdr=ncdr).item(),
+                label=release,
+                color=colors[release],
                 marker="x",
             )
 
-        if len(self.ds.ncdr) > 0:
+        if len(releases) > 0:
             ax.legend()
 
         ax.set(title=title, ylabel=ylabel)
@@ -470,24 +501,8 @@ class CDRVolumePointSource:
         if releases == "all":
             releases = [k for k in self.releases if k != "_tracer_metadata"]
 
-        # Validate the releases input
-        if isinstance(releases, str):
-            releases = [releases]  # Convert to list if a single string is provided
-        elif isinstance(releases, list):
-            if not all(isinstance(r, str) for r in releases):
-                raise ValueError("All elements in `releases` list must be strings.")
-        else:
-            raise ValueError(
-                "`releases` should be a string (single release name) or a list of strings (release names)."
-            )
-
-        # Validate that the specified releases exist in self.releases
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        invalid_releases = [
-            release for release in releases if release not in valid_releases
-        ]
-        if invalid_releases:
-            raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
+        # Validate input for release names
+        self._validate_release_input(releases)
 
         # Proceed with plotting
         field = self.grid.ds.mask_rho
@@ -510,7 +525,7 @@ class CDRVolumePointSource:
 
         proj = ccrs.PlateCarree()
 
-        colors = get_release_colors(valid_releases)
+        colors = self._get_release_colors()
 
         for name in releases:
             # transform coordinates to projected space
@@ -563,19 +578,15 @@ class CDRVolumePointSource:
             )
 
         valid_releases = [r for r in self.releases if r != "_tracer_metadata"]
-
         if release is None:
             if len(valid_releases) == 1:
                 release = valid_releases[0]
             else:
                 raise ValueError(
-                    f"Multiple releases found: {valid_releases}. Please specify a release to plot."
+                    f"Multiple releases found: {valid_releases}. Please specify a single release to plot."
                 )
 
-        if release not in valid_releases:
-            raise ValueError(
-                f"Invalid release: {release}. Valid options are: {valid_releases}"
-            )
+        self._validate_release_input(release)
 
         def _plot_bathymetry_section(
             ax, h, dim, fixed_val, coord_deg, resolution, title
@@ -658,7 +669,7 @@ class CDRVolumePointSource:
             title=f"Longitude: {self.releases[release]['lon']}°E",
         )
 
-        colors = get_release_colors(valid_releases)
+        colors = self._get_release_colors()
 
         axs[0].plot(
             self.releases[release]["lat"],
@@ -992,38 +1003,148 @@ class CDRVolumePointSource:
                 "Please check manually or provide a grid when instantiating the class."
             )
 
-def get_release_colors(valid_releases):
-    """
-    Returns a dictionary of colors for the valid releases, based on a consistent colormap.
+    def _validate_release_input(self, releases, list_allowed=True):
+        """Validates the input for release names in plotting methods to ensure they are
+        in an acceptable format and exist within the set of valid releases.
 
-    Parameters
-    ----------
-    valid_releases : list of str
-        A list of all valid release names to ensure consistent color assignment.
+        This method ensures that the `releases` parameter is either a single release name (string) or a list
+        of release names (strings), and checks that each release exists in the set of valid releases.
 
-    Returns
-    -------
-    dict
-        A dictionary with release names as keys and their corresponding colors as values.
+        Parameters
+        ----------
+        releases : str or list of str
+            A single release name as a string, or a list of release names (strings) to validate.
 
-    Notes
-    -----
-    The colormap is chosen based on the number of releases.
-    """
+        list_allowed : bool, optional
+            If `True`, a list of release names is allowed. If `False`, only a single release name (string)
+            is allowed. Default is `True`.
 
-    # Determine the colormap based on the number of releases
-    if len(valid_releases) <= 10:
-        color_map = cm.get_cmap("tab10")
-    elif len(valid_releases) <= 20:
-        color_map = cm.get_cmap("tab20")
-    else:
-        color_map = cm.get_cmap("tab20b")
+        Raises
+        ------
+        ValueError
+            If `releases` is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
 
-    # Ensure the number of releases doesn't exceed the available colormap capacity
-    if len(valid_releases) > color_map.N:
-        raise ValueError(f"Too many releases. The selected colormap supports up to {color_map.N} releases.")
+        Notes
+        -----
+        This method checks that the `releases` input is in a valid format (either a string or a list of strings),
+        and ensures each release is present in the set of valid releases defined in `self.releases`. Invalid releases
+        are reported in the error message.
 
-    # Create a dictionary of colors based on the release indices
-    colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
+        If `list_allowed` is set to `False`, only a single release name (string) will be accepted. Otherwise, a
+        list of release names is also acceptable.
+        """
 
-    return colors
+        # Ensure that a list of releases is only allowed if `list_allowed` is True
+        if not list_allowed and not isinstance(releases, str):
+            raise ValueError(
+                f"Only a single release name (string) is allowed. Got: {releases}"
+            )
+
+        if isinstance(releases, str):
+            releases = [releases]  # Convert to list if a single string is provided
+        elif isinstance(releases, list):
+            if not all(isinstance(r, str) for r in releases):
+                raise ValueError("All elements in `releases` list must be strings.")
+        else:
+            raise ValueError(
+                "`releases` should be a string (single release name) or a list of strings (release names)."
+            )
+
+        # Validate that the specified releases exist in self.releases
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+        invalid_releases = [
+            release for release in releases if release not in valid_releases
+        ]
+        if invalid_releases:
+            raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
+
+    def _validate_release_input(self, releases, list_allowed=True):
+        """Validates the input for release names in plotting methods to ensure they are
+        in an acceptable format and exist within the set of valid releases.
+
+        Parameters
+        ----------
+        releases : str or list of str
+            A single release name as a string, or a list of release names (strings) to validate.
+
+        Raises
+        ------
+        ValueError
+            If the input is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
+
+        Notes
+        -----
+        This method ensures that the `releases` input is in a valid format (a string or a list of strings),
+        and checks that each release exists in the set of valid releases defined in `self.releases`.
+        Invalid releases are reported in the error message.
+        """
+
+        # Validate the releases input
+        if isinstance(releases, str):
+            releases = [releases]  # Convert to list if a single string is provided
+        elif isinstance(releases, list):
+            if not all(isinstance(r, str) for r in releases):
+                raise ValueError("All elements in `releases` list must be strings.")
+        else:
+            raise ValueError(
+                "`releases` should be a string (single release name) or a list of strings (release names)."
+            )
+
+        # Validate that the specified releases exist in self.releases
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+        invalid_releases = [
+            release for release in releases if release not in valid_releases
+        ]
+        if invalid_releases:
+            raise ValueError(
+                f"Invalid releases: {', '.join(invalid_releases)}. Valid options are: {valid_releases}"
+            )
+
+    def _get_release_colors(self):
+        """Returns a dictionary of colors for the valid releases, based on a consistent
+        colormap.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        dict
+            A dictionary where the keys are release names and the values are their corresponding colors,
+            assigned based on the order of releases in the valid releases list.
+
+        Raises
+        ------
+        ValueError
+            If the number of valid releases exceeds the available colormap capacity.
+
+        Notes
+        -----
+        The colormap is chosen dynamically based on the number of valid releases:
+
+        - If there are 10 or fewer releases, the "tab10" colormap is used.
+        - If there are more than 10 but fewer than or equal to 20 releases, the "tab20" colormap is used.
+        - For more than 20 releases, the "tab20b" colormap is used.
+        """
+
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+
+        # Determine the colormap based on the number of releases
+        if len(valid_releases) <= 10:
+            color_map = cm.get_cmap("tab10")
+        elif len(valid_releases) <= 20:
+            color_map = cm.get_cmap("tab20")
+        else:
+            color_map = cm.get_cmap("tab20b")
+
+        # Ensure the number of releases doesn't exceed the available colormap capacity
+        if len(valid_releases) > color_map.N:
+            raise ValueError(
+                f"Too many releases. The selected colormap supports up to {color_map.N} releases."
+            )
+
+        # Create a dictionary of colors based on the release indices
+        colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
+
+        return colors

@@ -31,7 +31,7 @@ class CDRVolumePointSource:
     """Represents one or several volume sources of water with tracers at specific
     location(s). This class is particularly useful for modeling point sources of Carbon
     Dioxide Removal (CDR) forcing data, such as the injection of water and
-    biogeochemical tracers (e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC))
+    biogeochemical tracers, e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC),
     through a pipe.
 
     Parameters
@@ -39,9 +39,9 @@ class CDRVolumePointSource:
     grid : Grid, optional
         Object representing the grid for spatial context.
     start_time : datetime
-        Start time of the model simulation.
+        Start time of the ROMS model simulation.
     end_time : datetime
-        End time of the model simulation.
+        End time of the ROMS model simulation.
     model_reference_date : datetime, optional
         Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
     releases : dict, optional
@@ -58,6 +58,8 @@ class CDRVolumePointSource:
     end_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
     releases: Optional[dict] = field(default_factory=dict)
+
+    ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
         if self.start_time >= self.end_time:
@@ -124,40 +126,48 @@ class CDRVolumePointSource:
         name : str
             Unique identifier for the release.
         lat : float or int
-            Latitude of the release location. Must be between -90 and 90.
+            Latitude of the release location in degrees North. Must be between -90 and 90.
         lon : float or int
-            Longitude of the release location. No restrictions on bounds.
+            Longitude of the release location in degrees East. No restrictions on bounds.
         depth : float or int
-            Depth of the release. Must be non-negative.
+            Depth of the release in meters. Must be non-negative.
         times : list of datetime.datetime, optional
             Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
 
             Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
 
         volume_fluxes : float, int, or list of float/int, optional
+
             Volume flux(es) of the release in m³/s over time.
-            - Constant: applies uniformly from `times[0]` to `times[-1]`.
+
+            - Constant: applies uniformly across the entire simulation period.
             - Time-varying: must match the length of `times`.
 
             Example:
-            - Constant: `volume_fluxes=1000.0` (uniform across the time period).
+
+            - Constant: `volume_fluxes=1000.0` (uniform across the entire simulation period).
             - Time-varying: `volume_fluxes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
 
         tracer_concentrations : dict, optional
+
             Dictionary of tracer names and their concentration values. The concentration values can be either
             a float/int (constant in time) or a list of float/int (time-varying).
-            - Constant: applies uniformly from `times[0]` to `times[-1]`.
+
+            - Constant: applies uniformly across the entire simulation period.
             - Time-varying: must match the length of `times`.
 
             Default is an empty dictionary (`{}`) if not provided.
             Example:
+
             - Constant: `{"ALK": 2000.0, "DIC": 1900.0}`
             - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
             - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
 
         fill_values : str, optional
+
             Strategy for filling missing tracer concentration values. Options:
-            - "auto" (default): automatically set values
+
+            - "auto" (default): automatically set values to non-zero defaults
             - "zero": fill missing values with 0.0
         """
         # Check that the name is unique
@@ -555,9 +565,9 @@ class CDRVolumePointSource:
         This method creates two plots:
 
         - A bathymetry section along a fixed longitude (latitudinal view),
-          with the release location marked by a red "x".
+          with the release location marked by an "x".
         - A bathymetry section along a fixed latitude (longitudinal view),
-          with the release location also marked by a red "x".
+          with the release location also marked by an "x".
 
         Parameters
         ----------
@@ -568,6 +578,7 @@ class CDRVolumePointSource:
         Raises
         ------
         ValueError
+
             If `self.grid` is not set.
             If the specified `release` does not exist in `self.releases`.
             If no `release` is provided when multiple releases are available.

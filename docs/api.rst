@@ -50,6 +50,14 @@ River Forcing
 
    roms_tools.RiverForcing
 
+CDR Forcing
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   roms_tools.CDRVolumePointSource
+
 Nesting
 --------------------
 

@@ -27,12 +27,12 @@ from roms_tools.setup.utils import (
 
 
 @dataclass(kw_only=True)
-class VolumeSourceWithTracers:
-    """Represents one or several volume sources of water with tracers, simulating the
-    introduction of water and tracer concentrations at specific location(s). This class
-    is particularly useful for modeling point sources of Carbon Dioxide Removal (CDR)
-    forcing data, such as the injection of water and biogeochemical tracers (e.g.,
-    alkalinity (ALK) or dissolved inorganic carbon (DIC)) through a pipe.
+class CDRVolumePointSource:
+    """Represents one or several volume sources of water with tracers at specific
+    location(s). This class is particularly useful for modeling point sources of Carbon
+    Dioxide Removal (CDR) forcing data, such as the injection of water and
+    biogeochemical tracers (e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC))
+    through a pipe.
 
     Parameters
     ----------
@@ -752,8 +752,8 @@ class VolumeSourceWithTracers:
         _to_yaml(self, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "VolumeSourceWithTracers":
-        """Create an instance of the VolumeSourceWithTracers class from a YAML file.
+    def from_yaml(cls, filepath: Union[str, Path]) -> "CDRVolumePointSource":
+        """Create an instance of the CDRVolumePointSource class from a YAML file.
 
         Parameters
         ----------
@@ -762,8 +762,8 @@ class VolumeSourceWithTracers:
 
         Returns
         -------
-        VolumeSourceWithTracers
-            An instance of the VolumeSourceWithTracers class.
+        CDRVolumePointSource
+            An instance of the CDRVolumePointSource class.
         """
         filepath = Path(filepath)
 

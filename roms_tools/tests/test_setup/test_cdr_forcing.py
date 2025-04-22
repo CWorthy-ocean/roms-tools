@@ -2,7 +2,7 @@ import pytest
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from roms_tools import VolumeSourceWithTracers, Grid
+from roms_tools import CDRVolumePointSource, Grid
 import xarray as xr
 import numpy as np
 import logging
@@ -38,7 +38,7 @@ def start_end_times():
 def empty_cdr_point_source_without_grid(start_end_times):
     """Returns an empty CDR point source without a grid."""
     start_time, end_time = start_end_times
-    return VolumeSourceWithTracers(
+    return CDRVolumePointSource(
         start_time=start_time,
         end_time=end_time,
     )
@@ -48,7 +48,7 @@ def empty_cdr_point_source_without_grid(start_end_times):
 def empty_cdr_point_source_with_grid(iceland_test_grid, start_end_times):
     """Returns an empty CDR point source with the Iceland test grid."""
     start_time, end_time = start_end_times
-    return VolumeSourceWithTracers(
+    return CDRVolumePointSource(
         grid=iceland_test_grid,
         start_time=start_time,
         end_time=end_time,
@@ -61,7 +61,7 @@ def empty_cdr_point_source_with_grid_that_straddles(
 ):
     """Returns an empty CDR point source with a grid straddling the prime meridian."""
     start_time, end_time = start_end_times
-    return VolumeSourceWithTracers(
+    return CDRVolumePointSource(
         grid=test_grid_that_straddles,
         start_time=start_time,
         end_time=end_time,
@@ -86,7 +86,7 @@ def cdr_point_source_with_two_releases(
 ):
     """"Returns a CDR point source with one release."""
     start_time, end_time = start_end_times
-    cdr = VolumeSourceWithTracers(
+    cdr = CDRVolumePointSource(
         grid=iceland_test_grid, start_time=start_time, end_time=end_time
     )
     cdr.add_release(name="release1", **valid_release_params)
@@ -221,7 +221,7 @@ def test_merge_multiple_releases(start_end_times, valid_release_params):
     timestamp adjustment, and interpolation."""
 
     start_time, end_time = start_end_times
-    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
     dic_index = 9
 
     # add first release
@@ -385,7 +385,7 @@ def test_cdr_point_source_init_invalid_times():
     with pytest.raises(
         ValueError, match="`start_time` must be earlier than `end_time`"
     ):
-        VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+        CDRVolumePointSource(start_time=start_time, end_time=end_time)
 
 
 @pytest.mark.parametrize(
@@ -611,7 +611,7 @@ def test_invalid_release_location(
 def test_add_release_tracer_zero_fill(start_end_times, valid_release_params):
     """Test that zero fill of tracer concentrations works as expected."""
     start_time, end_time = start_end_times
-    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
     release_params = deepcopy(valid_release_params)
     release_params["fill_values"] = "zero"
     cdr.add_release(name="filled_release", **release_params)
@@ -628,7 +628,7 @@ def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
     """Test that auto fill of tracer concentrations works as expected."""
     start_time, end_time = start_end_times
     # Check that the tracer concentrations are auto-filled where missing
-    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
     release_params = deepcopy(valid_release_params)
     release_params["fill_values"] = "auto"
     cdr.add_release(name="filled_release", **release_params)
@@ -647,7 +647,7 @@ def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
 def test_add_release_invalid_fill(start_end_times, valid_release_params):
     """Test that invalid fill method of tracer concentrations raises error."""
     start_time, end_time = start_end_times
-    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
     release_params = deepcopy(valid_release_params)
     release_params["fill_values"] = "zero_fill"
 
@@ -659,7 +659,7 @@ def test_add_release_invalid_fill(start_end_times, valid_release_params):
 def test_plot_error_when_no_grid(start_end_times, valid_release_params):
     """Test that error is raised if plotting without a grid."""
     start_time, end_time = start_end_times
-    cdr = VolumeSourceWithTracers(start_time=start_time, end_time=end_time)
+    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
     release_params = deepcopy(valid_release_params)
     cdr.add_release(name="release1", **release_params)
 
@@ -717,8 +717,8 @@ def test_river_forcing_save(cdr_point_source_with_two_releases, tmp_path):
 
 
 def test_roundtrip_yaml(cdr_point_source_with_two_releases, tmp_path):
-    """Test that creating a VolumeSourceWithTracers object, saving its parameters to
-    yaml file, and re-opening yaml file creates the same object."""
+    """Test that creating a CDRVolumePointSource object, saving its parameters to yaml
+    file, and re-opening yaml file creates the same object."""
 
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"
@@ -729,7 +729,7 @@ def test_roundtrip_yaml(cdr_point_source_with_two_releases, tmp_path):
 
         cdr_point_source_with_two_releases.to_yaml(filepath)
 
-        cdr_forcing_from_file = VolumeSourceWithTracers.from_yaml(filepath)
+        cdr_forcing_from_file = CDRVolumePointSource.from_yaml(filepath)
 
         assert cdr_point_source_with_two_releases == cdr_forcing_from_file
 
@@ -745,7 +745,7 @@ def test_files_have_same_hash(cdr_point_source_with_two_releases, tmp_path):
 
     cdr_point_source_with_two_releases.to_yaml(yaml_filepath)
     cdr_point_source_with_two_releases.save(filepath1)
-    cdr_from_file = VolumeSourceWithTracers.from_yaml(yaml_filepath)
+    cdr_from_file = CDRVolumePointSource.from_yaml(yaml_filepath)
     cdr_from_file.save(filepath2)
 
     hash1 = calculate_file_hash(filepath1)

@@ -9,6 +9,7 @@ import logging
 from roms_tools.setup.utils import get_river_tracer_defaults
 from conftest import calculate_file_hash
 
+
 # Fixtures
 @pytest.fixture
 def iceland_test_grid():
@@ -84,7 +85,7 @@ def valid_release_params():
 def cdr_point_source_with_two_releases(
     iceland_test_grid, start_end_times, valid_release_params
 ):
-    """"Returns a CDR point source with one release."""
+    """Returns a CDR point source with one release."""
     start_time, end_time = start_end_times
     cdr = CDRVolumePointSource(
         grid=iceland_test_grid, start_time=start_time, end_time=end_time

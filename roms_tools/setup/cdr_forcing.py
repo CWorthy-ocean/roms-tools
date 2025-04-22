@@ -593,7 +593,7 @@ class CDRVolumePointSource:
                     f"Multiple releases found: {valid_releases}. Please specify a single release to plot."
                 )
 
-        self._validate_release_input(release)
+        self._validate_release_input(release, list_allowed=False)
 
         def _plot_bathymetry_section(
             ax, h, dim, fixed_val, coord_deg, resolution, title
@@ -1064,48 +1064,6 @@ class CDRVolumePointSource:
         ]
         if invalid_releases:
             raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
-
-    def _validate_release_input(self, releases, list_allowed=True):
-        """Validates the input for release names in plotting methods to ensure they are
-        in an acceptable format and exist within the set of valid releases.
-
-        Parameters
-        ----------
-        releases : str or list of str
-            A single release name as a string, or a list of release names (strings) to validate.
-
-        Raises
-        ------
-        ValueError
-            If the input is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
-
-        Notes
-        -----
-        This method ensures that the `releases` input is in a valid format (a string or a list of strings),
-        and checks that each release exists in the set of valid releases defined in `self.releases`.
-        Invalid releases are reported in the error message.
-        """
-
-        # Validate the releases input
-        if isinstance(releases, str):
-            releases = [releases]  # Convert to list if a single string is provided
-        elif isinstance(releases, list):
-            if not all(isinstance(r, str) for r in releases):
-                raise ValueError("All elements in `releases` list must be strings.")
-        else:
-            raise ValueError(
-                "`releases` should be a string (single release name) or a list of strings (release names)."
-            )
-
-        # Validate that the specified releases exist in self.releases
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        invalid_releases = [
-            release for release in releases if release not in valid_releases
-        ]
-        if invalid_releases:
-            raise ValueError(
-                f"Invalid releases: {', '.join(invalid_releases)}. Valid options are: {valid_releases}"
-            )
 
     def _get_release_colors(self):
         """Returns a dictionary of colors for the valid releases, based on a consistent

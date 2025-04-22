@@ -234,7 +234,7 @@
                 "ntracers",
                 "nriver"
             ],
-            "coordinates": "abs_time month river_name tracer_name",
+            "coordinates": "abs_time month river_name tracer_long_name tracer_name tracer_unit",
             "long_name": "River tracer data"
         },
         "river_volume/.zarray": {
@@ -268,6 +268,32 @@
             "long_name": "River volume flux",
             "units": "m^3/s"
         },
+        "tracer_long_name/.zarray": {
+            "chunks": [
+                34
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U43",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                34
+            ],
+            "zarr_format": 2
+        },
+        "tracer_long_name/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntracers"
+            ],
+            "long_name": "Tracer long name"
+        },
         "tracer_name/.zarray": {
             "chunks": [
                 34
@@ -293,6 +319,32 @@
                 "ntracers"
             ],
             "long_name": "Tracer name"
+        },
+        "tracer_unit/.zarray": {
+            "chunks": [
+                34
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U15",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                34
+            ],
+            "zarr_format": 2
+        },
+        "tracer_unit/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntracers"
+            ],
+            "long_name": "Tracer unit"
         }
     },
     "zarr_consolidated_format": 1

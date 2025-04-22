@@ -4,18 +4,27 @@
 
 ### New Features
 
-* Enable reading from unified BGC dataset ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
-
 ### Breaking Changes
+
+### Internal Changes
+
+* Correct default value for NOx from 1e-13 to 1e-12 kg/m2/s ([#294](https://github.com/CWorthy-ocean/roms-tools/pull/294))
+
+### Documentation
+
+### Bugfixes
+
+## v2.6.2
+
+### New Features
+
+* Enable reading from unified BGC dataset ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
 
 ### Internal Changes
 
 * Refactoring of `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` to accommodate optional variable names ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
 * Modification of the `Dataset` class including the `choose_subdomain` method, the capability to handle fractional days in a climatology, and the addition of a `needs_lateral_fill` attribute ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
-
-### Documentation
-
-### Bugfixes
+* Separation of `river_flux` variable into `river_index` and `river_fraction` ([#291](https://github.com/CWorthy-ocean/roms-tools/pull/291))
 
 ## v2.6.1
 

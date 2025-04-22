@@ -3,6 +3,6 @@
         "eta_rho",
         "xi_rho"
     ],
-    "long_name": "River ID plus local volume fraction",
+    "long_name": "River ID",
     "units": "none"
 }

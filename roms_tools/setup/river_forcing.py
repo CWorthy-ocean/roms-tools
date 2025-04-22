@@ -399,24 +399,25 @@ class RiverForcing:
         return river_indices
 
     def _write_indices_into_dataset(self, ds):
-        """Adds river location indices to the dataset as the "river_flux" variable.
+        """Adds river location indices to the dataset as the "river_index" and
+        "river_fraction" variables.
 
-        This method creates a new "river_flux" variable
-        using river station indices from `self.indices` and assigns it to the dataset.
-        The indices specify the river station locations in terms of eta_rho and xi_rho grid cell indices.
+        This method creates new "river_index" and "river_fraction" variables using river station indices
+        from `self.indices` and assigns them to the dataset.
 
         Parameters
         ----------
         ds : xarray.Dataset
-            The dataset to which the "river_flux" variable will be added.
+            The dataset to which the "river_index" and "river_fraction" variables will be added.
 
         Returns
         -------
         xarray.Dataset
-            The modified dataset with the "river_flux" variable added.
+            The modified dataset with the "river_index" and "river_fraction" variables added.
         """
 
-        river_locations = xr.zeros_like(self.grid.ds.h)
+        river_index = xr.zeros_like(self.grid.ds.h)
+        river_fraction = xr.zeros_like(self.grid.ds.h)
 
         for nriver in ds.nriver:
             river_name = str(ds.river_name.sel(nriver=nriver).values)
@@ -425,14 +426,18 @@ class RiverForcing:
 
             for eta_index, xi_index in indices:
 
-                river_locations[eta_index, xi_index] = (
-                    nriver  # assign unique nriver ID (Fortran-based indexing)
-                    + fraction  # Fractional contribution for multiple grid points
-                )
+                # Assign unique nriver ID (Fortran-based indexing)
+                river_index[eta_index, xi_index] = nriver
+                # Fractional contribution for multiple grid points
+                river_fraction[eta_index, xi_index] = fraction
 
-        river_locations.attrs["long_name"] = "River ID plus local volume fraction"
-        river_locations.attrs["units"] = "none"
-        ds["river_flux"] = river_locations
+        river_index.attrs["long_name"] = "River ID"
+        river_index.attrs["units"] = "none"
+        ds["river_index"] = river_index
+
+        river_fraction.attrs["long_name"] = "River volume fraction"
+        river_fraction.attrs["units"] = "none"
+        ds["river_fraction"] = river_fraction
 
         ds = ds.drop_vars(["lat_rho", "lon_rho"])
 

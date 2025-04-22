@@ -386,7 +386,7 @@ class CDRVolumePointSource:
             data,
             start,
             end,
-            title="Volume flux of release",
+            title="Volume flux of release(s)",
             ylabel=r"m$^3$/s",
         )
 
@@ -418,7 +418,7 @@ class CDRVolumePointSource:
         elif name == "salt":
             title = "Salinity of release water"
         else:
-            title = f"{name} concentration of release"
+            title = f"{name} concentration of release(s)"
 
         self._plot_line(
             data,
@@ -483,9 +483,9 @@ class CDRVolumePointSource:
             )
 
         # Validate that the specified releases exist in self.releases
-        valid_release_names = [k for k in self.releases if k != "_tracer_metadata"]
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
         invalid_releases = [
-            release for release in releases if release not in valid_release_names
+            release for release in releases if release not in valid_releases
         ]
         if invalid_releases:
             raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
@@ -517,8 +517,13 @@ class CDRVolumePointSource:
             color_map = cm.get_cmap("tab20")
         else:
             color_map = cm.get_cmap("tab20b")
+
+        # Find the indices of the releases in valid_releases such that we get consistent colors
+        release_indices = [valid_releases.index(release) for release in releases]
         # Create a dictionary of colors
-        colors = {name: color_map(i) for i, name in enumerate(releases)}
+        colors = {
+            name: color_map(release_indices[i]) for i, name in enumerate(releases)
+        }
 
         for name in releases:
             # transform coordinates to projected space

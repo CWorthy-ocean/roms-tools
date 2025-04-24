@@ -60,7 +60,33 @@
             ],
             "long_name": "Month index (1-12)"
         },
-        "river_location/.zarray": {
+        "nriver/.zarray": {
+            "chunks": [
+                6
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                6
+            ],
+            "zarr_format": 2
+        },
+        "nriver/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "nriver"
+            ],
+            "long_name": "River ID (1-based Fortran indexing)"
+        },
+        "river_fraction/.zarray": {
             "chunks": [
                 20,
                 20
@@ -82,12 +108,42 @@
             ],
             "zarr_format": 2
         },
-        "river_location/.zattrs": {
+        "river_fraction/.zattrs": {
             "_ARRAY_DIMENSIONS": [
                 "eta_rho",
                 "xi_rho"
             ],
-            "long_name": "River index plus local volume fraction",
+            "long_name": "River volume fraction",
+            "units": "none"
+        },
+        "river_index/.zarray": {
+            "chunks": [
+                20,
+                20
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                20,
+                20
+            ],
+            "zarr_format": 2
+        },
+        "river_index/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "eta_rho",
+                "xi_rho"
+            ],
+            "long_name": "River ID",
             "units": "none"
         },
         "river_name/.zarray": {

@@ -14,6 +14,8 @@ from roms_tools.setup.datasets import (
     ERA5Dataset,
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
+    UnifiedBGCDataset,
+    UnifiedBGCSurfaceDataset,
 )
 from roms_tools.download import download_test_data
 import hashlib
@@ -255,6 +257,34 @@ def initial_conditions_with_bgc_from_climatology(request, use_dask):
 
 
 @pytest.fixture(scope="session")
+def initial_conditions_with_unified_bgc_from_climatology(use_dask):
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def boundary_forcing(use_dask):
     """Fixture for creating a BoundaryForcing object."""
     grid = Grid(
@@ -399,6 +429,37 @@ def bgc_boundary_forcing_from_climatology(request, use_dask):
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+        type="bgc",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def bgc_boundary_forcing_from_unified_climatology(use_dask):
+    """Fixture for creating a BoundaryForcing object."""
+
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    return BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
@@ -555,6 +616,35 @@ def bgc_surface_forcing_from_climatology(request, use_dask):
 
 
 @pytest.fixture(scope="session")
+def bgc_surface_forcing_from_unified_climatology(request, use_dask):
+    """Fixture for creating a SurfaceForcing object with BGC from climatology."""
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
+
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},
+        type="bgc",
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def river_forcing():
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
     grid = Grid(
@@ -695,6 +785,38 @@ def cesm_surface_bgc_data(request, use_dask):
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2013, 1, 1),
         climatology=False,
+        use_dask=use_dask,
+    )
+    data.post_process()
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def unified_bgc_data(request, use_dask):
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+
+    data = UnifiedBGCDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=True,
+        use_dask=use_dask,
+    )
+    data.post_process()
+
+    return data
+
+
+@pytest.fixture(scope="session")
+def unified_surface_bgc_data(request, use_dask):
+    fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+
+    data = UnifiedBGCSurfaceDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=True,
         use_dask=use_dask,
     )
     data.post_process()

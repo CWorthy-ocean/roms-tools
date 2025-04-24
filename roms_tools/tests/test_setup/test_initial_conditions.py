@@ -6,7 +6,7 @@ import numpy as np
 import textwrap
 import logging
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import CESMBGCDataset
+from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
 from pathlib import Path
 from conftest import calculate_data_hash
 
@@ -19,6 +19,7 @@ from conftest import calculate_data_hash
         "initial_conditions_with_bgc",
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_initial_conditions_creation(ic_fixture, request):
@@ -40,6 +41,59 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert "v" in ic.ds
     assert "zeta" in ic.ds
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
+
+
+@pytest.mark.parametrize(
+    "ic_fixture",
+    [
+        "initial_conditions_with_bgc",
+        "initial_conditions_with_bgc_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
+    ],
+)
+def test_initial_condition_creation_with_bgc(ic_fixture, request):
+    """Test the creation of the BoundaryForcing object."""
+
+    ic = request.getfixturevalue(ic_fixture)
+
+    expected_bgc_variables = [
+        "PO4",
+        "NO3",
+        "SiO3",
+        "NH4",
+        "Fe",
+        "Lig",
+        "O2",
+        "DIC",
+        "DIC_ALT_CO2",
+        "ALK",
+        "ALK_ALT_CO2",
+        "DOC",
+        "DON",
+        "DOP",
+        "DOCr",
+        "DONr",
+        "DOPr",
+        "zooC",
+        "spChl",
+        "spC",
+        "spP",
+        "spFe",
+        "spCaCO3",
+        "diatChl",
+        "diatC",
+        "diatP",
+        "diatFe",
+        "diatSi",
+        "diazChl",
+        "diazC",
+        "diazP",
+        "diazFe",
+    ]
+
+    for var in expected_bgc_variables:
+        assert var in ic.ds
 
 
 @pytest.fixture
@@ -112,6 +166,22 @@ def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
             ini_time=datetime(2021, 6, 29),
             source={"name": "GLORYS", "path": fname},
             bgc_source={"name": "CESM_REGRIDDED"},
+            use_dask=use_dask,
+        )
+
+
+# Test initialization with missing ini_time
+def test_initial_conditions_missing_ini_time(example_grid, use_dask):
+
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    with pytest.raises(
+        ValueError,
+        match="`ini_time` must be a valid datetime object and cannot be None.",
+    ):
+        InitialConditions(
+            grid=example_grid,
+            ini_time=None,
+            source={"name": "GLORYS", "path": fname},
             use_dask=use_dask,
         )
 
@@ -240,7 +310,8 @@ def test_correct_depth_coords_adjusted_for_zeta(
     "initial_conditions_fixture",
     [
         "initial_conditions",
-        "initial_conditions",
+        "initial_conditions_with_bgc",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use_dask):
@@ -270,10 +341,9 @@ def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use
     )
 
 
-def test_interpolation_from_climatology(
-    initial_conditions_with_bgc_from_climatology, use_dask
-):
+def test_interpolation_from_climatology(use_dask):
 
+    # CESM climatology
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
     ds = xr.open_dataset(fname_bgc)
 
@@ -301,12 +371,42 @@ def test_interpolation_from_climatology(
         equal_nan=True,
     )
 
+    # Unified BGC climatology
+    fname_bgc = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
+    ds = xr.open_dataset(fname_bgc)
+
+    # check if interpolated value for Feb 14 is indeed February value from climatology
+    bgc_data = UnifiedBGCDataset(
+        filename=fname_bgc,
+        start_time=datetime(2012, 2, 14),
+        climatology=True,
+        use_dask=use_dask,
+        apply_post_processing=False,
+    )
+    assert np.allclose(ds["Alk"].isel(month=1), bgc_data.ds["Alk"], equal_nan=True)
+
+    # check if interpolated value for Jan 30.25 is indeed average of January and February value from climatology
+    bgc_data = UnifiedBGCDataset(
+        filename=fname_bgc,
+        start_time=datetime(2012, 1, 30, 6),  # time: 6 am, Jan 30
+        climatology=True,
+        use_dask=use_dask,
+        apply_post_processing=False,
+    )
+
+    assert np.allclose(
+        0.5 * (ds["Alk"].isel(month=0) + ds["Alk"].isel(month=1)),
+        bgc_data.ds["Alk"],
+        equal_nan=True,
+    )
+
 
 @pytest.mark.parametrize(
     "initial_conditions_fixture",
     [
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_initial_conditions_plot(initial_conditions_fixture, request):
@@ -316,29 +416,26 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
 
     # horizontal slices plots
     for depth_contours in [True, False]:
-        initial_conditions.plot(var_name="temp", s=0, depth_contours=depth_contours)
-        initial_conditions.plot(var_name="u", s=0, depth_contours=depth_contours)
-        initial_conditions.plot(var_name="v", s=0, depth_contours=depth_contours)
-        initial_conditions.plot(var_name="ALK", s=0, depth_contours=depth_contours)
+        for var_name in ["temp", "u", "v", "ALK", "DOC"]:
+            initial_conditions.plot(
+                var_name=var_name, s=0, depth_contours=depth_contours
+            )
 
     # section plots
     for layer_contours in [True, False]:
-        initial_conditions.plot(var_name="temp", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="temp", xi=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="ALK", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="ALK", xi=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="u", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="u", xi=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="v", eta=0, layer_contours=layer_contours)
-        initial_conditions.plot(var_name="v", xi=0, layer_contours=layer_contours)
+        for var_name in ["temp", "u", "v", "ALK", "DOC"]:
+            initial_conditions.plot(
+                var_name=var_name, eta=0, layer_contours=layer_contours
+            )
+            initial_conditions.plot(
+                var_name=var_name, xi=0, layer_contours=layer_contours
+            )
 
-    # 1D plot in horizontal
-    initial_conditions.plot(var_name="temp", s=0, xi=0)
-    initial_conditions.plot(var_name="ALK", s=0, xi=0)
-
-    # 1D plot in vertical
-    initial_conditions.plot(var_name="temp", eta=0, xi=0)
-    initial_conditions.plot(var_name="ALK", eta=0, xi=0)
+    for var_name in ["temp", "ALK", "DOC"]:
+        # 1D plot in horizontal
+        initial_conditions.plot(var_name=var_name, s=0, xi=0)
+        # 1D plot in vertical
+        initial_conditions.plot(var_name=var_name, eta=0, xi=0)
 
     initial_conditions.plot(var_name="zeta")
     initial_conditions.plot(var_name="ubar")
@@ -350,6 +447,8 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
     [
         "initial_conditions",
         "initial_conditions_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
@@ -378,6 +477,8 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
     [
         "initial_conditions",
         "initial_conditions_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask):
@@ -410,6 +511,8 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
     [
         "initial_conditions",
         "initial_conditions_adjusted_for_zeta",
+        "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
 def test_files_have_same_hash(initial_conditions_fixture, request, tmp_path, use_dask):

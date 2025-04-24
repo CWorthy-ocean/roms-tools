@@ -8,7 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from roms_tools import Grid
 from roms_tools.plot import _plot
-from roms_tools.regrid import LateralRegrid
+from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.utils import save_datasets
 from roms_tools.setup.datasets import TPXOManager
 from roms_tools.setup.utils import (
@@ -25,7 +25,7 @@ from roms_tools.setup.utils import (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class TidalForcing:
     """Represents tidal forcing for ROMS.
 
@@ -159,7 +159,7 @@ class TidalForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _input_checks(self):
 
@@ -254,7 +254,7 @@ class TidalForcing:
             },
         }
 
-        object.__setattr__(self, "variable_info", variable_info)
+        self.variable_info = variable_info
 
     def _write_into_dataset(self, processed_fields, d_meta):
 
@@ -457,7 +457,6 @@ class TidalForcing:
         cls,
         filepath: Union[str, Path],
         use_dask: bool = False,
-        bypass_validation: bool = False,
     ) -> "TidalForcing":
         """Create an instance of the TidalForcing class from a YAML file.
 
@@ -467,10 +466,6 @@ class TidalForcing:
             The path to the YAML file from which the parameters will be read.
         use_dask: bool, optional
             Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-        bypass_validation: bool, optional
-            Indicates whether to skip validation checks in the processed data. When set to True,
-            the validation process that ensures no NaN values exist at wet points
-            in the processed dataset is bypassed. Defaults to False.
 
         Returns
         -------
@@ -485,5 +480,4 @@ class TidalForcing:
             grid=grid,
             **tidal_forcing_params,
             use_dask=use_dask,
-            bypass_validation=bypass_validation,
         )

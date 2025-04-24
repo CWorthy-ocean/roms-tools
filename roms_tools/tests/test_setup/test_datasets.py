@@ -534,6 +534,8 @@ def test_climatology_error(use_dask):
         # ("tpxo_data", 1 / 6),
         ("cesm_bgc_data", 1.0),
         ("cesm_surface_bgc_data", 1.0),
+        ("unified_bgc_data", 2.0),
+        ("unified_surface_bgc_data", 2.0),
     ],
 )
 def test_horizontal_resolution(data_fixture, expected_resolution, request):

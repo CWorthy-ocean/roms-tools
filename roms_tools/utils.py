@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import glob
 import logging
+import warnings
 
 
 def _load_data(
@@ -139,13 +140,16 @@ def _load_data(
         if "time" in dim_names and time_chunking:
             chunks[dim_names["time"]] = 1
 
-        ds = xr.open_mfdataset(
-            matching_files,
-            decode_times=decode_times,
-            chunks=chunks,
-            **combine_kwargs,
-            **kwargs,
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="xarray")
+
+            ds = xr.open_mfdataset(
+                matching_files,
+                decode_times=decode_times,
+                chunks=chunks,
+                **combine_kwargs,
+                **kwargs,
+            )
 
         # Rechunk the dataset along the tidal constituent dimension ("ntides") after loading
         # because the original dataset does not have a chunk size of 1 along this dimension.

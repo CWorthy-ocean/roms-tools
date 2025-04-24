@@ -6,15 +6,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import logging
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Optional
 from roms_tools import Grid
-from roms_tools.utils import save_datasets
-from roms_tools.regrid import LateralRegrid
+from roms_tools.utils import save_datasets, transpose_dimensions
+from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.plot import _plot
 from roms_tools.setup.datasets import (
     ERA5Dataset,
     ERA5Correction,
     CESMBGCSurfaceForcingDataset,
+    UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
     get_target_coords,
@@ -24,13 +25,14 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     rotate_velocities,
+    compute_missing_surface_bgc_variables,
     convert_to_roms_time,
     _to_yaml,
     _from_yaml,
 )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(kw_only=True)
 class SurfaceForcing:
     """Represents surface forcing input data for ROMS.
 
@@ -38,10 +40,14 @@ class SurfaceForcing:
     ----------
     grid : Grid
         Object representing the grid information.
-    start_time : datetime
-        Start time of the desired surface forcing data.
-    end_time : datetime
-        End time of the desired surface forcing data.
+    start_time : datetime, optional
+        The start time of the desired surface forcing data. This time is used to filter the dataset
+        to include only records on or after this time, with a single record at or before this time.
+        If no time filtering is desired, set it to None. Default is None.
+    end_time : datetime, optional
+        The end time of the desired surface forcing data. This time is used to filter the dataset
+        to include only records on or before this time, with a single record at or after this time.
+        If no time filtering is desired, set it to None. Default is None.
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data. Keys include:
 
@@ -90,8 +96,8 @@ class SurfaceForcing:
     """
 
     grid: Grid
-    start_time: datetime
-    end_time: datetime
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     correct_radiation: bool = True
@@ -117,15 +123,17 @@ class SurfaceForcing:
             logging.info("Data will be interpolated onto grid coarsened by factor 2.")
         else:
             logging.info("Data will be interpolated onto fine grid.")
-        object.__setattr__(self, "use_coarse_grid", use_coarse_grid)
+        self.use_coarse_grid = use_coarse_grid
 
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
-        object.__setattr__(self, "target_coords", target_coords)
+        self.target_coords = target_coords
 
         data.choose_subdomain(
             target_coords,
             buffer_points=20,  # lateral fill needs some buffer from data margin
         )
+        # Enforce double precision to ensure reproducibility
+        data.convert_to_float64()
 
         data.apply_lateral_fill()
 
@@ -134,7 +142,7 @@ class SurfaceForcing:
 
         processed_fields = {}
         # lateral regridding
-        lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
         for var_name in var_names:
             if var_name in data.var_names.keys():
                 processed_fields[var_name] = lateral_regrid.apply(
@@ -154,6 +162,15 @@ class SurfaceForcing:
         if self.type == "physics" and self.correct_radiation:
             processed_fields = self._apply_correction(processed_fields, data)
 
+        if self.type == "bgc":
+            processed_fields = compute_missing_surface_bgc_variables(processed_fields)
+
+        # Reorder dimensions
+        for var_name in processed_fields:
+            processed_fields[var_name] = transpose_dimensions(
+                processed_fields[var_name]
+            )
+
         d_meta = get_variable_metadata()
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
@@ -165,9 +182,21 @@ class SurfaceForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        object.__setattr__(self, "ds", ds)
+        self.ds = ds
 
     def _input_checks(self):
+        # Check that start_time and end_time are both None or none of them is
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError(
+                "Both `start_time` and `end_time` must be provided together as datetime objects or both should be None."
+            )
+
+        # Trigger a warning if both are None
+        if self.start_time is None and self.end_time is None:
+            logging.warning(
+                "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
+            )
+
         # Validate the 'type' parameter
         if self.type not in ["physics", "bgc"]:
             raise ValueError("`type` must be either 'physics' or 'bgc'.")
@@ -179,11 +208,10 @@ class SurfaceForcing:
             raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
-        object.__setattr__(
-            self,
-            "source",
-            {**self.source, "climatology": self.source.get("climatology", False)},
-        )
+        self.source = {
+            **self.source,
+            "climatology": self.source.get("climatology", False),
+        }
 
         # Validate 'coarse_grid_mode'
         valid_modes = ["auto", "always", "never"]
@@ -248,9 +276,12 @@ class SurfaceForcing:
             if self.source["name"] == "CESM_REGRIDDED":
 
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
+            elif self.source["name"] == "UNIFIED":
+
+                data = UnifiedBGCSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" is a valid option for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
                 )
 
         return data
@@ -314,14 +345,16 @@ class SurfaceForcing:
             }
         elif self.type == "bgc":
             variable_info = {}
-            for var_name in data.var_names.keys():
+            for var_name in list(data.var_names.keys()) + list(
+                data.opt_var_names.keys()
+            ):
                 variable_info[var_name] = default_info
                 if var_name == "pco2_air":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
 
-        object.__setattr__(self, "variable_info", variable_info)
+        self.variable_info = variable_info
 
     def _apply_correction(self, processed_fields, data):
 
@@ -364,7 +397,9 @@ class SurfaceForcing:
             )
 
         # Spatial regridding
-        lateral_regrid = LateralRegrid(self.target_coords, correction_data.dim_names)
+        lateral_regrid = LateralRegridToROMS(
+            self.target_coords, correction_data.dim_names
+        )
         corr_factor = lateral_regrid.apply(corr_factor)
 
         processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
@@ -606,7 +641,6 @@ class SurfaceForcing:
         cls,
         filepath: Union[str, Path],
         use_dask: bool = False,
-        bypass_validation: bool = False,
     ) -> "SurfaceForcing":
         """Create an instance of the SurfaceForcing class from a YAML file.
 
@@ -616,10 +650,6 @@ class SurfaceForcing:
             The path to the YAML file from which the parameters will be read.
         use_dask: bool, optional
             Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-        bypass_validation: bool, optional
-            Indicates whether to skip validation checks in the processed data. When set to True,
-            the validation process that ensures no NaN values exist at wet points
-            in the processed dataset is bypassed. Defaults to False.
 
         Returns
         -------
@@ -631,6 +661,4 @@ class SurfaceForcing:
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
 
-        return cls(
-            grid=grid, **params, use_dask=use_dask, bypass_validation=bypass_validation
-        )
+        return cls(grid=grid, **params, use_dask=use_dask)

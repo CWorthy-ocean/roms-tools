@@ -351,7 +351,64 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
             assert not sfc_forcing.use_coarse_grid
 
 
-def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
+def test_start_time_end_time_error(use_dask):
+    """Test error when start_time and end_time are not both provided or both None."""
+    # Case 1: Only start_time provided
+    with pytest.raises(
+        ValueError, match="Both `start_time` and `end_time` must be provided together"
+    ):
+        SurfaceForcing(
+            grid=None,
+            start_time=datetime(2022, 1, 1),
+            end_time=None,  # end_time is None, should raise an error
+            source={"name": "ERA5", "path": "era5_data.nc"},
+            use_dask=use_dask,
+        )
+
+    # Case 2: Only end_time provided
+    with pytest.raises(
+        ValueError, match="Both `start_time` and `end_time` must be provided together"
+    ):
+        SurfaceForcing(
+            grid=None,
+            start_time=None,  # start_time is None, should raise an error
+            end_time=datetime(2022, 1, 2),
+            source={"name": "ERA5", "path": "era5_data.nc"},
+            use_dask=use_dask,
+        )
+
+
+def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, caplog):
+    """Test that a warning is triggered when both start_time and end_time are None."""
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+
+    with caplog.at_level(logging.INFO):
+        SurfaceForcing(
+            grid=grid_that_straddles_dateline,
+            start_time=None,
+            end_time=None,
+            source={"name": "ERA5", "path": fname},
+            use_dask=use_dask,
+        )
+
+    # Verify the warning message in the log
+    assert (
+        "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
+        in caplog.text
+    )
+
+
+@pytest.mark.parametrize(
+    "name, fname, type, climatology",
+    [
+        ("ERA5", "ERA5_regional_test_data.nc", "physics", False),
+        ("CESM_REGRIDDED", "CESM_surface_global_test_data_climatology.nc", "bgc", True),
+        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", True),
+    ],
+)
+def test_nans_filled_in(
+    grid_that_straddles_dateline, name, fname, type, climatology, use_dask
+):
     """Test that the surface forcing fields contain no NaNs.
 
     The test is performed twice:
@@ -362,8 +419,10 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
-    fname_bgc = Path(download_test_data("CESM_surface_global_test_data_climatology.nc"))
+    fname = Path(download_test_data(fname))
+    print(fname)
+    print(type)
+    print(name)
 
     for coarse_grid_mode in ["always", "never"]:
         sfc_forcing = SurfaceForcing(
@@ -371,42 +430,36 @@ def test_nans_filled_in(grid_that_straddles_dateline, use_dask):
             coarse_grid_mode=coarse_grid_mode,
             start_time=start_time,
             end_time=end_time,
-            source={"name": "ERA5", "path": fname},
+            source={"name": name, "path": fname, "climatology": climatology},
+            type=type,
             use_dask=use_dask,
         )
 
         # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
         # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
         # completed; the nan_check passes if there are NaNs only over land
-        assert not sfc_forcing.ds["uwnd"].isnull().any().values.item()
-        assert not sfc_forcing.ds["vwnd"].isnull().any().values.item()
-        assert not sfc_forcing.ds["rain"].isnull().any().values.item()
-
-        sfc_forcing = SurfaceForcing(
-            grid=grid_that_straddles_dateline,
-            coarse_grid_mode=coarse_grid_mode,
-            start_time=start_time,
-            end_time=end_time,
-            source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
-            type="bgc",
-            use_dask=use_dask,
-        )
-
-        # Check that no NaNs are in surface forcing fields (they could make ROMS blow up)
-        # Note that ROMS-Tools should replace NaNs with a fill value after the nan_check has successfully
-        # completed; the nan_check passes if there are NaNs only over land
-        assert not sfc_forcing.ds["pco2_air"].isnull().any().values.item()
+        for var in sfc_forcing.ds.data_vars:
+            assert not sfc_forcing.ds[var].isnull().any().values.item()
 
 
-def test_time_attr_climatology(bgc_surface_forcing_from_climatology):
+@pytest.mark.parametrize(
+    "bgc_surface_forcing_fixture",
+    [
+        "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
+    ],
+)
+def test_time_attr_climatology(bgc_surface_forcing_fixture, request):
     """Test that the 'cycle_length' attribute is present in the time coordinate of the
     BGC dataset when using climatology data."""
+
+    bgc_surface_forcing = request.getfixturevalue(bgc_surface_forcing_fixture)
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert hasattr(
-            bgc_surface_forcing_from_climatology.ds[time_coord],
+            bgc_surface_forcing.ds[time_coord],
             "cycle_length",
         )
-    assert hasattr(bgc_surface_forcing_from_climatology.ds, "climatology")
+    assert hasattr(bgc_surface_forcing.ds, "climatology")
 
 
 def test_time_attr(bgc_surface_forcing):
@@ -421,22 +474,30 @@ def test_time_attr(bgc_surface_forcing):
 
 
 @pytest.mark.parametrize(
-    "sfc_forcing_fixture, expected_climatology, expected_fname",
+    "sfc_forcing_fixture, expected_name, expected_climatology, expected_fname",
     [
         (
             "bgc_surface_forcing",
+            "CESM_REGRIDDED",
             False,
             Path(download_test_data("CESM_surface_global_test_data.nc")),
         ),
         (
             "bgc_surface_forcing_from_climatology",
+            "CESM_REGRIDDED",
             True,
             Path(download_test_data("CESM_surface_global_test_data_climatology.nc")),
+        ),
+        (
+            "bgc_surface_forcing_from_unified_climatology",
+            "UNIFIED",
+            True,
+            Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
         ),
     ],
 )
 def test_surface_forcing_creation(
-    sfc_forcing_fixture, expected_climatology, expected_fname, request
+    sfc_forcing_fixture, expected_name, expected_climatology, expected_fname, request
 ):
     """Test the creation and initialization of the SurfaceForcing object with BGC.
 
@@ -448,23 +509,19 @@ def test_surface_forcing_creation(
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     assert sfc_forcing.ds is not None
-    assert "pco2_air" in sfc_forcing.ds
-    assert "pco2_air_alt" in sfc_forcing.ds
-    assert "iron" in sfc_forcing.ds
-    assert "dust" in sfc_forcing.ds
-    assert "nox" in sfc_forcing.ds
-    assert "nhy" in sfc_forcing.ds
+    for var_name in ["pco2_air", "pco2_air_alt", "iron", "dust", "nox", "nhy"]:
+        assert var_name in sfc_forcing.ds
 
     assert sfc_forcing.start_time == datetime(2020, 2, 1)
     assert sfc_forcing.end_time == datetime(2020, 2, 1)
     assert sfc_forcing.type == "bgc"
     assert sfc_forcing.source == {
-        "name": "CESM_REGRIDDED",
+        "name": expected_name,
         "path": expected_fname,
         "climatology": expected_climatology,
     }
     assert not sfc_forcing.use_coarse_grid
-    assert sfc_forcing.ds.attrs["source"] == "CESM_REGRIDDED"
+    assert sfc_forcing.ds.attrs["source"] == expected_name
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
@@ -476,6 +533,7 @@ def test_surface_forcing_creation(
     [
         "bgc_surface_forcing",
         "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
     ],
 )
 def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
@@ -609,10 +667,17 @@ def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
             expected_filepath.unlink()
 
 
-def test_surface_forcing_bgc_from_clim_save(
-    bgc_surface_forcing_from_climatology, tmp_path
-):
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
+    ],
+)
+def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, request):
     """Test save method."""
+
+    bgc_surface_forcing_from_climatology = request.getfixturevalue(sfc_forcing_fixture)
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -650,6 +715,7 @@ def test_surface_forcing_bgc_from_clim_save(
         "corrected_surface_forcing",
         "bgc_surface_forcing",
         "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
     ],
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
@@ -713,9 +779,16 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
     Path(expected_filepath2).unlink()
 
 
-def test_files_have_same_hash_clim(
-    bgc_surface_forcing_from_climatology, tmp_path, use_dask
-):
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
+    ],
+)
+def test_files_have_same_hash_clim(sfc_forcing_fixture, tmp_path, use_dask, request):
+
+    bgc_surface_forcing_from_climatology = request.getfixturevalue(sfc_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"

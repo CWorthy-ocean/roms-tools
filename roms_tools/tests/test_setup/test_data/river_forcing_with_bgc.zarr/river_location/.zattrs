@@ -1,8 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "eta_rho",
-        "xi_rho"
-    ],
-    "long_name": "River index plus local volume fraction",
-    "units": "none"
-}

@@ -1,0 +1,6 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "nriver"
+    ],
+    "long_name": "River ID (1-based Fortran indexing)"
+}

@@ -1,0 +1,16 @@
+name: romstools-test
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python>=3.10
+  - xesmf
+  # testing
+  - zarr
+  - pytest
+  - pytest-xdist
+  - h5py
+  - flake8
+  - black
+  - pre-commit==3.8.0
+  - coverage

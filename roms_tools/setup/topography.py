@@ -6,7 +6,7 @@ import gcm_filters
 from roms_tools.setup.utils import handle_boundaries
 import warnings
 from itertools import count
-from roms_tools.regrid import LateralRegrid
+from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
 
 
@@ -145,10 +145,12 @@ def _make_raw_topography(
         The regridded topography data with the sign flipped (bathymetry positive).
     """
     data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
+    # Enforce double precision to ensure reproducibility
+    data.convert_to_float64()
 
     if verbose:
         start_time = time.time()
-    lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+    lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
     hraw = lateral_regrid.apply(data.ds[data.var_names["topo"]], method=method)
     if verbose:
         logging.info(
@@ -233,7 +235,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         rmax_log = 0.0
 
     # Apply hmin threshold
-    h = xr.where(h < hmin, hmin, h)
+    h = _clip_depth(h, hmin)
 
     # Perform logarithmic transformation of the height field
     h_log = np.log(h / hmin)
@@ -316,7 +318,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         h = hmin * np.exp(h_log)
 
         # Apply hmin threshold again
-        h = xr.where(h < hmin, hmin, h)
+        h = _clip_depth(h, hmin)
 
         # Compute maximum slope parameter r
         r_eta, r_xi = _compute_rfactor(h)
@@ -325,6 +327,27 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
             break
 
     return h
+
+
+def _clip_depth(h: xr.DataArray, hmin: float) -> xr.DataArray:
+    """Ensures that depth values do not fall below a minimum threshold.
+
+    This function replaces all depth values in `h` that are less than `hmin` with `hmin`,
+    ensuring a minimum depth constraint.
+
+    Parameters
+    ----------
+    h : xr.DataArray
+        The depth (bathymetry) array.
+    hmin : float
+        The minimum allowable depth value.
+
+    Returns
+    -------
+    xr.DataArray
+        The modified depth array with values clipped at `hmin`.
+    """
+    return xr.where(h < hmin, hmin, h)
 
 
 def _compute_rfactor(h):

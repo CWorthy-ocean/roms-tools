@@ -19,8 +19,8 @@ def _plot(
 
     Parameters
     ----------
-    field : xarray.DataArray, optional
-        The field to plot. If None, only the grid is plotted.
+    field : xarray.DataArray
+        The field to plot.
     depth_contours : bool, optional
         If True, adds depth contours to the plot.
     c : str, optional
@@ -33,9 +33,15 @@ def _plot(
     kwargs : dict, optional
         Additional keyword arguments to pass to `pcolormesh` (e.g., colormap or color limits).
 
-    Notes
-    -----
-    The function raises a `NotImplementedError` if the domain contains the North or South Pole.
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure with the plotted data.
+
+    Raises
+    ------
+    NotImplementedError
+        If the domain contains the North or South Pole.
     """
 
     field = field.squeeze()
@@ -83,6 +89,348 @@ def _plot(
     }  # Customize latitude label style
 
     ax.set_title(title)
+
+    return fig
+
+
+def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
+    """Plots nested parent and child grids with boundary overlays and grid masking.
+
+    Parameters
+    ----------
+    parent_grid_ds : xarray.Dataset
+        The parent grid dataset containing `lon_rho`, `lat_rho`, and `mask_rho` variables.
+    child_grid_ds : xarray.Dataset
+        The child grid dataset containing `lon_rho` and `lat_rho` variables.
+    parent_straddle : bool
+        Whether the parent grid straddles the 180-degree meridian. If True, longitudes
+        greater than 180° are wrapped to the -180° to 180° range.
+    with_dim_names : bool, optional
+        Whether to include dimension names in the plotted grid boundaries. Defaults to False.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure displaying the parent and child grid boundaries, mask,
+        and additional map features.
+    """
+
+    parent_lon_deg = parent_grid_ds["lon_rho"]
+    parent_lat_deg = parent_grid_ds["lat_rho"]
+
+    child_lon_deg = child_grid_ds["lon_rho"]
+    child_lat_deg = child_grid_ds["lat_rho"]
+
+    if parent_straddle:
+        parent_lon_deg = xr.where(
+            parent_lon_deg > 180, parent_lon_deg - 360, parent_lon_deg
+        )
+        child_lon_deg = xr.where(
+            child_lon_deg > 180, child_lon_deg - 360, child_lon_deg
+        )
+
+    trans = _get_projection(parent_lon_deg, parent_lat_deg)
+
+    parent_lon_deg = parent_lon_deg.values
+    parent_lat_deg = parent_lat_deg.values
+    child_lon_deg = child_lon_deg.values
+    child_lat_deg = child_lat_deg.values
+
+    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
+    _add_boundary_to_ax(
+        ax,
+        parent_lon_deg,
+        parent_lat_deg,
+        trans,
+        c="r",
+        label="parent grid",
+        with_dim_names=with_dim_names,
+    )
+
+    _add_boundary_to_ax(
+        ax,
+        child_lon_deg,
+        child_lat_deg,
+        trans,
+        c="g",
+        label="child grid",
+        with_dim_names=with_dim_names,
+    )
+
+    vmax = 3
+    vmin = 0
+    cmap = plt.colormaps.get_cmap("Blues")
+    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+    _add_field_to_ax(
+        ax,
+        parent_lon_deg,
+        parent_lat_deg,
+        parent_grid_ds.mask_rho,
+        add_colorbar=False,
+        kwargs=kwargs,
+    )
+
+    ax.coastlines(
+        resolution="50m", linewidth=0.5, color="black"
+    )  # add map of coastlines
+
+    # Add gridlines with labels for latitude and longitude
+    gridlines = ax.gridlines(
+        draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
+    )
+    gridlines.top_labels = False  # Hide top labels
+    gridlines.right_labels = False  # Hide right labels
+    gridlines.xlabel_style = {
+        "size": 10,
+        "color": "black",
+    }  # Customize longitude label style
+    gridlines.ylabel_style = {
+        "size": 10,
+        "color": "black",
+    }  # Customize latitude label style
+
+    ax.legend(loc="best")
+
+    return fig
+
+
+def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
+    """Plots a vertical section of a field with optional interface depths.
+
+    Parameters
+    ----------
+    field : xarray.DataArray
+        The field to plot, typically representing a vertical section of ocean data.
+    interface_depth : xarray.DataArray, optional
+        Interface depth values to overlay on the plot, useful for visualizing vertical layers.
+        Defaults to None.
+    title : str, optional
+        Title of the plot. Defaults to an empty string.
+    kwargs : dict, optional
+        Additional keyword arguments to pass to `xarray.plot`. Defaults to an empty dictionary.
+    ax : matplotlib.axes.Axes, optional
+        Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure with the plotted section.
+
+    Raises
+    ------
+    ValueError
+        If no dimension in `field.dims` starts with any of the recognized horizontal dimension
+        prefixes (`eta_rho`, `eta_v`, `xi_rho`, `xi_u`, `lat`, `lon`).
+    ValueError
+        If no coordinate in `field.coords` starts with either `layer` or `interface`.
+
+    Notes
+    -----
+    - NaN values at the horizontal ends are dropped before plotting.
+    """
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(9, 5))
+
+    dims_to_check = ["eta_rho", "eta_v", "xi_rho", "xi_u", "lat", "lon"]
+    try:
+        xdim = next(
+            dim
+            for dim in field.dims
+            if any(dim.startswith(prefix) for prefix in dims_to_check)
+        )
+    except StopIteration:
+        raise ValueError(
+            "None of the dimensions found in field.dims starts with (eta_rho, eta_v, xi_rho, xi_u, lat, lon)"
+        )
+
+    depths_to_check = [
+        "layer",
+        "interface",
+    ]
+    try:
+        depth_label = next(
+            depth_label
+            for depth_label in field.coords
+            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
+        )
+    except StopIteration:
+        raise ValueError(
+            "None of the coordinates found in field.coords starts with (layer_depth, interface_depth)"
+        )
+
+    # Handle NaNs on either horizontal end
+    field = field.where(~field[depth_label].isnull(), drop=True)
+
+    more_kwargs = {"x": xdim, "y": depth_label, "yincrease": False}
+
+    field.plot(**kwargs, **more_kwargs, ax=ax)
+
+    if interface_depth is not None:
+        layer_key = "s_rho" if "s_rho" in interface_depth.dims else "s_w"
+
+        for i in range(len(interface_depth[layer_key])):
+            ax.plot(
+                interface_depth[xdim], interface_depth.isel({layer_key: i}), color="k"
+            )
+
+    ax.set_title(title)
+    ax.set_ylabel("Depth [m]")
+
+    if xdim == "lon":
+        xlabel = "Longitude [°E]"
+    elif xdim == "lat":
+        xlabel = "Latitude [°N]"
+    else:
+        xlabel = xdim
+    ax.set_xlabel(xlabel)
+
+    return fig
+
+
+def _profile_plot(field, title="", ax=None):
+    """Plots a vertical profile of the given field against depth.
+
+    This function generates a profile plot by plotting the field values against
+    depth. It automatically detects the appropriate depth coordinate and
+    reverses the y-axis to follow the convention of increasing depth downward.
+
+    Parameters
+    ----------
+    field : xarray.DataArray
+        The field to plot, typically representing vertical profile data.
+    title : str, optional
+        Title of the plot. Defaults to an empty string.
+    ax : matplotlib.axes.Axes, optional
+        Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure with the plotted profile.
+
+    Raises
+    ------
+    ValueError
+        If no coordinate in `field.coords` starts with either `layer_depth` or `interface_depth`.
+
+    Notes
+    -----
+    - The y-axis is inverted to ensure that depth increases downward.
+    """
+
+    depths_to_check = [
+        "layer_depth",
+        "interface_depth",
+    ]
+    try:
+        depth_label = next(
+            depth_label
+            for depth_label in field.coords
+            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
+        )
+    except StopIteration:
+        raise ValueError(
+            "None of the coordinates found in field.coords starts with (layer_depth, interface_depth)"
+        )
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(4, 7))
+    kwargs = {"y": depth_label, "yincrease": False}
+    field.plot(**kwargs, linewidth=2)
+    ax.set_title(title)
+    ax.set_ylabel("Depth [m]")
+    ax.grid()
+
+    return fig
+
+
+def _line_plot(field, title="", ax=None):
+    """Plots a line graph of the given field with grey vertical bars indicating NaN
+    regions.
+
+    Parameters
+    ----------
+    field : xarray.DataArray
+        The field to plot, typically a 1D or 2D field with one spatial dimension.
+    title : str, optional
+        Title of the plot. Defaults to an empty string.
+    ax : matplotlib.axes.Axes, optional
+        Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated figure with the plotted data and highlighted NaN regions.
+
+    Raises
+    ------
+    ValueError
+        If none of the dimensions in `field.dims` starts with one of the expected
+        prefixes: `eta_rho`, `eta_v`, `xi_rho`, `xi_u`, `lat`, or `lon`.
+
+    Notes
+    -----
+    - NaN regions are identified and marked using `axvspan` with a grey shade.
+    """
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+
+    field.plot(ax=ax, linewidth=2)
+
+    # Loop through the NaNs in the field and add grey vertical bars
+    dims_to_check = ["eta_rho", "eta_v", "xi_rho", "xi_u", "lat", "lon"]
+    try:
+        xdim = next(
+            dim
+            for dim in field.dims
+            if any(dim.startswith(prefix) for prefix in dims_to_check)
+        )
+    except StopIteration:
+        raise ValueError(
+            "None of the dimensions found in field.dims starts with (eta_rho, eta_v, xi_rho, xi_u, lat, lon)"
+        )
+
+    nan_mask = np.isnan(field.values)
+    nan_indices = np.where(nan_mask)[0]
+
+    if len(nan_indices) > 0:
+        # Add grey vertical bars for each NaN region
+        start_idx = nan_indices[0]
+        for idx in range(1, len(nan_indices)):
+            if nan_indices[idx] != nan_indices[idx - 1] + 1:
+                ax.axvspan(
+                    field[xdim][start_idx],
+                    field[xdim][nan_indices[idx - 1] + 1],
+                    color="gray",
+                    alpha=0.3,
+                )
+                start_idx = nan_indices[idx]
+        # Add the last region of NaNs, making sure we don't go out of bounds
+        ax.axvspan(
+            field[xdim][start_idx],
+            field[xdim][nan_indices[-1]],
+            color="gray",
+            alpha=0.3,
+        )
+
+    # Set plot title and grid
+    ax.set_title(title)
+    ax.grid()
+    ax.set_xlim([field[xdim][0], field[xdim][-1]])
+
+    if xdim == "lon":
+        xlabel = "Longitude [°E]"
+    elif xdim == "lat":
+        xlabel = "Latitude [°N]"
+    else:
+        xlabel = xdim
+    ax.set_xlabel(xlabel)
+
+    return fig
 
 
 def _add_boundary_to_ax(
@@ -238,212 +586,3 @@ def _get_projection(lon, lat):
     return ccrs.NearsidePerspective(
         central_longitude=lon.mean().values, central_latitude=lat.mean().values
     )
-
-
-def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
-
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(9, 5))
-
-    dims_to_check = ["eta_rho", "eta_u", "eta_v", "xi_rho", "xi_u", "xi_v"]
-    try:
-        xdim = next(
-            dim
-            for dim in field.dims
-            if any(dim.startswith(prefix) for prefix in dims_to_check)
-        )
-    except StopIteration:
-        raise ValueError(
-            "None of the dimensions found in field.dims starts with (eta_rho, eta_u, eta_v, xi_rho, xi_u, xi_v)"
-        )
-
-    depths_to_check = [
-        "layer_depth",
-        "interface_depth",
-    ]
-    try:
-        depth_label = next(
-            depth_label
-            for depth_label in field.coords
-            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
-        )
-    except StopIteration:
-        raise ValueError(
-            "None of the coordinates found in field.coords starts with (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v)"
-        )
-
-    more_kwargs = {"x": xdim, "y": depth_label, "yincrease": False}
-    field.plot(**kwargs, **more_kwargs, ax=ax)
-
-    if interface_depth is not None:
-        layer_key = "s_rho" if "s_rho" in interface_depth.dims else "s_w"
-
-        for i in range(len(interface_depth[layer_key])):
-            ax.plot(
-                interface_depth[xdim], interface_depth.isel({layer_key: i}), color="k"
-            )
-
-    ax.set_title(title)
-
-
-def _profile_plot(field, title="", ax=None):
-    """Plots a profile of the given field against depth.
-
-    Parameters
-    ----------
-    field : xarray.DataArray
-        Data to plot.
-    title : str, optional
-        Title of the plot.
-    ax : matplotlib.axes.Axes, optional
-        Axes to plot on. If None, a new figure is created.
-
-    Raises
-    ------
-    ValueError
-        If no expected depth coordinate is found in the field.
-    """
-
-    depths_to_check = [
-        "layer_depth",
-        "interface_depth",
-    ]
-    try:
-        depth_label = next(
-            depth_label
-            for depth_label in field.coords
-            if any(depth_label.startswith(prefix) for prefix in depths_to_check)
-        )
-    except StopIteration:
-        raise ValueError(
-            "None of the expected coordinates (layer_depth_rho, layer_depth_u, layer_depth_v, interface_depth_rho, interface_depth_u, interface_depth_v) found in field.coords"
-        )
-
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(4, 7))
-    kwargs = {"y": depth_label, "yincrease": False}
-    field.plot(**kwargs)
-    ax.set_title(title)
-    ax.grid()
-
-
-def _line_plot(field, title="", ax=None):
-    """Plots a line graph of the given field, with grey vertical bars where NaNs are
-    located.
-
-    Parameters
-    ----------
-    field : xarray.DataArray
-        Data to plot.
-    title : str, optional
-        Title of the plot.
-    ax : matplotlib.axes.Axes, optional
-        Axes to plot on. If None, a new figure is created.
-
-    Returns
-    -------
-    None
-        Modifies the plot in-place.
-    """
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-    field.plot(ax=ax)
-
-    # Loop through the NaNs in the field and add grey vertical bars
-    nan_mask = np.isnan(field.values)
-    nan_indices = np.where(nan_mask)[0]
-
-    if len(nan_indices) > 0:
-        # Add grey vertical bars for each NaN region
-        start_idx = nan_indices[0]
-        for idx in range(1, len(nan_indices)):
-            if nan_indices[idx] != nan_indices[idx - 1] + 1:
-                ax.axvspan(start_idx, nan_indices[idx - 1] + 1, color="gray", alpha=0.3)
-                start_idx = nan_indices[idx]
-        # Add the last region of NaNs
-        ax.axvspan(start_idx, nan_indices[-1] + 1, color="gray", alpha=0.3)
-
-    # Set plot title and grid
-    ax.set_title(title)
-    ax.grid()
-
-
-def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
-
-    parent_lon_deg = parent_grid_ds["lon_rho"]
-    parent_lat_deg = parent_grid_ds["lat_rho"]
-
-    child_lon_deg = child_grid_ds["lon_rho"]
-    child_lat_deg = child_grid_ds["lat_rho"]
-
-    if parent_straddle:
-        parent_lon_deg = xr.where(
-            parent_lon_deg > 180, parent_lon_deg - 360, parent_lon_deg
-        )
-        child_lon_deg = xr.where(
-            child_lon_deg > 180, child_lon_deg - 360, child_lon_deg
-        )
-
-    trans = _get_projection(parent_lon_deg, parent_lat_deg)
-
-    parent_lon_deg = parent_lon_deg.values
-    parent_lat_deg = parent_lat_deg.values
-    child_lon_deg = child_lon_deg.values
-    child_lat_deg = child_lat_deg.values
-
-    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
-
-    _add_boundary_to_ax(
-        ax,
-        parent_lon_deg,
-        parent_lat_deg,
-        trans,
-        c="r",
-        label="parent grid",
-        with_dim_names=with_dim_names,
-    )
-
-    _add_boundary_to_ax(
-        ax,
-        child_lon_deg,
-        child_lat_deg,
-        trans,
-        c="g",
-        label="child grid",
-        with_dim_names=with_dim_names,
-    )
-
-    vmax = 3
-    vmin = 0
-    cmap = plt.colormaps.get_cmap("Blues")
-    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-    _add_field_to_ax(
-        ax,
-        parent_lon_deg,
-        parent_lat_deg,
-        parent_grid_ds.mask_rho,
-        add_colorbar=False,
-        kwargs=kwargs,
-    )
-
-    ax.coastlines(
-        resolution="50m", linewidth=0.5, color="black"
-    )  # add map of coastlines
-
-    # Add gridlines with labels for latitude and longitude
-    gridlines = ax.gridlines(
-        draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
-    )
-    gridlines.top_labels = False  # Hide top labels
-    gridlines.right_labels = False  # Hide right labels
-    gridlines.xlabel_style = {
-        "size": 10,
-        "color": "black",
-    }  # Customize longitude label style
-    gridlines.ylabel_style = {
-        "size": 10,
-        "color": "black",
-    }  # Customize latitude label style
-
-    ax.legend(loc="best")

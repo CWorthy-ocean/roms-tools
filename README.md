@@ -9,36 +9,44 @@
 > [!Warning]
 > **This project is still in an early phase of development.**
 >
-> The [python API](https://roms-tools.readthedocs.io/en/latest/api.html) is not yet stable.
+> The [Python API](https://roms-tools.readthedocs.io/en/latest/api.html) is not yet stable.
 > Therefore whilst you are welcome to try out using the package, we cannot yet guarantee backwards compatibility.
 > We expect to reach a more stable version in Q1 2025.
 
 ## Overview
 
-A suite of Python tools for setting up a [ROMS](https://github.com/CESR-lab/ucla-roms) simulation.
+A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://github.com/CESR-lab/ucla-roms) simulation.
 
 ## Installation
 
-### Installation from conda forge
+### ⚡️ **Installation from Conda-Forge**
+
+To install `ROMS-Tools` with all dependencies, including `xesmf` and `dask`, use:
 
 ```bash
 conda install -c conda-forge roms-tools
 ```
 
-This command installs `ROMS-Tools` along with its `dask` dependency.
+> [!Note]
+>  Installation from Conda-Forge is the recommended installation method to ensure all features of `ROMS-Tools` are available.
 
-### Installation from pip
+### 📦 **Installation from PyPI (pip)**
+
+You can also install `ROMS-Tools` from `pip`:
 
 ```bash
 pip install roms-tools
 ```
 
-If you want to use `ROMS-Tools` together with dask (which we recommend), you can
-install `ROMS-Tools` along with the additional dependency via:
+If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of-core computation), install it with the additional dependency:
 
 ```bash
 pip install roms-tools[dask]
 ```
+
+> [!Note]
+>  The PyPI versions of `ROMS-Tools` do not include `xesmf`, so some features will be unavailable.
+
 
 ### Installation from GitHub
 
@@ -52,7 +60,7 @@ cd roms-tools
 Next, install and activate the following conda environment:
 
 ```bash
-conda env create -f ci/environment.yml
+conda env create -f ci/environment-with-xesmf.yml
 conda activate romstools-test
 ```
 
@@ -62,13 +70,12 @@ Finally, install `ROMS-Tools` in the same environment:
 pip install -e .
 ```
 
-If you want to use `ROMS-Tools` together with dask (which we recommend), you can
+If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of-core computation), you can
 install `ROMS-Tools` along with the additional dependency via:
 
 ```bash
 pip install -e ".[dask]"
 ```
-
 
 ### Run the tests
 
@@ -93,7 +100,6 @@ To learn how to use `ROMS-Tools`, check out the [documentation](https://roms-too
 **If you find a bug, have a feature suggestion, or any other kind of feedback, please start a Discussion.**
 
 We also accept contributions in the form of Pull Requests.
-
 
 ## See also
 

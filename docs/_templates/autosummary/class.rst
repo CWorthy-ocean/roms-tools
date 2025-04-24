@@ -12,8 +12,9 @@
    {% for item in all_methods %}
       {%- if not item.startswith('_') or item in ['__call__',
                                                   ] %}
-      {{ name }}.{{ item }}
-
+        {%- if not (objname == 'ChildGrid' and item == 'from_file') %}
+        {{ name }}.{{ item }}
+       . {% endif %}
       {% endif %}
    {% endfor %}
    {% endif %}

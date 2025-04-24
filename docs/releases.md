@@ -1,6 +1,6 @@
 # Release notes
 
-## v2.5.0 (unreleased)
+## v2.7.0 (unreleased)
 
 ### New Features
 
@@ -8,12 +8,79 @@
 
 ### Internal Changes
 
+* Correct default value for NOx from 1e-13 to 1e-12 kg/m2/s ([#294](https://github.com/CWorthy-ocean/roms-tools/pull/294))
+
+### Documentation
+
+### Bugfixes
+
+## v2.6.2
+
+### New Features
+
+* Enable reading from unified BGC dataset ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
+
+### Internal Changes
+
+* Refactoring of `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` to accommodate optional variable names ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
+* Modification of the `Dataset` class including the `choose_subdomain` method, the capability to handle fractional days in a climatology, and the addition of a `needs_lateral_fill` attribute ([#274](https://github.com/CWorthy-ocean/roms-tools/pull/274))
+* Separation of `river_flux` variable into `river_index` and `river_fraction` ([#291](https://github.com/CWorthy-ocean/roms-tools/pull/291))
+
+## v2.6.1
+
+### New Features
+
+* Support to regrid ROMS output data onto lat-lon-z grid ([#286](https://github.com/CWorthy-ocean/roms-tools/pull/286))
+
+### Internal Changes
+
+* Rename `river_location` to `river_flux` ([#283](https://github.com/CWorthy-ocean/roms-tools/pull/283))
+
+### Bugfixes
+
+## v2.6.0
+
+### New Features
+
+* Support to plot ROMS output data at lat/lon locations ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
+* Support to plot ROMS output data along sections of fixed latitude or longitude ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
+* Support to plot ROMS output data at fixed depth ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
+* Support for saving a figure of ROMS output data ([#280](https://github.com/CWorthy-ocean/roms-tools/pull/280))
+
+### Internal Changes
+
+* Unfreeze arguments in all dataclasses ([#276](https://github.com/CWorthy-ocean/roms-tools/pull/276))
+* Integration with xesmf for horizontal regridding from ROMS ([#277](https://github.com/CWorthy-ocean/roms-tools/pull/277))
+* Computation of nominal horizontal resolution in degrees ([#278](https://github.com/CWorthy-ocean/roms-tools/pull/278))
+* Integration with xgcm and numba for vertical regridding from ROMS ([#279](https://github.com/CWorthy-ocean/roms-tools/pull/279))
+
+## v2.5.0
+
+### New Features
+
+* Support for creating multi-cell rivers ([#258](https://github.com/CWorthy-ocean/roms-tools/pull/258))
+* Support for writing and reading single-cell and multi-cell rivers to/from YAML ([#258](https://github.com/CWorthy-ocean/roms-tools/pull/258))
+* Enable plotting ROMS output without boundary; helpful because boundary for ROMS diagnostics consists of zeros ([#265](https://github.com/CWorthy-ocean/roms-tools/pull/265))
+* Nicer y-labels for depth plots ([#265](https://github.com/CWorthy-ocean/roms-tools/pull/265))
+* Option to enable or disable adjusting for SSH in depth coordinate calculation for `ROMSOutput` ([#269](https://github.com/CWorthy-ocean/roms-tools/pull/269))
+
+### Breaking Changes
+
+* Deprecate `type` parameter in `ROMSOutput` ([#253](https://github.com/CWorthy-ocean/roms-tools/pull/253))
+* Write and read the parameter `bypass_validation` to/from YAML ([#249](https://github.com/CWorthy-ocean/roms-tools/pull/249))
+* Refactor `Nesting` class and renamed it to `ChildGrid` class to ensure definite serialization ([#250](https://github.com/CWorthy-ocean/roms-tools/pull/250))
+
+### Internal Changes
+
 * Enforce double precision on source data to ensure reproducible results ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
 * Results produced with vs. without Dask in test suite now pass with `xr.testing.assert_equal` confirming reproducibility ([#244](https://github.com/CWorthy-ocean/roms-tools/pull/244))
+* Document the option for `start_time = None` and `end_time = None` in the docstrings for `BoundaryForcing` and `SurfaceForcing`, specifying that when both are `None`, no time filtering is applied to the data. Also, ensure a warning is raised in this case to inform the user. ([#249](https://github.com/CWorthy-ocean/roms-tools/pull/249))
+* Move conversion to double precision to after choosing subdomain of source data, ensuring a speed-up in grid generation and other forcing datasets that do not use Dask ([#264](https://github.com/CWorthy-ocean/roms-tools/pull/264))
 
 ### Documentation
 
 * Documentation on how to use ROMS-Tools with Dask ([#245](https://github.com/CWorthy-ocean/roms-tools/pull/245))
+* More detailed documentation of `ROMSOutput` ([#269](https://github.com/CWorthy-ocean/roms-tools/pull/269))
 
 ### Bugfixes
 

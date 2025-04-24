@@ -1,26 +1,29 @@
 Installation
 ############
 
-Installation from conda forge
+Installation from Conda-Forge
 =============================
 
-ROMS-Tools can be installed via conda forge::
+To install ``ROMS-Tools`` with all dependencies, including ``xesmf`` and ``dask``, use::
 
     conda install -c conda-forge roms-tools
 
-This command installs ROMS-Tools along with its dask dependency.
+Installation from Conda-Forge is the recommended installation method to ensure all features of ``ROMS-Tools`` are available.
 
-Installation from pip
-=====================
 
-ROMS-Tools can be installed using pip::
+Installation from PyPI (pip)
+============================
+
+``ROMS-Tools`` can be installed using pip::
 
     pip install roms-tools
 
-If you want to use ROMS-Tools together with dask (which we recommend), you can
-install ROMS-Tools along with the additional dependency via::
+If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend for parallel and out-of-core computation), you can install ``ROMS-Tools`` along with the additional dependency via::
 
     pip install roms-tools[dask]
+
+Note: The PyPI versions of ``ROMS-Tools`` do not include ``xesmf``, so some features will be unavailable.
+
 
 Installation from GitHub
 ========================
@@ -31,11 +34,16 @@ To obtain the latest development version, first clone
     git clone https://github.com/CWorthy-ocean/roms-tools.git
     cd roms-tools
 
-Then, install ROMS-Tools via::
+Then, install and activate the following conda environment::
 
-    pip install .
+    conda env create -f ci/environment-with-xesmf.yml
+    conda activate romstools-test
 
-If you want to use ROMS-Tools together with dask (which we recommend), you can
-install ROMS-Tools along with the additional dependency via::
+Finally, install ``ROMS-Tools`` in the same environment::
+
+    pip install -e .
+
+If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend), you can
+install ``ROMS-Tools`` along with the additional dependency via::
 
     pip install ".[dask]"

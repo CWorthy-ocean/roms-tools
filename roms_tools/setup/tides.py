@@ -111,7 +111,7 @@ class TidalForcing:
         for key, data in tidal_data.datasets.items():
             if key != "omega":
                 data.apply_lateral_fill()
-                lateral_regrid = LateralRegrid(target_coords, data.dim_names)
+                lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
 
                 for var_name in var_names:
                     if var_name in data.var_names.keys():

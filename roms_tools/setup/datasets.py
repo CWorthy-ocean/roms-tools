@@ -700,6 +700,10 @@ class Dataset:
 
         Notes
         -----
+        This method assumes that the variables in the dataset use a dimension
+        ordering where latitude comes before longitude, i.e., ('latitude', 'longitude').
+        Ensure that this convention is followed to avoid unexpected behavior.
+
         Looping over `self.ds.data_vars` instead of `self.var_names` ensures that each
         dataset variable is filled only once, even if multiple entries in `self.var_names`
         point to the same variable in the dataset.
@@ -888,6 +892,7 @@ class TPXODataset(Dataset):
             }
         )
         ds_grid = ds_grid.rename({"nx": "longitude", "ny": "latitude"})
+        ds_grid = ds_grid.transpose("latitude", "longitude")
 
         ds = ds.rename({"con": "nc"})
         ds = ds.assign_coords(
@@ -904,21 +909,13 @@ class TPXODataset(Dataset):
         ds = ds.rename(
             {"nx": "longitude", "ny": "latitude", self.dim_names["ntides"]: "ntides"}
         )
+        ds = ds.transpose("latitude", "longitude", "ntides")
 
         self.dim_names = {
             "latitude": "latitude",
             "longitude": "longitude",
             "ntides": "ntides",
         }
-
-        # Restrict dataset to same lat/lons as grid
-        ds = ds.sel(
-            {
-                "latitude": ds_grid["latitude"],
-                "longitude": ds_grid["longitude"],
-            },
-            method="nearest",
-        )
 
         # Validate matching lat/lon shapes and values
         for coord in [lon_name, lat_name]:
@@ -930,10 +927,14 @@ class TPXODataset(Dataset):
                 raise ValueError(
                     f"{coord.capitalize()} values from dataset do not match grid. Dataset: {ds[coord].values}, Grid: {ds_grid[coord].values}"
                 )
-        # Restrict dataset so lon/lat matches those of grid file
 
         # Add mask
-        ds["mask"] = ds_grid[mask_name].isnull()
+        mask = ds_grid[mask_name].isnull()
+        # Create a fresh xarray.DataArray for the mask using only the dimension names.
+        # This avoids issues that can arise from small coordinate mismatches when assigning directly.
+        ds["mask"] = xr.DataArray(
+            ds_grid[mask_name].isnull().values, dims=list(mask.dims)
+        )
 
         return ds
 

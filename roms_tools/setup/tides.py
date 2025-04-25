@@ -99,6 +99,8 @@ class TidalForcing:
                     target_coords,
                     buffer_points=20,
                 )
+                # Enforce double precision to ensure reproducibility
+                data.convert_to_float64()
 
         tidal_data.correct_tides(self.model_reference_date)
 
@@ -154,6 +156,7 @@ class TidalForcing:
             self._validate(ds)
 
         ds = ds.assign_coords({"omega": tidal_data.datasets["omega"]})
+        ds["ntides"].attrs["long_name"] = "constituent label"
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:

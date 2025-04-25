@@ -9,6 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from roms_tools import Grid
+from roms_tools.constants import NUM_TRACERS
 from roms_tools.plot import _plot, _get_projection
 from roms_tools.utils import save_datasets
 from roms_tools.setup.datasets import DaiRiverDataset
@@ -298,7 +299,7 @@ class RiverForcing:
         ds = ds.assign_coords({"nriver": nriver})
 
         if self.include_bgc:
-            ntracers = 2 + 32
+            ntracers = NUM_TRACERS
         else:
             ntracers = 2
         tracer_data = np.zeros(

@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from roms_tools import CDRVolumePointSource, Grid
+from roms_tools.constants import NUM_TRACERS
 import xarray as xr
 import numpy as np
 import logging
@@ -130,13 +131,13 @@ def test_cdr_point_source_init(cdr_forcing_fixture, start_end_times, request):
     # Check dimension lengths
     assert cdr.ds.time.size == 0
     assert cdr.ds.ncdr.size == 0
-    assert cdr.ds.ntracers.size == 34
+    assert cdr.ds.ntracers.size == NUM_TRACERS
 
     # Check coordinate and variable lengths
     assert cdr.ds.release_name.size == 0
-    assert cdr.ds.tracer_name.size == 34
-    assert cdr.ds.tracer_unit.size == 34
-    assert cdr.ds.tracer_long_name.size == 34
+    assert cdr.ds.tracer_name.size == NUM_TRACERS
+    assert cdr.ds.tracer_unit.size == NUM_TRACERS
+    assert cdr.ds.tracer_long_name.size == NUM_TRACERS
     assert cdr.ds.cdr_time.size == 0
     assert cdr.ds.cdr_lon.size == 0
     assert cdr.ds.cdr_lat.size == 0
@@ -187,14 +188,14 @@ def test_add_release(cdr_forcing_fixture, valid_release_params, request):
     # Check dimension lengths
     assert cdr.ds.time.size == len(times)
     assert cdr.ds.ncdr.size == 1
-    assert cdr.ds.ntracers.size == 34
+    assert cdr.ds.ntracers.size == NUM_TRACERS
 
     # Check coordinate and variable lengths
     assert cdr.ds.release_name.size == 1
     assert "release" in cdr.ds["release_name"].values
-    assert cdr.ds.tracer_name.size == 34
-    assert cdr.ds.tracer_unit.size == 34
-    assert cdr.ds.tracer_long_name.size == 34
+    assert cdr.ds.tracer_name.size == NUM_TRACERS
+    assert cdr.ds.tracer_unit.size == NUM_TRACERS
+    assert cdr.ds.tracer_long_name.size == NUM_TRACERS
     assert cdr.ds.cdr_time.size == len(times)
     assert cdr.ds.cdr_lon.size == 1
     assert cdr.ds.cdr_lat.size == 1
@@ -207,7 +208,7 @@ def test_add_release(cdr_forcing_fixture, valid_release_params, request):
     np.testing.assert_allclose(cdr.ds.cdr_volume[:, 0], volume_fluxes, rtol=1e-3)
 
     # Check tracer concentration shape
-    assert cdr.ds.cdr_tracer.shape == (len(times), 34, 1)
+    assert cdr.ds.cdr_tracer.shape == (len(times), NUM_TRACERS, 1)
 
     # Check tracer concentration values for known tracers
     tracer_index = {name: i for i, name in enumerate(cdr.ds.tracer_name.values)}

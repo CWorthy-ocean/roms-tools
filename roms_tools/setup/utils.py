@@ -8,6 +8,7 @@ from datetime import datetime
 from dataclasses import fields, asdict
 import importlib.metadata
 import yaml
+from roms_tools.constants import R_EARTH
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 
@@ -1137,11 +1138,8 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
         )
     )
 
-    # Radius of the Earth in meters
-    r_earth = 6371315.0
-
     # Distance in meters
-    dis = r_earth * dang
+    dis = R_EARTH * dang
 
     return dis
 

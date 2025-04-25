@@ -9,6 +9,7 @@ import logging
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from roms_tools import Grid
+from roms_tools.constants import NUM_TRACERS
 from roms_tools.plot import _plot, _get_projection
 from roms_tools.regrid import LateralRegridFromROMS
 from roms_tools.utils import (
@@ -76,7 +77,10 @@ class CDRVolumePointSource:
                 "cdr_hsc": (["ncdr"], np.empty(0)),
                 "cdr_vsc": (["ncdr"], np.empty(0)),
                 "cdr_volume": (["time", "ncdr"], np.empty((0, 0))),
-                "cdr_tracer": (["time", "ntracers", "ncdr"], np.empty((0, 34, 0))),
+                "cdr_tracer": (
+                    ["time", "ntracers", "ncdr"],
+                    np.empty((0, NUM_TRACERS, 0)),
+                ),
             },
             coords={
                 "time": (["time"], np.empty(0)),

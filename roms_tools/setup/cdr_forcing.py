@@ -19,7 +19,8 @@ from roms_tools.utils import (
 from roms_tools.setup.utils import (
     gc_dist,
     get_river_tracer_defaults,
-    add_tracer_metadata,
+    get_tracer_metadata_dict,
+    add_tracer_metadata_to_ds,
     to_float,
     _to_yaml,
     _from_yaml,
@@ -80,13 +81,15 @@ class CDRVolumePointSource:
                 "release_name": (["ncdr"], np.empty(0, dtype=str)),
             },
         )
-        ds, tracer_metadata = add_tracer_metadata(ds, return_dict=True)
+        ds = add_tracer_metadata_to_ds(ds)
         self.ds = ds
+
+        tracer_metadata = get_tracer_metadata_dict()
         self.releases["_tracer_metadata"] = tracer_metadata
 
         if self.releases:
             if "_metadata" not in self.releases:
-                tracer_metadata = add_tracer_metadata(ds=None, return_dict=True)
+                tracer_metadata = get_tracer_metadata_dict()
                 self.releases["_tracer_metadata"] = tracer_metadata
 
             for name, params in self.releases.items():
@@ -280,7 +283,7 @@ class CDRVolumePointSource:
         ds = xr.Dataset()
         ds["time"] = ("time", union_times)
         ds["cdr_time"] = ("time", union_rel_times)
-        ds = add_tracer_metadata(ds)
+        ds = add_tracer_metadata_to_ds(ds)
 
         release_names = np.concatenate([self.ds.release_name.values, [name]])
         ds = ds.assign_coords({"release_name": (["ncdr"], release_names)})

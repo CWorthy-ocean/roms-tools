@@ -609,30 +609,21 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
-def add_tracer_metadata(ds=None, include_bgc=True, return_dict=False):
-    """Assigns tracer metadata to a dataset and/or returns metadata as a dictionary.
+def get_tracer_metadata_dict(include_bgc=True):
+    """Returns a dictionary of tracer metadata.
 
-    If `ds` is provided, this function adds tracer metadata (name, unit, long name)
-    to the dataset as coordinates. If `return_dict` is True, it also returns a dict
-    of tracer metadata. If `ds` is None and `return_dict` is True, only the dictionary
-    is returned.
+    This function constructs a dictionary containing the names, units, and long names
+    of the tracers, based on whether biogeochemical tracers should be included or not.
 
     Parameters
     ----------
-    ds : xarray.Dataset or None, optional
-        Dataset to which tracer metadata will be added. If None and `return_dict` is True,
-        only a metadata dictionary is returned.
     include_bgc : bool, optional
         Whether to include biogeochemical tracers. Defaults to True.
-    return_dict : bool, optional
-        If True, returns a dict of tracer metadata.
 
     Returns
     -------
-    xarray.Dataset or dict or (xarray.Dataset, dict)
-        If `ds` is provided and `return_dict` is False, returns the dataset with metadata.
-        If `ds` is provided and `return_dict` is True, returns (dataset, metadata dict).
-        If `ds` is None and `return_dict` is True, returns only the metadata dict.
+    dict
+        A dictionary containing tracer names, units, and long names.
     """
     if include_bgc:
         tracer_names = [
@@ -675,8 +666,6 @@ def add_tracer_metadata(ds=None, include_bgc=True, return_dict=False):
         tracer_names = ["temp", "salt"]
 
     metadata = get_variable_metadata()
-    tracer_units = [metadata[tracer]["units"] for tracer in tracer_names]
-    tracer_long_names = [metadata[tracer]["long_name"] for tracer in tracer_names]
 
     tracer_dict = {
         tracer: {
@@ -686,23 +675,44 @@ def add_tracer_metadata(ds=None, include_bgc=True, return_dict=False):
         for tracer in tracer_names
     }
 
-    if ds is not None:
-        ds = ds.assign_coords(
-            tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"}),
-            tracer_unit=("ntracers", tracer_units, {"long_name": "Tracer unit"}),
-            tracer_long_name=(
-                "ntracers",
-                tracer_long_names,
-                {"long_name": "Tracer long name"},
-            ),
-        )
-        if return_dict:
-            return ds, tracer_dict
-        return ds
-    else:
-        if return_dict:
-            return tracer_dict
-        raise ValueError("`ds` is None and `return_dict` is False. Nothing to return.")
+    return tracer_dict
+
+
+def add_tracer_metadata_to_ds(ds, include_bgc=True):
+    """Adds tracer metadata to a dataset.
+
+    This function adds tracer metadata (name, unit, long name) as coordinates to
+    the provided dataset.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset to which tracer metadata will be added.
+    include_bgc : bool, optional
+        Whether to include biogeochemical tracers. Defaults to True.
+
+    Returns
+    -------
+    xarray.Dataset
+        The dataset with added tracer metadata.
+    """
+    tracer_dict = get_tracer_metadata_dict(include_bgc)
+
+    tracer_names = list(tracer_dict.keys())
+    tracer_units = [tracer_dict[tracer]["units"] for tracer in tracer_names]
+    tracer_long_names = [tracer_dict[tracer]["long_name"] for tracer in tracer_names]
+
+    ds = ds.assign_coords(
+        tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"}),
+        tracer_unit=("ntracers", tracer_units, {"long_name": "Tracer unit"}),
+        tracer_long_name=(
+            "ntracers",
+            tracer_long_names,
+            {"long_name": "Tracer long name"},
+        ),
+    )
+
+    return ds
 
 
 def get_river_tracer_defaults():

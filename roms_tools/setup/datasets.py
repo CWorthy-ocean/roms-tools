@@ -818,6 +818,9 @@ class TPXODataset(Dataset):
     dim_names : Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset. Defaults to:
         {"longitude": "ny", "latitude": "nx", "ntides": "nc"}.
+    tolerate_coord_mismatch : bool, optional
+        If True, allows mismatched latitude/longitude coordinates between the TPXO dataset and the TPXO grid
+        by selecting the nearest grid-aligned coordinates. Default is False.
 
     Attributes
     ----------
@@ -832,36 +835,37 @@ class TPXODataset(Dataset):
     dim_names: Dict[str, str] = field(
         default_factory=lambda: {"longitude": "nx", "latitude": "ny", "ntides": "nc"}
     )
+    tolerate_coord_mismatch: bool = False
     ds: xr.Dataset = field(init=False, repr=False)
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Standardize the dataset's dimensions and coordinates for further processing.
 
-        This method performs the following operations:
-        - Assigns 'longitude' and 'latitude' coordinates from existing dataset variables.
-        - Adds a `mask` variable indicating valid data points based on grid conditions.
-        - Renames dimensions:
-          - 'nx' → 'longitude'
-          - 'ny' → 'latitude'
-          - Tidal dimension → 'ntides'
-        - Updates `dim_names` to reflect the new dimension names.
-        - Ensures the dataset's longitude and latitude values match those of the grid.
-          If mismatched, raises a `ValueError` with details.
+            This method performs the following operations:
+            - Assigns 'longitude' and 'latitude' coordinates from existing dataset variables.
+            - Adds a `mask` variable indicating valid data points based on grid conditions.
+            - Renames dimensions:
+              - 'nx' → 'longitude'
+              - 'ny' → 'latitude'
+              - Tidal dimension → 'ntides'
+            - Updates `dim_names` to reflect the new dimension names.
+            - If coordinates do not match and `self.tolerate_coord_mismatch=True`, the dataset is reindexed
+        to the grid's coordinates using nearest-neighbor selection. Otherwise, a ValueError is raised.
 
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The dataset to be standardized.
+            Parameters
+            ----------
+            ds : xr.Dataset
+                The dataset to be standardized.
 
-        Returns
-        -------
-        xr.Dataset
-            The cleaned dataset with updated coordinates and dimensions.
+            Returns
+            -------
+            xr.Dataset
+                The cleaned dataset with updated coordinates and dimensions.
 
-        Raises
-        ------
-        ValueError
-            If longitude or latitude values do not match the grid.
+            Raises
+            ------
+            ValueError
+                If longitude or latitude values do not match the grid.
         """
 
         ds_grid = _load_data(self.grid_filename, self.dim_names, self.use_dask)
@@ -892,6 +896,22 @@ class TPXODataset(Dataset):
             }
         )
         ds_grid = ds_grid.rename({"nx": "longitude", "ny": "latitude"})
+
+        # Drop all dimensions except 'longitude' and 'latitude'
+        dims_to_keep = {"longitude", "latitude"}
+        dims_to_drop = [dim for dim in ds_grid.dims if dim not in dims_to_keep]
+        if dims_to_drop:
+            ds_grid = ds_grid.isel({dim: 0 for dim in dims_to_drop})
+
+        # Ensure correct dimension order
+        ds_grid = ds_grid.transpose("latitude", "longitude")
+
+        dims_to_keep = {"longitude", "latitude"}
+        dims_to_drop = set(ds_grid.dims) - dims_to_keep
+        ds_grid = (
+            ds_grid.isel({dim: 0 for dim in dims_to_drop}) if dims_to_drop else ds_grid
+        )
+        # Bring dimensions in correct order
         ds_grid = ds_grid.transpose("latitude", "longitude")
 
         ds = ds.rename({"con": "nc"})
@@ -909,6 +929,7 @@ class TPXODataset(Dataset):
         ds = ds.rename(
             {"nx": "longitude", "ny": "latitude", self.dim_names["ntides"]: "ntides"}
         )
+
         ds = ds.transpose("latitude", "longitude", "ntides")
 
         self.dim_names = {
@@ -916,6 +937,16 @@ class TPXODataset(Dataset):
             "longitude": "longitude",
             "ntides": "ntides",
         }
+
+        if self.tolerate_coord_mismatch:
+            # Reindex dataset to match grid lat/lon using nearest-neighbor method
+            ds = ds.sel(
+                {
+                    "latitude": ds_grid["latitude"],
+                    "longitude": ds_grid["longitude"],
+                },
+                method="nearest",
+            )
 
         # Validate matching lat/lon shapes and values
         for coord in [lon_name, lat_name]:
@@ -2143,6 +2174,7 @@ class TPXOManager:
                 location="h",
                 var_names={"sal_Re": "hRe", "sal_Im": "hIm"},
                 use_dask=self.use_dask,
+                tolerate_coord_mismatch=True,  # Allow coordinate mismatch since SAL is from TPXO9v2a and may not align exactly with newer grids
             ),
             "u": TPXODataset(
                 filename=self.filenames["u"],
@@ -2166,7 +2198,9 @@ class TPXOManager:
             data.select_constituents(self.ntides, omega)
 
         data_dict["omega"] = xr.DataArray(
-            data=list(omega.values())[: self.ntides], dims="ntides"
+            data=list(omega.values())[: self.ntides],
+            dims="ntides",
+            attrs={"long_name": "angular frequency", "units": "radians per second"},
         )
 
         object.__setattr__(self, "datasets", data_dict)

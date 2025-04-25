@@ -395,7 +395,7 @@ class TidalForcing:
 
         title = "%s, constituent: %s" % (
             field.long_name,
-            str(self.ds[var_name].ntides[ntides].values),
+            self.ds[var_name].ntides[ntides].values.item().decode("utf-8"),
         )
 
         vmax = max(field.max(), -field.min())

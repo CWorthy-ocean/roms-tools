@@ -917,7 +917,7 @@ class TPXODataset(Dataset):
         ds = ds.rename({"con": "nc"})
         ds = ds.assign_coords(
             {
-                "nc": ("nc", [c.decode("utf-8").strip() for c in ds["nc"].values]),
+                "nc": ("nc", [c.strip() for c in ds["nc"].values]),  # Strip padding
                 "nx": ds[lon_name].isel(
                     ny=0
                 ),  # lon is constant along ny, i.e., is only a function of nx
@@ -1002,7 +1002,9 @@ class TPXODataset(Dataset):
         expected_constituents = list(omega.keys())[:ntides]
 
         # Extract the current tidal constituents from the dataset
-        dataset_constituents = self.ds["ntides"].values.tolist()
+        dataset_constituents = [
+            c.decode("utf-8").strip() for c in self.ds["ntides"].values
+        ]
 
         # Check if the dataset contains the expected constituents
         if not all(c in dataset_constituents for c in expected_constituents):
@@ -1017,8 +1019,11 @@ class TPXODataset(Dataset):
             c for c in dataset_constituents if c in expected_constituents
         ]
 
+        # Encode the filtered constituents back to byte strings before selecting in xarray
+        filtered_constituents_bytes = [c.encode("utf-8") for c in filtered_constituents]
+
         # Update the dataset with the filtered constituents
-        self.ds = self.ds.sel(ntides=filtered_constituents)
+        self.ds = self.ds.sel(ntides=filtered_constituents_bytes)
 
 
 @dataclass(kw_only=True)

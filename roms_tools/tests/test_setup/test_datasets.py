@@ -616,7 +616,9 @@ class TestTPXODataset:
     def test_select_fewer_constituents(self, regional_tpxo_dataset, omega):
 
         regional_tpxo_dataset.select_constituents(2, omega)
-        assert (regional_tpxo_dataset.ds["ntides"].values == ["m2", "s2"]).all()
+        assert (
+            regional_tpxo_dataset.ds["ntides"].values.astype("U3") == ["m2", "s2"]
+        ).all()
 
     def test_select_constituents_with_reordering(self, regional_tpxo_dataset, omega):
 
@@ -624,7 +626,9 @@ class TestTPXODataset:
 
         assert len(regional_tpxo_dataset.ds["ntides"]) == 11
         # check that m4 has been moved from 12th to 11th position to follow TPXO9 order
-        assert regional_tpxo_dataset.ds["ntides"].isel(ntides=10) == "m4"
+        assert (
+            regional_tpxo_dataset.ds["ntides"].isel(ntides=10).decode("utf-8") == "m4"
+        )
 
     def test_select_constituents_omega_mismatch(self, regional_tpxo_dataset, omega):
 

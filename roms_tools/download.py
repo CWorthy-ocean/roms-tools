@@ -22,7 +22,7 @@ correction_data = pooch.create(
     },
 )
 
-# Create a Pooch object to manage the global topography data
+# Create a Pooch object to manage the global river data
 river_data = pooch.create(
     # Use the default cache folder for the operating system
     path=pooch.os_cache("roms-tools"),
@@ -32,6 +32,18 @@ river_data = pooch.create(
         "dai_trenberth_may2019.nc": "sha256:793849e6aa60d1f6bdb480c345515fb2453d903c0a30599241b3d752f53715ab",
     },
 )
+
+# Create a Pooch object to manage the global SAL TPXO data
+sal_data = pooch.create(
+    # Use the default cache folder for the operating system
+    path=pooch.os_cache("roms-tools"),
+    base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
+    # The registry specifies the files that can be fetched
+    registry={
+        "sal_tpxo9.v2a.nc": "sha256:5343d745b4374170a069bfc2c67dcdd9f1dc4eb0df7c0e6de5c004432c903f40",
+    },
+)
+
 # Create a Pooch object to manage the test data
 pup_test_data = pooch.create(
     # Use the default cache folder for the operating system
@@ -46,8 +58,19 @@ pup_test_data = pooch.create(
         "GLORYS_NA_20121231.nc": "03c1155087195deff76ad3f136d6a7f35bc01ccae3402f3d95557a2886d39e71",
         "ERA5_regional_test_data.nc": "bd12ce3b562fbea2a80a3b79ba74c724294043c28dc98ae092ad816d74eac794",
         "ERA5_global_test_data.nc": "8ed177ab64c02caf509b9fb121cf6713f286cc603b1f302f15f3f4eb0c21dc4f",
-        "TPXO_global_test_data.nc": "457bfe87a7b247ec6e04e3c7d3e741ccf223020c41593f8ae33a14f2b5255e60",
-        "TPXO_regional_test_data.nc": "11739245e2286d9c9d342dce5221e6435d2072b50028bef2e86a30287b3b4032",
+        "global_grid_tpxo10.v2.nc": "26eb97cd135cd6f2b4e894c5f11bf7f860ff19cec8dbaa9190e37d30ee6e744e",
+        "global_h_tpxo10.v2.nc": "ef60fae6d52fa514dcc59a737435d74aa798dc114b57f01b123aa39dbaffc592",
+        "global_u_tpxo10.v2.nc": "022e57e6287e51f52eb1e5296614b1086e0e22ecd0bd57c9fd8d0e155babf5c3",
+        "regional_grid_tpxo10v2a.nc": "c5022bfe93ead7cd46e836578645bd87cb5be63c736e660937c7f5703c968cbc",
+        "regional_h_tpxo10.v2.nc": "202fd0c197490ac460af12cd9fa1156aa40023c0023c705f145c596de5b5ad3d",
+        "regional_grid_tpxo10v2.nc": "0789b6a24ecb2ced522481dfcfb7282e32f999984747b9b9f46f044a8898d0ac",
+        "regional_grid_tpxo9v5a.nc": "497a2ae9e6adc7e4b06408dadb57734e2ad24afaa3f0e2e4fd90ebc6eafc2557",
+        "regional_h_tpxo10v2a.nc": "2df2f181f748a960e4072f975226f6f98f6a6c4d5b77da23057946585152d59c",
+        "regional_h_tpxo10v2.nc": "202fd0c197490ac460af12cd9fa1156aa40023c0023c705f145c596de5b5ad3d",
+        "regional_h_tpxo9v5a.nc": "c7e4d9ab73bc11dcb415f88c48131531488e1aed5113df5797e80d3d374607fc",
+        "regional_u_tpxo10v2a.nc": "2d1680ecd53242e858281a762221d91827999967f8e1f3cb7de3d23b47efe8c8",
+        "regional_u_tpxo10v2.nc": "3b0849473cbb7f9076ca907e4fc39eceda3c7d64659c121fa0692024d59dcdb3",
+        "regional_u_tpxo9v5a.nc": "b0cc5f6934d2e212549c7120d458d61a4963ba73d17055e67cc9e4312901b041",
         "CESM_BGC_coarse_global_clim.nc": "20806e4e99285d6de168d3236e2d9245f4e9106474b1464beaa266a73e6ef79f",
         "CESM_BGC_2012.nc": "e374d5df3c1be742d564fd26fd861c2d40af73be50a432c51d258171d5638eb6",
         "CESM_regional_test_data_one_time_slice.nc": "43b578ecc067c85f95d6b97ed7b9dc8da7846f07c95331c6ba7f4a3161036a17",
@@ -123,6 +146,26 @@ def download_correction_data(filename: str) -> str:
     """
     # Fetch the file using Pooch, downloading if necessary
     fname = correction_data.fetch(filename)
+
+    return fname
+
+
+def download_sal_data(filename: str) -> str:
+    """Download the SAL data file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the test data file to be downloaded. Available options:
+        - "sal_tpxo9.v2a.nc"
+
+    Returns
+    -------
+    str
+        The path to the downloaded test data file.
+    """
+    # Fetch the file using Pooch, downloading if necessary
+    fname = sal_data.fetch(filename)
 
     return fname
 

@@ -18,7 +18,7 @@ from roms_tools.utils import (
 )
 from roms_tools.setup.utils import (
     gc_dist,
-    get_river_tracer_defaults,
+    get_tracer_defaults,
     get_tracer_metadata_dict,
     add_tracer_metadata_to_ds,
     to_float,
@@ -193,7 +193,7 @@ class CDRVolumePointSource:
             tracer_concentrations = {}
 
         # Fill in missing tracer concentrations
-        defaults = get_river_tracer_defaults()
+        defaults = get_tracer_defaults()
         for tracer_name in self.ds.tracer_name.values:
             if tracer_name not in tracer_concentrations:
                 tracer_name = str(tracer_name)

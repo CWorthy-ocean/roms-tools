@@ -6,7 +6,7 @@ from roms_tools import CDRVolumePointSource, Grid
 import xarray as xr
 import numpy as np
 import logging
-from roms_tools.setup.utils import get_river_tracer_defaults
+from roms_tools.setup.utils import get_tracer_defaults
 from conftest import calculate_file_hash
 
 try:
@@ -620,7 +620,7 @@ def test_add_release_tracer_zero_fill(start_end_times, valid_release_params):
     release_params = deepcopy(valid_release_params)
     release_params["fill_values"] = "zero"
     cdr.add_release(name="filled_release", **release_params)
-    defaults = get_river_tracer_defaults()
+    defaults = get_tracer_defaults()
     # temp
     assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
     # salt
@@ -638,7 +638,7 @@ def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
     release_params["fill_values"] = "auto"
     cdr.add_release(name="filled_release", **release_params)
 
-    defaults = get_river_tracer_defaults()
+    defaults = get_tracer_defaults()
     # temp
     assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
     # salt

@@ -715,11 +715,11 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True):
     return ds
 
 
-def get_river_tracer_defaults():
-    """Returns default tracer concentrations for river inputs in ROMS.
+def get_tracer_defaults():
+    """Returns constant default tracer concentrations for ROMS-MARBL.
 
     These values represent typical physical and biogeochemical tracer levels
-    (e.g., temperature, salinity, nutrients, carbon) in river water.
+    (e.g., temperature, salinity, nutrients, carbon) in freshwater.
 
     Returns
     -------

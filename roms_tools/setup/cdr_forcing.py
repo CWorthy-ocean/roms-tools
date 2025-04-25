@@ -32,7 +32,7 @@ class CDRVolumePointSource:
     """Represents one or several volume sources of water with tracers at specific
     location(s). This class is particularly useful for modeling point sources of Carbon
     Dioxide Removal (CDR) forcing data, such as the injection of water and
-    biogeochemical tracers (e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC))
+    biogeochemical tracers, e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC),
     through a pipe.
 
     Parameters
@@ -40,9 +40,9 @@ class CDRVolumePointSource:
     grid : Grid, optional
         Object representing the grid for spatial context.
     start_time : datetime
-        Start time of the model simulation.
+        Start time of the ROMS model simulation.
     end_time : datetime
-        End time of the model simulation.
+        End time of the ROMS model simulation.
     model_reference_date : datetime, optional
         Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
     releases : dict, optional
@@ -59,6 +59,8 @@ class CDRVolumePointSource:
     end_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
     releases: Optional[dict] = field(default_factory=dict)
+
+    ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
         if self.start_time >= self.end_time:
@@ -127,40 +129,48 @@ class CDRVolumePointSource:
         name : str
             Unique identifier for the release.
         lat : float or int
-            Latitude of the release location. Must be between -90 and 90.
+            Latitude of the release location in degrees North. Must be between -90 and 90.
         lon : float or int
-            Longitude of the release location. No restrictions on bounds.
+            Longitude of the release location in degrees East. No restrictions on bounds.
         depth : float or int
-            Depth of the release. Must be non-negative.
+            Depth of the release in meters. Must be non-negative.
         times : list of datetime.datetime, optional
             Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
 
             Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
 
         volume_fluxes : float, int, or list of float/int, optional
+
             Volume flux(es) of the release in m³/s over time.
-            - Constant: applies uniformly from `times[0]` to `times[-1]`.
+
+            - Constant: applies uniformly across the entire simulation period.
             - Time-varying: must match the length of `times`.
 
             Example:
-            - Constant: `volume_fluxes=1000.0` (uniform across the time period).
+
+            - Constant: `volume_fluxes=1000.0` (uniform across the entire simulation period).
             - Time-varying: `volume_fluxes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
 
         tracer_concentrations : dict, optional
+
             Dictionary of tracer names and their concentration values. The concentration values can be either
             a float/int (constant in time) or a list of float/int (time-varying).
-            - Constant: applies uniformly from `times[0]` to `times[-1]`.
+
+            - Constant: applies uniformly across the entire simulation period.
             - Time-varying: must match the length of `times`.
 
             Default is an empty dictionary (`{}`) if not provided.
             Example:
+
             - Constant: `{"ALK": 2000.0, "DIC": 1900.0}`
             - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
             - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
 
         fill_values : str, optional
+
             Strategy for filling missing tracer concentration values. Options:
-            - "auto" (default): automatically set values
+
+            - "auto" (default): automatically set values to non-zero defaults
             - "zero": fill missing values with 0.0
         """
         # Check that the name is unique
@@ -558,9 +568,9 @@ class CDRVolumePointSource:
         This method creates two plots:
 
         - A bathymetry section along a fixed longitude (latitudinal view),
-          with the release location marked by a red "x".
+          with the release location marked by an "x".
         - A bathymetry section along a fixed latitude (longitudinal view),
-          with the release location also marked by a red "x".
+          with the release location also marked by an "x".
 
         Parameters
         ----------
@@ -571,6 +581,7 @@ class CDRVolumePointSource:
         Raises
         ------
         ValueError
+
             If `self.grid` is not set.
             If the specified `release` does not exist in `self.releases`.
             If no `release` is provided when multiple releases are available.
@@ -589,7 +600,7 @@ class CDRVolumePointSource:
                     f"Multiple releases found: {valid_releases}. Please specify a single release to plot."
                 )
 
-        self._validate_release_input(release)
+        self._validate_release_input(release, list_allowed=False)
 
         def _plot_bathymetry_section(
             ax, h, dim, fixed_val, coord_deg, resolution, title
@@ -1060,48 +1071,6 @@ class CDRVolumePointSource:
         ]
         if invalid_releases:
             raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
-
-    def _validate_release_input(self, releases, list_allowed=True):
-        """Validates the input for release names in plotting methods to ensure they are
-        in an acceptable format and exist within the set of valid releases.
-
-        Parameters
-        ----------
-        releases : str or list of str
-            A single release name as a string, or a list of release names (strings) to validate.
-
-        Raises
-        ------
-        ValueError
-            If the input is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
-
-        Notes
-        -----
-        This method ensures that the `releases` input is in a valid format (a string or a list of strings),
-        and checks that each release exists in the set of valid releases defined in `self.releases`.
-        Invalid releases are reported in the error message.
-        """
-
-        # Validate the releases input
-        if isinstance(releases, str):
-            releases = [releases]  # Convert to list if a single string is provided
-        elif isinstance(releases, list):
-            if not all(isinstance(r, str) for r in releases):
-                raise ValueError("All elements in `releases` list must be strings.")
-        else:
-            raise ValueError(
-                "`releases` should be a string (single release name) or a list of strings (release names)."
-            )
-
-        # Validate that the specified releases exist in self.releases
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        invalid_releases = [
-            release for release in releases if release not in valid_releases
-        ]
-        if invalid_releases:
-            raise ValueError(
-                f"Invalid releases: {', '.join(invalid_releases)}. Valid options are: {valid_releases}"
-            )
 
     def _get_release_colors(self):
         """Returns a dictionary of colors for the valid releases, based on a consistent

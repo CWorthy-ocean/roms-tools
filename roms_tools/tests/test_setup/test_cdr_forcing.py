@@ -711,7 +711,7 @@ def test_plot_more_errors(cdr_point_source_with_two_releases):
         cdr_point_source_with_two_releases.plot_location_top_view(releases=[4])
 
 
-def test_river_forcing_save(cdr_point_source_with_two_releases, tmp_path):
+def test_cdr_forcing_save(cdr_point_source_with_two_releases, tmp_path):
     """Test save method."""
 
     for file_str in ["test_cdr_forcing", "test_cdr_forcing.nc"]:
@@ -749,6 +749,8 @@ def test_roundtrip_yaml(cdr_point_source_with_two_releases, tmp_path):
 
 
 def test_files_have_same_hash(cdr_point_source_with_two_releases, tmp_path):
+    """Test that saving the same CDR forcing configuration to NetCDF twice results in
+    reproducible file hashes."""
 
     yaml_filepath = tmp_path / "test_yaml.yaml"
     filepath1 = tmp_path / "test1.nc"

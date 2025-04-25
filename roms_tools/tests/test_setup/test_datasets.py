@@ -627,7 +627,8 @@ class TestTPXODataset:
         assert len(regional_tpxo_dataset.ds["ntides"]) == 11
         # check that m4 has been moved from 12th to 11th position to follow TPXO9 order
         assert (
-            regional_tpxo_dataset.ds["ntides"].isel(ntides=10).decode("utf-8") == "m4"
+            regional_tpxo_dataset.ds["ntides"].isel(ntides=10).item().decode("utf-8")
+            == "m4"
         )
 
     def test_select_constituents_omega_mismatch(self, regional_tpxo_dataset, omega):

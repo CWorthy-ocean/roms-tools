@@ -2813,22 +2813,6 @@ def decode_string(byte_array):
     return decoded_string
 
 
-def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
-    """Convert all data variables in an xarray.Dataset to float64.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Input dataset.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with all data variables converted to float64.
-    """
-    return ds.map(lambda v: v.astype(np.float64) if v.dtype == np.float32 else v)
-
-
 def modified_julian_days(year, month, day, hour=0):
     """Calculate the Modified Julian Day (MJD) for a given date and time.
 

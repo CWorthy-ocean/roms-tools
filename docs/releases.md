@@ -1,6 +1,18 @@
 # Release notes
 
-## v2.7.0 (unreleased)
+## v2.8.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v2.7.0
 
 ### New Features
 
@@ -21,8 +33,6 @@
 ### Documentation
 
 * Updated documentation for the `TidalForcing` class and its dataset requirements ([#254](https://github.com/CWorthy-ocean/roms-tools/pull/254))
-
-### Bugfixes
 
 ## v2.6.2
 

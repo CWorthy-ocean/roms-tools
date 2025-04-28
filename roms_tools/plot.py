@@ -11,7 +11,9 @@ def _plot(
     title="",
     with_dim_names=False,
     plot_data=True,
+    add_colorbar=True,
     kwargs={},
+    ax=None,
 ):
     """Plots a grid or field on a map with optional depth contours.
 
@@ -30,13 +32,17 @@ def _plot(
     plot_data : bool, optional
         If True, plots the provided field data on the map. If False, only the grid
         boundaries and optional depth contours are plotted. Default is True.
+    add_colorbar : bool, optional
+        If True, add colobar.
     kwargs : dict, optional
         Additional keyword arguments to pass to `pcolormesh` (e.g., colormap or color limits).
+    ax : matplotlib.axes.Axes, optional
+        Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
 
     Returns
     -------
     matplotlib.figure.Figure
-        The generated figure with the plotted data.
+        The generated figure with the plotted data, if a new figure was created.
 
     Raises
     ------
@@ -56,10 +62,11 @@ def _plot(
 
     trans = _get_projection(lon_deg, lat_deg)
 
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
     lon_deg = lon_deg.values
     lat_deg = lat_deg.values
-
-    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
     if c is not None:
         _add_boundary_to_ax(
@@ -67,7 +74,15 @@ def _plot(
         )
 
     if plot_data:
-        _add_field_to_ax(ax, lon_deg, lat_deg, field, depth_contours, kwargs=kwargs)
+        _add_field_to_ax(
+            ax,
+            lon_deg,
+            lat_deg,
+            field,
+            depth_contours,
+            add_colorbar=add_colorbar,
+            kwargs=kwargs,
+        )
 
     ax.coastlines(
         resolution="50m", linewidth=0.5, color="black"
@@ -90,7 +105,9 @@ def _plot(
 
     ax.set_title(title)
 
-    return fig
+    # Only return fig if it was created inside the function (i.e., ax was not provided)
+    if ax is None:
+        return fig
 
 
 def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):

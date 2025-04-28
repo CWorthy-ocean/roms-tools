@@ -8,6 +8,7 @@ from datetime import datetime
 from dataclasses import fields, asdict
 import importlib.metadata
 import yaml
+from roms_tools.constants import R_EARTH
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 
@@ -609,6 +610,161 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
+def get_tracer_metadata_dict(include_bgc=True):
+    """Returns a dictionary of tracer metadata.
+
+    This function constructs a dictionary containing the names, units, and long names
+    of the tracers, based on whether biogeochemical tracers should be included or not.
+
+    Parameters
+    ----------
+    include_bgc : bool, optional
+        Whether to include biogeochemical tracers. Defaults to True.
+
+    Returns
+    -------
+    dict
+        A dictionary containing tracer names, units, and long names.
+    """
+    if include_bgc:
+        tracer_names = [
+            "temp",
+            "salt",
+            "PO4",
+            "NO3",
+            "SiO3",
+            "NH4",
+            "Fe",
+            "Lig",
+            "O2",
+            "DIC",
+            "DIC_ALT_CO2",
+            "ALK",
+            "ALK_ALT_CO2",
+            "DOC",
+            "DON",
+            "DOP",
+            "DOPr",
+            "DONr",
+            "DOCr",
+            "zooC",
+            "spChl",
+            "spC",
+            "spP",
+            "spFe",
+            "spCaCO3",
+            "diatChl",
+            "diatC",
+            "diatP",
+            "diatFe",
+            "diatSi",
+            "diazChl",
+            "diazC",
+            "diazP",
+            "diazFe",
+        ]
+    else:
+        tracer_names = ["temp", "salt"]
+
+    metadata = get_variable_metadata()
+
+    tracer_dict = {
+        tracer: {
+            "units": metadata[tracer]["units"],
+            "long_name": metadata[tracer]["long_name"],
+        }
+        for tracer in tracer_names
+    }
+
+    return tracer_dict
+
+
+def add_tracer_metadata_to_ds(ds, include_bgc=True):
+    """Adds tracer metadata to a dataset.
+
+    This function adds tracer metadata (name, unit, long name) as coordinates to
+    the provided dataset.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset to which tracer metadata will be added.
+    include_bgc : bool, optional
+        Whether to include biogeochemical tracers. Defaults to True.
+
+    Returns
+    -------
+    xarray.Dataset
+        The dataset with added tracer metadata.
+    """
+    tracer_dict = get_tracer_metadata_dict(include_bgc)
+
+    tracer_names = list(tracer_dict.keys())
+    tracer_units = [tracer_dict[tracer]["units"] for tracer in tracer_names]
+    tracer_long_names = [tracer_dict[tracer]["long_name"] for tracer in tracer_names]
+
+    ds = ds.assign_coords(
+        tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"}),
+        tracer_unit=("ntracers", tracer_units, {"long_name": "Tracer unit"}),
+        tracer_long_name=(
+            "ntracers",
+            tracer_long_names,
+            {"long_name": "Tracer long name"},
+        ),
+    )
+
+    return ds
+
+
+def get_tracer_defaults():
+    """Returns constant default tracer concentrations for ROMS-MARBL.
+
+    These values represent typical physical and biogeochemical tracer levels
+    (e.g., temperature, salinity, nutrients, carbon) in freshwater.
+
+    Returns
+    -------
+    dict
+        Dictionary of tracer names and their default concentrations
+    """
+    return {
+        "temp": 17.0,  # degrees C
+        "salt": 1.0,  # psu
+        "PO4": 2.7,  # mmol m-3
+        "NO3": 24.2,  # mmol m-3
+        "SiO3": 13.2,  # mmol m-3
+        "NH4": 2.2,  # mmol m-3
+        "Fe": 1.79,  # mmol m-3
+        "Lig": 3 * 1.79,  # mmol m-3, inferred from Fe
+        "O2": 187.5,  # mmol m-3
+        "DIC": 2370.0,  # mmol m-3
+        "DIC_ALT_CO2": 2370.0,  # mmol m-3
+        "ALK": 2310.0,  # meq m-3
+        "ALK_ALT_CO2": 2310.0,  # meq m-3
+        "DOC": 1e-4,  # mmol m-3
+        "DON": 1.0,  # mmol m-3
+        "DOP": 0.1,  # mmol m-3
+        "DOPr": 0.003,  # mmol m-3
+        "DONr": 0.8,  # mmol m-3
+        "DOCr": 1e-6,  # mmol m-3
+        "zooC": 2.7,  # mmol m-3
+        "spChl": 1.35,  # mg m-3
+        "spC": 6.75,  # mmol m-3
+        "spP": 1.5 * 0.03,  # mmol m-3, inferred from ?
+        "spFe": 2.7e-5,  # mmol m-3
+        "spCaCO3": 0.135,  # mmol m-3
+        "diatChl": 0.135,  # mg m-3
+        "diatC": 0.405,  # mmol m-3
+        "diatP": 1.5 * 0.02,  # mmol m-3, inferred from ?
+        "diatFe": 2.7e-6,  # mmol m-3
+        "diatSi": 0.135,  # mmol m-3
+        "diazChl": 0.015,  # mg m-3
+        "diazC": 0.075,  # mmol m-3
+        "diazP": 1.5 * 0.01,  # mmol m-3, inferred from ?
+        "diazFe": 1.5e-6,  # mmol m-3
+    }
+
+
 def extract_single_value(data):
     """Extracts a single value from an xarray.DataArray or numpy array.
 
@@ -982,11 +1138,8 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
         )
     )
 
-    # Radius of the Earth in meters
-    r_earth = 6371315.0
-
     # Distance in meters
-    dis = r_earth * dang
+    dis = R_EARTH * dang
 
     return dis
 
@@ -1041,16 +1194,17 @@ def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"
     return ds, time
 
 
+class NoAliasDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data):
+        return True
+
+
 def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     """Serialize a forcing object (including its grid) into a YAML file.
 
     This function serializes a dataclass object (forcing_object) and its associated
     `grid` attribute into a YAML file. It includes additional metadata, such as
-    the version of the `roms-tools` package, and omits fields like `grid` and `ds`
-    that are not serializable or meant to be excluded.
-
-    The function also converts datetime fields to ISO format strings for proper
-    serialization.
+    the version of the `roms-tools` package.
 
     Parameters
     ----------
@@ -1069,8 +1223,53 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     # Convert the filepath to a Path object
     filepath = Path(filepath)
 
-    # Step 1: Serialize Grid data
-    # Check if the forcing_object has a grid attribute
+    # Serialize object into dictionary
+    yaml_data = _to_dict(forcing_object)
+
+    # Create YAML header with version information
+    try:
+        roms_tools_version = importlib.metadata.version("roms-tools")
+    except importlib.metadata.PackageNotFoundError:
+        roms_tools_version = "unknown"
+
+    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
+
+    # Write to YAML file
+    with filepath.open("w") as file:
+        # Write the header first
+        file.write(header)
+        # Write the serialized YAML data
+        yaml.dump(
+            yaml_data,
+            file,
+            Dumper=NoAliasDumper,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
+
+def _to_dict(forcing_object) -> None:
+    """Serialize a forcing object (including its grid) into a dictionary.
+
+    This function serializes a dataclass object (forcing_object) and its associated
+    `grid` attribute into a dictionary. It omits fields like `grid` and `ds`
+    that are not serializable or meant to be excluded.
+
+    The function also converts datetime fields to ISO format strings for proper
+    serialization.
+
+    Parameters
+    ----------
+    forcing_object : object
+        The object that contains the forcing data, typically a dataclass with attributes
+        such as `grid`, `start_time`, `end_time`, etc.
+
+    Returns
+    -------
+    dict
+    """
+
+    # Serialize Grid data
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
         grid_data = asdict(forcing_object.grid)
         grid_yaml_data = {"Grid": _pop_grid_data(grid_data)}
@@ -1078,7 +1277,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         grid_data = asdict(forcing_object.parent_grid)
         grid_yaml_data = {"ParentGrid": _pop_grid_data(grid_data)}
 
-    # Step 2: Ensure Paths are Strings
+    # Ensure Paths are Strings
     def ensure_paths_are_strings(obj, key):
         attr = getattr(obj, key, None)
         if attr is not None and "path" in attr:
@@ -1094,16 +1293,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
     ensure_paths_are_strings(forcing_object, "source")
     ensure_paths_are_strings(forcing_object, "bgc_source")
 
-    # Step 3: Get ROMS Tools version
-    try:
-        roms_tools_version = importlib.metadata.version("roms-tools")
-    except importlib.metadata.PackageNotFoundError:
-        roms_tools_version = "unknown"
-
-    # Create YAML header with version information
-    header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-    # Step 4: Prepare Forcing Data
+    # Prepare Forcing Data
     forcing_data = {}
     field_names = [field.name for field in fields(forcing_object)]
     filtered_field_names = [
@@ -1129,11 +1319,14 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         # If the field is a datetime object, convert it to ISO format
         if isinstance(value, datetime):
             value = value.isoformat()
+        # Convert list of datetimes to list of ISO strings
+        elif isinstance(value, list) and all(isinstance(v, datetime) for v in value):
+            value = [v.isoformat() for v in value]
 
         # Add the field and its value to the forcing_data dictionary
         forcing_data[field_name] = value
 
-    # Step 5: Serialize `indices` data (conditionally)
+    # Serialize `indices` data (conditionally)
     indices_data = getattr(forcing_object, "indices", None)
     if indices_data is not None:
         serialized_indices = {
@@ -1147,23 +1340,13 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
 
         forcing_data["indices"] = serialized_indices
 
-    # Step 6: Combine Grid and Forcing Data into a single dictionary for the final YAML content
+    # Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {
         **grid_yaml_data,  # Add the grid data to the final YAML structure
         forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
     }
 
-    # Step 7: Write to YAML file
-    with filepath.open("w") as file:
-        # Write the header first
-        file.write(header)
-        # Write the serialized YAML data
-        yaml.dump(
-            yaml_data,
-            file,
-            default_flow_style=False,
-            sort_keys=False,
-        )
+    return yaml_data
 
 
 def _pop_grid_data(grid_data):
@@ -1349,3 +1532,21 @@ def wrap_longitudes(grid_ds, straddle):
             )
 
     return grid_ds
+
+
+def to_float(val):
+    """Convert a value or list of values to float.
+
+    Parameters
+    ----------
+    val : float, int, or list of float/int
+        A numeric value or a list of numeric values.
+
+    Returns
+    -------
+    float or list of float
+        The input value(s) converted to float type.
+    """
+    if isinstance(val, list):
+        return [float(v) for v in val]
+    return float(val)

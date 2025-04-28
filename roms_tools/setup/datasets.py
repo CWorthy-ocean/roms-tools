@@ -6,6 +6,7 @@ import numpy as np
 from typing import Dict, Optional, Union, List
 from pathlib import Path
 import logging
+from roms_tools.constants import R_EARTH
 from roms_tools.utils import _load_data
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
@@ -387,7 +388,6 @@ class Dataset:
             and longitude differences, in meters.
         """
 
-        r_earth = 6371315.0
         lat_dim = self.dim_names["latitude"]
         lon_dim = self.dim_names["longitude"]
 
@@ -400,11 +400,11 @@ class Dataset:
         lon_diff = np.abs(np.diff(longitudes)).min()  # Minimal longitude spacing
 
         # Latitude spacing is constant at all longitudes
-        min_lat_spacing = (2 * np.pi * r_earth * lat_diff) / 360
+        min_lat_spacing = (2 * np.pi * R_EARTH * lat_diff) / 360
 
         # Longitude spacing varies with latitude
         min_lon_spacing = (
-            2 * np.pi * r_earth * lon_diff * np.cos(np.radians(latitudes.min()))
+            2 * np.pi * R_EARTH * lon_diff * np.cos(np.radians(latitudes.min()))
         ) / 360
 
         # The minimal spacing is the smaller of the two

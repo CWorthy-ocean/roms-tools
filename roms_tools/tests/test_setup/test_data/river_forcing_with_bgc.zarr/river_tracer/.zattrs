@@ -4,6 +4,6 @@
         "ntracers",
         "nriver"
     ],
-    "coordinates": "abs_time month river_name tracer_name",
+    "coordinates": "abs_time month river_name tracer_long_name tracer_name tracer_unit",
     "long_name": "River tracer data"
 }

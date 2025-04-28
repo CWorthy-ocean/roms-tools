@@ -9,7 +9,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from roms_tools import Grid
-from roms_tools.plot import _get_projection, _add_field_to_ax
+from roms_tools.constants import NUM_TRACERS
+from roms_tools.plot import _plot, _get_projection
 from roms_tools.utils import save_datasets
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
@@ -19,6 +20,7 @@ from roms_tools.setup.utils import (
     convert_to_roms_time,
     _to_yaml,
     _from_yaml,
+    add_tracer_metadata_to_ds,
     get_variable_metadata,
 )
 
@@ -297,7 +299,7 @@ class RiverForcing:
         ds = ds.assign_coords({"nriver": nriver})
 
         if self.include_bgc:
-            ntracers = 2 + 32
+            ntracers = NUM_TRACERS
         else:
             ntracers = 2
         tracer_data = np.zeros(
@@ -311,52 +313,8 @@ class RiverForcing:
             tracer_data, dims=("river_time", "ntracers", "nriver")
         )
         river_tracer.attrs["long_name"] = "River tracer data"
-
-        if self.include_bgc:
-            tracer_names = xr.DataArray(
-                [
-                    "temp",
-                    "salt",
-                    "PO4",
-                    "NO3",
-                    "SiO3",
-                    "NH4",
-                    "Fe",
-                    "Lig",
-                    "O2",
-                    "DIC",
-                    "DIC_ALT_CO2",
-                    "ALK",
-                    "ALK_ALT_CO2",
-                    "DOC",
-                    "DON",
-                    "DOP",
-                    "DOPr",
-                    "DONr",
-                    "DOCr",
-                    "zooC",
-                    "spChl",
-                    "spC",
-                    "spP",
-                    "spFe",
-                    "spCaCO3",
-                    "diatChl",
-                    "diatC",
-                    "diatP",
-                    "diatFe",
-                    "diatSi",
-                    "diazChl",
-                    "diazC",
-                    "diazP",
-                    "diazFe",
-                ],
-                dims="ntracers",
-            )
-        else:
-            tracer_names = xr.DataArray(["temp", "salt"], dims="ntracers")
-        tracer_names.attrs["long_name"] = "Tracer name"
-        river_tracer.coords["tracer_name"] = tracer_names
         ds["river_tracer"] = river_tracer
+        ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
 
         ds, time = convert_to_roms_time(
             ds, self.model_reference_date, self.climatology, time_name="river_time"
@@ -513,56 +471,25 @@ class RiverForcing:
         """Plots the original and updated river locations on a map projection."""
 
         field = self.grid.ds.mask_rho
-        vmax = 3
-        vmin = 0
-        cmap = plt.colormaps.get_cmap("Blues")
-        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
-
-        # check if North or South pole are in domain
-        if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-            raise NotImplementedError(
-                "Plotting is not implemented for the case that the domain contains the North or South pole."
-            )
-
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-        trans = _get_projection(lon_deg, lat_deg)
+        vmax = 6
+        vmin = 0
+        cmap = plt.colormaps.get_cmap("Blues")
+        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
-        lon_deg = lon_deg.values
-        lat_deg = lat_deg.values
+        trans = _get_projection(lon_deg, lat_deg)
 
         fig, axs = plt.subplots(
             1, 2, figsize=(13, 13), subplot_kw={"projection": trans}
         )
 
         for ax in axs:
-            _add_field_to_ax(
-                ax,
-                lon_deg,
-                lat_deg,
-                field,
-                add_colorbar=False,
-                kwargs=kwargs,
-            )
-            # Add gridlines with labels for latitude and longitude
-            gridlines = ax.gridlines(
-                draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
-            )
-            gridlines.top_labels = False  # Hide top labels
-            gridlines.right_labels = False  # Hide right labels
-            gridlines.xlabel_style = {
-                "size": 10,
-                "color": "black",
-            }  # Customize longitude label style
-            gridlines.ylabel_style = {
-                "size": 10,
-                "color": "black",
-            }  # Customize latitude label style
+            _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
 
         proj = ccrs.PlateCarree()
 

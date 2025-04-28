@@ -30,6 +30,8 @@ to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation, with o
 
   - Physical forcing: river volume flux, river temperature, river salinity
 
+- **Carbon Dioxide Removal (CDR) forcing**
+
 - **Nesting**
 
 Additionally, it provides several analysis tools.
@@ -55,6 +57,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    Creating initial conditions <initial_conditions>
    Creating boundary forcing <boundary_forcing>
    Creating river forcing <river_forcing>
+   Creating carbon dioxide removal forcing <cdr_forcing>
    Preparing nested simulations <nesting>
    Partitioning the input files <partition>
 

@@ -2,7 +2,6 @@ import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
 from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.utils import _load_data
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from dataclasses import dataclass, field
 from typing import Union, Optional
@@ -15,8 +14,14 @@ from roms_tools import Grid
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
-from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
-from roms_tools.analysis.utils import _validate_plot_inputs, _generate_coordinate_range
+from roms_tools.utils import (
+    _load_data,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    _generate_coordinate_range,
+    _remove_edge_nans,
+)
+from roms_tools.analysis.utils import _validate_plot_inputs
 
 
 @dataclass(kw_only=True)
@@ -301,7 +306,7 @@ class ROMSOutput:
                 lats = [lat]
                 title = title + f", lat = {lat}°N"
             else:
-                resolution = self._infer_nominal_horizontal_resolution()
+                resolution = self.grid._infer_nominal_horizontal_resolution()
                 lats = _generate_coordinate_range(
                     field.lat.min().values, field.lat.max().values, resolution
                 )
@@ -311,7 +316,7 @@ class ROMSOutput:
                 lons = [lon]
                 title = title + f", lon = {lon}°E"
             else:
-                resolution = self._infer_nominal_horizontal_resolution(lat)
+                resolution = self.grid._infer_nominal_horizontal_resolution(lat)
                 lons = _generate_coordinate_range(
                     field.lon.min().values, field.lon.max().values, resolution
                 )
@@ -326,33 +331,6 @@ class ROMSOutput:
         # Assign depth as coordinate
         if compute_layer_depth:
             field = field.assign_coords({"layer_depth": layer_depth})
-
-        def _remove_edge_nans(field, xdim, layer_depth=None):
-            """Removes NaNs from the edges along the specified dimension."""
-            if xdim in field.dims:
-                if layer_depth is not None:
-                    nan_mask = layer_depth.isnull().sum(
-                        dim=[dim for dim in layer_depth.dims if dim != xdim]
-                    )
-                else:
-                    nan_mask = field.isnull().sum(
-                        dim=[dim for dim in field.dims if dim != xdim]
-                    )
-
-                # Find the valid indices where the sum of the nans is 0
-                valid_indices = np.where(nan_mask.values == 0)[0]
-
-                if len(valid_indices) > 0:
-                    first_valid = valid_indices[0]
-                    last_valid = valid_indices[-1]
-
-                    field = field.isel({xdim: slice(first_valid, last_valid + 1)})
-                    if layer_depth is not None:
-                        layer_depth = layer_depth.isel(
-                            {xdim: slice(first_valid, last_valid + 1)}
-                        )
-
-            return field, layer_depth
 
         if lat is not None:
             field, layer_depth = _remove_edge_nans(
@@ -459,7 +437,7 @@ class ROMSOutput:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         if horizontal_resolution is None:
-            horizontal_resolution = self._infer_nominal_horizontal_resolution()
+            horizontal_resolution = self.grid._infer_nominal_horizontal_resolution()
         lons = _generate_coordinate_range(
             lon_deg.min().values, lon_deg.max().values, horizontal_resolution
         )
@@ -808,50 +786,6 @@ class ROMSOutput:
         # Add all necessary coordinates in one go
         ds = ds.assign_coords(coords_to_add)
         return ds
-
-    def _infer_nominal_horizontal_resolution(self, lat=None):
-        """Estimate the nominal horizontal resolution of the grid in degrees at a
-        specified latitude.
-
-        This method calculates the nominal horizontal resolution of the grid by first
-        determining the average grid spacing in meters. The spacing is then converted
-        to degrees, accounting for the Earth's curvature, and the latitude where the
-        resolution is being computed.
-
-        Parameters
-        ----------
-        lat : float, optional
-            Latitude (in degrees) at which to estimate the horizontal resolution.
-            If not provided, the resolution is calculated at the average latitude of
-            the grid (`lat_rho`).
-
-        Returns
-        -------
-        float
-            The estimated horizontal resolution in degrees, adjusted for the Earth's curvature.
-        """
-        # Earth radius in meters
-        r_earth = 6371315.0
-
-        if lat is None:
-            # Center latitude in degrees
-            lat = (self.grid.ds.lat_rho.max() + self.grid.ds.lat_rho.min()) / 2
-
-        # Convert latitude to radians
-        lat_rad = np.deg2rad(lat)
-
-        # Mean resolution in meters
-        resolution_in_m = (
-            (1 / self.grid.ds.pm).mean() + (1 / self.grid.ds.pn).mean()
-        ) / 2
-
-        # Meters per degree at the equator
-        meters_per_degree = 2 * np.pi * r_earth / 360
-
-        # Correct for latitude by multiplying by cos(latitude) for longitude
-        resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
-
-        return resolution_in_degrees
 
     def _compute_exponential_depth_levels(self, Nz=None, depth=None, h=None):
         """Compute vertical grid center and face depths using an exponential profile.

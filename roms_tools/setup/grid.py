@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
 from typing import Dict, Union, List
+from roms_tools.constants import R_EARTH
 from roms_tools.utils import save_datasets
 from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.mask import _add_mask, _add_velocity_masks
@@ -918,8 +919,6 @@ class Grid:
             - lonq, latq: 2D arrays of longitudes and latitudes at cell corners.
         """
 
-        r_earth = 6371315.0
-
         # initially define the domain to be longer in x-direction (dimension "length")
         # than in y-direction (dimension "width") to keep grid distortion minimal
         if self.size_y > self.size_x:
@@ -929,8 +928,8 @@ class Grid:
             domain_length, domain_width = self.size_x * 1e3, self.size_y * 1e3  # in m
             nl, nw = self.nx, self.ny
 
-        domain_length_in_degrees = domain_length / r_earth
-        domain_width_in_degrees = domain_width / r_earth
+        domain_length_in_degrees = domain_length / R_EARTH
+        domain_width_in_degrees = domain_width / R_EARTH
 
         # Generate 1D longitude arrays at cell centers and corners
         lon_array_1d_in_degrees = domain_length_in_degrees * (
@@ -1097,6 +1096,45 @@ class Grid:
         )
 
         return ds
+
+    def _infer_nominal_horizontal_resolution(self, lat=None):
+        """Estimate the nominal horizontal resolution of the grid in degrees at a
+        specified latitude.
+
+        This method calculates the nominal horizontal resolution of the grid by first
+        determining the average grid spacing in meters. The spacing is then converted
+        to degrees, accounting for the Earth's curvature, and the latitude where the
+        resolution is being computed.
+
+        Parameters
+        ----------
+        lat : float, optional
+            Latitude (in degrees) at which to estimate the horizontal resolution.
+            If not provided, the resolution is calculated at the average latitude of
+            the grid (`lat_rho`).
+
+        Returns
+        -------
+        float
+            The estimated horizontal resolution in degrees, adjusted for the Earth's curvature.
+        """
+        if lat is None:
+            # Center latitude in degrees
+            lat = (self.ds.lat_rho.max() + self.ds.lat_rho.min()) / 2
+
+        # Convert latitude to radians
+        lat_rad = np.deg2rad(lat)
+
+        # Mean resolution in meters
+        resolution_in_m = ((1 / self.ds.pm).mean() + (1 / self.ds.pn).mean()) / 2
+
+        # Meters per degree at the equator
+        meters_per_degree = 2 * np.pi * R_EARTH / 360
+
+        # Correct for latitude by multiplying by cos(latitude) for longitude
+        resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
+
+        return resolution_in_degrees
 
 
 def _rotate(coords, rot):

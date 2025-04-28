@@ -1,14 +1,38 @@
 {
     "metadata": {
         ".zattrs": {
-            "allan_factor": 2.0,
             "model_reference_date": "2000-01-01 00:00:00",
-            "roms_tools_version": "0.1.dev157+dirty",
+            "roms_tools_version": "0.1.dev177",
             "source": "TPXO",
             "title": "ROMS tidal forcing created by ROMS-Tools"
         },
         ".zgroup": {
             "zarr_format": 2
+        },
+        "ntides/.zarray": {
+            "chunks": [
+                1
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U3",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1
+            ],
+            "zarr_format": 2
+        },
+        "ntides/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "ntides"
+            ]
         },
         "omega/.zarray": {
             "chunks": [
@@ -33,9 +57,7 @@
         "omega/.zattrs": {
             "_ARRAY_DIMENSIONS": [
                 "ntides"
-            ],
-            "long_name": "Tidal frequencies",
-            "units": "1/s"
+            ]
         },
         "pot_Im/.zarray": {
             "chunks": [

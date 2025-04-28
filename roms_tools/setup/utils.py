@@ -1286,6 +1286,9 @@ def _to_dict(forcing_object) -> None:
                 attr["path"] = [str(p) if isinstance(p, Path) else p for p in paths]
             elif isinstance(paths, Path):
                 attr["path"] = str(paths)
+            elif isinstance(paths, dict):
+                for key, path in paths.items():
+                    attr["path"][key] = str(path)
 
     ensure_paths_are_strings(forcing_object, "source")
     ensure_paths_are_strings(forcing_object, "bgc_source")

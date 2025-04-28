@@ -5,14 +5,22 @@
 ### New Features
 
 * New class `CDRVolumePointSource` for creating Carbon Dioxide Removal (CDR) forcing in ROMS simulations. It supports point-source injection of water and BGC tracers at fixed locations, designed for field-scale deployments, where localized mixing is essential ([#295](https://github.com/CWorthy-ocean/roms-tools/pull/295))
+* `TidalForcing` class now works with original (rather than postprocessed) TPXO data ([#254](https://github.com/CWorthy-ocean/roms-tools/pull/254))
 
 ### Breaking Changes
+
+* `TidalForcing` class now expects original (rather than postprocessed) TPXO data. See documentation for details. ([#254](https://github.com/CWorthy-ocean/roms-tools/pull/254))
 
 ### Internal Changes
 
 * Correct default value for NOx from 1e-13 to 1e-12 kg/m2/s ([#294](https://github.com/CWorthy-ocean/roms-tools/pull/294))
+* The `TidalForcing` class now correctly handles staggered grid of TPXO data ([#254](https://github.com/CWorthy-ocean/roms-tools/pull/254))
+* The `TidalForcing` class now includes enhanced and more robust constituent correction, making it compatible with newer TPXO products ([#254](https://github.com/CWorthy-ocean/roms-tools/pull/254))
+* The  Self-Attraction and Loading (SAL) correction for the tidal forcing is sourced internally from the TPXO09v2a dataset since it is not included in the regularly updated TPXO datasets ([#254](https://github.com/CWorthy-ocean/roms-tools/pull/254))
 
 ### Documentation
+
+* Updated documentation for the `TidalForcing` class and its dataset requirements ([#254](https://github.com/CWorthy-ocean/roms-tools/pull/254))
 
 ### Bugfixes
 

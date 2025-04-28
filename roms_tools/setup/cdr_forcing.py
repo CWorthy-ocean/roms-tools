@@ -119,7 +119,7 @@ class CDRVolumePointSource:
         times: Optional[List[datetime]] = None,
         volume_fluxes: Union[float, List[float]] = 0.0,
         tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
-        fill_values: Optional[str] = "auto",
+        fill_values: str = "auto",
     ):
         """Adds a release (point source) of water with tracers to the forcing dataset
         and dictionary.

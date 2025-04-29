@@ -526,20 +526,20 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     # Test invalid volume flux (negative)
     invalid_params = deepcopy(valid_release_params)
     invalid_params["volume_fluxes"] = -100  # Invalid volume flux
-    with pytest.raises(ValueError, match="'volume_fluxes' is negative"):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test volume flux as list with negative values
     invalid_params = deepcopy(valid_release_params)
     invalid_params["times"] = [cdr.start_time, cdr.end_time]
     invalid_params["volume_fluxes"] = [10, -5]  # Invalid volume fluxes in list
-    with pytest.raises(ValueError, match="'volume_fluxes' contains negative values"):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test invalid tracer concentration (negative)
     invalid_params = deepcopy(valid_release_params)
     invalid_params["tracer_concentrations"] = {"ALK": -1}
-    with pytest.raises(ValueError, match="Tracer concentration for 'ALK' is negative"):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test tracer_concentration as list with negative values
@@ -548,9 +548,7 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     invalid_params["tracer_concentrations"] = {
         "ALK": [10, -5]
     }  # Invalid concentration in list
-    with pytest.raises(
-        ValueError, match="Tracer concentration for 'ALK' contains negative values"
-    ):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
 

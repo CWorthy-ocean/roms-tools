@@ -3,6 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Dict, Union
+from typing_extensions import Annotated
+from annotated_types import Ge
 import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
@@ -23,10 +25,11 @@ from roms_tools.setup.utils import (
     get_tracer_defaults,
     get_tracer_metadata_dict,
     add_tracer_metadata_to_ds,
-    to_float,
     _to_yaml,
     _from_yaml,
 )
+
+NonNegativeFloat = Annotated[float, Ge(0)]
 
 
 class Release(BaseModel):
@@ -60,12 +63,12 @@ class Release(BaseModel):
     """
 
     name: str
-    lat: float = Field(ge=-90, le=90)
+    lat: Annotated[float, Field(ge=-90, le=90)]
     lon: float
-    depth: float = Field(ge=0)
+    depth: NonNegativeFloat
     times: List[datetime]
-    volume_fluxes: Union[float, int, List[Union[float, int]]]
-    tracer_concentrations: Dict[str, Union[float, int, List[Union[float, int]]]]
+    volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat]]
+    tracer_concentrations: Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
 
     start_time: datetime
     end_time: datetime
@@ -96,46 +99,26 @@ class Release(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def check_and_convert_volume_fluxes(self) -> "Release":
-        """Ensure 'volume_fluxes' matches length of 'times', are non-negative, and
-        convert all values to float."""
+    def check_volume_fluxes(self) -> "Release":
+        """Ensure 'volume_fluxes' matches length of 'times'."""
 
         num_times = len(self.times)
 
-        if isinstance(self.volume_fluxes, (float, int)):
-            if self.volume_fluxes < 0:
-                raise ValueError(
-                    f"'volume_fluxes' is negative: {self.volume_fluxes}. Must be non-negative."
-                )
-
-        elif isinstance(self.volume_fluxes, list):
+        if isinstance(self.volume_fluxes, list):
             if len(self.volume_fluxes) != num_times:
                 raise ValueError(
                     f"The length of 'volume_fluxes' ({len(self.volume_fluxes)}) does not match the number of times ({num_times})."
                 )
-            if any(x < 0 for x in self.volume_fluxes):
-                raise ValueError(
-                    f"'volume_fluxes' contains negative values: {self.volume_fluxes}. Must be non-negative."
-                )
-
-        self.volume_fluxes = to_float(self.volume_fluxes)
 
         return self
 
     @model_validator(mode="after")
-    def check_and_convert_tracer_concentrations(self) -> "Release":
-        """Ensure tracer concentractions match length of 'times', are non-negative, and
-        convert all values to float."""
+    def check_tracer_concentrations(self) -> "Release":
+        """Ensure tracer concentractions match length of 'times'."""
 
         num_times = len(self.times)
 
         for tracer, val in self.tracer_concentrations.items():
-
-            if isinstance(val, (float, int)):
-                if val < 0:
-                    raise ValueError(
-                        f"Tracer concentration for '{tracer}' is negative: {val}. Must be non-negative."
-                    )
 
             if isinstance(val, list):
                 if len(val) != num_times:
@@ -143,15 +126,6 @@ class Release(BaseModel):
                         f"The length of tracer '{tracer}' ({len(val)}) does not match the number of times ({num_times})."
                     )
 
-                if any(x < 0 for x in val):
-                    raise ValueError(
-                        f"Tracer concentration for '{tracer}' contains negative values: {val}. All values must be non-negative."
-                    )
-
-        self.tracer_concentrations = {
-            tracer: to_float(vals)
-            for tracer, vals in self.tracer_concentrations.items()
-        }
         return self
 
     @model_validator(mode="after")

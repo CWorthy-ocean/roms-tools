@@ -202,6 +202,8 @@ class Release(BaseModel):
                         self.tracer_concentrations[k][-1]
                     )
 
+        return self
+
 
 @dataclass(kw_only=True)
 class CDRVolumePointSource:

@@ -8,6 +8,8 @@
 
 ### Internal Changes
 
+* Introduce Pydantic `Release` object refactoring the `CDRVolumePointSource` ([#298](https://github.com/CWorthy-ocean/roms-tools/pull/298))
+
 ### Documentation
 
 ### Bugfixes

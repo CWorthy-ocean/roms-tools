@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 from typing import Optional, List, Dict, Union
 from typing_extensions import Annotated
-from annotated_types import Ge
+from annotated_types import Ge, Le
 import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
@@ -63,7 +63,7 @@ class Release(BaseModel):
     """
 
     name: str
-    lat: Annotated[float, Field(ge=-90, le=90)]
+    lat: Annotated[float, Ge(-90), Le(90)]
     lon: float
     depth: NonNegativeFloat
     times: List[datetime]

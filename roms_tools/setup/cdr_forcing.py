@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Dict, Union
 import numpy as np
 import xarray as xr
@@ -60,30 +60,15 @@ class Release(BaseModel):
     """
 
     name: str
-    lat: Union[float, int] = Field(ge=-90, le=90)
-    lon: Union[float, int]
-    depth: Union[float, int] = Field(ge=0)
+    lat: float = Field(ge=-90, le=90)
+    lon: float
+    depth: float = Field(ge=0)
     times: List[datetime]
     volume_fluxes: Union[float, int, List[Union[float, int]]]
     tracer_concentrations: Dict[str, Union[float, int, List[Union[float, int]]]]
 
     start_time: datetime
     end_time: datetime
-
-    @field_validator("lat", mode="after")
-    @classmethod
-    def force_lat_to_float(cls, v: Union[float, int]) -> float:
-        return float(v)
-
-    @field_validator("lon", mode="after")
-    @classmethod
-    def force_lon_to_float(cls, v: Union[float, int]) -> float:
-        return float(v)
-
-    @field_validator("depth", mode="after")
-    @classmethod
-    def force_depth_to_float(cls, v: Union[float, int]) -> float:
-        return float(v)
 
     @model_validator(mode="after")
     def check_times(self) -> "Release":

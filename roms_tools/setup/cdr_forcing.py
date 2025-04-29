@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from pydantic import BaseModel, model_validator
 from typing import Optional, List, Dict, Union
+from typing_extensions import Annotated
+from annotated_types import Ge, Le
 import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
@@ -22,10 +25,158 @@ from roms_tools.setup.utils import (
     get_tracer_defaults,
     get_tracer_metadata_dict,
     add_tracer_metadata_to_ds,
-    to_float,
     _to_yaml,
     _from_yaml,
 )
+
+NonNegativeFloat = Annotated[float, Ge(0)]
+
+
+class Release(BaseModel):
+    """Represents a single point-source release of water and tracers.
+
+    Attributes
+    ----------
+    name : str
+        Unique identifier for the release.
+    lat : float or int
+        Latitude of the release location in degrees North. Must be between -90 and 90.
+    lon : float or int
+        Longitude of the release location in degrees East.
+    depth : float or int
+        Depth of the release in meters. Must be non-negative.
+    times : list of datetime
+        Time points for the release events. Must be within `start_time` and `end_time`, and strictly increasing.
+    volume_fluxes : float, int or list of floats/ints
+        Volume flux of the release in m³/s. Can be a constant (applied uniformly) or a list matching `times`.
+    tracer_concentrations : dict
+        Tracer names mapped to their concentrations (float or list matching `times`).
+    start_time : datetime
+        Start of the simulation.
+    end_time : datetime
+        End of the simulation.
+
+    Notes
+    -----
+    - Validates that `lat`, `depth`, `times`, `volume_fluxes`, and `tracer_concentrations` follow expected formats.
+    - Converts single values for `volume_fluxes` and `tracer_concentrations` into time-series matching `times`.
+    """
+
+    name: str
+    lat: Annotated[float, Ge(-90), Le(90)]
+    lon: float
+    depth: NonNegativeFloat
+    times: List[datetime]
+    volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat]]
+    tracer_concentrations: Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
+
+    start_time: datetime
+    end_time: datetime
+
+    @model_validator(mode="after")
+    def check_times(self) -> "Release":
+        """Validate that 'times' are sorted and fall within start_time and end_time."""
+
+        if len(self.times) > 0:
+
+            # Ensure times are strictly increasing
+            if not all(t1 < t2 for t1, t2 in zip(self.times, self.times[1:])):
+                raise ValueError(
+                    f"'times' must be strictly monotonically increasing. Got: {self.times}"
+                )
+
+            # First time must not be before start_time
+            if self.times[0] < self.start_time:
+                raise ValueError(
+                    f"First time in 'times' cannot be before start_time ({self.start_time})."
+                )
+
+            # Last time must not be after end_time
+            if self.times[-1] > self.end_time:
+                raise ValueError(
+                    f"Last time in 'times' cannot be after end_time ({self.end_time})."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def check_volume_fluxes(self) -> "Release":
+        """Ensure 'volume_fluxes' matches length of 'times'."""
+
+        num_times = len(self.times)
+
+        if isinstance(self.volume_fluxes, list):
+            if len(self.volume_fluxes) != num_times:
+                raise ValueError(
+                    f"The length of 'volume_fluxes' ({len(self.volume_fluxes)}) does not match the number of times ({num_times})."
+                )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_tracer_concentrations(self) -> "Release":
+        """Ensure tracer concentractions match length of 'times'."""
+
+        num_times = len(self.times)
+
+        for tracer, val in self.tracer_concentrations.items():
+
+            if isinstance(val, list):
+                if len(val) != num_times:
+                    raise ValueError(
+                        f"The length of tracer '{tracer}' ({len(val)}) does not match the number of times ({num_times})."
+                    )
+
+        return self
+
+    @model_validator(mode="after")
+    def extend_to_endpoints(self) -> "Release":
+        """Ensure that the release time series starts at `start_time` and ends at
+        `end_time`.
+
+        If `volume_fluxes` is a list and does not cover the endpoints, zero volume fluxes are added.
+        Tracer concentrations are extended accordingly by duplicating endpoint values.
+
+        If `times` is empty, [start_time, end_time] is used with zero fluxes and duplicated tracer values.
+        """
+        if not self.times:
+            self.times = [self.start_time, self.end_time]
+            self.volume_fluxes = [self.volume_fluxes, self.volume_fluxes]
+            self.tracer_concentrations = {
+                tracer: [vals, vals]
+                if not isinstance(vals, list)
+                else [vals[0], vals[0]]
+                for tracer, vals in self.tracer_concentrations.items()
+            }
+        else:
+            self.times = list(self.times)  # Make mutable
+            self.volume_fluxes = (
+                list(self.volume_fluxes)
+                if isinstance(self.volume_fluxes, list)
+                else [self.volume_fluxes] * len(self.times)
+            )
+            self.tracer_concentrations = {
+                tracer: list(vals)
+                if isinstance(vals, list)
+                else [vals] * len(self.times)
+                for tracer, vals in self.tracer_concentrations.items()
+            }
+
+            if self.times[0] > self.start_time:
+                self.times.insert(0, self.start_time)
+                self.volume_fluxes.insert(0, 0.0)
+                for k in self.tracer_concentrations:
+                    self.tracer_concentrations[k].insert(
+                        0, self.tracer_concentrations[k][0]
+                    )
+            if self.times[-1] < self.end_time:
+                self.times.append(self.end_time)
+                self.volume_fluxes.append(0.0)
+                for k in self.tracer_concentrations:
+                    self.tracer_concentrations[k].append(
+                        self.tracer_concentrations[k][-1]
+                    )
+
+        return self
 
 
 @dataclass(kw_only=True)
@@ -101,13 +252,17 @@ class CDRVolumePointSource:
             for name, params in self.releases.items():
                 if name == "_tracer_metadata":
                     continue  # skip metadata entry
-                self._validate_release_location(
-                    name=name,
-                    lat=params["lat"],
-                    lon=params["lon"],
-                    depth=params["depth"],
+
+                release = Release(
+                    **{
+                        "name": name,
+                        **params,
+                        "start_time": self.start_time,
+                        "end_time": self.end_time,
+                    }
                 )
-                self._add_release_to_ds(name=name, **params)
+                self._validate_release_location(release)
+                self._add_release_to_ds(release)
 
     def add_release(
         self,
@@ -209,8 +364,7 @@ class CDRVolumePointSource:
                     elif fill_values == "zero":
                         tracer_concentrations[tracer_name] = 0.0
 
-        # Check input parameters
-        self._input_checks(
+        release = Release(
             name=name,
             lat=lat,
             lon=lon,
@@ -218,60 +372,19 @@ class CDRVolumePointSource:
             times=times,
             volume_fluxes=volume_fluxes,
             tracer_concentrations=tracer_concentrations,
+            start_time=self.start_time,
+            end_time=self.end_time,
         )
 
-        # Convert integers to floats
-        lat = float(lat)
-        lon = float(lon)
-        depth = float(depth)
-        volume_fluxes = to_float(volume_fluxes)
-        tracer_concentrations = {
-            tracer: to_float(vals) for tracer, vals in tracer_concentrations.items()
-        }
+        self._validate_release_location(release)
+        self._add_release_to_dict(release)
+        self._add_release_to_ds(release)
 
-        # Extend volume fluxes and tracer_concentrations across simulation period if necessary
-        times, volume_fluxes, tracer_concentrations = self._handle_simulation_endpoints(
-            times, volume_fluxes, tracer_concentrations
-        )
-
-        # Validate release location
-        self._validate_release_location(name=name, lat=lat, lon=lon, depth=depth)
-
-        self._add_release_to_dict(
-            name=name,
-            lat=lat,
-            lon=lon,
-            depth=depth,
-            times=times,
-            volume_fluxes=volume_fluxes,
-            tracer_concentrations=tracer_concentrations,
-        )
-
-        self._add_release_to_ds(
-            name=name,
-            lat=lat,
-            lon=lon,
-            depth=depth,
-            times=times,
-            volume_fluxes=volume_fluxes,
-            tracer_concentrations=tracer_concentrations,
-        )
-
-    def _add_release_to_ds(
-        self,
-        *,
-        name: str,
-        lat: float,
-        lon: float,
-        depth: float,
-        times: Optional[List[datetime]] = None,
-        tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
-        volume_fluxes: Union[float, List[float]] = 0.0,
-    ):
+    def _add_release_to_ds(self, release: Release):
         """Add the release data for a specific release to the forcing dataset."""
 
         # Convert times to datetime64[ns]
-        times = np.array(times, dtype="datetime64[ns]")
+        times = np.array(release.times, dtype="datetime64[ns]")
 
         # Ensure reference date is also datetime64[ns]
         ref = np.datetime64(self.model_reference_date, "ns")
@@ -299,7 +412,7 @@ class CDRVolumePointSource:
         ds["cdr_time"] = ("time", union_rel_times)
         ds = add_tracer_metadata_to_ds(ds)
 
-        release_names = np.concatenate([self.ds.release_name.values, [name]])
+        release_names = np.concatenate([self.ds.release_name.values, [release.name]])
         ds = ds.assign_coords({"release_name": (["ncdr"], release_names)})
         ds["cdr_lon"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
         ds["cdr_lat"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
@@ -321,7 +434,7 @@ class CDRVolumePointSource:
         # Add the new experiment location
         for var_name, value in zip(
             ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"],
-            [lon, lat, depth, 0.0, 0.0],
+            [release.lon, release.lat, release.depth, 0.0, 0.0],
         ):
             ds[var_name].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = np.float64(value)
 
@@ -344,22 +457,24 @@ class CDRVolumePointSource:
                     ds["cdr_tracer"].loc[{"ntracers": n, "ncdr": i}] = interpolated
 
         # Handle new experiment volume fluxes and tracer concentrations
-        if isinstance(volume_fluxes, list):
-            interpolated = np.interp(union_rel_times, rel_times, volume_fluxes)
+        if isinstance(release.volume_fluxes, list):
+            interpolated = np.interp(union_rel_times, rel_times, release.volume_fluxes)
         else:
-            interpolated = np.full(len(union_rel_times), volume_fluxes)
+            interpolated = np.full(len(union_rel_times), release.volume_fluxes)
 
         ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = interpolated
 
         for n in range(len(self.ds.ntracers)):
             tracer_name = ds.tracer_name[n].item()
-            if isinstance(tracer_concentrations[tracer_name], list):
+            if isinstance(release.tracer_concentrations[tracer_name], list):
                 interpolated = np.interp(
-                    union_rel_times, rel_times, tracer_concentrations[tracer_name]
+                    union_rel_times,
+                    rel_times,
+                    release.tracer_concentrations[tracer_name],
                 )
             else:
                 interpolated = np.full(
-                    len(union_rel_times), tracer_concentrations[tracer_name]
+                    len(union_rel_times), release.tracer_concentrations[tracer_name]
                 )
 
             ds["cdr_tracer"].loc[
@@ -368,20 +483,16 @@ class CDRVolumePointSource:
 
         self.ds = ds
 
-    def _add_release_to_dict(self, name: str, **params):
-        """Add the release data for a specific 'name' to the releases dictionary.
-
-        Parameters
-        ----------
-        name : str
-            The unique name for the release to be added to the dictionary.
-        **params : keyword arguments
-            Parameters to be added for the specific release (e.g., location, volume fluxes, etc.).
-        """
-        # Add the parameters to the dictionary under the given name
-        if name not in self.releases:
-            self.releases[name] = {}
-        self.releases[name].update(params)
+    def _add_release_to_dict(self, release: Release):
+        """Add the release data to the releases dictionary."""
+        self.releases[release.name] = {
+            "lat": release.lat,
+            "lon": release.lon,
+            "depth": release.depth,
+            "times": release.times,
+            "tracer_concentrations": release.tracer_concentrations,
+            "volume_fluxes": release.volume_fluxes,
+        }
 
     def plot_volume_flux(self, start=None, end=None, releases="all"):
         """Plot the volume flux for each specified release within the given time range.
@@ -785,157 +896,7 @@ class CDRVolumePointSource:
 
         return cls(grid=grid, **params)
 
-    def _input_checks(
-        self,
-        name,
-        lat,
-        lon,
-        depth,
-        times,
-        volume_fluxes,
-        tracer_concentrations,
-    ):
-        """Perform various input checks on release parameters.
-
-        - Checks that latitude is between -90 and 90.
-        - Checks that depth is non-negative.
-        - Ensures 'times' is a list of datetime objects and is monotonically increasing.
-        - Verifies that times are within the defined start and end time.
-        - Ensures volume fluxes is either a list of floats/ints or a single float/int.
-        - Ensures each tracer concentration is either a float/int or a list of floats/ints.
-        - Ensures the lengths of 'volume_fluxes' and 'tracer_concentrations' match the length of 'times' if they are lists.
-        - Ensures all entries in 'volume_fluxes' and 'tracer_concentrations' are non-negative.
-        """
-
-        # Check that lat is valid
-        if not (-90 <= lat <= 90):
-            raise ValueError(
-                f"Invalid latitude {lat}. Latitude must be between -90 and 90."
-            )
-
-        # Check that depth is non-negative
-        if depth < 0:
-            raise ValueError(
-                f"Invalid depth {depth}. Depth must be a non-negative number."
-            )
-
-        # Ensure that times is a list of datetimes
-        if not all(isinstance(t, datetime) for t in times):
-            raise ValueError(
-                f"If 'times' is provided, all entries must be datetime objects. Got: {[type(t) for t in times]}"
-            )
-
-        if len(times) > 0:
-            if len(times) > 1:
-                # Check that times is strictly monotonically increasing sequence
-                if not all(t1 < t2 for t1, t2 in zip(times, times[1:])):
-                    raise ValueError(
-                        f"The 'times' list must be strictly monotonically increasing. Got: {[t for t in times]}"
-                    )
-
-            # Check that first time is not before start_time
-            if times[0] < self.start_time:
-                raise ValueError(
-                    f"First entry in `times` ({times[0]}) cannot be before `self.start_time` ({self.start_time})."
-                )
-
-            # Check that last time is not after end_time
-            if times[-1] > self.end_time:
-                raise ValueError(
-                    f"Last entry in `times` ({times[-1]}) cannot be after `self.end_time` ({self.end_time})."
-                )
-
-        # Ensure volume fluxes is either a list of floats/ints or a single float/int
-        if not isinstance(volume_fluxes, (float, int)) and not (
-            isinstance(volume_fluxes, list)
-            and all(isinstance(v, (float, int)) for v in volume_fluxes)
-        ):
-            raise ValueError(
-                "Invalid 'volume_fluxes' input: must be a float/int or a list of floats/ints."
-            )
-
-        # Ensure each tracer concentration is either a float/int or a list of floats/ints
-        for key, val in tracer_concentrations.items():
-            if not isinstance(val, (float, int)) and not (
-                isinstance(val, list) and all(isinstance(v, (float, int)) for v in val)
-            ):
-                raise ValueError(
-                    f"Invalid tracer concentration for '{key}': must be a float/int or a list of floats/ints."
-                )
-
-        # Ensure that time series for 'times', 'volume_fluxes', and 'tracer_concentrations' are all the same length
-        num_times = len(times)
-
-        # Check that volume fluxes is either a constant or has the same length as 'times'
-        if isinstance(volume_fluxes, list) and len(volume_fluxes) != num_times:
-            raise ValueError(
-                f"The length of `volume_fluxes` ({len(volume_fluxes)}) does not match the length of `times` ({num_times})."
-            )
-
-        # Check that tracer_concentrations are either constants or have the same length as 'times'
-        for key, tracer_values in tracer_concentrations.items():
-            if isinstance(tracer_values, list) and len(tracer_values) != num_times:
-                raise ValueError(
-                    f"The length of tracer '{key}' ({len(tracer_values)}) does not match the length of `times` ({num_times})."
-                )
-
-        # Check that volume fluxes and tracer concentrations are valid
-        if isinstance(volume_fluxes, (float, int)) and volume_fluxes < 0:
-            raise ValueError(f"Volume flux must be non-negative. Got: {volume_fluxes}")
-        elif isinstance(volume_fluxes, list) and not all(v >= 0 for v in volume_fluxes):
-            raise ValueError(
-                f"All entries in `volume_fluxes` must be non-negative. Got: {volume_fluxes}"
-            )
-        for key, tracer_values in tracer_concentrations.items():
-            if key != "temp":
-                if isinstance(tracer_values, (float, int)) and tracer_values < 0:
-                    raise ValueError(
-                        f"The concentration of tracer '{key}' must be non-negative. Got: {tracer_values}"
-                    )
-                elif isinstance(tracer_values, list) and not all(
-                    c >= 0 for c in tracer_values
-                ):
-                    raise ValueError(
-                        f"All entries in `tracer_concentrations['{key}']` must be non-negative. Got: {tracer_values}"
-                    )
-
-    def _handle_simulation_endpoints(self, times, volume_fluxes, tracer_concentrations):
-        """Ensure that the release time series starts at self.start_time and ends at
-        self.end_time.
-
-        If `volume_fluxes` is a list and does not cover the endpoints, zero volume fluxes are added.
-        Tracer concentrations are extended accordingly by duplicating endpoint values.
-        """
-
-        if len(times) > 0:
-            # Handle start_time
-            if times[0] != self.start_time:
-                if isinstance(volume_fluxes, list):
-                    volume_fluxes.insert(0, 0.0)
-
-                for key, vals in tracer_concentrations.items():
-                    if isinstance(vals, list):
-                        vals.insert(0, vals[0])
-
-                times.insert(0, self.start_time)
-
-            # Handle end_time
-            if times[-1] != self.end_time:
-                if isinstance(volume_fluxes, list):
-                    volume_fluxes.append(0.0)
-
-                for key, vals in tracer_concentrations.items():
-                    if isinstance(vals, list):
-                        vals.append(vals[-1])
-
-                times.append(self.end_time)
-
-        else:
-            times = [self.start_time, self.end_time]
-
-        return times, volume_fluxes, tracer_concentrations
-
-    def _validate_release_location(self, name, lat, lon, depth):
+    def _validate_release_location(self, release: Release):
         """Validates the closest grid location for a release site.
 
         This function ensures that the given release site (lat, lon, depth) lies
@@ -944,47 +905,25 @@ class CDRVolumePointSource:
         - Checks if the point is within the grid domain (with buffer for boundary artifacts).
         - Verifies that the location is not on land.
         - Verifies that the location is not below the seafloor.
-
-        Parameters
-        ----------
-        name : str
-            A unique identifier for the release location.
-        lat : float
-            Latitude of the release location.
-        lon : float
-            Longitude of the release location.
-        depth : float
-            Depth (positive, in meters) of the release location.
-
-        Raises
-        ------
-        ValueError
-            If the location is:
-                - Outside the model grid.
-                - On the boundary of the grid domain (eta_rho, xi_rho = 0 or max).
-                - On land (based on `mask_rho`).
-                - Below the ocean bottom (`h < depth`).
-        Warning
-            If no grid is available to validate the location.
         """
         if self.grid:
             # Adjust longitude based on whether it crosses the International Date Line (straddle case)
             if self.grid.straddle:
-                lon = xr.where(lon > 180, lon - 360, lon)
+                lon = xr.where(release.lon > 180, release.lon - 360, release.lon)
             else:
-                lon = xr.where(lon < 0, lon + 360, lon)
+                lon = xr.where(release.lon < 0, release.lon + 360, release.lon)
 
             dx = 1 / self.grid.ds.pm
             dy = 1 / self.grid.ds.pn
             max_grid_spacing = np.sqrt(dx**2 + dy**2) / 2
 
             # Compute great-circle distance to all grid points
-            dist = gc_dist(self.grid.ds.lon_rho, self.grid.ds.lat_rho, lon, lat)
+            dist = gc_dist(self.grid.ds.lon_rho, self.grid.ds.lat_rho, lon, release.lat)
             dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
             if (dist_min > max_grid_spacing).all():
                 raise ValueError(
-                    f"Release site '{name}' is outside of the grid domain. "
+                    f"Release site '{release.name}' is outside of the grid domain. "
                     "Ensure the provided (lat, lon) falls within the model grid extent."
                 )
 
@@ -998,21 +937,21 @@ class CDRVolumePointSource:
 
             if eta_rho in [0, eta_max] or xi_rho in [0, xi_max]:
                 raise ValueError(
-                    f"Release site '{name}' is located too close to the grid boundary. "
+                    f"Release site '{release.name}' is located too close to the grid boundary. "
                     "Place release location (lat, lon) away from grid boundaries."
                 )
 
             if self.grid.ds.mask_rho[eta_rho, xi_rho].values == 0:
                 raise ValueError(
-                    f"Release site '{name}' is on land. "
+                    f"Release site '{release.name}' is on land. "
                     "Please provide coordinates (lat, lon) over ocean."
                 )
 
-            if self.grid.ds.h[eta_rho, xi_rho].values < depth:
+            if self.grid.ds.h[eta_rho, xi_rho].values < release.depth:
                 raise ValueError(
-                    f"Release site '{name}' lies below the seafloor. "
+                    f"Release site '{release.name}' lies below the seafloor. "
                     f"Seafloor depth is {self.grid.ds.h[eta_rho, xi_rho].values:.2f} m, "
-                    f"but requested depth is {depth:.2f} m. Adjust depth or location (lat, lon)."
+                    f"but requested depth is {release.depth:.2f} m. Adjust depth or location (lat, lon)."
                 )
 
         else:

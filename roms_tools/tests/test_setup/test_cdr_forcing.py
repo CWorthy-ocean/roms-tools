@@ -426,24 +426,24 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     # Test invalid latitude
     invalid_params = deepcopy(valid_release_params)
     invalid_params["lat"] = 100.0
-    with pytest.raises(ValueError, match="Latitude must be between -90 and 90."):
+    with pytest.raises(ValueError, match="Input should be less than or equal to 90"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test invalid depth (negative value)
     invalid_params = deepcopy(valid_release_params)
     invalid_params["depth"] = -10.0
-    with pytest.raises(ValueError, match="Depth must be a non-negative number."):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test times not being datetime objects
     invalid_params = deepcopy(valid_release_params)
     invalid_params["times"] = [
-        "2023-01-01",
+        "fake_time",
         "2023-02-01",
     ]  # Invalid times format (strings)
     with pytest.raises(
         ValueError,
-        match="If 'times' is provided, all entries must be datetime objects.",
+        match="Input should be a valid datetime or date",
     ):
         cdr.add_release(name="release_1", **invalid_params)
 
@@ -456,7 +456,7 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
         datetime(2022, 3, 1),
     ]
     with pytest.raises(
-        ValueError, match="The 'times' list must be strictly monotonically increasing."
+        ValueError, match="'times' must be strictly monotonically increasing."
     ):
         cdr.add_release(name="release_1", **invalid_params)
 
@@ -469,7 +469,7 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
         datetime(2022, 3, 1),
     ]
     with pytest.raises(
-        ValueError, match="The 'times' list must be strictly monotonically increasing."
+        ValueError, match="'times' must be strictly monotonically increasing."
     ):
         cdr.add_release(name="release_1", **invalid_params)
 
@@ -479,7 +479,9 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
         datetime(2000, 1, 1),
         datetime(2022, 2, 1),
     ]  # Earlier than self.start_time
-    with pytest.raises(ValueError, match="First entry"):
+    with pytest.raises(
+        ValueError, match="First time in 'times' cannot be before start_time"
+    ):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test last time later than self.end_time
@@ -488,26 +490,28 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
         datetime(2022, 1, 1),
         datetime(2025, 1, 1),
     ]  # Later than self.end_time
-    with pytest.raises(ValueError, match="Last entry"):
+    with pytest.raises(
+        ValueError, match="Last time in 'times' cannot be after end_time"
+    ):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test invalid volume_fluxes: not a float/int or list of float/int
     invalid_params = deepcopy(valid_release_params)
     invalid_params["volume_fluxes"] = ["not", "valid"]
-    with pytest.raises(ValueError, match="Invalid 'volume_fluxes' input"):
+    with pytest.raises(ValueError, match="Input should be a valid number"):
         cdr.add_release(name="release_invalid_volume", **invalid_params)
 
     # Test invalid tracer_concentrations: not a float/int or list of float/int
     invalid_params = deepcopy(valid_release_params)
     invalid_params["tracer_concentrations"] = {"ALK": ["not", "valid"]}
-    with pytest.raises(ValueError, match="Invalid tracer concentration for 'ALK'"):
+    with pytest.raises(ValueError, match="Input should be a valid number"):
         cdr.add_release(name="release_invalid_tracer", **invalid_params)
 
     # Test mismatch between times and volume fluxes length
     invalid_params = deepcopy(valid_release_params)
     invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
     invalid_params["volume_fluxes"] = [100]  # Only one volume flux entry
-    with pytest.raises(ValueError, match="The length of `volume_fluxes` "):
+    with pytest.raises(ValueError, match="The length of 'volume_fluxes'"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test mismatch between times and tracer_concentrations length
@@ -522,22 +526,20 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     # Test invalid volume flux (negative)
     invalid_params = deepcopy(valid_release_params)
     invalid_params["volume_fluxes"] = -100  # Invalid volume flux
-    with pytest.raises(ValueError, match="Volume flux must be non-negative"):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test volume flux as list with negative values
     invalid_params = deepcopy(valid_release_params)
     invalid_params["times"] = [cdr.start_time, cdr.end_time]
     invalid_params["volume_fluxes"] = [10, -5]  # Invalid volume fluxes in list
-    with pytest.raises(
-        ValueError, match="All entries in `volume_fluxes` must be non-negative"
-    ):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test invalid tracer concentration (negative)
     invalid_params = deepcopy(valid_release_params)
     invalid_params["tracer_concentrations"] = {"ALK": -1}
-    with pytest.raises(ValueError, match="The concentration of tracer"):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test tracer_concentration as list with negative values
@@ -546,7 +548,7 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     invalid_params["tracer_concentrations"] = {
         "ALK": [10, -5]
     }  # Invalid concentration in list
-    with pytest.raises(ValueError, match="All entries in "):
+    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
         cdr.add_release(name="release_1", **invalid_params)
 
 

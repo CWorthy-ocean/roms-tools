@@ -45,30 +45,25 @@ class Release(BaseModel):
         Longitude of the release location in degrees East.
     depth : float or int
         Depth of the release in meters. Must be non-negative.
+    hsc : float or int
+        Horizontal scale of the release in meters. Must be non-negative.
+    vsc : float or int
+        Vertical scale of the release in meters. Must be non-negative.
     times : list of datetime
         Time points for the release events. Must be within `start_time` and `end_time`, and strictly increasing.
-    volume_fluxes : float, int or list of floats/ints
-        Volume flux of the release in m³/s. Can be a constant (applied uniformly) or a list matching `times`.
-    tracer_concentrations : dict
-        Tracer names mapped to their concentrations (float or list matching `times`).
     start_time : datetime
         Start of the simulation.
     end_time : datetime
         End of the simulation.
-
-    Notes
-    -----
-    - Validates that `lat`, `depth`, `times`, `volume_fluxes`, and `tracer_concentrations` follow expected formats.
-    - Converts single values for `volume_fluxes` and `tracer_concentrations` into time-series matching `times`.
     """
 
     name: str
     lat: Annotated[float, Ge(-90), Le(90)]
     lon: float
     depth: NonNegativeFloat
+    hsc: NonNegativeFloat
+    vsc: NonNegativeFloat
     times: List[datetime]
-    volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat]]
-    tracer_concentrations: Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
 
     start_time: datetime
     end_time: datetime
@@ -98,8 +93,28 @@ class Release(BaseModel):
                 )
         return self
 
+
+class PointVolumeRelease(Release):
+    """Represents a single point-source release with volume fluxes and tracer
+    concentrations.
+
+    Inherits attributes from `Release` and adds specific attributes for volume fluxes and tracer concentrations.
+
+    Attributes
+    ----------
+    volume_fluxes : float, int or list of floats/ints
+        Volume flux of the release in m³/s. Can be a constant (applied uniformly) or a list matching `times`.
+    tracer_concentrations : dict
+        Tracer names mapped to their concentrations (float or list matching `times`).
+    """
+
+    hsc: NonNegativeFloat = 0
+    vsc: NonNegativeFloat = 0
+    volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat]]
+    tracer_concentrations: Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
+
     @model_validator(mode="after")
-    def check_volume_fluxes(self) -> "Release":
+    def check_volume_fluxes(self) -> "PointVolumeRelease":
         """Ensure 'volume_fluxes' matches length of 'times'."""
 
         num_times = len(self.times)
@@ -113,7 +128,7 @@ class Release(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def check_tracer_concentrations(self) -> "Release":
+    def check_tracer_concentrations(self) -> "PointVolumeRelease":
         """Ensure tracer concentractions match length of 'times'."""
 
         num_times = len(self.times)
@@ -129,7 +144,7 @@ class Release(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def extend_to_endpoints(self) -> "Release":
+    def extend_to_endpoints(self) -> "PointVolumeRelease":
         """Ensure that the release time series starts at `start_time` and ends at
         `end_time`.
 
@@ -253,7 +268,7 @@ class CDRVolumePointSource:
                 if name == "_tracer_metadata":
                     continue  # skip metadata entry
 
-                release = Release(
+                release = PointVolumeRelease(
                     **{
                         "name": name,
                         **params,
@@ -364,7 +379,7 @@ class CDRVolumePointSource:
                     elif fill_values == "zero":
                         tracer_concentrations[tracer_name] = 0.0
 
-        release = Release(
+        release = PointVolumeRelease(
             name=name,
             lat=lat,
             lon=lon,
@@ -380,7 +395,7 @@ class CDRVolumePointSource:
         self._add_release_to_dict(release)
         self._add_release_to_ds(release)
 
-    def _add_release_to_ds(self, release: Release):
+    def _add_release_to_ds(self, release: PointVolumeRelease):
         """Add the release data for a specific release to the forcing dataset."""
 
         # Convert times to datetime64[ns]
@@ -483,7 +498,7 @@ class CDRVolumePointSource:
 
         self.ds = ds
 
-    def _add_release_to_dict(self, release: Release):
+    def _add_release_to_dict(self, release: PointVolumeRelease):
         """Add the release data to the releases dictionary."""
         self.releases[release.name] = {
             "lat": release.lat,
@@ -896,7 +911,7 @@ class CDRVolumePointSource:
 
         return cls(grid=grid, **params)
 
-    def _validate_release_location(self, release: Release):
+    def _validate_release_location(self, release: PointVolumeRelease):
         """Validates the closest grid location for a release site.
 
         This function ensures that the given release site (lat, lon, depth) lies

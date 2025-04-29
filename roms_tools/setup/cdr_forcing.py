@@ -132,14 +132,11 @@ class PointVolumeRelease(Release):
         """Ensure tracer concentractions match length of 'times'."""
 
         num_times = len(self.times)
-
-        for tracer, val in self.tracer_concentrations.items():
-
-            if isinstance(val, list):
-                if len(val) != num_times:
-                    raise ValueError(
-                        f"The length of tracer '{tracer}' ({len(val)}) does not match the number of times ({num_times})."
-                    )
+        for key, val in self.tracer_concentrations.items():
+            if isinstance(val, list) and len(val) != num_times:
+                raise ValueError(
+                    f"The length of 'tracer_concentrations' for tracer '{key}' ({len(val)}) does not match the number of times ({num_times})."
+                )
 
         return self
 
@@ -190,6 +187,68 @@ class PointVolumeRelease(Release):
                     self.tracer_concentrations[k].append(
                         self.tracer_concentrations[k][-1]
                     )
+
+        return self
+
+
+class TracerPerturbationRelease(Release):
+    """Represents a tracer perturbation release without volume fluxes.
+
+    Inherits attributes from `Release` and adds specific attributes for tracer fluxes.
+
+    Attributes
+    ----------
+    tracer_fluxes : dict
+        Tracer names mapped to their fluxes (float or list matching `times`).
+    """
+
+    tracer_fluxes: Dict[str, Union[float, List[float]]]
+
+    @model_validator(mode="after")
+    def check_tracer_fluxes(self) -> "TracerPerturbationRelease":
+        """Ensure tracer fluxes match length of 'times'."""
+
+        num_times = len(self.times)
+        for key, val in self.tracer_fluxes.items():
+            if isinstance(val, list) and len(val) != num_times:
+                raise ValueError(
+                    f"The length of 'tracer_fluxes' for tracer '{key}' ({len(val)}) does not match the number of times ({num_times})."
+                )
+
+        return self
+
+    @model_validator(mode="after")
+    def extend_to_endpoints(self) -> "PointVolumeRelease":
+        """Ensure that the release time series starts at `start_time` and ends at
+        `end_time`.
+
+        If `tracer_fluxes` is a list and does not cover the endpoints, zero tracer fluxes are added.
+
+        If `times` is empty, [start_time, end_time] is used with zero tracer fluxes.
+        """
+        if not self.times:
+            self.times = [self.start_time, self.end_time]
+            self.tracer_fluxes = {
+                tracer: [vals, vals] if not isinstance(vals, list) else [0, 0]
+                for tracer, vals in self.tracer_fluxes.items()
+            }
+        else:
+            self.times = list(self.times)  # Make mutable
+            self.tracer_fluxes = {
+                tracer: list(vals)
+                if isinstance(vals, list)
+                else [vals] * len(self.times)
+                for tracer, vals in self.tracer_fluxes.items()
+            }
+
+            if self.times[0] > self.start_time:
+                self.times.insert(0, self.start_time)
+                for k in self.tracer_fluxes:
+                    self.tracer_fluxes[k].insert(0, 0.0)
+            if self.times[-1] < self.end_time:
+                self.times.append(self.end_time)
+                for k in self.tracer_fluxes:
+                    self.tracer_fluxes[k].append(0.0)
 
         return self
 

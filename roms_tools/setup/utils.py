@@ -705,7 +705,11 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True):
 
     ds = ds.assign_coords(
         tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"}),
-        tracer_unit=("ntracers", tracer_units, {"long_name": "Tracer concentration unit"}),
+        tracer_unit=(
+            "ntracers",
+            tracer_units,
+            {"long_name": "Tracer concentration unit"},
+        ),
         tracer_long_name=(
             "ntracers",
             tracer_long_names,

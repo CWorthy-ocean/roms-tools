@@ -254,12 +254,8 @@ class TracerPerturbationRelease(Release):
 
 
 @dataclass(kw_only=True)
-class CDRVolumePointSource:
-    """Represents one or several volume sources of water with tracers at specific
-    location(s). This class is particularly useful for modeling point sources of Carbon
-    Dioxide Removal (CDR) forcing data, such as the injection of water and
-    biogeochemical tracers, e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC),
-    through a pipe.
+class CDRForcing:
+    """Represents Carbon Dioxide Removal (CDR) forcing.
 
     Parameters
     ----------
@@ -293,41 +289,22 @@ class CDRVolumePointSource:
             raise ValueError("`start_time` must be earlier than `end_time`.")
 
         # Start with an empty dataset representing zero releases
-        ds = xr.Dataset(
-            {
-                "cdr_time": (["time"], np.empty(0)),
-                "cdr_lon": (["ncdr"], np.empty(0)),
-                "cdr_lat": (["ncdr"], np.empty(0)),
-                "cdr_dep": (["ncdr"], np.empty(0)),
-                "cdr_hsc": (["ncdr"], np.empty(0)),
-                "cdr_vsc": (["ncdr"], np.empty(0)),
-                "cdr_volume": (["time", "ncdr"], np.empty((0, 0))),
-                "cdr_tracer": (
-                    ["time", "ntracers", "ncdr"],
-                    np.empty((0, NUM_TRACERS, 0)),
-                ),
-            },
-            coords={
-                "time": (["time"], np.empty(0)),
-                "release_name": (["ncdr"], np.empty(0, dtype=str)),
-            },
-        )
-        ds = add_tracer_metadata_to_ds(ds)
+        ds = self._initialize_empty_dataset()
         self.ds = ds
 
-        tracer_metadata = get_tracer_metadata_dict()
+        tracer_metadata = self._get_tracer_metadata_dict()
         self.releases["_tracer_metadata"] = tracer_metadata
 
         if self.releases:
             if "_metadata" not in self.releases:
-                tracer_metadata = get_tracer_metadata_dict()
                 self.releases["_tracer_metadata"] = tracer_metadata
 
             for name, params in self.releases.items():
                 if name == "_tracer_metadata":
                     continue  # skip metadata entry
 
-                release = PointVolumeRelease(
+                release_cls = self._get_release_class()
+                release = release_cls(
                     **{
                         "name": name,
                         **params,
@@ -337,6 +314,131 @@ class CDRVolumePointSource:
                 )
                 self._validate_release_location(release)
                 self._add_release_to_ds(release)
+
+    def _initialize_empty_dataset(self):
+        """Create and assign an empty dataset with CDR release variables."""
+        ds = xr.Dataset(
+            {
+                "cdr_time": (["time"], np.empty(0)),
+                "cdr_lon": (["ncdr"], np.empty(0)),
+                "cdr_lat": (["ncdr"], np.empty(0)),
+                "cdr_dep": (["ncdr"], np.empty(0)),
+                "cdr_hsc": (["ncdr"], np.empty(0)),
+                "cdr_vsc": (["ncdr"], np.empty(0)),
+            },
+            coords={
+                "time": (["time"], np.empty(0)),
+                "release_name": (["ncdr"], np.empty(0, dtype=str)),
+            },
+        )
+
+        ds = self._add_variable_attributes(ds)
+        return ds
+
+    def _add_variable_attributes(self, ds):
+        ds["time"].attrs = {"long_name": "absolute time"}
+        ds["cdr_time"].attrs = {
+            "long_name": "relative time: days since {self.model_reference_date}",
+            "units": "days",
+        }
+        ds["release_name"].attrs = {"long_name": "Name of release"}
+        ds["cdr_lon"].attrs = {
+            "long_name": "Longitude of CDR release",
+            "units": "degrees east",
+        }
+        ds["cdr_lat"].attrs = {
+            "long_name": "Latitude of CDR release",
+            "units": "degrees north",
+        }
+        ds["cdr_dep"].attrs = {"long_name": "Depth of CDR release", "units": "meters"}
+        ds["cdr_hsc"].attrs = {
+            "long_name": "Horizontal scale of CDR release",
+            "units": "meters",
+        }
+        ds["cdr_vsc"].attrs = {
+            "long_name": "Vertical scale of CDR release",
+            "units": "meters",
+        }
+
+        ds = self._add_tracer_metadata_to_ds(ds)
+
+        return ds
+
+    def _get_release_class(self):
+        """Return the Release class used for each release (to be overridden)."""
+        return Release  # default
+
+    @staticmethod
+    def _add_tracer_metadata_to_ds(ds):
+        """Add tracer metadata to the dataset (to be overridden)."""
+        return ds
+
+    @staticmethod
+    def _get_tracer_metadata_dict():
+        """Return tracer metadata as a dictionary (to be overridden)."""
+        return {}
+
+
+@dataclass(kw_only=True)
+class CDRVolumePointSource(CDRForcing):
+    """Represents one or several volume sources of water with tracers at specific
+    location(s). This class is particularly useful for modeling point sources of Carbon
+    Dioxide Removal (CDR) forcing data, such as the injection of water and
+    biogeochemical tracers, e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC),
+    through a pipe.
+
+    Parameters
+    ----------
+    grid : Grid, optional
+        Object representing the grid for spatial context.
+    start_time : datetime
+        Start time of the ROMS model simulation.
+    end_time : datetime
+        End time of the ROMS model simulation.
+    model_reference_date : datetime, optional
+        Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
+    releases : dict, optional
+        A dictionary of existing releases. Defaults to empty dictionary.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        The xarray dataset containing release metadata and forcing variables.
+    """
+
+    grid: Optional["Grid"] = None
+    start_time: datetime
+    end_time: datetime
+    model_reference_date: datetime = datetime(2000, 1, 1)
+    releases: Optional[dict] = field(default_factory=dict)
+
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def _initialize_empty_dataset(self):
+        """Create and assign an empty dataset with CDR release variables."""
+
+        ds = super()._initialize_empty_dataset()
+        print(ds)
+
+        ds["cdr_volume"] = xr.DataArray(np.empty((0, 0)), dims=["time", "ncdr"])
+        ds["cdr_tracer"] = xr.DataArray(
+            np.empty((0, NUM_TRACERS, 0)), dims=["time", "ntracers", "ncdr"]
+        )
+
+        return ds
+
+    def _get_release_class(self):
+        return PointVolumeRelease
+
+    @staticmethod
+    def _add_tracer_metadata_to_ds(ds):
+        ds = add_tracer_metadata_to_ds(ds)
+        return ds
+
+    @staticmethod
+    def _get_tracer_metadata_dict():
+        """Return tracer metadata as a dictionary (to be overridden)."""
+        return get_tracer_metadata_dict()
 
     def add_release(
         self,

@@ -9,6 +9,7 @@
 ### Internal Changes
 
 * Introduce Pydantic `Release` object refactoring the `CDRVolumePointSource` ([#298](https://github.com/CWorthy-ocean/roms-tools/pull/298))
+* Add zero padding to `partition_netcdf` file numbers in filenames
 
 ### Documentation
 

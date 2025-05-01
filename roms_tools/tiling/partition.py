@@ -326,8 +326,10 @@ def partition_netcdf(
 
     # Generate paths to the partitioned files
     base_filepath = filepath.with_suffix("")
+    ndigits = len(str(max(np.array(file_numbers))))
     paths_to_partitioned_files = [
-        Path(f"{base_filepath}.{file_number}") for file_number in file_numbers
+        Path(f"{base_filepath}.{file_number:0{ndigits}d}")
+        for file_number in file_numbers
     ]
 
     # Save the partitioned datasets to files

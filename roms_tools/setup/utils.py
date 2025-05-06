@@ -1148,25 +1148,70 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     return dis
 
 
-def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"):
+def convert_to_relative_days(
+    times: Union[Sequence[datetime], np.ndarray],
+    model_reference_date: Union[datetime, np.datetime64],
+) -> np.ndarray:
+    """Convert absolute datetimes to model-relative time in days.
+
+    Parameters
+    ----------
+    times : sequence of datetime or np.ndarray
+        Absolute times to convert.
+    model_reference_date : datetime or np.datetime64
+        Reference date from which to compute relative days.
+
+    Returns
+    -------
+    np.ndarray
+        Times relative to the reference date, in days.
+    """
+    times = np.array(times, dtype="datetime64[ns]")
+    ref = np.datetime64(model_reference_date, "ns")
+    rel_times = (times - ref) / np.timedelta64(1, "D")
+
+    return rel_times
+
+
+def add_time_info_to_ds(
+    ds: xr.Dataset,
+    model_reference_date: Union[datetime, np.datetime64],
+    climatology: bool,
+    time_name: str = "time",
+) -> tuple[xr.Dataset, xr.DataArray]:
+    """Add relative and absolute time coordinates to a dataset.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset to which time information will be added.
+    model_reference_date : datetime or np.datetime64
+        The reference date for computing relative time.
+    climatology : bool
+        Whether the time data is climatological (cyclical over the year).
+    time_name : str
+        Name of the time coordinate in the dataset.
+
+    Returns
+    -------
+    tuple[xr.Dataset, xr.DataArray]
+        Updated dataset with time information and the relative time array.
+    """
 
     if climatology:
         ds.attrs["climatology"] = str(True)
         month = xr.DataArray(range(1, 13), dims=time_name)
         month.attrs["long_name"] = "Month index (1-12)"
         ds = ds.assign_coords({"month": month})
-        # Preserve absolute time coordinate for readability
+
+        # Absolute time (for readability only)
         abs_time = np.datetime64(model_reference_date) + ds[time_name]
-        # Convert to pandas TimedeltaIndex
+
+        # Custom relative time logic for climatology
         timedelta_index = pd.to_timedelta(ds[time_name].values)
-
-        # Determine the start of the year for the base_datetime
         start_of_year = datetime(model_reference_date.year, 1, 1)
-
-        # Calculate the offset from midnight of the new year
         offset = model_reference_date - start_of_year
 
-        # Convert the timedelta to nanoseconds first, then to days
         time = xr.DataArray(
             (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
             dims=time_name,
@@ -1174,26 +1219,22 @@ def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"
         time.attrs["cycle_length"] = 365.25
 
     else:
-        # Preserve absolute time coordinate for readability
         abs_time = ds[time_name]
 
-        time = (
-            (ds[time_name] - np.datetime64(model_reference_date)).astype("float64")
-            / 3600
-            / 24
-            * 1e-9
+        time = xr.DataArray(
+            convert_to_relative_days(ds[time_name].values, model_reference_date),
+            dims=time_name,
         )
 
-    attrs = [key for key in abs_time.attrs]
-    for attr in attrs:
-        del abs_time.attrs[attr]
+    # Clean up and assign attributes
+    abs_time.attrs.clear()
     abs_time.attrs["long_name"] = "absolute time"
     ds = ds.assign_coords({"abs_time": abs_time})
 
     time.attrs["long_name"] = f"relative time: days since {str(model_reference_date)}"
     time.encoding["units"] = "days"
     time.attrs["units"] = "days"
-    ds.encoding["unlimited_dims"] = "time"
+    ds.encoding["unlimited_dims"] = time_name
 
     return ds, time
 

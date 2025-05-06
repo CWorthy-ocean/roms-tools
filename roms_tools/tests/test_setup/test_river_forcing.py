@@ -196,7 +196,7 @@ class TestRiverForcingGeneral:
         )
         np.testing.assert_allclose(
             river_forcing.ds.river_tracer.isel(ntracers=slice(2, None)).values,
-            0.0,
+           [2.7, 24.2, 13.2, 2.2, 1.79, 3 * 1.79, 187.5, 2370.0, 2370.0, 2310.0, 2310.0, 10e-4, 1.0, 0.1, 0.003, 0.8, 10e-6, 2.7, 1.35, 6.75, 1.5 * 0.03, 2.7e-5, 0.135, 0.135, 0.405, 1.5 * 0.02, 2.7e-5, 0.135, 0.015, 0.075, 1.5 * 0.01, 1.5e-6] ,
             atol=0,
         )
 

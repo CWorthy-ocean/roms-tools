@@ -271,11 +271,11 @@ class TestPartitionNetcdf:
         filepath = tmp_path / "test_grid.nc"
         grid.save(filepath)
 
-        saved_filenames = partition_netcdf(filepath, np_eta=3, np_xi=3)
+        saved_filenames = partition_netcdf(filepath, np_eta=3, np_xi=5)
 
         filepath_str = str(filepath.with_suffix(""))
         expected_filepath_list = [
-            Path(filepath_str + f".{index}.nc") for index in range(9)
+            Path(filepath_str + f".{index:02d}.nc") for index in range(15)
         ]
 
         assert saved_filenames == expected_filepath_list

@@ -520,7 +520,9 @@ def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, reque
     invalid_params["tracer_concentrations"] = {
         "ALK": [1]
     }  # Only one tracer concentration
-    with pytest.raises(ValueError, match="The length of tracer 'ALK'"):
+    with pytest.raises(
+        ValueError, match="The length of 'tracer_concentrations' for tracer 'ALK'"
+    ):
         cdr.add_release(name="release_1", **invalid_params)
 
     # Test invalid volume flux (negative)

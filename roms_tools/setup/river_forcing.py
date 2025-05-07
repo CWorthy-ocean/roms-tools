@@ -17,7 +17,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
     substitute_nans_by_fillvalue,
-    convert_to_roms_time,
+    add_time_info_to_ds,
     _to_yaml,
     _from_yaml,
     add_tracer_metadata_to_ds,
@@ -316,7 +316,7 @@ class RiverForcing:
         ds["river_tracer"] = river_tracer
         ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
 
-        ds, time = convert_to_roms_time(
+        ds, time = add_time_info_to_ds(
             ds, self.model_reference_date, self.climatology, time_name="river_time"
         )
 

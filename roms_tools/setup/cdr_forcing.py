@@ -1,10 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from pydantic import BaseModel, model_validator
 from typing import Optional, List, Dict, Union
-from typing_extensions import Annotated
-from annotated_types import Ge, Le
 import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
@@ -21,6 +18,7 @@ from roms_tools.utils import (
     save_datasets,
 )
 from roms_tools.setup.utils import (
+    convert_to_relative_days,
     gc_dist,
     get_tracer_defaults,
     get_tracer_metadata_dict,
@@ -28,229 +26,12 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-
-NonNegativeFloat = Annotated[float, Ge(0)]
-
-
-class Release(BaseModel):
-    """Represents a single point-source release of water and tracers.
-
-    Attributes
-    ----------
-    name : str
-        Unique identifier for the release.
-    lat : float or int
-        Latitude of the release location in degrees North. Must be between -90 and 90.
-    lon : float or int
-        Longitude of the release location in degrees East.
-    depth : float or int
-        Depth of the release in meters. Must be non-negative.
-    hsc : float or int
-        Horizontal scale of the release in meters. Must be non-negative.
-    vsc : float or int
-        Vertical scale of the release in meters. Must be non-negative.
-    times : list of datetime
-        Time points for the release events. Must be within `start_time` and `end_time`, and strictly increasing.
-    start_time : datetime
-        Start of the simulation.
-    end_time : datetime
-        End of the simulation.
-    """
-
-    name: str
-    lat: Annotated[float, Ge(-90), Le(90)]
-    lon: float
-    depth: NonNegativeFloat
-    hsc: NonNegativeFloat
-    vsc: NonNegativeFloat
-    times: List[datetime]
-
-    start_time: datetime
-    end_time: datetime
-
-    @model_validator(mode="after")
-    def check_times(self) -> "Release":
-        """Validate that 'times' are sorted and fall within start_time and end_time."""
-
-        if len(self.times) > 0:
-
-            # Ensure times are strictly increasing
-            if not all(t1 < t2 for t1, t2 in zip(self.times, self.times[1:])):
-                raise ValueError(
-                    f"'times' must be strictly monotonically increasing. Got: {self.times}"
-                )
-
-            # First time must not be before start_time
-            if self.times[0] < self.start_time:
-                raise ValueError(
-                    f"First time in 'times' cannot be before start_time ({self.start_time})."
-                )
-
-            # Last time must not be after end_time
-            if self.times[-1] > self.end_time:
-                raise ValueError(
-                    f"Last time in 'times' cannot be after end_time ({self.end_time})."
-                )
-        return self
-
-
-class PointVolumeRelease(Release):
-    """Represents a single point-source release with volume fluxes and tracer
-    concentrations.
-
-    Inherits attributes from `Release` and adds specific attributes for volume fluxes and tracer concentrations.
-
-    Attributes
-    ----------
-    volume_fluxes : float, int or list of floats/ints
-        Volume flux of the release in m³/s. Can be a constant (applied uniformly) or a list matching `times`.
-    tracer_concentrations : dict
-        Tracer names mapped to their concentrations (float or list matching `times`).
-    """
-
-    hsc: NonNegativeFloat = 0
-    vsc: NonNegativeFloat = 0
-    volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat]]
-    tracer_concentrations: Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
-
-    @model_validator(mode="after")
-    def check_volume_fluxes(self) -> "PointVolumeRelease":
-        """Ensure 'volume_fluxes' matches length of 'times'."""
-
-        num_times = len(self.times)
-
-        if isinstance(self.volume_fluxes, list):
-            if len(self.volume_fluxes) != num_times:
-                raise ValueError(
-                    f"The length of 'volume_fluxes' ({len(self.volume_fluxes)}) does not match the number of times ({num_times})."
-                )
-
-        return self
-
-    @model_validator(mode="after")
-    def check_tracer_concentrations(self) -> "PointVolumeRelease":
-        """Ensure tracer concentractions match length of 'times'."""
-
-        num_times = len(self.times)
-        for key, val in self.tracer_concentrations.items():
-            if isinstance(val, list) and len(val) != num_times:
-                raise ValueError(
-                    f"The length of 'tracer_concentrations' for tracer '{key}' ({len(val)}) does not match the number of times ({num_times})."
-                )
-
-        return self
-
-    @model_validator(mode="after")
-    def extend_to_endpoints(self) -> "PointVolumeRelease":
-        """Ensure that the release time series starts at `start_time` and ends at
-        `end_time`.
-
-        If `volume_fluxes` is a list and does not cover the endpoints, zero volume fluxes are added.
-        Tracer concentrations are extended accordingly by duplicating endpoint values.
-
-        If `times` is empty, [start_time, end_time] is used with zero fluxes and duplicated tracer values.
-        """
-        if not self.times:
-            self.times = [self.start_time, self.end_time]
-            self.volume_fluxes = [self.volume_fluxes, self.volume_fluxes]
-            self.tracer_concentrations = {
-                tracer: [vals, vals]
-                if not isinstance(vals, list)
-                else [vals[0], vals[0]]
-                for tracer, vals in self.tracer_concentrations.items()
-            }
-        else:
-            self.times = list(self.times)  # Make mutable
-            self.volume_fluxes = (
-                list(self.volume_fluxes)
-                if isinstance(self.volume_fluxes, list)
-                else [self.volume_fluxes] * len(self.times)
-            )
-            self.tracer_concentrations = {
-                tracer: list(vals)
-                if isinstance(vals, list)
-                else [vals] * len(self.times)
-                for tracer, vals in self.tracer_concentrations.items()
-            }
-
-            if self.times[0] > self.start_time:
-                self.times.insert(0, self.start_time)
-                self.volume_fluxes.insert(0, 0.0)
-                for k in self.tracer_concentrations:
-                    self.tracer_concentrations[k].insert(
-                        0, self.tracer_concentrations[k][0]
-                    )
-            if self.times[-1] < self.end_time:
-                self.times.append(self.end_time)
-                self.volume_fluxes.append(0.0)
-                for k in self.tracer_concentrations:
-                    self.tracer_concentrations[k].append(
-                        self.tracer_concentrations[k][-1]
-                    )
-
-        return self
-
-
-class TracerPerturbationRelease(Release):
-    """Represents a tracer perturbation release without volume fluxes.
-
-    Inherits attributes from `Release` and adds specific attributes for tracer fluxes.
-
-    Attributes
-    ----------
-    tracer_fluxes : dict
-        Tracer names mapped to their fluxes (float or list matching `times`).
-    """
-
-    tracer_fluxes: Dict[str, Union[float, List[float]]]
-
-    @model_validator(mode="after")
-    def check_tracer_fluxes(self) -> "TracerPerturbationRelease":
-        """Ensure tracer fluxes match length of 'times'."""
-
-        num_times = len(self.times)
-        for key, val in self.tracer_fluxes.items():
-            if isinstance(val, list) and len(val) != num_times:
-                raise ValueError(
-                    f"The length of 'tracer_fluxes' for tracer '{key}' ({len(val)}) does not match the number of times ({num_times})."
-                )
-
-        return self
-
-    @model_validator(mode="after")
-    def extend_to_endpoints(self) -> "PointVolumeRelease":
-        """Ensure that the release time series starts at `start_time` and ends at
-        `end_time`.
-
-        If `tracer_fluxes` is a list and does not cover the endpoints, zero tracer fluxes are added.
-
-        If `times` is empty, [start_time, end_time] is used with zero tracer fluxes.
-        """
-        if not self.times:
-            self.times = [self.start_time, self.end_time]
-            self.tracer_fluxes = {
-                tracer: [vals, vals] if not isinstance(vals, list) else [0, 0]
-                for tracer, vals in self.tracer_fluxes.items()
-            }
-        else:
-            self.times = list(self.times)  # Make mutable
-            self.tracer_fluxes = {
-                tracer: list(vals)
-                if isinstance(vals, list)
-                else [vals] * len(self.times)
-                for tracer, vals in self.tracer_fluxes.items()
-            }
-
-            if self.times[0] > self.start_time:
-                self.times.insert(0, self.start_time)
-                for k in self.tracer_fluxes:
-                    self.tracer_fluxes[k].insert(0, 0.0)
-            if self.times[-1] < self.end_time:
-                self.times.append(self.end_time)
-                for k in self.tracer_fluxes:
-                    self.tracer_fluxes[k].append(0.0)
-
-        return self
+from roms_tools.setup.cdr_release import (
+    Flux,
+    Concentration,
+    Release,
+    PointVolumeRelease,
+)
 
 
 @dataclass(kw_only=True)
@@ -303,15 +84,7 @@ class CDRForcing:
                 if name == "_tracer_metadata":
                     continue  # skip metadata entry
 
-                release_cls = self._get_release_class()
-                release = release_cls(
-                    **{
-                        "name": name,
-                        **params,
-                        "start_time": self.start_time,
-                        "end_time": self.end_time,
-                    }
-                )
+                release = self._instantiate_release(name, params)
                 self._validate_release_location(release)
                 self._add_release_to_ds(release)
 
@@ -364,9 +137,10 @@ class CDRForcing:
 
         return ds
 
-    def _get_release_class(self):
-        """Return the Release class used for each release (to be overridden)."""
-        return Release  # default
+    def _instantiate_release(self, name, params):
+        return Release(
+            name=name, start_time=self.start_time, end_time=self.end_time, **params
+        )
 
     @staticmethod
     def _add_tracer_metadata_to_ds(ds):
@@ -377,6 +151,107 @@ class CDRForcing:
     def _get_tracer_metadata_dict():
         """Return tracer metadata as a dictionary (to be overridden)."""
         return {}
+
+    def add_release(
+        self,
+        *,
+        name: str,
+        lat: float,
+        lon: float,
+        depth: float,
+        hsc: float,
+        vsc: float,
+        times: Optional[List[datetime]] = None,
+    ):
+        """Adds a release to the forcing dataset and dictionary.
+
+        This method registers a point source at a specific location (latitude, longitude, and depth).
+
+        Parameters
+        ----------
+        name : str
+            Unique identifier for the release.
+        lat : float or int
+            Latitude of the release location in degrees North. Must be between -90 and 90.
+        lon : float or int
+            Longitude of the release location in degrees East. No restrictions on bounds.
+        depth : float or int
+            Depth of the release in meters. Must be non-negative.
+        hsc : float or int
+            Horizontal scale of the release in meters. Must be non-negative.
+        vsc : float or int
+            Vertical scale of the release in meters. Must be non-negative.
+        times : list of datetime.datetime, optional
+            Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
+
+            Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
+        """
+        # Check that the name is unique
+        if name in self.releases:
+            raise ValueError(f"A release with the name '{name}' already exists.")
+
+        params = {k: v for k, v in locals().items() if k != "self"}
+
+        params = self._set_defaults(params)
+
+        release = self._instantiate_release(params)
+        self._validate_release_location(release)
+        self._add_release_to_dict(release)
+        ds = self._add_release_to_ds(release)
+        self.ds = ds
+
+    def _set_defaults(self, params):
+
+        return params
+
+    def _add_release_to_ds(self, release: Release):
+        """Add the release data for a specific release to the forcing dataset."""
+
+        times = np.array(release.times, dtype="datetime64[ns]")
+        rel_times = convert_to_relative_days(times)
+
+        # Merge with existing time dimension
+        existing_times = (
+            self.ds["time"].values
+            if len(self.ds["time"]) > 0
+            else np.array([], dtype="datetime64[ns]")
+        )
+        existing_rel_times = (
+            self.ds["cdr_time"].values if len(self.ds["cdr_time"]) > 0 else []
+        )
+        union_times = np.union1d(existing_times, times)
+        union_rel_times = np.union1d(existing_rel_times, rel_times)
+
+        # Initialize a fresh dataset to accommodate the new release.
+        # xarray does not handle dynamic resizing of dimensions well (e.g., increasing 'ncdr' by 1),
+        # so we recreate the dataset with the updated size.
+        ds = xr.Dataset()
+        ds["time"] = ("time", union_times)
+        ds["cdr_time"] = ("time", union_rel_times)
+        ds = self._add_tracer_metadata_to_ds(ds)
+
+        release_names = np.concatenate([self.ds.release_name.values, [release.name]])
+        ds = ds.assign_coords({"release_name": (["ncdr"], release_names)})
+        ds["cdr_lon"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_lat"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_dep"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_hsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+        ds["cdr_vsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
+
+        # Retain previous experiment locations
+        if len(self.ds["ncdr"]) > 0:
+            for i in range(len(self.ds.ncdr)):
+                for var_name in ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"]:
+                    ds[var_name].loc[{"ncdr": i}] = self.ds[var_name].isel(ncdr=i)
+
+        # Add the new experiment location
+        for var_name, value in zip(
+            ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"],
+            [release.lon, release.lat, release.depth, release.hsc, release.vsc],
+        ):
+            ds[var_name].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = np.float64(value)
+
+        return ds
 
 
 @dataclass(kw_only=True)
@@ -418,7 +293,6 @@ class CDRVolumePointSource(CDRForcing):
         """Create and assign an empty dataset with CDR release variables."""
 
         ds = super()._initialize_empty_dataset()
-        print(ds)
 
         ds["cdr_volume"] = xr.DataArray(np.empty((0, 0)), dims=["time", "ncdr"])
         ds["cdr_tracer"] = xr.DataArray(
@@ -427,8 +301,18 @@ class CDRVolumePointSource(CDRForcing):
 
         return ds
 
-    def _get_release_class(self):
-        return PointVolumeRelease
+    def _instantiate_release(self, name, params):
+        params["volume_fluxes"] = Flux("volume", params["volume_fluxes"])
+        params["tracer_concentrations"] = {
+            tracer: Concentration(name=tracer, values=conc)
+            for tracer, conc in params["tracer_concentrations"].items()
+        }
+        return PointVolumeRelease(
+            name=name,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            **params,
+        )
 
     @staticmethod
     def _add_tracer_metadata_to_ds(ds):
@@ -508,9 +392,22 @@ class CDRVolumePointSource(CDRForcing):
             - "auto" (default): automatically set values to non-zero defaults
             - "zero": fill missing values with 0.0
         """
-        # Check that the name is unique
-        if name in self.releases:
-            raise ValueError(f"A release with the name '{name}' already exists.")
+        params = {
+            "name": name,
+            "lat": lat,
+            "lon": lon,
+            "depth": depth,
+            "hsc": 0.0,
+            "vsc": 0.0,
+            "times": times,
+        }
+        super().add_release(**params)
+
+    def _set_defaults(self, params):
+
+        # Set default for times if None
+        if params["times"] is None:
+            params["times"] = []
 
         # Check that fill_values has proper string
         if fill_values not in ("auto", "zero"):
@@ -519,11 +416,8 @@ class CDRVolumePointSource(CDRForcing):
                 "Must be 'auto' or 'zero'."
             )
 
-        # Set default for times if None
-        if times is None:
-            times = []
-
         # Set default for tracer_concentrations if None
+        tracer_concentrations = params["tracer_concentrations"]
         if tracer_concentrations is None:
             tracer_concentrations = {}
 
@@ -540,117 +434,60 @@ class CDRVolumePointSource(CDRForcing):
                     elif fill_values == "zero":
                         tracer_concentrations[tracer_name] = 0.0
 
-        release = PointVolumeRelease(
-            name=name,
-            lat=lat,
-            lon=lon,
-            depth=depth,
-            times=times,
-            volume_fluxes=volume_fluxes,
-            tracer_concentrations=tracer_concentrations,
-            start_time=self.start_time,
-            end_time=self.end_time,
-        )
+        params["tracer_concentrations"] = tracer_concentrations
 
-        self._validate_release_location(release)
-        self._add_release_to_dict(release)
-        self._add_release_to_ds(release)
+        return params
 
     def _add_release_to_ds(self, release: PointVolumeRelease):
         """Add the release data for a specific release to the forcing dataset."""
 
-        # Convert times to datetime64[ns]
-        times = np.array(release.times, dtype="datetime64[ns]")
-
-        # Ensure reference date is also datetime64[ns]
-        ref = np.datetime64(self.model_reference_date, "ns")
-
-        # Compute model-relative times in days
-        rel_times = (times - ref) / np.timedelta64(1, "D")
-
-        # Merge with existing time dimension
-        existing_times = (
-            self.ds["time"].values
-            if len(self.ds["time"]) > 0
-            else np.array([], dtype="datetime64[ns]")
-        )
-        existing_rel_times = (
-            self.ds["cdr_time"].values if len(self.ds["cdr_time"]) > 0 else []
-        )
-        union_times = np.union1d(existing_times, times)
-        union_rel_times = np.union1d(existing_rel_times, rel_times)
-
-        # Initialize a fresh dataset to accommodate the new release.
-        # xarray does not handle dynamic resizing of dimensions well (e.g., increasing 'ncdr' by 1),
-        # so we recreate the dataset with the updated size.
-        ds = xr.Dataset()
-        ds["time"] = ("time", union_times)
-        ds["cdr_time"] = ("time", union_rel_times)
-        ds = add_tracer_metadata_to_ds(ds)
-
-        release_names = np.concatenate([self.ds.release_name.values, [release.name]])
-        ds = ds.assign_coords({"release_name": (["ncdr"], release_names)})
-        ds["cdr_lon"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_lat"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_dep"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_hsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_vsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-
-        ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
-        ds["cdr_tracer"] = xr.zeros_like(
-            ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
-        )
-
-        # Retain previous experiment locations
-        if len(self.ds["ncdr"]) > 0:
-            for i in range(len(self.ds.ncdr)):
-                for var_name in ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"]:
-                    ds[var_name].loc[{"ncdr": i}] = self.ds[var_name].isel(ncdr=i)
-
-        # Add the new experiment location
-        for var_name, value in zip(
-            ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"],
-            [release.lon, release.lat, release.depth, 0.0, 0.0],
-        ):
-            ds[var_name].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = np.float64(value)
+        ds = super()._add_release_to_ds(release)
 
         # Interpolate and retain previous experiment volume fluxes and tracer concentrations
         if len(self.ds["ncdr"]) > 0:
             for i in range(len(self.ds.ncdr)):
                 interpolated = np.interp(
-                    union_rel_times,
-                    self.ds["cdr_time"].values,
+                    ds["cdr_time"].values,  # existing + new relative times
+                    self.ds["cdr_time"].values,  # existing relative times
                     self.ds["cdr_volume"].isel(ncdr=i).values,
                 )
                 ds["cdr_volume"].loc[{"ncdr": i}] = interpolated
 
                 for n in range(len(self.ds.ntracers)):
                     interpolated = np.interp(
-                        union_rel_times,
-                        self.ds["cdr_time"].values,
+                        ds["cdr_time"].values,  # existing + new relative times
+                        self.ds["cdr_time"].values,  # existing relative times
                         self.ds["cdr_tracer"].isel(ntracers=n, ncdr=i).values,
                     )
                     ds["cdr_tracer"].loc[{"ntracers": n, "ncdr": i}] = interpolated
 
+        times = np.array(release.times, dtype="datetime64[ns]")
+        rel_times = convert_to_relative_days(times)
+
         # Handle new experiment volume fluxes and tracer concentrations
-        if isinstance(release.volume_fluxes, list):
-            interpolated = np.interp(union_rel_times, rel_times, release.volume_fluxes)
+        if isinstance(release.volume_fluxes.values, list):
+            interpolated = np.interp(
+                ds["cdr_time"].values,  # existing + new relative times
+                rel_times,  # new relative times
+                release.volume_fluxes.values,
+            )
         else:
-            interpolated = np.full(len(union_rel_times), release.volume_fluxes)
+            interpolated = np.full(len(ds["cdr_time"]), release.volume_fluxes.values)
 
         ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = interpolated
 
         for n in range(len(self.ds.ntracers)):
             tracer_name = ds.tracer_name[n].item()
-            if isinstance(release.tracer_concentrations[tracer_name], list):
+            if isinstance(release.tracer_concentrations[tracer_name].values, list):
                 interpolated = np.interp(
-                    union_rel_times,
-                    rel_times,
-                    release.tracer_concentrations[tracer_name],
+                    ds["cdr_time"].values,  # existing + new relative times
+                    rel_times,  # new relative times
+                    release.tracer_concentrations[tracer_name].values,
                 )
             else:
                 interpolated = np.full(
-                    len(union_rel_times), release.tracer_concentrations[tracer_name]
+                    len(ds["cdr_time"]),
+                    release.tracer_concentrations[tracer_name].values,
                 )
 
             ds["cdr_tracer"].loc[
@@ -666,8 +503,11 @@ class CDRVolumePointSource(CDRForcing):
             "lon": release.lon,
             "depth": release.depth,
             "times": release.times,
-            "tracer_concentrations": release.tracer_concentrations,
-            "volume_fluxes": release.volume_fluxes,
+            "tracer_concentrations": {
+                name: conc.values
+                for name, conc in release.tracer_concentrations.items()
+            },
+            "volume_fluxes": release.volume_fluxes.values,
         }
 
     def plot_volume_flux(self, start=None, end=None, releases="all"):

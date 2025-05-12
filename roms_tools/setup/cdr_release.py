@@ -45,42 +45,46 @@ class ValueArray(ABC):
                 )
 
     def _extend_scalar_series(
-        self, times: list, start_time, end_time, start_pad, end_pad
+        self,
+        times: list,
+        start_time,
+        end_time,
+        start_pad: float,
+        end_pad: float,
     ):
-        """Internal utility to convert a scalar to a list and extend the series at
-        endpoints.
+        """Extend self.values to align with times, including optional padding at
+        start_time and end_time.
 
         Parameters
         ----------
         times : list
             List of datetime-like objects.
         start_time : datetime-like
-            Start of the interval.
+            Start of the desired interval.
         end_time : datetime-like
-            End of the interval.
+            End of the desired interval.
         start_pad : float
-            Value to insert at the beginning if padding is needed.
+            Value to prepend if `times[0] > start_time` (only if `self.values` is a list).
         end_pad : float
-            Value to append at the end if padding is needed.
+            Value to append if `times[-1] < end_time` (only if `self.values` is a list).
 
         Returns
         -------
         self : ValueArray
             The updated instance with extended `values`.
         """
-        if not times:
-            self.values = [self.values, self.values]
-        else:
-            self.values = (
-                list(self.values)
-                if isinstance(self.values, list)
-                else [self.values] * len(times)
-            )
-
-            if times[0] > start_time:
+        if isinstance(self.values, list):
+            if times and times[0] > start_time:
                 self.values.insert(0, start_pad)
-            if times[-1] < end_time:
+            if times and times[-1] < end_time:
                 self.values.append(end_pad)
+        else:
+            count = len(times)
+            prepend = not times or times[0] > start_time
+            append = not times or times[-1] < end_time
+            count += int(prepend) + int(append)
+
+            self.values = [self.values] * count
 
         return self
 

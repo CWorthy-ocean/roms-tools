@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Union
+from typing import Optional, List, Union
+from pydantic import BaseModel, model_validator
 import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
@@ -9,7 +10,6 @@ import logging
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from roms_tools import Grid
-from roms_tools.constants import NUM_TRACERS
 from roms_tools.plot import _plot, _get_projection
 from roms_tools.regrid import LateralRegridFromROMS
 from roms_tools.utils import (
@@ -20,18 +20,167 @@ from roms_tools.utils import (
 from roms_tools.setup.utils import (
     convert_to_relative_days,
     gc_dist,
-    get_tracer_defaults,
-    get_tracer_metadata_dict,
     add_tracer_metadata_to_ds,
     _to_yaml,
     _from_yaml,
 )
 from roms_tools.setup.cdr_release import (
-    Flux,
-    Concentration,
     Release,
-    PointVolumeRelease,
+    VolumeRelease,
 )
+
+
+class ReleaseSimulationManager(BaseModel):
+    """Validates and adjusts a single release against a ROMS simulation time window."""
+
+    release: Release
+    grid: Grid
+    start_time: datetime
+    end_time: datetime
+
+    @model_validator(mode="after")
+    def check_release_times_within_simulation_window(
+        self,
+    ) -> "ReleaseSimulationManager":
+        """Ensure the release times are within the [start_time, end_time] simulation
+        window."""
+
+        times = self.release.times
+        if len(times) == 0:
+            return self
+
+        if times[0] < self.start_time:
+            raise ValueError(
+                f"First time in release '{self.release.name}' is before start_time ({self.start_time})."
+            )
+
+        if times[-1] > self.end_time:
+            raise ValueError(
+                f"Last time in release '{self.release.name}' is after end_time ({self.end_time})."
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_release_location(self) -> "ReleaseSimulationManager":
+        """Ensure the release is consistent with the simulation grid."""
+        _validate_release_location(self.grid, self.release)
+        return self
+
+    @model_validator(mode="after")
+    def extend_to_endpoints(self) -> "ReleaseSimulationManager":
+        """Extend the release time series to include the simulation time endpoints."""
+        self.release._extend_to_endpoints(self.start_time, self.end_time)
+        return self
+
+
+class ReleaseCollector:
+    """Collects and validates multiple releases against each other."""
+
+    def __init__(self, releases):
+        """Initialize with a list of releases."""
+        self.releases = releases
+
+    @model_validator(mode="after")
+    def check_unique_name(self) -> "ReleaseCollector":
+        """Check that all releases have unique names."""
+        names = [release.name for release in self.releases]
+        for name in names:
+            if names.count(name) > 1:
+                raise ValueError(f"A release with the name '{name}' already exists.")
+        return self
+
+    def determine_release_type(self) -> "ReleaseCollector":
+        """Ensure all releases are of the same type, and set the release_type."""
+        if not all(
+            isinstance(release, type(self.releases[0])) for release in self.releases
+        ):
+            raise ValueError("Not all releases are of the same type.")
+
+        return type(self.releases[0])
+
+
+class CDRForcingDatasetBuilder:
+    def __init__(self, releases, model_reference_date, release_type):
+        self.releases = releases
+        self.model_reference_date = model_reference_date
+        self.release_type = release_type
+
+    def build(self) -> xr.Dataset:
+        all_times = [np.array(r.times, dtype="datetime64[ns]") for r in self.releases]
+        union_times = np.unique(np.concatenate(all_times))
+        union_rel_times = [
+            convert_to_relative_days(t, self.model_reference_date) for t in union_times
+        ]
+
+        ds = xr.Dataset()
+        ds["time"] = ("time", union_times)
+        ds["cdr_time"] = ("time", union_rel_times)
+        ds["cdr_lon"] = ("ncdr", [r.lon for r in self.releases])
+        ds["cdr_lat"] = ("ncdr", [r.lat for r in self.releases])
+        ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
+        ds["cdr_hsc"] = ("ncdr", [r.hsc for r in self.releases])
+        ds["cdr_vsc"] = ("ncdr", [r.vsc for r in self.releases])
+        ds = ds.assign_coords(
+            {"release_name": (["ncdr"], [r.name for r in self.releases])}
+        )
+
+        # Assign attributes
+        attr_map = {
+            "time": {"long_name": "absolute time"},
+            "cdr_time": {
+                "long_name": f"relative time: days since {self.model_reference_date}",
+                "units": "days",
+            },
+            "release_name": {"long_name": "Name of release"},
+            "cdr_lon": {
+                "long_name": "Longitude of CDR release",
+                "units": "degrees east",
+            },
+            "cdr_lat": {
+                "long_name": "Latitude of CDR release",
+                "units": "degrees north",
+            },
+            "cdr_dep": {"long_name": "Depth of CDR release", "units": "meters"},
+            "cdr_hsc": {
+                "long_name": "Horizontal scale of CDR release",
+                "units": "meters",
+            },
+            "cdr_vsc": {
+                "long_name": "Vertical scale of CDR release",
+                "units": "meters",
+            },
+        }
+        for var, attrs in attr_map.items():
+            ds[var].attrs.update(attrs)
+
+        ds = add_tracer_metadata_to_ds(ds)  # adds the coordinate "tracer_name"
+
+        if self.release_type == VolumeRelease:
+            ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
+            ds["cdr_tracer"] = xr.zeros_like(
+                ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
+            )
+
+        for ncdr, release in enumerate(self.releases):
+            times = np.array(release.times, dtype="datetime64[ns]")
+            rel_times = convert_to_relative_days(times, self.model_reference_date)
+
+            if self.release_type == VolumeRelease:
+                ds["cdr_volume"].loc[{"ncdr": ncdr}] = np.interp(
+                    union_rel_times, rel_times, release.volume_fluxes.values
+                )
+                for ntracer in range(ds.ntracers.size):
+                    tracer_name = ds.tracer_name[ntracer].item()
+                    ds["cdr_tracer"].loc[
+                        {"ntracers": ntracer, "ncdr": ncdr}
+                    ] = np.interp(
+                        union_rel_times,
+                        rel_times,
+                        release.tracer_concentrations[tracer_name].values,
+                    )
+
+        return ds
 
 
 @dataclass(kw_only=True)
@@ -48,8 +197,8 @@ class CDRForcing:
         End time of the ROMS model simulation.
     model_reference_date : datetime, optional
         Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
-    releases : dict, optional
-        A dictionary of existing releases. Defaults to empty dictionary.
+    releases : list of Release
+        A list of one or more CDR release objects.
 
     Attributes
     ----------
@@ -61,7 +210,7 @@ class CDRForcing:
     start_time: datetime
     end_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
-    releases: Optional[dict] = field(default_factory=dict)
+    releases: List["Release"] = field(default_factory=list)
 
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -69,446 +218,21 @@ class CDRForcing:
         if self.start_time >= self.end_time:
             raise ValueError("`start_time` must be earlier than `end_time`.")
 
-        # Start with an empty dataset representing zero releases
-        ds = self._initialize_empty_dataset()
-        self.ds = ds
-
-        tracer_metadata = self._get_tracer_metadata_dict()
-        self.releases["_tracer_metadata"] = tracer_metadata
-
-        if self.releases:
-            if "_metadata" not in self.releases:
-                self.releases["_tracer_metadata"] = tracer_metadata
-
-            for name, params in self.releases.items():
-                if name == "_tracer_metadata":
-                    continue  # skip metadata entry
-
-                release = self._instantiate_release(name, params)
-                self._validate_release_location(release)
-                self._add_release_to_ds(release)
-
-    def _initialize_empty_dataset(self):
-        """Create and assign an empty dataset with CDR release variables."""
-        ds = xr.Dataset(
-            {
-                "cdr_time": (["time"], np.empty(0)),
-                "cdr_lon": (["ncdr"], np.empty(0)),
-                "cdr_lat": (["ncdr"], np.empty(0)),
-                "cdr_dep": (["ncdr"], np.empty(0)),
-                "cdr_hsc": (["ncdr"], np.empty(0)),
-                "cdr_vsc": (["ncdr"], np.empty(0)),
-            },
-            coords={
-                "time": (["time"], np.empty(0)),
-                "release_name": (["ncdr"], np.empty(0, dtype=str)),
-            },
-        )
-
-        ds = self._add_variable_attributes(ds)
-        return ds
-
-    def _add_variable_attributes(self, ds):
-        ds["time"].attrs = {"long_name": "absolute time"}
-        ds["cdr_time"].attrs = {
-            "long_name": "relative time: days since {self.model_reference_date}",
-            "units": "days",
-        }
-        ds["release_name"].attrs = {"long_name": "Name of release"}
-        ds["cdr_lon"].attrs = {
-            "long_name": "Longitude of CDR release",
-            "units": "degrees east",
-        }
-        ds["cdr_lat"].attrs = {
-            "long_name": "Latitude of CDR release",
-            "units": "degrees north",
-        }
-        ds["cdr_dep"].attrs = {"long_name": "Depth of CDR release", "units": "meters"}
-        ds["cdr_hsc"].attrs = {
-            "long_name": "Horizontal scale of CDR release",
-            "units": "meters",
-        }
-        ds["cdr_vsc"].attrs = {
-            "long_name": "Vertical scale of CDR release",
-            "units": "meters",
-        }
-
-        ds = self._add_tracer_metadata_to_ds(ds)
-
-        return ds
-
-    def _instantiate_release(self, name, params):
-        return Release(
-            name=name, start_time=self.start_time, end_time=self.end_time, **params
-        )
-
-    @staticmethod
-    def _add_tracer_metadata_to_ds(ds):
-        """Add tracer metadata to the dataset (to be overridden)."""
-        return ds
-
-    @staticmethod
-    def _get_tracer_metadata_dict():
-        """Return tracer metadata as a dictionary (to be overridden)."""
-        return {}
-
-    def add_release(
-        self,
-        *,
-        name: str,
-        lat: float,
-        lon: float,
-        depth: float,
-        hsc: float,
-        vsc: float,
-        times: Optional[List[datetime]] = None,
-    ):
-        """Adds a release to the forcing dataset and dictionary.
-
-        This method registers a point source at a specific location (latitude, longitude, and depth).
-
-        Parameters
-        ----------
-        name : str
-            Unique identifier for the release.
-        lat : float or int
-            Latitude of the release location in degrees North. Must be between -90 and 90.
-        lon : float or int
-            Longitude of the release location in degrees East. No restrictions on bounds.
-        depth : float or int
-            Depth of the release in meters. Must be non-negative.
-        hsc : float or int
-            Horizontal scale of the release in meters. Must be non-negative.
-        vsc : float or int
-            Vertical scale of the release in meters. Must be non-negative.
-        times : list of datetime.datetime, optional
-            Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
-
-            Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
-        """
-        # Check that the name is unique
-        if name in self.releases:
-            raise ValueError(f"A release with the name '{name}' already exists.")
-
-        params = {k: v for k, v in locals().items() if k != "self"}
-
-        params = self._set_defaults(params)
-
-        release = self._instantiate_release(params)
-        self._validate_release_location(release)
-        self._add_release_to_dict(release)
-        ds = self._add_release_to_ds(release)
-        self.ds = ds
-
-    def _set_defaults(self, params):
-
-        return params
-
-    def _add_release_to_ds(self, release: Release):
-        """Add the release data for a specific release to the forcing dataset."""
-
-        times = np.array(release.times, dtype="datetime64[ns]")
-        rel_times = convert_to_relative_days(times)
-
-        # Merge with existing time dimension
-        existing_times = (
-            self.ds["time"].values
-            if len(self.ds["time"]) > 0
-            else np.array([], dtype="datetime64[ns]")
-        )
-        existing_rel_times = (
-            self.ds["cdr_time"].values if len(self.ds["cdr_time"]) > 0 else []
-        )
-        union_times = np.union1d(existing_times, times)
-        union_rel_times = np.union1d(existing_rel_times, rel_times)
-
-        # Initialize a fresh dataset to accommodate the new release.
-        # xarray does not handle dynamic resizing of dimensions well (e.g., increasing 'ncdr' by 1),
-        # so we recreate the dataset with the updated size.
-        ds = xr.Dataset()
-        ds["time"] = ("time", union_times)
-        ds["cdr_time"] = ("time", union_rel_times)
-        ds = self._add_tracer_metadata_to_ds(ds)
-
-        release_names = np.concatenate([self.ds.release_name.values, [release.name]])
-        ds = ds.assign_coords({"release_name": (["ncdr"], release_names)})
-        ds["cdr_lon"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_lat"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_dep"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_hsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-        ds["cdr_vsc"] = xr.zeros_like(ds.ncdr, dtype=np.float64)
-
-        # Retain previous experiment locations
-        if len(self.ds["ncdr"]) > 0:
-            for i in range(len(self.ds.ncdr)):
-                for var_name in ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"]:
-                    ds[var_name].loc[{"ncdr": i}] = self.ds[var_name].isel(ncdr=i)
-
-        # Add the new experiment location
-        for var_name, value in zip(
-            ["cdr_lon", "cdr_lat", "cdr_dep", "cdr_hsc", "cdr_vsc"],
-            [release.lon, release.lat, release.depth, release.hsc, release.vsc],
-        ):
-            ds[var_name].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = np.float64(value)
-
-        return ds
-
-
-@dataclass(kw_only=True)
-class CDRVolumePointSource(CDRForcing):
-    """Represents one or several volume sources of water with tracers at specific
-    location(s). This class is particularly useful for modeling point sources of Carbon
-    Dioxide Removal (CDR) forcing data, such as the injection of water and
-    biogeochemical tracers, e.g., alkalinity (ALK) or dissolved inorganic carbon (DIC),
-    through a pipe.
-
-    Parameters
-    ----------
-    grid : Grid, optional
-        Object representing the grid for spatial context.
-    start_time : datetime
-        Start time of the ROMS model simulation.
-    end_time : datetime
-        End time of the ROMS model simulation.
-    model_reference_date : datetime, optional
-        Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
-    releases : dict, optional
-        A dictionary of existing releases. Defaults to empty dictionary.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray dataset containing release metadata and forcing variables.
-    """
-
-    grid: Optional["Grid"] = None
-    start_time: datetime
-    end_time: datetime
-    model_reference_date: datetime = datetime(2000, 1, 1)
-    releases: Optional[dict] = field(default_factory=dict)
-
-    ds: xr.Dataset = field(init=False, repr=False)
-
-    def _initialize_empty_dataset(self):
-        """Create and assign an empty dataset with CDR release variables."""
-
-        ds = super()._initialize_empty_dataset()
-
-        ds["cdr_volume"] = xr.DataArray(np.empty((0, 0)), dims=["time", "ncdr"])
-        ds["cdr_tracer"] = xr.DataArray(
-            np.empty((0, NUM_TRACERS, 0)), dims=["time", "ntracers", "ncdr"]
-        )
-
-        return ds
-
-    def _instantiate_release(self, name, params):
-        params["volume_fluxes"] = Flux("volume", params["volume_fluxes"])
-        params["tracer_concentrations"] = {
-            tracer: Concentration(name=tracer, values=conc)
-            for tracer, conc in params["tracer_concentrations"].items()
-        }
-        return PointVolumeRelease(
-            name=name,
-            start_time=self.start_time,
-            end_time=self.end_time,
-            **params,
-        )
-
-    @staticmethod
-    def _add_tracer_metadata_to_ds(ds):
-        ds = add_tracer_metadata_to_ds(ds)
-        return ds
-
-    @staticmethod
-    def _get_tracer_metadata_dict():
-        """Return tracer metadata as a dictionary (to be overridden)."""
-        return get_tracer_metadata_dict()
-
-    def add_release(
-        self,
-        *,
-        name: str,
-        lat: float,
-        lon: float,
-        depth: float,
-        times: Optional[List[datetime]] = None,
-        volume_fluxes: Union[float, List[float]] = 0.0,
-        tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None,
-        fill_values: str = "auto",
-    ):
-        """Adds a release (point source) of water with tracers to the forcing dataset
-        and dictionary.
-
-        This method registers a point source at a specific location (latitude, longitude, and depth).
-        The release includes both a volume flux of water and tracer
-        concentrations, which can be constant or time-varying.
-
-        Parameters
-        ----------
-        name : str
-            Unique identifier for the release.
-        lat : float or int
-            Latitude of the release location in degrees North. Must be between -90 and 90.
-        lon : float or int
-            Longitude of the release location in degrees East. No restrictions on bounds.
-        depth : float or int
-            Depth of the release in meters. Must be non-negative.
-        times : list of datetime.datetime, optional
-            Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
-
-            Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
-
-        volume_fluxes : float, int, or list of float/int, optional
-
-            Volume flux(es) of the release in m³/s over time.
-
-            - Constant: applies uniformly across the entire simulation period.
-            - Time-varying: must match the length of `times`.
-
-            Example:
-
-            - Constant: `volume_fluxes=1000.0` (uniform across the entire simulation period).
-            - Time-varying: `volume_fluxes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
-
-        tracer_concentrations : dict, optional
-
-            Dictionary of tracer names and their concentration values. The concentration values can be either
-            a float/int (constant in time) or a list of float/int (time-varying).
-
-            - Constant: applies uniformly across the entire simulation period.
-            - Time-varying: must match the length of `times`.
-
-            Default is an empty dictionary (`{}`) if not provided.
-            Example:
-
-            - Constant: `{"ALK": 2000.0, "DIC": 1900.0}`
-            - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
-            - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
-
-        fill_values : str, optional
-
-            Strategy for filling missing tracer concentration values. Options:
-
-            - "auto" (default): automatically set values to non-zero defaults
-            - "zero": fill missing values with 0.0
-        """
-        params = {
-            "name": name,
-            "lat": lat,
-            "lon": lon,
-            "depth": depth,
-            "hsc": 0.0,
-            "vsc": 0.0,
-            "times": times,
-        }
-        super().add_release(**params)
-
-    def _set_defaults(self, params):
-
-        # Set default for times if None
-        if params["times"] is None:
-            params["times"] = []
-
-        # Check that fill_values has proper string
-        if fill_values not in ("auto", "zero"):
-            raise ValueError(
-                f"Invalid fill_values option: '{fill_values}'. "
-                "Must be 'auto' or 'zero'."
+        for release in self.releases:
+            ReleaseSimulationManager(
+                release=release,
+                grid=self.grid,
+                start_time=self.start_time,
+                end_time=self.end_time,
             )
 
-        # Set default for tracer_concentrations if None
-        tracer_concentrations = params["tracer_concentrations"]
-        if tracer_concentrations is None:
-            tracer_concentrations = {}
+        release_collector = ReleaseCollector(self.releases)
+        release_type = release_collector.determine_release_type()
 
-        # Fill in missing tracer concentrations
-        defaults = get_tracer_defaults()
-        for tracer_name in self.ds.tracer_name.values:
-            if tracer_name not in tracer_concentrations:
-                tracer_name = str(tracer_name)
-                if tracer_name in ["temp", "salt"]:
-                    tracer_concentrations[tracer_name] = defaults[tracer_name]
-                else:
-                    if fill_values == "auto":
-                        tracer_concentrations[tracer_name] = defaults[tracer_name]
-                    elif fill_values == "zero":
-                        tracer_concentrations[tracer_name] = 0.0
-
-        params["tracer_concentrations"] = tracer_concentrations
-
-        return params
-
-    def _add_release_to_ds(self, release: PointVolumeRelease):
-        """Add the release data for a specific release to the forcing dataset."""
-
-        ds = super()._add_release_to_ds(release)
-
-        # Interpolate and retain previous experiment volume fluxes and tracer concentrations
-        if len(self.ds["ncdr"]) > 0:
-            for i in range(len(self.ds.ncdr)):
-                interpolated = np.interp(
-                    ds["cdr_time"].values,  # existing + new relative times
-                    self.ds["cdr_time"].values,  # existing relative times
-                    self.ds["cdr_volume"].isel(ncdr=i).values,
-                )
-                ds["cdr_volume"].loc[{"ncdr": i}] = interpolated
-
-                for n in range(len(self.ds.ntracers)):
-                    interpolated = np.interp(
-                        ds["cdr_time"].values,  # existing + new relative times
-                        self.ds["cdr_time"].values,  # existing relative times
-                        self.ds["cdr_tracer"].isel(ntracers=n, ncdr=i).values,
-                    )
-                    ds["cdr_tracer"].loc[{"ntracers": n, "ncdr": i}] = interpolated
-
-        times = np.array(release.times, dtype="datetime64[ns]")
-        rel_times = convert_to_relative_days(times)
-
-        # Handle new experiment volume fluxes and tracer concentrations
-        if isinstance(release.volume_fluxes.values, list):
-            interpolated = np.interp(
-                ds["cdr_time"].values,  # existing + new relative times
-                rel_times,  # new relative times
-                release.volume_fluxes.values,
-            )
-        else:
-            interpolated = np.full(len(ds["cdr_time"]), release.volume_fluxes.values)
-
-        ds["cdr_volume"].loc[{"ncdr": ds.sizes["ncdr"] - 1}] = interpolated
-
-        for n in range(len(self.ds.ntracers)):
-            tracer_name = ds.tracer_name[n].item()
-            if isinstance(release.tracer_concentrations[tracer_name].values, list):
-                interpolated = np.interp(
-                    ds["cdr_time"].values,  # existing + new relative times
-                    rel_times,  # new relative times
-                    release.tracer_concentrations[tracer_name].values,
-                )
-            else:
-                interpolated = np.full(
-                    len(ds["cdr_time"]),
-                    release.tracer_concentrations[tracer_name].values,
-                )
-
-            ds["cdr_tracer"].loc[
-                {"ntracers": n, "ncdr": ds.sizes["ncdr"] - 1}
-            ] = interpolated
-
-        self.ds = ds
-
-    def _add_release_to_dict(self, release: PointVolumeRelease):
-        """Add the release data to the releases dictionary."""
-        self.releases[release.name] = {
-            "lat": release.lat,
-            "lon": release.lon,
-            "depth": release.depth,
-            "times": release.times,
-            "tracer_concentrations": {
-                name: conc.values
-                for name, conc in release.tracer_concentrations.items()
-            },
-            "volume_fluxes": release.volume_fluxes.values,
-        }
+        builder = CDRForcingDatasetBuilder(
+            self.releases, self.model_reference_date, release_type
+        )
+        self.ds = builder.build()
 
     def plot_volume_flux(self, start=None, end=None, releases="all"):
         """Plot the volume flux for each specified release within the given time range.
@@ -528,11 +252,14 @@ class CDRVolumePointSource(CDRForcing):
         start = start or self.start_time
         end = end or self.end_time
 
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+
         # Handle "all" releases case
         if releases == "all":
-            releases = [k for k in self.releases if k != "_tracer_metadata"]
+            releases = valid_releases
+
         # Validate input for release names
-        self._validate_release_input(releases)
+        _validate_release_input(releases, valid_releases)
 
         data = self.ds["cdr_volume"]
 
@@ -567,11 +294,13 @@ class CDRVolumePointSource(CDRForcing):
         start = start or self.start_time
         end = end or self.end_time
 
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
         # Handle "all" releases case
         if releases == "all":
-            releases = [k for k in self.releases if k != "_tracer_metadata"]
+            releases = valid_releases
+
         # Validate input for release names
-        self._validate_release_input(releases)
+        _validate_release_input(releases, valid_releases)
 
         tracer_names = list(self.ds["tracer_name"].values)
         if name not in tracer_names:
@@ -598,27 +327,6 @@ class CDRVolumePointSource(CDRForcing):
             ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
         )
 
-    def _plot_line(self, data, releases, start, end, title="", ylabel=""):
-        """Plots a line graph for the specified releases and time range."""
-        colors = self._get_release_colors()
-
-        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-        for release in releases:
-            ncdr = np.where(self.ds["release_name"].values == release)[0][0]
-            data.isel(ncdr=ncdr).plot(
-                ax=ax,
-                linewidth=2,
-                label=release,
-                color=colors[release],
-                marker="x",
-            )
-
-        if len(releases) > 0:
-            ax.legend()
-
-        ax.set(title=title, ylabel=ylabel)
-        ax.set_xlim([start, end])
-
     def plot_location_top_view(self, releases="all"):
         """Plot the top-down view of release locations.
 
@@ -641,14 +349,14 @@ class CDRVolumePointSource(CDRForcing):
                 "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
         # Handle "all" releases case
         if releases == "all":
-            releases = [k for k in self.releases if k != "_tracer_metadata"]
+            releases = valid_releases
 
         # Validate input for release names
-        self._validate_release_input(releases)
+        _validate_release_input(releases, valid_releases)
 
-        # Proceed with plotting
         field = self.grid.ds.mask_rho
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
@@ -669,7 +377,8 @@ class CDRVolumePointSource(CDRForcing):
 
         proj = ccrs.PlateCarree()
 
-        colors = self._get_release_colors()
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+        colors = _get_release_colors(valid_releases)
 
         for name in releases:
             # transform coordinates to projected space
@@ -731,65 +440,7 @@ class CDRVolumePointSource(CDRForcing):
                     f"Multiple releases found: {valid_releases}. Please specify a single release to plot."
                 )
 
-        self._validate_release_input(release, list_allowed=False)
-
-        def _plot_bathymetry_section(
-            ax, h, dim, fixed_val, coord_deg, resolution, title
-        ):
-            """Plots a bathymetry section along a fixed latitude or longitude.
-
-            Parameters
-            ----------
-            ax : matplotlib.axes.Axes
-                The axis on which the plot will be drawn.
-
-            h : xarray.DataArray
-                The bathymetry data to plot.
-
-            dim : str
-                The dimension along which to plot the section, either "lat" or "lon".
-
-            fixed_val : float
-                The fixed value of latitude or longitude for the section.
-
-            coord_deg : xarray.DataArray
-                The array of latitude or longitude coordinates.
-
-            resolution : float
-                The resolution at which to generate the coordinate range.
-
-            title : str
-                The title for the plot.
-
-            Returns
-            -------
-            None
-                The function does not return anything. It directly plots the bathymetry section on the provided axis.
-            """
-            # Determine coordinate names and build target range
-            var_range = _generate_coordinate_range(
-                coord_deg.min().values, coord_deg.max().values, resolution
-            )
-            var_name = "lat" if dim == "lon" else "lon"
-            range_da = xr.DataArray(
-                var_range,
-                dims=[var_name],
-                attrs={"units": "°N" if var_name == "lat" else "°E"},
-            )
-
-            # Construct target coordinates for regridding
-            target_coords = {dim: [fixed_val], var_name: range_da}
-            regridder = LateralRegridFromROMS(h, target_coords)
-            section = regridder.apply(h)
-            section, _ = _remove_edge_nans(section, var_name)
-
-            # Plot the bathymetry section
-            section.plot(ax=ax, color="k")
-            ax.fill_between(section[var_name], section.squeeze(), y2=0, color="#deebf7")
-            ax.invert_yaxis()
-            ax.set_xlabel("Latitude [°N]" if var_name == "lat" else "Longitude [°E]")
-            ax.set_ylabel("Depth [m]")
-            ax.set_title(title)
+        _validate_release_input(release, valid_releases, list_allowed=False)
 
         # Prepare grid coordinates
         lon_deg = self.grid.ds.lon_rho
@@ -814,7 +465,8 @@ class CDRVolumePointSource(CDRForcing):
             title=f"Longitude: {self.releases[release]['lon']}°E",
         )
 
-        colors = self._get_release_colors()
+        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+        colors = _get_release_colors(valid_releases)
 
         axs[0].plot(
             self.releases[release]["lat"],
@@ -888,11 +540,28 @@ class CDRVolumePointSource(CDRForcing):
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
+        # Create a serializable representation
+        data = {
+            "releases": {
+                release.name: {
+                    "lat": release.lat,
+                    "lon": release.lon,
+                    "depth": release.depth,
+                    "times": [t.isoformat() for t in release.times],
+                    "tracer_concentrations": {
+                        name: conc.values
+                        for name, conc in release.tracer_concentrations.items()
+                    },
+                    "volume_fluxes": release.volume_fluxes.values,
+                }
+                for release in self.releases
+            },
+        }
 
-        _to_yaml(self, filepath)
+        _to_yaml(data, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "CDRVolumePointSource":
+    def from_yaml(cls, filepath: Union[str, Path]) -> "CDRForcing":
         """Create an instance of the CDRVolumePointSource class from a YAML file.
 
         Parameters
@@ -912,170 +581,250 @@ class CDRVolumePointSource(CDRForcing):
 
         return cls(grid=grid, **params)
 
-    def _validate_release_location(self, release: PointVolumeRelease):
-        """Validates the closest grid location for a release site.
 
-        This function ensures that the given release site (lat, lon, depth) lies
-        within the ocean portion of the model grid domain. It:
+def _validate_release_input(releases, valid_releases, list_allowed=True):
+    """Validates the input for release names in plotting methods to ensure they are in
+    an acceptable format and exist within the set of valid releases.
 
-        - Checks if the point is within the grid domain (with buffer for boundary artifacts).
-        - Verifies that the location is not on land.
-        - Verifies that the location is not below the seafloor.
-        """
-        if self.grid:
-            # Adjust longitude based on whether it crosses the International Date Line (straddle case)
-            if self.grid.straddle:
-                lon = xr.where(release.lon > 180, release.lon - 360, release.lon)
-            else:
-                lon = xr.where(release.lon < 0, release.lon + 360, release.lon)
+    This method ensures that the `releases` parameter is either a single release name (string) or a list
+    of release names (strings), and checks that each release exists in the set of valid releases.
 
-            dx = 1 / self.grid.ds.pm
-            dy = 1 / self.grid.ds.pn
-            max_grid_spacing = np.sqrt(dx**2 + dy**2) / 2
+    Parameters
+    ----------
+    releases : str or list of str
+        A single release name as a string, or a list of release names (strings) to validate.
 
-            # Compute great-circle distance to all grid points
-            dist = gc_dist(self.grid.ds.lon_rho, self.grid.ds.lat_rho, lon, release.lat)
-            dist_min = dist.min(dim=["eta_rho", "xi_rho"])
+    list_allowed : bool, optional
+        If `True`, a list of release names is allowed. If `False`, only a single release name (string)
+        is allowed. Default is `True`.
 
-            if (dist_min > max_grid_spacing).all():
-                raise ValueError(
-                    f"Release site '{release.name}' is outside of the grid domain. "
-                    "Ensure the provided (lat, lon) falls within the model grid extent."
-                )
+    Raises
+    ------
+    ValueError
+        If `releases` is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
 
-            # Find the indices of the closest grid cell
-            indices = np.where(dist == dist_min)
-            eta_rho = indices[0][0]
-            xi_rho = indices[1][0]
+    Notes
+    -----
+    This method checks that the `releases` input is in a valid format (either a string or a list of strings),
+    and ensures each release is present in the set of valid releases defined in `self.releases`. Invalid releases
+    are reported in the error message.
 
-            eta_max = self.grid.ds.sizes["eta_rho"] - 1
-            xi_max = self.grid.ds.sizes["xi_rho"] - 1
+    If `list_allowed` is set to `False`, only a single release name (string) will be accepted. Otherwise, a
+    list of release names is also acceptable.
+    """
 
-            if eta_rho in [0, eta_max] or xi_rho in [0, xi_max]:
-                raise ValueError(
-                    f"Release site '{release.name}' is located too close to the grid boundary. "
-                    "Place release location (lat, lon) away from grid boundaries."
-                )
+    # Ensure that a list of releases is only allowed if `list_allowed` is True
+    if not list_allowed and not isinstance(releases, str):
+        raise ValueError(
+            f"Only a single release name (string) is allowed. Got: {releases}"
+        )
 
-            if self.grid.ds.mask_rho[eta_rho, xi_rho].values == 0:
-                raise ValueError(
-                    f"Release site '{release.name}' is on land. "
-                    "Please provide coordinates (lat, lon) over ocean."
-                )
+    if isinstance(releases, str):
+        releases = [releases]  # Convert to list if a single string is provided
+    elif isinstance(releases, list):
+        if not all(isinstance(r, str) for r in releases):
+            raise ValueError("All elements in `releases` list must be strings.")
+    else:
+        raise ValueError(
+            "`releases` should be a string (single release name) or a list of strings (release names)."
+        )
 
-            if self.grid.ds.h[eta_rho, xi_rho].values < release.depth:
-                raise ValueError(
-                    f"Release site '{release.name}' lies below the seafloor. "
-                    f"Seafloor depth is {self.grid.ds.h[eta_rho, xi_rho].values:.2f} m, "
-                    f"but requested depth is {release.depth:.2f} m. Adjust depth or location (lat, lon)."
-                )
+    # Validate that the specified releases exist in self.releases
+    invalid_releases = [
+        release for release in releases if release not in valid_releases
+    ]
+    if invalid_releases:
+        raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
 
+
+def _get_release_colors(valid_releases):
+    """Returns a dictionary of colors for the valid releases, based on a consistent
+    colormap.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    dict
+        A dictionary where the keys are release names and the values are their corresponding colors,
+        assigned based on the order of releases in the valid releases list.
+
+    Raises
+    ------
+    ValueError
+        If the number of valid releases exceeds the available colormap capacity.
+
+    Notes
+    -----
+    The colormap is chosen dynamically based on the number of valid releases:
+
+    - If there are 10 or fewer releases, the "tab10" colormap is used.
+    - If there are more than 10 but fewer than or equal to 20 releases, the "tab20" colormap is used.
+    - For more than 20 releases, the "tab20b" colormap is used.
+    """
+
+    # Determine the colormap based on the number of releases
+    if len(valid_releases) <= 10:
+        color_map = cm.get_cmap("tab10")
+    elif len(valid_releases) <= 20:
+        color_map = cm.get_cmap("tab20")
+    else:
+        color_map = cm.get_cmap("tab20b")
+
+    # Ensure the number of releases doesn't exceed the available colormap capacity
+    if len(valid_releases) > color_map.N:
+        raise ValueError(
+            f"Too many releases. The selected colormap supports up to {color_map.N} releases."
+        )
+
+    # Create a dictionary of colors based on the release indices
+    colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
+
+    return colors
+
+
+def _plot_line(self, data, releases, start, end, title="", ylabel=""):
+    """Plots a line graph for the specified releases and time range."""
+    valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+    colors = _get_release_colors(valid_releases)
+
+    fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+    for release in releases:
+        ncdr = np.where(self.ds["release_name"].values == release)[0][0]
+        data.isel(ncdr=ncdr).plot(
+            ax=ax,
+            linewidth=2,
+            label=release,
+            color=colors[release],
+            marker="x",
+        )
+
+    if len(releases) > 0:
+        ax.legend()
+
+    ax.set(title=title, ylabel=ylabel)
+    ax.set_xlim([start, end])
+
+
+def _validate_release_location(grid, release: Release):
+    """Validates the closest grid location for a release site.
+
+    This function ensures that the given release site (lat, lon, depth) lies
+    within the ocean portion of the model grid domain. It:
+
+    - Checks if the point is within the grid domain (with buffer for boundary artifacts).
+    - Verifies that the location is not on land.
+    - Verifies that the location is not below the seafloor.
+    """
+    if grid:
+        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
+        if grid.straddle:
+            lon = xr.where(release.lon > 180, release.lon - 360, release.lon)
         else:
-            logging.warning(
-                "Grid not provided: cannot verify whether the specified lat/lon/depth location is within the domain or on land. "
-                "Please check manually or provide a grid when instantiating the class."
-            )
+            lon = xr.where(release.lon < 0, release.lon + 360, release.lon)
 
-    def _validate_release_input(self, releases, list_allowed=True):
-        """Validates the input for release names in plotting methods to ensure they are
-        in an acceptable format and exist within the set of valid releases.
+        dx = 1 / grid.ds.pm
+        dy = 1 / grid.ds.pn
+        max_grid_spacing = np.sqrt(dx**2 + dy**2) / 2
 
-        This method ensures that the `releases` parameter is either a single release name (string) or a list
-        of release names (strings), and checks that each release exists in the set of valid releases.
+        # Compute great-circle distance to all grid points
+        dist = gc_dist(grid.ds.lon_rho, grid.ds.lat_rho, lon, release.lat)
+        dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
-        Parameters
-        ----------
-        releases : str or list of str
-            A single release name as a string, or a list of release names (strings) to validate.
-
-        list_allowed : bool, optional
-            If `True`, a list of release names is allowed. If `False`, only a single release name (string)
-            is allowed. Default is `True`.
-
-        Raises
-        ------
-        ValueError
-            If `releases` is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
-
-        Notes
-        -----
-        This method checks that the `releases` input is in a valid format (either a string or a list of strings),
-        and ensures each release is present in the set of valid releases defined in `self.releases`. Invalid releases
-        are reported in the error message.
-
-        If `list_allowed` is set to `False`, only a single release name (string) will be accepted. Otherwise, a
-        list of release names is also acceptable.
-        """
-
-        # Ensure that a list of releases is only allowed if `list_allowed` is True
-        if not list_allowed and not isinstance(releases, str):
+        if (dist_min > max_grid_spacing).all():
             raise ValueError(
-                f"Only a single release name (string) is allowed. Got: {releases}"
+                f"Release site '{release.name}' is outside of the grid domain. "
+                "Ensure the provided (lat, lon) falls within the model grid extent."
             )
 
-        if isinstance(releases, str):
-            releases = [releases]  # Convert to list if a single string is provided
-        elif isinstance(releases, list):
-            if not all(isinstance(r, str) for r in releases):
-                raise ValueError("All elements in `releases` list must be strings.")
-        else:
+        # Find the indices of the closest grid cell
+        indices = np.where(dist == dist_min)
+        eta_rho = indices[0][0]
+        xi_rho = indices[1][0]
+
+        eta_max = grid.ds.sizes["eta_rho"] - 1
+        xi_max = grid.ds.sizes["xi_rho"] - 1
+
+        if eta_rho in [0, eta_max] or xi_rho in [0, xi_max]:
             raise ValueError(
-                "`releases` should be a string (single release name) or a list of strings (release names)."
+                f"Release site '{release.name}' is located too close to the grid boundary. "
+                "Place release location (lat, lon) away from grid boundaries."
             )
 
-        # Validate that the specified releases exist in self.releases
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        invalid_releases = [
-            release for release in releases if release not in valid_releases
-        ]
-        if invalid_releases:
-            raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
-
-    def _get_release_colors(self):
-        """Returns a dictionary of colors for the valid releases, based on a consistent
-        colormap.
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        dict
-            A dictionary where the keys are release names and the values are their corresponding colors,
-            assigned based on the order of releases in the valid releases list.
-
-        Raises
-        ------
-        ValueError
-            If the number of valid releases exceeds the available colormap capacity.
-
-        Notes
-        -----
-        The colormap is chosen dynamically based on the number of valid releases:
-
-        - If there are 10 or fewer releases, the "tab10" colormap is used.
-        - If there are more than 10 but fewer than or equal to 20 releases, the "tab20" colormap is used.
-        - For more than 20 releases, the "tab20b" colormap is used.
-        """
-
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-
-        # Determine the colormap based on the number of releases
-        if len(valid_releases) <= 10:
-            color_map = cm.get_cmap("tab10")
-        elif len(valid_releases) <= 20:
-            color_map = cm.get_cmap("tab20")
-        else:
-            color_map = cm.get_cmap("tab20b")
-
-        # Ensure the number of releases doesn't exceed the available colormap capacity
-        if len(valid_releases) > color_map.N:
+        if grid.ds.mask_rho[eta_rho, xi_rho].values == 0:
             raise ValueError(
-                f"Too many releases. The selected colormap supports up to {color_map.N} releases."
+                f"Release site '{release.name}' is on land. "
+                "Please provide coordinates (lat, lon) over ocean."
             )
 
-        # Create a dictionary of colors based on the release indices
-        colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
+        if grid.ds.h[eta_rho, xi_rho].values < release.depth:
+            raise ValueError(
+                f"Release site '{release.name}' lies below the seafloor. "
+                f"Seafloor depth is {grid.ds.h[eta_rho, xi_rho].values:.2f} m, "
+                f"but requested depth is {release.depth:.2f} m. Adjust depth or location (lat, lon)."
+            )
 
-        return colors
+    else:
+        logging.warning(
+            "Grid not provided: cannot verify whether the specified lat/lon/depth location is within the domain or on land. "
+            "Please check manually or provide a grid when instantiating the class."
+        )
+
+
+def _plot_bathymetry_section(ax, h, dim, fixed_val, coord_deg, resolution, title):
+    """Plots a bathymetry section along a fixed latitude or longitude.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axis on which the plot will be drawn.
+
+    h : xarray.DataArray
+        The bathymetry data to plot.
+
+    dim : str
+        The dimension along which to plot the section, either "lat" or "lon".
+
+    fixed_val : float
+        The fixed value of latitude or longitude for the section.
+
+    coord_deg : xarray.DataArray
+        The array of latitude or longitude coordinates.
+
+    resolution : float
+        The resolution at which to generate the coordinate range.
+
+    title : str
+        The title for the plot.
+
+    Returns
+    -------
+    None
+        The function does not return anything. It directly plots the bathymetry section on the provided axis.
+    """
+    # Determine coordinate names and build target range
+    var_range = _generate_coordinate_range(
+        coord_deg.min().values, coord_deg.max().values, resolution
+    )
+    var_name = "lat" if dim == "lon" else "lon"
+    range_da = xr.DataArray(
+        var_range,
+        dims=[var_name],
+        attrs={"units": "°N" if var_name == "lat" else "°E"},
+    )
+
+    # Construct target coordinates for regridding
+    target_coords = {dim: [fixed_val], var_name: range_da}
+    regridder = LateralRegridFromROMS(h, target_coords)
+    section = regridder.apply(h)
+    section, _ = _remove_edge_nans(section, var_name)
+
+    # Plot the bathymetry section
+    section.plot(ax=ax, color="k")
+    ax.fill_between(section[var_name], section.squeeze(), y2=0, color="#deebf7")
+    ax.invert_yaxis()
+    ax.set_xlabel("Latitude [°N]" if var_name == "lat" else "Longitude [°E]")
+    ax.set_ylabel("Depth [m]")
+    ax.set_title(title)

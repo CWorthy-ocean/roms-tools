@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from abc import abstractmethod, ABC
-from pydantic import BaseModel, model_validator, Field
+from pydantic import BaseModel, model_validator, Field, ConfigDict
 from typing import List, Dict, Union, Literal, Optional
 from typing_extensions import Annotated
 from annotated_types import Ge, Le
@@ -207,6 +207,8 @@ class Release(BaseModel):
     vsc: NonNegativeFloat
     times: List[datetime]
 
+    model_config = ConfigDict(extra="forbid")
+
     @model_validator(mode="after")
     def check_increasing_times(self) -> "Release":
         """Validates that `times` are strictly increasing and fall within the specified
@@ -301,14 +303,19 @@ class VolumeRelease(Release):
     hsc: NonNegativeFloat = 0.0
     vsc: NonNegativeFloat = 0.0
     times: Optional[List[datetime]] = None
-    volume_fluxes: Union[float, List[float], Flux] = Field(default=0.0)
-    tracer_concentrations: Optional[Dict[str, Union[float, List[float]]]] = None
+    volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat], Flux] = Field(
+        default=0.0
+    )
+    tracer_concentrations: Optional[
+        Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
+    ] = None
     fill_values: Literal["auto", "zero"] = "auto"
 
     @model_validator(mode="after")
     def _postprocess(self) -> "VolumeRelease":
         if self.times is None:
             self.times = []
+        num_times = len(self.times)
 
         if self.tracer_concentrations is None:
             self.tracer_concentrations = {}
@@ -326,6 +333,7 @@ class VolumeRelease(Release):
 
         if not isinstance(self.volume_fluxes, Flux):
             self.volume_fluxes = Flux("volume", self.volume_fluxes)
+        self.volume_fluxes.check_length(num_times)
 
         self.tracer_concentrations = {
             tracer: (
@@ -335,6 +343,8 @@ class VolumeRelease(Release):
             )
             for tracer, conc in self.tracer_concentrations.items()
         }
+        for tracer_concentrations in self.tracer_concentrations.values():
+            tracer_concentrations.check_length(num_times)
 
         return self
 

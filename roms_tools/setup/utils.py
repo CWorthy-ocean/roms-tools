@@ -1349,7 +1349,6 @@ def _to_dict(forcing_object) -> None:
             "climatology",
             "verbose",
             "straddle",
-            "indices",
         )
     ]
 
@@ -1366,20 +1365,6 @@ def _to_dict(forcing_object) -> None:
 
         # Add the field and its value to the forcing_data dictionary
         forcing_data[field_name] = value
-
-    # Serialize `indices` data (conditionally)
-    indices_data = getattr(forcing_object, "indices", None)
-    if indices_data is not None:
-        serialized_indices = {
-            "_convention": "eta_rho, xi_rho"
-        }  # Add convention metadata
-
-        for key, value in indices_data.items():
-            serialized_indices[key] = [
-                f"{tup[0]}, {tup[1]}" for tup in value
-            ]  # Comma-separated string
-
-        forcing_data["indices"] = serialized_indices
 
     # Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {

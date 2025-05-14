@@ -677,6 +677,20 @@ class RiverForcing:
 
         # Serialize object into dictionary
         yaml_data = _to_dict(self)
+        # Convert indices format
+
+        indices_data = yaml_data["RiverForcing"]["indices"]
+        serialized_indices = {
+            "_convention": "eta_rho, xi_rho"
+        }  # Add convention metadata
+
+        for key, value in indices_data.items():
+            serialized_indices[key] = [
+                f"{tup[0]}, {tup[1]}" for tup in value
+            ]  # Comma-separated string
+
+        yaml_data["RiverForcing"]["indices"] = serialized_indices
+
         # Write to YAML
         _to_yaml(yaml_data, filepath)
 

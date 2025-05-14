@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
 import logging
+from collections import Counter
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from roms_tools import Grid
@@ -34,7 +35,7 @@ class ReleaseSimulationManager(BaseModel):
     """Validates and adjusts a single release against a ROMS simulation time window."""
 
     release: Release
-    grid: Grid
+    grid: Optional[Grid] = None
     start_time: datetime
     end_time: datetime
 
@@ -74,20 +75,23 @@ class ReleaseSimulationManager(BaseModel):
         return self
 
 
-class ReleaseCollector:
+class ReleaseCollector(BaseModel):
     """Collects and validates multiple releases against each other."""
 
-    def __init__(self, releases):
-        """Initialize with a list of releases."""
-        self.releases = releases
+    releases: List[Release]
 
     @model_validator(mode="after")
     def check_unique_name(self) -> "ReleaseCollector":
         """Check that all releases have unique names."""
         names = [release.name for release in self.releases]
-        for name in names:
-            if names.count(name) > 1:
-                raise ValueError(f"A release with the name '{name}' already exists.")
+        duplicates = [name for name, count in Counter(names).items() if count > 1]
+
+        if duplicates:
+            raise ValueError(
+                f"Multiple releases share the following name(s): {', '.join(repr(d) for d in duplicates)}. "
+                "Each release must have a unique name."
+            )
+
         return self
 
     def determine_release_type(self) -> "ReleaseCollector":
@@ -216,7 +220,13 @@ class CDRForcing:
 
     def __post_init__(self):
         if self.start_time >= self.end_time:
-            raise ValueError("`start_time` must be earlier than `end_time`.")
+            raise ValueError(
+                f"`start_time` ({self.start_time}) must be earlier than `end_time` ({self.end_time})."
+            )
+        if len(self.releases) == 0:
+            raise ValueError(
+                "The `releases` list is empty. Provide at least one `Release` object."
+            )
 
         for release in self.releases:
             ReleaseSimulationManager(

@@ -1244,32 +1244,28 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
-def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
-    """Serialize a forcing object (including its grid) into a YAML file.
+def _to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
+    """Write pre-serialized YAML data and additional metadata to a YAML file.
 
-    This function serializes a dataclass object (forcing_object) and its associated
-    `grid` attribute into a YAML file. It includes additional metadata, such as
-    the version of the `roms-tools` package.
+    This function writes the provided pre-serialized YAML data along with metadata, such as the version
+    of the `roms-tools` package, to the specified file. The metadata header is written first, followed by
+    the provided YAML data.
 
     Parameters
     ----------
-    forcing_object : object
-        The object that contains the forcing data, typically a dataclass with attributes
-        such as `grid`, `start_time`, `end_time`, etc.
+    yaml_data : dict or str
+        The pre-serialized YAML data to be written to the file. This data may include the forcing object and grid.
     filepath : Union[str, Path]
-        The path where the serialized YAML file will be saved.
+        The path (as a string or Path object) where the serialized YAML file will be saved.
 
     Returns
     -------
     None
-        The function writes the serialized data directly to a YAML file at the specified path.
+        This function does not return anything. It writes the provided YAML data directly to the specified file.
     """
 
     # Convert the filepath to a Path object
     filepath = Path(filepath)
-
-    # Serialize object into dictionary
-    yaml_data = _to_dict(forcing_object)
 
     # Create YAML header with version information
     try:

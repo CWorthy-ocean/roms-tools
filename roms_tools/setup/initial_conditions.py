@@ -30,6 +30,7 @@ from roms_tools.setup.utils import (
     rotate_velocities,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
+    _to_dict,
     _to_yaml,
     _from_yaml,
 )
@@ -926,7 +927,10 @@ class InitialConditions:
             The path to the YAML file where the parameters will be saved.
         """
 
-        _to_yaml(self, filepath)
+        # Serialize object into dictionary
+        yaml_data = _to_dict(self)
+        # Write to YAML
+        _to_yaml(yaml_data, filepath)
 
     @classmethod
     def from_yaml(

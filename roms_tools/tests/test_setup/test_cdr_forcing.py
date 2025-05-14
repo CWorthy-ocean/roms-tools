@@ -1,13 +1,17 @@
 import pytest
-from copy import deepcopy
-from datetime import datetime
-from pathlib import Path
-from roms_tools import CDRVolumePointSource, Grid
+from datetime import datetime, timedelta
+from pydantic import ValidationError
+from roms_tools import Grid, VolumeRelease, CDRForcing
 from roms_tools.constants import NUM_TRACERS
+import logging
+from pathlib import Path
 import xarray as xr
 import numpy as np
-import logging
-from roms_tools.setup.utils import get_tracer_defaults
+from roms_tools.setup.cdr_forcing import (
+    ReleaseSimulationManager,
+    ReleaseCollector,
+    CDRForcingDatasetBuilder,
+)
 from conftest import calculate_file_hash
 
 try:
@@ -15,762 +19,609 @@ try:
 except ImportError:
     xesmf = None
 
-# Fixtures
-@pytest.fixture
-def iceland_test_grid():
-    """Returns a grid surrouding Iceland."""
-    return Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=0, N=3
-    )
-
 
 @pytest.fixture
-def test_grid_that_straddles():
-    """Returns a grid that straddles the prime meridian."""
-    return Grid(
-        nx=18, ny=18, size_x=800, size_y=800, center_lon=0, center_lat=65, rot=0, N=3
+def another_iceland_volume_release(valid_release_params):
+    """Returns a valid volume point source release consistent with the Iceland test
+    domain."""
+    return VolumeRelease(
+        name="iceland2",
+        **valid_release_params,
+        times=[
+            datetime(2022, 1, 1),
+            datetime(2022, 1, 3),
+            datetime(2022, 1, 5),
+        ],
+        volume_fluxes=[1.0, 2.0, 3.0],
+        tracer_concentrations={"DIC": [10.0, 20.0, 30.0]},
     )
 
 
-@pytest.fixture
-def start_end_times():
-    """Returns test start and end times."""
-    start_time = datetime(2022, 1, 1)
-    end_time = datetime(2022, 12, 31)
-    return start_time, end_time
-
-
-@pytest.fixture
-def empty_cdr_point_source_without_grid(start_end_times):
-    """Returns an empty CDR point source without a grid."""
-    start_time, end_time = start_end_times
-    return CDRVolumePointSource(
-        start_time=start_time,
-        end_time=end_time,
-    )
-
-
-@pytest.fixture
-def empty_cdr_point_source_with_grid(iceland_test_grid, start_end_times):
-    """Returns an empty CDR point source with the Iceland test grid."""
-    start_time, end_time = start_end_times
-    return CDRVolumePointSource(
-        grid=iceland_test_grid,
-        start_time=start_time,
-        end_time=end_time,
-    )
-
-
-@pytest.fixture
-def empty_cdr_point_source_with_grid_that_straddles(
-    test_grid_that_straddles, start_end_times
-):
-    """Returns an empty CDR point source with a grid straddling the prime meridian."""
-    start_time, end_time = start_end_times
-    return CDRVolumePointSource(
-        grid=test_grid_that_straddles,
-        start_time=start_time,
-        end_time=end_time,
-    )
-
-
-@pytest.fixture
-def valid_release_params():
-    """Returns a dictionary with valid parameters for a CDR point source release within
-    the Iceland test domain."""
-    return {
-        "lat": 66.0,
-        "lon": -25.0,
-        "depth": 50.0,
-        "volume_fluxes": 100.0,
-    }
-
-
-@pytest.fixture
-def cdr_point_source_with_two_releases(
-    iceland_test_grid, start_end_times, valid_release_params
-):
-    """Returns a CDR point source with one release."""
-    start_time, end_time = start_end_times
-    cdr = CDRVolumePointSource(
-        grid=iceland_test_grid, start_time=start_time, end_time=end_time
-    )
-    cdr.add_release(name="release1", **valid_release_params)
-
-    release_params = deepcopy(valid_release_params)
-    release_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2022, 1, 3),
-        datetime(2022, 1, 5),
-    ]
-    release_params["volume_fluxes"] = [1.0, 2.0, 3.0]
-    release_params["tracer_concentrations"] = {"DIC": [10.0, 20.0, 30.0]}
-    cdr.add_release(name="release2", **release_params)
-
-    return cdr
-
-
-# Tests
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_without_grid",
-        "empty_cdr_point_source_with_grid",
-    ],
-)
-def test_cdr_point_source_init(cdr_forcing_fixture, start_end_times, request):
-    """Tests the initialization of CDR point source fixtures."""
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
-    start_time, end_time = start_end_times
-    assert cdr.start_time == start_time
-    assert cdr.end_time == end_time
-
-    # Check that dataset is empty but has right dimensions and variables
-    assert isinstance(cdr.ds, xr.Dataset)
-
-    # Check dimension lengths
-    assert cdr.ds.time.size == 0
-    assert cdr.ds.ncdr.size == 0
-    assert cdr.ds.ntracers.size == NUM_TRACERS
-
-    # Check coordinate and variable lengths
-    assert cdr.ds.release_name.size == 0
-    assert cdr.ds.tracer_name.size == NUM_TRACERS
-    assert cdr.ds.tracer_unit.size == NUM_TRACERS
-    assert cdr.ds.tracer_long_name.size == NUM_TRACERS
-    assert cdr.ds.cdr_time.size == 0
-    assert cdr.ds.cdr_lon.size == 0
-    assert cdr.ds.cdr_lat.size == 0
-    assert cdr.ds.cdr_dep.size == 0
-    assert cdr.ds.cdr_hsc.size == 0
-    assert cdr.ds.cdr_vsc.size == 0
-    assert cdr.ds.cdr_volume.size == 0
-    assert cdr.ds.cdr_tracer.size == 0
-
-    # Check that release dictionary is empty except for tracer metadata
-    assert set(cdr.releases.keys()) == {"_tracer_metadata"}
-
-
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_without_grid",
-        "empty_cdr_point_source_with_grid",
-    ],
-)
-def test_add_release(cdr_forcing_fixture, valid_release_params, request):
-    """Test some basic features of the `add_release` method for updating forcing dataset
-    and dictionary."""
-
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
-    release_params = deepcopy(valid_release_params)
-    times = [
-        cdr.start_time,
-        datetime(2022, 1, 5),
-        cdr.end_time,
-    ]
-    release_params["times"] = times
-
-    volume_fluxes = [100.0, 200.0, 150.0]
-    release_params["volume_fluxes"] = volume_fluxes
-
-    tracer_concentrations = {
-        "ALK": [2300.0, 2350.0, 2400.0],
-        "DIC": [2100.0, 2150.0, 2200.0],
-        "temp": 10.0,
-        "salt": 35.0,
-    }
-    release_params["tracer_concentrations"] = tracer_concentrations
-
-    # Add release
-    cdr.add_release(name="release", **release_params)
-
-    # Check dimension lengths
-    assert cdr.ds.time.size == len(times)
-    assert cdr.ds.ncdr.size == 1
-    assert cdr.ds.ntracers.size == NUM_TRACERS
-
-    # Check coordinate and variable lengths
-    assert cdr.ds.release_name.size == 1
-    assert "release" in cdr.ds["release_name"].values
-    assert cdr.ds.tracer_name.size == NUM_TRACERS
-    assert cdr.ds.tracer_unit.size == NUM_TRACERS
-    assert cdr.ds.tracer_long_name.size == NUM_TRACERS
-    assert cdr.ds.cdr_time.size == len(times)
-    assert cdr.ds.cdr_lon.size == 1
-    assert cdr.ds.cdr_lat.size == 1
-    assert cdr.ds.cdr_dep.size == 1
-    assert cdr.ds.cdr_hsc.size == 1
-    assert cdr.ds.cdr_vsc.size == 1
-
-    # Check cdr_volume shape and values
-    assert cdr.ds.cdr_volume.shape == (len(times), 1)
-    np.testing.assert_allclose(cdr.ds.cdr_volume[:, 0], volume_fluxes, rtol=1e-3)
-
-    # Check tracer concentration shape
-    assert cdr.ds.cdr_tracer.shape == (len(times), NUM_TRACERS, 1)
-
-    # Check tracer concentration values for known tracers
-    tracer_index = {name: i for i, name in enumerate(cdr.ds.tracer_name.values)}
-    for tracer, expected in tracer_concentrations.items():
-        i = tracer_index[tracer]
-        if isinstance(expected, list):
-            np.testing.assert_allclose(cdr.ds.cdr_tracer[:, i, 0], expected)
-        else:
-            np.testing.assert_allclose(cdr.ds.cdr_tracer[:, i, 0], expected)
-
-    assert "release" in cdr.releases.keys()
-
-
-def test_merge_multiple_releases(start_end_times, valid_release_params):
-    """Test merging multiple releases in the dataset, including endpoint filling,
-    timestamp adjustment, and interpolation."""
-
-    start_time, end_time = start_end_times
-    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
-    dic_index = 9
-
-    # add first release
-    release_params1 = deepcopy(valid_release_params)
-    release_params1["times"] = [
-        datetime(2022, 1, 1),  # overall start time
-        datetime(2022, 1, 3),
-        datetime(2022, 1, 5),
-    ]
-    release_params1["volume_fluxes"] = [1.0, 2.0, 3.0]
-    release_params1["tracer_concentrations"] = {"DIC": [10.0, 20.0, 30.0]}
-    cdr.add_release(name="release1", **release_params1)
-
-    # check time
-    expected_times = [
-        datetime(2022, 1, 1),  # overall start time
-        datetime(2022, 1, 3),
-        datetime(2022, 1, 5),
-        datetime(2022, 12, 31),  # overall end time
-    ]
-    assert np.array_equal(
-        cdr.ds["time"].values, np.array(expected_times, dtype="datetime64[ns]")
-    )
-
-    # check first release
-    ncdr_index = 0
-
-    assert cdr.ds["cdr_lon"].isel(ncdr=ncdr_index).values == release_params1["lon"]
-    assert cdr.ds["cdr_lat"].isel(ncdr=ncdr_index).values == release_params1["lat"]
-    assert cdr.ds["cdr_dep"].isel(ncdr=ncdr_index).values == release_params1["depth"]
-    assert cdr.ds["cdr_hsc"].isel(ncdr=ncdr_index).values == 0.0
-    assert cdr.ds["cdr_vsc"].isel(ncdr=ncdr_index).values == 0.0
-
-    expected_volume_fluxes = [
-        1.0,
-        2.0,
-        3.0,
-        0.0,  # volume flux set to zero at endpoint
-    ]
-
-    assert np.allclose(
-        cdr.ds["cdr_volume"].isel(ncdr=ncdr_index).values,
-        np.array(expected_volume_fluxes),
-    )
-
-    expected_dics = [
-        10.0,
-        20.0,
-        30.0,
-        30.0,  # tracer concenctration extrapolated to endpoint
-    ]
-    assert np.allclose(
-        cdr.ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index).values,
-        np.array(expected_dics),
-    )
-
-    # add second release
-    release_params2 = deepcopy(valid_release_params)
-    release_params2["lon"] = release_params2["lon"] - 1
-    release_params2["lat"] = release_params2["lat"] - 1
-    release_params2["depth"] = release_params2["depth"] - 1
-
-    release_params2["times"] = [
-        datetime(2022, 1, 2),
-        datetime(2022, 1, 4),
-        datetime(2022, 1, 5),
-    ]
-    release_params2["volume_fluxes"] = [2.0, 4.0, 10.0]
-    release_params2["tracer_concentrations"] = {"DIC": [20.0, 40.0, 100.0]}
-    cdr.add_release(name="release2", **release_params2)
-
-    # check time again
-    expected_times = [
-        datetime(2022, 1, 1),  # overall start time
-        datetime(2022, 1, 2),
-        datetime(2022, 1, 3),
-        datetime(2022, 1, 4),
-        datetime(2022, 1, 5),
-        datetime(2022, 12, 31),  # overall end time
-    ]
-    assert np.array_equal(
-        cdr.ds["time"].values, np.array(expected_times, dtype="datetime64[ns]")
-    )
-
-    # check first release again
-    ncdr_index = 0
-
-    assert cdr.ds["cdr_lon"].isel(ncdr=ncdr_index).values == release_params1["lon"]
-    assert cdr.ds["cdr_lat"].isel(ncdr=ncdr_index).values == release_params1["lat"]
-    assert cdr.ds["cdr_dep"].isel(ncdr=ncdr_index).values == release_params1["depth"]
-    assert cdr.ds["cdr_hsc"].isel(ncdr=ncdr_index).values == 0.0
-    assert cdr.ds["cdr_vsc"].isel(ncdr=ncdr_index).values == 0.0
-
-    expected_volume_fluxes = [
-        1.0,
-        1.5,
-        2.0,
-        2.5,
-        3.0,
-        0.0,  # volume flux set to zero at endpoint
-    ]
-
-    assert np.allclose(
-        cdr.ds["cdr_volume"].isel(ncdr=ncdr_index).values,
-        np.array(expected_volume_fluxes),
-    )
-
-    expected_dics = [
-        10.0,
-        15.0,
-        20.0,
-        25.0,
-        30.0,
-        30.0,  # tracer concenctration extrapolated to endpoint
-    ]
-    assert np.allclose(
-        cdr.ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index).values,
-        np.array(expected_dics),
-    )
-    # check second release
-    ncdr_index = 1
-
-    assert cdr.ds["cdr_lon"].isel(ncdr=ncdr_index).values == release_params2["lon"]
-    assert cdr.ds["cdr_lat"].isel(ncdr=ncdr_index).values == release_params2["lat"]
-    assert cdr.ds["cdr_dep"].isel(ncdr=ncdr_index).values == release_params2["depth"]
-    assert cdr.ds["cdr_hsc"].isel(ncdr=ncdr_index).values == 0.0
-    assert cdr.ds["cdr_vsc"].isel(ncdr=ncdr_index).values == 0.0
-
-    expected_volume_fluxes = [
-        0.0,  # volume flux set to zero at startpoint
-        2.0,
-        3.0,
-        4.0,
-        10.0,
-        0.0,  # volume flux set to zero at endpoint
-    ]
-    assert np.allclose(
-        cdr.ds["cdr_volume"].isel(ncdr=ncdr_index).values,
-        np.array(expected_volume_fluxes),
-    )
-
-    expected_dics = [
-        20.0,  # tracer concenctration extrapolated to startpoint
-        20.0,
-        30.0,
-        40.0,
-        100.0,
-        100.0,  # tracer concenctration extrapolated to endpoint
-    ]
-    assert np.allclose(
-        cdr.ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index).values,
-        np.array(expected_dics),
-    )
-
-
-def test_cdr_point_source_init_invalid_times():
-    """Test that initializing a CDR point source with the same start and end time raises
-    a ValueError."""
-    start_time = datetime(2022, 5, 1)
-    end_time = datetime(2022, 5, 1)
-    with pytest.raises(
-        ValueError, match="`start_time` must be earlier than `end_time`"
-    ):
-        CDRVolumePointSource(start_time=start_time, end_time=end_time)
-
-
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_without_grid",
-        "empty_cdr_point_source_with_grid",
-    ],
-)
-def test_add_duplicate_release(cdr_forcing_fixture, valid_release_params, request):
-    """Test that adding a duplicate release raises a ValueError."""
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
-    release_params = deepcopy(valid_release_params)
-    cdr.add_release(name="release_1", **release_params)
-    with pytest.raises(
-        ValueError, match="A release with the name 'release_1' already exists."
-    ):
-        cdr.add_release(name="release_1", **release_params)
-
-
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_without_grid",
-        "empty_cdr_point_source_with_grid",
-    ],
-)
-def test_invalid_release_params(cdr_forcing_fixture, valid_release_params, request):
-    """Test that invalid release parameters raise the appropriate ValueErrors."""
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
-
-    # Test invalid latitude
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lat"] = 100.0
-    with pytest.raises(ValueError, match="Input should be less than or equal to 90"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid depth (negative value)
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["depth"] = -10.0
-    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test times not being datetime objects
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        "fake_time",
-        "2023-02-01",
-    ]  # Invalid times format (strings)
-    with pytest.raises(
-        ValueError,
-        match="Input should be a valid datetime or date",
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test times being not monotonically increasing
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2022, 2, 1),
-        datetime(2022, 1, 15),  # Out of order date
-        datetime(2022, 3, 1),
-    ]
-    with pytest.raises(
-        ValueError, match="'times' must be strictly monotonically increasing."
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test times being not strictly monotonically increasing
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2022, 2, 1),
-        datetime(2022, 2, 1),  # Duplicated time
-        datetime(2022, 3, 1),
-    ]
-    with pytest.raises(
-        ValueError, match="'times' must be strictly monotonically increasing."
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test first time earlier than self.start_time
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2000, 1, 1),
-        datetime(2022, 2, 1),
-    ]  # Earlier than self.start_time
-    with pytest.raises(
-        ValueError, match="First time in 'times' cannot be before start_time"
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test last time later than self.end_time
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [
-        datetime(2022, 1, 1),
-        datetime(2025, 1, 1),
-    ]  # Later than self.end_time
-    with pytest.raises(
-        ValueError, match="Last time in 'times' cannot be after end_time"
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid volume_fluxes: not a float/int or list of float/int
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["volume_fluxes"] = ["not", "valid"]
-    with pytest.raises(ValueError, match="Input should be a valid number"):
-        cdr.add_release(name="release_invalid_volume", **invalid_params)
-
-    # Test invalid tracer_concentrations: not a float/int or list of float/int
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["tracer_concentrations"] = {"ALK": ["not", "valid"]}
-    with pytest.raises(ValueError, match="Input should be a valid number"):
-        cdr.add_release(name="release_invalid_tracer", **invalid_params)
-
-    # Test mismatch between times and volume fluxes length
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
-    invalid_params["volume_fluxes"] = [100]  # Only one volume flux entry
-    with pytest.raises(ValueError, match="The length of 'volume_fluxes'"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test mismatch between times and tracer_concentrations length
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [datetime(2022, 1, 1), datetime(2022, 1, 2)]  # Two times
-    invalid_params["tracer_concentrations"] = {
-        "ALK": [1]
-    }  # Only one tracer concentration
-    with pytest.raises(
-        ValueError, match="The length of 'tracer_concentrations' for tracer 'ALK'"
-    ):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid volume flux (negative)
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["volume_fluxes"] = -100  # Invalid volume flux
-    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test volume flux as list with negative values
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [cdr.start_time, cdr.end_time]
-    invalid_params["volume_fluxes"] = [10, -5]  # Invalid volume fluxes in list
-    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test invalid tracer concentration (negative)
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["tracer_concentrations"] = {"ALK": -1}
-    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-    # Test tracer_concentration as list with negative values
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["times"] = [cdr.start_time, cdr.end_time]
-    invalid_params["tracer_concentrations"] = {
-        "ALK": [10, -5]
-    }  # Invalid concentration in list
-    with pytest.raises(ValueError, match="Input should be greater than or equal to 0"):
-        cdr.add_release(name="release_1", **invalid_params)
-
-
-def test_warning_no_grid(
-    empty_cdr_point_source_without_grid, valid_release_params, caplog
-):
-    """Test warning if no grid is provided."""
-    with caplog.at_level(logging.WARNING):
-        empty_cdr_point_source_without_grid.add_release(
-            name="release_1", **valid_release_params
+class TestReleaseSimulationManager:
+    def setup_method(self):
+        self.grid = Grid(
+            nx=18,
+            ny=18,
+            size_x=800,
+            size_y=800,
+            center_lon=-18,
+            center_lat=65,
+            rot=0,
+            N=3,
+        )  # grid surrounding Iceland
+        self.grid_that_straddles = Grid(
+            nx=18,
+            ny=18,
+            size_x=800,
+            size_y=800,
+            center_lon=0,
+            center_lat=65,
+            rot=0,
+            N=3,
+        )  # grid that straddles dateline
+        self.valid_iceland_release_location = {
+            "lat": 66.0,
+            "lon": -25.0,
+            "depth": 50.0,
+        }  # release location consistent with Iceland grid
+        self.volume_release_without_times = VolumeRelease(
+            name="iceland_without_times",
+            **self.valid_iceland_release_location,
+            volume_fluxes=100.0,
+        )
+        self.volume_release_with_times = VolumeRelease(
+            name="iceland_with_times",
+            **self.valid_iceland_release_location,
+            times=[datetime(2022, 1, 1), datetime(2022, 1, 3), datetime(2022, 1, 5)],
+            volume_fluxes=[1.0, 2.0, 3.0],
+            tracer_concentrations={
+                "DIC": [10.0, 20.0, 30.0],
+                "temp": 10.0,
+                "salt": 35.0,
+            },
+        )
+        self.start_time = datetime(2022, 1, 1)
+        self.end_time = datetime(2022, 12, 31)
+
+    def test_release_coorectly_extended(self):
+
+        # Save copies of mutable fields before they are modified by ReleaseSimulationManager
+        times = self.volume_release_with_times.times.copy()  # list
+        volume_fluxes = (
+            self.volume_release_with_times.volume_fluxes.values.copy()
+        )  # list
+        tracer_concentrations_dic = (
+            self.volume_release_with_times.tracer_concentrations["DIC"].values.copy()
+        )  # list
+        tracer_concentrations_temp = (
+            self.volume_release_with_times.tracer_concentrations["temp"].values
+        )  # float, no copy needed
+
+        ReleaseSimulationManager(
+            release=self.volume_release_with_times,
+            grid=None,
+            start_time=self.start_time,
+            end_time=self.end_time,
         )
 
-    assert "Grid not provided"
+        # check that release was properly extended to end points
+        assert self.volume_release_with_times.times == [*times, self.end_time]
+        assert self.volume_release_with_times.volume_fluxes.values == [
+            *volume_fluxes,
+            0.0,
+        ]
+        assert self.volume_release_with_times.tracer_concentrations["DIC"].values == [
+            *tracer_concentrations_dic,
+            tracer_concentrations_dic[-1],
+        ]
+        assert self.volume_release_with_times.tracer_concentrations[
+            "temp"
+        ].values == 4 * [tracer_concentrations_temp]
+
+    def test_release_starts_too_early(self):
+        release = self.volume_release_with_times
+        times = release.times
+        start_time = times[0] + timedelta(days=1)
+        end_time = times[-1] + timedelta(days=1)
+
+        with pytest.raises(ValueError, match="before start_time"):
+            ReleaseSimulationManager(
+                release=release,
+                grid=None,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+    def test_release_ends_too_late(self):
+        release = self.volume_release_with_times
+        times = release.times
+        start_time = times[0] - timedelta(days=1)
+        end_time = times[-1] - timedelta(days=1)
+
+        with pytest.raises(ValueError, match="after end_time"):
+            ReleaseSimulationManager(
+                release=release,
+                grid=None,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+    def test_warning_no_grid(self, caplog):
+        release = self.volume_release_without_times
+
+        with caplog.at_level(logging.WARNING):
+            ReleaseSimulationManager(
+                release=release,
+                grid=None,
+                start_time=self.start_time,
+                end_time=self.end_time,
+            )
+
+        assert "Grid not provided"
+
+    def test_invalid_release_longitude(self):
+        """Test that error is raised if release location is outside grid."""
+
+        # Define release location both outside of Iceland grid and grid that straddles dateline
+        lon0 = -30
+        lat0 = 60
+        depth0 = 0
+
+        for lon in [lon0, lon0 - 360, lon0 + 360]:
+            for grid in [self.grid, self.grid_that_straddles]:
+                release = VolumeRelease(name="vol", lon=lon, lat=lat0, depth=depth0)
+                with pytest.raises(ValueError, match="outside of the grid domain"):
+                    ReleaseSimulationManager(
+                        release=release,
+                        grid=grid,
+                        start_time=self.start_time,
+                        end_time=self.end_time,
+                    )
+
+    def test_invalid_release_location(self):
+        """Test that error is raised if release location is outside grid or on land."""
+
+        # Release location too close to boundary of Iceland domain; lat_rho[0, 0] = 60.97, lon_rho[0, 0] = 334.17
+        release = VolumeRelease(name="vol", lon=334.17, lat=60.97, depth=0.0)
+        with pytest.raises(ValueError, match="too close to the grid boundary"):
+            ReleaseSimulationManager(
+                release=release,
+                grid=self.grid,
+                start_time=self.start_time,
+                end_time=self.end_time,
+            )
+
+        # Release location lies on land
+        release = VolumeRelease(name="vol", lon=-20, lat=64.5, depth=0.0)
+        with pytest.raises(ValueError, match="on land"):
+            ReleaseSimulationManager(
+                release=release,
+                grid=self.grid,
+                start_time=self.start_time,
+                end_time=self.end_time,
+            )
+
+        # Release location lies below seafloor
+        valid_release = self.volume_release_without_times
+        release = VolumeRelease(
+            name="vol", lon=valid_release.lon, lat=valid_release.lat, depth=4000
+        )
+        with pytest.raises(ValueError, match="below the seafloor"):
+            ReleaseSimulationManager(
+                release=release,
+                grid=self.grid,
+                start_time=self.start_time,
+                end_time=self.end_time,
+            )
 
 
-@pytest.mark.parametrize(
-    "cdr_forcing_fixture",
-    [
-        "empty_cdr_point_source_with_grid",
-        "empty_cdr_point_source_with_grid_that_straddles",
-    ],
-)
-def test_invalid_release_longitude(cdr_forcing_fixture, valid_release_params, request):
-    """Test that error is raised if release location is outside grid."""
+class TestReleaseCollector:
+    def setup_method(self):
+        self.volume_release = VolumeRelease(
+            name="iceland", lat=66, lon=-25, depth=50, volume_fluxes=100
+        )
 
-    cdr = request.getfixturevalue(cdr_forcing_fixture)
+    def test_check_unique_name(self):
+        with pytest.raises(ValidationError):
+            ReleaseCollector(releases=[self.volume_release, self.volume_release])
 
-    # Release location outside of domain
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = -30
-    invalid_params["lat"] = 60
-    with pytest.raises(ValueError, match="outside of the grid domain"):
-        cdr.add_release(name="release_1", **invalid_params)
+    # def test_raises_inconsistent_release_type(self):
+    #    """Test that release type is correctly inferred."""
 
-    # Release location outside of domain
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = 360 - 30
-    invalid_params["lat"] = 60
-    with pytest.raises(ValueError, match="outside of the grid domain"):
-        cdr.add_release(name="release_1", **invalid_params)
+    #    with pytest.raises(
+    #        ValueError, match="Not all releases are of the same type."
+    #    ):
+    #        ReleaseCollector([self.volume_release, self.tracer_perturbation])
+
+    def test_determine_release_type(self):
+        """Test that release type is correctly inferred."""
+
+        collector = ReleaseCollector(releases=[self.volume_release])
+        assert collector.determine_release_type() == VolumeRelease
 
 
-def test_invalid_release_location(
-    empty_cdr_point_source_with_grid, valid_release_params
-):
-    """Test that error is raised if release location is outside grid or on land."""
-    # Release location too close to boundary of Iceland domain; lat_rho[0, 0] = 60.97, lon_rho[0, 0] = 334.17
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = 334.17
-    invalid_params["lat"] = 60.97
-    with pytest.raises(ValueError, match="too close to the grid boundary"):
-        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
+class TestCDRForcingDatasetBuilder:
+    def setup_method(self):
+        self.start_time = datetime(2022, 1, 1)
+        self.end_time = datetime(2022, 12, 31)
 
-    # Release location lies on land
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["lon"] = -20.0
-    invalid_params["lat"] = 64.5
-    with pytest.raises(ValueError, match="on land"):
-        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
+        first_volume_release = VolumeRelease(
+            name="first_release",
+            lat=66.0,
+            lon=-25.0,
+            depth=50.0,
+            times=[datetime(2022, 1, 1), datetime(2022, 1, 3), datetime(2022, 1, 5)],
+            volume_fluxes=[1.0, 2.0, 3.0],
+            tracer_concentrations={
+                "DIC": [10.0, 20.0, 30.0],
+                "temp": 10.0,
+                "salt": 35.0,
+            },
+        )
 
-    # Release location lies below seafloor
-    invalid_params = deepcopy(valid_release_params)
-    invalid_params["depth"] = 4000
-    with pytest.raises(ValueError, match="below the seafloor"):
-        empty_cdr_point_source_with_grid.add_release(name="release_1", **invalid_params)
+        # Modify release including extending it to the endpoints
+        ReleaseSimulationManager(
+            release=first_volume_release,
+            start_time=self.start_time,
+            end_time=self.end_time,
+        )
+        self.first_volume_release = first_volume_release
+
+        second_volume_release = VolumeRelease(
+            name="second_release",
+            lon=first_volume_release.lon - 1,
+            lat=first_volume_release.lat - 1,
+            depth=first_volume_release.depth - 1,
+            times=[
+                datetime(2022, 1, 2),
+                datetime(2022, 1, 4),
+                datetime(2022, 1, 5),
+            ],
+            volume_fluxes=[2.0, 4.0, 10.0],
+            tracer_concentrations={"DIC": [20.0, 40.0, 100.0]},
+        )
+
+        # Modify release including extending it to the endpoints
+        ReleaseSimulationManager(
+            release=second_volume_release,
+            start_time=self.start_time,
+            end_time=self.end_time,
+        )
+        self.second_volume_release = second_volume_release
+
+    def check_ds_dims_and_coords(
+        self, ds, num_times, num_releases, release_type=VolumeRelease
+    ):
+        """Assert expected dimensions and coordinates for a CDR dataset."""
+
+        # Dimensions
+        assert ds.time.size == num_times
+        assert ds.ncdr.size == num_releases
+        assert ds.ntracers.size == NUM_TRACERS
+
+        # Coordinates and metadata
+        assert ds.release_name.size == num_releases
+        assert ds.tracer_name.size == NUM_TRACERS
+        assert ds.tracer_unit.size == NUM_TRACERS
+        assert ds.tracer_long_name.size == NUM_TRACERS
+        assert ds.cdr_time.size == num_times
+        assert ds.cdr_lon.size == num_releases
+        assert ds.cdr_lat.size == num_releases
+        assert ds.cdr_dep.size == num_releases
+        assert ds.cdr_hsc.size == num_releases
+        assert ds.cdr_vsc.size == num_releases
+
+        if release_type == VolumeRelease:
+            assert ds.cdr_volume.shape == (num_times, num_releases)
+            assert ds.cdr_tracer.shape == (num_times, NUM_TRACERS, num_releases)
+
+    def check_ds_name_and_location(self, ds, release, ncdr_index):
+        """Assert expected release name and location for a CDR dataset."""
+
+        # Name
+        assert release.name in ds["release_name"].values
+
+        # Location
+        assert ds["cdr_lon"].isel(ncdr=ncdr_index).values == release.lon
+        assert ds["cdr_lat"].isel(ncdr=ncdr_index).values == release.lat
+        assert ds["cdr_dep"].isel(ncdr=ncdr_index).values == release.depth
+        assert ds["cdr_hsc"].isel(ncdr=ncdr_index).values == release.hsc
+        assert ds["cdr_vsc"].isel(ncdr=ncdr_index).values == release.vsc
+
+        # TODO: Check for tracer metadata
+
+    def test_build_with_single_volume_release(self):
+
+        builder = CDRForcingDatasetBuilder(
+            releases=[self.first_volume_release],
+            model_reference_date=datetime(2000, 1, 1),
+            release_type=VolumeRelease,
+        )
+        ds = builder.build()
+
+        num_times = len(self.first_volume_release.times)
+        num_releases = 1
+        self.check_ds_dims_and_coords(
+            ds, num_times, num_releases, release_type=VolumeRelease
+        )
+
+        ncdr_index = 0
+        self.check_ds_name_and_location(ds, self.first_volume_release, ncdr_index)
+
+        # Time values
+        assert np.array_equal(
+            ds["time"].values,
+            np.array(self.first_volume_release.times, dtype="datetime64[ns]"),
+        )
+
+        # Volume flux values
+        np.testing.assert_allclose(
+            ds.cdr_volume.isel(ncdr=ncdr_index).values,
+            self.first_volume_release.volume_fluxes.values,
+        )
+
+        # Tracer concentration values
+        tracer_index = {name: i for i, name in enumerate(ds.tracer_name.values)}
+        for tracer, expected in self.first_volume_release.tracer_concentrations.items():
+            i = tracer_index[tracer]
+            np.testing.assert_allclose(
+                ds.cdr_tracer.isel(ncdr=ncdr_index, ntracers=i), expected.values
+            )
+
+    def test_build_with_multiple_volume_releases(self):
+
+        builder = CDRForcingDatasetBuilder(
+            releases=[self.first_volume_release, self.second_volume_release],
+            model_reference_date=datetime(2000, 1, 1),
+            release_type=VolumeRelease,
+        )
+        ds = builder.build()
+
+        # expected times is the union of the times of the first and second release without duplication
+        expected_times = [
+            datetime(2022, 1, 1),
+            datetime(2022, 1, 2),
+            datetime(2022, 1, 3),
+            datetime(2022, 1, 4),
+            datetime(2022, 1, 5),
+            datetime(2022, 12, 31),
+        ]
+        num_times = len(expected_times)
+        num_releases = 2
+        self.check_ds_dims_and_coords(
+            ds, num_times, num_releases, release_type=VolumeRelease
+        )
+
+        self.check_ds_name_and_location(ds, self.first_volume_release, 0)
+        self.check_ds_name_and_location(ds, self.second_volume_release, 1)
+
+        # Time values
+        assert np.array_equal(
+            ds["time"].values, np.array(expected_times, dtype="datetime64[ns]")
+        )
+
+        # Volume flux values first release
+        ncdr_index = 0
+        expected_volume_fluxes = [1.0, 1.5, 2.0, 2.5, 3.0, 0.0]
+        assert np.allclose(
+            ds["cdr_volume"].isel(ncdr=ncdr_index).values,
+            np.array(expected_volume_fluxes),
+        )
+
+        # Volume flux values second release
+        ncdr_index = 1
+        expected_volume_fluxes = [0.0, 2.0, 3.0, 4.0, 10.0, 0.0]
+        assert np.allclose(
+            ds["cdr_volume"].isel(ncdr=ncdr_index).values,
+            np.array(expected_volume_fluxes),
+        )
+
+        # Tracer concentration values first release
+        ncdr_index = 0
+        dic_index = 9
+
+        expected_dics = [10.0, 15.0, 20.0, 25.0, 30.0, 30.0]
+        assert np.allclose(
+            ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index).values,
+            np.array(expected_dics),
+        )
+
+        # Tracer concentration values second release
+        ncdr_index = 1
+
+        expected_dics = [20.0, 20.0, 30.0, 40.0, 100.0, 100.0]
+        assert np.allclose(
+            ds["cdr_tracer"].isel(ncdr=ncdr_index, ntracers=dic_index).values,
+            np.array(expected_dics),
+        )
 
 
-def test_add_release_tracer_zero_fill(start_end_times, valid_release_params):
-    """Test that zero fill of tracer concentrations works as expected."""
-    start_time, end_time = start_end_times
-    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
-    release_params = deepcopy(valid_release_params)
-    release_params["fill_values"] = "zero"
-    cdr.add_release(name="filled_release", **release_params)
-    defaults = get_tracer_defaults()
-    # temp
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
-    # salt
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=1) == defaults["salt"]).all()
-    # all other tracers should be zero
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) == 0.0).all()
+class TestCDRForcing:
+    def setup_method(self):
+        self.start_time = datetime(2022, 1, 1)
+        self.end_time = datetime(2022, 12, 31)
 
+        first_volume_release = VolumeRelease(
+            name="first_release",
+            lat=66.0,
+            lon=-25.0,
+            depth=50.0,
+            times=[datetime(2022, 1, 1), datetime(2022, 1, 3), datetime(2022, 1, 5)],
+            volume_fluxes=[1.0, 2.0, 3.0],
+            tracer_concentrations={
+                "DIC": [10.0, 20.0, 30.0],
+                "temp": 10.0,
+                "salt": 35.0,
+            },
+        )
 
-def test_add_release_tracer_auto_fill(start_end_times, valid_release_params):
-    """Test that auto fill of tracer concentrations works as expected."""
-    start_time, end_time = start_end_times
-    # Check that the tracer concentrations are auto-filled where missing
-    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
-    release_params = deepcopy(valid_release_params)
-    release_params["fill_values"] = "auto"
-    cdr.add_release(name="filled_release", **release_params)
+        # Modify release including extending it to the endpoints
+        ReleaseSimulationManager(
+            release=first_volume_release,
+            start_time=self.start_time,
+            end_time=self.end_time,
+        )
+        self.first_volume_release = first_volume_release
 
-    defaults = get_tracer_defaults()
-    # temp
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=0) == defaults["temp"]).all()
-    # salt
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=1) == defaults["salt"]).all()
-    # ALK
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=11) == defaults["ALK"]).all()
-    # all other tracers should also be equal to the tracer default values, so not equal to zero
-    assert (cdr.ds["cdr_tracer"].isel(ntracers=slice(2, None)) > 0.0).all()
+        second_volume_release = VolumeRelease(
+            name="second_release",
+            lon=first_volume_release.lon - 1,
+            lat=first_volume_release.lat - 1,
+            depth=first_volume_release.depth - 1,
+            times=[
+                datetime(2022, 1, 2),
+                datetime(2022, 1, 4),
+                datetime(2022, 1, 5),
+            ],
+            volume_fluxes=[2.0, 4.0, 10.0],
+            tracer_concentrations={"DIC": [20.0, 40.0, 100.0]},
+        )
 
+        # Modify release including extending it to the endpoints
+        ReleaseSimulationManager(
+            release=second_volume_release,
+            start_time=self.start_time,
+            end_time=self.end_time,
+        )
+        self.second_volume_release = second_volume_release
 
-def test_add_release_invalid_fill(start_end_times, valid_release_params):
-    """Test that invalid fill method of tracer concentrations raises error."""
-    start_time, end_time = start_end_times
-    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
-    release_params = deepcopy(valid_release_params)
-    release_params["fill_values"] = "zero_fill"
+        self.cdr_forcing_without_grid = CDRForcing(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self.first_volume_release, self.second_volume_release],
+        )
+        self.cdr_forcing = CDRForcing(
+            grid=Grid(
+                nx=18,
+                ny=18,
+                size_x=800,
+                size_y=800,
+                center_lon=-18,
+                center_lat=65,
+                rot=0,
+                N=3,
+            ),
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self.first_volume_release, self.second_volume_release],
+        )
 
-    with pytest.raises(ValueError, match="Invalid fill_values option"):
+    def test_inconsistent_start_end_time(self):
 
-        cdr.add_release(name="filled_release", **release_params)
+        start_time = datetime(2022, 5, 1)
+        end_time = datetime(2022, 5, 1)
+        with pytest.raises(ValueError, match="must be earlier"):
+            CDRForcing(
+                start_time=start_time,
+                end_time=end_time,
+                releases=[self.first_volume_release],
+            )
 
+    def test_empty_release_list(self):
 
-def test_plot_error_when_no_grid(start_end_times, valid_release_params):
-    """Test that error is raised if plotting without a grid."""
-    start_time, end_time = start_end_times
-    cdr = CDRVolumePointSource(start_time=start_time, end_time=end_time)
-    release_params = deepcopy(valid_release_params)
-    cdr.add_release(name="release1", **release_params)
+        with pytest.raises(ValueError, match="list is empty"):
+            CDRForcing(start_time=self.start_time, end_time=self.end_time)
 
-    with pytest.raises(ValueError, match="A grid must be provided for plotting"):
-        cdr.plot_location_top_view("all")
+    def test_ds_attribute(self):
 
-    with pytest.raises(ValueError, match="A grid must be provided for plotting"):
-        cdr.plot_location_side_view("release1")
+        assert isinstance(self.cdr_forcing_without_grid.ds, xr.Dataset)
+        assert isinstance(self.cdr_forcing.ds, xr.Dataset)
 
+    def test_plot_error_when_no_grid(self):
 
-def test_plot(cdr_point_source_with_two_releases):
-    """Test that plotting method run without error."""
+        cdr = self.cdr_forcing_without_grid
 
-    cdr_point_source_with_two_releases.plot_volume_flux()
-    cdr_point_source_with_two_releases.plot_tracer_concentration("ALK")
-    cdr_point_source_with_two_releases.plot_tracer_concentration("DIC")
+        with pytest.raises(ValueError, match="A grid must be provided for plotting"):
+            cdr.plot_location_top_view("all")
 
-    cdr_point_source_with_two_releases.plot_location_top_view()
+        with pytest.raises(ValueError, match="A grid must be provided for plotting"):
+            cdr.plot_location_side_view("first_release")
 
+    def test_plot(self):
 
-@pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_plot_side_view(cdr_point_source_with_two_releases):
-    """Test that plotting method run without error."""
+        for cdr in [self.cdr_forcing_without_grid, self.cdr_forcing]:
+            cdr.plot_volume_flux()
+            cdr.plot_tracer_concentration("ALK")
+            cdr.plot_tracer_concentration("DIC")
 
-    cdr_point_source_with_two_releases.plot_location_side_view("release1")
+        self.cdr_forcing.plot_location_top_view()
 
+    @pytest.mark.skipif(xesmf is None, reason="xesmf required")
+    def test_plot_side_view(self):
 
-def test_plot_more_errors(cdr_point_source_with_two_releases):
-    """Test that error is raised on bad plot args or ambiguous release."""
+        self.cdr_forcing.plot_location_side_view("first_release")
 
-    with pytest.raises(ValueError, match="Multiple releases found"):
-        cdr_point_source_with_two_releases.plot_location_side_view()
+    def test_plot_more_errors(self):
+        """Test that error is raised on bad plot args or ambiguous release."""
 
-    with pytest.raises(ValueError, match="Invalid release"):
-        cdr_point_source_with_two_releases.plot_location_side_view(release="fake")
+        with pytest.raises(ValueError, match="Multiple releases found"):
+            self.cdr_forcing.plot_location_side_view()
 
-    with pytest.raises(ValueError, match="Invalid releases"):
-        cdr_point_source_with_two_releases.plot_location_top_view(releases=["fake"])
+        with pytest.raises(ValueError, match="Invalid release"):
+            self.cdr_forcing.plot_location_side_view(release_name="fake")
 
-    with pytest.raises(ValueError, match="should be a string"):
-        cdr_point_source_with_two_releases.plot_location_top_view(releases=4)
+        with pytest.raises(ValueError, match="Invalid releases"):
+            self.cdr_forcing.plot_location_top_view(release_names=["fake"])
 
-    with pytest.raises(ValueError, match="list must be strings"):
-        cdr_point_source_with_two_releases.plot_location_top_view(releases=[4])
+        with pytest.raises(ValueError, match="should be a string"):
+            self.cdr_forcing.plot_location_top_view(release_names=4)
 
+        with pytest.raises(ValueError, match="list must be strings"):
+            self.cdr_forcing.plot_location_top_view(release_names=[4])
 
-def test_cdr_forcing_save(cdr_point_source_with_two_releases, tmp_path):
-    """Test save method."""
+    def test_cdr_forcing_save(self, tmp_path):
+        """Test save method."""
 
-    for file_str in ["test_cdr_forcing", "test_cdr_forcing.nc"]:
+        for file_str in ["test_cdr_forcing", "test_cdr_forcing.nc"]:
+            # Create a temporary filepath using the tmp_path fixture
+            for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
+
+                saved_filenames = self.cdr_forcing.save(filepath)
+                # Check if the .nc file was created
+                filepath = Path(filepath).with_suffix(".nc")
+                assert saved_filenames == [filepath]
+                assert filepath.exists()
+                # Clean up the .nc file
+                filepath.unlink()
+
+    def test_roundtrip_yaml(self, tmp_path):
+        """Test that creating a CDRVolumePointSource object, saving its parameters to
+        yaml file, and re-opening yaml file creates the same object."""
+
         # Create a temporary filepath using the tmp_path fixture
-        for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
+        file_str = "test_yaml"
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
 
-            saved_filenames = cdr_point_source_with_two_releases.save(filepath)
-            # Check if the .nc file was created
-            filepath = Path(filepath).with_suffix(".nc")
-            assert saved_filenames == [filepath]
-            assert filepath.exists()
-            # Clean up the .nc file
+            self.cdr_forcing.to_yaml(filepath)
+
+            cdr_forcing_from_file = CDRForcing.from_yaml(filepath)
+
+            assert self.cdr_forcing == cdr_forcing_from_file
+
+            filepath = Path(filepath)
             filepath.unlink()
 
+    def test_files_have_same_hash(self, tmp_path):
+        """Test that saving the same CDR forcing configuration to NetCDF twice results
+        in reproducible file hashes."""
 
-def test_roundtrip_yaml(cdr_point_source_with_two_releases, tmp_path):
-    """Test that creating a CDRVolumePointSource object, saving its parameters to yaml
-    file, and re-opening yaml file creates the same object."""
+        yaml_filepath = tmp_path / "test_yaml.yaml"
+        filepath1 = tmp_path / "test1.nc"
+        filepath2 = tmp_path / "test2.nc"
 
-    # Create a temporary filepath using the tmp_path fixture
-    file_str = "test_yaml"
-    for filepath in [
-        tmp_path / file_str,
-        str(tmp_path / file_str),
-    ]:  # test for Path object and str
+        self.cdr_forcing.to_yaml(yaml_filepath)
+        self.cdr_forcing.save(filepath1)
+        cdr_from_file = CDRForcing.from_yaml(yaml_filepath)
+        cdr_from_file.save(filepath2)
 
-        cdr_point_source_with_two_releases.to_yaml(filepath)
+        hash1 = calculate_file_hash(filepath1)
+        hash2 = calculate_file_hash(filepath2)
 
-        cdr_forcing_from_file = CDRVolumePointSource.from_yaml(filepath)
+        assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 
-        assert cdr_point_source_with_two_releases == cdr_forcing_from_file
-
-        filepath = Path(filepath)
-        filepath.unlink()
-
-
-def test_files_have_same_hash(cdr_point_source_with_two_releases, tmp_path):
-    """Test that saving the same CDR forcing configuration to NetCDF twice results in
-    reproducible file hashes."""
-
-    yaml_filepath = tmp_path / "test_yaml.yaml"
-    filepath1 = tmp_path / "test1.nc"
-    filepath2 = tmp_path / "test2.nc"
-
-    cdr_point_source_with_two_releases.to_yaml(yaml_filepath)
-    cdr_point_source_with_two_releases.save(filepath1)
-    cdr_from_file = CDRVolumePointSource.from_yaml(yaml_filepath)
-    cdr_from_file.save(filepath2)
-
-    hash1 = calculate_file_hash(filepath1)
-    hash2 = calculate_file_hash(filepath2)
-
-    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
-
-    yaml_filepath.unlink()
-    filepath1.unlink()
-    filepath2.unlink()
+        yaml_filepath.unlink()
+        filepath1.unlink()
+        filepath2.unlink()

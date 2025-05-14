@@ -246,7 +246,7 @@ class Release(BaseModel):
 
 
 class VolumeRelease(Release):
-    """Represents a point-source CDR release with volume flux and tracer concentrations.
+    """Represents a CDR release with volume flux and tracer concentrations.
 
     Attributes
     ----------
@@ -267,7 +267,7 @@ class VolumeRelease(Release):
 
         Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
 
-    volume_fluxes : float, int, or list of float/int, optional
+    volume_fluxes : float or list of float, optional
 
         Volume flux(es) of the release in m³/s over time.
 
@@ -282,17 +282,19 @@ class VolumeRelease(Release):
     tracer_concentrations : dict, optional
 
         Dictionary of tracer names and their concentration values. The concentration values can be either
-        a float/int (constant in time) or a list of float/int (time-varying).
+        a float (constant in time) or a list of float (time-varying).
 
         - Constant: applies uniformly across the entire simulation period.
         - Time-varying: must match the length of `times`.
 
         Default is an empty dictionary (`{}`) if not provided.
+
         Example:
 
         - Constant: `{"ALK": 2000.0, "DIC": 1900.0}`
         - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
         - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
+
     fill_values : str, optional
 
         Strategy for filling missing tracer concentration values. Options:
@@ -362,6 +364,7 @@ class VolumeRelease(Release):
         self.extend_times_to_endpoints(start_time, end_time)
 
     def _simplified_dump(self) -> dict:
+        """Return a simplified dict representation with flattened values."""
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -378,5 +381,116 @@ class VolumeRelease(Release):
             for tracer, contents in data["tracer_concentrations"].items():
                 simplified[tracer] = contents["values"]
             data["tracer_concentrations"] = simplified
+
+        return data
+
+
+class TracerPerturbation(Release):
+    """Represents a CDR release with tracer fluxes and without any volume.
+
+    Attributes
+    ----------
+    name : str
+        Unique identifier for the release.
+    lat : float
+        Latitude of the release location in degrees North. Must be between -90 and 90.
+    lon : float
+        Longitude of the release location in degrees East.
+    depth : float
+        Depth of the release in meters. Must be non-negative.
+    hsc : float
+        Horizontal scale (standard deviation) of the release in meters. Must be non-negative. Defaults to 0.0.
+    vsc : float
+        Vertical scale (standard deviation) of the release in meters. Must be non-negative. Defaults to 0.0.
+    times : list of datetime.datetime, optional
+        Explicit time points for volume fluxes and tracer concentrations. Defaults to [self.start_time, self.end_time] if None.
+
+        Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
+
+    volume_fluxes : float or list of float, optional
+
+        Volume flux(es) of the release in m³/s over time.
+
+        - Constant: applies uniformly across the entire simulation period.
+        - Time-varying: must match the length of `times`.
+
+        Example:
+
+        - Constant: `volume_fluxes=1000.0` (uniform across the entire simulation period).
+        - Time-varying: `volume_fluxes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
+
+    tracer_fluxes : dict, optional
+
+        Dictionary of tracer names and their non-negative flux values. The flux values can be either
+        a float (constant in time) or a list of float (time-varying).
+
+        - Constant: applies uniformly across the entire simulation period.
+        - Time-varying: must match the length of `times`.
+
+        Default is an empty dictionary (`{}`) if not provided.
+
+        Example:
+
+        - Constant: `{"ALK": 2000.0, "DIC": 1900.0}`
+        - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
+        - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
+    """
+
+    times: Optional[List[datetime]] = None
+    tracer_fluxes: Optional[
+        Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
+    ] = None
+
+    @model_validator(mode="after")
+    def _postprocess(self) -> "TracerPerturbation":
+        if self.times is None:
+            self.times = []
+        num_times = len(self.times)
+
+        if self.tracer_fluxes is None:
+            self.tracer_fluxes = {}
+
+        # Fill all tracer fluxes that are not provided with zero
+        defaults = get_tracer_defaults()
+        for tracer_name in defaults.keys():
+            if tracer_name not in self.tracer_fluxes:
+                self.tracer_fluxes[tracer_name] = 0.0
+
+        self.tracer_fluxes = {
+            tracer: (flux if isinstance(flux, Flux) else Flux(name=tracer, values=flux))
+            for tracer, flux in self.tracer_fluxes.items()
+        }
+
+        for flux in self.tracer_fluxes.values():
+            flux.check_length(num_times)
+
+        return self
+
+    def _extend_to_endpoints(self, start_time, end_time) -> "TracerPerturbation":
+        """Ensures that time series data includes endpoints at `start_time` and
+        `end_time`.
+
+        Pads each tracer flux if needed to match the full time window.
+        Also ensures `self.times` includes the endpoints.
+        """
+        self.volume_fluxes.extend_to_endpoints(self.times, start_time, end_time)
+        for flux in self.tracer_fluxes.values():
+            flux.extend_to_endpoints(self.times, start_time, end_time)
+        self.extend_times_to_endpoints(start_time, end_time)
+
+    def _simplified_dump(self) -> dict:
+        """Return a simplified dict representation with flattened values."""
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            data = self.model_dump()
+        data["release_type"] = "TracerPerturbation"
+
+        # Flatten tracer_fluxes
+        if "tracer_fluxes" in data:
+            simplified = {}
+            for tracer, contents in data["tracer_fluxes"].items():
+                simplified[tracer] = contents["values"]
+            data["tracer_fluxes"] = simplified
 
         return data

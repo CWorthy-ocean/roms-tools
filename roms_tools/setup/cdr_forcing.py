@@ -9,7 +9,6 @@ import cartopy.crs as ccrs
 import logging
 from collections import Counter
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 from roms_tools import Grid
 from roms_tools.plot import _plot, _get_projection
 from roms_tools.regrid import LateralRegridFromROMS
@@ -236,7 +235,7 @@ class CDRForcing:
                 end_time=self.end_time,
             )
 
-        release_collector = ReleaseCollector(self.releases)
+        release_collector = ReleaseCollector(releases=self.releases)
         release_type = release_collector.determine_release_type()
 
         builder = CDRForcingDatasetBuilder(
@@ -244,7 +243,7 @@ class CDRForcing:
         )
         self.ds = builder.build()
 
-    def plot_volume_flux(self, start=None, end=None, releases="all"):
+    def plot_volume_flux(self, start=None, end=None, release_names="all"):
         """Plot the volume flux for each specified release within the given time range.
 
         Parameters
@@ -253,29 +252,33 @@ class CDRForcing:
             Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
             End datetime for the plot. If None, defaults to `self.end_time`.
-        releases : str, list of str, or "all", optional
-            A string or list of release names to plot.
+        release_name : list of str, or "all", optional
+            A list of release names to plot.
             If "all", the method will plot all releases.
             The default is "all".
+
+        Raises
+        ------
+        ValueError
+            If `release_names` is not a list of strings or "all".
+            If any of the specified release names do not exist in `self.releases`.
         """
 
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
+        valid_release_names = [r.name for r in self.releases]
 
-        # Handle "all" releases case
-        if releases == "all":
-            releases = valid_releases
+        if release_names == "all":
+            release_names = valid_release_names
 
-        # Validate input for release names
-        _validate_release_input(releases, valid_releases)
+        _validate_release_input(release_names, valid_release_names)
 
         data = self.ds["cdr_volume"]
 
         self._plot_line(
             data,
-            releases,
+            release_names,
             start,
             end,
             title="Volume flux of release(s)",
@@ -283,7 +286,7 @@ class CDRForcing:
         )
 
     def plot_tracer_concentration(
-        self, name: str, start=None, end=None, releases="all"
+        self, name: str, start=None, end=None, release_names="all"
     ):
         """Plot the concentration of a given tracer for each specified release within
         the given time range.
@@ -296,21 +299,26 @@ class CDRForcing:
             Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
             End datetime for the plot. If None, defaults to `self.end_time`.
-        releases : str, list of str, or "all", optional
-            A string or list of release names to plot.
+        release_name : list of str, or "all", optional
+            A list of release names to plot.
             If "all", the method will plot all releases.
             The default is "all".
+
+        Raises
+        ------
+        ValueError
+            If `release_names` is not a list of strings or "all".
+            If any of the specified release names do not exist in `self.releases`.
         """
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        # Handle "all" releases case
-        if releases == "all":
-            releases = valid_releases
+        valid_release_names = [r.name for r in self.releases]
 
-        # Validate input for release names
-        _validate_release_input(releases, valid_releases)
+        if release_names == "all":
+            release_names = valid_release_names
+
+        _validate_release_input(release_names, valid_release_names)
 
         tracer_names = list(self.ds["tracer_name"].values)
         if name not in tracer_names:
@@ -330,42 +338,65 @@ class CDRForcing:
 
         self._plot_line(
             data,
-            releases,
+            release_names,
             start,
             end,
             title=title,
             ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
         )
 
-    def plot_location_top_view(self, releases="all"):
+    def _plot_line(self, data, release_names, start, end, title="", ylabel=""):
+        """Plots a line graph for the specified releases and time range."""
+        valid_release_names = [r.name for r in self.releases]
+        colors = _get_release_colors(valid_release_names)
+
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+        for name in release_names:
+            ncdr = np.where(self.ds["release_name"].values == name)[0].item()
+            data.isel(ncdr=ncdr).plot(
+                ax=ax,
+                linewidth=2,
+                label=name,
+                color=colors[name],
+                marker="x",
+            )
+
+        if len(release_names) > 0:
+            ax.legend()
+
+        ax.set(title=title, ylabel=ylabel)
+        ax.set_xlim([start, end])
+
+    def plot_location_top_view(self, release_names="all"):
         """Plot the top-down view of release locations.
 
         Parameters
         ----------
-        releases : list of str or str, optional
-            A single release name (string) or a list of release names (strings) to plot.
-            Default is 'all', which will plot all releases.
+        release_names : list of str or "all", optional
+            A list of release names to plot.
+            If "all", the method will plot all releases.
+            The default is "all".
 
         Raises
         ------
         ValueError
+            If `release_names` is not a list of strings or "all".
+            If any of the specified release names do not exist in `self.releases`.
             If `self.grid` is not set.
-            If `releases` is not a string or list of strings.
-            If any of the specified releases do not exist in `self.releases`.
         """
+
         # Ensure that the grid is provided
         if self.grid is None:
             raise ValueError(
                 "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        # Handle "all" releases case
-        if releases == "all":
-            releases = valid_releases
+        valid_release_names = [r.name for r in self.releases]
 
-        # Validate input for release names
-        _validate_release_input(releases, valid_releases)
+        if release_names == "all":
+            release_names = valid_release_names
+
+        _validate_release_input(release_names, valid_release_names)
 
         field = self.grid.ds.mask_rho
         lon_deg = self.grid.ds.lon_rho
@@ -387,14 +418,15 @@ class CDRForcing:
 
         proj = ccrs.PlateCarree()
 
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        colors = _get_release_colors(valid_releases)
+        colors = _get_release_colors(valid_release_names)
 
-        for name in releases:
+        for name in release_names:
+            ncdr = np.where(self.ds["release_name"].values == name)[0].item()
+
             # transform coordinates to projected space
             transformed_lon, transformed_lat = trans.transform_point(
-                self.releases[name]["lon"],
-                self.releases[name]["lat"],
+                self.ds.cdr_lon.isel(ncdr=ncdr).item(),
+                self.ds.cdr_lat.isel(ncdr=ncdr).item(),
                 proj,
             )
 
@@ -411,7 +443,7 @@ class CDRForcing:
         ax.set_title("Release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
-    def plot_location_side_view(self, release: str = None):
+    def plot_location_side_view(self, release_name: str = None):
         """Plot the release location from a side view, showing bathymetry sections along
         both fixed longitude and latitude.
 
@@ -424,7 +456,7 @@ class CDRForcing:
 
         Parameters
         ----------
-        release : str, optional
+        release_name : str, optional
             Name of the release to plot. If only one release is available,
             it is used by default. If multiple releases are available, this must be specified.
 
@@ -433,24 +465,25 @@ class CDRForcing:
         ValueError
 
             If `self.grid` is not set.
-            If the specified `release` does not exist in `self.releases`.
-            If no `release` is provided when multiple releases are available.
+            If the specified `release_name` does not exist in `self.releases`.
+            If no `release_name` is provided when multiple releases are available.
         """
         if self.grid is None:
             raise ValueError(
                 "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
-        valid_releases = [r for r in self.releases if r != "_tracer_metadata"]
-        if release is None:
-            if len(valid_releases) == 1:
-                release = valid_releases[0]
+        valid_release_names = [r.name for r in self.releases]
+
+        if release_name is None:
+            if len(valid_release_names) == 1:
+                release_name = valid_release_names[0]
             else:
                 raise ValueError(
-                    f"Multiple releases found: {valid_releases}. Please specify a single release to plot."
+                    f"Multiple releases found: {valid_release_names}. Please specify a single release via `release_name` to plot."
                 )
 
-        _validate_release_input(release, valid_releases, list_allowed=False)
+        _validate_release_input(release_name, valid_release_names, list_allowed=False)
 
         # Prepare grid coordinates
         lon_deg = self.grid.ds.lon_rho
@@ -461,6 +494,8 @@ class CDRForcing:
         resolution = self.grid._infer_nominal_horizontal_resolution()
         h = self.grid.ds.h.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
+        ncdr = np.where(self.ds["release_name"].values == release_name)[0].item()
+
         # Set up plot
         fig, axs = plt.subplots(2, 1, figsize=(7, 8))
 
@@ -469,19 +504,18 @@ class CDRForcing:
             ax=axs[0],
             h=h,
             dim="lon",
-            fixed_val=self.releases[release]["lon"],
+            fixed_val=self.ds.cdr_lon.isel(ncdr=ncdr),
             coord_deg=lat_deg,
             resolution=resolution,
-            title=f"Longitude: {self.releases[release]['lon']}°E",
+            title=f"Longitude: {self.ds.cdr_lon.isel(ncdr=ncdr).item()}°E",
         )
 
-        valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-        colors = _get_release_colors(valid_releases)
+        colors = _get_release_colors(valid_release_names)
 
         axs[0].plot(
-            self.releases[release]["lat"],
-            self.releases[release]["depth"],
-            color=colors[release],
+            self.ds.cdr_lat.isel(ncdr=ncdr),
+            self.ds.cdr_dep.isel(ncdr=ncdr),
+            color=colors[release_name],
             marker="x",
             markersize=8,
             markeredgewidth=2,
@@ -492,15 +526,15 @@ class CDRForcing:
             ax=axs[1],
             h=h,
             dim="lat",
-            fixed_val=self.releases[release]["lat"],
+            fixed_val=self.ds.cdr_lat.isel(ncdr=ncdr),
             coord_deg=lon_deg,
             resolution=resolution,
-            title=f"Latitude: {self.releases[release]['lat']}°N",
+            title=f"Latitude: {self.ds.cdr_lat.isel(ncdr=ncdr).item()}°N",
         )
         axs[1].plot(
-            self.releases[release]["lon"],
-            self.releases[release]["depth"],
-            color=colors[release],
+            self.ds.cdr_lon.isel(ncdr=ncdr),
+            self.ds.cdr_dep.isel(ncdr=ncdr),
+            color=colors[release_name],
             marker="x",
             markersize=8,
             markeredgewidth=2,
@@ -508,7 +542,7 @@ class CDRForcing:
 
         # Adjust layout and title
         fig.subplots_adjust(hspace=0.4)
-        fig.suptitle(f"Release location for: {release}")
+        fig.suptitle(f"Release location for: {release_name}")
 
     def save(
         self,
@@ -550,29 +584,12 @@ class CDRForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        # Create a serializable representation
-        data = {
-            "releases": {
-                release.name: {
-                    "lat": release.lat,
-                    "lon": release.lon,
-                    "depth": release.depth,
-                    "times": [t.isoformat() for t in release.times],
-                    "tracer_concentrations": {
-                        name: conc.values
-                        for name, conc in release.tracer_concentrations.items()
-                    },
-                    "volume_fluxes": release.volume_fluxes.values,
-                }
-                for release in self.releases
-            },
-        }
 
-        _to_yaml(data, filepath)
+        _to_yaml(self, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "CDRForcing":
-        """Create an instance of the CDRVolumePointSource class from a YAML file.
+        """Create an instance of the CDRForcing class from a YAML file.
 
         Parameters
         ----------
@@ -581,13 +598,27 @@ class CDRForcing:
 
         Returns
         -------
-        CDRVolumePointSource
-            An instance of the CDRVolumePointSource class.
+        CDRForcing
+            An instance of the CDRForcing class.
         """
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
+
+        def convert_releases_format(releases):
+
+            releases_list = []
+            for name, params in releases.items():
+                if params["release_type"] == "VolumeRelease":
+                    params.pop("release_type")
+                    release = VolumeRelease(name=name, **params)
+
+                releases_list.append(release)
+
+            return releases_list
+
+        params["releases"] = convert_releases_format(params["releases"])
 
         return cls(grid=grid, **params)
 
@@ -677,11 +708,11 @@ def _get_release_colors(valid_releases):
 
     # Determine the colormap based on the number of releases
     if len(valid_releases) <= 10:
-        color_map = cm.get_cmap("tab10")
+        color_map = plt.get_cmap("tab10")
     elif len(valid_releases) <= 20:
-        color_map = cm.get_cmap("tab20")
+        color_map = plt.get_cmap("tab20")
     else:
-        color_map = cm.get_cmap("tab20b")
+        color_map = plt.get_cmap("tab20b")
 
     # Ensure the number of releases doesn't exceed the available colormap capacity
     if len(valid_releases) > color_map.N:
@@ -693,29 +724,6 @@ def _get_release_colors(valid_releases):
     colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
 
     return colors
-
-
-def _plot_line(self, data, releases, start, end, title="", ylabel=""):
-    """Plots a line graph for the specified releases and time range."""
-    valid_releases = [k for k in self.releases if k != "_tracer_metadata"]
-    colors = _get_release_colors(valid_releases)
-
-    fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-    for release in releases:
-        ncdr = np.where(self.ds["release_name"].values == release)[0][0]
-        data.isel(ncdr=ncdr).plot(
-            ax=ax,
-            linewidth=2,
-            label=release,
-            color=colors[release],
-            marker="x",
-        )
-
-    if len(releases) > 0:
-        ax.legend()
-
-    ax.set(title=title, ylabel=ylabel)
-    ax.set_xlim([start, end])
 
 
 def _validate_release_location(grid, release: Release):

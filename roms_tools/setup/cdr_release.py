@@ -5,6 +5,7 @@ from typing import List, Dict, Union, Literal, Optional
 from typing_extensions import Annotated
 from annotated_types import Ge, Le
 from datetime import datetime
+import warnings
 from roms_tools.setup.utils import get_tracer_defaults
 
 NonNegativeFloat = Annotated[float, Ge(0)]
@@ -359,3 +360,23 @@ class VolumeRelease(Release):
         for conc in self.tracer_concentrations.values():
             conc.extend_to_endpoints(self.times, start_time, end_time)
         self.extend_times_to_endpoints(start_time, end_time)
+
+    def _simplified_dump(self) -> dict:
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            data = self.model_dump()
+        data["release_type"] = "VolumeRelease"
+
+        # Flatten volume_fluxes
+        if "volume_fluxes" in data and isinstance(data["volume_fluxes"], dict):
+            data["volume_fluxes"] = data["volume_fluxes"]["values"]
+
+        # Flatten tracer_concentrations
+        if "tracer_concentrations" in data:
+            simplified = {}
+            for tracer, contents in data["tracer_concentrations"].items():
+                simplified[tracer] = contents["values"]
+            data["tracer_concentrations"] = simplified
+
+        return data

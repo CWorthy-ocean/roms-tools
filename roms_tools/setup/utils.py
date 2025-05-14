@@ -1381,17 +1381,6 @@ def _to_dict(forcing_object) -> None:
 
         forcing_data["indices"] = serialized_indices
 
-    # Serialize `releases` data (conditionally)
-    releases_data = getattr(forcing_object, "releases", None)
-    if releases_data is not None:
-        serialized_releases = {}
-        for release in releases_data:
-            serialized = release._simplified_dump()
-            name = serialized.pop("name")
-            serialized_releases[name] = serialized
-
-        forcing_data["releases"] = serialized_releases
-
     # Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {
         **grid_yaml_data,  # Add the grid data to the final YAML structure

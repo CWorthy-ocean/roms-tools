@@ -588,6 +588,17 @@ class CDRForcing:
 
         # Serialize object into dictionary
         yaml_data = _to_dict(self)
+
+        # Convert releases format
+        releases_data = yaml_data["CDRForcing"]["releases"]
+        serialized_releases = {}
+        for release in releases_data:
+            serialized = release._simplified_dump()
+            name = serialized.pop("name")
+            serialized_releases[name] = serialized
+
+        yaml_data["CDRForcing"]["releases"] = serialized_releases
+
         # Write to YAML
         _to_yaml(yaml_data, filepath)
 

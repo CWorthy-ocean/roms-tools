@@ -20,23 +20,6 @@ except ImportError:
     xesmf = None
 
 
-@pytest.fixture
-def another_iceland_volume_release(valid_release_params):
-    """Returns a valid volume point source release consistent with the Iceland test
-    domain."""
-    return VolumeRelease(
-        name="iceland2",
-        **valid_release_params,
-        times=[
-            datetime(2022, 1, 1),
-            datetime(2022, 1, 3),
-            datetime(2022, 1, 5),
-        ],
-        volume_fluxes=[1.0, 2.0, 3.0],
-        tracer_concentrations={"DIC": [10.0, 20.0, 30.0]},
-    )
-
-
 class TestReleaseSimulationManager:
     def setup_method(self):
         self.grid = Grid(

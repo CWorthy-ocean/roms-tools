@@ -471,7 +471,6 @@ class TracerPerturbation(Release):
         Pads each tracer flux if needed to match the full time window.
         Also ensures `self.times` includes the endpoints.
         """
-        self.volume_fluxes.extend_to_endpoints(self.times, start_time, end_time)
         for flux in self.tracer_fluxes.values():
             flux.extend_to_endpoints(self.times, start_time, end_time)
         self.extend_times_to_endpoints(start_time, end_time)

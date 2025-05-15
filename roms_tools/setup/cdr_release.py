@@ -204,8 +204,8 @@ class Release(BaseModel):
     lat: Annotated[float, Ge(-90), Le(90)]
     lon: float
     depth: NonNegativeFloat
-    hsc: NonNegativeFloat
-    vsc: NonNegativeFloat
+    hsc: NonNegativeFloat = 0.0
+    vsc: NonNegativeFloat = 0.0
     times: List[datetime]
 
     model_config = ConfigDict(extra="forbid")
@@ -303,8 +303,6 @@ class VolumeRelease(Release):
         - "zero": fill missing values with 0.0
     """
 
-    hsc: NonNegativeFloat = 0.0
-    vsc: NonNegativeFloat = 0.0
     times: Optional[List[datetime]] = None
     volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat], Flux] = Field(
         default=0.0

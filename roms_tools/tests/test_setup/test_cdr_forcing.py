@@ -66,7 +66,7 @@ class TestReleaseSimulationManager:
         self.start_time = datetime(2022, 1, 1)
         self.end_time = datetime(2022, 12, 31)
 
-    def test_release_coorectly_extended(self):
+    def test_release_correctly_extended(self):
 
         # Save copies of mutable fields before they are modified by ReleaseSimulationManager
         times = self.volume_release_with_times.times.copy()  # list

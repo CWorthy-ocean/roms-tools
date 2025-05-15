@@ -1,7 +1,13 @@
 import pytest
 from datetime import datetime
 from pydantic import ValidationError
-from roms_tools.setup.cdr_release import Flux, Concentration, Release, VolumeRelease
+from roms_tools.setup.cdr_release import (
+    Flux,
+    Concentration,
+    Release,
+    VolumeRelease,
+    TracerPerturbation,
+)
 from roms_tools.setup.utils import get_tracer_defaults
 
 
@@ -286,3 +292,71 @@ class TestVolumeRelease:
             VolumeRelease(
                 **self.params, times=times, tracer_concentrations=tracer_concentrations
             )
+
+
+class TestTracerPerturbation:
+    def setup_method(self):
+        self.params = {"name": "pert", "lat": 0.0, "lon": 0.0, "depth": 0.0}
+
+    def test_missing_field(self):
+        with pytest.raises(ValidationError):
+            TracerPerturbation(lat=0, lon=0, depth=0)  # name is missing
+
+    def test_disallow_extra_fields(self):
+        with pytest.raises(ValidationError):
+            TracerPerturbation(
+                **self.params, tracer_flux={"ALK": 1.0}
+            )  # correct field is tracer_fluxes
+
+    def test_tracer_fluxes_not_valid(self):
+        with pytest.raises(ValidationError):
+            TracerPerturbation(**self.params, tracer_fluxes={"ALK": ["not", "valid"]})
+
+    def test_tracer_fluxes_non_negative(self):
+        with pytest.raises(ValidationError):
+            TracerPerturbation(**self.params, tracer_fluxes={"ALK": -1})
+        with pytest.raises(ValidationError):
+            TracerPerturbation(**self.params, tracer_fluxes={"ALK": [-1, 15]})
+
+    def test_zero_fill_strategy(self):
+
+        alk_value = 100.0
+        tp = TracerPerturbation(
+            **self.params,
+            tracer_fluxes={"ALK": alk_value},
+        )
+        defaults = get_tracer_defaults()
+        for tracer in defaults:
+            assert tracer in tp.tracer_fluxes
+            assert isinstance(tp.tracer_fluxes[tracer], Flux)
+            if tracer == "ALK":
+                assert tp.tracer_fluxes[tracer].values == alk_value
+            else:
+                assert tp.tracer_fluxes[tracer].values == 0.0
+
+    def test_flux_conversion(self):
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"ALK": 2100})
+        assert isinstance(tp.tracer_fluxes["ALK"], Flux)
+        assert tp.tracer_fluxes["ALK"].values == 2100
+
+    def test_extend_to_endpoints(self):
+        start = datetime(2022, 1, 1)
+        mid = datetime(2022, 1, 2)
+        end = datetime(2022, 1, 3)
+        tp = TracerPerturbation(
+            **self.params,
+            times=[mid],
+            tracer_fluxes={"ALK": [2000.0]},
+        )
+        tp._extend_to_endpoints(start, end)
+        assert tp.times == [start, mid, end]
+        assert tp.tracer_fluxes["ALK"].values == [0.0, 2000.0, 0.0]
+
+    def test_mismatch_list_length(self):
+
+        times = [datetime(2022, 1, 1), datetime(2022, 1, 2)]
+
+        # Test mismatch between times and tracer_fluxes length
+        tracer_fluxes = {"ALK": [1]}
+        with pytest.raises(ValidationError):
+            TracerPerturbation(**self.params, times=times, tracer_fluxes=tracer_fluxes)

@@ -155,14 +155,18 @@ class CDRForcingDatasetBuilder:
         for var, attrs in attr_map.items():
             ds[var].attrs.update(attrs)
 
-        ds = add_tracer_metadata_to_ds(ds)  # adds the coordinate "tracer_name"
-
         if self.release_type == VolumeRelease:
+            ds = add_tracer_metadata_to_ds(
+                ds, with_flux_units=False
+            )  # adds the coordinate "tracer_name"
             ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
             ds["cdr_tracer"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
             )
         elif self.release_type == TracerPerturbation:
+            ds = add_tracer_metadata_to_ds(
+                ds, with_flux_units=True
+            )  # adds the coordinate "tracer_name"
             ds["cdr_trcflx"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
             )

@@ -410,8 +410,12 @@ def get_variable_metadata():
         "Tair": {"long_name": "air temperature at 2m", "units": "degrees Celsius"},
         "qair": {"long_name": "absolute humidity at 2m", "units": "kg/kg"},
         "rain": {"long_name": "total precipitation", "units": "cm/day"},
-        "temp": {"long_name": "potential temperature", "units": "degrees Celsius"},
-        "salt": {"long_name": "salinity", "units": "PSU"},
+        "temp": {
+            "long_name": "potential temperature",
+            "units": "degrees Celsius",
+            "flux_units": "degrees Celsius/s",
+        },
+        "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -424,59 +428,162 @@ def get_variable_metadata():
             "long_name": "vertically integrated v-flux component",
             "units": "m/s",
         },
-        "PO4": {"long_name": "dissolved inorganic phosphate", "units": "mmol/m^3"},
-        "NO3": {"long_name": "dissolved inorganic nitrate", "units": "mmol/m^3"},
-        "SiO3": {"long_name": "dissolved inorganic silicate", "units": "mmol/m^3"},
-        "NH4": {"long_name": "dissolved ammonia", "units": "mmol/m^3"},
-        "Fe": {"long_name": "dissolved inorganic iron", "units": "mmol/m^3"},
-        "Lig": {"long_name": "iron binding ligand", "units": "mmol/m^3"},
-        "O2": {"long_name": "dissolved oxygen", "units": "mmol/m^3"},
-        "DIC": {"long_name": "dissolved inorganic carbon", "units": "mmol/m^3"},
+        "PO4": {
+            "long_name": "dissolved inorganic phosphate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "NO3": {
+            "long_name": "dissolved inorganic nitrate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "SiO3": {
+            "long_name": "dissolved inorganic silicate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "NH4": {
+            "long_name": "dissolved ammonia",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "Fe": {
+            "long_name": "dissolved inorganic iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "Lig": {
+            "long_name": "iron binding ligand",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "O2": {
+            "long_name": "dissolved oxygen",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "DIC": {
+            "long_name": "dissolved inorganic carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "DIC_ALT_CO2": {
             "long_name": "dissolved inorganic carbon, alternative CO2",
             "units": "mmol/m^3",
+            "flux_units": "meq/s",
         },
-        "ALK": {"long_name": "alkalinity", "units": "meq/m^3"},
+        "ALK": {"long_name": "alkalinity", "units": "meq/m^3", "flux_units": "meq/s"},
         "ALK_ALT_CO2": {
             "long_name": "alkalinity, alternative CO2",
             "units": "meq/m^3",
+            "flux_units": "meq/s",
         },
-        "DOC": {"long_name": "dissolved organic carbon", "units": "mmol/m^3"},
-        "DON": {"long_name": "dissolved organic nitrogen", "units": "mmol/m^3"},
-        "DOP": {"long_name": "dissolved organic phosphorus", "units": "mmol/m^3"},
+        "DOC": {
+            "long_name": "dissolved organic carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "DON": {
+            "long_name": "dissolved organic nitrogen",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "DOP": {
+            "long_name": "dissolved organic phosphorus",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "DOCr": {
             "long_name": "refractory dissolved organic carbon",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
         "DONr": {
             "long_name": "refractory dissolved organic nitrogen",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
         "DOPr": {
             "long_name": "refractory dissolved organic phosphorus",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
-        "zooC": {"long_name": "zooplankton carbon", "units": "mmol/m^3"},
+        "zooC": {
+            "long_name": "zooplankton carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "spChl": {
             "long_name": "small phytoplankton chlorophyll",
             "units": "mg/m^3",
+            "flux_units": "mg/s",
         },
-        "spC": {"long_name": "small phytoplankton carbon", "units": "mmol/m^3"},
+        "spC": {
+            "long_name": "small phytoplankton carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "spP": {
             "long_name": "small phytoplankton phosphorous",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
-        "spFe": {"long_name": "small phytoplankton iron", "units": "mmol/m^3"},
-        "spCaCO3": {"long_name": "small phytoplankton CaCO3", "units": "mmol/m^3"},
-        "diatChl": {"long_name": "diatom chloropyll", "units": "mg/m^3"},
-        "diatC": {"long_name": "diatom carbon", "units": "mmol/m^3"},
-        "diatP": {"long_name": "diatom phosphorus", "units": "mmol/m^3"},
-        "diatFe": {"long_name": "diatom iron", "units": "mmol/m^3"},
-        "diatSi": {"long_name": "diatom silicate", "units": "mmol/m^3"},
-        "diazChl": {"long_name": "diazotroph chloropyll", "units": "mg/m^3"},
-        "diazC": {"long_name": "diazotroph carbon", "units": "mmol/m^3"},
-        "diazP": {"long_name": "diazotroph phosphorus", "units": "mmol/m^3"},
-        "diazFe": {"long_name": "diazotroph iron", "units": "mmol/m^3"},
+        "spFe": {
+            "long_name": "small phytoplankton iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "spCaCO3": {
+            "long_name": "small phytoplankton CaCO3",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatChl": {
+            "long_name": "diatom chloropyll",
+            "units": "mg/m^3",
+            "flux_units": "mg/s",
+        },
+        "diatC": {
+            "long_name": "diatom carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatP": {
+            "long_name": "diatom phosphorus",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatFe": {
+            "long_name": "diatom iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatSi": {
+            "long_name": "diatom silicate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diazChl": {
+            "long_name": "diazotroph chloropyll",
+            "units": "mg/m^3",
+            "flux_units": "mg/s",
+        },
+        "diazC": {
+            "long_name": "diazotroph carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diazP": {
+            "long_name": "diazotroph phosphorus",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diazFe": {
+            "long_name": "diazotroph iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
         "pco2_air_alt": {
             "long_name": "atmospheric pCO2, alternative CO2",
@@ -610,21 +717,27 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
-def get_tracer_metadata_dict(include_bgc=True):
-    """Returns a dictionary of tracer metadata.
+def get_tracer_metadata_dict(include_bgc=True, with_flux_units=False):
+    """Generate a dictionary containing metadata for model tracers.
 
-    This function constructs a dictionary containing the names, units, and long names
-    of the tracers, based on whether biogeochemical tracers should be included or not.
+    The returned dictionary maps tracer names to their associated units and long names.
+    Optionally includes biogeochemical tracers and can toggle between concentration and flux units.
 
     Parameters
     ----------
     include_bgc : bool, optional
-        Whether to include biogeochemical tracers. Defaults to True.
+        If True (default), includes biogeochemical tracers in the output.
+        If False, returns only physical tracers (e.g., temperature, salinity).
+
+    with_flux_units : bool, optional
+        If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
+        If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
 
     Returns
     -------
     dict
-        A dictionary containing tracer names, units, and long names.
+        A dictionary where keys are tracer names and values are dictionaries
+        containing 'units' and 'long_name' for each tracer.
     """
     if include_bgc:
         tracer_names = [
@@ -670,7 +783,9 @@ def get_tracer_metadata_dict(include_bgc=True):
 
     tracer_dict = {
         tracer: {
-            "units": metadata[tracer]["units"],
+            "units": metadata[tracer]["flux_units"]
+            if with_flux_units
+            else metadata[tracer]["units"],
             "long_name": metadata[tracer]["long_name"],
         }
         for tracer in tracer_names
@@ -679,7 +794,7 @@ def get_tracer_metadata_dict(include_bgc=True):
     return tracer_dict
 
 
-def add_tracer_metadata_to_ds(ds, include_bgc=True):
+def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
     """Adds tracer metadata to a dataset.
 
     This function adds tracer metadata (name, unit, long name) as coordinates to
@@ -690,14 +805,18 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True):
     ds : xarray.Dataset
         Dataset to which tracer metadata will be added.
     include_bgc : bool, optional
-        Whether to include biogeochemical tracers. Defaults to True.
+        If True (default), includes biogeochemical tracers in the output.
+        If False, returns only physical tracers (e.g., temperature, salinity).
+    with_flux_units : bool, optional
+        If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
+        If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
 
     Returns
     -------
     xarray.Dataset
         The dataset with added tracer metadata.
     """
-    tracer_dict = get_tracer_metadata_dict(include_bgc)
+    tracer_dict = get_tracer_metadata_dict(include_bgc, with_flux_units)
 
     tracer_names = list(tracer_dict.keys())
     tracer_units = [tracer_dict[tracer]["units"] for tracer in tracer_names]
@@ -708,7 +827,11 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True):
         tracer_unit=(
             "ntracers",
             tracer_units,
-            {"long_name": "Tracer concentration unit"},
+            {
+                "long_name": "Tracer flux unit"
+                if with_flux_units
+                else "Tracer concentration unit"
+            },
         ),
         tracer_long_name=(
             "ntracers",

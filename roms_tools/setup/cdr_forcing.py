@@ -29,7 +29,8 @@ from roms_tools.setup.cdr_release import Release, VolumeRelease, TracerPerturbat
 
 
 class ReleaseSimulationManager(BaseModel):
-    """Validates and adjusts a single release against a ROMS simulation time window."""
+    """Validates and adjusts a single release against a ROMS simulation time window and
+    grid."""
 
     release: Release
     grid: Optional[Grid] = None
@@ -102,6 +103,8 @@ class ReleaseCollector(BaseModel):
 
 
 class CDRForcingDatasetBuilder:
+    """Constructs the xarray `Dataset` to be saved as NetCDF."""
+
     def __init__(self, releases, model_reference_date, release_type):
         self.releases = releases
         self.model_reference_date = model_reference_date

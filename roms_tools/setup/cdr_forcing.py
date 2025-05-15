@@ -160,9 +160,19 @@ class CDRForcingDatasetBuilder:
                 ds, with_flux_units=False
             )  # adds the coordinate "tracer_name"
             ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
+            ds["cdr_volume"].attrs = {
+                "long_name": "CDR volume flux",
+                "units": "m3/s",
+                "description": "Volume flux associated with CDR releases",
+            }
             ds["cdr_tracer"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
             )
+            ds["cdr_tracer"].attrs = {
+                "long_name": "CDR tracer concentration",
+                "description": "Tracer concentrations for CDR releases",
+            }
+
         elif self.release_type == TracerPerturbation:
             ds = add_tracer_metadata_to_ds(
                 ds, with_flux_units=True
@@ -170,6 +180,10 @@ class CDRForcingDatasetBuilder:
             ds["cdr_trcflx"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
             )
+            ds["cdr_trcflx"].attrs = {
+                "long_name": "CDR tracer flux",
+                "description": "Tracer fluxes for CDR releases",
+            }
 
         for ncdr, release in enumerate(self.releases):
             times = np.array(release.times, dtype="datetime64[ns]")

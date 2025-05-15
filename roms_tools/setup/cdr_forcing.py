@@ -710,6 +710,9 @@ class CDRForcing:
                 if params["release_type"] == "VolumeRelease":
                     params.pop("release_type")
                     release = VolumeRelease(name=name, **params)
+                elif params["release_type"] == "TracerPerturbation":
+                    params.pop("release_type")
+                    release = TracerPerturbation(name=name, **params)
 
                 releases_list.append(release)
 

@@ -25,10 +25,7 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.cdr_release import (
-    Release,
-    VolumeRelease,
-)
+from roms_tools.setup.cdr_release import Release, VolumeRelease, TracerPerturbation
 
 
 class ReleaseSimulationManager(BaseModel):
@@ -165,6 +162,10 @@ class CDRForcingDatasetBuilder:
             ds["cdr_tracer"] = xr.zeros_like(
                 ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
             )
+        elif self.release_type == TracerPerturbation:
+            ds["cdr_trcflx"] = xr.zeros_like(
+                ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
+            )
 
         for ncdr, release in enumerate(self.releases):
             times = np.array(release.times, dtype="datetime64[ns]")
@@ -182,6 +183,16 @@ class CDRForcingDatasetBuilder:
                         union_rel_times,
                         rel_times,
                         release.tracer_concentrations[tracer_name].values,
+                    )
+            elif self.release_type == TracerPerturbation:
+                for ntracer in range(ds.ntracers.size):
+                    tracer_name = ds.tracer_name[ntracer].item()
+                    ds["cdr_trcflx"].loc[
+                        {"ntracers": ntracer, "ncdr": ncdr}
+                    ] = np.interp(
+                        union_rel_times,
+                        rel_times,
+                        release.tracer_fluxes[tracer_name].values,
                     )
 
         return ds
@@ -237,10 +248,10 @@ class CDRForcing:
             )
 
         release_collector = ReleaseCollector(releases=self.releases)
-        release_type = release_collector.determine_release_type()
+        self.release_type = release_collector.determine_release_type()
 
         builder = CDRForcingDatasetBuilder(
-            self.releases, self.model_reference_date, release_type
+            self.releases, self.model_reference_date, self.release_type
         )
         self.ds = builder.build()
 
@@ -253,7 +264,7 @@ class CDRForcing:
             Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
             End datetime for the plot. If None, defaults to `self.end_time`.
-        release_name : list of str, or "all", optional
+        release_names : list of str, or "all", optional
             A list of release names to plot.
             If "all", the method will plot all releases.
             The default is "all".
@@ -261,9 +272,15 @@ class CDRForcing:
         Raises
         ------
         ValueError
+            If self.releases are not of type VolumeRelease.
             If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
         """
+
+        if self.release_type != VolumeRelease:
+            raise ValueError(
+                "plot_volume_flux is only supported when all releases are of type VolumeRelease."
+            )
 
         start = start or self.start_time
         end = end or self.end_time
@@ -300,7 +317,7 @@ class CDRForcing:
             Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
             End datetime for the plot. If None, defaults to `self.end_time`.
-        release_name : list of str, or "all", optional
+        release_names : list of str, or "all", optional
             A list of release names to plot.
             If "all", the method will plot all releases.
             The default is "all".
@@ -308,9 +325,15 @@ class CDRForcing:
         Raises
         ------
         ValueError
+            If self.releases are not of type VolumeRelease.
             If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
         """
+        if self.release_type != VolumeRelease:
+            raise ValueError(
+                "plot_tracer_concentration is only supported when all releases are of type VolumeRelease."
+            )
+
         start = start or self.start_time
         end = end or self.end_time
 
@@ -336,6 +359,65 @@ class CDRForcing:
             title = "Salinity of release water"
         else:
             title = f"{name} concentration of release(s)"
+
+        self._plot_line(
+            data,
+            release_names,
+            start,
+            end,
+            title=title,
+            ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
+        )
+
+    def plot_tracer_flux(self, name: str, start=None, end=None, release_names="all"):
+        """Plot the flux of a given tracer for each specified release within the given
+        time range.
+
+        Parameters
+        ----------
+        name : str
+            Name of the tracer to plot, e.g., "ALK", "DIC", etc.
+        start : datetime or None
+            Start datetime for the plot. If None, defaults to `self.start_time`.
+        end : datetime or None
+            End datetime for the plot. If None, defaults to `self.end_time`.
+        release_names : list of str, or "all", optional
+            A list of release names to plot.
+            If "all", the method will plot all releases.
+            The default is "all".
+
+        Raises
+        ------
+        ValueError
+            If self.releases are not of type TracerPerturbation.
+            If `release_names` is not a list of strings or "all".
+            If any of the specified release names do not exist in `self.releases`.
+        """
+        if self.release_type != TracerPerturbation:
+            raise ValueError(
+                "plot_tracer_flux is only supported when all releases are of type TracerPerturbation."
+            )
+
+        start = start or self.start_time
+        end = end or self.end_time
+
+        valid_release_names = [r.name for r in self.releases]
+
+        if release_names == "all":
+            release_names = valid_release_names
+
+        _validate_release_input(release_names, valid_release_names)
+
+        tracer_names = list(self.ds["tracer_name"].values)
+        if name not in tracer_names:
+            raise ValueError(
+                f"Tracer '{name}' not found. Available: {', '.join(tracer_names)}"
+            )
+
+        tracer_index = tracer_names.index(name)
+        data = self.ds["cdr_trcflx"].isel(ntracers=tracer_index)
+
+        title = f"{name} flux of release(s)"
 
         self._plot_line(
             data,

@@ -304,14 +304,14 @@ class CDRForcing:
         )
 
     def plot_tracer_concentration(
-        self, name: str, start=None, end=None, release_names="all"
+        self, tracer_name: str, start=None, end=None, release_names="all"
     ):
         """Plot the concentration of a given tracer for each specified release within
         the given time range.
 
         Parameters
         ----------
-        name : str
+        tracer_name : str
             Name of the tracer to plot, e.g., "ALK", "DIC", etc.
         start : datetime or None
             Start datetime for the plot. If None, defaults to `self.start_time`.
@@ -328,6 +328,7 @@ class CDRForcing:
             If self.releases are not of type VolumeRelease.
             If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
+            If `tracer_name` does not exist in self.ds["tracer_name"])
         """
         if self.release_type != VolumeRelease:
             raise ValueError(
@@ -345,20 +346,20 @@ class CDRForcing:
         _validate_release_input(release_names, valid_release_names)
 
         tracer_names = list(self.ds["tracer_name"].values)
-        if name not in tracer_names:
+        if tracer_name not in tracer_names:
             raise ValueError(
-                f"Tracer '{name}' not found. Available: {', '.join(tracer_names)}"
+                f"Tracer '{tracer_name}' not found. Available: {', '.join(tracer_names)}"
             )
 
-        tracer_index = tracer_names.index(name)
+        tracer_index = tracer_names.index(tracer_name)
         data = self.ds["cdr_tracer"].isel(ntracers=tracer_index)
 
-        if name == "temp":
+        if tracer_name == "temp":
             title = "Temperature of release water"
-        elif name == "salt":
+        elif tracer_name == "salt":
             title = "Salinity of release water"
         else:
-            title = f"{name} concentration of release(s)"
+            title = f"{tracer_name} concentration of release(s)"
 
         self._plot_line(
             data,
@@ -369,13 +370,15 @@ class CDRForcing:
             ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
         )
 
-    def plot_tracer_flux(self, name: str, start=None, end=None, release_names="all"):
+    def plot_tracer_flux(
+        self, tracer_name: str, start=None, end=None, release_names="all"
+    ):
         """Plot the flux of a given tracer for each specified release within the given
         time range.
 
         Parameters
         ----------
-        name : str
+        tracer_name : str
             Name of the tracer to plot, e.g., "ALK", "DIC", etc.
         start : datetime or None
             Start datetime for the plot. If None, defaults to `self.start_time`.
@@ -392,6 +395,7 @@ class CDRForcing:
             If self.releases are not of type TracerPerturbation.
             If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
+            If `tracer_name` does not exist in self.ds["tracer_name"])
         """
         if self.release_type != TracerPerturbation:
             raise ValueError(
@@ -409,15 +413,15 @@ class CDRForcing:
         _validate_release_input(release_names, valid_release_names)
 
         tracer_names = list(self.ds["tracer_name"].values)
-        if name not in tracer_names:
+        if tracer_name not in tracer_names:
             raise ValueError(
-                f"Tracer '{name}' not found. Available: {', '.join(tracer_names)}"
+                f"Tracer '{tracer_name}' not found. Available: {', '.join(tracer_names)}"
             )
 
-        tracer_index = tracer_names.index(name)
+        tracer_index = tracer_names.index(tracer_name)
         data = self.ds["cdr_trcflx"].isel(ntracers=tracer_index)
 
-        title = f"{name} flux of release(s)"
+        title = f"{tracer_name} flux of release(s)"
 
         self._plot_line(
             data,
@@ -447,7 +451,7 @@ class CDRForcing:
         if len(release_names) > 0:
             ax.legend()
 
-        ax.set(title=title, ylabel=ylabel)
+        ax.set(title=title, ylabel=ylabel, xlabel="time")
         ax.set_xlim([start, end])
 
     def plot_location_top_view(self, release_names="all"):

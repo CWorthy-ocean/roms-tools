@@ -4,13 +4,24 @@
 
 ### New Features
 
+* Add `CDRForcing` as a unified interface for CDR releases with and without volume flux ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+* Introduce `TracerPerturbation` for tracer-only CDR scenarios ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+* Add `.plot_tracer_flux()` method for visualizing tracer flux time series ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+
 ### Breaking Changes
+
+* Remove class `CDRVolumePointSource` ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+* Require users to explicitly construct `VolumeRelease` and `TracerPerturbation` objects ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 
 ### Internal Changes
 
 * Introduce Pydantic `Release` object refactoring the `CDRVolumePointSource` ([#298](https://github.com/CWorthy-ocean/roms-tools/pull/298))
+* Refactor `Release` into its own module with subclassing (`VolumeRelease`, `TracerPerturbation`) ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+* Add new core classes: `ReleaseSimulationManager`, `ReleaseCollector`, and `CDRForcingDatasetBuilder` ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 
 ### Documentation
+
+* Update example notebook demonstrating new `CDRForcing` workflow and release configuration ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 
 ### Bugfixes
 

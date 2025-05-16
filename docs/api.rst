@@ -56,7 +56,9 @@ CDR Forcing
 .. autosummary::
    :toctree: generated/
 
-   roms_tools.CDRVolumePointSource
+   roms_tools.VolumeRelease
+   roms_tools.TracerPerturbation
+   roms_tools.CDRForcing
 
 Nesting
 --------------------

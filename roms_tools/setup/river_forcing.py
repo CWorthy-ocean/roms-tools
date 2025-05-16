@@ -17,7 +17,8 @@ from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
     substitute_nans_by_fillvalue,
-    convert_to_roms_time,
+    add_time_info_to_ds,
+    _to_dict,
     _to_yaml,
     _from_yaml,
     add_tracer_metadata_to_ds,
@@ -316,7 +317,7 @@ class RiverForcing:
         ds["river_tracer"] = river_tracer
         ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
 
-        ds, time = convert_to_roms_time(
+        ds, time = add_time_info_to_ds(
             ds, self.model_reference_date, self.climatology, time_name="river_time"
         )
 
@@ -674,7 +675,24 @@ class RiverForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        _to_yaml(self, filepath)
+        # Serialize object into dictionary
+        yaml_data = _to_dict(self)
+        # Convert indices format
+
+        indices_data = yaml_data["RiverForcing"]["indices"]
+        serialized_indices = {
+            "_convention": "eta_rho, xi_rho"
+        }  # Add convention metadata
+
+        for key, value in indices_data.items():
+            serialized_indices[key] = [
+                f"{tup[0]}, {tup[1]}" for tup in value
+            ]  # Comma-separated string
+
+        yaml_data["RiverForcing"]["indices"] = serialized_indices
+
+        # Write to YAML
+        _to_yaml(yaml_data, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":

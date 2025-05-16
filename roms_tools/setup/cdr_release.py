@@ -405,18 +405,6 @@ class TracerPerturbation(Release):
 
         Example: `times=[datetime(2022, 1, 1), datetime(2022, 1, 2), datetime(2022, 1, 3)]`
 
-    volume_fluxes : float or list of float, optional
-
-        Volume flux(es) of the release in m³/s over time.
-
-        - Constant: applies uniformly across the entire simulation period.
-        - Time-varying: must match the length of `times`.
-
-        Example:
-
-        - Constant: `volume_fluxes=1000.0` (uniform across the entire simulation period).
-        - Time-varying: `volume_fluxes=[1000.0, 1500.0, 2000.0]` (corresponds to each `times` entry).
-
     tracer_fluxes : dict, optional
 
         Dictionary of tracer names and their non-negative flux values. The flux values can be either

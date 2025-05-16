@@ -16,6 +16,7 @@
 ### Internal Changes
 
 * Introduce Pydantic `Release` object refactoring the `CDRVolumePointSource` ([#298](https://github.com/CWorthy-ocean/roms-tools/pull/298))
+* Add zero padding to `partition_netcdf` file numbers in filenames ([#300](https://github.com/CWorthy-ocean/roms-tools/pull/300))
 * Refactor `Release` into its own module with subclassing (`VolumeRelease`, `TracerPerturbation`) ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Add new core classes: `ReleaseSimulationManager`, `ReleaseCollector`, and `CDRForcingDatasetBuilder` ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 

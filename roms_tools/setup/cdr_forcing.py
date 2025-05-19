@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Union, Any, Self, Annotated
-from pydantic import BaseModel, model_validator, Field, model_serializer, RootModel
+from typing import Optional, List, Union
+from pydantic import BaseModel, model_validator
 import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
@@ -25,12 +25,7 @@ from roms_tools.setup.utils import (
     _to_yaml,
     _from_yaml,
 )
-from roms_tools.setup.cdr_release import (
-    Release,
-    VolumeRelease,
-    TracerPerturbation,
-    ReleaseType,
-)
+from roms_tools.setup.cdr_release import Release, VolumeRelease, TracerPerturbation
 
 
 class ReleaseSimulationManager(BaseModel):
@@ -78,36 +73,15 @@ class ReleaseSimulationManager(BaseModel):
         return self
 
 
-class ReleaseCollector(RootModel):
+class ReleaseCollector(BaseModel):
     """Collects and validates multiple releases against each other."""
 
-    root: list[Annotated[VolumeRelease | TracerPerturbation, Field(discriminator="release_type")]]
-
-    _release_type: ReleaseType = None
-
-    def __iter__(self):
-        return iter(self.root)
-
-    def __getitem__(self, item):
-        return self.root[item]
-
-    @model_validator(mode = "wrap")
-    @classmethod
-    def unpack_dict(cls, value, pydantic_handler):
-        if isinstance(value, dict):
-            try:
-                return pydantic_handler(value["releases"])
-            except KeyError:
-                raise ValueError("Expected a dictionary with a 'releases' key, or else a list of releases")
-        # elif isinstance(value, list) and all([isinstance(r, Release) for r in value]):
-        #     return pydantic_handler(value)
-        return pydantic_handler(value)
-
+    releases: List[Release]
 
     @model_validator(mode="after")
     def check_unique_name(self) -> "ReleaseCollector":
         """Check that all releases have unique names."""
-        names = [release.name for release in self.root]
+        names = [release.name for release in self.releases]
         duplicates = [name for name, count in Counter(names).items() if count > 1]
 
         if duplicates:
@@ -118,33 +92,20 @@ class ReleaseCollector(RootModel):
 
         return self
 
-    @model_validator(mode = "after")
-    def check_size_gt_0(self):
-        if len(self.root) == 0:
-            raise ValueError(
-                "The `releases` list is empty. Provide at least one `Release` object."
-            )
-        return self
-
-    def determine_release_type(self) -> ReleaseType:
+    def determine_release_type(self) -> "ReleaseCollector":
         """Ensure all releases are of the same type, and set the release_type."""
         if not all(
-            isinstance(release, type(self.root[0])) for release in self.root
+            isinstance(release, type(self.releases[0])) for release in self.releases
         ):
             raise ValueError("Not all releases are of the same type.")
 
-        return self.root[0].release_type
+        return type(self.releases[0])
 
-    @property
-    def release_type(self):
-        if self._release_type is None:
-            self._release_type = self.determine_release_type()
-        return self._release_type
 
 class CDRForcingDatasetBuilder:
     """Constructs the xarray `Dataset` to be saved as NetCDF."""
 
-    def __init__(self, releases, model_reference_date, release_type: ReleaseType):
+    def __init__(self, releases, model_reference_date, release_type):
         self.releases = releases
         self.model_reference_date = model_reference_date
         self.release_type = release_type
@@ -197,7 +158,7 @@ class CDRForcingDatasetBuilder:
         for var, attrs in attr_map.items():
             ds[var].attrs.update(attrs)
 
-        if self.release_type == ReleaseType.volume:
+        if self.release_type == VolumeRelease:
             ds = add_tracer_metadata_to_ds(
                 ds, with_flux_units=False
             )  # adds the coordinate "tracer_name"
@@ -215,7 +176,7 @@ class CDRForcingDatasetBuilder:
                 "description": "Tracer concentrations for CDR releases",
             }
 
-        elif self.release_type == ReleaseType.tracer_perturbation:
+        elif self.release_type == TracerPerturbation:
             ds = add_tracer_metadata_to_ds(
                 ds, with_flux_units=True
             )  # adds the coordinate "tracer_name"
@@ -231,7 +192,7 @@ class CDRForcingDatasetBuilder:
             times = np.array(release.times, dtype="datetime64[ns]")
             rel_times = convert_to_relative_days(times, self.model_reference_date)
 
-            if self.release_type == ReleaseType.volume:
+            if self.release_type == VolumeRelease:
                 ds["cdr_volume"].loc[{"ncdr": ncdr}] = np.interp(
                     union_rel_times, rel_times, release.volume_fluxes.values
                 )
@@ -244,7 +205,7 @@ class CDRForcingDatasetBuilder:
                         rel_times,
                         release.tracer_concentrations[tracer_name].values,
                     )
-            elif self.release_type == ReleaseType.tracer_perturbation:
+            elif self.release_type == TracerPerturbation:
                 for ntracer in range(ds.ntracers.size):
                     tracer_name = ds.tracer_name[ntracer].item()
                     ds["cdr_trcflx"].loc[
@@ -258,8 +219,8 @@ class CDRForcingDatasetBuilder:
         return ds
 
 
-
-class CDRForcing(BaseModel):
+@dataclass(kw_only=True)
+class CDRForcing:
     """Represents Carbon Dioxide Removal (CDR) forcing.
 
     Parameters
@@ -285,16 +246,18 @@ class CDRForcing(BaseModel):
     start_time: datetime
     end_time: datetime
     model_reference_date: datetime = datetime(2000, 1, 1)
-    releases: ReleaseCollector
+    releases: List["Release"] = field(default_factory=list)
 
-    # these are defined during init and shouldn't be serialized
-    _ds: xr.Dataset
+    ds: xr.Dataset = field(init=False, repr=False)
 
-    @model_validator(mode="after")
-    def validate(self):
+    def __post_init__(self):
         if self.start_time >= self.end_time:
             raise ValueError(
                 f"`start_time` ({self.start_time}) must be earlier than `end_time` ({self.end_time})."
+            )
+        if len(self.releases) == 0:
+            raise ValueError(
+                "The `releases` list is empty. Provide at least one `Release` object."
             )
 
         for release in self.releases:
@@ -305,19 +268,13 @@ class CDRForcing(BaseModel):
                 end_time=self.end_time,
             )
 
+        release_collector = ReleaseCollector(releases=self.releases)
+        self.release_type = release_collector.determine_release_type()
+
         builder = CDRForcingDatasetBuilder(
             self.releases, self.model_reference_date, self.release_type
         )
-        self._ds = builder.build()
-        return self
-
-    @property
-    def release_type(self) -> ReleaseType:
-        return self.releases.release_type
-
-    @property
-    def ds(self) -> xr.Dataset:
-        return self._ds
+        self.ds = builder.build()
 
     def plot_volume_flux(self, start=None, end=None, release_names="all"):
         """Plot the volume flux for each specified release within the given time range.
@@ -341,7 +298,7 @@ class CDRForcing(BaseModel):
             If any of the specified release names do not exist in `self.releases`.
         """
 
-        if self.release_type != ReleaseType.volume:
+        if self.release_type != VolumeRelease:
             raise ValueError(
                 "plot_volume_flux is only supported when all releases are of type VolumeRelease."
             )
@@ -394,7 +351,7 @@ class CDRForcing(BaseModel):
             If any of the specified release names do not exist in `self.releases`.
             If `tracer_name` does not exist in self.ds["tracer_name"])
         """
-        if self.release_type != ReleaseType.volume:
+        if self.release_type != VolumeRelease:
             raise ValueError(
                 "plot_tracer_concentration is only supported when all releases are of type VolumeRelease."
             )
@@ -461,7 +418,7 @@ class CDRForcing(BaseModel):
             If any of the specified release names do not exist in `self.releases`.
             If `tracer_name` does not exist in self.ds["tracer_name"])
         """
-        if self.release_type != ReleaseType.tracer_perturbation:
+        if self.release_type != TracerPerturbation:
             raise ValueError(
                 "plot_tracer_flux is only supported when all releases are of type TracerPerturbation."
             )
@@ -726,10 +683,6 @@ class CDRForcing(BaseModel):
 
         return saved_filenames
 
-    @model_serializer
-    def serialize(self) -> dict:
-        return _to_dict(self)
-
     def to_yaml(self, filepath: Union[str, Path]) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
@@ -741,17 +694,17 @@ class CDRForcing(BaseModel):
         """
 
         # Serialize object into dictionary
-        yaml_data = self.model_dump()
+        yaml_data = _to_dict(self)
 
-        # # Convert releases format
-        # releases_data = yaml_data["CDRForcing"]["releases"]
-        # serialized_releases = {}
-        # for release in releases_data:
-        #     serialized = release._simplified_dump()
-        #     name = serialized.pop("name")
-        #     serialized_releases[name] = serialized
-        #
-        # yaml_data["CDRForcing"]["releases"] = serialized_releases
+        # Convert releases format
+        releases_data = yaml_data["CDRForcing"]["releases"]
+        serialized_releases = {}
+        for release in releases_data:
+            serialized = release._simplified_dump()
+            name = serialized.pop("name")
+            serialized_releases[name] = serialized
+
+        yaml_data["CDRForcing"]["releases"] = serialized_releases
 
         # Write to YAML
         _to_yaml(yaml_data, filepath)
@@ -774,6 +727,23 @@ class CDRForcing(BaseModel):
 
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
+
+        def convert_releases_format(releases):
+
+            releases_list = []
+            for name, params in releases.items():
+                if params["release_type"] == "VolumeRelease":
+                    params.pop("release_type")
+                    release = VolumeRelease(name=name, **params)
+                elif params["release_type"] == "TracerPerturbation":
+                    params.pop("release_type")
+                    release = TracerPerturbation(name=name, **params)
+
+                releases_list.append(release)
+
+            return releases_list
+
+        params["releases"] = convert_releases_format(params["releases"])
 
         return cls(grid=grid, **params)
 

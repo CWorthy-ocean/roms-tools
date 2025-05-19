@@ -1,3 +1,5 @@
+from enum import StrEnum
+
 import xarray as xr
 import numpy as np
 from typing import Union, Any, Dict, Type, Sequence
@@ -5,12 +7,17 @@ import pandas as pd
 import cftime
 from pathlib import Path
 from datetime import datetime
-from dataclasses import fields, asdict
+from dataclasses import fields, asdict, is_dataclass
+from pydantic import BaseModel
 import importlib.metadata
 import yaml
 from roms_tools.constants import R_EARTH
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
+yaml.SafeDumper.add_multi_representer(
+    StrEnum,
+    yaml.representer.SafeRepresenter.represent_str,
+)
 
 def nan_check(field, mask, error_message=None) -> None:
     """Checks for NaN values at wet points in the field.
@@ -1412,7 +1419,7 @@ def _to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
         )
 
 
-def _to_dict(forcing_object) -> None:
+def _to_dict(forcing_object) -> dict:
     """Serialize a forcing object (including its grid) into a dictionary.
 
     This function serializes a dataclass object (forcing_object) and its associated
@@ -1459,7 +1466,13 @@ def _to_dict(forcing_object) -> None:
 
     # Prepare Forcing Data
     forcing_data = {}
-    field_names = [field.name for field in fields(forcing_object)]
+    if isinstance(forcing_object, BaseModel):
+        field_names = forcing_object.model_fields
+    elif is_dataclass(forcing_object):
+        field_names = [field.name for field in fields(forcing_object)]
+    else:
+        raise TypeError("Forcing object is not a dataclass or pydantic model")
+
     filtered_field_names = [
         param
         for param in field_names

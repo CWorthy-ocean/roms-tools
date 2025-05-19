@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from abc import abstractmethod, ABC
-from pydantic import BaseModel, model_validator, Field, ConfigDict
+from enum import StrEnum, auto
+
+from pydantic import BaseModel, model_validator, Field, ConfigDict, model_serializer
 from typing import List, Dict, Union, Literal, Optional
-from typing_extensions import Annotated
+from typing_extensions import Annotated, ClassVar
 from annotated_types import Ge, Le
 from datetime import datetime
 import warnings
@@ -178,6 +180,11 @@ class Concentration(ValueArray):
         )
 
 
+class ReleaseType(StrEnum):
+    volume = auto()
+    tracer_perturbation = auto()
+
+
 class Release(BaseModel):
     """Defines the basic properties and timing of a carbon dioxide removal (CDR)
     release.
@@ -207,6 +214,8 @@ class Release(BaseModel):
     hsc: NonNegativeFloat = 0.0
     vsc: NonNegativeFloat = 0.0
     times: List[datetime]
+
+    release_type: ReleaseType | str = "unspecified"
 
     model_config = ConfigDict(extra="forbid")
 
@@ -312,6 +321,8 @@ class VolumeRelease(Release):
     ] = None
     fill_values: Literal["auto", "zero"] = "auto"
 
+    release_type: Literal[ReleaseType.volume] = ReleaseType.volume
+
     @model_validator(mode="after")
     def _postprocess(self) -> "VolumeRelease":
         if self.times is None:
@@ -361,13 +372,13 @@ class VolumeRelease(Release):
             conc.extend_to_endpoints(self.times, start_time, end_time)
         self.extend_times_to_endpoints(start_time, end_time)
 
-    def _simplified_dump(self) -> dict:
+    @model_serializer(mode = "wrap")
+    def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            data = self.model_dump()
-        data["release_type"] = "VolumeRelease"
+            data = pydantic_serializer(self)
 
         # Flatten volume_fluxes
         if "volume_fluxes" in data and isinstance(data["volume_fluxes"], dict):
@@ -427,6 +438,9 @@ class TracerPerturbation(Release):
         Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
     ] = None
 
+    release_type: Literal[ReleaseType.tracer_perturbation] = ReleaseType.tracer_perturbation
+
+
     @model_validator(mode="after")
     def _postprocess(self) -> "TracerPerturbation":
         if self.times is None:
@@ -463,13 +477,13 @@ class TracerPerturbation(Release):
             flux.extend_to_endpoints(self.times, start_time, end_time)
         self.extend_times_to_endpoints(start_time, end_time)
 
-    def _simplified_dump(self) -> dict:
+    @model_serializer(mode = "wrap")
+    def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            data = self.model_dump()
-        data["release_type"] = "TracerPerturbation"
+            data = pydantic_serializer(self)
 
         # Flatten tracer_fluxes
         if "tracer_fluxes" in data:

@@ -1,6 +1,9 @@
+from unittest import mock
+
 import pytest
 from datetime import datetime
 from pydantic import ValidationError
+
 from roms_tools.setup.cdr_release import (
     Flux,
     Concentration,
@@ -108,6 +111,17 @@ class TestValueArray:
 
 
 class TestRelease:
+    @pytest.fixture(scope="class", autouse=True)
+    def mock_release_type(self):
+        """This fixture fills in the release_type field for the base Release object, so
+        we can test Release generally, without subclassing it."""
+        original_fields = Release.model_fields
+        modified = original_fields.copy()
+        modified["release_type"].default = "testing_only"
+        with mock.patch.object(Release, "model_fields", modified):
+            Release.model_rebuild(force=True)
+            yield
+
     def test_valid_release(self):
         times = [datetime(2022, 1, 1), datetime(2022, 1, 2)]
         r = Release(
@@ -121,6 +135,7 @@ class TestRelease:
         assert r.hsc == 10.0
         assert r.vsc == 5.0
         assert r.times == times
+        assert r.release_type == "testing_only"
 
     def test_lat_bounds_validation(self):
         with pytest.raises(ValidationError):

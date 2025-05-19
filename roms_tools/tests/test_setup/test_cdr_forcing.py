@@ -13,6 +13,7 @@ from roms_tools.setup.cdr_forcing import (
     CDRForcingDatasetBuilder,
 )
 from conftest import calculate_file_hash
+from roms_tools.setup.cdr_release import ReleaseType
 
 try:
     import xesmf  # type: ignore
@@ -297,20 +298,19 @@ class TestReleaseCollector:
 
     def test_raises_inconsistent_release_type(self):
 
-        collector = ReleaseCollector(
-            releases=[self.volume_release, self.tracer_perturbation]
-        )
-        with pytest.raises(ValueError, match="Not all releases have the same type."):
-            collector.determine_release_type()
+        with pytest.raises(
+            ValidationError, match="Not all releases are of the same type"
+        ):
+            ReleaseCollector(releases=[self.volume_release, self.tracer_perturbation])
 
     def test_determine_release_type(self):
         """Test that release type is correctly inferred."""
 
         collector = ReleaseCollector(releases=[self.volume_release])
-        assert collector.determine_release_type() == VolumeRelease
+        assert collector.release_type == ReleaseType.volume
 
         collector = ReleaseCollector(releases=[self.tracer_perturbation])
-        assert collector.determine_release_type() == TracerPerturbation
+        assert collector.release_type == ReleaseType.tracer_perturbation
 
 
 class TestCDRForcingDatasetBuilder:
@@ -436,7 +436,7 @@ class TestCDRForcingDatasetBuilder:
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_volume_release],
             model_reference_date=datetime(2000, 1, 1),
-            release_type=VolumeRelease,
+            release_type=ReleaseType.volume,
         )
         ds = builder.build()
 
@@ -474,7 +474,7 @@ class TestCDRForcingDatasetBuilder:
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_tracer_perturbation],
             model_reference_date=datetime(2000, 1, 1),
-            release_type=TracerPerturbation,
+            release_type=ReleaseType.tracer_perturbation,
         )
         ds = builder.build()
 
@@ -506,7 +506,7 @@ class TestCDRForcingDatasetBuilder:
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_volume_release, self.second_volume_release],
             model_reference_date=datetime(2000, 1, 1),
-            release_type=VolumeRelease,
+            release_type=ReleaseType.volume,
         )
         ds = builder.build()
 
@@ -573,7 +573,7 @@ class TestCDRForcingDatasetBuilder:
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_tracer_perturbation, self.second_tracer_perturbation],
             model_reference_date=datetime(2000, 1, 1),
-            release_type=TracerPerturbation,
+            release_type=ReleaseType.tracer_perturbation,
         )
         ds = builder.build()
 
@@ -748,7 +748,7 @@ class TestCDRForcing:
 
     def test_empty_release_list(self):
 
-        with pytest.raises(ValueError, match="list is empty"):
+        with pytest.raises(ValidationError):
             CDRForcing(start_time=self.start_time, end_time=self.end_time)
 
     def test_ds_attribute(self):

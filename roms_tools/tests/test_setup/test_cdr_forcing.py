@@ -300,7 +300,7 @@ class TestReleaseCollector:
         collector = ReleaseCollector(
             releases=[self.volume_release, self.tracer_perturbation]
         )
-        with pytest.raises(ValueError, match="Not all releases are of the same type."):
+        with pytest.raises(ValueError, match="Not all releases have the same type."):
             collector.determine_release_type()
 
     def test_determine_release_type(self):

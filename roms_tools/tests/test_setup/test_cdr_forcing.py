@@ -299,7 +299,7 @@ class TestReleaseCollector:
     def test_raises_inconsistent_release_type(self):
 
         with pytest.raises(
-            ValidationError, match="Not all releases are of the same type"
+            ValidationError, match="Not all releases have the same type"
         ):
             ReleaseCollector(releases=[self.volume_release, self.tracer_perturbation])
 

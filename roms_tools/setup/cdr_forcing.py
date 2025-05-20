@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 import cartopy.crs as ccrs
 import logging
+import itertools
 from collections import Counter
 import matplotlib.pyplot as plt
 from roms_tools import Grid
@@ -113,8 +114,8 @@ class CDRForcingDatasetBuilder:
         self.release_type = release_type
 
     def build(self) -> xr.Dataset:
-        all_times = [np.array(r.times, dtype="datetime64[ns]") for r in self.releases]
-        unique_times = np.unique(np.concatenate(all_times))
+        all_times = itertools.chain.from_iterable(r.times for r in self.releases)
+        unique_times = np.unique(np.array(list(all_times), dtype="datetime64[ns]"))
         unique_rel_times = [
             convert_to_relative_days(t, self.model_reference_date) for t in unique_times
         ]

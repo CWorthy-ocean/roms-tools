@@ -94,12 +94,14 @@ class ReleaseCollector(BaseModel):
 
     def determine_release_type(self) -> "ReleaseCollector":
         """Ensure all releases are of the same type, and set the release_type."""
-        if not all(
-            isinstance(release, type(self.releases[0])) for release in self.releases
-        ):
-            raise ValueError("Not all releases are of the same type.")
+        release_types = set(map(type, self.releases))
+        if len(release_types) > 1:
+            type_list = ", ".join(map(str, release_types))
+            raise ValueError(
+                f"Not all releases have the same type. Received: {type_list}"
+            )
 
-        return type(self.releases[0])
+        return release_types.pop()
 
 
 class CDRForcingDatasetBuilder:

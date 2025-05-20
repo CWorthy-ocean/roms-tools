@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict
 from pydantic import BaseModel, model_validator
 import numpy as np
 import xarray as xr
@@ -133,31 +133,7 @@ class CDRForcingDatasetBuilder:
         )
 
         # Assign attributes
-        attr_map = {
-            "time": {"long_name": "absolute time"},
-            "cdr_time": {
-                "long_name": f"relative time: days since {self.model_reference_date}",
-                "units": "days",
-            },
-            "release_name": {"long_name": "Name of release"},
-            "cdr_lon": {
-                "long_name": "Longitude of CDR release",
-                "units": "degrees east",
-            },
-            "cdr_lat": {
-                "long_name": "Latitude of CDR release",
-                "units": "degrees north",
-            },
-            "cdr_dep": {"long_name": "Depth of CDR release", "units": "meters"},
-            "cdr_hsc": {
-                "long_name": "Horizontal scale of CDR release",
-                "units": "meters",
-            },
-            "cdr_vsc": {
-                "long_name": "Vertical scale of CDR release",
-                "units": "meters",
-            },
-        }
+        attr_map = self._get_attr_map()
         for var, attrs in attr_map.items():
             ds[var].attrs.update(attrs)
 
@@ -220,6 +196,41 @@ class CDRForcingDatasetBuilder:
                     )
 
         return ds
+
+    def _get_attr_map(self) -> Dict[str, Dict[str, str]]:
+        """Returns metadata (long name and units) for variables in the CDRForcing xarray
+        dataset.
+
+        Returns
+        -------
+        dict
+            Keys are variable names, values are dicts with 'long_name' and 'units'.
+        """
+        return {
+            "time": {"long_name": "absolute time"},
+            "cdr_time": {
+                "long_name": f"relative time: days since {self.model_reference_date}",
+                "units": "days",
+            },
+            "release_name": {"long_name": "Name of release"},
+            "cdr_lon": {
+                "long_name": "Longitude of CDR release",
+                "units": "degrees east",
+            },
+            "cdr_lat": {
+                "long_name": "Latitude of CDR release",
+                "units": "degrees north",
+            },
+            "cdr_dep": {"long_name": "Depth of CDR release", "units": "meters"},
+            "cdr_hsc": {
+                "long_name": "Horizontal scale of CDR release",
+                "units": "meters",
+            },
+            "cdr_vsc": {
+                "long_name": "Vertical scale of CDR release",
+                "units": "meters",
+            },
+        }
 
 
 @dataclass(kw_only=True)

@@ -116,9 +116,9 @@ class CDRForcingDatasetBuilder:
     def build(self) -> xr.Dataset:
         all_times = itertools.chain.from_iterable(r.times for r in self.releases)
         unique_times = np.unique(np.array(list(all_times), dtype="datetime64[ns]"))
-        unique_rel_times = [
-            convert_to_relative_days(t, self.model_reference_date) for t in unique_times
-        ]
+        unique_rel_times = convert_to_relative_days(
+            unique_times, self.model_reference_date
+        )
 
         ds = xr.Dataset()
         ds["time"] = ("time", unique_times)

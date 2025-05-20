@@ -20,7 +20,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
     _pop_grid_data,
-    _to_yaml,
+    _write_to_yaml,
 )
 from roms_tools.setup.utils import extract_single_value
 from pathlib import Path
@@ -691,7 +691,7 @@ class Grid:
         data = _pop_grid_data(data)
         forcing_dict = {self.__class__.__name__: data}
 
-        _to_yaml(forcing_dict, filepath)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

@@ -32,7 +32,7 @@ from roms_tools.setup.utils import (
     add_time_info_to_ds,
     get_boundary_coords,
     _to_dict,
-    _to_yaml,
+    _write_to_yaml,
     _from_yaml,
 )
 
@@ -1004,7 +1004,7 @@ class BoundaryForcing:
         """
 
         forcing_dict = _to_dict(self)
-        _to_yaml(forcing_dict, filepath)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

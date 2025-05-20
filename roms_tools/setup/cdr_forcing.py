@@ -22,7 +22,7 @@ from roms_tools.setup.utils import (
     gc_dist,
     add_tracer_metadata_to_ds,
     _to_dict,
-    _to_yaml,
+    _write_to_yaml,
     _from_yaml,
 )
 from roms_tools.setup.cdr_release import Release, VolumeRelease, TracerPerturbation
@@ -705,7 +705,7 @@ class CDRForcing:
 
         forcing_dict["CDRForcing"]["releases"] = serialized_releases
 
-        _to_yaml(forcing_dict, filepath)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "CDRForcing":

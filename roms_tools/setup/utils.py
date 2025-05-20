@@ -1367,7 +1367,7 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
-def _to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
+def _write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
     This function writes the provided pre-serialized YAML data along with metadata, such as the version

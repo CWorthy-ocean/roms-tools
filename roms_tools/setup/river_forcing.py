@@ -19,7 +19,7 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
     add_time_info_to_ds,
     _to_dict,
-    _to_yaml,
+    _write_to_yaml,
     _from_yaml,
     add_tracer_metadata_to_ds,
     get_variable_metadata,
@@ -684,7 +684,7 @@ class RiverForcing:
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
         forcing_dict["RiverForcing"]["indices"] = serialized_indices
 
-        _to_yaml(forcing_dict, filepath)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":

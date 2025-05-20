@@ -31,7 +31,7 @@ from roms_tools.setup.utils import (
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     _to_dict,
-    _to_yaml,
+    _write_to_yaml,
     _from_yaml,
 )
 
@@ -928,7 +928,7 @@ class InitialConditions:
         """
 
         forcing_dict = _to_dict(self)
-        _to_yaml(forcing_dict, filepath)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

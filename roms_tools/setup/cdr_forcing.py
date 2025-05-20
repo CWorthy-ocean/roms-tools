@@ -693,21 +693,19 @@ class CDRForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        # Serialize object into dictionary
-        yaml_data = _to_dict(self)
+        forcing_dict = _to_dict(self)
 
         # Convert releases format
-        releases_data = yaml_data["CDRForcing"]["releases"]
+        releases_data = forcing_dict["CDRForcing"]["releases"]
         serialized_releases = {}
         for release in releases_data:
             serialized = release._simplified_dump()
             name = serialized.pop("name")
             serialized_releases[name] = serialized
 
-        yaml_data["CDRForcing"]["releases"] = serialized_releases
+        forcing_dict["CDRForcing"]["releases"] = serialized_releases
 
-        # Write to YAML
-        _to_yaml(yaml_data, filepath)
+        _to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "CDRForcing":

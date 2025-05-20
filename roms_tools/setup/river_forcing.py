@@ -675,24 +675,18 @@ class RiverForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        # Serialize object into dictionary
-        yaml_data = _to_dict(self)
+        forcing_dict = _to_dict(self)
+
         # Convert indices format
-
-        indices_data = yaml_data["RiverForcing"]["indices"]
-        serialized_indices = {
-            "_convention": "eta_rho, xi_rho"
-        }  # Add convention metadata
-
+        indices_data = forcing_dict["RiverForcing"]["indices"]
+        serialized_indices = {"_convention": "eta_rho, xi_rho"}
         for key, value in indices_data.items():
             serialized_indices[key] = [
                 f"{tup[0]}, {tup[1]}" for tup in value
             ]  # Comma-separated string
+        forcing_dict["RiverForcing"]["indices"] = serialized_indices
 
-        yaml_data["RiverForcing"]["indices"] = serialized_indices
-
-        # Write to YAML
-        _to_yaml(yaml_data, filepath)
+        _to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":

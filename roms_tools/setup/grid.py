@@ -687,13 +687,11 @@ class Grid:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        # Serialize object into dictionary
         data = asdict(self)
         data = _pop_grid_data(data)
-        yaml_data = {self.__class__.__name__: data}
+        forcing_dict = {self.__class__.__name__: data}
 
-        # Write to YAML
-        _to_yaml(yaml_data, filepath)
+        _to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

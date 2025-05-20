@@ -681,9 +681,7 @@ class RiverForcing:
         indices_data = forcing_dict["RiverForcing"]["indices"]
         serialized_indices = {"_convention": "eta_rho, xi_rho"}
         for key, value in indices_data.items():
-            serialized_indices[key] = [
-                f"{tup[0]}, {tup[1]}" for tup in value
-            ]  # Comma-separated string
+            serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
         forcing_dict["RiverForcing"]["indices"] = serialized_indices
 
         _to_yaml(forcing_dict, filepath)
@@ -708,14 +706,11 @@ class RiverForcing:
         params = _from_yaml(cls, filepath)
 
         def convert_indices_format(indices):
-            # Remove the '_convention' key from the dictionary if present
             indices = {
                 key: value for key, value in indices.items() if key != "_convention"
             }
 
-            # Convert the string of indices into tuples
             for river, index_list in indices.items():
-                # Split the string by ',' and convert to tuples of integers
                 indices[river] = [tuple(map(int, idx.split(","))) for idx in index_list]
 
             return indices

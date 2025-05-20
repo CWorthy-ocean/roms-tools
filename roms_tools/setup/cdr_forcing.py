@@ -114,14 +114,14 @@ class CDRForcingDatasetBuilder:
 
     def build(self) -> xr.Dataset:
         all_times = [np.array(r.times, dtype="datetime64[ns]") for r in self.releases]
-        union_times = np.unique(np.concatenate(all_times))
-        union_rel_times = [
-            convert_to_relative_days(t, self.model_reference_date) for t in union_times
+        unique_times = np.unique(np.concatenate(all_times))
+        unique_rel_times = [
+            convert_to_relative_days(t, self.model_reference_date) for t in unique_times
         ]
 
         ds = xr.Dataset()
-        ds["time"] = ("time", union_times)
-        ds["cdr_time"] = ("time", union_rel_times)
+        ds["time"] = ("time", unique_times)
+        ds["cdr_time"] = ("time", unique_rel_times)
         ds["cdr_lon"] = ("ncdr", [r.lon for r in self.releases])
         ds["cdr_lat"] = ("ncdr", [r.lat for r in self.releases])
         ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
@@ -196,14 +196,14 @@ class CDRForcingDatasetBuilder:
 
             if self.release_type == VolumeRelease:
                 ds["cdr_volume"].loc[{"ncdr": ncdr}] = np.interp(
-                    union_rel_times, rel_times, release.volume_fluxes.values
+                    unique_rel_times, rel_times, release.volume_fluxes.values
                 )
                 for ntracer in range(ds.ntracers.size):
                     tracer_name = ds.tracer_name[ntracer].item()
                     ds["cdr_tracer"].loc[
                         {"ntracers": ntracer, "ncdr": ncdr}
                     ] = np.interp(
-                        union_rel_times,
+                        unique_rel_times,
                         rel_times,
                         release.tracer_concentrations[tracer_name].values,
                     )
@@ -213,7 +213,7 @@ class CDRForcingDatasetBuilder:
                     ds["cdr_trcflx"].loc[
                         {"ntracers": ntracer, "ncdr": ncdr}
                     ] = np.interp(
-                        union_rel_times,
+                        unique_rel_times,
                         rel_times,
                         release.tracer_fluxes[tracer_name].values,
                     )

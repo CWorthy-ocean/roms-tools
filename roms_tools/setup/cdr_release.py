@@ -182,8 +182,13 @@ class Concentration(ValueArray):
         self : Concentration
             Updated instance with extended values.
         """
-        start_pad = self.values[0] if isinstance(self.values, list) else self.values
-        end_pad = self.values[-1] if isinstance(self.values, list) else self.values
+        if isinstance(self.values, list):
+            start_pad = self.values[0]
+            end_pad = self.values[-1]
+        else:
+            start_pad = self.values
+            end_pad = self.values
+
         return self._extend_scalar_series(
             times, start_time, end_time, start_pad=start_pad, end_pad=end_pad
         )

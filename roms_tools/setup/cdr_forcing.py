@@ -144,7 +144,8 @@ class ReleaseCollector(RootModel):
 
     @property
     def release_type(self):
-        return self.root[0].release_type
+    release_types = set(map(type, self.root))
+    return release_types.pop()
 
 
 class CDRForcingDatasetBuilder:

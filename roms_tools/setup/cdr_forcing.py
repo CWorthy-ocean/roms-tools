@@ -16,6 +16,7 @@ import logging
 import itertools
 from collections import Counter
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 from roms_tools import Grid
 from roms_tools.plot import _plot, _get_projection
 from roms_tools.regrid import LateralRegridFromROMS
@@ -970,7 +971,15 @@ def _validate_release_location(grid, release: Release):
         )
 
 
-def _plot_bathymetry_section(ax, h, dim, fixed_val, coord_deg, resolution, title):
+def _plot_bathymetry_section(
+    ax: Axes,
+    h: xr.DataArray,
+    dim: str,
+    fixed_val: float,
+    coord_deg: xr.DataArray,
+    resolution: float,
+    title: str,
+) -> None:
     """Plots a bathymetry section along a fixed latitude or longitude.
 
     Parameters

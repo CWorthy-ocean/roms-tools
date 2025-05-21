@@ -732,17 +732,17 @@ class CDRForcing(BaseModel):
     def save(
         self,
         filepath: str | Path,
-    ) -> None:
+    ) -> list[Path]:
         """Save the volume source with tracers to netCDF4 file.
 
         Parameters
         ----------
-        filepath : Union[str, Path]
+        filepath : str | Path
             The base path and filename for the output files.
 
         Returns
         -------
-        List[Path]
+        list[Path]
             A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
         """
 
@@ -770,7 +770,7 @@ class CDRForcing(BaseModel):
 
         Parameters
         ----------
-        filepath : Union[str, Path]
+        filepath : str | Path
             The path to the YAML file where the parameters will be saved.
         """
 
@@ -786,7 +786,7 @@ class CDRForcing(BaseModel):
 
         Parameters
         ----------
-        filepath : Union[str, Path]
+        filepath : str | Path
             The path to the YAML file from which the parameters will be read.
 
         Returns

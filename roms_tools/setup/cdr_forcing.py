@@ -144,7 +144,7 @@ class ReleaseCollector(RootModel):
 
     @property
     def release_type(self):
-        release_types = set(map(type, self.root))
+        release_types = set(r.release_type for r in self.root)
         return release_types.pop()
 
 

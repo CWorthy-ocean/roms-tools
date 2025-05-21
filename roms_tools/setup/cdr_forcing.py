@@ -277,7 +277,7 @@ class CDRForcingDatasetBuilder:
                 "long_name": "Vertical scale of CDR release",
                 "units": "meters",
             },
-            "cdr_trcflux": {
+            "cdr_trcflx": {
                 "long_name": "CDR tracer flux",
                 "description": "Tracer fluxes for CDR releases",
             },

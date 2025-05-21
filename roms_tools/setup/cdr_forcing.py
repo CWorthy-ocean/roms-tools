@@ -157,6 +157,8 @@ class CDRForcingDatasetBuilder:
         self.release_type = release_type
 
     def build(self) -> xr.Dataset:
+        """Build the CDR forcing dataset."""
+
         all_times = itertools.chain.from_iterable(r.times for r in self.releases)
         unique_times = np.unique(np.array(list(all_times), dtype="datetime64[ns]"))
         unique_rel_times = convert_to_relative_days(

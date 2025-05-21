@@ -163,52 +163,7 @@ class CDRForcingDatasetBuilder:
             unique_times, self.model_reference_date
         )
 
-        ds = xr.Dataset()
-        ds["time"] = ("time", unique_times)
-        ds["cdr_time"] = ("time", unique_rel_times)
-        ds["cdr_lon"] = ("ncdr", [r.lon for r in self.releases])
-        ds["cdr_lat"] = ("ncdr", [r.lat for r in self.releases])
-        ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
-        ds["cdr_hsc"] = ("ncdr", [r.hsc for r in self.releases])
-        ds["cdr_vsc"] = ("ncdr", [r.vsc for r in self.releases])
-        ds = ds.assign_coords(
-            {"release_name": (["ncdr"], [r.name for r in self.releases])}
-        )
-
-        # Assign attributes
-        attr_map = self._get_attr_map()
-        for var, attrs in attr_map.items():
-            ds[var].attrs.update(attrs)
-
-        if self.release_type == ReleaseType.volume:
-            ds = add_tracer_metadata_to_ds(
-                ds, with_flux_units=False
-            )  # adds the coordinate "tracer_name"
-            ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
-            ds["cdr_volume"].attrs = {
-                "long_name": "CDR volume flux",
-                "units": "m3/s",
-                "description": "Volume flux associated with CDR releases",
-            }
-            ds["cdr_tracer"] = xr.zeros_like(
-                ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
-            )
-            ds["cdr_tracer"].attrs = {
-                "long_name": "CDR tracer concentration",
-                "description": "Tracer concentrations for CDR releases",
-            }
-
-        elif self.release_type == ReleaseType.tracer_perturbation:
-            ds = add_tracer_metadata_to_ds(
-                ds, with_flux_units=True
-            )  # adds the coordinate "tracer_name"
-            ds["cdr_trcflx"] = xr.zeros_like(
-                ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
-            )
-            ds["cdr_trcflx"].attrs = {
-                "long_name": "CDR tracer flux",
-                "description": "Tracer fluxes for CDR releases",
-            }
+        ds = self._initialize_dataset(unique_times, unique_rel_times)
 
         for ncdr, release in enumerate(self.releases):
             times = np.array(release.times, dtype="datetime64[ns]")
@@ -237,6 +192,59 @@ class CDRForcingDatasetBuilder:
                         rel_times,
                         release.tracer_fluxes[tracer_name].values,
                     )
+
+        return ds
+
+    def _initialize_dataset(self, unique_times, unique_rel_times) -> xr.Dataset:
+        """Create and initialize a CDR xarray.Dataset with metadata and empty variables.
+
+        Parameters
+        ----------
+        unique_times : array-like
+            Array of unique absolute times for the release.
+        unique_rel_times : array-like
+            Array of unique relative times (days since model reference date).
+
+        Returns
+        -------
+        xr.Dataset
+            Initialized dataset with time, location, and release-type-dependent variables.
+        """
+
+        ds = xr.Dataset()
+        ds["time"] = ("time", unique_times)
+        ds["cdr_time"] = ("time", unique_rel_times)
+        ds["cdr_lon"] = ("ncdr", [r.lon for r in self.releases])
+        ds["cdr_lat"] = ("ncdr", [r.lat for r in self.releases])
+        ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
+        ds["cdr_hsc"] = ("ncdr", [r.hsc for r in self.releases])
+        ds["cdr_vsc"] = ("ncdr", [r.vsc for r in self.releases])
+        ds = ds.assign_coords(
+            {"release_name": (["ncdr"], [r.name for r in self.releases])}
+        )
+
+        if self.release_type == ReleaseType.volume:
+            ds = add_tracer_metadata_to_ds(
+                ds, with_flux_units=False
+            )  # adds the coordinate "tracer_name"
+            ds["cdr_volume"] = xr.zeros_like(ds.cdr_time * ds.ncdr, dtype=np.float64)
+            ds["cdr_tracer"] = xr.zeros_like(
+                ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
+            )
+
+        elif self.release_type == ReleaseType.tracer_perturbation:
+            ds = add_tracer_metadata_to_ds(
+                ds, with_flux_units=True
+            )  # adds the coordinate "tracer_name"
+            ds["cdr_trcflx"] = xr.zeros_like(
+                ds.cdr_time * ds.ntracers * ds.ncdr, dtype=np.float64
+            )
+
+        # Assign attributes
+        attr_map = self._get_attr_map()
+        for var, attrs in attr_map.items():
+            if var in ds.data_vars or var in ds.coords:
+                ds[var].attrs.update(attrs)
 
         return ds
 
@@ -272,6 +280,19 @@ class CDRForcingDatasetBuilder:
             "cdr_vsc": {
                 "long_name": "Vertical scale of CDR release",
                 "units": "meters",
+            },
+            "cdr_trcflux": {
+                "long_name": "CDR tracer flux",
+                "description": "Tracer fluxes for CDR releases",
+            },
+            "cdr_volume": {
+                "long_name": "CDR volume flux",
+                "units": "m3/s",
+                "description": "Volume flux associated with CDR releases",
+            },
+            "cdr_tracer": {
+                "long_name": "CDR tracer concentration",
+                "description": "Tracer concentrations for CDR releases",
             },
         }
 

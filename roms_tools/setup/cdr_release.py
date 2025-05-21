@@ -37,7 +37,7 @@ class ValueArray(ABC):
     name: str
     values: float | list[float]
 
-    def check_length(self, num_times: int):
+    def check_length(self, num_times: int) -> None:
         """Checks that the number of values matches the number of time steps.
 
         Parameters

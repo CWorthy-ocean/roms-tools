@@ -12,6 +12,7 @@
 
 * Remove class `CDRVolumePointSource` ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Require users to explicitly construct `VolumeRelease` and `TracerPerturbation` objects ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+* Drop support for Python 3.10 ([#309](https://github.com/CWorthy-ocean/roms-tools/pull/309))
 
 ### Internal Changes
 

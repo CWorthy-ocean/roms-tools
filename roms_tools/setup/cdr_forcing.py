@@ -173,25 +173,19 @@ class CDRForcingDatasetBuilder:
                 ds["cdr_volume"].loc[{"ncdr": ncdr}] = np.interp(
                     unique_rel_times, rel_times, release.volume_fluxes.values
                 )
-                for ntracer in range(ds.ntracers.size):
-                    tracer_name = ds.tracer_name[ntracer].item()
-                    ds["cdr_tracer"].loc[
-                        {"ntracers": ntracer, "ncdr": ncdr}
-                    ] = np.interp(
-                        unique_rel_times,
-                        rel_times,
-                        release.tracer_concentrations[tracer_name].values,
-                    )
+                tracer_key = "cdr_tracer"
+                tracer_data = release.tracer_concentrations
             elif self.release_type == ReleaseType.tracer_perturbation:
-                for ntracer in range(ds.ntracers.size):
-                    tracer_name = ds.tracer_name[ntracer].item()
-                    ds["cdr_trcflx"].loc[
-                        {"ntracers": ntracer, "ncdr": ncdr}
-                    ] = np.interp(
-                        unique_rel_times,
-                        rel_times,
-                        release.tracer_fluxes[tracer_name].values,
-                    )
+                tracer_key = "cdr_trcflx"
+                tracer_data = release.tracer_fluxes
+
+            for ntracer in range(ds.ntracers.size):
+                tracer_name = ds.tracer_name[ntracer].item()
+                ds[tracer_key].loc[{"ntracers": ntracer, "ncdr": ncdr}] = np.interp(
+                    unique_rel_times,
+                    rel_times,
+                    tracer_data[tracer_name].values,
+                )
 
         return ds
 

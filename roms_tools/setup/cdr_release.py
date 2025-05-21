@@ -339,7 +339,9 @@ class VolumeRelease(Release):
 
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
-            if tracer_name not in tracer_concentrations:
+            if tracer_name in tracer_concentrations:
+                continue
+            else:
                 if tracer_name in ["temp", "salt"]:
                     tracer_concentrations[tracer_name] = defaults[tracer_name]
                 else:

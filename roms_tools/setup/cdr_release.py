@@ -1,7 +1,18 @@
 from dataclasses import dataclass
 from abc import abstractmethod, ABC
-from pydantic import BaseModel, model_validator, Field, ConfigDict
-from typing import List, Dict, Union, Literal, Optional
+from enum import StrEnum, auto
+
+from pydantic import (
+    BaseModel,
+    model_validator,
+    Field,
+    ConfigDict,
+    model_serializer,
+    field_validator,
+)
+from typing import Literal
+
+from pydantic_core.core_schema import ValidationInfo
 from typing_extensions import Annotated
 from annotated_types import Ge, Le
 from datetime import datetime
@@ -24,7 +35,7 @@ class ValueArray(ABC):
     """
 
     name: str
-    values: Union[float, List[float]]
+    values: float | list[float]
 
     def check_length(self, num_times: int):
         """Checks that the number of values matches the number of time steps.
@@ -110,7 +121,7 @@ class Flux(ValueArray):
         A constant non-negative flux or a list of non-negative flux values.
     """
 
-    values: Union[NonNegativeFloat, List[NonNegativeFloat]]
+    values: NonNegativeFloat | list[NonNegativeFloat]
 
     def extend_to_endpoints(self, times: list, start_time, end_time):
         """Extends the flux series to ensure it covers the full time interval.
@@ -178,6 +189,11 @@ class Concentration(ValueArray):
         )
 
 
+class ReleaseType(StrEnum):
+    volume = auto()
+    tracer_perturbation = auto()
+
+
 class Release(BaseModel):
     """Defines the basic properties and timing of a carbon dioxide removal (CDR)
     release.
@@ -206,7 +222,10 @@ class Release(BaseModel):
     depth: NonNegativeFloat
     hsc: NonNegativeFloat = 0.0
     vsc: NonNegativeFloat = 0.0
-    times: List[datetime]
+    times: list[datetime]
+
+    # this should be defined by subclasses
+    release_type: ReleaseType
 
     model_config = ConfigDict(extra="forbid")
 
@@ -303,53 +322,64 @@ class VolumeRelease(Release):
         - "zero": fill missing values with 0.0
     """
 
-    times: Optional[List[datetime]] = None
-    volume_fluxes: Union[NonNegativeFloat, List[NonNegativeFloat], Flux] = Field(
-        default=0.0
-    )
-    tracer_concentrations: Optional[
-        Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
-    ] = None
+    times: list[datetime] = Field([])
     fill_values: Literal["auto", "zero"] = "auto"
+    volume_fluxes: Flux | NonNegativeFloat | list[NonNegativeFloat] = Field(
+        default=0.0, validate_default=True
+    )
+    tracer_concentrations: dict[
+        str, Concentration | NonNegativeFloat | list[NonNegativeFloat]
+    ] = Field({})
 
-    @model_validator(mode="after")
-    def _postprocess(self) -> "VolumeRelease":
-        if self.times is None:
-            self.times = []
-        num_times = len(self.times)
+    release_type: Literal[ReleaseType.volume] = ReleaseType.volume
 
-        if self.tracer_concentrations is None:
-            self.tracer_concentrations = {}
+    @field_validator("tracer_concentrations", mode="after")
+    @classmethod
+    def create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
 
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
-            if tracer_name not in self.tracer_concentrations:
+            if tracer_name not in tracer_concentrations:
                 if tracer_name in ["temp", "salt"]:
-                    self.tracer_concentrations[tracer_name] = defaults[tracer_name]
+                    tracer_concentrations[tracer_name] = defaults[tracer_name]
                 else:
-                    if self.fill_values == "auto":
-                        self.tracer_concentrations[tracer_name] = defaults[tracer_name]
-                    elif self.fill_values == "zero":
-                        self.tracer_concentrations[tracer_name] = 0.0
+                    fill_values = info.data["fill_values"]
+                    if fill_values == "auto":
+                        tracer_concentrations[tracer_name] = defaults[tracer_name]
+                    elif fill_values == "zero":
+                        tracer_concentrations[tracer_name] = 0.0
 
-        if not isinstance(self.volume_fluxes, Flux):
-            self.volume_fluxes = Flux("volume", self.volume_fluxes)
-        self.volume_fluxes.check_length(num_times)
-
-        self.tracer_concentrations = {
+        tracer_concentrations = {
             tracer: (
                 conc
                 if isinstance(conc, Concentration)
                 else Concentration(name=tracer, values=conc)
             )
-            for tracer, conc in self.tracer_concentrations.items()
+            for tracer, conc in tracer_concentrations.items()
         }
+
+        return tracer_concentrations
+
+    @field_validator("volume_fluxes", mode="after")
+    @classmethod
+    def create_fluxes(cls, volume_fluxes) -> Flux:
+        if not isinstance(volume_fluxes, Flux):
+            volume_fluxes = Flux("volume", volume_fluxes)
+        return volume_fluxes
+
+    @model_validator(mode="after")
+    def check_lengths(self) -> "VolumeRelease":
+
+        num_times = len(self.times)
+
         for tracer_concentrations in self.tracer_concentrations.values():
             tracer_concentrations.check_length(num_times)
 
+        self.volume_fluxes.check_length(num_times)
+
         return self
 
-    def _extend_to_endpoints(self, start_time, end_time) -> "VolumeRelease":
+    def _extend_to_endpoints(self, start_time, end_time):
         """Ensures that time series data includes endpoints at `start_time` and
         `end_time`.
 
@@ -361,13 +391,15 @@ class VolumeRelease(Release):
             conc.extend_to_endpoints(self.times, start_time, end_time)
         self.extend_times_to_endpoints(start_time, end_time)
 
-    def _simplified_dump(self) -> dict:
+    @model_serializer(mode="wrap")
+    def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
 
+        # pydantic_serializer is a function that runs pydantic's default conversion
+        # of a model to a dict. then, we make some custom modifications after that
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            data = self.model_dump()
-        data["release_type"] = "VolumeRelease"
+            data = pydantic_serializer(self)
 
         # Flatten volume_fluxes
         if "volume_fluxes" in data and isinstance(data["volume_fluxes"], dict):
@@ -422,37 +454,39 @@ class TracerPerturbation(Release):
         - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
     """
 
-    times: Optional[List[datetime]] = None
-    tracer_fluxes: Optional[
-        Dict[str, Union[NonNegativeFloat, List[NonNegativeFloat]]]
-    ] = None
+    times: list[datetime] = Field([])
+    tracer_fluxes: dict[str, Flux | NonNegativeFloat | list[NonNegativeFloat]] = Field(
+        {}
+    )
 
-    @model_validator(mode="after")
-    def _postprocess(self) -> "TracerPerturbation":
-        if self.times is None:
-            self.times = []
-        num_times = len(self.times)
+    release_type: Literal[
+        ReleaseType.tracer_perturbation
+    ] = ReleaseType.tracer_perturbation
 
-        if self.tracer_fluxes is None:
-            self.tracer_fluxes = {}
+    @field_validator("tracer_fluxes", mode="after")
+    @classmethod
+    def create_fluxes(cls, tracer_fluxes):
 
         # Fill all tracer fluxes that are not provided with zero
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
-            if tracer_name not in self.tracer_fluxes:
-                self.tracer_fluxes[tracer_name] = 0.0
+            if tracer_name not in tracer_fluxes:
+                tracer_fluxes[tracer_name] = 0.0
 
-        self.tracer_fluxes = {
+        tracer_fluxes = {
             tracer: (flux if isinstance(flux, Flux) else Flux(name=tracer, values=flux))
-            for tracer, flux in self.tracer_fluxes.items()
+            for tracer, flux in tracer_fluxes.items()
         }
+        return tracer_fluxes
 
+    @model_validator(mode="after")
+    def check_tracer_flux_lengths(self):
+        num_times = len(self.times)
         for flux in self.tracer_fluxes.values():
             flux.check_length(num_times)
-
         return self
 
-    def _extend_to_endpoints(self, start_time, end_time) -> "TracerPerturbation":
+    def _extend_to_endpoints(self, start_time, end_time):
         """Ensures that time series data includes endpoints at `start_time` and
         `end_time`.
 
@@ -463,13 +497,15 @@ class TracerPerturbation(Release):
             flux.extend_to_endpoints(self.times, start_time, end_time)
         self.extend_times_to_endpoints(start_time, end_time)
 
-    def _simplified_dump(self) -> dict:
+    @model_serializer(mode="wrap")
+    def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
 
+        # pydantic_serializer is a function that runs pydantic's default conversion
+        # of a model to a dict. then, we make some custom modifications after that
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            data = self.model_dump()
-        data["release_type"] = "TracerPerturbation"
+            data = pydantic_serializer(self)
 
         # Flatten tracer_fluxes
         if "tracer_fluxes" in data:

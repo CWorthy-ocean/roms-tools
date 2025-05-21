@@ -40,6 +40,8 @@ from roms_tools.setup.cdr_release import (
     ReleaseType,
 )
 
+INCLUDE_ALL_RELEASE_NAMES = "all"
+
 
 class ReleaseSimulationManager(BaseModel):
     """Validates and adjusts a single release against a ROMS simulation time window and
@@ -354,7 +356,9 @@ class CDRForcing(BaseModel):
     def ds(self) -> xr.Dataset:
         return self._ds
 
-    def plot_volume_flux(self, start=None, end=None, release_names="all"):
+    def plot_volume_flux(
+        self, start=None, end=None, release_names=INCLUDE_ALL_RELEASE_NAMES
+    ):
         """Plot the volume flux for each specified release within the given time range.
 
         Parameters
@@ -363,16 +367,16 @@ class CDRForcing(BaseModel):
             Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
             End datetime for the plot. If None, defaults to `self.end_time`.
-        release_names : list of str, or "all", optional
+        release_names : list[str], or str, optional
             A list of release names to plot.
-            If "all", the method will plot all releases.
-            The default is "all".
+            If a string equal to INCLUDE_ALL_RELEASE_NAMES, all releases will be plotted.
+            Defaults to INCLUDE_ALL_RELEASE_NAMES.
 
         Raises
         ------
         ValueError
             If self.releases are not of type VolumeRelease.
-            If `release_names` is not a list of strings or "all".
+            If `release_names` is not a list of strings or INCLUDE_ALL_RELEASE_NAMES.
             If any of the specified release names do not exist in `self.releases`.
         """
 
@@ -386,7 +390,7 @@ class CDRForcing(BaseModel):
 
         valid_release_names = [r.name for r in self.releases]
 
-        if release_names == "all":
+        if release_names == INCLUDE_ALL_RELEASE_NAMES:
             release_names = valid_release_names
 
         _validate_release_input(release_names, valid_release_names)
@@ -403,7 +407,11 @@ class CDRForcing(BaseModel):
         )
 
     def plot_tracer_concentration(
-        self, tracer_name: str, start=None, end=None, release_names="all"
+        self,
+        tracer_name: str,
+        start=None,
+        end=None,
+        release_names=INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the concentration of a given tracer for each specified release within
         the given time range.
@@ -416,16 +424,16 @@ class CDRForcing(BaseModel):
             Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
             End datetime for the plot. If None, defaults to `self.end_time`.
-        release_names : list of str, or "all", optional
+        release_names : list[str], or str, optional
             A list of release names to plot.
-            If "all", the method will plot all releases.
-            The default is "all".
+            If a string equal to INCLUDE_ALL_RELEASE_NAMES, all releases will be plotted.
+            Defaults to INCLUDE_ALL_RELEASE_NAMES.
 
         Raises
         ------
         ValueError
             If self.releases are not of type VolumeRelease.
-            If `release_names` is not a list of strings or "all".
+            If `release_names` is not a list of strings or INCLUDE_ALL_RELEASE_NAMES.
             If any of the specified release names do not exist in `self.releases`.
             If `tracer_name` does not exist in self.ds["tracer_name"])
         """
@@ -439,7 +447,7 @@ class CDRForcing(BaseModel):
 
         valid_release_names = [r.name for r in self.releases]
 
-        if release_names == "all":
+        if release_names == INCLUDE_ALL_RELEASE_NAMES:
             release_names = valid_release_names
 
         _validate_release_input(release_names, valid_release_names)
@@ -470,7 +478,11 @@ class CDRForcing(BaseModel):
         )
 
     def plot_tracer_flux(
-        self, tracer_name: str, start=None, end=None, release_names="all"
+        self,
+        tracer_name: str,
+        start=None,
+        end=None,
+        release_names=INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the flux of a given tracer for each specified release within the given
         time range.
@@ -483,16 +495,16 @@ class CDRForcing(BaseModel):
             Start datetime for the plot. If None, defaults to `self.start_time`.
         end : datetime or None
             End datetime for the plot. If None, defaults to `self.end_time`.
-        release_names : list of str, or "all", optional
+        release_names : list[str], or str, optional
             A list of release names to plot.
-            If "all", the method will plot all releases.
-            The default is "all".
+            If a string equal to INCLUDE_ALL_RELEASE_NAMES, all releases will be plotted.
+            Defaults to INCLUDE_ALL_RELEASE_NAMES.
 
         Raises
         ------
         ValueError
             If self.releases are not of type TracerPerturbation.
-            If `release_names` is not a list of strings or "all".
+            If `release_names` is not a list of strings or INCLUDE_ALL_RELEASE_NAMES.
             If any of the specified release names do not exist in `self.releases`.
             If `tracer_name` does not exist in self.ds["tracer_name"])
         """
@@ -506,7 +518,7 @@ class CDRForcing(BaseModel):
 
         valid_release_names = [r.name for r in self.releases]
 
-        if release_names == "all":
+        if release_names == INCLUDE_ALL_RELEASE_NAMES:
             release_names = valid_release_names
 
         _validate_release_input(release_names, valid_release_names)

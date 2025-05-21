@@ -6,6 +6,8 @@
 
 ### Breaking Changes
 
+* Drop support for Python 3.10 ([#309](https://github.com/CWorthy-ocean/roms-tools/pull/309))
+
 ### Internal Changes
 
 * Introduce Pydantic `Release` object refactoring the `CDRVolumePointSource` ([#298](https://github.com/CWorthy-ocean/roms-tools/pull/298))

@@ -284,8 +284,14 @@ class TestReleaseCollector:
         self.volume_release = VolumeRelease(
             name="vol", lat=66, lon=-25, depth=50, volume_fluxes=100
         )
+        self.another_volume_release = VolumeRelease(
+            name="vol2", lat=66, lon=-25, depth=50, volume_fluxes=100
+        )
         self.tracer_perturbation = TracerPerturbation(
             name="pert", lat=66, lon=-25, depth=50, tracer_fluxes={"ALK": 100}
+        )
+        self.another_tracer_perturbation = TracerPerturbation(
+            name="pert2", lat=66, lon=-25, depth=50, tracer_fluxes={"ALK": 100}
         )
 
     def test_check_unique_name(self):
@@ -309,7 +315,17 @@ class TestReleaseCollector:
         collector = ReleaseCollector(releases=[self.volume_release])
         assert collector.release_type == ReleaseType.volume
 
+        collector = ReleaseCollector(
+            releases=[self.volume_release, self.another_volume_release]
+        )
+        assert collector.release_type == ReleaseType.volume
+
         collector = ReleaseCollector(releases=[self.tracer_perturbation])
+        assert collector.release_type == ReleaseType.tracer_perturbation
+
+        collector = ReleaseCollector(
+            releases=[self.tracer_perturbation, self.another_tracer_perturbation]
+        )
         assert collector.release_type == ReleaseType.tracer_perturbation
 
 

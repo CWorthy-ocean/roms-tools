@@ -134,7 +134,7 @@ class ReleaseCollector(RootModel):
     @model_validator(mode="after")
     def check_all_releases_same_type(self):
         """Ensure all releases are of the same type, and set the release_type."""
-        release_types = set(map(type, self.root))
+        release_types = set(r.release_type for r in self.root)
         if len(release_types) > 1:
             type_list = ", ".join(map(str, release_types))
             raise ValueError(

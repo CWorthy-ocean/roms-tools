@@ -6,6 +6,7 @@ import importlib.metadata
 import textwrap
 from roms_tools.download import download_test_data
 from conftest import calculate_file_hash
+from roms_tools.constants import MAXIMUM_GRID_SIZE
 from pathlib import Path
 
 
@@ -102,7 +103,23 @@ def test_plot_save_methods(tmp_path):
 
 def test_raise_if_domain_too_large():
     with pytest.raises(ValueError, match="Domain size exceeds"):
-        Grid(nx=3, ny=3, size_x=30000, size_y=30000, center_lon=0, center_lat=51.5)
+        Grid(
+            nx=3,
+            ny=3,
+            size_x=MAXIMUM_GRID_SIZE + 10,
+            size_y=1000,
+            center_lon=0,
+            center_lat=51.5,
+        )
+    with pytest.raises(ValueError, match="Domain size exceeds"):
+        Grid(
+            nx=3,
+            ny=3,
+            size_x=1000,
+            size_y=MAXIMUM_GRID_SIZE + 10,
+            center_lon=0,
+            center_lat=51.5,
+        )
 
     # test grid with reasonable domain size
     grid = Grid(

@@ -4,6 +4,8 @@
 
 ### New Features
 
+* Allow bigger grid sizes of up to 25000 km ([#311](https://github.com/CWorthy-ocean/roms-tools/pull/311))
+
 ### Breaking Changes
 
 * Drop support for Python 3.10 ([#309](https://github.com/CWorthy-ocean/roms-tools/pull/309))

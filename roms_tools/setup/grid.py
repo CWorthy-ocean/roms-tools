@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import yaml
 import importlib.metadata
 from typing import Dict, Union, List
-from roms_tools.constants import R_EARTH
+from roms_tools.constants import R_EARTH, MAXIMUM_GRID_SIZE
 from roms_tools.utils import save_datasets
 from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.mask import _add_mask, _add_velocity_masks
@@ -894,13 +894,12 @@ class Grid:
     def _raise_if_domain_size_too_large(self):
         """Raise a ValueError if the domain size exceeds the allowable threshold.
 
-        Checks if either the x or y domain size exceeds 20,000 km and raises an error
-        with appropriate details if the threshold is surpassed.
+        Checks if either the x or y domain size exceeds the threshold and raises an
+        error with appropriate details if the threshold is surpassed.
         """
-        threshold = 20000
-        if self.size_x > threshold or self.size_y > threshold:
+        if self.size_x > MAXIMUM_GRID_SIZE or self.size_y > MAXIMUM_GRID_SIZE:
             raise ValueError(
-                f"Domain size exceeds the allowable limit of {threshold} km. "
+                f"Domain size exceeds the allowable limit of {MAXIMUM_GRID_SIZE} km. "
                 f"Received dimensions: size_x = {self.size_x} km, size_y = {self.size_y} km. "
                 "Please reduce the domain size to meet the threshold."
             )

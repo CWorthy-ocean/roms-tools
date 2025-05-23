@@ -1,9 +1,10 @@
 from numbers import Integral
+from pathlib import Path
+from typing import Union
 
 import numpy as np
 import xarray as xr
-from typing import Union
-from pathlib import Path
+
 from roms_tools.utils import save_datasets
 
 

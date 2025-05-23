@@ -1,6 +1,7 @@
-import pytest
 import numpy as np
+import pytest
 import xarray as xr
+
 from roms_tools.regrid import VerticalRegridToROMS
 
 try:
@@ -9,6 +10,7 @@ except ImportError:
     xesmf = None
 
 from roms_tools.regrid import LateralRegridFromROMS
+
 
 # Lateral regridding
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")

@@ -1,29 +1,31 @@
-from datetime import datetime
-import xarray as xr
-import numpy as np
-from typing import Dict, Union, List
 import importlib.metadata
-import matplotlib.pyplot as plt
-from pathlib import Path
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Union
+
+import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from roms_tools import Grid
 from roms_tools.plot import _plot
 from roms_tools.regrid import LateralRegridToROMS
-from roms_tools.utils import save_datasets
 from roms_tools.setup.datasets import TPXOManager
 from roms_tools.setup.utils import (
-    nan_check,
-    substitute_nans_by_fillvalue,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
-    get_variable_metadata,
-    get_target_coords,
-    rotate_velocities,
-    get_vector_pairs,
+    _from_yaml,
     _to_dict,
     _write_to_yaml,
-    _from_yaml,
+    get_target_coords,
+    get_variable_metadata,
+    get_vector_pairs,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    nan_check,
+    rotate_velocities,
+    substitute_nans_by_fillvalue,
 )
+from roms_tools.utils import save_datasets
 
 
 @dataclass(kw_only=True)

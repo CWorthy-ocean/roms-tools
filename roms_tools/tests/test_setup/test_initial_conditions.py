@@ -1,14 +1,16 @@
-import pytest
-from datetime import datetime
-from roms_tools import InitialConditions, Grid
-import xarray as xr
-import numpy as np
-import textwrap
 import logging
+import textwrap
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pytest
+import xarray as xr
+
+from conftest import calculate_data_hash
+from roms_tools import Grid, InitialConditions
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
-from pathlib import Path
-from conftest import calculate_data_hash
 
 
 @pytest.mark.parametrize(

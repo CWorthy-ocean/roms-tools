@@ -1,10 +1,12 @@
-import pytest
-from pathlib import Path
-import xarray as xr
-import numpy as np
-import os
 import logging
+import os
 from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pytest
+import xarray as xr
+
 from roms_tools import Grid, ROMSOutput
 from roms_tools.download import download_test_data
 

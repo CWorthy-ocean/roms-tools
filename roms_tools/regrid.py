@@ -1,6 +1,7 @@
-import xgcm
-import xarray as xr
 import warnings
+
+import xarray as xr
+import xgcm
 
 
 class LateralRegridToROMS:

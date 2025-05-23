@@ -67,12 +67,8 @@ exclude = ["docs", "tests", "tests.*", "docs.*"]
 [tool.setuptools.package-data]
 roms_tools = ["py.typed"]
 
-[tool.isort]
-profile = "black"
-skip_gitignore = true
-float_to_top = true
-default_section = "THIRDPARTY"
-known_first_party = "roms_tools"
+[tool.ruff.lint]
+extend-select = ["I"]
 
 [mypy]
 files = "roms_tools/**/*.py"

@@ -1,15 +1,15 @@
+from datetime import datetime
 from unittest import mock
 
 import pytest
-from datetime import datetime
 from pydantic import ValidationError
 
 from roms_tools.setup.cdr_release import (
-    Flux,
     Concentration,
+    Flux,
     Release,
-    VolumeRelease,
     TracerPerturbation,
+    VolumeRelease,
 )
 from roms_tools.setup.utils import get_tracer_defaults
 

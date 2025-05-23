@@ -46,7 +46,7 @@ napoleon_custom_sections = [
 ]
 
 autodoc_default_options = {
-    'inherited-members': False,
+    "inherited-members": False,
 }
 
 # -- Options for HTML output -------------------------------------------------

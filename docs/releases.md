@@ -7,6 +7,7 @@
 * Add `CDRForcing` as a unified interface for CDR releases with and without volume flux ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Introduce `TracerPerturbation` for tracer-only CDR scenarios ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Add `.plot_tracer_flux()` method for visualizing tracer flux time series ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+* Allow bigger grid sizes of up to 25000 km ([#311](https://github.com/CWorthy-ocean/roms-tools/pull/311))
 
 ### Breaking Changes
 

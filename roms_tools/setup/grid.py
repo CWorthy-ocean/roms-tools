@@ -71,7 +71,7 @@ class Grid:
     theta_s : float, optional
         The surface control parameter. Must satisfy 0 < theta_s <= 10. The default is 5.0.
     theta_b : float, optional
-        The bottom control parameter. Must satisfy 0 < theta_b <= 4. The default is 2.0.
+        The bottom control parameter. Must satisfy 0 < theta_b <= 10. The default is 2.0.
     hc : float, optional
         The critical depth (in meters). The default is 300.0.
     verbose: bool, optional
@@ -80,7 +80,7 @@ class Grid:
     Raises
     ------
     ValueError
-        If you try to create a grid with domain size larger than 20000 km.
+        If you try to create a grid with domain size larger than 25000 km.
     """
 
     nx: int

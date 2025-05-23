@@ -8,6 +8,7 @@
 * Introduce `TracerPerturbation` for tracer-only CDR scenarios ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Add `.plot_tracer_flux()` method for visualizing tracer flux time series ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Allow bigger grid sizes of up to 25000 km ([#311](https://github.com/CWorthy-ocean/roms-tools/pull/311))
+* Allow larger bottom control parameter `theta_b` up to 10 ([#317](https://github.com/CWorthy-ocean/roms-tools/pull/317))
 
 ### Breaking Changes
 

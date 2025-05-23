@@ -93,7 +93,7 @@ ROMS uses a terrain-following vertical coordinate system. The vertical coordinat
 |-------------------------------|------------------------------------------------------------|------|-------------------------|
 | $N$                            | Number of vertical layers                                  | -    | -                       |
 | $\theta_s$                          | Surface control parameter                                  | -    | $0 < \theta_s ≤ 10$          |
-| $\theta_b$                          | Bottom control parameter                                   | -    | $0 < \theta_b ≤ 4$
+| $\theta_b$                          | Bottom control parameter                                   | -    | $0 < \theta_b ≤ 10$
 | $h_c$                          | Critical depth                                             | m    | -                       |
 
 Following {cite}`shchepetkin_correction_2009` (see also Figure 2 in {cite}`lemarie_are_2012`), these parameters are used to create the vertical coordinate system as follows:

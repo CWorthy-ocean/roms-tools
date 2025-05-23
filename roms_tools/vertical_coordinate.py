@@ -1,6 +1,7 @@
 import numpy as np
 import xarray as xr
 
+from roms_tools.constants import UPPER_BOUND_THETA_B, UPPER_BOUND_THETA_S
 from roms_tools.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
@@ -31,10 +32,10 @@ def compute_cs(sigma, theta_s, theta_b):
     ValueError
         If theta_s or theta_b are not within the valid range.
     """
-    if not (0 < theta_s <= 10):
-        raise ValueError("theta_s must be between 0 and 10.")
-    if not (0 < theta_b <= 4):
-        raise ValueError("theta_b must be between 0 and 4.")
+    if not (0 < theta_s <= UPPER_BOUND_THETA_S):
+        raise ValueError(f"theta_s must be between 0 and {UPPER_BOUND_THETA_S}.")
+    if not (0 < theta_b <= UPPER_BOUND_THETA_B):
+        raise ValueError(f"theta_b must be between 0 and {UPPER_BOUND_THETA_B}.")
 
     C = (1 - np.cosh(theta_s * sigma)) / (np.cosh(theta_s) - 1)
     C = (np.exp(theta_b * C) - 1) / (1 - np.exp(-theta_b))

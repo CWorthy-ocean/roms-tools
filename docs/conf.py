@@ -29,8 +29,6 @@ extensions = [
 ]
 myst_enable_extensions = ["dollarmath", "amsmath"]
 
-autodoc_show_inheritance = False
-
 numpydoc_show_class_members = True
 napolean_google_docstring = False
 napolean_numpy_docstring = True
@@ -47,6 +45,9 @@ napoleon_custom_sections = [
     ("Example Config YAML File", "example"),
 ]
 
+autodoc_default_options = {
+    'inherited-members': False,
+}
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

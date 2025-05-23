@@ -45,6 +45,9 @@ napoleon_custom_sections = [
     ("Example Config YAML File", "example"),
 ]
 
+autodoc_default_options = {
+    "inherited-members": False,
+}
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

@@ -20,6 +20,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
     _pop_grid_data,
+    _write_to_yaml,
 )
 from roms_tools.setup.utils import extract_single_value
 from pathlib import Path
@@ -686,29 +687,11 @@ class Grid:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
-        filepath = Path(filepath)
-
         data = asdict(self)
         data = _pop_grid_data(data)
+        forcing_dict = {self.__class__.__name__: data}
 
-        # Include the version of roms-tools
-        try:
-            roms_tools_version = importlib.metadata.version("roms-tools")
-        except importlib.metadata.PackageNotFoundError:
-            roms_tools_version = "unknown"
-
-        # Create header
-        header = f"---\nroms_tools_version: {roms_tools_version}\n---\n"
-
-        # Use the class name as the top-level key
-        yaml_data = {self.__class__.__name__: data}
-
-        with filepath.open("w") as file:
-            # Write header
-            file.write(header)
-            # Write YAML data
-            yaml.dump(yaml_data, file, default_flow_style=False, sort_keys=False)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

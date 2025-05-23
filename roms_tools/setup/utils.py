@@ -1,3 +1,5 @@
+from enum import StrEnum
+
 import xarray as xr
 import numpy as np
 from typing import Union, Any, Dict, Type, Sequence
@@ -5,11 +7,17 @@ import pandas as pd
 import cftime
 from pathlib import Path
 from datetime import datetime
-from dataclasses import fields, asdict
+from dataclasses import fields, asdict, is_dataclass
+from pydantic import BaseModel
 import importlib.metadata
 import yaml
 from roms_tools.constants import R_EARTH
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+
+yaml.SafeDumper.add_multi_representer(
+    StrEnum,
+    yaml.representer.SafeRepresenter.represent_str,
+)
 
 
 def nan_check(field, mask, error_message=None) -> None:
@@ -410,8 +418,12 @@ def get_variable_metadata():
         "Tair": {"long_name": "air temperature at 2m", "units": "degrees Celsius"},
         "qair": {"long_name": "absolute humidity at 2m", "units": "kg/kg"},
         "rain": {"long_name": "total precipitation", "units": "cm/day"},
-        "temp": {"long_name": "potential temperature", "units": "degrees Celsius"},
-        "salt": {"long_name": "salinity", "units": "PSU"},
+        "temp": {
+            "long_name": "potential temperature",
+            "units": "degrees Celsius",
+            "flux_units": "degrees Celsius/s",
+        },
+        "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -424,59 +436,162 @@ def get_variable_metadata():
             "long_name": "vertically integrated v-flux component",
             "units": "m/s",
         },
-        "PO4": {"long_name": "dissolved inorganic phosphate", "units": "mmol/m^3"},
-        "NO3": {"long_name": "dissolved inorganic nitrate", "units": "mmol/m^3"},
-        "SiO3": {"long_name": "dissolved inorganic silicate", "units": "mmol/m^3"},
-        "NH4": {"long_name": "dissolved ammonia", "units": "mmol/m^3"},
-        "Fe": {"long_name": "dissolved inorganic iron", "units": "mmol/m^3"},
-        "Lig": {"long_name": "iron binding ligand", "units": "mmol/m^3"},
-        "O2": {"long_name": "dissolved oxygen", "units": "mmol/m^3"},
-        "DIC": {"long_name": "dissolved inorganic carbon", "units": "mmol/m^3"},
+        "PO4": {
+            "long_name": "dissolved inorganic phosphate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "NO3": {
+            "long_name": "dissolved inorganic nitrate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "SiO3": {
+            "long_name": "dissolved inorganic silicate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "NH4": {
+            "long_name": "dissolved ammonia",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "Fe": {
+            "long_name": "dissolved inorganic iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "Lig": {
+            "long_name": "iron binding ligand",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "O2": {
+            "long_name": "dissolved oxygen",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "DIC": {
+            "long_name": "dissolved inorganic carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "DIC_ALT_CO2": {
             "long_name": "dissolved inorganic carbon, alternative CO2",
             "units": "mmol/m^3",
+            "flux_units": "meq/s",
         },
-        "ALK": {"long_name": "alkalinity", "units": "meq/m^3"},
+        "ALK": {"long_name": "alkalinity", "units": "meq/m^3", "flux_units": "meq/s"},
         "ALK_ALT_CO2": {
             "long_name": "alkalinity, alternative CO2",
             "units": "meq/m^3",
+            "flux_units": "meq/s",
         },
-        "DOC": {"long_name": "dissolved organic carbon", "units": "mmol/m^3"},
-        "DON": {"long_name": "dissolved organic nitrogen", "units": "mmol/m^3"},
-        "DOP": {"long_name": "dissolved organic phosphorus", "units": "mmol/m^3"},
+        "DOC": {
+            "long_name": "dissolved organic carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "DON": {
+            "long_name": "dissolved organic nitrogen",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "DOP": {
+            "long_name": "dissolved organic phosphorus",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "DOCr": {
             "long_name": "refractory dissolved organic carbon",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
         "DONr": {
             "long_name": "refractory dissolved organic nitrogen",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
         "DOPr": {
             "long_name": "refractory dissolved organic phosphorus",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
-        "zooC": {"long_name": "zooplankton carbon", "units": "mmol/m^3"},
+        "zooC": {
+            "long_name": "zooplankton carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "spChl": {
             "long_name": "small phytoplankton chlorophyll",
             "units": "mg/m^3",
+            "flux_units": "mg/s",
         },
-        "spC": {"long_name": "small phytoplankton carbon", "units": "mmol/m^3"},
+        "spC": {
+            "long_name": "small phytoplankton carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "spP": {
             "long_name": "small phytoplankton phosphorous",
             "units": "mmol/m^3",
+            "flux_units": "mmol/s",
         },
-        "spFe": {"long_name": "small phytoplankton iron", "units": "mmol/m^3"},
-        "spCaCO3": {"long_name": "small phytoplankton CaCO3", "units": "mmol/m^3"},
-        "diatChl": {"long_name": "diatom chloropyll", "units": "mg/m^3"},
-        "diatC": {"long_name": "diatom carbon", "units": "mmol/m^3"},
-        "diatP": {"long_name": "diatom phosphorus", "units": "mmol/m^3"},
-        "diatFe": {"long_name": "diatom iron", "units": "mmol/m^3"},
-        "diatSi": {"long_name": "diatom silicate", "units": "mmol/m^3"},
-        "diazChl": {"long_name": "diazotroph chloropyll", "units": "mg/m^3"},
-        "diazC": {"long_name": "diazotroph carbon", "units": "mmol/m^3"},
-        "diazP": {"long_name": "diazotroph phosphorus", "units": "mmol/m^3"},
-        "diazFe": {"long_name": "diazotroph iron", "units": "mmol/m^3"},
+        "spFe": {
+            "long_name": "small phytoplankton iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "spCaCO3": {
+            "long_name": "small phytoplankton CaCO3",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatChl": {
+            "long_name": "diatom chloropyll",
+            "units": "mg/m^3",
+            "flux_units": "mg/s",
+        },
+        "diatC": {
+            "long_name": "diatom carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatP": {
+            "long_name": "diatom phosphorus",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatFe": {
+            "long_name": "diatom iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diatSi": {
+            "long_name": "diatom silicate",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diazChl": {
+            "long_name": "diazotroph chloropyll",
+            "units": "mg/m^3",
+            "flux_units": "mg/s",
+        },
+        "diazC": {
+            "long_name": "diazotroph carbon",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diazP": {
+            "long_name": "diazotroph phosphorus",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
+        "diazFe": {
+            "long_name": "diazotroph iron",
+            "units": "mmol/m^3",
+            "flux_units": "mmol/s",
+        },
         "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
         "pco2_air_alt": {
             "long_name": "atmospheric pCO2, alternative CO2",
@@ -610,21 +725,27 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
-def get_tracer_metadata_dict(include_bgc=True):
-    """Returns a dictionary of tracer metadata.
+def get_tracer_metadata_dict(include_bgc=True, with_flux_units=False):
+    """Generate a dictionary containing metadata for model tracers.
 
-    This function constructs a dictionary containing the names, units, and long names
-    of the tracers, based on whether biogeochemical tracers should be included or not.
+    The returned dictionary maps tracer names to their associated units and long names.
+    Optionally includes biogeochemical tracers and can toggle between concentration and flux units.
 
     Parameters
     ----------
     include_bgc : bool, optional
-        Whether to include biogeochemical tracers. Defaults to True.
+        If True (default), includes biogeochemical tracers in the output.
+        If False, returns only physical tracers (e.g., temperature, salinity).
+
+    with_flux_units : bool, optional
+        If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
+        If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
 
     Returns
     -------
     dict
-        A dictionary containing tracer names, units, and long names.
+        A dictionary where keys are tracer names and values are dictionaries
+        containing 'units' and 'long_name' for each tracer.
     """
     if include_bgc:
         tracer_names = [
@@ -670,7 +791,9 @@ def get_tracer_metadata_dict(include_bgc=True):
 
     tracer_dict = {
         tracer: {
-            "units": metadata[tracer]["units"],
+            "units": metadata[tracer]["flux_units"]
+            if with_flux_units
+            else metadata[tracer]["units"],
             "long_name": metadata[tracer]["long_name"],
         }
         for tracer in tracer_names
@@ -679,7 +802,7 @@ def get_tracer_metadata_dict(include_bgc=True):
     return tracer_dict
 
 
-def add_tracer_metadata_to_ds(ds, include_bgc=True):
+def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
     """Adds tracer metadata to a dataset.
 
     This function adds tracer metadata (name, unit, long name) as coordinates to
@@ -690,14 +813,18 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True):
     ds : xarray.Dataset
         Dataset to which tracer metadata will be added.
     include_bgc : bool, optional
-        Whether to include biogeochemical tracers. Defaults to True.
+        If True (default), includes biogeochemical tracers in the output.
+        If False, returns only physical tracers (e.g., temperature, salinity).
+    with_flux_units : bool, optional
+        If True, uses units appropriate for tracer fluxes (e.g., mmol/s).
+        If False (default), uses units appropriate for tracer concentrations (e.g., mmol/m³).
 
     Returns
     -------
     xarray.Dataset
         The dataset with added tracer metadata.
     """
-    tracer_dict = get_tracer_metadata_dict(include_bgc)
+    tracer_dict = get_tracer_metadata_dict(include_bgc, with_flux_units)
 
     tracer_names = list(tracer_dict.keys())
     tracer_units = [tracer_dict[tracer]["units"] for tracer in tracer_names]
@@ -705,7 +832,15 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True):
 
     ds = ds.assign_coords(
         tracer_name=("ntracers", tracer_names, {"long_name": "Tracer name"}),
-        tracer_unit=("ntracers", tracer_units, {"long_name": "Tracer unit"}),
+        tracer_unit=(
+            "ntracers",
+            tracer_units,
+            {
+                "long_name": "Tracer flux unit"
+                if with_flux_units
+                else "Tracer concentration unit"
+            },
+        ),
         tracer_long_name=(
             "ntracers",
             tracer_long_names,
@@ -716,7 +851,7 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True):
     return ds
 
 
-def get_tracer_defaults():
+def get_tracer_defaults() -> dict[str, float]:
     """Returns constant default tracer concentrations for ROMS-MARBL.
 
     These values represent typical physical and biogeochemical tracer levels
@@ -1144,25 +1279,70 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     return dis
 
 
-def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"):
+def convert_to_relative_days(
+    times: Union[Sequence[datetime], np.ndarray],
+    model_reference_date: Union[datetime, np.datetime64],
+) -> np.ndarray:
+    """Convert absolute datetimes to model-relative time in days.
+
+    Parameters
+    ----------
+    times : sequence of datetime or np.ndarray
+        Absolute times to convert.
+    model_reference_date : datetime or np.datetime64
+        Reference date from which to compute relative days.
+
+    Returns
+    -------
+    np.ndarray
+        Times relative to the reference date, in days.
+    """
+    times = np.array(times, dtype="datetime64[ns]")
+    ref = np.datetime64(model_reference_date, "ns")
+    rel_times = (times - ref) / np.timedelta64(1, "D")
+
+    return rel_times
+
+
+def add_time_info_to_ds(
+    ds: xr.Dataset,
+    model_reference_date: Union[datetime, np.datetime64],
+    climatology: bool,
+    time_name: str = "time",
+) -> tuple[xr.Dataset, xr.DataArray]:
+    """Add relative and absolute time coordinates to a dataset.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset to which time information will be added.
+    model_reference_date : datetime or np.datetime64
+        The reference date for computing relative time.
+    climatology : bool
+        Whether the time data is climatological (cyclical over the year).
+    time_name : str
+        Name of the time coordinate in the dataset.
+
+    Returns
+    -------
+    tuple[xr.Dataset, xr.DataArray]
+        Updated dataset with time information and the relative time array.
+    """
 
     if climatology:
         ds.attrs["climatology"] = str(True)
         month = xr.DataArray(range(1, 13), dims=time_name)
         month.attrs["long_name"] = "Month index (1-12)"
         ds = ds.assign_coords({"month": month})
-        # Preserve absolute time coordinate for readability
+
+        # Absolute time (for readability only)
         abs_time = np.datetime64(model_reference_date) + ds[time_name]
-        # Convert to pandas TimedeltaIndex
+
+        # Custom relative time logic for climatology
         timedelta_index = pd.to_timedelta(ds[time_name].values)
-
-        # Determine the start of the year for the base_datetime
         start_of_year = datetime(model_reference_date.year, 1, 1)
-
-        # Calculate the offset from midnight of the new year
         offset = model_reference_date - start_of_year
 
-        # Convert the timedelta to nanoseconds first, then to days
         time = xr.DataArray(
             (timedelta_index - offset).view("int64") / 3600 / 24 * 1e-9,
             dims=time_name,
@@ -1170,26 +1350,22 @@ def convert_to_roms_time(ds, model_reference_date, climatology, time_name="time"
         time.attrs["cycle_length"] = 365.25
 
     else:
-        # Preserve absolute time coordinate for readability
         abs_time = ds[time_name]
 
-        time = (
-            (ds[time_name] - np.datetime64(model_reference_date)).astype("float64")
-            / 3600
-            / 24
-            * 1e-9
+        time = xr.DataArray(
+            convert_to_relative_days(ds[time_name].values, model_reference_date),
+            dims=time_name,
         )
 
-    attrs = [key for key in abs_time.attrs]
-    for attr in attrs:
-        del abs_time.attrs[attr]
+    # Clean up and assign attributes
+    abs_time.attrs.clear()
     abs_time.attrs["long_name"] = "absolute time"
     ds = ds.assign_coords({"abs_time": abs_time})
 
     time.attrs["long_name"] = f"relative time: days since {str(model_reference_date)}"
     time.encoding["units"] = "days"
     time.attrs["units"] = "days"
-    ds.encoding["unlimited_dims"] = "time"
+    ds.encoding["unlimited_dims"] = time_name
 
     return ds, time
 
@@ -1199,32 +1375,28 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
-def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
-    """Serialize a forcing object (including its grid) into a YAML file.
+def _write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
+    """Write pre-serialized YAML data and additional metadata to a YAML file.
 
-    This function serializes a dataclass object (forcing_object) and its associated
-    `grid` attribute into a YAML file. It includes additional metadata, such as
-    the version of the `roms-tools` package.
+    This function writes the provided pre-serialized YAML data along with metadata, such as the version
+    of the `roms-tools` package, to the specified file. The metadata header is written first, followed by
+    the provided YAML data.
 
     Parameters
     ----------
-    forcing_object : object
-        The object that contains the forcing data, typically a dataclass with attributes
-        such as `grid`, `start_time`, `end_time`, etc.
+    yaml_data : dict or str
+        The pre-serialized YAML data to be written to the file. This data may include the forcing object and grid.
     filepath : Union[str, Path]
-        The path where the serialized YAML file will be saved.
+        The path (as a string or Path object) where the serialized YAML file will be saved.
 
     Returns
     -------
     None
-        The function writes the serialized data directly to a YAML file at the specified path.
+        This function does not return anything. It writes the provided YAML data directly to the specified file.
     """
 
     # Convert the filepath to a Path object
     filepath = Path(filepath)
-
-    # Serialize object into dictionary
-    yaml_data = _to_dict(forcing_object)
 
     # Create YAML header with version information
     try:
@@ -1248,7 +1420,7 @@ def _to_yaml(forcing_object, filepath: Union[str, Path]) -> None:
         )
 
 
-def _to_dict(forcing_object) -> None:
+def _to_dict(forcing_object) -> dict:
     """Serialize a forcing object (including its grid) into a dictionary.
 
     This function serializes a dataclass object (forcing_object) and its associated
@@ -1295,7 +1467,13 @@ def _to_dict(forcing_object) -> None:
 
     # Prepare Forcing Data
     forcing_data = {}
-    field_names = [field.name for field in fields(forcing_object)]
+    if isinstance(forcing_object, BaseModel):
+        field_names = forcing_object.model_fields
+    elif is_dataclass(forcing_object):
+        field_names = [field.name for field in fields(forcing_object)]
+    else:
+        raise TypeError("Forcing object is not a dataclass or pydantic model")
+
     filtered_field_names = [
         param
         for param in field_names
@@ -1308,7 +1486,6 @@ def _to_dict(forcing_object) -> None:
             "climatology",
             "verbose",
             "straddle",
-            "indices",
         )
     ]
 
@@ -1325,20 +1502,6 @@ def _to_dict(forcing_object) -> None:
 
         # Add the field and its value to the forcing_data dictionary
         forcing_data[field_name] = value
-
-    # Serialize `indices` data (conditionally)
-    indices_data = getattr(forcing_object, "indices", None)
-    if indices_data is not None:
-        serialized_indices = {
-            "_convention": "eta_rho, xi_rho"
-        }  # Add convention metadata
-
-        for key, value in indices_data.items():
-            serialized_indices[key] = [
-                f"{tup[0]}, {tup[1]}" for tup in value
-            ]  # Comma-separated string
-
-        forcing_data["indices"] = serialized_indices
 
     # Combine Grid and Forcing Data into a single dictionary for the final YAML content
     yaml_data = {

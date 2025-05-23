@@ -20,7 +20,8 @@ from roms_tools.setup.utils import (
     get_target_coords,
     rotate_velocities,
     get_vector_pairs,
-    _to_yaml,
+    _to_dict,
+    _write_to_yaml,
     _from_yaml,
 )
 
@@ -453,7 +454,8 @@ class TidalForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        _to_yaml(self, filepath)
+        forcing_dict = _to_dict(self)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

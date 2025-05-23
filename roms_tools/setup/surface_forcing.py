@@ -26,8 +26,9 @@ from roms_tools.setup.utils import (
     group_dataset,
     rotate_velocities,
     compute_missing_surface_bgc_variables,
-    convert_to_roms_time,
-    _to_yaml,
+    add_time_info_to_ds,
+    _to_dict,
+    _write_to_yaml,
     _from_yaml,
 )
 
@@ -420,7 +421,7 @@ class SurfaceForcing:
         ds = self._add_global_metadata(ds)
 
         # Convert the time coordinate to the format expected by ROMS
-        ds, sfc_time = convert_to_roms_time(
+        ds, sfc_time = add_time_info_to_ds(
             ds, self.model_reference_date, data.climatology
         )
 
@@ -634,7 +635,8 @@ class SurfaceForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        _to_yaml(self, filepath)
+        forcing_dict = _to_dict(self)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

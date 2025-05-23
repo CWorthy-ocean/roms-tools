@@ -17,8 +17,9 @@ from roms_tools.setup.utils import (
     get_target_coords,
     gc_dist,
     substitute_nans_by_fillvalue,
-    convert_to_roms_time,
-    _to_yaml,
+    add_time_info_to_ds,
+    _to_dict,
+    _write_to_yaml,
     _from_yaml,
     add_tracer_metadata_to_ds,
     get_variable_metadata,
@@ -316,7 +317,7 @@ class RiverForcing:
         ds["river_tracer"] = river_tracer
         ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
 
-        ds, time = convert_to_roms_time(
+        ds, time = add_time_info_to_ds(
             ds, self.model_reference_date, self.climatology, time_name="river_time"
         )
 
@@ -674,7 +675,16 @@ class RiverForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        _to_yaml(self, filepath)
+        forcing_dict = _to_dict(self)
+
+        # Convert indices format
+        indices_data = forcing_dict["RiverForcing"]["indices"]
+        serialized_indices = {"_convention": "eta_rho, xi_rho"}
+        for key, value in indices_data.items():
+            serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
+        forcing_dict["RiverForcing"]["indices"] = serialized_indices
+
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":
@@ -696,14 +706,11 @@ class RiverForcing:
         params = _from_yaml(cls, filepath)
 
         def convert_indices_format(indices):
-            # Remove the '_convention' key from the dictionary if present
             indices = {
                 key: value for key, value in indices.items() if key != "_convention"
             }
 
-            # Convert the string of indices into tuples
             for river, index_list in indices.items():
-                # Split the string by ',' and convert to tuples of integers
                 indices[river] = [tuple(map(int, idx.split(","))) for idx in index_list]
 
             return indices

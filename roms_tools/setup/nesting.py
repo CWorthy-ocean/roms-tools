@@ -15,7 +15,8 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_v,
     get_boundary_coords,
     wrap_longitudes,
-    _to_yaml,
+    _to_dict,
+    _write_to_yaml,
     _from_yaml,
 )
 
@@ -209,7 +210,8 @@ class ChildGrid(Grid):
             The path to the YAML file where the parameters will be saved.
         """
 
-        _to_yaml(self, filepath)
+        forcing_dict = _to_dict(self)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "ChildGrid":

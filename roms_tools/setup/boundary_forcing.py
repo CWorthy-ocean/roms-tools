@@ -29,9 +29,10 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     nan_check,
     substitute_nans_by_fillvalue,
-    convert_to_roms_time,
+    add_time_info_to_ds,
     get_boundary_coords,
-    _to_yaml,
+    _to_dict,
+    _write_to_yaml,
     _from_yaml,
 )
 
@@ -686,8 +687,7 @@ class BoundaryForcing:
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
 
-        # Convert the time coordinate to the format expected by ROMS
-        ds, bry_time = convert_to_roms_time(
+        ds, bry_time = add_time_info_to_ds(
             ds, self.model_reference_date, data.climatology
         )
 
@@ -1003,7 +1003,8 @@ class BoundaryForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        _to_yaml(self, filepath)
+        forcing_dict = _to_dict(self)
+        _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

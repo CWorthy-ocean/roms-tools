@@ -1,10 +1,12 @@
-import pytest
-from roms_tools import Grid, TidalForcing
-import xarray as xr
-from roms_tools.download import download_test_data
 import textwrap
 from pathlib import Path
+
+import pytest
+import xarray as xr
+
 from conftest import calculate_data_hash
+from roms_tools import Grid, TidalForcing
+from roms_tools.download import download_test_data
 
 
 @pytest.fixture(scope="session")

@@ -1,13 +1,15 @@
-import time
 import logging
-import xarray as xr
-import numpy as np
-import gcm_filters
-from roms_tools.setup.utils import handle_boundaries
+import time
 import warnings
 from itertools import count
+
+import gcm_filters
+import numpy as np
+import xarray as xr
+
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
+from roms_tools.setup.utils import handle_boundaries
 
 
 def _add_topography(

@@ -1,29 +1,30 @@
-import time
+import importlib.metadata
 import logging
-from dataclasses import dataclass, field, asdict
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Dict, List, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-import matplotlib.pyplot as plt
 import yaml
-import importlib.metadata
-from typing import Dict, Union, List
-from roms_tools.constants import R_EARTH, MAXIMUM_GRID_SIZE
-from roms_tools.utils import save_datasets
-from roms_tools.setup.topography import _add_topography
-from roms_tools.setup.mask import _add_mask, _add_velocity_masks
-from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
+
+from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import _plot, _section_plot
+from roms_tools.setup.mask import _add_mask, _add_velocity_masks
+from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.utils import (
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
-    get_target_coords,
-    gc_dist,
     _pop_grid_data,
     _write_to_yaml,
+    extract_single_value,
+    gc_dist,
+    get_target_coords,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
 )
-from roms_tools.setup.utils import extract_single_value
-from pathlib import Path
+from roms_tools.utils import save_datasets
+from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
 
 
 @dataclass(kw_only=True)

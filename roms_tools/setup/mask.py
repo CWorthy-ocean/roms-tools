@@ -1,12 +1,14 @@
-import xarray as xr
+import warnings
+
 import numpy as np
 import regionmask
-import warnings
+import xarray as xr
 from scipy.ndimage import label
+
 from roms_tools.setup.utils import (
+    handle_boundaries,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    handle_boundaries,
 )
 
 

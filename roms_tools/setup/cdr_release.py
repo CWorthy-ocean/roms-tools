@@ -1,22 +1,22 @@
+import warnings
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from abc import abstractmethod, ABC
+from datetime import datetime
 from enum import StrEnum, auto
-
-from pydantic import (
-    BaseModel,
-    model_validator,
-    Field,
-    ConfigDict,
-    model_serializer,
-    field_validator,
-)
 from typing import Literal
 
+from annotated_types import Ge, Le
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 from pydantic_core.core_schema import ValidationInfo
 from typing_extensions import Annotated
-from annotated_types import Ge, Le
-from datetime import datetime
-import warnings
+
 from roms_tools.setup.utils import get_tracer_defaults
 
 NonNegativeFloat = Annotated[float, Ge(0)]

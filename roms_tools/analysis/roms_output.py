@@ -1,27 +1,29 @@
-import xarray as xr
-import numpy as np
-import matplotlib.pyplot as plt
-from roms_tools.plot import _plot, _section_plot, _profile_plot, _line_plot
-from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
-from dataclasses import dataclass, field
-from typing import Union, Optional
-from pathlib import Path
-import re
 import logging
+import re
 import warnings
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional, Union
+
+import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from roms_tools import Grid
+from roms_tools.analysis.utils import _validate_plot_inputs
+from roms_tools.plot import _line_plot, _plot, _profile_plot, _section_plot
+from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
+from roms_tools.utils import (
+    _generate_coordinate_range,
+    _load_data,
+    _remove_edge_nans,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+)
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
-from roms_tools.utils import (
-    _load_data,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
-    _generate_coordinate_range,
-    _remove_edge_nans,
-)
-from roms_tools.analysis.utils import _validate_plot_inputs
 
 
 @dataclass(kw_only=True)

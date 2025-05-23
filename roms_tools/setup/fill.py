@@ -1,6 +1,6 @@
 import numpy as np
-import xarray as xr
 import pyamg
+import xarray as xr
 from scipy import sparse
 
 

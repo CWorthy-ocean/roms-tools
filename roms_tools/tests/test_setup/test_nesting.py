@@ -1,17 +1,19 @@
-import pytest
-import xarray as xr
-import numpy as np
 import logging
 from pathlib import Path
-from roms_tools import Grid, ChildGrid
-from roms_tools.setup.utils import get_boundary_coords
+
+import numpy as np
+import pytest
+import xarray as xr
+
 from conftest import calculate_file_hash
+from roms_tools import ChildGrid, Grid
 from roms_tools.setup.nesting import (
+    compute_boundary_distance,
     interpolate_indices,
     map_child_boundaries_onto_parent_grid_indices,
-    compute_boundary_distance,
     modify_child_topography_and_mask,
 )
+from roms_tools.setup.utils import get_boundary_coords
 
 
 @pytest.fixture()

@@ -1,10 +1,11 @@
-import xarray as xr
-import numpy as np
-from pathlib import Path
-import re
 import glob
 import logging
+import re
 import warnings
+from pathlib import Path
+
+import numpy as np
+import xarray as xr
 
 
 def _load_data(

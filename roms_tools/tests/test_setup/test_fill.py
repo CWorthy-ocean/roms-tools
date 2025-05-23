@@ -1,7 +1,8 @@
-import pytest
-from roms_tools.setup.fill import LateralFill
 import numpy as np
+import pytest
 import xarray as xr
+
+from roms_tools.setup.fill import LateralFill
 
 
 @pytest.mark.parametrize(

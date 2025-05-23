@@ -1,43 +1,45 @@
+import itertools
+import logging
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Iterator
-from pydantic import (
-    BaseModel,
-    model_validator,
-    Field,
-    model_serializer,
-    RootModel,
-    conlist,
-)
+
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-import cartopy.crs as ccrs
-import logging
-import itertools
-from collections import Counter
-import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
+from pydantic import (
+    BaseModel,
+    Field,
+    RootModel,
+    conlist,
+    model_serializer,
+    model_validator,
+)
+
 from roms_tools import Grid
-from roms_tools.plot import _plot, _get_projection
+from roms_tools.plot import _get_projection, _plot
 from roms_tools.regrid import LateralRegridFromROMS
+from roms_tools.setup.cdr_release import (
+    Release,
+    ReleaseType,
+    TracerPerturbation,
+    VolumeRelease,
+)
+from roms_tools.setup.utils import (
+    _from_yaml,
+    _to_dict,
+    _write_to_yaml,
+    add_tracer_metadata_to_ds,
+    convert_to_relative_days,
+    gc_dist,
+)
 from roms_tools.utils import (
     _generate_coordinate_range,
     _remove_edge_nans,
     save_datasets,
-)
-from roms_tools.setup.utils import (
-    convert_to_relative_days,
-    gc_dist,
-    add_tracer_metadata_to_ds,
-    _to_dict,
-    _write_to_yaml,
-    _from_yaml,
-)
-from roms_tools.setup.cdr_release import (
-    Release,
-    VolumeRelease,
-    TracerPerturbation,
-    ReleaseType,
 )
 
 INCLUDE_ALL_RELEASE_NAMES = "all"

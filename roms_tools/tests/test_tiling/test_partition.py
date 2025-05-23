@@ -1,9 +1,10 @@
-import pytest
 from pathlib import Path
+
+import pytest
 import xarray.testing as xrt
 
-from roms_tools.tiling.partition import partition, partition_netcdf
 from roms_tools import Grid
+from roms_tools.tiling.partition import partition, partition_netcdf
 
 
 @pytest.fixture

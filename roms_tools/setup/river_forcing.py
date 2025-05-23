@@ -1,29 +1,31 @@
-import xarray as xr
-import numpy as np
 import logging
 from dataclasses import dataclass, field
-import cartopy.crs as ccrs
 from datetime import datetime
-from typing import Dict, Union, List, Optional
 from pathlib import Path
-import matplotlib.pyplot as plt
+from typing import Dict, List, Optional, Union
+
+import cartopy.crs as ccrs
 import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from roms_tools import Grid
 from roms_tools.constants import NUM_TRACERS
-from roms_tools.plot import _plot, _get_projection
-from roms_tools.utils import save_datasets
+from roms_tools.plot import _get_projection, _plot
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
-    get_target_coords,
-    gc_dist,
-    substitute_nans_by_fillvalue,
-    add_time_info_to_ds,
+    _from_yaml,
     _to_dict,
     _write_to_yaml,
-    _from_yaml,
+    add_time_info_to_ds,
     add_tracer_metadata_to_ds,
+    gc_dist,
+    get_target_coords,
     get_variable_metadata,
+    substitute_nans_by_fillvalue,
 )
+from roms_tools.utils import save_datasets
 
 
 @dataclass(kw_only=True)

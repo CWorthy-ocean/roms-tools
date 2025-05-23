@@ -1,12 +1,14 @@
-from roms_tools import RiverForcing, Grid
-import xarray as xr
-import numpy as np
-from datetime import datetime
-import textwrap
-from pathlib import Path
-import pytest
 import logging
+import textwrap
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pytest
+import xarray as xr
+
 from conftest import calculate_file_hash
+from roms_tools import Grid, RiverForcing
 
 
 @pytest.fixture

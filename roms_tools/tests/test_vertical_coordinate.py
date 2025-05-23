@@ -1,12 +1,12 @@
-import pytest
 import numpy as np
+import pytest
 import xarray as xr
 
 from roms_tools.vertical_coordinate import (
     compute_cs,
-    sigma_stretch,
     compute_depth,
     compute_depth_coordinates,
+    sigma_stretch,
 )
 
 

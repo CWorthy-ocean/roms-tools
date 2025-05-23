@@ -184,7 +184,7 @@ class TestRelease:
             vsc=0,
             times=[datetime(2022, 1, 2)],
         )
-        r.extend_times_to_endpoints(datetime(2022, 1, 1), datetime(2022, 1, 3))
+        r._extend_times_to_endpoints(datetime(2022, 1, 1), datetime(2022, 1, 3))
         assert r.times == [
             datetime(2022, 1, 1),
             datetime(2022, 1, 2),

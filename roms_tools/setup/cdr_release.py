@@ -235,7 +235,7 @@ class Release(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
-    def check_increasing_times(self) -> "Release":
+    def _check_increasing_times(self) -> "Release":
         """Validates that `times` are strictly increasing and fall within the specified
         time window.
 
@@ -252,7 +252,7 @@ class Release(BaseModel):
                 )
         return self
 
-    def extend_times_to_endpoints(self, start_time, end_time) -> None:
+    def _extend_times_to_endpoints(self, start_time, end_time) -> None:
         """Ensures that `times` includes both `start_time` and `end_time`.
 
         Modifies `self.times` in place by prepending or appending times as needed.
@@ -340,7 +340,7 @@ class VolumeRelease(Release):
 
     @field_validator("tracer_concentrations", mode="after")
     @classmethod
-    def create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
+    def _create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
 
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
@@ -369,13 +369,13 @@ class VolumeRelease(Release):
 
     @field_validator("volume_fluxes", mode="after")
     @classmethod
-    def create_fluxes(cls, volume_fluxes) -> Flux:
+    def _create_fluxes(cls, volume_fluxes) -> Flux:
         if not isinstance(volume_fluxes, Flux):
             volume_fluxes = Flux("volume", volume_fluxes)
         return volume_fluxes
 
     @model_validator(mode="after")
-    def check_lengths(self) -> "VolumeRelease":
+    def _check_lengths(self) -> "VolumeRelease":
 
         num_times = len(self.times)
 
@@ -396,7 +396,7 @@ class VolumeRelease(Release):
         self.volume_fluxes.extend_to_endpoints(self.times, start_time, end_time)
         for conc in self.tracer_concentrations.values():
             conc.extend_to_endpoints(self.times, start_time, end_time)
-        self.extend_times_to_endpoints(start_time, end_time)
+        self._extend_times_to_endpoints(start_time, end_time)
 
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:
@@ -502,7 +502,7 @@ class TracerPerturbation(Release):
         """
         for flux in self.tracer_fluxes.values():
             flux.extend_to_endpoints(self.times, start_time, end_time)
-        self.extend_times_to_endpoints(start_time, end_time)
+        self._extend_times_to_endpoints(start_time, end_time)
 
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:

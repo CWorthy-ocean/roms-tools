@@ -328,7 +328,7 @@ class CDRForcing(BaseModel):
     _ds: xr.Dataset = None
 
     @model_validator(mode="after")
-    def validate(self):
+    def _validate(self):
         if self.start_time >= self.end_time:
             raise ValueError(
                 f"`start_time` ({self.start_time}) must be earlier than `end_time` ({self.end_time})."
@@ -774,7 +774,7 @@ class CDRForcing(BaseModel):
         return saved_filenames
 
     @model_serializer
-    def serialize(self) -> dict:
+    def _serialize(self) -> dict:
         return _to_dict(self)
 
     def to_yaml(self, filepath: str | Path) -> None:

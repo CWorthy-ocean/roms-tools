@@ -29,6 +29,8 @@ extensions = [
 ]
 myst_enable_extensions = ["dollarmath", "amsmath"]
 
+autodoc_show_inheritance = False
+
 numpydoc_show_class_members = True
 napolean_google_docstring = False
 napolean_numpy_docstring = True

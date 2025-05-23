@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from roms_tools.constants import UPPER_BOUND_THETA_B, UPPER_BOUND_THETA_S
 from roms_tools.vertical_coordinate import (
     compute_cs,
     compute_depth,
@@ -17,11 +18,15 @@ def test_compute_cs():
     assert cs.shape == sigma.shape
     assert np.all(cs <= 0) and np.all(cs >= -1)
 
-    with pytest.raises(ValueError, match="theta_s must be between 0 and 10"):
-        compute_cs(sigma, 15, 2)
+    with pytest.raises(
+        ValueError, match=f"theta_s must be between 0 and {UPPER_BOUND_THETA_S}"
+    ):
+        compute_cs(sigma, UPPER_BOUND_THETA_S + 1, theta_b)
 
-    with pytest.raises(ValueError, match="theta_b must be between 0 and 4"):
-        compute_cs(sigma, 5, 5)
+    with pytest.raises(
+        ValueError, match=f"theta_b must be between 0 and {UPPER_BOUND_THETA_B}"
+    ):
+        compute_cs(sigma, theta_s, UPPER_BOUND_THETA_B + 1)
 
 
 def test_sigma_stretch():

@@ -371,14 +371,14 @@ class CDRForcing(BaseModel):
             End datetime for the plot. If None, defaults to `self.end_time`.
         release_names : list[str], or str, optional
             A list of release names to plot.
-            If a string equal to INCLUDE_ALL_RELEASE_NAMES, all releases will be plotted.
-            Defaults to INCLUDE_ALL_RELEASE_NAMES.
+            If a string equal to "all", all releases will be plotted.
+            Defaults to "all".
 
         Raises
         ------
         ValueError
             If self.releases are not of type VolumeRelease.
-            If `release_names` is not a list of strings or INCLUDE_ALL_RELEASE_NAMES.
+            If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
         """
 
@@ -428,14 +428,14 @@ class CDRForcing(BaseModel):
             End datetime for the plot. If None, defaults to `self.end_time`.
         release_names : list[str], or str, optional
             A list of release names to plot.
-            If a string equal to INCLUDE_ALL_RELEASE_NAMES, all releases will be plotted.
-            Defaults to INCLUDE_ALL_RELEASE_NAMES.
+            If a string equal to "all", all releases will be plotted.
+            Defaults to "all".
 
         Raises
         ------
         ValueError
             If self.releases are not of type VolumeRelease.
-            If `release_names` is not a list of strings or INCLUDE_ALL_RELEASE_NAMES.
+            If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
             If `tracer_name` does not exist in self.ds["tracer_name"])
         """
@@ -499,14 +499,14 @@ class CDRForcing(BaseModel):
             End datetime for the plot. If None, defaults to `self.end_time`.
         release_names : list[str], or str, optional
             A list of release names to plot.
-            If a string equal to INCLUDE_ALL_RELEASE_NAMES, all releases will be plotted.
-            Defaults to INCLUDE_ALL_RELEASE_NAMES.
+            If a string equal to "all", all releases will be plotted.
+            Defaults to "all".
 
         Raises
         ------
         ValueError
             If self.releases are not of type TracerPerturbation.
-            If `release_names` is not a list of strings or INCLUDE_ALL_RELEASE_NAMES.
+            If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
             If `tracer_name` does not exist in self.ds["tracer_name"])
         """

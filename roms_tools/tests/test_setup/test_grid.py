@@ -8,7 +8,11 @@ import xarray as xr
 
 from conftest import calculate_file_hash
 from roms_tools import Grid
-from roms_tools.constants import MAXIMUM_GRID_SIZE
+from roms_tools.constants import (
+    MAXIMUM_GRID_SIZE,
+    UPPER_BOUND_THETA_B,
+    UPPER_BOUND_THETA_S,
+)
 from roms_tools.download import download_test_data
 
 
@@ -449,9 +453,7 @@ def test_invalid_theta_s_value():
             center_lat=55,
             rot=10,
             N=3,
-            theta_s=11.0,  # Invalid value, should be 0 < theta_s <= 10
-            theta_b=2.0,
-            hc=250.0,
+            theta_s=UPPER_BOUND_THETA_S + 1,
         )
 
 
@@ -467,9 +469,7 @@ def test_invalid_theta_b_value():
             center_lat=55,
             rot=10,
             N=3,
-            theta_s=5.0,
-            theta_b=5.0,  # Invalid value, should be 0 < theta_b <= 4
-            hc=250.0,
+            theta_b=UPPER_BOUND_THETA_B + 1,
         )
 
 

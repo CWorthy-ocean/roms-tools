@@ -141,19 +141,23 @@ class SurfaceForcing:
         data.apply_lateral_fill()
 
         self._set_variable_info(data)
-        var_names = self.variable_info.keys()
+        var_names = {
+            var: {"name": name}
+            for d in [data.var_names, data.opt_var_names]
+            for var, name in d.items()
+            if name in data.ds.data_vars
+        }
 
         processed_fields = {}
         # lateral regridding
         lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
         for var_name in var_names:
-            if var_name in data.var_names.keys():
-                processed_fields[var_name] = lateral_regrid.apply(
-                    data.ds[data.var_names[var_name]]
-                )
+            processed_fields[var_name] = lateral_regrid.apply(
+                data.ds[var_names[var_name]["name"]]
+            )
 
         # rotation of velocities
-        if "uwnd" in self.variable_info and "vwnd" in self.variable_info:
+        if "uwnd" in processed_fields and "vwnd" in processed_fields:
             processed_fields["uwnd"], processed_fields["vwnd"] = rotate_velocities(
                 processed_fields["uwnd"],
                 processed_fields["vwnd"],

@@ -3,6 +3,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 
@@ -546,6 +547,19 @@ def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
     xr.testing.assert_allclose(
         sfc_forcing.ds.pco2_air, sfc_forcing.ds.pco2_air_alt, rtol=1.0e-5
     )
+
+
+def test_computed_missing_optional_fields(bgc_surface_forcing_from_unified_climatology):
+    ds = bgc_surface_forcing_from_unified_climatology.ds
+
+    # Use tight tolerances because 'nox' and 'nhy' can have values order 1e-12
+
+    # 'nhy' was missing in the source data and should have been filled with a constant default value
+    assert np.allclose(
+        ds.nhy.std(), 0.0, rtol=1e-13, atol=1e-13
+    ), "NHy should be constant across space and time"
+    # 'nox' was present in the source data and should show spatial or temporal variability
+    assert ds.nox.std() > 1e-13, "NOx should vary across space and time"
 
 
 def test_determine_usage_coarse_grid():

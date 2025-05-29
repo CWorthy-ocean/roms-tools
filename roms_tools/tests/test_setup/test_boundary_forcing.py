@@ -474,6 +474,25 @@ def test_correct_depth_coords_zero_zeta(boundary_forcing_fixture, request, use_d
         )
 
 
+def test_computed_missing_optional_fields(
+    bgc_boundary_forcing_from_unified_climatology,
+):
+    ds = bgc_boundary_forcing_from_unified_climatology.ds
+
+    # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
+
+    # 'DOCr' was missing in the source data and should have been filled with a constant default value
+    for direction in ["south", "east", "north", "west"]:
+        assert np.allclose(
+            ds[f"DOCr_{direction}"].std(), 0.0, rtol=1e-10, atol=1e-10
+        ), "DOCr should be constant across space and time"
+    # 'DOC' was present in the source data and should show spatial or temporal variability
+    for direction in ["south", "east", "north", "west"]:
+        assert (
+            ds[f"DOC_{direction}"].std() > 1e-10
+        ), "DOC should vary across space and time"
+
+
 @pytest.mark.parametrize(
     "boundary_forcing_fixture",
     [

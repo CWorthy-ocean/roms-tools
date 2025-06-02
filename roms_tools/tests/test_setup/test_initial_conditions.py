@@ -3,6 +3,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
@@ -442,6 +443,13 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
     initial_conditions.plot(var_name="zeta")
     initial_conditions.plot(var_name="ubar")
     initial_conditions.plot(var_name="vbar")
+
+    # Test that passing a matplotlib.axes.Axes works
+    fig, ax = plt.subplots(1, 1)
+    initial_conditions.plot(var_name="temp", s=0, ax=ax)
+    initial_conditions.plot(var_name="temp", eta=0, ax=ax)
+    initial_conditions.plot(var_name="temp", s=0, xi=0, ax=ax)
+    initial_conditions.plot(var_name="zeta", ax=ax)
 
 
 @pytest.mark.parametrize(

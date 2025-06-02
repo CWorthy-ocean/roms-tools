@@ -17,7 +17,7 @@ from pydantic import (
 from pydantic_core.core_schema import ValidationInfo
 from typing_extensions import Annotated
 
-from roms_tools.setup.utils import get_tracer_defaults
+from roms_tools.setup.utils import get_tracer_defaults, get_tracer_metadata_dict
 
 NonNegativeFloat = Annotated[float, Ge(0)]
 
@@ -398,6 +398,11 @@ class VolumeRelease(Release):
             conc.extend_to_endpoints(self.times, start_time, end_time)
         self._extend_times_to_endpoints(start_time, end_time)
 
+    @staticmethod
+    def get_tracer_metadata():
+        """Returns long names and expected units for the tracer concentrations."""
+        return get_tracer_metadata_dict(include_bgc=True, with_flux_units=False)
+
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
@@ -503,6 +508,11 @@ class TracerPerturbation(Release):
         for flux in self.tracer_fluxes.values():
             flux.extend_to_endpoints(self.times, start_time, end_time)
         self._extend_times_to_endpoints(start_time, end_time)
+
+    @staticmethod
+    def get_tracer_metadata():
+        """Returns long names and expected units for the tracer fluxes."""
+        return get_tracer_metadata_dict(include_bgc=True, with_flux_units=True)
 
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:

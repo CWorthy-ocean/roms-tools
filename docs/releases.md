@@ -4,6 +4,7 @@
 
 ### New Features
 
+* Set BGC tracers in rivers to non-zero default values ([#326](https://github.com/CWorthy-ocean/roms-tools/pull/326))
 * Add `CDRForcing` as a unified interface for CDR releases with and without volume flux ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Introduce `TracerPerturbation` for tracer-only CDR scenarios ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
 * Add `.plot_tracer_flux()` method for visualizing tracer flux time series ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))

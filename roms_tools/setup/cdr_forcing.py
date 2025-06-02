@@ -789,10 +789,16 @@ class CDRForcing(BaseModel):
             The path to the YAML file where the parameters will be saved.
         """
 
-        # Serialize object into dictionary
         forcing_dict = self.model_dump()
 
-        # Write to YAML
+        if self.release_type == ReleaseType.volume:
+            metadata = VolumeRelease.get_tracer_metadata()
+        elif self.release_type == ReleaseType.tracer_perturbation:
+            metadata = TracerPerturbation.get_tracer_metadata()
+        else:
+            metadata = {}
+        forcing_dict["CDRForcing"]["_tracer_metadata"] = metadata
+
         _write_to_yaml(forcing_dict, filepath)
 
     @classmethod
@@ -813,6 +819,7 @@ class CDRForcing(BaseModel):
 
         grid = Grid.from_yaml(filepath)
         params = _from_yaml(cls, filepath)
+        params.pop("_tracer_metadata", None)
 
         return cls(grid=grid, **params)
 

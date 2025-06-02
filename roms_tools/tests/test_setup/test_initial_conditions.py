@@ -404,6 +404,21 @@ def test_interpolation_from_climatology(use_dask):
     )
 
 
+def test_computed_missing_optional_fields(
+    initial_conditions_with_unified_bgc_from_climatology,
+):
+    ds = initial_conditions_with_unified_bgc_from_climatology.ds
+
+    # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
+
+    # 'DOCr' was missing in the source data and should have been filled with a constant default value
+    assert np.allclose(
+        ds.DOCr.std(), 0.0, rtol=1e-10, atol=1e-10
+    ), "DOCr should be constant across space and time"
+    # 'DOC' was present in the source data and should show spatial or temporal variability
+    assert ds.DOC.std() > 1e-10, "DOC should vary across space and time"
+
+
 @pytest.mark.parametrize(
     "initial_conditions_fixture",
     [

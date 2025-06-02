@@ -26,8 +26,11 @@
 ### Documentation
 
 * Update example notebook demonstrating new `CDRForcing` workflow and release configuration ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))
+* Example notebooks now use updated unified BGC datasets ([#320](https://github.com/CWorthy-ocean/roms-tools/pull/320))
 
 ### Bugfixes
+
+* Fix handling of optional variables in Unified BGC datasets ([#320](https://github.com/CWorthy-ocean/roms-tools/pull/320))
 
 ## v2.7.0
 

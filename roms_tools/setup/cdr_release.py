@@ -135,7 +135,6 @@ class Flux(ValueArray):
         times : list
             List of datetime-like time points.
         start_time : datetime-like
-            Start of the interval to cover.
         end_time : datetime-like
             End of the interval to cover.
 
@@ -267,6 +266,10 @@ class Release(BaseModel):
                 self.times.insert(0, start_time)
             if self.times[-1] < end_time:
                 self.times.append(end_time)
+
+    @staticmethod
+    def get_tracer_metadata():
+        return {}
 
 
 class VolumeRelease(Release):

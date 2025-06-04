@@ -790,13 +790,7 @@ class CDRForcing(BaseModel):
         """
 
         forcing_dict = self.model_dump()
-
-        if self.release_type == ReleaseType.volume:
-            metadata = VolumeRelease.get_tracer_metadata()
-        elif self.release_type == ReleaseType.tracer_perturbation:
-            metadata = TracerPerturbation.get_tracer_metadata()
-        else:
-            metadata = {}
+        metadata = self.releases[0].get_tracer_metadata()
         forcing_dict["CDRForcing"]["_tracer_metadata"] = metadata
 
         _write_to_yaml(forcing_dict, filepath)

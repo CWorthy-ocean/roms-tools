@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Annotated, Iterator
 
 import cartopy.crs as ccrs
+import gcm_filters
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -35,6 +37,7 @@ from roms_tools.setup.utils import (
     add_tracer_metadata_to_ds,
     convert_to_relative_days,
     gc_dist,
+    get_target_coords,
 )
 from roms_tools.utils import (
     _generate_coordinate_range,
@@ -105,8 +108,16 @@ class ReleaseCollector(RootModel):
     def __iter__(self) -> Iterator[Release]:
         return iter(self.root)
 
-    def __getitem__(self, item) -> Release:
-        return self.root[item]
+    def __getitem__(self, item: int | str) -> Release:
+        if isinstance(item, int):
+            return self.root[item]
+        elif isinstance(item, str):
+            for release in self.root:
+                if release.name == item:
+                    return release
+            raise KeyError(f"Release named '{item}' not found.")
+        else:
+            raise TypeError(f"Invalid key type: {type(item)}. Must be int or str.")
 
     @model_validator(mode="before")
     @classmethod
@@ -567,8 +578,8 @@ class CDRForcing(BaseModel):
         ax.set(title=title, ylabel=ylabel, xlabel="time")
         ax.set_xlim([start, end])
 
-    def plot_location_top_view(self, release_names="all"):
-        """Plot the top-down view of release locations.
+    def plot_location_centers(self, release_names="all"):
+        """Plot centers of release locations in top-down view.
 
         Parameters
         ----------
@@ -621,12 +632,10 @@ class CDRForcing(BaseModel):
         colors = _get_release_colors(valid_release_names)
 
         for name in release_names:
-            ncdr = np.where(self.ds["release_name"].values == name)[0].item()
-
             # transform coordinates to projected space
             transformed_lon, transformed_lat = trans.transform_point(
-                self.ds.cdr_lon.isel(ncdr=ncdr).item(),
-                self.ds.cdr_lat.isel(ncdr=ncdr).item(),
+                self.releases[name].lon,
+                self.releases[name].lat,
                 proj,
             )
 
@@ -643,12 +652,12 @@ class CDRForcing(BaseModel):
         ax.set_title("Release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
-    def plot_location_side_view(self, release_name: str = None):
-        """Plot the release location from a side view, showing bathymetry sections along
-        both fixed longitude and latitude.
+    def plot_location(self, release_name: str):
+        """Plot the release location from a top and side view.
 
-        This method creates two plots:
+        This method creates three plots:
 
+        - A top view of the release distribution.
         - A bathymetry section along a fixed longitude (latitudinal view),
           with the release location marked by an "x".
         - A bathymetry section along a fixed latitude (longitudinal view),
@@ -656,17 +665,14 @@ class CDRForcing(BaseModel):
 
         Parameters
         ----------
-        release_name : str, optional
-            Name of the release to plot. If only one release is available,
-            it is used by default. If multiple releases are available, this must be specified.
+        release_name : str
+            Name of the release to plot.
 
         Raises
         ------
         ValueError
-
             If `self.grid` is not set.
             If the specified `release_name` does not exist in `self.releases`.
-            If no `release_name` is provided when multiple releases are available.
         """
         if self.grid is None:
             raise ValueError(
@@ -674,16 +680,8 @@ class CDRForcing(BaseModel):
             )
 
         valid_release_names = [r.name for r in self.releases]
-
-        if release_name is None:
-            if len(valid_release_names) == 1:
-                release_name = valid_release_names[0]
-            else:
-                raise ValueError(
-                    f"Multiple releases found: {valid_release_names}. Please specify a single release via `release_name` to plot."
-                )
-
         _validate_release_input(release_name, valid_release_names, list_allowed=False)
+        release = self.releases[release_name]
 
         # Prepare grid coordinates
         lon_deg = self.grid.ds.lon_rho
@@ -691,53 +689,51 @@ class CDRForcing(BaseModel):
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
+        # Setup figure
+        fig = plt.figure(figsize=(12, 5.5))
+        gs = gridspec.GridSpec(nrows=2, ncols=2, figure=fig)
+        trans = _get_projection(lon_deg, lat_deg)
+        ax0 = fig.add_subplot(gs[:, 0], projection=trans)
+        ax1 = fig.add_subplot(gs[0, 1])
+        ax2 = fig.add_subplot(gs[1, 1])
+
+        # Top down view plot
+        if release.hsc > 0:
+            field = _map_horizontal_gaussian(
+                self.grid, release.lat, release.lon, release.hsc
+            )
+        else:
+            field = xr.zeros_like(self.grid.ds.mask_rho)
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
+        cmap = plt.colormaps.get_cmap("RdPu")
+        kwargs = {"cmap": cmap}
+
+        _plot(field, kwargs=kwargs, ax=ax0, c=None, add_colorbar=False)
+
+        # Side view plots
         resolution = self.grid._infer_nominal_horizontal_resolution()
         h = self.grid.ds.h.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-        ncdr = np.where(self.ds["release_name"].values == release_name)[0].item()
-
-        # Set up plot
-        fig, axs = plt.subplots(2, 1, figsize=(7, 8))
+        color = _get_release_colors(valid_release_names)[release_name]
 
         # Plot along fixed longitude
-        _plot_bathymetry_section(
-            ax=axs[0],
+        _plot_section(
+            release=release,
             h=h,
-            dim="lon",
-            fixed_val=self.ds.cdr_lon.isel(ncdr=ncdr),
-            coord_deg=lat_deg,
             resolution=resolution,
-            title=f"Longitude: {self.ds.cdr_lon.isel(ncdr=ncdr).item()}°E",
-        )
-
-        colors = _get_release_colors(valid_release_names)
-
-        axs[0].plot(
-            self.ds.cdr_lat.isel(ncdr=ncdr),
-            self.ds.cdr_dep.isel(ncdr=ncdr),
-            color=colors[release_name],
-            marker="x",
-            markersize=8,
-            markeredgewidth=2,
+            coords={"lat": lat_deg, "lon": release.lon},
+            color=color,
+            ax=ax1,
         )
 
         # Plot along fixed latitude
-        _plot_bathymetry_section(
-            ax=axs[1],
+        _plot_section(
+            release=release,
             h=h,
-            dim="lat",
-            fixed_val=self.ds.cdr_lat.isel(ncdr=ncdr),
-            coord_deg=lon_deg,
             resolution=resolution,
-            title=f"Latitude: {self.ds.cdr_lat.isel(ncdr=ncdr).item()}°N",
-        )
-        axs[1].plot(
-            self.ds.cdr_lon.isel(ncdr=ncdr),
-            self.ds.cdr_dep.isel(ncdr=ncdr),
-            color=colors[release_name],
-            marker="x",
-            markersize=8,
-            markeredgewidth=2,
+            coords={"lat": release.lat, "lon": lon_deg},
+            color=color,
+            ax=ax2,
         )
 
         # Adjust layout and title
@@ -985,14 +981,103 @@ def _validate_release_location(grid, release: Release):
         )
 
 
+def _map_horizontal_gaussian(grid, lat, lon, hsc):
+
+    # Find closest grid cell center
+    target_coords = get_target_coords(grid)
+    if target_coords["straddle"]:
+        lon = xr.where(lon > 180, lon - 360, lon)
+    else:
+        lon = xr.where(lon < 0, lon + 360, lon)
+    dist = gc_dist(target_coords["lon"], target_coords["lat"], lon, lat)
+    dist_min = dist.min(dim=["eta_rho", "xi_rho"])
+
+    # Find the indices of the closest grid cell
+    indices = np.where(dist == dist_min)
+    eta_rho = indices[0][0]
+    xi_rho = indices[1][0]
+
+    # Deploy delta function at center of Gaussian
+    delta = xr.zeros_like(grid.ds.mask_rho)
+    delta[eta_rho, xi_rho] = 1
+
+    # mean dx in grid
+    dx = (((1 / grid.ds.pm).mean() + (1 / grid.ds.pn).mean()) / 2).item()
+
+    # since GCM-Filters assumes periodic domain, we extend the domain by one grid cell in each dimension
+    # and set that margin to land
+    margin_mask = xr.concat(
+        [grid.ds.mask_rho, 0 * grid.ds.mask_rho.isel(eta_rho=-1)], dim="eta_rho"
+    )
+    margin_mask = xr.concat(
+        [margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
+    )
+    delta_extended = xr.concat([delta, delta.isel(eta_rho=-1)], dim="eta_rho")
+    delta_extended = xr.concat(
+        [delta_extended, delta_extended.isel(xi_rho=-1)], dim="xi_rho"
+    )
+
+    # The GCM-Filters Gaussian filter kernel uses a Gaussian with standard deviation filter_scale/sqrt(12)
+    # because this standard deviation matches the standard deviation of a boxcar kernel with total width equal to factor.
+    filter_scale = hsc / dx * np.sqrt(12)
+    filter = gcm_filters.Filter(
+        filter_scale=filter_scale,
+        dx_min=1,
+        filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+        grid_type=gcm_filters.GridType.REGULAR_WITH_LAND,
+        grid_vars={"wet_mask": margin_mask},
+    )
+
+    delta_smooth = filter.apply(delta_extended, dims=["eta_rho", "xi_rho"])
+    delta_smooth = delta_smooth.isel(eta_rho=slice(None, -1), xi_rho=slice(None, -1))
+
+    return delta_smooth
+
+
+def _plot_section(release: Release, h, resolution, coords, color, ax: Axes) -> None:
+    """Plots release distribution along depth and the specified horizontal direction.
+
+    Parameters
+    ----------
+    dim : str
+        The dimension along which to plot the section, either "lat" or "lon".
+    ax : matplotlib.axes.Axes
+        The axis on which the plot will be drawn.
+
+    Returns
+    -------
+    None
+        The function does not return anything. It directly plots the bathymetry section on the provided axis.
+    """
+    if isinstance(coords["lat"], float):
+        loc = release.lon
+    elif isinstance(coords["lon"], float):
+        loc = release.lat
+    else:
+        raise ValueError("Either 'lat' or 'lon' must be a float.")
+
+    _plot_bathymetry_section(
+        ax=ax,
+        h=h,
+        coords=coords,
+        resolution=resolution,
+    )
+
+    ax.plot(
+        loc,
+        release.depth,
+        color=color,
+        marker="x",
+        markersize=8,
+        markeredgewidth=2,
+    )
+
+
 def _plot_bathymetry_section(
     ax: Axes,
     h: xr.DataArray,
-    dim: str,
-    fixed_val: float,
-    coord_deg: xr.DataArray,
+    coords,
     resolution: float,
-    title: str,
 ) -> None:
     """Plots a bathymetry section along a fixed latitude or longitude.
 
@@ -1004,31 +1089,34 @@ def _plot_bathymetry_section(
     h : xarray.DataArray
         The bathymetry data to plot.
 
-    dim : str
-        The dimension along which to plot the section, either "lat" or "lon".
-
-    fixed_val : float
-        The fixed value of latitude or longitude for the section.
-
-    coord_deg : xarray.DataArray
-        The array of latitude or longitude coordinates.
+    coords :
 
     resolution : float
         The resolution at which to generate the coordinate range.
-
-    title : str
-        The title for the plot.
 
     Returns
     -------
     None
         The function does not return anything. It directly plots the bathymetry section on the provided axis.
     """
+    if isinstance(coords["lat"], float):
+        dim = "lat"
+        var_name = "lon"
+        xlabel = "Longitude [°E]"
+        title = f"Latitude: {coords['lat']}°N"
+    elif isinstance(coords["lon"], float):
+        dim = "lon"
+        var_name = "lat"
+        xlabel = "Latitude [°N]"
+        title = f"Longitude: {coords['lon']}°E"
+    else:
+        raise ValueError("Either 'lat' or 'lon' must be a float.")
+
     # Determine coordinate names and build target range
+    coord_deg = coords[var_name]
     var_range = _generate_coordinate_range(
         coord_deg.min().values, coord_deg.max().values, resolution
     )
-    var_name = "lat" if dim == "lon" else "lon"
     range_da = xr.DataArray(
         var_range,
         dims=[var_name],
@@ -1036,7 +1124,7 @@ def _plot_bathymetry_section(
     )
 
     # Construct target coordinates for regridding
-    target_coords = {dim: [fixed_val], var_name: range_da}
+    target_coords = {dim: [coords[dim]], var_name: range_da}
     regridder = LateralRegridFromROMS(h, target_coords)
     section = regridder.apply(h)
     section, _ = _remove_edge_nans(section, var_name)
@@ -1045,6 +1133,4 @@ def _plot_bathymetry_section(
     section.plot(ax=ax, color="k")
     ax.fill_between(section[var_name], section.squeeze(), y2=0, color="#deebf7")
     ax.invert_yaxis()
-    ax.set_xlabel("Latitude [°N]" if var_name == "lat" else "Longitude [°E]")
-    ax.set_ylabel("Depth [m]")
-    ax.set_title(title)
+    ax.set(xlabel=xlabel, ylabel="Depth [m]", title=title)

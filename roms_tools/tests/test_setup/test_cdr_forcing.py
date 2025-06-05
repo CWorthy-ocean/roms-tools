@@ -794,12 +794,12 @@ class TestCDRForcing:
             with pytest.raises(
                 ValueError, match="A grid must be provided for plotting"
             ):
-                cdr.plot_location_centers("all")
+                cdr.plot_locations("all")
 
             with pytest.raises(
                 ValueError, match="A grid must be provided for plotting"
             ):
-                cdr.plot_location("first_release")
+                cdr.plot_distribution("first_release")
 
     def test_plot_volume_release(self):
 
@@ -811,10 +811,8 @@ class TestCDRForcing:
             cdr.plot_tracer_concentration("ALK")
             cdr.plot_tracer_concentration("DIC")
 
-        self.volume_release_cdr_forcing.plot_location_centers()
-        self.volume_release_cdr_forcing.plot_location_centers(
-            release_names=["first_release"]
-        )
+        self.volume_release_cdr_forcing.plot_locations()
+        self.volume_release_cdr_forcing.plot_locations(release_names=["first_release"])
 
     def test_plot_tracer_perturbation(self):
 
@@ -825,33 +823,31 @@ class TestCDRForcing:
             cdr.plot_tracer_flux("ALK")
             cdr.plot_tracer_flux("DIC")
 
-        self.tracer_perturbation_cdr_forcing.plot_location_centers()
-        self.tracer_perturbation_cdr_forcing.plot_location_centers(
+        self.tracer_perturbation_cdr_forcing.plot_locations()
+        self.tracer_perturbation_cdr_forcing.plot_locations(
             release_names=["first_release"]
         )
 
     @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-    def test_plot_location(self):
+    def test_plot_distribution(self):
 
-        self.volume_release_cdr_forcing.plot_location("first_release")
-        self.tracer_perturbation_cdr_forcing.plot_location("first_release")
+        self.volume_release_cdr_forcing.plot_distribution("first_release")
+        self.tracer_perturbation_cdr_forcing.plot_distribution("first_release")
 
     def test_plot_more_errors(self):
         """Test that error is raised on bad plot args or ambiguous release."""
 
         with pytest.raises(ValueError, match="Invalid release"):
-            self.volume_release_cdr_forcing.plot_location(release_name="fake")
+            self.volume_release_cdr_forcing.plot_distribution(release_name="fake")
 
         with pytest.raises(ValueError, match="Invalid releases"):
-            self.volume_release_cdr_forcing.plot_location_centers(
-                release_names=["fake"]
-            )
+            self.volume_release_cdr_forcing.plot_locations(release_names=["fake"])
 
         with pytest.raises(ValueError, match="should be a string"):
-            self.volume_release_cdr_forcing.plot_location_centers(release_names=4)
+            self.volume_release_cdr_forcing.plot_locations(release_names=4)
 
         with pytest.raises(ValueError, match="list must be strings"):
-            self.volume_release_cdr_forcing.plot_location_centers(release_names=[4])
+            self.volume_release_cdr_forcing.plot_locations(release_names=[4])
 
     def test_cdr_forcing_save(self, tmp_path):
         """Test save method."""

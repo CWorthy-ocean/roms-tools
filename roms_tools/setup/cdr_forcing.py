@@ -578,7 +578,7 @@ class CDRForcing(BaseModel):
         ax.set(title=title, ylabel=ylabel, xlabel="time")
         ax.set_xlim([start, end])
 
-    def plot_location_centers(self, release_names="all"):
+    def plot_locations(self, release_names="all"):
         """Plot centers of release locations in top-down view.
 
         Parameters
@@ -652,7 +652,7 @@ class CDRForcing(BaseModel):
         ax.set_title("Release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
-    def plot_location(self, release_name: str):
+    def plot_distribution(self, release_name: str):
         """Plot the release location from a top and side view.
 
         This method creates three plots:

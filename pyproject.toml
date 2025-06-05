@@ -27,7 +27,7 @@ dependencies = [
     "cartopy",
     "packaging",
     "scipy",
-    "gcm_filters",
+    "gcm_filters >=0.5.1",
     "netcdf4",
     "PyYAML",
     "pyamg",

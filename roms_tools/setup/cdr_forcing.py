@@ -698,12 +698,9 @@ class CDRForcing(BaseModel):
         ax2 = fig.add_subplot(gs[1, 1])
 
         # Top down view plot
-        if release.hsc > 0:
-            field = _map_horizontal_gaussian(
-                self.grid, release.lat, release.lon, release.hsc
-            )
-        else:
-            field = xr.zeros_like(self.grid.ds.mask_rho)
+        field = _map_horizontal_gaussian(
+            self.grid, release.lat, release.lon, release.hsc
+        )
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         cmap = plt.colormaps.get_cmap("RdPu")

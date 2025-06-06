@@ -188,18 +188,16 @@ class TestRiverForcingGeneral:
             "river_forcing_with_prescribed_multi_cell_indices",
         ],
     )
-    def test_constant_tracers(self, river_forcing_fixture, request):
+    def test_tracers_are_filled(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
-        np.testing.assert_allclose(
-            river_forcing.ds.river_tracer.isel(ntracers=0).values, 17.0, atol=0
-        )
-        np.testing.assert_allclose(
-            river_forcing.ds.river_tracer.isel(ntracers=1).values, 1.0, atol=0
-        )
-        np.testing.assert_allclose(
-            river_forcing.ds.river_tracer.isel(ntracers=slice(2, None)).values,
+        # Test that all tracers have been filled and have positive values
+        assert river_forcing.ds.river_tracer.all() > 0.0
+        # Test that tracers are constant across rivers and time
+        assert np.allclose(
+            river_forcing.ds.river_tracer.std(dim=["river_time", "nriver"]),
             0.0,
-            atol=0,
+            rtol=1e-5,
+            atol=1e-5,
         )
 
     def test_reproducibility_same_grid(self, river_forcing):

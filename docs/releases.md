@@ -4,6 +4,7 @@
 
 ### New Features
 
+* Fix bug for `grid = Grid.from_file()` --> `grid.to_yaml()` sequence ([#334](https://github.com/CWorthy-ocean/roms-tools/pull/334))
 * Add `.get_tracer_metadata()` method to `VolumeRelease` and `TracerPerturbation` to allow users to inspect expected tracer units ahead of time ([#327](https://github.com/CWorthy-ocean/roms-tools/pull/327))
 * Include tracer units in CDR forcing YAML files ([#327](https://github.com/CWorthy-ocean/roms-tools/pull/327))
 * Add `CDRForcing` as a unified interface for CDR releases with and without volume flux ([#301](https://github.com/CWorthy-ocean/roms-tools/pull/301))

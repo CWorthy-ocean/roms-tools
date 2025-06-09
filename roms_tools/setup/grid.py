@@ -632,9 +632,9 @@ class Grid:
         grid.nx = ds.sizes["xi_rho"] - 2
         grid.ny = ds.sizes["eta_rho"] - 2
         if "center_lon" in ds.attrs:
-            center_lon = ds.attrs["center_lon"]
+            center_lon = float(ds.attrs["center_lon"])
         elif "tra_lon" in ds:
-            center_lon = extract_single_value(ds["tra_lon"])
+            center_lon = float(extract_single_value(ds["tra_lon"]))
         else:
             raise ValueError(
                 "Missing grid information: 'center_lon' attribute or 'tra_lon' variable "
@@ -642,9 +642,9 @@ class Grid:
             )
         grid.center_lon = center_lon
         if "center_lat" in ds.attrs:
-            center_lat = ds.attrs["center_lat"]
+            center_lat = float(ds.attrs["center_lat"])
         elif "tra_lat" in ds:
-            center_lat = extract_single_value(ds["tra_lat"])
+            center_lat = float(extract_single_value(ds["tra_lat"]))
         else:
             raise ValueError(
                 "Missing grid information: 'center_lat' attribute or 'tra_lat' variable "
@@ -652,9 +652,9 @@ class Grid:
             )
         grid.center_lat = center_lat
         if "rot" in ds.attrs:
-            rot = ds.attrs["rot"]
+            rot = float(ds.attrs["rot"])
         elif "rotate" in ds:
-            rot = extract_single_value(ds["rotate"])
+            rot = float(extract_single_value(ds["rotate"]))
         else:
             raise ValueError(
                 "Missing grid information: 'rot' attribute or 'rotate' variable "
@@ -672,7 +672,7 @@ class Grid:
                 if attr == "topography_source":
                     a = {"name": ds.attrs[attr]}
                 else:
-                    a = ds.attrs[attr]
+                    a = float(ds.attrs[attr])
             else:
                 a = None
             object.__setattr__(grid, attr, a)

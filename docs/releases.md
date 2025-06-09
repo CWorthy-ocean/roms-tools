@@ -5,6 +5,7 @@
 ### New Features
 
 * Handle duplicate time entries in source data ([#336](https://github.com/CWorthy-ocean/roms-tools/pull/336))
+* Fix bug for `grid = Grid.from_file()` --> `grid.to_yaml()` sequence ([#334](https://github.com/CWorthy-ocean/roms-tools/pull/334))
 * Set BGC tracers in rivers to non-zero default values ([#326](https://github.com/CWorthy-ocean/roms-tools/pull/326))
 * Add `.get_tracer_metadata()` method to `VolumeRelease` and `TracerPerturbation` to allow users to inspect expected tracer units ahead of time ([#327](https://github.com/CWorthy-ocean/roms-tools/pull/327))
 * Include tracer units in CDR forcing YAML files ([#327](https://github.com/CWorthy-ocean/roms-tools/pull/327))

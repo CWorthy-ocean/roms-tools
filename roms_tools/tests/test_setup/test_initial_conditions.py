@@ -45,6 +45,43 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
 
 
+def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
+    """Test the creation of the InitialConditions object with duplicates in source data
+    works as expected."""
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+    )
+
+    initial_conditions = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2012, 1, 1),
+        source={"path": [fname1, fname2], "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+
+    initial_conditions_with_duplicates_in_source_data = InitialConditions(
+        grid=grid,
+        ini_time=datetime(2012, 1, 1),
+        source={"path": [fname1, fname1, fname2], "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+
+    assert initial_conditions.ds.identical(
+        initial_conditions_with_duplicates_in_source_data.ds
+    )
+
+
 @pytest.mark.parametrize(
     "ic_fixture",
     [

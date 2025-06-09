@@ -11,7 +11,6 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.constants import NUM_TRACERS
 from roms_tools.plot import _get_projection, _plot
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
@@ -22,6 +21,7 @@ from roms_tools.setup.utils import (
     add_tracer_metadata_to_ds,
     gc_dist,
     get_target_coords,
+    get_tracer_defaults,
     get_variable_metadata,
     substitute_nans_by_fillvalue,
 )
@@ -280,49 +280,50 @@ class RiverForcing:
 
         ds = xr.Dataset()
 
+        # Tracer metadata
+        ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
+
+        # River volume
         river_volume = (
             data.ds[data.var_names["flux"]] * data.ds[data.var_names["ratio"]]
         ).astype(np.float32)
-        river_volume.attrs["long_name"] = "River volume flux"
-        river_volume.attrs["units"] = "m^3/s"
         river_volume = river_volume.rename(
             {data.dim_names["time"]: "river_time", data.dim_names["station"]: "nriver"}
         )
+        ds["river_volume"] = river_volume
+        ds["river_volume"].attrs["long_name"] = "River volume flux"
+        ds["river_volume"].attrs["units"] = "m^3/s"
 
-        name = data.ds[data.var_names["name"]].rename(
+        # River tracers
+        ds["river_tracer"] = xr.zeros_like(
+            ds.river_time.astype(np.float32) * ds.ntracers * ds.nriver, dtype=np.float32
+        )
+        ds["river_tracer"].attrs["long_name"] = "River tracer data"
+
+        defaults = get_tracer_defaults()
+        for ntracer in range(ds.ntracers.size):
+            tracer_name = ds.tracer_name[ntracer].item()
+            ds["river_tracer"].loc[{"ntracers": ntracer}] = defaults[tracer_name]
+
+        # River names
+        river_names = data.ds[data.var_names["name"]].rename(
             {data.dim_names["station"]: "nriver"}
         )
-        name.attrs["long_name"] = "River name"
-        river_volume.coords["river_name"] = name
+        river_names.attrs["long_name"] = "River name"
+        ds = ds.assign_coords({"river_name": river_names})
 
-        ds["river_volume"] = river_volume
-
+        # River IDs
         nriver = xr.DataArray(np.arange(1, len(ds.nriver) + 1), dims="nriver")
         nriver.attrs["long_name"] = "River ID (1-based Fortran indexing)"
         ds = ds.assign_coords({"nriver": nriver})
 
-        if self.include_bgc:
-            ntracers = NUM_TRACERS
-        else:
-            ntracers = 2
-        tracer_data = np.zeros(
-            (len(ds.river_time), ntracers, len(ds.nriver)), dtype=np.float32
+        # River time
+        ds["river_time"] = data.ds[data.dim_names["time"]].rename(
+            {"time": "river_time"}
         )
-        tracer_data[:, 0, :] = 17.0
-        tracer_data[:, 1, :] = 1.0
-        tracer_data[:, 2:, :] = 0.0
-
-        river_tracer = xr.DataArray(
-            tracer_data, dims=("river_time", "ntracers", "nriver")
-        )
-        river_tracer.attrs["long_name"] = "River tracer data"
-        ds["river_tracer"] = river_tracer
-        ds = add_tracer_metadata_to_ds(ds, self.include_bgc)
-
         ds, time = add_time_info_to_ds(
             ds, self.model_reference_date, self.climatology, time_name="river_time"
         )
-
         ds = ds.assign_coords({"river_time": time})
 
         return ds
@@ -420,8 +421,8 @@ class RiverForcing:
             The modified dataset with the "river_index" and "river_fraction" variables added.
         """
 
-        river_index = xr.zeros_like(self.grid.ds.h)
-        river_fraction = xr.zeros_like(self.grid.ds.h)
+        river_index = xr.zeros_like(self.grid.ds.h, dtype=np.float32)
+        river_fraction = xr.zeros_like(self.grid.ds.h, dtype=np.float32)
 
         for nriver in ds.nriver:
             river_name = str(ds.river_name.sel(nriver=nriver).values)

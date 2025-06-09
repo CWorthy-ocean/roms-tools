@@ -45,7 +45,7 @@ def test_initial_conditions_creation(ic_fixture, request):
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
 
 
-def test_initial_conditions_creation_with_duplicates(use_dask):
+def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
     """Test the creation of the InitialConditions object with duplicates in source data
     works as expected."""
 

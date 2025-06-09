@@ -58,7 +58,7 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     assert hasattr(boundary_forcing.ds, "apply_2d_horizontal_fill")
 
 
-def test_boundary_forcing_creation_with_duplicates(boundary_forcing, use_dask):
+def test_boundary_forcing_creation_with_duplicates(boundary_forcing: BoundaryForcing, use_dask: bool) -> None:
     """Test the creation of the BoundaryForcing object with duplicates in source data
     works as expected."""
 

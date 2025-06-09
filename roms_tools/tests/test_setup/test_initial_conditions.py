@@ -77,7 +77,7 @@ def test_initial_conditions_creation_with_duplicates(use_dask):
         use_dask=use_dask,
     )
 
-    initial_conditions.ds.identical(
+    assert initial_conditions.ds.identical(
         initial_conditions_with_duplicates_in_source_data.ds
     )
 

@@ -74,7 +74,7 @@ def test_boundary_forcing_creation_with_duplicates(boundary_forcing, use_dask):
         use_dask=use_dask,
     )
 
-    boundary_forcing.ds.identical(boundary_forcing_with_duplicates_in_source_data.ds)
+    assert boundary_forcing.ds.identical(boundary_forcing_with_duplicates_in_source_data.ds)
 
 
 @pytest.mark.parametrize(

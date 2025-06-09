@@ -3,6 +3,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
@@ -543,6 +544,11 @@ def test_boundary_forcing_plot(boundary_forcing_fixture, request):
         boundary_forcing.plot(var_name=f"zeta_{direction}")
         boundary_forcing.plot(var_name=f"vbar_{direction}")
         boundary_forcing.plot(var_name=f"ubar_{direction}")
+
+    # Test that passing a matplotlib.axes.Axes works
+    fig, ax = plt.subplots(1, 1)
+    boundary_forcing.plot(var_name=f"temp_{direction}", ax=ax)
+    boundary_forcing.plot(var_name=f"zeta_{direction}", ax=ax)
 
 
 @pytest.mark.parametrize(

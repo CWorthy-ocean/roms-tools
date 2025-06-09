@@ -34,7 +34,7 @@ def _load_data(
         If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
         Defaults to True.
     decode_times: bool, optional
-        If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
     force_combine_nested: bool, optional
         If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
@@ -148,6 +148,7 @@ def _load_data(
             ds = xr.open_mfdataset(
                 matching_files,
                 decode_times=decode_times,
+                decode_timedelta=decode_times,
                 chunks=chunks,
                 **combine_kwargs,
                 **kwargs,
@@ -161,7 +162,12 @@ def _load_data(
     else:
         ds_list = []
         for file in matching_files:
-            ds = xr.open_dataset(file, decode_times=decode_times, chunks=None)
+            ds = xr.open_dataset(
+                file,
+                decode_times=decode_times,
+                decode_timedelta=decode_times,
+                chunks=None,
+            )
             ds_list.append(ds)
 
         if kwargs["combine"] == "by_coords":

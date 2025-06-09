@@ -174,6 +174,9 @@ def _load_data(
     if "time" in dim_names and dim_names["time"] not in ds.dims:
         ds = ds.expand_dims(dim_names["time"])
 
+    if "time" in dim_names:
+        ds = ds.drop_duplicates(dim=dim_names["time"])
+
     return ds
 
 

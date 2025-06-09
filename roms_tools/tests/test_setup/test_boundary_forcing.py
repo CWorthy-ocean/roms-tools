@@ -58,6 +58,25 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     assert hasattr(boundary_forcing.ds, "apply_2d_horizontal_fill")
 
 
+def test_boundary_forcing_creation_with_duplicates(boundary_forcing, use_dask):
+    """Test the creation of the BoundaryForcing object with duplicates in source data
+    works as expected."""
+
+    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
+    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
+
+    boundary_forcing_with_duplicates_in_source_data = BoundaryForcing(
+        grid=boundary_forcing.grid,
+        start_time=boundary_forcing.start_time,
+        end_time=boundary_forcing.end_time,
+        source={"name": "GLORYS", "path": [fname1, fname1, fname2]},
+        apply_2d_horizontal_fill=boundary_forcing.apply_2d_horizontal_fill,
+        use_dask=use_dask,
+    )
+
+    boundary_forcing.ds.identical(boundary_forcing_with_duplicates_in_source_data.ds)
+
+
 @pytest.mark.parametrize(
     "boundary_forcing_fixture",
     [

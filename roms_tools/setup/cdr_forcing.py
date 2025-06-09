@@ -716,6 +716,7 @@ class CDRForcing(BaseModel):
         # Plot along fixed longitude
         _plot_section(
             release=release,
+            field=field,
             h=h,
             resolution=resolution,
             coords={"lat": lat_deg, "lon": release.lon},
@@ -726,6 +727,7 @@ class CDRForcing(BaseModel):
         # Plot along fixed latitude
         _plot_section(
             release=release,
+            field=field,
             h=h,
             resolution=resolution,
             coords={"lat": release.lat, "lon": lon_deg},
@@ -1032,7 +1034,9 @@ def _map_horizontal_gaussian(grid, lat, lon, hsc):
     return delta_smooth
 
 
-def _plot_section(release: Release, h, resolution, coords, color, ax: Axes) -> None:
+def _plot_section(
+    release: Release, field, h, resolution, coords, color, ax: Axes
+) -> None:
     """Plots release distribution along depth and the specified horizontal direction.
 
     Parameters
@@ -1041,49 +1045,6 @@ def _plot_section(release: Release, h, resolution, coords, color, ax: Axes) -> N
         The dimension along which to plot the section, either "lat" or "lon".
     ax : matplotlib.axes.Axes
         The axis on which the plot will be drawn.
-
-    Returns
-    -------
-    None
-        The function does not return anything. It directly plots the bathymetry section on the provided axis.
-    """
-    if isinstance(coords["lat"], float):
-        loc = release.lon
-    elif isinstance(coords["lon"], float):
-        loc = release.lat
-    else:
-        raise ValueError("Either 'lat' or 'lon' must be a float.")
-
-    _plot_bathymetry_section(
-        ax=ax,
-        h=h,
-        coords=coords,
-        resolution=resolution,
-    )
-
-    ax.plot(
-        loc,
-        release.depth,
-        color=color,
-        marker="x",
-        markersize=8,
-        markeredgewidth=2,
-    )
-
-
-def _plot_bathymetry_section(
-    ax: Axes,
-    h: xr.DataArray,
-    coords,
-    resolution: float,
-) -> None:
-    """Plots a bathymetry section along a fixed latitude or longitude.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        The axis on which the plot will be drawn.
-
     h : xarray.DataArray
         The bathymetry data to plot.
 
@@ -1098,11 +1059,13 @@ def _plot_bathymetry_section(
         The function does not return anything. It directly plots the bathymetry section on the provided axis.
     """
     if isinstance(coords["lat"], float):
+        loc = release.lon
         dim = "lat"
         var_name = "lon"
         xlabel = "Longitude [°E]"
         title = f"Latitude: {coords['lat']}°N"
     elif isinstance(coords["lon"], float):
+        loc = release.lat
         dim = "lon"
         var_name = "lat"
         xlabel = "Latitude [°N]"
@@ -1121,7 +1084,7 @@ def _plot_bathymetry_section(
         attrs={"units": "°N" if var_name == "lat" else "°E"},
     )
 
-    # Construct target coordinates for regridding
+    # Regrid horizontal fields
     target_coords = {dim: [coords[dim]], var_name: range_da}
     regridder = LateralRegridFromROMS(h, target_coords)
     section = regridder.apply(h)
@@ -1132,3 +1095,12 @@ def _plot_bathymetry_section(
     ax.fill_between(section[var_name], section.squeeze(), y2=0, color="#deebf7")
     ax.invert_yaxis()
     ax.set(xlabel=xlabel, ylabel="Depth [m]", title=title)
+
+    ax.plot(
+        loc,
+        release.depth,
+        color=color,
+        marker="x",
+        markersize=8,
+        markeredgewidth=2,
+    )

@@ -1001,14 +1001,15 @@ def _map_horizontal_gaussian(grid, lat, lon, hsc):
     delta = xr.zeros_like(grid.ds.mask_rho)
     delta[eta_rho, xi_rho] = 1
 
+    # Grid cell area
+    area = 1 / (grid.ds.pm * grid.ds.pn)
     # mean dx in grid
     dx = (((1 / grid.ds.pm).mean() + (1 / grid.ds.pn).mean()) / 2).item()
 
     # since GCM-Filters assumes periodic domain, we extend the domain by one grid cell in each dimension
     # and set that margin to land
-    margin_mask = xr.concat(
-        [grid.ds.mask_rho, 0 * grid.ds.mask_rho.isel(eta_rho=-1)], dim="eta_rho"
-    )
+    mask = xr.ones_like(grid.ds.mask_rho)  # ignore land here, renormalize later
+    margin_mask = xr.concat([mask, 0 * mask.isel(eta_rho=-1)], dim="eta_rho")
     margin_mask = xr.concat(
         [margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
     )
@@ -1016,7 +1017,10 @@ def _map_horizontal_gaussian(grid, lat, lon, hsc):
     delta_extended = xr.concat(
         [delta_extended, delta_extended.isel(xi_rho=-1)], dim="xi_rho"
     )
-
+    area_extended = xr.concat([area, area.isel(eta_rho=-1)], dim="eta_rho")
+    area_extended = xr.concat(
+        [area_extended, area_extended.isel(xi_rho=-1)], dim="xi_rho"
+    )
     # The GCM-Filters Gaussian filter kernel uses a Gaussian with standard deviation filter_scale/sqrt(12)
     # because this standard deviation matches the standard deviation of a boxcar kernel with total width equal to factor.
     filter_scale = hsc / dx * np.sqrt(12)
@@ -1024,12 +1028,17 @@ def _map_horizontal_gaussian(grid, lat, lon, hsc):
         filter_scale=filter_scale,
         dx_min=1,
         filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-        grid_type=gcm_filters.GridType.REGULAR_WITH_LAND,
-        grid_vars={"wet_mask": margin_mask},
+        grid_type=gcm_filters.GridType.REGULAR_WITH_LAND_AREA_WEIGHTED,
+        grid_vars={"wet_mask": margin_mask, "area": area_extended},
     )
 
     delta_smooth = filter.apply(delta_extended, dims=["eta_rho", "xi_rho"])
     delta_smooth = delta_smooth.isel(eta_rho=slice(None, -1), xi_rho=slice(None, -1))
+
+    # Now account for land and renormalize over ocean
+    delta_smooth = delta_smooth.where(grid.ds.mask_rho, 0.0)
+    integral = delta_smooth.sum(dim=["eta_rho", "xi_rho"])
+    delta_smooth = delta_smooth / integral
 
     return delta_smooth
 

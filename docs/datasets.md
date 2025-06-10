@@ -137,7 +137,7 @@ Run the download script below to extract data for *wind, dewpoint, temp, sst, pr
 ```python
 # This script downloads the ERA5 files using cdsapi
 # The variables selected are those needed to create forcing files in roms-tools as of May 2025
-# before using this script, you must be in an environment with cdsapi installed 
+# before using this script, you must be in an environment with cdsapi installed
 
 import cdsapi
 import zipfile

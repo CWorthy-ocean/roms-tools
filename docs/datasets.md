@@ -62,14 +62,14 @@ To use `ROMS-Tools`, the user is required to [download](#downloading-era5-and-gl
 
 Install 2 packages into your conda python environment:
 
-**Copernicusmarine**: https://pypi.org/project/copernicusmarine/
+**Copernicusmarine**: https://pypi.org/project/copernicusmarine/<br />
 **cdsapi**: https://anaconda.org/conda-forge/cdsapi
 
 ## GLORYS
 
 ### Setup
 
-Installation instructions and set up account credentials in the shell: [here](https://help.marine.copernicus.eu/en/articles/7970514-copernicus-marine-toolbox-installation)
+Instructions on installation and how to set up account credentials, in the shell: [here](https://help.marine.copernicus.eu/en/articles/7970514-copernicus-marine-toolbox-installation)<br />
 But, essentially do:
 - 1st need to make an account with marine.copernicus: https://marine.copernicus.eu/
 - Export account credentials in `~/.bashrc`:
@@ -82,7 +82,7 @@ export COPERNICUSMARINE_SERVICE_PASSWORD=password
 
 ### Download
 
-Run the download script (via Scott B) below to extract data for *salt, temp, u, v, sea surface height*. Specify the years, month, and number of days per month. Adjust lat lon if needed. Pulls from Global Ocean Physics Reanalysis.
+Run the download script below to extract data for *salt, temp, u, v, sea surface height*. Specify the years, month, and number of days for each month. Adjust lat and lon to desired range. This script pulls data from the Global Ocean Physics Reanalysis.
 
 ```python
 import copernicusmarine
@@ -113,12 +113,12 @@ for y in years:
 
 ### Setup
 
-Installation instructions and set up account credentials in the shell: [here](https://help.marine.copernicus.eu/en/articles/7970514-copernicus-marine-toolbox-installation)
+Instructions on installation and how to set up account credentials, in the shell: [here](https://help.marine.copernicus.eu/en/articles/7970514-copernicus-marine-toolbox-installation)
 
 But, essentially do:
 
 - Make account at: https://cds.climate.copernicus.eu/
-- Login on web
+- Login on the web
 - Setup the api: https://cds.climate.copernicus.eu/how-to-api
     - Add this to `$HOME/.cdsapirc`:
 
@@ -132,7 +132,7 @@ key: 77deaea8-7d41-4b8e-967f-90d6d1849c0e
 
 ### Download
 
-Run the download script (via Scott B via Abigale) below to extract data for *wind, dewpoint, temp, sst, precipitation, net solar radiation, surface downward thermal radiation*. Specify the years, months.
+Run the download script below to extract data for *wind, dewpoint, temp, sst, precipitation, net solar radiation, surface downward thermal radiation*. Specify the years, months.
 
 ```python
 # This script downloads the ERA5 files using cdsapi

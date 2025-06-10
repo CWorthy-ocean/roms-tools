@@ -141,9 +141,15 @@ def _load_data(
             chunks[dim_names["depth"]] = -1
         if "time" in dim_names and time_chunking:
             chunks[dim_names["time"]] = 1
+        if "ntides" in dim_names:
+            chunks[dim_names["ntides"]] = 1
 
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="xarray")
+            warnings.filterwarnings(
+                "ignore",
+                category=UserWarning,
+                message=r"^The specified chunks separate.*",
+            )
 
             ds = xr.open_mfdataset(
                 matching_files,
@@ -153,11 +159,6 @@ def _load_data(
                 **combine_kwargs,
                 **kwargs,
             )
-
-        # Rechunk the dataset along the tidal constituent dimension ("ntides") after loading
-        # because the original dataset does not have a chunk size of 1 along this dimension.
-        if "ntides" in dim_names and "ntides" in ds.dims:
-            ds = ds.chunk({dim_names["ntides"]: 1})
 
     else:
         ds_list = []

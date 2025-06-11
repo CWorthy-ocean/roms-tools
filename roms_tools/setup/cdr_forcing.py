@@ -698,14 +698,10 @@ class CDRForcing(BaseModel):
         ax2 = fig.add_subplot(gs[1, 1])
 
         # Top down view plot
-        field = _map_horizontal_gaussian(
-            self.grid, release.lat, release.lon, release.hsc
-        )
+        field = _map_horizontal_gaussian(self.grid, release)
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
         cmap = plt.colormaps.get_cmap("RdPu")
         kwargs = {"cmap": cmap}
-
         _plot(field, kwargs=kwargs, ax=ax0, c=None, add_colorbar=False)
 
         # Side view plots
@@ -981,15 +977,33 @@ def _validate_release_location(grid, release: Release):
         )
 
 
-def _map_horizontal_gaussian(grid, lat, lon, hsc):
+def _map_horizontal_gaussian(grid: Grid, release: Release):
+    """Map a tracer release to the ROMS grid as a normalized 2D Gaussian distribution.
 
+    The tracer is centered at the nearest grid cell to the release location, then smoothed
+    using a Gaussian filter (via GCM-Filters) with horizontal scale `release.hsc`. Land points
+    are masked out, and the distribution is renormalized to integrate to 1 over the ocean.
+
+    Parameters
+    ----------
+    grid : Grid
+        ROMS grid object with grid metrics and land mask.
+    release : Release
+        Release location and horizontal scale (hsc) in meters.
+
+    Returns
+    -------
+    delta_smooth : xarray.DataArray
+        Normalized 2D tracer distribution on the ROMS grid (zero over land).
+    """
     # Find closest grid cell center
     target_coords = get_target_coords(grid)
+    lon = release.lon
     if target_coords["straddle"]:
         lon = xr.where(lon > 180, lon - 360, lon)
     else:
         lon = xr.where(lon < 0, lon + 360, lon)
-    dist = gc_dist(target_coords["lon"], target_coords["lat"], lon, lat)
+    dist = gc_dist(target_coords["lon"], target_coords["lat"], lon, release.lat)
     dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
     # Find the indices of the closest grid cell
@@ -1023,7 +1037,7 @@ def _map_horizontal_gaussian(grid, lat, lon, hsc):
     )
     # The GCM-Filters Gaussian filter kernel uses a Gaussian with standard deviation filter_scale/sqrt(12)
     # because this standard deviation matches the standard deviation of a boxcar kernel with total width equal to factor.
-    filter_scale = hsc / dx * np.sqrt(12)
+    filter_scale = release.hsc / dx * np.sqrt(12)
     filter = gcm_filters.Filter(
         filter_scale=filter_scale,
         dx_min=1,

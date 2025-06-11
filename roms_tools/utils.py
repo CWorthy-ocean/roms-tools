@@ -34,7 +34,7 @@ def _load_data(
         If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
         Defaults to True.
     decode_times: bool, optional
-        If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
     force_combine_nested: bool, optional
         If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
@@ -141,27 +141,34 @@ def _load_data(
             chunks[dim_names["depth"]] = -1
         if "time" in dim_names and time_chunking:
             chunks[dim_names["time"]] = 1
+        if "ntides" in dim_names:
+            chunks[dim_names["ntides"]] = 1
 
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="xarray")
+            warnings.filterwarnings(
+                "ignore",
+                category=UserWarning,
+                message=r"^The specified chunks separate.*",
+            )
 
             ds = xr.open_mfdataset(
                 matching_files,
                 decode_times=decode_times,
+                decode_timedelta=decode_times,
                 chunks=chunks,
                 **combine_kwargs,
                 **kwargs,
             )
 
-        # Rechunk the dataset along the tidal constituent dimension ("ntides") after loading
-        # because the original dataset does not have a chunk size of 1 along this dimension.
-        if "ntides" in dim_names and "ntides" in ds.dims:
-            ds = ds.chunk({dim_names["ntides"]: 1})
-
     else:
         ds_list = []
         for file in matching_files:
-            ds = xr.open_dataset(file, decode_times=decode_times, chunks=None)
+            ds = xr.open_dataset(
+                file,
+                decode_times=decode_times,
+                decode_timedelta=decode_times,
+                chunks=None,
+            )
             ds_list.append(ds)
 
         if kwargs["combine"] == "by_coords":

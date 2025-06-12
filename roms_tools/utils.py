@@ -439,46 +439,56 @@ def _generate_coordinate_range(min, max, resolution):
 
 
 def _remove_edge_nans(field, xdim, layer_depth=None):
-    """Trim NaN-only edges along a specified dimension.
+    """Remove NaN-only slices at the edges of a specified dimension.
 
-    Useful when a ROMS grid has been regridded to a fixed lat/lon section,
-    leaving NaN-filled edges (e.g., over land or outside the domain).
-    Removes leading/trailing slices along `xdim` where all values are NaN,
-    based on `field` or optionally `layer_depth`.
+    Trims leading and trailing slices along `xdim` where all values are NaN.
+    The operation requires `field` to have exactly one other dimension besides `xdim`.
+    If `layer_depth` is provided, it is used to determine NaN locations instead of `field`.
 
     Parameters
     ----------
     field : xr.DataArray
-        Data to trim.
+        Input data array with NaN edges to trim.
     xdim : str
-        Dimension along which to remove NaN edges.
+        Dimension along which to trim NaN-only slices.
     layer_depth : xr.DataArray, optional
-        Optional field to determine where NaNs occur.
+        Optional array used to identify NaN regions. If None, `field` is used.
 
     Returns
     -------
     field : xr.DataArray
-        Trimmed data.
+        Trimmed data array.
     layer_depth : xr.DataArray or None
-        Trimmed `layer_depth` if provided.
+        Trimmed `layer_depth`, or None if not provided.
+
+    Raises
+    ------
+    ValueError
+        If `field` does not have exactly one dimension besides `xdim`.
     """
     if xdim in field.dims:
-        if layer_depth is not None:
-            nan_mask = layer_depth.isnull().sum(
-                dim=[dim for dim in layer_depth.dims if dim != xdim]
-            )
-        else:
-            nan_mask = field.isnull().sum(
-                dim=[dim for dim in field.dims if dim != xdim]
+        other_dims = [dim for dim in field.dims if dim != xdim]
+        if len(other_dims) != 1:
+            raise ValueError(
+                f"Expected exactly one dimension besides '{xdim}', but got: {other_dims}"
             )
 
-        # Find the valid indices where the sum of the nans is 0
+        depth_dim = other_dims[0]
+
+        if layer_depth is not None:
+            if depth_dim in layer_depth.dims:
+                nan_mask = layer_depth.sum(dim=depth_dim).isnull()
+            else:
+                nan_mask = layer_depth.isnull()
+        else:
+            N = field.sizes[depth_dim]
+            nan_mask = field.isnull().sum(dim=depth_dim) == N
+
         valid_indices = np.where(nan_mask.values == 0)[0]
 
         if len(valid_indices) > 0:
             first_valid = valid_indices[0]
             last_valid = valid_indices[-1]
-
             field = field.isel({xdim: slice(first_valid, last_valid + 1)})
             if layer_depth is not None:
                 layer_depth = layer_depth.isel(

@@ -1088,7 +1088,12 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
     h = lateral_regrid.apply(grid.ds.h).squeeze()
 
     # Define depth levels
-    depth_levels, _ = grid._compute_exponential_depth_levels(max_depth=h.max().values)
+    depth_levels, _ = _compute_focused_vertical_levels(
+        depth=release.depth,
+        vsc=release.vsc,
+        Nz=grid.N,
+        max_depth=h.max().values
+    )
     depth_levels = xr.DataArray(
         np.asarray(depth_levels),
         dims=["depth"],
@@ -1096,9 +1101,15 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
     )
     depth_levels = depth_levels.astype(np.float32)
 
-    # Compute Gaussian weights at each layer center
-    weights = np.exp(-0.5 * ((depth_levels - release.depth) / release.vsc) ** 2)
-    weights /= weights.sum()
+    if release.vsc == 0:
+        # Find index of depth_level closest to release.depth
+        closest_idx = np.abs(depth_levels - release.depth).argmin()
+        weights = xr.zeros_like(depth_levels)
+        weights[closest_idx] = 1.0
+    else:
+        # Compute Gaussian weights at each layer center
+        weights = np.exp(-0.5 * ((depth_levels - release.depth) / release.vsc) ** 2)
+        weights /= weights.sum()
 
     # Redistribute Gaussian mass from under topography to open ocean
     weights = weights.where(depth_levels < h)
@@ -1190,3 +1201,63 @@ def _plot_location(
     if ax is None:
         ax.set_title("Release locations")
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
+
+
+def _compute_focused_vertical_levels(
+    depth: float,
+    vsc: float,
+    Nz: int,
+    max_depth: float,
+    stretch_factor: float = 3.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute vertical grid center and face depths with higher resolution focused near
+    `depth` ± stretch_factor * `vsc`, with coarser spacing elsewhere.
+
+    Parameters
+    ----------
+    depth : float
+        Depth around which to increase vertical resolution (meters).
+    vsc : float
+        Standard deviation controlling width of high-resolution region (meters).
+    Nz : int
+        Number of vertical levels.
+    max_depth : float
+        Maximal depth.
+    stretch_factor : float, default 3.0
+        Multiples of vsc defining the width of the focused region.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        Depths of vertical grid centers and vertical grid faces, in meters.
+    """
+    # Uniform parameter from 0 to 1 along vertical dimension (faces)
+    k = np.linspace(0, 1, Nz + 1)
+
+    # Define a function to concentrate grid points near target_depth region
+    def stretched_coord(x):
+        center = depth / max_depth
+        width = (vsc * stretch_factor) / max_depth
+        if width == 0:
+            return x  # no stretching; uniform grid
+        bump = np.exp(-0.5 * ((x - center) / width) ** 2)
+        return x - 0.3 * bump
+
+    # Apply stretching and normalize back to [0,1]
+    stretched = stretched_coord(k)
+    stretched -= stretched.min()
+    stretched /= stretched.max()
+
+    # Map stretched coordinate to depth (linear scaling)
+    z_faces = stretched * max_depth
+
+    # Calculate center depths (average between adjacent faces)
+    z_centers = (z_faces[:-1] + z_faces[1:]) / 2
+
+    # Round results
+    z_faces = np.round(z_faces, 2)
+    z_centers = np.round(z_centers, 2)
+
+    return z_centers, z_faces
+

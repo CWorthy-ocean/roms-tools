@@ -1119,7 +1119,7 @@ class Grid:
 
         return resolution_in_degrees
 
-    def _compute_exponential_depth_levels(self, Nz=None, depth=None, h=None):
+    def _compute_exponential_depth_levels(self, Nz=None, max_depth=None, h=None):
         """Compute vertical grid center and face depths using an exponential profile.
 
         Parameters
@@ -1127,7 +1127,7 @@ class Grid:
         Nz : int, optional
             Number of vertical levels. Defaults to `self.N`.
 
-        depth : float, optional
+        max_depth : float, optional
             Total depth of the domain. Defaults to `self.ds.h.max().values`.
 
         h : float, optional
@@ -1141,8 +1141,8 @@ class Grid:
         """
         if Nz is None:
             Nz = self.N
-        if depth is None:
-            depth = self.ds.h.max().values
+        if max_depth is None:
+            max_depth = self.ds.h.max().values
         if h is None:
             h = Nz / 4.5
 
@@ -1156,7 +1156,7 @@ class Grid:
 
         # Normalize
         z_faces -= z_faces[0]
-        z_faces *= depth / z_faces[-1]
+        z_faces *= max_depth / z_faces[-1]
         z_faces[0] = 0.0
 
         # Calculate center depths (average between adjacent face depths)

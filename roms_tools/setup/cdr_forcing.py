@@ -11,7 +11,6 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from matplotlib.axes import Axes
 from pydantic import (
     BaseModel,
     Field,
@@ -608,49 +607,13 @@ class CDRForcing(BaseModel):
             release_names = valid_release_names
 
         _validate_release_input(release_names, valid_release_names)
-
-        field = self.grid.ds.mask_rho
-        lon_deg = self.grid.ds.lon_rho
-        lat_deg = self.grid.ds.lat_rho
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-        vmax = 6
-        vmin = 0
-        cmap = plt.colormaps.get_cmap("Blues")
-        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-        trans = _get_projection(lon_deg, lat_deg)
-
-        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
-
-        _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
-
-        proj = ccrs.PlateCarree()
-
         colors = _get_release_colors(valid_release_names)
 
-        for name in release_names:
-            # transform coordinates to projected space
-            transformed_lon, transformed_lat = trans.transform_point(
-                self.releases[name].lon,
-                self.releases[name].lat,
-                proj,
-            )
-
-            ax.plot(
-                transformed_lon,
-                transformed_lat,
-                marker="x",
-                markersize=8,
-                markeredgewidth=2,
-                label=name,
-                color=colors[name],
-            )
-
-        ax.set_title("Release locations")
-        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
+        _plot_location(
+            grid=self.grid,
+            releases=[self.releases[name] for name in release_names],
+            colors=colors,
+        )
 
     def plot_distribution(self, release_name: str):
         """Plot the release location from a top and side view.
@@ -696,43 +659,47 @@ class CDRForcing(BaseModel):
         ax0 = fig.add_subplot(gs[:, 0], projection=trans)
         ax1 = fig.add_subplot(gs[0, 1])
         ax2 = fig.add_subplot(gs[1, 1])
+        cmap = plt.colormaps.get_cmap("RdPu")
+        cmap.set_bad(color="gray")
+        kwargs = {"cmap": cmap}
 
         # Top down view plot
-        field = _map_horizontal_gaussian(self.grid, release)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-        cmap = plt.colormaps.get_cmap("RdPu")
-        kwargs = {"cmap": cmap}
-        _plot(field, kwargs=kwargs, ax=ax0, c=None, add_colorbar=False)
+        horizontal_field = _map_horizontal_gaussian(self.grid, release)
+        horizontal_field = horizontal_field.assign_coords(
+            {"lon": lon_deg, "lat": lat_deg}
+        )
+        _plot(
+            horizontal_field.where(self.grid.ds.mask_rho),
+            kwargs=kwargs,
+            ax=ax0,
+            c=None,
+            add_colorbar=False,
+        )
 
         # Side view plots
-        resolution = self.grid._infer_nominal_horizontal_resolution()
-        h = self.grid.ds.h.assign_coords({"lon": lon_deg, "lat": lat_deg})
-        color = _get_release_colors(valid_release_names)[release_name]
-
-        # Plot along fixed longitude
-        _plot_section(
-            release=release,
-            field=field,
-            h=h,
-            resolution=resolution,
-            coords={"lat": lat_deg, "lon": release.lon},
-            color=color,
-            ax=ax1,
+        kwargs = {
+            "cmap": cmap,
+            "y": "depth",
+            "yincrease": False,
+            "add_colorbar": False,
+        }
+        # Plot along latitude
+        vertical_field = _map_vertical_gaussian(
+            self.grid, release, horizontal_field, orientation="latitude"
         )
-
-        # Plot along fixed latitude
-        _plot_section(
-            release=release,
-            field=field,
-            h=h,
-            resolution=resolution,
-            coords={"lat": release.lat, "lon": lon_deg},
-            color=color,
-            ax=ax2,
+        more_kwargs = {"x": "lat"}
+        vertical_field.plot(**kwargs, **more_kwargs, ax=ax1)
+        ax1.set(title=f"Longitude: {release.lon}°E", xlabel="Latitude [°N]")
+        # Plot along longitude
+        vertical_field = _map_vertical_gaussian(
+            self.grid, release, horizontal_field, orientation="longitude"
         )
+        more_kwargs = {"x": "lon"}
+        vertical_field.plot(**kwargs, **more_kwargs, ax=ax2)
+        ax2.set(title=f"Latitude: {release.lat}°N", xlabel="Longitude [°E]")
 
         # Adjust layout and title
-        fig.subplots_adjust(hspace=0.4)
+        fig.subplots_adjust(hspace=0.45)
         fig.suptitle(f"Release location for: {release_name}")
 
     def save(
@@ -864,17 +831,18 @@ def _validate_release_input(releases, valid_releases, list_allowed=True):
         raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
 
 
-def _get_release_colors(valid_releases):
+def _get_release_colors(valid_releases: list[str]) -> dict[str, tuple]:
     """Returns a dictionary of colors for the valid releases, based on a consistent
     colormap.
 
     Parameters
     ----------
-    None
+    valid_releases : List[str]
+        List of release names to assign colors to.
 
     Returns
     -------
-    dict
+    Dict[str, tuple]
         A dictionary where the keys are release names and the values are their corresponding colors,
         assigned based on the order of releases in the valid releases list.
 
@@ -1057,73 +1025,168 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
     return delta_smooth
 
 
-def _plot_section(
-    release: Release, field, h, resolution, coords, color, ax: Axes
-) -> None:
-    """Plots release distribution along depth and the specified horizontal direction.
+def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
+    """Extract a vertical section from a ROMS grid and apply a Gaussian distribution in
+    depth.
+
+    This function interpolates a horizontally Gaussian field (e.g., from a tracer release)
+    along either a constant latitude or longitude section and distributes it vertically using
+    a Gaussian profile centered around the release depth.
 
     Parameters
     ----------
-    dim : str
-        The dimension along which to plot the section, either "lat" or "lon".
-    ax : matplotlib.axes.Axes
-        The axis on which the plot will be drawn.
-    h : xarray.DataArray
-        The bathymetry data to plot.
+    grid : Grid
+        ROMS grid object with methods and attributes used for horizontal resolution,
+        depth computation, and straddling logic.
+    release : Release
+        Release object containing coordinates (`lat`, `lon`, `depth`) and vertical
+        spread (`vsc`) for the Gaussian distribution.
+    field : xr.DataArray
+        2D horizontal tracer field defined on the ROMS grid.
+    orientation : {"latitude", "longitude"}, default "latitude"
+        Orientation of the extracted vertical section. If "latitude", extracts
+        a section along constant longitude. If "longitude", extracts a section
+        along constant latitude.
 
-    coords :
+    Returns
+    -------
+    vertical_field : xr.DataArray
+        2D field (depth vs. latitude or longitude) with the vertically-distributed
+        Gaussian mapped along the specified section.
+    """
+    if orientation == "longitude":
+        resolution = grid._infer_nominal_horizontal_resolution(release.lat)
+        lon_deg = grid.ds.lon_rho
+        if grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        lons = _generate_coordinate_range(
+            lon_deg.min().values, lon_deg.max().values, resolution
+        )
+        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
+        lats = [release.lat]
 
-    resolution : float
-        The resolution at which to generate the coordinate range.
+    elif orientation == "latitude":
+        if grid.straddle:
+            release_lon = release.lon if release.lon > 180 else release.lon
+        else:
+            release_lon = release.lon if release.lon < 0 else release.lon - 360
+        lons = [release_lon]
+        resolution = grid._infer_nominal_horizontal_resolution()
+        lats = _generate_coordinate_range(
+            grid.ds.lat_rho.min().values, grid.ds.lat_rho.max().values, resolution
+        )
+        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
+    else:
+        raise ValueError(
+            "`section_orientation` must be either 'latitude' or 'longitude'."
+        )
+
+    # Regrid 2D horizontal Gaussian onto desired 1D horizontal section
+    target_coords = {"lat": lats, "lon": lons}
+    lateral_regrid = LateralRegridFromROMS(field, target_coords)
+    field = lateral_regrid.apply(field).squeeze()
+    h = lateral_regrid.apply(grid.ds.h).squeeze()
+
+    # Define depth levels
+    depth_levels, _ = grid._compute_exponential_depth_levels(max_depth=h.max().values)
+    depth_levels = xr.DataArray(
+        np.asarray(depth_levels),
+        dims=["depth"],
+        attrs={"long_name": "Depth", "units": "m"},
+    )
+    depth_levels = depth_levels.astype(np.float32)
+
+    # Compute Gaussian weights at each layer center
+    weights = np.exp(-0.5 * ((depth_levels - release.depth) / release.vsc) ** 2)
+    weights /= weights.sum()
+
+    # Redistribute Gaussian mass from under topography to open ocean
+    weights = weights.where(depth_levels < h)
+    weights = weights / weights.sum(dim="depth")
+
+    # Map 1D to 2D Gaussian
+    vertical_field = field * weights
+
+    # Remove NaNs at the edges
+    if orientation == "longitude":
+        vertical_field, _ = _remove_edge_nans(vertical_field, "lon", None)
+    if orientation == "latitude":
+        vertical_field, _ = _remove_edge_nans(vertical_field, "lat", None)
+
+    vertical_field = vertical_field.assign_coords({"depth": depth_levels})
+    return vertical_field
+
+
+def _plot_location(
+    grid, releases: ReleaseCollector, colors: dict[str, tuple] | None = None, ax=None
+) -> None:
+    """Plot the center location of each release on a top-down map view.
+
+    Each release is represented as a point on the map, with its color
+    determined by the `colors` dictionary.
+
+    Parameters
+    ----------
+    grid : Grid
+        The grid object defining the spatial extent and coordinate system for the plot.
+    releases : ReleaseCollector
+        A collection of Release objects to plot. Each release must have
+        `.lat`, `.lon`, and `.name` attributes.
+    colors : dict, optional
+        A dictionary mapping release names to RGBA color tuples (e.g., from a colormap).
+        If None, a default color is applied.
+    ax : matplotlib.axes.Axes, optional
+        An optional matplotlib axis to plot on. If not provided, a new one will be created.
 
     Returns
     -------
     None
-        The function does not return anything. It directly plots the bathymetry section on the provided axis.
     """
-    if isinstance(coords["lat"], float):
-        loc = release.lon
-        dim = "lat"
-        var_name = "lon"
-        xlabel = "Longitude [°E]"
-        title = f"Latitude: {coords['lat']}°N"
-    elif isinstance(coords["lon"], float):
-        loc = release.lat
-        dim = "lon"
-        var_name = "lat"
-        xlabel = "Latitude [°N]"
-        title = f"Longitude: {coords['lon']}°E"
-    else:
-        raise ValueError("Either 'lat' or 'lon' must be a float.")
 
-    # Determine coordinate names and build target range
-    coord_deg = coords[var_name]
-    var_range = _generate_coordinate_range(
-        coord_deg.min().values, coord_deg.max().values, resolution
-    )
-    range_da = xr.DataArray(
-        var_range,
-        dims=[var_name],
-        attrs={"units": "°N" if var_name == "lat" else "°E"},
-    )
+    field = grid.ds.mask_rho
+    lon_deg = grid.ds.lon_rho
+    lat_deg = grid.ds.lat_rho
+    if grid.straddle:
+        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+    field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
-    # Regrid horizontal fields
-    target_coords = {dim: [coords[dim]], var_name: range_da}
-    regridder = LateralRegridFromROMS(h, target_coords)
-    section = regridder.apply(h)
-    section, _ = _remove_edge_nans(section, var_name)
+    vmax = 6
+    vmin = 0
+    cmap = plt.colormaps.get_cmap("Blues")
+    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
-    # Plot the bathymetry section
-    section.plot(ax=ax, color="k")
-    ax.fill_between(section[var_name], section.squeeze(), y2=0, color="#deebf7")
-    ax.invert_yaxis()
-    ax.set(xlabel=xlabel, ylabel="Depth [m]", title=title)
+    trans = _get_projection(lon_deg, lat_deg)
 
-    ax.plot(
-        loc,
-        release.depth,
-        color=color,
-        marker="x",
-        markersize=8,
-        markeredgewidth=2,
-    )
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
+    _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
+
+    proj = ccrs.PlateCarree()
+
+    for release in releases:
+        # transform coordinates to projected space
+        transformed_lon, transformed_lat = trans.transform_point(
+            release.lon,
+            release.lat,
+            proj,
+        )
+
+        if colors is not None:
+            color = colors[release.name]
+        else:
+            color = "#dd1c77"
+
+        ax.plot(
+            transformed_lon,
+            transformed_lat,
+            marker="x",
+            markersize=8,
+            markeredgewidth=2,
+            label=release.name,
+            color=color,
+        )
+
+    if ax is None:
+        ax.set_title("Release locations")
+        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))

@@ -648,8 +648,8 @@ class TestCDRForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
-            hsc=40000.0,
-            vsc=100.0,
+            hsc=0.0,
+            vsc=0.0,
             times=[datetime(2022, 1, 1), datetime(2022, 1, 3), datetime(2022, 1, 5)],
             volume_fluxes=[1.0, 2.0, 3.0],
             tracer_concentrations={
@@ -665,6 +665,7 @@ class TestCDRForcing:
             lat=first_volume_release.lat - 1,
             depth=first_volume_release.depth - 1,
             hsc=40000.0,
+            vsc=0.0,
             times=[
                 datetime(2022, 1, 2),
                 datetime(2022, 1, 4),
@@ -692,7 +693,8 @@ class TestCDRForcing:
             lon=first_tracer_perturbation.lon - 1,
             lat=first_tracer_perturbation.lat - 1,
             depth=first_tracer_perturbation.depth - 1,
-            hsc=40000.0,
+            hsc=0.0,
+            vsc=10.0,
             times=[
                 datetime(2022, 1, 2),
                 datetime(2022, 1, 4),
@@ -740,14 +742,37 @@ class TestCDRForcing:
             rot=0,
             N=3,
         )
+        grid_that_straddles = Grid(
+            nx=18,
+            ny=18,
+            size_x=2500,
+            size_y=2500,
+            center_lon=0,
+            center_lat=65,
+            rot=0,
+            N=3,
+        )  # grid that straddles dateline
+
         self.volume_release_cdr_forcing = CDRForcing(
             grid=grid,
             start_time=self.start_time,
             end_time=self.end_time,
             releases=[self.first_volume_release, self.second_volume_release],
         )
+        self.volume_release_cdr_forcing_with_straddling_grid = CDRForcing(
+            grid=grid_that_straddles,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self.first_volume_release, self.second_volume_release],
+        )
         self.tracer_perturbation_cdr_forcing = CDRForcing(
             grid=grid,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self.first_tracer_perturbation, self.second_tracer_perturbation],
+        )
+        self.tracer_perturbation_cdr_forcing_with_straddling_grid = CDRForcing(
+            grid=grid_that_straddles,
             start_time=self.start_time,
             end_time=self.end_time,
             releases=[self.first_tracer_perturbation, self.second_tracer_perturbation],
@@ -783,6 +808,12 @@ class TestCDRForcing:
         )
         assert isinstance(self.volume_release_cdr_forcing.ds, xr.Dataset)
         assert isinstance(self.tracer_perturbation_cdr_forcing.ds, xr.Dataset)
+        assert isinstance(
+            self.volume_release_cdr_forcing_with_straddling_grid.ds, xr.Dataset
+        )
+        assert isinstance(
+            self.tracer_perturbation_cdr_forcing_with_straddling_grid.ds, xr.Dataset
+        )
 
     def test_plot_error_when_no_grid(self):
 
@@ -806,6 +837,7 @@ class TestCDRForcing:
         for cdr in [
             self.volume_release_cdr_forcing_without_grid,
             self.volume_release_cdr_forcing,
+            self.volume_release_cdr_forcing_with_straddling_grid,
         ]:
             cdr.plot_volume_flux()
             cdr.plot_tracer_concentration("ALK")
@@ -819,6 +851,7 @@ class TestCDRForcing:
         for cdr in [
             self.tracer_perturbation_cdr_forcing_without_grid,
             self.tracer_perturbation_cdr_forcing,
+            self.tracer_perturbation_cdr_forcing_with_straddling_grid,
         ]:
             cdr.plot_tracer_flux("ALK")
             cdr.plot_tracer_flux("DIC")
@@ -832,7 +865,13 @@ class TestCDRForcing:
     def test_plot_distribution(self):
 
         self.volume_release_cdr_forcing.plot_distribution("first_release")
+        self.volume_release_cdr_forcing_with_straddling_grid.plot_distribution(
+            "first_release"
+        )
         self.tracer_perturbation_cdr_forcing.plot_distribution("first_release")
+        self.tracer_perturbation_cdr_forcing_with_straddling_grid.plot_distribution(
+            "first_release"
+        )
 
     def test_plot_more_errors(self):
         """Test that error is raised on bad plot args or ambiguous release."""

@@ -25,7 +25,7 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     one_dim_fill,
 )
-from roms_tools.utils import _load_data
+from roms_tools.utils import _has_dask, _load_data
 
 # lat-lon datasets
 
@@ -95,6 +95,7 @@ class Dataset:
     needs_lateral_fill: Optional[bool] = True
     use_dask: Optional[bool] = False
     apply_post_processing: Optional[bool] = True
+    read_zarr: Optional[bool] = False
 
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
@@ -168,7 +169,9 @@ class Dataset:
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
 
-        ds = _load_data(self.filename, self.dim_names, self.use_dask)
+        ds = _load_data(
+            self.filename, self.dim_names, self.use_dask, read_zarr=self.read_zarr
+        )
 
         return ds
 
@@ -1540,6 +1543,38 @@ class ERA5Dataset(Dataset):
             var_names = self.var_names
             var_names.pop("mask")
             self.var_names = var_names
+
+
+@dataclass(kw_only=True)
+class ERA5ARCODataset(ERA5Dataset):
+    # The GCP ARCO version of the dataset has different variable names
+
+    read_zarr = True
+    use_dask = True
+
+    var_names: Dict[str, str] = field(
+        default_factory=lambda: {
+            "uwnd": "10m_u_component_of_wind",
+            "vwnd": "10m_v_component_of_wind",
+            "swrad": "surface_net_solar_radiation",
+            "lwrad": "surface_thermal_radiation_downwards",
+            "Tair": "2m_temperature",
+            "d2m": "2m_dewpoint_temperature",
+            "rain": "total_precipitation",
+            "mask": "sea_surface_temperature",
+        }
+    )
+
+    def __post_init__(self):
+        self.read_zarr = True
+
+        if not _has_dask:
+            raise RuntimeError(
+                "You must have dask installed to use the ERA5ARCO dataset, since it uses zarr"
+            )
+
+        self.use_dask = True
+        super().__post_init__()
 
 
 @dataclass(kw_only=True)

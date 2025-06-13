@@ -2,6 +2,7 @@ import glob
 import logging
 import re
 import warnings
+from importlib.util import find_spec
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ def _load_data(
     time_chunking=True,
     decode_times=True,
     force_combine_nested=False,
+    read_zarr: bool = False,
 ):
     """Load dataset from the specified file.
 
@@ -39,6 +41,9 @@ def _load_data(
     force_combine_nested: bool, optional
         If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
         Defaults to False.
+    read_zarr: bool, optional
+        If True, use the zarr engine to read the dataset, and don't use mfdataset.
+        Defaults to False.
 
     Returns
     -------
@@ -54,6 +59,12 @@ def _load_data(
     """
     if dim_names is None:
         dim_names = {}
+
+    if read_zarr:
+        if isinstance(filename, list):
+            raise ValueError("read_zarr requires a single path, not a list of paths")
+        if not use_dask:
+            raise ValueError("read_zarr must be used with use_dask")
 
     # Precompile the regex for matching wildcard characters
     wildcard_regex = re.compile(r"[\*\?\[\]]")
@@ -151,14 +162,22 @@ def _load_data(
                 message=r"^The specified chunks separate.*",
             )
 
-            ds = xr.open_mfdataset(
-                matching_files,
-                decode_times=decode_times,
-                decode_timedelta=decode_times,
-                chunks=chunks,
-                **combine_kwargs,
-                **kwargs,
-            )
+            if read_zarr:
+                ds = xr.open_zarr(
+                    matching_files[0],
+                    decode_times=decode_times,
+                    chunks=chunks,
+                    consolidated=True,
+                )
+            else:
+                ds = xr.open_mfdataset(
+                    matching_files,
+                    decode_times=decode_times,
+                    decode_timedelta=decode_times,
+                    chunks=chunks,
+                    **combine_kwargs,
+                    **kwargs,
+                )
 
     else:
         ds_list = []
@@ -496,3 +515,7 @@ def _remove_edge_nans(field, xdim, layer_depth=None):
                 )
 
     return field, layer_depth
+
+
+def _has_dask() -> bool:
+    return find_spec("dask") is not None

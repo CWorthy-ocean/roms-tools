@@ -14,6 +14,7 @@ from roms_tools.plot import _plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
+    ERA5ARCODataset,
     ERA5Correction,
     ERA5Dataset,
     UnifiedBGCSurfaceDataset,
@@ -33,6 +34,10 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
 )
 from roms_tools.utils import save_datasets, transpose_dimensions
+
+DEFAULT_ERA5_ARCO_PATH = (
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
 
 
 @dataclass(kw_only=True)
@@ -212,7 +217,11 @@ class SurfaceForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] == "ERA5_ARCO":
+                logging.debug("No path specified for ERA5_ARCO, using default")
+                self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            else:
+                raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
         self.source = {
@@ -274,9 +283,11 @@ class SurfaceForcing:
         if self.type == "physics":
             if self.source["name"] == "ERA5":
                 data = ERA5Dataset(**data_dict)
+            elif self.source["name"] == "ERA5_ARCO":
+                data = ERA5ARCODataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "ERA5" is a valid option for source["name"] when type is "physics".'
+                    'Only "ERA5" or "ERA5_ARCO" are valid options for source["name"] when type is "physics".'
                 )
 
         elif self.type == "bgc":
@@ -296,6 +307,8 @@ class SurfaceForcing:
     def _get_correction_data(self):
 
         if self.source["name"] == "ERA5":
+            correction_data = ERA5Correction(use_dask=self.use_dask)
+        elif self.source["name"] == "ERA5_ARCO":
             correction_data = ERA5Correction(use_dask=self.use_dask)
         else:
             raise ValueError(

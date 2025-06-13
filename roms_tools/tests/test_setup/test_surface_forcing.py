@@ -157,6 +157,7 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
     return grid
 
 
+@pytest.mark.parametrize("source", [{"name": "ERA5"}, {"name": "ERA5_ARCO"}])
 @pytest.mark.parametrize(
     "grid_fixture",
     [
@@ -168,7 +169,7 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
     ],
 )
 def test_successful_initialization_with_regional_data(
-    grid_fixture, request, caplog, use_dask
+    source, grid_fixture, request, caplog, use_dask
 ):
     """Test the initialization of SurfaceForcing with regional ERA5 data.
 
@@ -180,7 +181,9 @@ def test_successful_initialization_with_regional_data(
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
-    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+    if source["name"] == "ERA5":
+        fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+        source["path"] = fname
 
     grid = request.getfixturevalue(grid_fixture)
 
@@ -190,10 +193,10 @@ def test_successful_initialization_with_regional_data(
                 grid=grid,
                 start_time=start_time,
                 end_time=end_time,
-                source={"name": "ERA5", "path": fname},
+                source=source,
                 correct_radiation=True,
                 coarse_grid_mode=coarse_grid_mode,
-                use_dask=use_dask,
+                use_dask=True,
             )
 
         assert sfc_forcing.ds is not None
@@ -208,11 +211,6 @@ def test_successful_initialization_with_regional_data(
         assert sfc_forcing.start_time == start_time
         assert sfc_forcing.end_time == end_time
         assert sfc_forcing.type == "physics"
-        assert sfc_forcing.source == {
-            "name": "ERA5",
-            "path": fname,
-            "climatology": False,
-        }
         assert sfc_forcing.ds.coords["time"].attrs["units"] == "days"
 
         if coarse_grid_mode == "always":

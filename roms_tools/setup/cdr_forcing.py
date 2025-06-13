@@ -11,6 +11,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from matplotlib.axes import Axes
 from pydantic import (
     BaseModel,
     Field,
@@ -21,6 +22,7 @@ from pydantic import (
 )
 
 from roms_tools import Grid
+from roms_tools.constants import R_EARTH
 from roms_tools.plot import _get_projection, _plot
 from roms_tools.regrid import LateralRegridFromROMS
 from roms_tools.setup.cdr_release import (
@@ -39,7 +41,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
 )
 from roms_tools.utils import (
-    _generate_coordinate_range,
+    _generate_focused_coordinate_range,
     _remove_edge_nans,
     save_datasets,
 )
@@ -607,29 +609,47 @@ class CDRForcing(BaseModel):
             release_names = valid_release_names
 
         _validate_release_input(release_names, valid_release_names)
-        colors = _get_release_colors(valid_release_names)
 
+        lon_deg = self.grid.ds.lon_rho
+        lat_deg = self.grid.ds.lat_rho
+        if self.grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        trans = _get_projection(lon_deg, lat_deg)
+        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
+        # Plot blue background on map
+        field = self.grid.ds.mask_rho
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+        vmax = 6
+        vmin = 0
+        cmap = plt.colormaps.get_cmap("Blues")
+        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+        _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
+
+        # Plot release locations
+        colors = _get_release_colors(valid_release_names)
         _plot_location(
             grid=self.grid,
             releases=[self.releases[name] for name in release_names],
+            ax=ax,
             colors=colors,
         )
 
-    def plot_distribution(self, release_name: str):
+    def plot_distribution(self, release_name: str, mark_release_center: bool = True):
         """Plot the release location from a top and side view.
 
         This method creates three plots:
 
         - A top view of the release distribution.
-        - A bathymetry section along a fixed longitude (latitudinal view),
-          with the release location marked by an "x".
-        - A bathymetry section along a fixed latitude (longitudinal view),
-          with the release location also marked by an "x".
+        - A side view of the release distribution along a fixed longitude.
+        - A side view of the release distribution along a fixed latitude.
 
         Parameters
         ----------
         release_name : str
             Name of the release to plot.
+        mark_release_center : bool, default True
+            Whether to mark the center of the release distribution with an "x".
 
         Raises
         ------
@@ -675,6 +695,10 @@ class CDRForcing(BaseModel):
             c=None,
             add_colorbar=False,
         )
+        if mark_release_center:
+            _plot_location(
+                grid=self.grid, releases=[release], ax=ax0, include_legend=False
+            )
 
         # Side view plots
         kwargs = {
@@ -689,6 +713,16 @@ class CDRForcing(BaseModel):
         )
         more_kwargs = {"x": "lat"}
         vertical_field.plot(**kwargs, **more_kwargs, ax=ax1)
+        if mark_release_center:
+            ax1.plot(
+                release.lat,
+                release.depth,
+                color="k",
+                marker="x",
+                markersize=8,
+                markeredgewidth=2,
+            )
+
         ax1.set(title=f"Longitude: {release.lon}°E", xlabel="Latitude [°N]")
         # Plot along longitude
         vertical_field = _map_vertical_gaussian(
@@ -696,11 +730,24 @@ class CDRForcing(BaseModel):
         )
         more_kwargs = {"x": "lon"}
         vertical_field.plot(**kwargs, **more_kwargs, ax=ax2)
+        if mark_release_center:
+            if self.grid.straddle:
+                release_lon = release.lon if release.lon > 180 else release.lon
+            else:
+                release_lon = release.lon if release.lon < 0 else release.lon - 360
+            ax2.plot(
+                release_lon,
+                release.depth,
+                color="k",
+                marker="x",
+                markersize=8,
+                markeredgewidth=2,
+            )
         ax2.set(title=f"Latitude: {release.lat}°N", xlabel="Longitude [°E]")
 
         # Adjust layout and title
         fig.subplots_adjust(hspace=0.45)
-        fig.suptitle(f"Release location for: {release_name}")
+        fig.suptitle(f"Release distribution for: {release_name}")
 
     def save(
         self,
@@ -1054,13 +1101,19 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
         2D field (depth vs. latitude or longitude) with the vertically-distributed
         Gaussian mapped along the specified section.
     """
+    meters_per_degree = 2 * np.pi * R_EARTH / 360
+
     if orientation == "longitude":
-        resolution = grid._infer_nominal_horizontal_resolution(release.lat)
         lon_deg = grid.ds.lon_rho
         if grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        lons = _generate_coordinate_range(
-            lon_deg.min().values, lon_deg.max().values, resolution
+        hsc_in_degrees = release.hsc / (meters_per_degree * np.cos(release.lat))
+        lons, _ = _generate_focused_coordinate_range(
+            center=release.lon,
+            sc=hsc_in_degrees,
+            min_val=lon_deg.min().values,
+            max_val=lon_deg.max().values,
+            N=2000,
         )
         lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
         lats = [release.lat]
@@ -1071,9 +1124,15 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
         else:
             release_lon = release.lon if release.lon < 0 else release.lon - 360
         lons = [release_lon]
-        resolution = grid._infer_nominal_horizontal_resolution()
-        lats = _generate_coordinate_range(
-            grid.ds.lat_rho.min().values, grid.ds.lat_rho.max().values, resolution
+        hsc_in_degrees = release.hsc / (
+            meters_per_degree * np.cos(grid.ds.lat_rho.mean().values)
+        )
+        lats, _ = _generate_focused_coordinate_range(
+            center=release.lat,
+            sc=hsc_in_degrees,
+            min_val=grid.ds.lat_rho.min().values,
+            max_val=grid.ds.lat_rho.max().values,
+            N=2000,
         )
         lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
     else:
@@ -1088,11 +1147,12 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
     h = lateral_regrid.apply(grid.ds.h).squeeze()
 
     # Define depth levels
-    depth_levels, _ = _compute_focused_vertical_levels(
-        depth=release.depth,
-        vsc=release.vsc,
-        Nz=grid.N,
-        max_depth=h.max().values
+    depth_levels, _ = _generate_focused_coordinate_range(
+        center=release.depth,
+        sc=release.vsc,
+        min_val=0.0,
+        max_val=h.max().values,
+        N=2000,
     )
     depth_levels = xr.DataArray(
         np.asarray(depth_levels),
@@ -1120,16 +1180,21 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
 
     # Remove NaNs at the edges
     if orientation == "longitude":
-        vertical_field, _ = _remove_edge_nans(vertical_field, "lon", None)
+        vertical_field, _ = _remove_edge_nans(vertical_field, "lon", layer_depth=h)
     if orientation == "latitude":
-        vertical_field, _ = _remove_edge_nans(vertical_field, "lat", None)
+        vertical_field, _ = _remove_edge_nans(vertical_field, "lat", layer_depth=h)
 
     vertical_field = vertical_field.assign_coords({"depth": depth_levels})
+
     return vertical_field
 
 
 def _plot_location(
-    grid, releases: ReleaseCollector, colors: dict[str, tuple] | None = None, ax=None
+    grid: Grid,
+    releases: ReleaseCollector,
+    ax: Axes,
+    colors: dict[str, tuple] | None = None,
+    include_legend: bool = True,
 ) -> None:
     """Plot the center location of each release on a top-down map view.
 
@@ -1140,38 +1205,31 @@ def _plot_location(
     ----------
     grid : Grid
         The grid object defining the spatial extent and coordinate system for the plot.
+
     releases : ReleaseCollector
-        A collection of Release objects to plot. Each release must have
-        `.lat`, `.lon`, and `.name` attributes.
-    colors : dict, optional
-        A dictionary mapping release names to RGBA color tuples (e.g., from a colormap).
-        If None, a default color is applied.
-    ax : matplotlib.axes.Axes, optional
-        An optional matplotlib axis to plot on. If not provided, a new one will be created.
+        Collection of `Release` objects to plot. Each `Release` must have `.lat`, `.lon`,
+        and `.name` attributes.
+
+    ax : matplotlib.axes.Axes
+        The Matplotlib axis object to plot on.
+
+    colors : dict of str to tuple, optional
+        Optional dictionary mapping release names to RGBA color tuples. If not provided,
+        all releases are plotted in a default color (`"#dd1c77"`).
+
+    include_legend : bool, default True
+        Whether to include a legend showing release names.
 
     Returns
     -------
     None
     """
 
-    field = grid.ds.mask_rho
     lon_deg = grid.ds.lon_rho
     lat_deg = grid.ds.lat_rho
     if grid.straddle:
         lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-    field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-    vmax = 6
-    vmin = 0
-    cmap = plt.colormaps.get_cmap("Blues")
-    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
     trans = _get_projection(lon_deg, lat_deg)
-
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
-
-    _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
 
     proj = ccrs.PlateCarree()
 
@@ -1186,7 +1244,7 @@ def _plot_location(
         if colors is not None:
             color = colors[release.name]
         else:
-            color = "#dd1c77"
+            color = "k"
 
         ax.plot(
             transformed_lon,
@@ -1198,66 +1256,5 @@ def _plot_location(
             color=color,
         )
 
-    if ax is None:
-        ax.set_title("Release locations")
+    if include_legend:
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
-
-
-def _compute_focused_vertical_levels(
-    depth: float,
-    vsc: float,
-    Nz: int,
-    max_depth: float,
-    stretch_factor: float = 3.0,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Compute vertical grid center and face depths with higher resolution focused near
-    `depth` ± stretch_factor * `vsc`, with coarser spacing elsewhere.
-
-    Parameters
-    ----------
-    depth : float
-        Depth around which to increase vertical resolution (meters).
-    vsc : float
-        Standard deviation controlling width of high-resolution region (meters).
-    Nz : int
-        Number of vertical levels.
-    max_depth : float
-        Maximal depth.
-    stretch_factor : float, default 3.0
-        Multiples of vsc defining the width of the focused region.
-
-    Returns
-    -------
-    tuple of np.ndarray
-        Depths of vertical grid centers and vertical grid faces, in meters.
-    """
-    # Uniform parameter from 0 to 1 along vertical dimension (faces)
-    k = np.linspace(0, 1, Nz + 1)
-
-    # Define a function to concentrate grid points near target_depth region
-    def stretched_coord(x):
-        center = depth / max_depth
-        width = (vsc * stretch_factor) / max_depth
-        if width == 0:
-            return x  # no stretching; uniform grid
-        bump = np.exp(-0.5 * ((x - center) / width) ** 2)
-        return x - 0.3 * bump
-
-    # Apply stretching and normalize back to [0,1]
-    stretched = stretched_coord(k)
-    stretched -= stretched.min()
-    stretched /= stretched.max()
-
-    # Map stretched coordinate to depth (linear scaling)
-    z_faces = stretched * max_depth
-
-    # Calculate center depths (average between adjacent faces)
-    z_centers = (z_faces[:-1] + z_faces[1:]) / 2
-
-    # Round results
-    z_faces = np.round(z_faces, 2)
-    z_centers = np.round(z_centers, 2)
-
-    return z_centers, z_faces
-

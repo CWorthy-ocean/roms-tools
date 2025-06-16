@@ -214,6 +214,11 @@ class ROMSOutput:
         lon_deg = self.grid.ds[f"lon_{loc}"]
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+            if lon is not None:
+                lon = lon if lon > 180 else lon
+            else:
+                lon = lon if lon < 0 else lon - 360
+
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         # Mask the field

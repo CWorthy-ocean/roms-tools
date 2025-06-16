@@ -43,6 +43,7 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import (
     _generate_focused_coordinate_range,
     _remove_edge_nans,
+    normalize_longitude,
     save_datasets,
 )
 
@@ -731,10 +732,7 @@ class CDRForcing(BaseModel):
         more_kwargs = {"x": "lon"}
         vertical_field.plot(**kwargs, **more_kwargs, ax=ax2)
         if mark_release_center:
-            if self.grid.straddle:
-                release_lon = release.lon if release.lon > 180 else release.lon
-            else:
-                release_lon = release.lon if release.lon < 0 else release.lon - 360
+            release_lon = normalize_longitude(release.lon, self.grid.straddle)
             ax2.plot(
                 release_lon,
                 release.depth,
@@ -1102,6 +1100,7 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
         Gaussian mapped along the specified section.
     """
     meters_per_degree = 2 * np.pi * R_EARTH / 360
+    release_lon = normalize_longitude(release.lon, grid.straddle)
 
     if orientation == "longitude":
         lon_deg = grid.ds.lon_rho
@@ -1109,7 +1108,7 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
         hsc_in_degrees = release.hsc / (meters_per_degree * np.cos(release.lat))
         lons, _ = _generate_focused_coordinate_range(
-            center=release.lon,
+            center=release_lon,
             sc=hsc_in_degrees,
             min_val=lon_deg.min().values,
             max_val=lon_deg.max().values,
@@ -1119,10 +1118,6 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
         lats = [release.lat]
 
     elif orientation == "latitude":
-        if grid.straddle:
-            release_lon = release.lon if release.lon > 180 else release.lon
-        else:
-            release_lon = release.lon if release.lon < 0 else release.lon - 360
         lons = [release_lon]
         hsc_in_degrees = release.hsc / (
             meters_per_degree * np.cos(grid.ds.lat_rho.mean().values)

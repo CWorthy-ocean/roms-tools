@@ -44,11 +44,14 @@ def roms_output_from_restart_file_adjusted_for_zeta(use_dask):
         use_dask=use_dask,
     )
 
+
 @pytest.fixture
 def roms_output_from_restart_file_with_straddling_grid(use_dask):
 
     # Make fake grid that straddles the dateline and that has consistent sizes with test data below
-    grid = Grid(nx=8, ny=13, center_lon=0, center_lat=60, rot=32, size_x=244, size_y=365)
+    grid = Grid(
+        nx=8, ny=13, center_lon=0, center_lat=60, rot=32, size_x=244, size_y=365
+    )
 
     return ROMSOutput(
         grid=grid,
@@ -56,12 +59,13 @@ def roms_output_from_restart_file_with_straddling_grid(use_dask):
         use_dask=use_dask,
     )
 
+
 @pytest.mark.parametrize(
     "roms_output_fixture",
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 def test_load_model_output_file(roms_output_fixture, request):
@@ -283,7 +287,7 @@ def test_that_coordinates_are_added(use_dask):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 def test_plot_on_native_model_grid(roms_output_fixture, request):
@@ -354,7 +358,7 @@ def test_plot_on_native_model_grid(roms_output_fixture, request):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -510,7 +514,7 @@ def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -518,9 +522,7 @@ def test_regrid_all_variables(roms_output_fixture, request):
     roms_output = request.getfixturevalue(roms_output_fixture)
     ds_regridded = roms_output.regrid()
     assert isinstance(ds_regridded, xr.Dataset)
-    assert set(ds_regridded.data_vars).issubset(
-        set(roms_output.ds.data_vars)
-    )
+    assert set(ds_regridded.data_vars).issubset(set(roms_output.ds.data_vars))
     assert "lon" in ds_regridded.coords
     assert "lat" in ds_regridded.coords
     assert "depth" in ds_regridded.coords
@@ -532,7 +534,7 @@ def test_regrid_all_variables(roms_output_fixture, request):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -552,7 +554,7 @@ def test_regrid_specific_variables(roms_output_fixture, request):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -569,7 +571,7 @@ def test_regrid_missing_variable_raises_error(roms_output_fixture, request):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -589,7 +591,7 @@ def test_regrid_with_custom_horizontal_resolution(roms_output_fixture, request):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid"
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")

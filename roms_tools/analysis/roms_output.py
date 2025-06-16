@@ -20,6 +20,7 @@ from roms_tools.utils import (
     _remove_edge_nans,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    normalize_longitude,
 )
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
@@ -215,10 +216,7 @@ class ROMSOutput:
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
         if lon is not None:
-            if self.grid.straddle:
-                lon = lon - 360 if lon > 180 else lon
-            else:
-                lon = lon + 360 if lon < 0 else lon
+            lon = normalize_longitude(lon, self.grid.straddle)
 
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 

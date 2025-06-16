@@ -661,9 +661,9 @@ class TestCDRForcing:
 
         second_volume_release = VolumeRelease(
             name="second_release",
-            lon=first_volume_release.lon - 1,
-            lat=first_volume_release.lat - 1,
-            depth=first_volume_release.depth - 1,
+            lon=first_volume_release.lon + 360,
+            lat=first_volume_release.lat,
+            depth=first_volume_release.depth,
             hsc=40000.0,
             vsc=0.0,
             times=[
@@ -690,9 +690,9 @@ class TestCDRForcing:
 
         second_tracer_perturbation = TracerPerturbation(
             name="second_release",
-            lon=first_tracer_perturbation.lon - 1,
-            lat=first_tracer_perturbation.lat - 1,
-            depth=first_tracer_perturbation.depth - 1,
+            lon=first_tracer_perturbation.lon + 360,
+            lat=first_tracer_perturbation.lat,
+            depth=first_tracer_perturbation.depth,
             hsc=0.0,
             vsc=10.0,
             times=[

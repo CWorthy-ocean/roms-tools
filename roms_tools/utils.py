@@ -535,51 +535,68 @@ def _generate_focused_coordinate_range(
     return centers, faces
 
 
-def _remove_edge_nans(field, xdim, layer_depth=None):
+def _remove_edge_nans(
+    field: xr.DataArray, xdim: str, layer_depth: xr.DataArray | None = None
+) -> tuple[xr.DataArray, xr.DataArray | None]:
     """Remove NaN-only slices at the edges of a specified dimension.
 
-    Trims leading and trailing slices along `xdim` where all values are NaN.
-    The operation requires `field` to have exactly one other dimension besides `xdim`.
-    If `layer_depth` is provided, it is used to determine NaN locations instead of `field`.
+    This function trims leading and trailing slices along the specified `xdim` where all values
+    are NaN. It assumes that the data has only one other relevant dimension (typically depth).
+    If `layer_depth` is provided, it is used instead of `field` to determine which slices are NaN-only.
 
     Parameters
     ----------
     field : xr.DataArray
-        Input data array with NaN edges to trim.
+        Input array to trim. May contain NaNs at the edges along `xdim`.
     xdim : str
-        Dimension along which to trim NaN-only slices.
+        The dimension along which to remove NaN-only slices.
     layer_depth : xr.DataArray, optional
-        Optional array used to identify NaN regions. If None, `field` is used.
+        Optional array to evaluate NaN positions. If not provided, `field` is used instead.
 
     Returns
     -------
     field : xr.DataArray
-        Trimmed data array.
+        Trimmed `field`, with leading and trailing NaN-only slices removed along `xdim`.
     layer_depth : xr.DataArray or None
-        Trimmed `layer_depth`, or None if not provided.
+        Trimmed `layer_depth`, if provided. Otherwise, returns None.
 
     Raises
     ------
     ValueError
-        If `field` does not have exactly one dimension besides `xdim`.
+        If `field` has more than one additional dimension besides `xdim`.
+
+    Notes
+    -----
+    - If `xdim` is not in `field.dims`, no trimming is performed.
+    - This is typically used for visualizing or extracting clean sections from 2D slices
+      (e.g., vertical sections) that have NaNs at the spatial boundaries.
     """
     if xdim in field.dims:
         other_dims = [dim for dim in field.dims if dim != xdim]
-        if len(other_dims) != 1:
-            raise ValueError(
-                f"Expected exactly one dimension besides '{xdim}', but got: {other_dims}"
-            )
-
-        depth_dim = other_dims[0]
-
-        if layer_depth is not None:
-            if depth_dim in layer_depth.dims:
-                nan_mask = layer_depth.sum(dim=depth_dim).isnull()
-            else:
+        if len(other_dims) == 0:
+            if layer_depth is not None:
                 nan_mask = layer_depth.isnull()
+            else:
+                nan_mask = field.isnull()
+
+        elif len(other_dims) == 1:
+
+            depth_dim = other_dims[0]
+
+            if layer_depth is not None:
+                if depth_dim in layer_depth.dims:
+                    nan_mask = layer_depth.isnull().sum(dim=depth_dim)
+                else:
+                    nan_mask = layer_depth.isnull()
+            else:
+                N = field.sizes[depth_dim]
+                nan_mask = field.isnull().sum(dim=depth_dim) == N
+
         else:
-            N = field.sizes[depth_dim]
-            nan_mask = field.isnull().sum(dim=depth_dim) == N
+            raise ValueError(
+                f"Cannot trim along dimension '{xdim}': expected at most one other dimension, "
+                f"but got {len(other_dims)} ({other_dims})."
+            )
 
         valid_indices = np.where(nan_mask.values == 0)[0]
 

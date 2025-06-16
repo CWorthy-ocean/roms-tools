@@ -298,7 +298,10 @@ def partition(
 
 
 def partition_netcdf(
-    filepath: Union[str, Path], np_eta: int = 1, np_xi: int = 1
+    filepath: Union[str, Path],
+    np_eta: int = 1,
+    np_xi: int = 1,
+    include_coarse_dims: bool = True,
 ) -> None:
     """Partition a ROMS NetCDF file into smaller spatial tiles and save them to disk.
 
@@ -316,6 +319,11 @@ def partition_netcdf(
     np_xi : int, optional
         The number of partitions along the `xi` direction. Must be a positive integer. Default is 1.
 
+    include_coarse_dims : bool, optional
+        Whether to include coarse grid dimensions (`eta_coarse`, `xi_coarse`) in the partitioning.
+        If False, these dimensions will not be split. Relevant if none of the coarse resolution variables are actually used by ROMS.
+        Default is True.
+
     Returns
     -------
     List[Path]
@@ -326,10 +334,12 @@ def partition_netcdf(
     filepath = Path(filepath)
 
     # Open the dataset
-    ds = xr.open_dataset(filepath.with_suffix(".nc"))
+    ds = xr.open_dataset(filepath.with_suffix(".nc"), decode_timedelta=False)
 
     # Partition the dataset
-    file_numbers, partitioned_datasets = partition(ds, np_eta=np_eta, np_xi=np_xi)
+    file_numbers, partitioned_datasets = partition(
+        ds, np_eta=np_eta, np_xi=np_xi, include_coarse_dims=include_coarse_dims
+    )
 
     # Generate paths to the partitioned files
     base_filepath = filepath.with_suffix("")

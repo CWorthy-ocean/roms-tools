@@ -354,15 +354,15 @@ def test_plot_on_native_model_grid(roms_output_fixture, request):
 
 
 @pytest.mark.parametrize(
-    "roms_output_fixture",
+    "roms_output_fixture, lat, lon",
     [
-        "roms_output_from_restart_file",
-        "roms_output_from_restart_file_adjusted_for_zeta",
-        "roms_output_from_restart_file_with_straddling_grid",
+        ("roms_output_from_restart_file", 9, -128),
+        ("roms_output_from_restart_file_adjusted_for_zeta", 9, -128),
+        ("roms_output_from_restart_file_with_straddling_grid", 60, 0),
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_plot_on_lat_lon(roms_output_fixture, request):
+def test_plot_on_lat_lon(roms_output_fixture, lat, lon, request):
     roms_output = request.getfixturevalue(roms_output_fixture)
 
     for include_boundary in [False, True]:
@@ -377,54 +377,54 @@ def test_plot_on_lat_lon(roms_output_fixture, request):
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
-                    lon=-128,
+                    lat=lat,
+                    lon=lon,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
+                    lat=lat,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
+                    lat=lat,
                     s=-1,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
+                    lat=lat,
                     depth=1000,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lon=-128,
+                    lon=lon,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lon=-128,
+                    lon=lon,
                     s=-1,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lon=-128,
+                    lon=lon,
                     depth=1000,
                     **kwargs,
                 )
 
             # 2D fields
-            roms_output.plot("zeta", time=1, lat=9, **kwargs)
-            roms_output.plot("zeta", time=1, lon=-128, **kwargs)
+            roms_output.plot("zeta", time=1, lat=lat, **kwargs)
+            roms_output.plot("zeta", time=1, lon=lon, **kwargs)
 
 
 def test_plot_errors(roms_output_from_restart_file):

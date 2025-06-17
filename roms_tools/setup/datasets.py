@@ -129,8 +129,8 @@ class Dataset:
 
         # Select relevant times
         if "time" in self.dim_names and self.start_time is not None:
-            ds = self.add_time_info(ds)
             ds = self.select_relevant_times(ds)
+            ds = self.add_time_info(ds)
 
             if self.dim_names["time"] != "time":
                 ds = ds.rename({self.dim_names["time"]: "time"})

@@ -648,6 +648,8 @@ class TestCDRForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
+            hsc=0.0,
+            vsc=0.0,
             times=[datetime(2022, 1, 1), datetime(2022, 1, 3), datetime(2022, 1, 5)],
             volume_fluxes=[1.0, 2.0, 3.0],
             tracer_concentrations={
@@ -659,9 +661,11 @@ class TestCDRForcing:
 
         second_volume_release = VolumeRelease(
             name="second_release",
-            lon=first_volume_release.lon - 1,
-            lat=first_volume_release.lat - 1,
-            depth=first_volume_release.depth - 1,
+            lon=first_volume_release.lon + 360,
+            lat=first_volume_release.lat,
+            depth=first_volume_release.depth,
+            hsc=40000.0,
+            vsc=0.0,
             times=[
                 datetime(2022, 1, 2),
                 datetime(2022, 1, 4),
@@ -676,6 +680,8 @@ class TestCDRForcing:
             lat=66.0,
             lon=-25.0,
             depth=50.0,
+            hsc=40000.0,
+            vsc=100.0,
             times=[datetime(2022, 1, 1), datetime(2022, 1, 3), datetime(2022, 1, 5)],
             tracer_fluxes={
                 "DIC": [10.0, 20.0, 30.0],
@@ -684,9 +690,11 @@ class TestCDRForcing:
 
         second_tracer_perturbation = TracerPerturbation(
             name="second_release",
-            lon=first_tracer_perturbation.lon - 1,
-            lat=first_tracer_perturbation.lat - 1,
-            depth=first_tracer_perturbation.depth - 1,
+            lon=first_tracer_perturbation.lon + 360,
+            lat=first_tracer_perturbation.lat,
+            depth=first_tracer_perturbation.depth,
+            hsc=0.0,
+            vsc=10.0,
             times=[
                 datetime(2022, 1, 2),
                 datetime(2022, 1, 4),
@@ -734,14 +742,37 @@ class TestCDRForcing:
             rot=0,
             N=3,
         )
+        grid_that_straddles = Grid(
+            nx=18,
+            ny=18,
+            size_x=2500,
+            size_y=2500,
+            center_lon=0,
+            center_lat=65,
+            rot=0,
+            N=3,
+        )  # grid that straddles dateline
+
         self.volume_release_cdr_forcing = CDRForcing(
             grid=grid,
             start_time=self.start_time,
             end_time=self.end_time,
             releases=[self.first_volume_release, self.second_volume_release],
         )
+        self.volume_release_cdr_forcing_with_straddling_grid = CDRForcing(
+            grid=grid_that_straddles,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self.first_volume_release, self.second_volume_release],
+        )
         self.tracer_perturbation_cdr_forcing = CDRForcing(
             grid=grid,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=[self.first_tracer_perturbation, self.second_tracer_perturbation],
+        )
+        self.tracer_perturbation_cdr_forcing_with_straddling_grid = CDRForcing(
+            grid=grid_that_straddles,
             start_time=self.start_time,
             end_time=self.end_time,
             releases=[self.first_tracer_perturbation, self.second_tracer_perturbation],
@@ -777,6 +808,12 @@ class TestCDRForcing:
         )
         assert isinstance(self.volume_release_cdr_forcing.ds, xr.Dataset)
         assert isinstance(self.tracer_perturbation_cdr_forcing.ds, xr.Dataset)
+        assert isinstance(
+            self.volume_release_cdr_forcing_with_straddling_grid.ds, xr.Dataset
+        )
+        assert isinstance(
+            self.tracer_perturbation_cdr_forcing_with_straddling_grid.ds, xr.Dataset
+        )
 
     def test_plot_error_when_no_grid(self):
 
@@ -788,61 +825,68 @@ class TestCDRForcing:
             with pytest.raises(
                 ValueError, match="A grid must be provided for plotting"
             ):
-                cdr.plot_location_top_view("all")
+                cdr.plot_locations("all")
 
             with pytest.raises(
                 ValueError, match="A grid must be provided for plotting"
             ):
-                cdr.plot_location_side_view("first_release")
+                cdr.plot_distribution("first_release")
 
     def test_plot_volume_release(self):
 
         for cdr in [
             self.volume_release_cdr_forcing_without_grid,
             self.volume_release_cdr_forcing,
+            self.volume_release_cdr_forcing_with_straddling_grid,
         ]:
             cdr.plot_volume_flux()
             cdr.plot_tracer_concentration("ALK")
             cdr.plot_tracer_concentration("DIC")
 
-        self.volume_release_cdr_forcing.plot_location_top_view()
+        self.volume_release_cdr_forcing.plot_locations()
+        self.volume_release_cdr_forcing.plot_locations(release_names=["first_release"])
 
     def test_plot_tracer_perturbation(self):
 
         for cdr in [
             self.tracer_perturbation_cdr_forcing_without_grid,
             self.tracer_perturbation_cdr_forcing,
+            self.tracer_perturbation_cdr_forcing_with_straddling_grid,
         ]:
             cdr.plot_tracer_flux("ALK")
             cdr.plot_tracer_flux("DIC")
 
-        self.tracer_perturbation_cdr_forcing.plot_location_top_view()
+        self.tracer_perturbation_cdr_forcing.plot_locations()
+        self.tracer_perturbation_cdr_forcing.plot_locations(
+            release_names=["first_release"]
+        )
 
     @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-    def test_plot_side_view(self):
+    def test_plot_distribution(self):
 
-        self.volume_release_cdr_forcing.plot_location_side_view("first_release")
-        self.tracer_perturbation_cdr_forcing.plot_location_side_view("first_release")
+        self.volume_release_cdr_forcing.plot_distribution("first_release")
+        self.volume_release_cdr_forcing_with_straddling_grid.plot_distribution(
+            "first_release"
+        )
+        self.tracer_perturbation_cdr_forcing.plot_distribution("first_release")
+        self.tracer_perturbation_cdr_forcing_with_straddling_grid.plot_distribution(
+            "first_release"
+        )
 
     def test_plot_more_errors(self):
         """Test that error is raised on bad plot args or ambiguous release."""
 
-        with pytest.raises(ValueError, match="Multiple releases found"):
-            self.volume_release_cdr_forcing.plot_location_side_view()
-
         with pytest.raises(ValueError, match="Invalid release"):
-            self.volume_release_cdr_forcing.plot_location_side_view(release_name="fake")
+            self.volume_release_cdr_forcing.plot_distribution(release_name="fake")
 
         with pytest.raises(ValueError, match="Invalid releases"):
-            self.volume_release_cdr_forcing.plot_location_top_view(
-                release_names=["fake"]
-            )
+            self.volume_release_cdr_forcing.plot_locations(release_names=["fake"])
 
         with pytest.raises(ValueError, match="should be a string"):
-            self.volume_release_cdr_forcing.plot_location_top_view(release_names=4)
+            self.volume_release_cdr_forcing.plot_locations(release_names=4)
 
         with pytest.raises(ValueError, match="list must be strings"):
-            self.volume_release_cdr_forcing.plot_location_top_view(release_names=[4])
+            self.volume_release_cdr_forcing.plot_locations(release_names=[4])
 
     def test_cdr_forcing_save(self, tmp_path):
         """Test save method."""

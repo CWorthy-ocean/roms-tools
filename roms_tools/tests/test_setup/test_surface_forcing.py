@@ -611,6 +611,7 @@ def test_determine_usage_coarse_grid():
     [
         "surface_forcing",
         "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
         "coarse_surface_forcing",
     ],
 )
@@ -722,6 +723,7 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
         "bgc_surface_forcing",
         "bgc_surface_forcing_from_climatology",
         "bgc_surface_forcing_from_unified_climatology",
@@ -755,6 +757,7 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
     [
         "surface_forcing",
         "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
         "coarse_surface_forcing",
         "bgc_surface_forcing",
     ],

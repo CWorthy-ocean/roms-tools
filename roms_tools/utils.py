@@ -167,7 +167,7 @@ def _load_data(
                     matching_files[0],
                     decode_times=decode_times,
                     chunks=chunks,
-                    consolidated=True,
+                    consolidated=None,
                 )
             else:
                 ds = xr.open_mfdataset(

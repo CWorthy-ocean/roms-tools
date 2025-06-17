@@ -606,6 +606,25 @@ def test_determine_usage_coarse_grid():
     assert surface_forcing.use_coarse_grid
 
 
+def test_apply_wind_correction(surface_forcing):
+
+    uwnd = surface_forcing.ds["uwnd"]
+    vwnd = surface_forcing.ds["vwnd"]
+
+    uwnd_corr, vwnd_corr = surface_forcing._apply_wind_correction(uwnd, vwnd)
+
+    assert isinstance(uwnd_corr, xr.DataArray)
+    assert isinstance(vwnd_corr, xr.DataArray)
+
+    # Wind correction should not increase magnitude
+    assert (abs(uwnd_corr) <= abs(uwnd)).all()
+    assert (abs(vwnd_corr) <= abs(vwnd)).all()
+
+    # Direction (sign) should be preserved
+    assert (np.sign(uwnd_corr) == np.sign(uwnd)).all()
+    assert (np.sign(vwnd_corr) == np.sign(vwnd)).all()
+
+
 @pytest.mark.parametrize(
     "sfc_forcing_fixture",
     [

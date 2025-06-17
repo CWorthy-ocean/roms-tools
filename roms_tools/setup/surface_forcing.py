@@ -14,6 +14,7 @@ from roms_tools.plot import _plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
+    Dataset,
     ERA5Correction,
     ERA5Dataset,
     UnifiedBGCSurfaceDataset,
@@ -166,8 +167,11 @@ class SurfaceForcing:
             )
 
         # correct radiation
-        if self.type == "physics" and self.correct_radiation:
-            processed_fields = self._apply_correction(processed_fields, data)
+        if self.type == "physics":
+            if self.correct_radiation:
+                processed_fields["swrad"] = self._apply_correction(
+                    processed_fields["swrad"], data
+                )
 
         if self.type == "bgc":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
@@ -363,8 +367,26 @@ class SurfaceForcing:
 
         self.variable_info = variable_info
 
-    def _apply_correction(self, processed_fields, data):
+    def _apply_correction(self, radiation: xr.DataArray, data: Dataset) -> xr.DataArray:
+        """Apply a climatological correction to shortwave radiation.
 
+        This method scales the input `radiation` field using a correction factor
+        derived from climatological data, interpolated in time and regridded
+        to the ROMS domain.
+
+        Parameters
+        ----------
+        radiation : xr.DataArray
+            Shortwave radiation field to be corrected. Must include a `time` coordinate.
+
+        data : Dataset
+            Dataset containing ROMS grid and mask information used to align correction data.
+
+        Returns
+        -------
+        xr.DataArray
+            Radiation field scaled by the correction factor, with original coordinates.
+        """
         correction_data = self._get_correction_data()
         # Match subdomain to forcing data to reuse the mask
         coords_correction = {
@@ -391,7 +413,7 @@ class SurfaceForcing:
                         correction_data.dim_names["time"],
                         time=time,
                     )
-                    for time in processed_fields["swrad"].time
+                    for time in radiation.time
                 ],
                 dim="time",
             )
@@ -400,7 +422,7 @@ class SurfaceForcing:
             corr_factor = interpolate_from_climatology(
                 correction_data.ds[correction_data.var_names["swr_corr"]],
                 correction_data.dim_names["time"],
-                time=processed_fields["swrad"].time,
+                time=radiation.time,
             )
 
         # Spatial regridding
@@ -409,9 +431,9 @@ class SurfaceForcing:
         )
         corr_factor = lateral_regrid.apply(corr_factor)
 
-        processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
+        radiation = radiation * corr_factor
 
-        return processed_fields
+        return radiation
 
     def _write_into_dataset(self, processed_fields, data, d_meta):
 

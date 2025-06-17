@@ -5,6 +5,7 @@
 ### New Features
 
 * Option for wind drop-off near the coasts in `SurfaceForcing` ([#351](https://github.com/CWorthy-ocean/roms-tools/pull/351))
+* Option to ignore coarse dimensions when partitioning ([#348](https://github.com/CWorthy-ocean/roms-tools/pull/348))
 * Ensure clean initialization of `SurfaceForcing` with ERA5 data (no warnings) ([#337](https://github.com/CWorthy-ocean/roms-tools/pull/337))
 * Handle duplicate time entries in source data ([#336](https://github.com/CWorthy-ocean/roms-tools/pull/336))
 * Fix bug for `grid = Grid.from_file()` --> `grid.to_yaml()` sequence ([#334](https://github.com/CWorthy-ocean/roms-tools/pull/334))

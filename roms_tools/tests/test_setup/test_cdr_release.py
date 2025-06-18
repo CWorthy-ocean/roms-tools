@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
+from roms_tools.constants import NUM_TRACERS
 from roms_tools.setup.cdr_release import (
     Concentration,
     Flux,
@@ -308,6 +309,11 @@ class TestVolumeRelease:
                 **self.params, times=times, tracer_concentrations=tracer_concentrations
             )
 
+    def test_get_tracer_metadata(self):
+
+        d = VolumeRelease.get_tracer_metadata()
+        assert len(d) == NUM_TRACERS
+
 
 class TestTracerPerturbation:
     def setup_method(self):
@@ -375,3 +381,8 @@ class TestTracerPerturbation:
         tracer_fluxes = {"ALK": [1]}
         with pytest.raises(ValidationError):
             TracerPerturbation(**self.params, times=times, tracer_fluxes=tracer_fluxes)
+
+    def test_get_tracer_metadata(self):
+
+        d = VolumeRelease.get_tracer_metadata()
+        assert len(d) == NUM_TRACERS

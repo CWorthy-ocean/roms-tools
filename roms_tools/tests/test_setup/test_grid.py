@@ -302,6 +302,21 @@ def test_roundtrip_yaml(tmp_path):
         filepath.unlink()
 
 
+def test_roundtrip_from_file_yaml(grid, tmp_path):
+    """Test that reading a grid from file and then saving it to yaml works."""
+
+    filepath = Path(tmp_path / "test.nc")
+    grid.save(filepath)
+
+    grid_from_file = Grid.from_file(filepath)
+
+    filepath_yaml = Path(tmp_path / "test.yaml")
+    grid_from_file.to_yaml(filepath_yaml)
+
+    filepath.unlink()
+    filepath_yaml.unlink()
+
+
 def test_files_have_same_hash(tmp_path):
 
     # Initialize a Grid object using the initializer

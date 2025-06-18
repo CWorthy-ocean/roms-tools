@@ -174,7 +174,6 @@ class SurfaceForcing:
                 interpolate=False,
             )
 
-        # correct radiation
         if self.type == "physics":
             if self.correct_radiation:
                 processed_fields["swrad"] = self._apply_radiation_correction(

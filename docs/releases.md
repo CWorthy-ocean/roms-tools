@@ -4,8 +4,9 @@
 
 ### New Features
 
+* Fix plotting `ROMSOutput` for grids that straddle the dateline ([#347](https://github.com/CWorthy-ocean/roms-tools/pull/347))
 * Option to ignore coarse dimensions when partitioning ([#348](https://github.com/CWorthy-ocean/roms-tools/pull/348))
-* Ensure clean initialization of SurfaceForcing with ERA5 data (no warnings) ([#337](https://github.com/CWorthy-ocean/roms-tools/pull/337))
+* Ensure clean initialization of `SurfaceForcing` with ERA5 data (no warnings) ([#337](https://github.com/CWorthy-ocean/roms-tools/pull/337))
 * Handle duplicate time entries in source data ([#336](https://github.com/CWorthy-ocean/roms-tools/pull/336))
 * Fix bug for `grid = Grid.from_file()` --> `grid.to_yaml()` sequence ([#334](https://github.com/CWorthy-ocean/roms-tools/pull/334))
 * Set BGC tracers in rivers to non-zero default values ([#326](https://github.com/CWorthy-ocean/roms-tools/pull/326))

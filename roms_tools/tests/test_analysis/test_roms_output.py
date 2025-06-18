@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
@@ -352,6 +353,17 @@ def test_plot_on_native_model_grid(roms_output_fixture, request):
             roms_output.plot("zeta", time=1, eta=1, **kwargs)
             roms_output.plot("zeta", time=1, xi=1, **kwargs)
 
+    # Test that passing a matplotlib.axes.Axes works
+    fig, ax = plt.subplots(1, 1)
+    roms_output.plot(var_name="temp", time=1, s=-1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, depth=1000, ax=ax)
+    roms_output.plot(var_name="temp", time=1, eta=1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, eta=1, xi=1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, s=-1, eta=1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, depth=1000, eta=1, ax=ax)
+    roms_output.plot(var_name="zeta", time=1, ax=ax)
+    roms_output.plot(var_name="zeta", time=1, eta=1, ax=ax)
+
 
 @pytest.mark.parametrize(
     "roms_output_fixture, lat, lon",
@@ -425,6 +437,14 @@ def test_plot_on_lat_lon(roms_output_fixture, lat, lon, request):
             # 2D fields
             roms_output.plot("zeta", time=1, lat=lat, **kwargs)
             roms_output.plot("zeta", time=1, lon=lon, **kwargs)
+
+    # Test that passing a matplotlib.axes.Axes works
+    fig, ax = plt.subplots(1, 1)
+    roms_output.plot(var_name="temp", time=1, lat=lat, lon=lon, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, s=-1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, depth=1000, ax=ax)
+    roms_output.plot(var_name="zeta", time=1, lat=lat, ax=ax)
 
 
 def test_plot_errors(roms_output_from_restart_file):

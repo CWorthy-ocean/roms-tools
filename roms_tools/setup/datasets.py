@@ -1549,9 +1549,6 @@ class ERA5Dataset(Dataset):
 class ERA5ARCODataset(ERA5Dataset):
     # The GCP ARCO version of the dataset has different variable names
 
-    read_zarr = True
-    use_dask = True
-
     var_names: Dict[str, str] = field(
         default_factory=lambda: {
             "uwnd": "10m_u_component_of_wind",
@@ -1567,13 +1564,13 @@ class ERA5ARCODataset(ERA5Dataset):
 
     def __post_init__(self):
         self.read_zarr = True
+        self.use_dask = True
 
-        if not _has_dask:
+        if not _has_dask():
             raise RuntimeError(
                 "You must have dask installed to use the ERA5ARCO dataset, since it uses zarr"
             )
 
-        self.use_dask = True
         super().__post_init__()
 
 

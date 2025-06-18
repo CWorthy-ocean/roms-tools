@@ -499,6 +499,34 @@ def surface_forcing(request, use_dask):
 
 
 @pytest.fixture(scope="session")
+def surface_forcing_arco(request, use_dask):
+    """Fixture for creating a SurfaceForcing object."""
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=5,
+        size_y=5,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "ERA5_ARCO"},
+        correct_radiation=True,
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def coarse_surface_forcing(request, use_dask):
     """Fixture for creating a SurfaceForcing object."""
 

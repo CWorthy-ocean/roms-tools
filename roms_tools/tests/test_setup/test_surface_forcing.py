@@ -617,6 +617,7 @@ def test_determine_usage_coarse_grid():
         "surface_forcing",
         "corrected_surface_forcing",
         "coarse_surface_forcing",
+        "surface_forcing_arco",
     ],
 )
 def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):

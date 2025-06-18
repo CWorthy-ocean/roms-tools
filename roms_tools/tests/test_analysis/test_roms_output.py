@@ -440,11 +440,11 @@ def test_plot_on_lat_lon(roms_output_fixture, lat, lon, request):
 
     # Test that passing a matplotlib.axes.Axes works
     fig, ax = plt.subplots(1, 1)
-    roms_output.plot(var_name="temp", time=1, lat=9, lon=-128, ax=ax)
-    roms_output.plot(var_name="temp", time=1, lat=9, ax=ax)
-    roms_output.plot(var_name="temp", time=1, lat=9, s=-1, ax=ax)
-    roms_output.plot(var_name="temp", time=1, lat=9, depth=1000, ax=ax)
-    roms_output.plot(var_name="zeta", time=1, lat=9, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, lon=lon, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, s=-1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, depth=1000, ax=ax)
+    roms_output.plot(var_name="zeta", time=1, lat=lat, ax=ax)
 
 
 def test_plot_errors(roms_output_from_restart_file):

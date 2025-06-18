@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -179,8 +180,8 @@ class RiverForcing:
                         f"Data for river `{river_name}` must be a list of tuples."
                     )
 
-                # Ensure each element in the list is a tuple of length 2
                 seen_tuples = set()
+                # Ensure each element in the list is a tuple of length 2
                 for idx_pair in river_data:
                     if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
                         raise ValueError(
@@ -209,7 +210,7 @@ class RiverForcing:
                             f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho)-1}]."
                         )
 
-                    # Check for duplicate tuples
+                    # Check for duplicate tuples for a single river
                     if idx_pair in seen_tuples:
                         raise ValueError(
                             f"Duplicate location {idx_pair} found for river `{river_name}`."
@@ -402,6 +403,110 @@ class RiverForcing:
         ds = ds.assign_coords({"river_time": time})
 
         return ds
+
+    def _handle_overlapping_rivers(self, ds: xr.Dataset) -> xr.Dataset:
+        """Detect and resolve overlapping river grid cell assignments.
+
+        If multiple rivers are assigned to the same grid cell (i.e., overlapping index pairs),
+        this method creates new uniquely named rivers ('overlap_1', 'overlap_2', ...)
+        that consolidate the contributions from all original rivers sharing that location.
+
+        For each overlapping grid cell:
+        - A new river is created using a volume-weighted sum of the original rivers' volume and tracer.
+        - The volume fraction of the original river is reduced proportionally to reflect the removal of the shared grid cell.
+        - The overlapping grid cell is removed from each contributing river in `self.indices`.
+        - The new river is appended to the dataset and indexed in `self.indices`.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing the existing river forcing fields, including:
+            - `river_volume` : volume transport per river [river_time, nriver]
+            - `river_tracer` : tracer concentration per river [river_time, ntracers, nriver]
+            - `river_name`   : river name labels [nriver]
+
+        Returns
+        -------
+        xr.Dataset
+            A new dataset with overlapping rivers resolved and new entries added.
+        """
+        index_to_rivers = defaultdict(list)
+
+        # Collect all index pairs used by multiple rivers
+        for river_name, index_list in self.indices.items():
+            for idx_pair in index_list:
+                index_to_rivers[idx_pair].append(river_name)
+
+        overlapping_rivers = {
+            idx: names for idx, names in index_to_rivers.items() if len(names) > 1
+        }
+
+        # Add new unique river for each overlapping index
+        combined_river_volumes = []
+        combined_river_tracers = []
+
+        for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
+            new_name = f"overlap_{i+1}"
+            self.indices[new_name] = [idx_pair]
+
+            # Get IDs of all rivers contributing to this overlapping cell
+            contributing_ids = [
+                np.where(ds["river_name"].values == name)[0].item()
+                + 1  # river ID uses fortran indexing
+                for name in river_list
+            ]
+
+            # Get the number of grid points each river originally contributed to
+            num_cells_per_river = [len(self.indices[name]) for name in river_list]
+
+            # Weighted sum of river volume contributions at the overlapping location
+            combined_river_volume = sum(
+                ds["river_volume"].sel(nriver=id) / n_cells
+                for idx, n_cells in zip(contributing_ids, num_cells_per_river)
+            )
+
+            # Volume-weighted sum of river tracer contributions at the overlapping location
+            combined_river_tracer = (
+                sum(
+                    ds["river_tracer"].sel(nriver=id)
+                    * (ds["river_volume"].sel(nriver=id) / n_cells)
+                    for id, n_cells in zip(contributing_ids, num_cells_per_river)
+                )
+                / combined_river_volume
+            )
+
+            # Expand, assign coordinates, and name for both volume and tracer
+            new_nriver = ds.dims["nriver"] + len(combined_river_volumes)
+            for var in [combined_river_volume, combined_river_tracer]:
+                var = var.expand_dims(nriver=1)
+                var = var.assign_coords(nriver=[new_nriver], river_name=new_name)
+
+            combined_river_volumes.append(combined_river_volume)
+            combined_river_tracers.append(combined_river_tracer)
+
+            # Reduce volume fraction of each original river by appropriate amount
+            for idx, n_cells in zip(contributing_ids, num_cells_per_river):
+                ds["river_volume"].loc[{"nriver": id}] = (
+                    ds["river_volume"].sel(nriver=id)
+                    * (num_cells_per_river - 1)
+                    / num_cells_per_river
+                )
+
+            # Remove shared index from each original river
+            for river_name in river_list:
+                self.indices[river_name] = [
+                    idx for idx in self.indices[river_name] if idx != idx_pair
+                ]
+
+        ds_updated = xr.Dataset()
+        ds_updated["river_volume"] = xr.concat(
+            [ds["river_volume"]] + combined_river_volumes, dim="nriver"
+        )
+        ds_updated["river_tracer"] = xr.concat(
+            [ds["river_tracer"]] + combined_river_tracers, dim="nriver"
+        )
+
+        return ds_updated
 
     def _write_indices_into_dataset(self, ds):
         """Adds river location indices to the dataset as the "river_index" and

@@ -233,6 +233,81 @@ class RiverForcing:
 
         return data
 
+    def _move_rivers_to_closest_coast(self, target_coords, data):
+        """Move river mouths to the closest coastal grid cell.
+
+        This method computes the closest coastal grid point to each river mouth
+        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
+
+        Parameters:
+        -----------
+        target_coords : dict
+            A dictionary containing the following keys:
+            - "lon" (xarray.DataArray): Longitude coordinates of the target grid points.
+            - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
+            - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
+
+        data : object
+            An object that contains the dataset and related variables. It must have the following attributes:
+            - `ds`: The dataset containing river information.
+            - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
+            - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
+
+        Returns
+        -------
+        indices : dict[str, list[tuple]]
+            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+        """
+
+        # Retrieve longitude and latitude of river mouths
+        river_lon = data.ds[data.var_names["longitude"]]
+        river_lat = data.ds[data.var_names["latitude"]]
+
+        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
+        if target_coords["straddle"]:
+            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
+        else:
+            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+
+        mask = self.grid.ds.mask_rho
+        faces = (
+            mask.shift(eta_rho=1)
+            + mask.shift(eta_rho=-1)
+            + mask.shift(xi_rho=1)
+            + mask.shift(xi_rho=-1)
+        )
+
+        # We want all grid points on land that are adjacent to the ocean
+        coast = (1 - mask) * (faces > 0)
+        dist_coast = gc_dist(
+            target_coords["lon"].where(coast),
+            target_coords["lat"].where(coast),
+            river_lon,
+            river_lat,
+        ).transpose(data.dim_names["station"], "eta_rho", "xi_rho")
+        dist_coast_min = dist_coast.min(dim=["eta_rho", "xi_rho"])
+
+        # Find the indices of the closest coastal grid cell to the river mouth
+        indices = np.where(dist_coast == dist_coast_min)
+        stations = indices[0]
+        eta_rho_values = indices[1]
+        xi_rho_values = indices[2]
+        names = (
+            data.ds[data.var_names["name"]]
+            .isel({data.dim_names["station"]: stations})
+            .values
+        )
+        # Return the indices in a dictionary format
+        river_indices = {}
+        for i in range(len(stations)):
+            river_name = names[i]
+            river_indices[river_name] = [
+                (int(eta_rho_values[i]), int(xi_rho_values[i]))
+            ]  # list of tuples
+
+        return river_indices
+
     def _create_river_forcing(self, data):
         """Create river forcing data for volume flux and tracers (temperature, salinity,
         BGC tracers).
@@ -327,81 +402,6 @@ class RiverForcing:
         ds = ds.assign_coords({"river_time": time})
 
         return ds
-
-    def _move_rivers_to_closest_coast(self, target_coords, data):
-        """Move river mouths to the closest coastal grid cell.
-
-        This method computes the closest coastal grid point to each river mouth
-        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
-
-        Parameters:
-        -----------
-        target_coords : dict
-            A dictionary containing the following keys:
-            - "lon" (xarray.DataArray): Longitude coordinates of the target grid points.
-            - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
-            - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
-
-        data : object
-            An object that contains the dataset and related variables. It must have the following attributes:
-            - `ds`: The dataset containing river information.
-            - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
-            - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
-
-        Returns
-        -------
-        indices : dict[str, list[tuple]]
-            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
-            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
-        """
-
-        # Retrieve longitude and latitude of river mouths
-        river_lon = data.ds[data.var_names["longitude"]]
-        river_lat = data.ds[data.var_names["latitude"]]
-
-        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
-        if target_coords["straddle"]:
-            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
-        else:
-            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
-
-        mask = self.grid.ds.mask_rho
-        faces = (
-            mask.shift(eta_rho=1)
-            + mask.shift(eta_rho=-1)
-            + mask.shift(xi_rho=1)
-            + mask.shift(xi_rho=-1)
-        )
-
-        # We want all grid points on land that are adjacent to the ocean
-        coast = (1 - mask) * (faces > 0)
-        dist_coast = gc_dist(
-            target_coords["lon"].where(coast),
-            target_coords["lat"].where(coast),
-            river_lon,
-            river_lat,
-        ).transpose(data.dim_names["station"], "eta_rho", "xi_rho")
-        dist_coast_min = dist_coast.min(dim=["eta_rho", "xi_rho"])
-
-        # Find the indices of the closest coastal grid cell to the river mouth
-        indices = np.where(dist_coast == dist_coast_min)
-        stations = indices[0]
-        eta_rho_values = indices[1]
-        xi_rho_values = indices[2]
-        names = (
-            data.ds[data.var_names["name"]]
-            .isel({data.dim_names["station"]: stations})
-            .values
-        )
-        # Return the indices in a dictionary format
-        river_indices = {}
-        for i in range(len(stations)):
-            river_name = names[i]
-            river_indices[river_name] = [
-                (int(eta_rho_values[i]), int(xi_rho_values[i]))
-            ]  # list of tuples
-
-        return river_indices
 
     def _write_indices_into_dataset(self, ds):
         """Adds river location indices to the dataset as the "river_index" and

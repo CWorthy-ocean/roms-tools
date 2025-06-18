@@ -3,6 +3,7 @@ import logging
 import textwrap
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.testing as npt
 import pytest
@@ -183,13 +184,21 @@ def test_successful_initialization_with_topography(grid_fixture, request):
     assert grid is not None
 
 
-def test_plot_save_methods(tmp_path):
+def test_plot():
 
     grid = Grid(
         nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
     )
 
     grid.plot(bathymetry=True)
+    grid.plot(bathymetry=False)
+
+
+def test_save(tmp_path):
+
+    grid = Grid(
+        nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
+    )
 
     for file_str in ["test_grid", "test_grid.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -630,7 +639,7 @@ def test_update_vertical_coordinate():
     assert len(grid.ds.s_rho) == 5
 
 
-def test_plot():
+def test_plot_vertical_coordinate():
     grid = Grid(
         nx=2,
         ny=2,
@@ -647,6 +656,10 @@ def test_plot():
     grid.plot_vertical_coordinate(s=-1)
     grid.plot_vertical_coordinate(eta=0)
     grid.plot_vertical_coordinate(xi=0)
+    # Test that passing a matplotlib.axes.Axes works
+    fig, ax = plt.subplots(1, 1)
+    grid.plot_vertical_coordinate(s=-1, ax=ax)
+    grid.plot_vertical_coordinate(eta=0, ax=ax)
 
     with pytest.raises(ValueError, match="Exactly one of"):
         grid.plot_vertical_coordinate(s=-1, eta=0)

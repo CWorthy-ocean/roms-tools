@@ -41,8 +41,8 @@ def _plot(
 
     Returns
     -------
-    matplotlib.figure.Figure
-        The generated figure with the plotted data, if a new figure was created.
+    matplotlib.figure.Figure, optional
+        The generated figure with the plotted data, only returned if `ax` is None.
 
     Raises
     ------
@@ -232,8 +232,8 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
 
     Returns
     -------
-    matplotlib.figure.Figure
-        The generated figure with the plotted section.
+    matplotlib.figure.Figure, optional
+        The generated figure with the plotted section, only returned if `ax` is None.
 
     Raises
     ------
@@ -304,7 +304,8 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         xlabel = xdim
     ax.set_xlabel(xlabel)
 
-    return fig
+    if ax is None:
+        return fig
 
 
 def _profile_plot(field, title="", ax=None):
@@ -326,7 +327,7 @@ def _profile_plot(field, title="", ax=None):
     Returns
     -------
     matplotlib.figure.Figure
-        The generated figure with the plotted profile.
+        The generated figure with the plotted profile, only returned if `ax` is None.
 
     Raises
     ------
@@ -361,7 +362,8 @@ def _profile_plot(field, title="", ax=None):
     ax.set_ylabel("Depth [m]")
     ax.grid()
 
-    return fig
+    if ax is None:
+        return fig
 
 
 def _line_plot(field, title="", ax=None):
@@ -380,7 +382,8 @@ def _line_plot(field, title="", ax=None):
     Returns
     -------
     matplotlib.figure.Figure
-        The generated figure with the plotted data and highlighted NaN regions.
+        The generated figure with the plotted data and highlighted NaN regions, only
+        returned if `ax` is None.
 
     Raises
     ------
@@ -447,7 +450,8 @@ def _line_plot(field, title="", ax=None):
         xlabel = xdim
     ax.set_xlabel(xlabel)
 
-    return fig
+    if ax is None:
+        return fig
 
 
 def _add_boundary_to_ax(

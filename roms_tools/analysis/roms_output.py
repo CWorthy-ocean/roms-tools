@@ -138,7 +138,7 @@ class ROMSOutput:
             By default, depth contours are not shown (False).
 
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots. Default is None.
+            The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots. Default is None.
 
         save_path : str, optional
             Path to save the generated plot. If None, the plot is shown interactively.

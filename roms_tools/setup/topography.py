@@ -403,7 +403,8 @@ def _add_topography_metadata(ds, topography_source, smooth_factor, hmin, rmax):
         Updated dataset with added metadata.
     """
     ds.attrs["topography_source_name"] = topography_source["name"]
-    ds.attrs["topography_source_path"] = topography_source["path"]
+    if "path" in topography_source:
+        ds.attrs["topography_source_path"] = topography_source["path"]
     ds.attrs["hmin"] = hmin
 
     return ds

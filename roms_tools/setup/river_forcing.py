@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -179,8 +180,8 @@ class RiverForcing:
                         f"Data for river `{river_name}` must be a list of tuples."
                     )
 
-                # Ensure each element in the list is a tuple of length 2
                 seen_tuples = set()
+                # Ensure each element in the list is a tuple of length 2
                 for idx_pair in river_data:
                     if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
                         raise ValueError(
@@ -209,7 +210,7 @@ class RiverForcing:
                             f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho)-1}]."
                         )
 
-                    # Check for duplicate tuples
+                    # Check for duplicate tuples for a single river
                     if idx_pair in seen_tuples:
                         raise ValueError(
                             f"Duplicate location {idx_pair} found for river `{river_name}`."
@@ -232,6 +233,81 @@ class RiverForcing:
             raise ValueError('Only "DAI" is a valid option for source["name"].')
 
         return data
+
+    def _move_rivers_to_closest_coast(self, target_coords, data):
+        """Move river mouths to the closest coastal grid cell.
+
+        This method computes the closest coastal grid point to each river mouth
+        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
+
+        Parameters:
+        -----------
+        target_coords : dict
+            A dictionary containing the following keys:
+            - "lon" (xarray.DataArray): Longitude coordinates of the target grid points.
+            - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
+            - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
+
+        data : object
+            An object that contains the dataset and related variables. It must have the following attributes:
+            - `ds`: The dataset containing river information.
+            - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
+            - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
+
+        Returns
+        -------
+        indices : dict[str, list[tuple]]
+            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+        """
+
+        # Retrieve longitude and latitude of river mouths
+        river_lon = data.ds[data.var_names["longitude"]]
+        river_lat = data.ds[data.var_names["latitude"]]
+
+        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
+        if target_coords["straddle"]:
+            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
+        else:
+            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+
+        mask = self.grid.ds.mask_rho
+        faces = (
+            mask.shift(eta_rho=1)
+            + mask.shift(eta_rho=-1)
+            + mask.shift(xi_rho=1)
+            + mask.shift(xi_rho=-1)
+        )
+
+        # We want all grid points on land that are adjacent to the ocean
+        coast = (1 - mask) * (faces > 0)
+        dist_coast = gc_dist(
+            target_coords["lon"].where(coast),
+            target_coords["lat"].where(coast),
+            river_lon,
+            river_lat,
+        ).transpose(data.dim_names["station"], "eta_rho", "xi_rho")
+        dist_coast_min = dist_coast.min(dim=["eta_rho", "xi_rho"])
+
+        # Find the indices of the closest coastal grid cell to the river mouth
+        indices = np.where(dist_coast == dist_coast_min)
+        stations = indices[0]
+        eta_rho_values = indices[1]
+        xi_rho_values = indices[2]
+        names = (
+            data.ds[data.var_names["name"]]
+            .isel({data.dim_names["station"]: stations})
+            .values
+        )
+        # Return the indices in a dictionary format
+        river_indices = {}
+        for i in range(len(stations)):
+            river_name = names[i]
+            river_indices[river_name] = [
+                (int(eta_rho_values[i]), int(xi_rho_values[i]))
+            ]  # list of tuples
+
+        return river_indices
 
     def _create_river_forcing(self, data):
         """Create river forcing data for volume flux and tracers (temperature, salinity,
@@ -328,80 +404,109 @@ class RiverForcing:
 
         return ds
 
-    def _move_rivers_to_closest_coast(self, target_coords, data):
-        """Move river mouths to the closest coastal grid cell.
+    def _handle_overlapping_rivers(self, ds: xr.Dataset) -> xr.Dataset:
+        """Detect and resolve overlapping river grid cell assignments.
 
-        This method computes the closest coastal grid point to each river mouth
-        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
+        If multiple rivers are assigned to the same grid cell (i.e., overlapping index pairs),
+        this method creates new uniquely named rivers ('overlap_1', 'overlap_2', ...)
+        that consolidate the contributions from all original rivers sharing that location.
 
-        Parameters:
-        -----------
-        target_coords : dict
-            A dictionary containing the following keys:
-            - "lon" (xarray.DataArray): Longitude coordinates of the target grid points.
-            - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
-            - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
+        For each overlapping grid cell:
+        - A new river is created using a volume-weighted sum of the original rivers' volume and tracer.
+        - The volume fraction of the original river is reduced proportionally to reflect the removal of the shared grid cell.
+        - The overlapping grid cell is removed from each contributing river in `self.indices`.
+        - The new river is appended to the dataset and indexed in `self.indices`.
 
-        data : object
-            An object that contains the dataset and related variables. It must have the following attributes:
-            - `ds`: The dataset containing river information.
-            - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
-            - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing the existing river forcing fields, including:
+            - `river_volume` : volume transport per river [river_time, nriver]
+            - `river_tracer` : tracer concentration per river [river_time, ntracers, nriver]
+            - `river_name`   : river name labels [nriver]
 
         Returns
         -------
-        indices : dict[str, list[tuple]]
-            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
-            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+        xr.Dataset
+            A new dataset with overlapping rivers resolved and new entries added.
         """
+        index_to_rivers = defaultdict(list)
 
-        # Retrieve longitude and latitude of river mouths
-        river_lon = data.ds[data.var_names["longitude"]]
-        river_lat = data.ds[data.var_names["latitude"]]
+        # Collect all index pairs used by multiple rivers
+        for river_name, index_list in self.indices.items():
+            for idx_pair in index_list:
+                index_to_rivers[idx_pair].append(river_name)
 
-        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
-        if target_coords["straddle"]:
-            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
-        else:
-            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+        overlapping_rivers = {
+            idx: names for idx, names in index_to_rivers.items() if len(names) > 1
+        }
 
-        mask = self.grid.ds.mask_rho
-        faces = (
-            mask.shift(eta_rho=1)
-            + mask.shift(eta_rho=-1)
-            + mask.shift(xi_rho=1)
-            + mask.shift(xi_rho=-1)
+        # Add new unique river for each overlapping index
+        combined_river_volumes = []
+        combined_river_tracers = []
+
+        for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
+            new_name = f"overlap_{i+1}"
+            self.indices[new_name] = [idx_pair]
+
+            # Get IDs of all rivers contributing to this overlapping cell
+            contributing_ids = [
+                np.where(ds["river_name"].values == name)[0].item()
+                + 1  # river ID uses fortran indexing
+                for name in river_list
+            ]
+
+            # Get the number of grid points each river originally contributed to
+            num_cells_per_river = [len(self.indices[name]) for name in river_list]
+
+            # Weighted sum of river volume contributions at the overlapping location
+            combined_river_volume = sum(
+                ds["river_volume"].sel(nriver=id) / n_cells
+                for idx, n_cells in zip(contributing_ids, num_cells_per_river)
+            )
+
+            # Volume-weighted sum of river tracer contributions at the overlapping location
+            combined_river_tracer = (
+                sum(
+                    ds["river_tracer"].sel(nriver=id)
+                    * (ds["river_volume"].sel(nriver=id) / n_cells)
+                    for id, n_cells in zip(contributing_ids, num_cells_per_river)
+                )
+                / combined_river_volume
+            )
+
+            # Expand, assign coordinates, and name for both volume and tracer
+            new_nriver = ds.dims["nriver"] + len(combined_river_volumes)
+            for var in [combined_river_volume, combined_river_tracer]:
+                var = var.expand_dims(nriver=1)
+                var = var.assign_coords(nriver=[new_nriver], river_name=new_name)
+
+            combined_river_volumes.append(combined_river_volume)
+            combined_river_tracers.append(combined_river_tracer)
+
+            # Reduce volume fraction of each original river by appropriate amount
+            for idx, n_cells in zip(contributing_ids, num_cells_per_river):
+                ds["river_volume"].loc[{"nriver": id}] = (
+                    ds["river_volume"].sel(nriver=id)
+                    * (num_cells_per_river - 1)
+                    / num_cells_per_river
+                )
+
+            # Remove shared index from each original river
+            for river_name in river_list:
+                self.indices[river_name] = [
+                    idx for idx in self.indices[river_name] if idx != idx_pair
+                ]
+
+        ds_updated = xr.Dataset()
+        ds_updated["river_volume"] = xr.concat(
+            [ds["river_volume"]] + combined_river_volumes, dim="nriver"
+        )
+        ds_updated["river_tracer"] = xr.concat(
+            [ds["river_tracer"]] + combined_river_tracers, dim="nriver"
         )
 
-        # We want all grid points on land that are adjacent to the ocean
-        coast = (1 - mask) * (faces > 0)
-        dist_coast = gc_dist(
-            target_coords["lon"].where(coast),
-            target_coords["lat"].where(coast),
-            river_lon,
-            river_lat,
-        ).transpose(data.dim_names["station"], "eta_rho", "xi_rho")
-        dist_coast_min = dist_coast.min(dim=["eta_rho", "xi_rho"])
-
-        # Find the indices of the closest coastal grid cell to the river mouth
-        indices = np.where(dist_coast == dist_coast_min)
-        stations = indices[0]
-        eta_rho_values = indices[1]
-        xi_rho_values = indices[2]
-        names = (
-            data.ds[data.var_names["name"]]
-            .isel({data.dim_names["station"]: stations})
-            .values
-        )
-        # Return the indices in a dictionary format
-        river_indices = {}
-        for i in range(len(stations)):
-            river_name = names[i]
-            river_indices[river_name] = [
-                (int(eta_rho_values[i]), int(xi_rho_values[i]))
-            ]  # list of tuples
-
-        return river_indices
+        return ds_updated
 
     def _write_indices_into_dataset(self, ds):
         """Adds river location indices to the dataset as the "river_index" and

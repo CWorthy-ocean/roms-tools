@@ -9,7 +9,7 @@ from roms_tools.utils import save_datasets
 
 
 def partition(
-    ds: xr.Dataset, np_eta: int = 1, np_xi: int = 1
+    ds: xr.Dataset, np_eta: int = 1, np_xi: int = 1, include_coarse_dims: bool = True
 ) -> tuple[list[int], list[xr.Dataset]]:
     """Partition a ROMS (Regional Ocean Modeling System) dataset into smaller spatial
     tiles.
@@ -29,6 +29,11 @@ def partition(
 
     np_xi : int, optional
         The number of partitions along the `xi` direction. Must be a positive integer. Default is 1.
+
+    include_coarse_dims : bool, optional
+        Whether to include coarse grid dimensions (`eta_coarse`, `xi_coarse`) in the partitioning.
+        If False, these dimensions will not be split. Relevant if none of the coarse resolution variables are actually used by ROMS.
+        Default is True.
 
     Returns
     -------
@@ -67,17 +72,18 @@ def partition(
     ):
         raise ValueError("np_eta and np_xi must be positive integers")
 
-    partitionable_dims_maybe_present = [
+    base_dims = [
         "eta_rho",
         "xi_rho",
         "eta_v",
         "xi_u",
         "eta_psi",
         "xi_psi",
-        "eta_coarse",
-        "xi_coarse",
     ]
-    dims_to_partition = [d for d in partitionable_dims_maybe_present if d in ds.dims]
+    coarse_dims = ["eta_coarse", "xi_coarse"]
+    partitionable_dims = base_dims + coarse_dims if include_coarse_dims else base_dims
+
+    dims_to_partition = [d for d in partitionable_dims if d in ds.dims]
 
     # if eta is periodic there are no ghost cells along those dimensions
     if "eta_v" in ds.sizes and ds.sizes["eta_rho"] == ds.sizes["eta_v"]:
@@ -292,7 +298,10 @@ def partition(
 
 
 def partition_netcdf(
-    filepath: Union[str, Path], np_eta: int = 1, np_xi: int = 1
+    filepath: Union[str, Path],
+    np_eta: int = 1,
+    np_xi: int = 1,
+    include_coarse_dims: bool = True,
 ) -> None:
     """Partition a ROMS NetCDF file into smaller spatial tiles and save them to disk.
 
@@ -310,6 +319,11 @@ def partition_netcdf(
     np_xi : int, optional
         The number of partitions along the `xi` direction. Must be a positive integer. Default is 1.
 
+    include_coarse_dims : bool, optional
+        Whether to include coarse grid dimensions (`eta_coarse`, `xi_coarse`) in the partitioning.
+        If False, these dimensions will not be split. Relevant if none of the coarse resolution variables are actually used by ROMS.
+        Default is True.
+
     Returns
     -------
     List[Path]
@@ -320,10 +334,12 @@ def partition_netcdf(
     filepath = Path(filepath)
 
     # Open the dataset
-    ds = xr.open_dataset(filepath.with_suffix(".nc"))
+    ds = xr.open_dataset(filepath.with_suffix(".nc"), decode_timedelta=False)
 
     # Partition the dataset
-    file_numbers, partitioned_datasets = partition(ds, np_eta=np_eta, np_xi=np_xi)
+    file_numbers, partitioned_datasets = partition(
+        ds, np_eta=np_eta, np_xi=np_xi, include_coarse_dims=include_coarse_dims
+    )
 
     # Generate paths to the partitioned files
     base_filepath = filepath.with_suffix("")

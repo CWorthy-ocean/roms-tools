@@ -232,6 +232,19 @@ class TestPartitionGrid:
         with pytest.raises(ValueError, match="cannot be evenly divided"):
             partition(grid.ds, np_eta=4, np_xi=1)
 
+        with pytest.raises(ValueError, match="cannot be evenly divided"):
+            partition(grid.ds, np_eta=10, np_xi=10)
+
+    def test_skip_coarse_dims(self, grid):
+        """Test that coarse dimensions remain unchanged when excluded from
+        partitioning."""
+        _, partitioned_datasets = partition(
+            grid.ds, np_eta=10, np_xi=10, include_coarse_dims=False
+        )
+        for ds in partitioned_datasets:
+            assert ds.sizes["eta_coarse"] == grid.ds.sizes["eta_coarse"]
+            assert ds.sizes["xi_coarse"] == grid.ds.sizes["xi_coarse"]
+
 
 class TestPartitionMissingDims:
     def test_partition_missing_dims(self, grid):

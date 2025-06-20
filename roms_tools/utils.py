@@ -516,6 +516,27 @@ def _remove_edge_nans(field, xdim, layer_depth=None):
 
     return field, layer_depth
 
-
 def _has_dask() -> bool:
     return find_spec("dask") is not None
+
+def normalize_longitude(lon: float, straddle: bool) -> float:
+    """Normalize longitude to the appropriate range depending on whether the grid
+    straddles the dateline.
+
+    Parameters
+    ----------
+    lon : float
+        Longitude in degrees (can be any value, including multiples of 360 or negative values).
+    straddle : bool
+        Whether the grid straddles the dateline. If True, output will be in (-180, 180];
+        if False, output will be in [0, 360).
+    Returns
+    -------
+    float
+        Normalized longitude.
+    """
+    lon = lon % 360
+    if straddle:
+        return lon - 360 if lon > 180 else lon
+    else:
+        return lon + 360 if lon < 0 else lon

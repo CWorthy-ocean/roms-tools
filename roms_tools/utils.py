@@ -516,8 +516,10 @@ def _remove_edge_nans(field, xdim, layer_depth=None):
 
     return field, layer_depth
 
+
 def _has_dask() -> bool:
     return find_spec("dask") is not None
+
 
 def normalize_longitude(lon: float, straddle: bool) -> float:
     """Normalize longitude to the appropriate range depending on whether the grid

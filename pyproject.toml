@@ -43,7 +43,8 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 dask = [
-    "dask[diagnostics]"
+    "dask[diagnostics]",
+    "gcsfs"
 ]
 
 

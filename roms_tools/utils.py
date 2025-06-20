@@ -60,6 +60,14 @@ def _load_data(
     if dim_names is None:
         dim_names = {}
 
+    if use_dask:
+        if not _has_dask():
+            raise RuntimeError(
+                "Dask is required but not installed. Install it with:\n"
+                "  • `pip install roms-tools[dask]` or\n"
+                "  • `conda install dask`\n"
+                "Alternatively, install `roms-tools` with conda to include all dependencies."
+            )
     if read_zarr:
         if isinstance(filename, list):
             raise ValueError("read_zarr requires a single path, not a list of paths")
@@ -519,6 +527,10 @@ def _remove_edge_nans(field, xdim, layer_depth=None):
 
 def _has_dask() -> bool:
     return find_spec("dask") is not None
+
+
+def _has_gcsfs() -> bool:
+    return find_spec("gcsfs") is not None
 
 
 def normalize_longitude(lon: float, straddle: bool) -> float:

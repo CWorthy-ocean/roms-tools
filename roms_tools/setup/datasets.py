@@ -25,7 +25,7 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     one_dim_fill,
 )
-from roms_tools.utils import _has_dask, _load_data
+from roms_tools.utils import _has_gcsfs, _load_data
 
 # lat-lon datasets
 
@@ -1564,11 +1564,12 @@ class ERA5ARCODataset(ERA5Dataset):
 
     def __post_init__(self):
         self.read_zarr = True
-        self.use_dask = True
-
-        if not _has_dask():
+        if not _has_gcsfs():
             raise RuntimeError(
-                "You must have dask installed to use the ERA5ARCO dataset, since it uses zarr"
+                "To use cloud-based ERA5 data, GCSFS is required but not installed. Install it with:\n"
+                "  • `pip install roms-tools[dask]` or\n"
+                "  • `conda install gcsfs`\n"
+                "Alternatively, install `roms-tools` with conda to include all dependencies."
             )
 
         super().__post_init__()

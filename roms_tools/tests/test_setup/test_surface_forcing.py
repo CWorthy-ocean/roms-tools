@@ -521,8 +521,6 @@ def test_surface_forcing_creation(
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
-    sfc_forcing.plot("pco2_air", time=0)
-
 
 @pytest.mark.parametrize(
     "sfc_forcing_fixture",
@@ -634,10 +632,24 @@ def test_apply_wind_correction(surface_forcing):
         "coarse_surface_forcing",
     ],
 )
-def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
+def test_surface_forcing_plot(sfc_forcing_fixture, request, tmp_path):
     """Test save method."""
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
     sfc_forcing.plot(var_name="uwnd", time=0)
+
+
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "surface_forcing",
+        "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
+        "coarse_surface_forcing",
+    ],
+)
+def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
+    """Test save method."""
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -663,15 +675,32 @@ def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
             expected_filepath.unlink()
 
 
-def test_surface_forcing_bgc_plot(bgc_surface_forcing):
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "bgc_surface_forcing",
+        "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
+    ],
+)
+def test_surface_forcing_bgc_plot(sfc_forcing_fixture, request):
     """Test plot method."""
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+    sfc_forcing.plot(var_name="pco2_air", time=0)
 
-    bgc_surface_forcing.plot(var_name="pco2_air", time=0)
 
-
-def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "bgc_surface_forcing",
+        "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
+    ],
+)
+def test_surface_forcing_bgc_save(sfc_forcing_fixture, request, tmp_path):
     """Test save method."""
 
+    bgc_surface_forcing = request.getfixturevalue(sfc_forcing_fixture)
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
         for filepath in [

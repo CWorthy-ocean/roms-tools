@@ -35,7 +35,8 @@ dependencies = [
     "regionmask",
     "xgcm",
     "numba",
-    "pydantic"
+    "pydantic",
+    "gcsfs"
 ]
 dynamic = ["version"]
 

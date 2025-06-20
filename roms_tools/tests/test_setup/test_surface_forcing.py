@@ -645,6 +645,7 @@ def test_surface_forcing_plot(sfc_forcing_fixture, request, tmp_path):
         "corrected_surface_forcing",
         "surface_forcing_with_wind_dropoff",
         "coarse_surface_forcing",
+        "surface_forcing_arco",
     ],
 )
 def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):

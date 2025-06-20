@@ -217,8 +217,10 @@ class SurfaceForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            if self.source["name"] == "ERA5_ARCO":
-                logging.debug("No path specified for ERA5_ARCO, using default")
+            if self.source["name"] == "ERA5":
+                logging.info(
+                    "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
+                )
                 self.source["path"] = DEFAULT_ERA5_ARCO_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
@@ -282,20 +284,19 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
-                data = ERA5Dataset(**data_dict)
-            elif self.source["name"] == "ERA5_ARCO":
-                data = ERA5ARCODataset(**data_dict)
+                if self.source["path"].startswith("gs://"):
+                    data = ERA5ARCODataset(**data_dict)
+                else:
+                    data = ERA5Dataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "ERA5" or "ERA5_ARCO" are valid options for source["name"] when type is "physics".'
+                    'Only "ERA5" is a valid options for source["name"] when type is "physics".'
                 )
 
         elif self.type == "bgc":
             if self.source["name"] == "CESM_REGRIDDED":
-
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
-
                 data = UnifiedBGCSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
@@ -307,8 +308,6 @@ class SurfaceForcing:
     def _get_correction_data(self):
 
         if self.source["name"] == "ERA5":
-            correction_data = ERA5Correction(use_dask=self.use_dask)
-        elif self.source["name"] == "ERA5_ARCO":
             correction_data = ERA5Correction(use_dask=self.use_dask)
         else:
             raise ValueError(

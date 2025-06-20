@@ -285,6 +285,10 @@ class SurfaceForcing:
         if self.type == "physics":
             if self.source["name"] == "ERA5":
                 if self.source["path"].startswith("gs://"):
+                    if not self.use_dask:
+                        raise ValueError(
+                            "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
+                        )
                     data = ERA5ARCODataset(**data_dict)
                 else:
                     data = ERA5Dataset(**data_dict)

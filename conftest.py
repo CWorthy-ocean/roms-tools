@@ -588,6 +588,36 @@ def corrected_surface_forcing(request, use_dask):
 
 
 @pytest.fixture(scope="session")
+def surface_forcing_with_wind_dropoff(request, use_dask):
+    """Fixture for creating a SurfaceForcing object with wind dropoff correction."""
+
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 1, 31)
+    end_time = datetime(2020, 2, 2)
+
+    fname = Path(download_test_data("ERA5_global_test_data.nc"))
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "ERA5", "path": fname},
+        wind_dropoff=True,
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def bgc_surface_forcing(request, use_dask):
     """Fixture for creating a SurfaceForcing object with BGC."""
     grid = Grid(

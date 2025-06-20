@@ -482,7 +482,7 @@ def surface_forcing(use_dask):
         rot=20,
     )
 
-    start_time = datetime(2020, 1, 31)
+    start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 2)
 
     fname = Path(download_test_data("ERA5_global_test_data.nc"))
@@ -515,7 +515,7 @@ def surface_forcing_arco(use_dask):
         rot=20,
     )
 
-    start_time = datetime(2020, 1, 31)
+    start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 2)
 
     return SurfaceForcing(
@@ -543,7 +543,7 @@ def coarse_surface_forcing(use_dask):
         rot=20,
     )
 
-    start_time = datetime(2020, 1, 31)
+    start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 2)
 
     fname = Path(download_test_data("ERA5_global_test_data.nc"))
@@ -574,7 +574,7 @@ def corrected_surface_forcing(use_dask):
         rot=20,
     )
 
-    start_time = datetime(2020, 1, 31)
+    start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 2)
 
     fname = Path(download_test_data("ERA5_global_test_data.nc"))

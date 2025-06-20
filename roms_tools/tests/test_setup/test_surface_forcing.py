@@ -157,63 +157,34 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
     return grid
 
 
-@pytest.mark.parametrize(
-    "grid_fixture",
-    [
-        "grid_that_straddles_dateline",
-        "grid_that_lies_east_of_dateline_less_than_five_degrees_away",
-        "grid_that_lies_east_of_dateline_more_than_five_degrees_away",
-        "grid_that_lies_west_of_dateline_less_than_five_degrees_away",
-        "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
-    ],
-)
-def test_successful_initialization_with_regional_data(
-    grid_fixture, request, caplog, use_dask
+def _test_successful_initialization(
+    grid: Grid,
+    start_time: datetime,
+    end_time: datetime,
+    source: dict[str, str],
+    coarse_grid_mode: str,
+    use_dask: bool,
+    caplog,
 ):
-    """Test the initialization of SurfaceForcing with regional ERA5 data.
+    with caplog.at_level(logging.INFO):
+        sfc_forcing = SurfaceForcing(
+            grid=grid,
+            start_time=start_time,
+            end_time=end_time,
+            source=source,
+            correct_radiation=True,
+            wind_dropoff=True,
+            coarse_grid_mode=coarse_grid_mode,
+            use_dask=use_dask,
+        )
 
-    The test is performed twice:
-    - First with the default fine grid.
-    - Then with the coarse grid enabled.
-    """
-
-    start_time = datetime(2020, 1, 31)
-    end_time = datetime(2020, 2, 2)
-
-    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
-
-    grid = request.getfixturevalue(grid_fixture)
-
-    for coarse_grid_mode in ["always", "never"]:
-        with caplog.at_level(logging.INFO):
-            sfc_forcing = SurfaceForcing(
-                grid=grid,
-                start_time=start_time,
-                end_time=end_time,
-                source={"name": "ERA5", "path": fname},
-                correct_radiation=True,
-                coarse_grid_mode=coarse_grid_mode,
-                use_dask=use_dask,
-            )
-
-        assert sfc_forcing.ds is not None
-        assert "uwnd" in sfc_forcing.ds
-        assert "vwnd" in sfc_forcing.ds
-        assert "swrad" in sfc_forcing.ds
-        assert "lwrad" in sfc_forcing.ds
-        assert "Tair" in sfc_forcing.ds
-        assert "qair" in sfc_forcing.ds
-        assert "rain" in sfc_forcing.ds
-
+        assert sfc_forcing.grid == grid
         assert sfc_forcing.start_time == start_time
         assert sfc_forcing.end_time == end_time
         assert sfc_forcing.type == "physics"
-        assert sfc_forcing.source == {
-            "name": "ERA5",
-            "path": fname,
-            "climatology": False,
-        }
-        assert sfc_forcing.ds.coords["time"].attrs["units"] == "days"
+        assert sfc_forcing.source == source
+        assert sfc_forcing.correct_radiation
+        assert sfc_forcing.wind_dropoff
 
         if coarse_grid_mode == "always":
             assert sfc_forcing.use_coarse_grid
@@ -225,9 +196,92 @@ def test_successful_initialization_with_regional_data(
             assert not sfc_forcing.use_coarse_grid
             assert "Data will be interpolated onto fine grid." in caplog.text
 
-        sfc_forcing.plot("uwnd", time=0)
-        sfc_forcing.plot("vwnd", time=0)
-        sfc_forcing.plot("rain", time=0)
+        assert isinstance(sfc_forcing.ds, xr.Dataset)
+        assert "uwnd" in sfc_forcing.ds
+        assert "vwnd" in sfc_forcing.ds
+        assert "swrad" in sfc_forcing.ds
+        assert "lwrad" in sfc_forcing.ds
+        assert "Tair" in sfc_forcing.ds
+        assert "qair" in sfc_forcing.ds
+        assert "rain" in sfc_forcing.ds
+        assert sfc_forcing.ds.coords["time"].attrs["units"] == "days"
+
+        assert sfc_forcing.ds.attrs["source"] == source["name"]
+        assert sfc_forcing.ds.attrs["correct_radiation"] == "True"
+        assert sfc_forcing.ds.attrs["wind_dropoff"] == "True"
+
+
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid_that_straddles_dateline",
+        "grid_that_lies_east_of_dateline_less_than_five_degrees_away",
+        "grid_that_lies_east_of_dateline_more_than_five_degrees_away",
+        "grid_that_lies_west_of_dateline_less_than_five_degrees_away",
+        "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
+    ],
+)
+def test_successful_initialization_with_regional_data(
+    grid_fixture, request, use_dask, caplog
+):
+    """Test the initialization of SurfaceForcing with regional ERA5 data.
+
+    The test is performed twice:
+    - First with the default fine grid.
+    - Then with the coarse grid enabled.
+    """
+
+    fname = Path(download_test_data("ERA5_regional_test_data.nc"))
+    grid = request.getfixturevalue(grid_fixture)
+
+    for coarse_grid_mode in ["always", "never"]:
+        _test_successful_initialization(
+            grid=grid,
+            start_time=datetime(2020, 1, 31),
+            end_time=datetime(2020, 2, 2),
+            source={"name": "ERA5", "path": fname, "climatology": False},
+            coarse_grid_mode=coarse_grid_mode,
+            use_dask=use_dask,
+            caplog=caplog,
+        )
+
+
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid_that_straddles_dateline",
+        "grid_that_lies_east_of_dateline_less_than_five_degrees_away",
+        "grid_that_lies_east_of_dateline_more_than_five_degrees_away",
+        "grid_that_lies_west_of_dateline_less_than_five_degrees_away",
+        "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
+        "grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
+        "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
+        "grid_that_straddles_180_degree_meridian",
+    ],
+)
+def test_successful_initialization_with_global_data(
+    grid_fixture, request, use_dask, caplog
+):
+    """Test initialization of SurfaceForcing with global data.
+
+    Verifies that the SurfaceForcing object is correctly initialized with global data,
+    including the correct handling of the grid and physics data. Checks both coarse and
+    fine grid initialization.
+    """
+
+    fname = Path(download_test_data("ERA5_global_test_data.nc"))
+    grid = request.getfixturevalue(grid_fixture)
+
+    for coarse_grid_mode in ["always", "never"]:
+        _test_successful_initialization(
+            grid=grid,
+            start_time=datetime(2020, 1, 31),
+            end_time=datetime(2020, 2, 2),
+            source={"name": "ERA5", "path": fname, "climatology": False},
+            coarse_grid_mode=coarse_grid_mode,
+            use_dask=use_dask,
+            caplog=caplog,
+        )
 
 
 @pytest.mark.parametrize(
@@ -291,67 +345,6 @@ def test_no_longitude_intersection_initialization_with_regional_data(
                 source={"name": "ERA5", "path": fname},
                 use_dask=use_dask,
             )
-
-
-@pytest.mark.parametrize(
-    "grid_fixture",
-    [
-        "grid_that_straddles_dateline",
-        "grid_that_lies_east_of_dateline_less_than_five_degrees_away",
-        "grid_that_lies_east_of_dateline_more_than_five_degrees_away",
-        "grid_that_lies_west_of_dateline_less_than_five_degrees_away",
-        "grid_that_lies_west_of_dateline_more_than_five_degrees_away",
-        "grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
-        "another_grid_that_straddles_dateline_but_is_too_big_for_regional_test_data",
-        "grid_that_straddles_180_degree_meridian",
-    ],
-)
-def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
-    """Test initialization of SurfaceForcing with global data.
-
-    Verifies that the SurfaceForcing object is correctly initialized with global data,
-    including the correct handling of the grid and physics data. Checks both coarse and
-    fine grid initialization.
-    """
-    start_time = datetime(2020, 1, 31)
-    end_time = datetime(2020, 2, 2)
-
-    fname = Path(download_test_data("ERA5_global_test_data.nc"))
-
-    grid = request.getfixturevalue(grid_fixture)
-
-    for coarse_grid_mode in ["always", "never"]:
-        sfc_forcing = SurfaceForcing(
-            grid=grid,
-            coarse_grid_mode=coarse_grid_mode,
-            start_time=start_time,
-            end_time=end_time,
-            source={"name": "ERA5", "path": fname},
-            use_dask=use_dask,
-        )
-        assert sfc_forcing.start_time == start_time
-        assert sfc_forcing.end_time == end_time
-        assert sfc_forcing.type == "physics"
-        assert sfc_forcing.source == {
-            "name": "ERA5",
-            "path": fname,
-            "climatology": False,
-        }
-
-        assert "uwnd" in sfc_forcing.ds
-        assert "vwnd" in sfc_forcing.ds
-        assert "swrad" in sfc_forcing.ds
-        assert "lwrad" in sfc_forcing.ds
-        assert "Tair" in sfc_forcing.ds
-        assert "qair" in sfc_forcing.ds
-        assert "rain" in sfc_forcing.ds
-        assert sfc_forcing.ds.attrs["source"] == "ERA5"
-        assert sfc_forcing.ds.coords["time"].attrs["units"] == "days"
-
-        if coarse_grid_mode == "always":
-            assert sfc_forcing.use_coarse_grid
-        elif coarse_grid_mode == "never":
-            assert not sfc_forcing.use_coarse_grid
 
 
 def test_start_time_end_time_error(use_dask):
@@ -528,8 +521,6 @@ def test_surface_forcing_creation(
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
-    sfc_forcing.plot("pco2_air", time=0)
-
 
 @pytest.mark.parametrize(
     "sfc_forcing_fixture",
@@ -613,18 +604,52 @@ def test_determine_usage_coarse_grid():
     assert surface_forcing.use_coarse_grid
 
 
+def test_apply_wind_correction(surface_forcing):
+
+    uwnd = surface_forcing.ds["uwnd"]
+    vwnd = surface_forcing.ds["vwnd"]
+
+    uwnd_corr, vwnd_corr = surface_forcing._apply_wind_correction(uwnd, vwnd)
+
+    assert isinstance(uwnd_corr, xr.DataArray)
+    assert isinstance(vwnd_corr, xr.DataArray)
+
+    # Wind correction should not increase magnitude
+    assert (abs(uwnd_corr) <= abs(uwnd)).all()
+    assert (abs(vwnd_corr) <= abs(vwnd)).all()
+
+    # Direction (sign) should be preserved
+    assert (np.sign(uwnd_corr) == np.sign(uwnd)).all()
+    assert (np.sign(vwnd_corr) == np.sign(vwnd)).all()
+
+
 @pytest.mark.parametrize(
     "sfc_forcing_fixture",
     [
         "surface_forcing",
         "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
+        "coarse_surface_forcing",
+    ],
+)
+def test_surface_forcing_plot(sfc_forcing_fixture, request, tmp_path):
+    """Test save method."""
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+    sfc_forcing.plot(var_name="uwnd", time=0)
+
+
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "surface_forcing",
+        "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
         "coarse_surface_forcing",
     ],
 )
 def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
     """Test save method."""
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
-    sfc_forcing.plot(var_name="uwnd", time=0)
 
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -650,10 +675,18 @@ def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
             expected_filepath.unlink()
 
 
-def test_surface_forcing_bgc_plot(bgc_surface_forcing):
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "bgc_surface_forcing",
+        "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
+    ],
+)
+def test_surface_forcing_bgc_plot(sfc_forcing_fixture, request):
     """Test plot method."""
-
-    bgc_surface_forcing.plot(var_name="pco2_air", time=0)
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+    sfc_forcing.plot(var_name="pco2_air", time=0)
 
 
 def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
@@ -729,6 +762,7 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
         "bgc_surface_forcing",
         "bgc_surface_forcing_from_climatology",
         "bgc_surface_forcing_from_unified_climatology",
@@ -762,6 +796,7 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
     [
         "surface_forcing",
         "corrected_surface_forcing",
+        "surface_forcing_with_wind_dropoff",
         "coarse_surface_forcing",
         "bgc_surface_forcing",
     ],

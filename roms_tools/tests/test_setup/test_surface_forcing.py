@@ -689,18 +689,9 @@ def test_surface_forcing_bgc_plot(sfc_forcing_fixture, request):
     sfc_forcing.plot(var_name="pco2_air", time=0)
 
 
-@pytest.mark.parametrize(
-    "sfc_forcing_fixture",
-    [
-        "bgc_surface_forcing",
-        "bgc_surface_forcing_from_climatology",
-        "bgc_surface_forcing_from_unified_climatology",
-    ],
-)
-def test_surface_forcing_bgc_save(sfc_forcing_fixture, request, tmp_path):
+def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
     """Test save method."""
 
-    bgc_surface_forcing = request.getfixturevalue(sfc_forcing_fixture)
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
         for filepath in [

@@ -38,6 +38,7 @@
 ### Bugfixes
 
 * Fix plotting `ROMSOutput` for grids that straddle the dateline ([#347](https://github.com/CWorthy-ocean/roms-tools/pull/347))
+* Report topography source path in NetCDF grid file so that the sequence `Grid.from_file()` --> `grid.to_yaml()` works ([#353](https://github.com/CWorthy-ocean/roms-tools/pull/353))
 * Fix bug related to passing an `ax` to plotting methods ([#325](https://github.com/CWorthy-ocean/roms-tools/pull/325))
 * Fix bug for `grid = Grid.from_file()` --> `grid.to_yaml()` sequence ([#334](https://github.com/CWorthy-ocean/roms-tools/pull/334))
 * Fix handling of optional variables in Unified BGC datasets ([#320](https://github.com/CWorthy-ocean/roms-tools/pull/320))

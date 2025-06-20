@@ -661,17 +661,27 @@ class Grid:
         for attr in [
             "size_x",
             "size_y",
-            "topography_source",
             "hmin",
         ]:
             if attr in ds.attrs:
-                if attr == "topography_source":
-                    a = {"name": ds.attrs[attr]}
-                else:
-                    a = float(ds.attrs[attr])
+                a = float(ds.attrs[attr])
             else:
                 a = None
+
             object.__setattr__(grid, attr, a)
+
+        if "topography_source_name" in ds.attrs:
+            if "topography_source_path" in ds.attrs:
+                a = {
+                    "name": ds.attrs["topography_source_name"],
+                    "path": ds.attrs["topography_source_path"],
+                }
+            else:
+                a = {"name": ds.attrs["topography_source_name"]}
+        else:
+            a = None
+
+        object.__setattr__(grid, "topography_source", a)
 
         return grid
 

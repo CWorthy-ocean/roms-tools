@@ -1567,7 +1567,7 @@ class ERA5ARCODataset(ERA5Dataset):
         if not _has_gcsfs():
             raise RuntimeError(
                 "To use cloud-based ERA5 data, GCSFS is required but not installed. Install it with:\n"
-                "  • `pip install roms-tools[dask]` or\n"
+                "  • `pip install roms-tools[stream]` or\n"
                 "  • `conda install gcsfs`\n"
                 "Alternatively, install `roms-tools` with conda to include all dependencies."
             )

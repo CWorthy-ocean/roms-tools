@@ -176,6 +176,7 @@ def _load_data(
                     decode_times=decode_times,
                     chunks=chunks,
                     consolidated=None,
+                    storage_options=dict(token="anon"),
                 )
             else:
                 ds = xr.open_mfdataset(

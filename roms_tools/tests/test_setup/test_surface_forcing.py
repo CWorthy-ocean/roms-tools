@@ -645,7 +645,6 @@ def test_surface_forcing_plot(sfc_forcing_fixture, request, tmp_path):
         "corrected_surface_forcing",
         "surface_forcing_with_wind_dropoff",
         "coarse_surface_forcing",
-        "surface_forcing_arco",
     ],
 )
 def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
@@ -908,3 +907,35 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
             SurfaceForcing.from_yaml(yaml_filepath, use_dask=use_dask)
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
+
+
+@pytest.mark.stream
+def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
+    """One big integration test for cloud-based ERA5 data because the streaming takes a
+    long time."""
+
+    # Test plotting
+    surface_forcing_arco.plot(var_name="uwnd", time=0)
+
+    # Roundtrip yaml
+    yaml_filepath = tmp_path / "test_yaml.yaml"
+    surface_forcing_arco.to_yaml(yaml_filepath)
+    sfc_forcing_from_yaml = SurfaceForcing.from_yaml(yaml_filepath, use_dask=True)
+    assert surface_forcing_arco == sfc_forcing_from_yaml
+
+    # Compare hashes
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+    surface_forcing_arco.save(filepath1, group=True)
+    sfc_forcing_from_yaml.save(filepath2, group=True)
+    filepath_str1 = str(Path(filepath1).with_suffix(""))
+    filepath_str2 = str(Path(filepath2).with_suffix(""))
+    expected_filepath1 = f"{filepath_str1}_202002.nc"
+    expected_filepath2 = f"{filepath_str2}_202002.nc"
+    hash1 = calculate_data_hash(expected_filepath1)
+    hash2 = calculate_data_hash(expected_filepath2)
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    Path(expected_filepath1).unlink()
+    Path(expected_filepath2).unlink()

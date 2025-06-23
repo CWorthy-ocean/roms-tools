@@ -35,6 +35,12 @@ def pytest_addoption(parser):
     parser.addoption(
         "--use_dask", action="store_true", default=False, help="Run tests with Dask"
     )
+    parser.addoption(
+        "--use_stream",
+        action="store_true",
+        default=False,
+        help="Run tests that require streaming from cloud",
+    )
 
 
 def pytest_configure(config):
@@ -46,6 +52,11 @@ def pytest_configure(config):
 @pytest.fixture(scope="session")
 def use_dask(request):
     return request.config.getoption("--use_dask")
+
+
+@pytest.fixture(scope="session")
+def use_stream(request):
+    return request.config.getoption("--use_stream")
 
 
 @pytest.fixture(scope="session")
@@ -499,11 +510,11 @@ def surface_forcing(use_dask):
 
 
 @pytest.fixture(scope="session")
-def surface_forcing_arco(use_dask):
+def surface_forcing_arco(use_stream):
     """Fixture for creating a SurfaceForcing object with ERA5 ARCO data."""
 
-    if not use_dask:
-        pytest.skip("surface_forcing_arco requires use_dask=True")
+    if not use_stream:
+        pytest.skip("surface_forcing_arco requires use_stream=True")
 
     grid = Grid(
         nx=5,
@@ -525,7 +536,7 @@ def surface_forcing_arco(use_dask):
         source={"name": "ERA5"},
         correct_radiation=True,
         coarse_grid_mode="never",
-        use_dask=use_dask,
+        use_dask=True,
     )
 
 

@@ -44,6 +44,9 @@ dynamic = ["version"]
 [project.optional-dependencies]
 dask = [
     "dask[diagnostics]",
+]
+stream = [
+    "dask[diagnostics]",
     "gcsfs"
 ]
 

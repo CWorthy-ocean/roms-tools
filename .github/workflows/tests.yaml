@@ -112,7 +112,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -m stream --use_dask --verbose roms_tools/tests/*
+           coverage run --rcfile=coverage.toml -m pytest --stream --use_dask --verbose roms_tools/tests/*
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf

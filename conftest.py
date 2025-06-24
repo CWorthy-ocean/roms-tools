@@ -35,12 +35,33 @@ def pytest_addoption(parser):
     parser.addoption(
         "--use_dask", action="store_true", default=False, help="Run tests with Dask"
     )
+    parser.addoption(
+        "--stream",
+        action="store_true",
+        default=False,
+        help="Run tests that stream data (can be slow)",
+    )
 
 
 def pytest_configure(config):
     if "all" in config.getoption("--overwrite"):
         # If 'all' is specified, overwrite everything
         config.option.overwrite = ["all"]
+
+    config.addinivalue_line(
+        "markers", "stream: mark test that streams data from external sources"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--stream"):
+        # --stream given in cli: do not skip streaming tests
+        return
+
+    skip_stream = pytest.mark.skip(reason="need --stream option to run")
+    for item in items:
+        if "stream" in item.keywords:
+            item.add_marker(skip_stream)
 
 
 @pytest.fixture(scope="session")

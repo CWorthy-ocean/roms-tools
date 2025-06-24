@@ -302,7 +302,9 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
-                if str(self.source["path"]).startswith("gs://"):
+                if str(self.source["path"]).startswith("gs://") or str(
+                    self.source["path"]
+                ).startswith("gcs://"):
                     if not self.use_dask:
                         raise ValueError(
                             "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."

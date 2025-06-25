@@ -477,9 +477,14 @@ class RiverForcing:
 
             # Expand, assign coordinates, and name for both volume and tracer
             new_nriver = ds.dims["nriver"] + len(combined_river_volumes)
-            for var in [combined_river_volume, combined_river_tracer]:
-                var = var.expand_dims(nriver=1)
-                var = var.assign_coords(nriver=[new_nriver], river_name=new_name)
+            combined_river_volume = combined_river_volume.expand_dims(nriver=1)
+            combined_river_volume = combined_river_volume.assign_coords(
+                nriver=[new_nriver + 1], river_name=new_name
+            )
+            combined_river_tracer = combined_river_tracer.expand_dims(nriver=1)
+            combined_river_tracer = combined_river_tracer.assign_coords(
+                nriver=[new_nriver + 1], river_name=new_name
+            )
 
             combined_river_volumes.append(combined_river_volume)
             combined_river_tracers.append(combined_river_tracer)
@@ -487,9 +492,7 @@ class RiverForcing:
             # Reduce volume fraction of each original river by appropriate amount
             for i, n_cells in zip(contributing_indices, num_cells_per_river):
                 ds["river_volume"].loc[{"nriver": ds.nriver[i]}] = (
-                    ds["river_volume"].isel(nriver=i)
-                    * (num_cells_per_river - 1)
-                    / num_cells_per_river
+                    ds["river_volume"].isel(nriver=i) * (n_cells - 1) / n_cells
                 )
 
             # Remove shared index from each original river
@@ -532,7 +535,10 @@ class RiverForcing:
         for nriver in ds.nriver:
             river_name = str(ds.river_name.sel(nriver=nriver).values)
             indices = self.indices[river_name]
-            fraction = 1.0 / len(indices)
+            if len(indices) > 1:
+                fraction = 1.0 / len(indices)
+            else:
+                fraction = 1.0
 
             for eta_index, xi_index in indices:
 

@@ -314,7 +314,7 @@ class SurfaceForcing:
                     data = ERA5Dataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "ERA5" is a valid options for source["name"] when type is "physics".'
+                    'Only "ERA5" is a valid option for source["name"] when type is "physics".'
                 )
 
         elif self.type == "bgc":

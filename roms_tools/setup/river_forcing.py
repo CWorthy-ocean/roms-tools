@@ -136,6 +136,7 @@ class RiverForcing:
             data.extract_named_rivers(self.indices)
 
         ds = self._create_river_forcing(data)
+        ds = self._handle_overlapping_rivers(ds)
         ds = self._write_indices_into_dataset(ds)
         self._validate(ds)
 
@@ -449,10 +450,9 @@ class RiverForcing:
             new_name = f"overlap_{i+1}"
             self.indices[new_name] = [idx_pair]
 
-            # Get IDs of all rivers contributing to this overlapping cell
-            contributing_ids = [
+            # Get index of all rivers contributing to this overlapping cell
+            contributing_indices = [
                 np.where(ds["river_name"].values == name)[0].item()
-                + 1  # river ID uses fortran indexing
                 for name in river_list
             ]
 
@@ -461,16 +461,16 @@ class RiverForcing:
 
             # Weighted sum of river volume contributions at the overlapping location
             combined_river_volume = sum(
-                ds["river_volume"].sel(nriver=id) / n_cells
-                for idx, n_cells in zip(contributing_ids, num_cells_per_river)
+                ds["river_volume"].isel(nriver=i) / n_cells
+                for idx, n_cells in zip(contributing_indices, num_cells_per_river)
             )
 
             # Volume-weighted sum of river tracer contributions at the overlapping location
             combined_river_tracer = (
                 sum(
-                    ds["river_tracer"].sel(nriver=id)
-                    * (ds["river_volume"].sel(nriver=id) / n_cells)
-                    for id, n_cells in zip(contributing_ids, num_cells_per_river)
+                    ds["river_tracer"].isel(nriver=i)
+                    * (ds["river_volume"].isel(nriver=i) / n_cells)
+                    for id, n_cells in zip(contributing_indices, num_cells_per_river)
                 )
                 / combined_river_volume
             )
@@ -485,9 +485,9 @@ class RiverForcing:
             combined_river_tracers.append(combined_river_tracer)
 
             # Reduce volume fraction of each original river by appropriate amount
-            for idx, n_cells in zip(contributing_ids, num_cells_per_river):
-                ds["river_volume"].loc[{"nriver": id}] = (
-                    ds["river_volume"].sel(nriver=id)
+            for i, n_cells in zip(contributing_indices, num_cells_per_river):
+                ds["river_volume"].loc[{"nriver": ds.nriver[i]}] = (
+                    ds["river_volume"].isel(nriver=i)
                     * (num_cells_per_river - 1)
                     / num_cells_per_river
                 )

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Sequence, Type, Union
 
 import cftime
+import numba as nb
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -1229,6 +1230,12 @@ def get_vector_pairs(variable_info):
 
 
 def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
+    return _gc_dist(lon1, lat1, lon2, lat2, input_in_degrees)
+
+
+# @nb.vectorize([nb.float64(nb.float64, nb.float64,nb.float64,nb.float64,nb.boolean)],nopython=True)
+@nb.vectorize(nopython=True)
+def _gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     """Calculate the great circle distance between two points on the Earth's surface
     using the Haversine formula.
 
@@ -1278,6 +1285,25 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     dis = R_EARTH * dang
 
     return dis
+
+
+@nb.guvectorize(
+    [
+        nb.void(
+            nb.float64[:, :],
+            nb.float64[:, :],
+            nb.float64[:, :],
+            nb.float64[:, :],
+            nb.float64[:, :],
+        )
+    ],
+    "(i,j),(i,j),(n,m),(n,m)->(i,j)",
+    nopython=True,
+)
+def min_dist_between_point_arrays(lon1, lat1, lon2, lat2, result):
+    for i in range(lon1.shape[0]):
+        for j in range(lon1.shape[1]):
+            result[i, j] = np.nanmin(_gc_dist(lon1[i, j], lat1[i, j], lon2, lat2, True))
 
 
 def convert_to_relative_days(

@@ -26,11 +26,11 @@ from roms_tools.setup.utils import (
     _write_to_yaml,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
-    gc_dist,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
     interpolate_from_climatology,
+    min_dist_between_point_arrays,
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
@@ -498,22 +498,32 @@ class SurfaceForcing:
             Corrected meridional wind component with reduced coastal values.
         """
 
+        cdist = np.empty_like(self.target_coords["lon"].values)
+        min_dist_between_point_arrays(
+            self.target_coords["lon"].values,
+            self.target_coords["lat"].values,
+            self.target_coords["lon"].where(1 - self.target_coords["mask"]).values,
+            self.target_coords["lat"].where(1 - self.target_coords["mask"]).values,
+            cdist,
+        )
         # Compute great-circle distance from each grid point to the nearest land point
-        dist_mask = gc_dist(
-            self.target_coords["lon"].where(1 - self.target_coords["mask"]),
-            self.target_coords["lat"].where(1 - self.target_coords["mask"]),
-            self.target_coords["lon"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
-            self.target_coords["lat"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
-        )
-        # Find the minimum distance to land for each ocean point (in meters)
-        cdist = dist_mask.min(dim=["eta_rho", "xi_rho"]).rename(
-            {"eta": "eta_rho", "xi": "xi_rho"}
-        )
+        # dist_mask = gc_dist(
+        #     self.target_coords["lon"].where(1 - self.target_coords["mask"]),
+        #     self.target_coords["lat"].where(1 - self.target_coords["mask"]),
+        #     self.target_coords["lon"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
+        #     self.target_coords["lat"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
+        # )
+        # # Find the minimum distance to land for each ocean point (in meters)
+        # cdist = dist_mask.min(dim=["eta_rho", "xi_rho"]).rename(
+        #     {"eta": "eta_rho", "xi": "xi_rho"}
+        # )
 
         # Compute a spatially varying scaling factor to reduce wind near the coast.
         # This uses an exponential decay with a 12.5 km e-folding scale,
         # reducing wind magnitude by up to 40% at the coastline.
         mult = 1 - 0.4 * np.exp(-0.08 * cdist / 1000)
+
+        mult = xr.DataArray(data=mult, dims=["eta_rho", "xi_rho"])
 
         uwnd_corrected = mult * uwnd
         vwnd_corrected = mult * vwnd

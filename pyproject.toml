@@ -35,14 +35,18 @@ dependencies = [
     "regionmask",
     "xgcm",
     "numba",
-    "pydantic"
+    "pydantic",
 ]
 dynamic = ["version"]
 
 
 [project.optional-dependencies]
 dask = [
-    "dask[diagnostics]"
+    "dask[diagnostics]",
+]
+stream = [
+    "dask[diagnostics]",
+    "gcsfs"
 ]
 
 

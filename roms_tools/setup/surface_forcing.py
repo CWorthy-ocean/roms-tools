@@ -15,6 +15,7 @@ from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
     Dataset,
+    ERA5ARCODataset,
     ERA5Correction,
     ERA5Dataset,
     UnifiedBGCSurfaceDataset,
@@ -36,6 +37,10 @@ from roms_tools.setup.utils import (
 )
 from roms_tools.utils import save_datasets, transpose_dimensions
 
+DEFAULT_ERA5_ARCO_PATH = (
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
+
 
 @dataclass(kw_only=True)
 class SurfaceForcing:
@@ -56,12 +61,13 @@ class SurfaceForcing:
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data. Keys include:
 
-          - "name" (str): Name of the data source (e.g., "ERA5").
-          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source. Currently supported: "ERA5"
+          - "path" (optional; Union[str, Path, List[Union[str, Path]]]): Path(s) to the raw data file(s). Accepted formats:
 
-            - A single string (with or without wildcards).
-            - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+            - A single string (supports wildcards),
+            - A single Path object,
+            - A list of strings or Path objects.
+            If omitted or set to the ARCO URL, the data will be streamed from the cloud.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str
@@ -230,7 +236,13 @@ class SurfaceForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] == "ERA5":
+                logging.info(
+                    "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
+                )
+                self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            else:
+                raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
         self.source = {
@@ -291,7 +303,16 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
-                data = ERA5Dataset(**data_dict)
+                if str(self.source["path"]).startswith("gs://") or str(
+                    self.source["path"]
+                ).startswith("gcs://"):
+                    if not self.use_dask:
+                        raise ValueError(
+                            "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
+                        )
+                    data = ERA5ARCODataset(**data_dict)
+                else:
+                    data = ERA5Dataset(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -299,10 +320,8 @@ class SurfaceForcing:
 
         elif self.type == "bgc":
             if self.source["name"] == "CESM_REGRIDDED":
-
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
-
                 data = UnifiedBGCSurfaceDataset(**data_dict)
             else:
                 raise ValueError(

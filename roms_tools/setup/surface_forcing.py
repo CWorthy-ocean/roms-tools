@@ -61,12 +61,13 @@ class SurfaceForcing:
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data. Keys include:
 
-          - "name" (str): Name of the data source (e.g., "ERA5").
-          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source. Currently supported: "ERA5"
+          - "path" (optional; Union[str, Path, List[Union[str, Path]]]): Path(s) to the raw data file(s). Accepted formats:
 
-            - A single string (with or without wildcards).
-            - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+            - A single string (supports wildcards),
+            - A single Path object,
+            - A list of strings or Path objects.
+            If omitted or set to the ARCO URL, the data will be streamed from the cloud.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str

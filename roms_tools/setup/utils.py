@@ -1230,17 +1230,13 @@ def get_vector_pairs(variable_info):
 
 
 def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
-    return _gc_dist(lon1, lat1, lon2, lat2, input_in_degrees)
-
-
-# @nb.vectorize([nb.float64(nb.float64, nb.float64,nb.float64,nb.float64,nb.boolean)],nopython=True)
-@nb.vectorize(nopython=True)
-def _gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     """Calculate the great circle distance between two points on the Earth's surface
     using the Haversine formula.
 
     Latitude and longitude are assumed to be in degrees by default. If `input_in_degrees` is set to `False`,
     the input is assumed to already be in radians.
+
+    This function is a wrapper two numba-vectorized versions of the function, one each for degrees and radians.
 
     Parameters
     ----------
@@ -1254,21 +1250,29 @@ def _gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
 
     Returns
     -------
-    dis : float
+    dist : float
         The great circle distance between the two points in meters.
 
     Notes
     -----
     The radius of the Earth is taken to be 6371315 meters.
     """
+    if input_in_degrees:
+        return _gc_dist_degrees(lon1, lat1, lon2, lat2)
+    return _gc_dist_radians(lon1, lat1, lon2, lat2)
+
+
+@nb.vectorize(
+    [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)], nopython=True
+)
+def _gc_dist_degrees(lon1, lat1, lon2, lat2):
 
     # Convert degrees to radians
-    if input_in_degrees:
-        d2r = np.pi / 180
-        lon1 = lon1 * d2r
-        lat1 = lat1 * d2r
-        lon2 = lon2 * d2r
-        lat2 = lat2 * d2r
+    d2r = np.pi / 180
+    lon1 = lon1 * d2r
+    lat1 = lat1 * d2r
+    lon2 = lon2 * d2r
+    lat2 = lat2 * d2r
 
     # Difference in latitudes and longitudes
     dlat = lat2 - lat1
@@ -1287,7 +1291,28 @@ def _gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     return dis
 
 
-@nb.guvectorize(
+@nb.vectorize(
+    [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)], nopython=True
+)
+def _gc_dist_radians(lon1, lat1, lon2, lat2):
+    # Difference in latitudes and longitudes
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    # Haversine formula
+    dang = 2 * np.arcsin(
+        np.sqrt(
+            np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+        )
+    )
+
+    # Distance in meters
+    dis = R_EARTH * dang
+
+    return dis
+
+
+@nb.njit(
     [
         nb.void(
             nb.float64[:, :],
@@ -1297,13 +1322,37 @@ def _gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
             nb.float64[:, :],
         )
     ],
-    "(i,j),(i,j),(n,m),(n,m)->(i,j)",
-    nopython=True,
+    parallel=True,
 )
-def min_dist_between_point_arrays(lon1, lat1, lon2, lat2, result):
-    for i in range(lon1.shape[0]):
-        for j in range(lon1.shape[1]):
-            result[i, j] = np.nanmin(_gc_dist(lon1[i, j], lat1[i, j], lon2, lat2, True))
+def min_dist_between_point_arrays_in_degrees(
+    lon1: np.ndarray[float, float],
+    lat1: np.ndarray[float, float],
+    lon2: np.ndarray[float, float],
+    lat2: np.ndarray[float, float],
+    result: np.ndarray[float, float],
+):
+    """Calculate the distance between one set of points (lon1, lat1) to the closest of
+    another set of points (lon2, lat2).
+
+    Parameters
+    ----------
+    lon1, lat1 : np.ndarray
+        2-D Arrays of longitude and latitude of the first set of points (origin points).
+    lon2, lat2 : np.ndarray
+        2-D Arrays of longitude and latitude of the second set of points (target points).
+    result: np.ndarray
+        2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
+        to the nearest non-nan lon2, lat2 point
+
+    Returns
+    -------
+    None (output is stored in `result` input array)
+    """
+    for i in nb.prange(lon1.shape[0]):
+        for j in nb.prange(lon1.shape[1]):
+            result[i, j] = np.nanmin(
+                _gc_dist_degrees(lon1[i, j], lat1[i, j], lon2, lat2)
+            )
 
 
 def convert_to_relative_days(

@@ -30,7 +30,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     interpolate_from_climatology,
-    min_dist_between_point_arrays,
+    min_dist_between_point_arrays_in_degrees,
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
@@ -499,7 +499,7 @@ class SurfaceForcing:
         """
 
         cdist = np.empty_like(self.target_coords["lon"].values)
-        min_dist_between_point_arrays(
+        min_dist_between_point_arrays_in_degrees(
             self.target_coords["lon"].values,
             self.target_coords["lat"].values,
             self.target_coords["lon"].where(1 - self.target_coords["mask"]).values,

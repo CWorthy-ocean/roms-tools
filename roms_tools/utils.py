@@ -2,6 +2,7 @@ import glob
 import logging
 import re
 import warnings
+from importlib.util import find_spec
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ def _load_data(
     time_chunking=True,
     decode_times=True,
     force_combine_nested=False,
+    read_zarr: bool = False,
 ):
     """Load dataset from the specified file.
 
@@ -39,6 +41,9 @@ def _load_data(
     force_combine_nested: bool, optional
         If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
         Defaults to False.
+    read_zarr: bool, optional
+        If True, use the zarr engine to read the dataset, and don't use mfdataset.
+        Defaults to False.
 
     Returns
     -------
@@ -54,6 +59,20 @@ def _load_data(
     """
     if dim_names is None:
         dim_names = {}
+
+    if use_dask:
+        if not _has_dask():
+            raise RuntimeError(
+                "Dask is required but not installed. Install it with:\n"
+                "  • `pip install roms-tools[dask]` or\n"
+                "  • `conda install dask`\n"
+                "Alternatively, install `roms-tools` with conda to include all dependencies."
+            )
+    if read_zarr:
+        if isinstance(filename, list):
+            raise ValueError("read_zarr requires a single path, not a list of paths")
+        if not use_dask:
+            raise ValueError("read_zarr must be used with use_dask")
 
     # Precompile the regex for matching wildcard characters
     wildcard_regex = re.compile(r"[\*\?\[\]]")
@@ -151,14 +170,23 @@ def _load_data(
                 message=r"^The specified chunks separate.*",
             )
 
-            ds = xr.open_mfdataset(
-                matching_files,
-                decode_times=decode_times,
-                decode_timedelta=decode_times,
-                chunks=chunks,
-                **combine_kwargs,
-                **kwargs,
-            )
+            if read_zarr:
+                ds = xr.open_zarr(
+                    matching_files[0],
+                    decode_times=decode_times,
+                    chunks=chunks,
+                    consolidated=None,
+                    storage_options=dict(token="anon"),
+                )
+            else:
+                ds = xr.open_mfdataset(
+                    matching_files,
+                    decode_times=decode_times,
+                    decode_timedelta=decode_times,
+                    chunks=chunks,
+                    **combine_kwargs,
+                    **kwargs,
+                )
 
     else:
         ds_list = []
@@ -181,7 +209,7 @@ def _load_data(
     if "time" in dim_names and dim_names["time"] not in ds.dims:
         ds = ds.expand_dims(dim_names["time"])
 
-    if "time" in dim_names:
+    if "time" in dim_names and not read_zarr:
         ds = ds.drop_duplicates(dim=dim_names["time"])
 
     return ds
@@ -612,6 +640,14 @@ def _remove_edge_nans(
     return field, layer_depth
 
 
+def _has_dask() -> bool:
+    return find_spec("dask") is not None
+
+
+def _has_gcsfs() -> bool:
+    return find_spec("gcsfs") is not None
+
+
 def normalize_longitude(lon: float, straddle: bool) -> float:
     """Normalize longitude to the appropriate range depending on whether the grid
     straddles the dateline.
@@ -623,7 +659,6 @@ def normalize_longitude(lon: float, straddle: bool) -> float:
     straddle : bool
         Whether the grid straddles the dateline. If True, output will be in (-180, 180];
         if False, output will be in [0, 360).
-
     Returns
     -------
     float

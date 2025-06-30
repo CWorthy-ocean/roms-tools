@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
@@ -45,14 +46,30 @@ def roms_output_from_restart_file_adjusted_for_zeta(use_dask):
     )
 
 
+@pytest.fixture
+def roms_output_from_restart_file_with_straddling_grid(use_dask):
+
+    # Make fake grid that straddles the dateline and that has consistent sizes with test data below
+    grid = Grid(
+        nx=8, ny=13, center_lon=0, center_lat=60, rot=32, size_x=244, size_y=365
+    )
+
+    return ROMSOutput(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        use_dask=use_dask,
+    )
+
+
 @pytest.mark.parametrize(
     "roms_output_fixture",
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
-def test_load_model_output_file(roms_output_fixture, use_dask, request):
+def test_load_model_output_file(roms_output_fixture, request):
     roms_output = request.getfixturevalue(roms_output_fixture)
 
     assert isinstance(roms_output.ds, xr.Dataset)
@@ -271,9 +288,10 @@ def test_that_coordinates_are_added(use_dask):
     [
         "roms_output_from_restart_file",
         "roms_output_from_restart_file_adjusted_for_zeta",
+        "roms_output_from_restart_file_with_straddling_grid",
     ],
 )
-def test_plot_on_native_model_grid(roms_output_fixture, use_dask, request):
+def test_plot_on_native_model_grid(roms_output_fixture, request):
     roms_output = request.getfixturevalue(roms_output_fixture)
 
     for include_boundary in [False, True]:
@@ -335,16 +353,28 @@ def test_plot_on_native_model_grid(roms_output_fixture, use_dask, request):
             roms_output.plot("zeta", time=1, eta=1, **kwargs)
             roms_output.plot("zeta", time=1, xi=1, **kwargs)
 
+    # Test that passing a matplotlib.axes.Axes works
+    fig, ax = plt.subplots(1, 1)
+    roms_output.plot(var_name="temp", time=1, s=-1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, depth=1000, ax=ax)
+    roms_output.plot(var_name="temp", time=1, eta=1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, eta=1, xi=1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, s=-1, eta=1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, depth=1000, eta=1, ax=ax)
+    roms_output.plot(var_name="zeta", time=1, ax=ax)
+    roms_output.plot(var_name="zeta", time=1, eta=1, ax=ax)
+
 
 @pytest.mark.parametrize(
-    "roms_output_fixture",
+    "roms_output_fixture, lat, lon",
     [
-        "roms_output_from_restart_file",
-        "roms_output_from_restart_file_adjusted_for_zeta",
+        ("roms_output_from_restart_file", 9, -128),
+        ("roms_output_from_restart_file_adjusted_for_zeta", 9, -128),
+        ("roms_output_from_restart_file_with_straddling_grid", 60, 0),
     ],
 )
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_plot_on_lat_lon(roms_output_fixture, use_dask, request):
+def test_plot_on_lat_lon(roms_output_fixture, lat, lon, request):
     roms_output = request.getfixturevalue(roms_output_fixture)
 
     for include_boundary in [False, True]:
@@ -359,57 +389,65 @@ def test_plot_on_lat_lon(roms_output_fixture, use_dask, request):
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
-                    lon=-128,
+                    lat=lat,
+                    lon=lon,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
+                    lat=lat,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
+                    lat=lat,
                     s=-1,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lat=9,
+                    lat=lat,
                     depth=1000,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lon=-128,
+                    lon=lon,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lon=-128,
+                    lon=lon,
                     s=-1,
                     **kwargs,
                 )
                 roms_output.plot(
                     var_name,
                     time=1,
-                    lon=-128,
+                    lon=lon,
                     depth=1000,
                     **kwargs,
                 )
 
             # 2D fields
-            roms_output.plot("zeta", time=1, lat=9, **kwargs)
-            roms_output.plot("zeta", time=1, lon=-128, **kwargs)
+            roms_output.plot("zeta", time=1, lat=lat, **kwargs)
+            roms_output.plot("zeta", time=1, lon=lon, **kwargs)
+
+    # Test that passing a matplotlib.axes.Axes works
+    fig, ax = plt.subplots(1, 1)
+    roms_output.plot(var_name="temp", time=1, lat=lat, lon=lon, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, s=-1, ax=ax)
+    roms_output.plot(var_name="temp", time=1, lat=lat, depth=1000, ax=ax)
+    roms_output.plot(var_name="zeta", time=1, lat=lat, ax=ax)
 
 
-def test_plot_errors(roms_output_from_restart_file, use_dask):
+def test_plot_errors(roms_output_from_restart_file):
     """Test error conditions for the ROMSOutput.plot() method."""
 
     # Invalid time index
@@ -491,41 +529,75 @@ def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):
     filename.unlink()
 
 
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+        "roms_output_from_restart_file_with_straddling_grid",
+    ],
+)
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_regrid_all_variables(roms_output_from_restart_file):
-    ds_regridded = roms_output_from_restart_file.regrid()
+def test_regrid_all_variables(roms_output_fixture, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
+    ds_regridded = roms_output.regrid()
     assert isinstance(ds_regridded, xr.Dataset)
-    assert set(ds_regridded.data_vars).issubset(
-        set(roms_output_from_restart_file.ds.data_vars)
-    )
+    assert set(ds_regridded.data_vars).issubset(set(roms_output.ds.data_vars))
     assert "lon" in ds_regridded.coords
     assert "lat" in ds_regridded.coords
     assert "depth" in ds_regridded.coords
     assert "time" in ds_regridded.coords
 
 
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+        "roms_output_from_restart_file_with_straddling_grid",
+    ],
+)
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_regrid_specific_variables(roms_output_from_restart_file):
+def test_regrid_specific_variables(roms_output_fixture, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
     var_names = ["temp", "salt"]
-    ds_regridded = roms_output_from_restart_file.regrid(var_names=var_names)
+    ds_regridded = roms_output.regrid(var_names=var_names)
     assert isinstance(ds_regridded, xr.Dataset)
     assert set(ds_regridded.data_vars) == set(var_names)
 
-    ds = roms_output_from_restart_file.regrid(var_names=[])
+    ds = roms_output.regrid(var_names=[])
     assert ds is None
 
 
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+        "roms_output_from_restart_file_with_straddling_grid",
+    ],
+)
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_regrid_missing_variable_raises_error(roms_output_from_restart_file):
+def test_regrid_missing_variable_raises_error(roms_output_fixture, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
     with pytest.raises(
         ValueError, match="The following variables are not found in the dataset"
     ):
-        roms_output_from_restart_file.regrid(var_names=["fake_variable"])
+        roms_output.regrid(var_names=["fake_variable"])
 
 
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+        "roms_output_from_restart_file_with_straddling_grid",
+    ],
+)
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_regrid_with_custom_horizontal_resolution(roms_output_from_restart_file):
-    ds_regridded = roms_output_from_restart_file.regrid(horizontal_resolution=0.1)
+def test_regrid_with_custom_horizontal_resolution(roms_output_fixture, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
+    ds_regridded = roms_output.regrid(horizontal_resolution=0.1)
     assert isinstance(ds_regridded, xr.Dataset)
     assert "lon" in ds_regridded.coords
     assert "lat" in ds_regridded.coords
@@ -534,12 +606,21 @@ def test_regrid_with_custom_horizontal_resolution(roms_output_from_restart_file)
     assert np.allclose(ds_regridded.lat.diff(dim="lat"), 0.1, atol=1e-4)
 
 
+@pytest.mark.parametrize(
+    "roms_output_fixture",
+    [
+        "roms_output_from_restart_file",
+        "roms_output_from_restart_file_adjusted_for_zeta",
+        "roms_output_from_restart_file_with_straddling_grid",
+    ],
+)
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_regrid_with_custom_depth_levels(roms_output_from_restart_file):
+def test_regrid_with_custom_depth_levels(roms_output_fixture, request):
+    roms_output = request.getfixturevalue(roms_output_fixture)
     depth_levels = xr.DataArray(
         np.linspace(0, 500, 51), dims=["depth"], attrs={"units": "m"}
     )
-    ds_regridded = roms_output_from_restart_file.regrid(depth_levels=depth_levels)
+    ds_regridded = roms_output.regrid(depth_levels=depth_levels)
     assert isinstance(ds_regridded, xr.Dataset)
     assert "depth" in ds_regridded.coords
     np.allclose(ds_regridded.depth, depth_levels, atol=0.0)

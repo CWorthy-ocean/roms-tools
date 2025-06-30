@@ -14,6 +14,8 @@ from roms_tools.plot import _plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
+    Dataset,
+    ERA5ARCODataset,
     ERA5Correction,
     ERA5Dataset,
     UnifiedBGCSurfaceDataset,
@@ -24,6 +26,7 @@ from roms_tools.setup.utils import (
     _write_to_yaml,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
+    gc_dist,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
@@ -33,6 +36,10 @@ from roms_tools.setup.utils import (
     substitute_nans_by_fillvalue,
 )
 from roms_tools.utils import save_datasets, transpose_dimensions
+
+DEFAULT_ERA5_ARCO_PATH = (
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
 
 
 @dataclass(kw_only=True)
@@ -54,12 +61,13 @@ class SurfaceForcing:
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data. Keys include:
 
-          - "name" (str): Name of the data source (e.g., "ERA5").
-          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source. Currently supported: "ERA5"
+          - "path" (optional; Union[str, Path, List[Union[str, Path]]]): Path(s) to the raw data file(s). Accepted formats:
 
-            - A single string (with or without wildcards).
-            - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+            - A single string (supports wildcards),
+            - A single Path object,
+            - A list of strings or Path objects.
+            If omitted or set to the ARCO URL, the data will be streamed from the cloud.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str
@@ -70,6 +78,12 @@ class SurfaceForcing:
 
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is True.
+
+    wind_dropoff : bool, optional
+        Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
+        This applies an exponential decay to wind magnitude near the coast, based on
+        a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
+
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
 
@@ -104,6 +118,7 @@ class SurfaceForcing:
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
     type: str = "physics"
     correct_radiation: bool = True
+    wind_dropoff: bool = False
     coarse_grid_mode: str = "auto"
     model_reference_date: datetime = datetime(2000, 1, 1)
     use_dask: bool = False
@@ -165,9 +180,18 @@ class SurfaceForcing:
                 interpolate=False,
             )
 
-        # correct radiation
-        if self.type == "physics" and self.correct_radiation:
-            processed_fields = self._apply_correction(processed_fields, data)
+        if self.type == "physics":
+            if self.correct_radiation:
+                processed_fields["swrad"] = self._apply_radiation_correction(
+                    processed_fields["swrad"], data
+                )
+            if self.wind_dropoff:
+                (
+                    processed_fields["uwnd"],
+                    processed_fields["vwnd"],
+                ) = self._apply_wind_correction(
+                    processed_fields["uwnd"], processed_fields["vwnd"]
+                )
 
         if self.type == "bgc":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
@@ -212,7 +236,13 @@ class SurfaceForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] == "ERA5":
+                logging.info(
+                    "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
+                )
+                self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            else:
+                raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
         self.source = {
@@ -273,7 +303,16 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
-                data = ERA5Dataset(**data_dict)
+                if str(self.source["path"]).startswith("gs://") or str(
+                    self.source["path"]
+                ).startswith("gcs://"):
+                    if not self.use_dask:
+                        raise ValueError(
+                            "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
+                        )
+                    data = ERA5ARCODataset(**data_dict)
+                else:
+                    data = ERA5Dataset(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -281,10 +320,8 @@ class SurfaceForcing:
 
         elif self.type == "bgc":
             if self.source["name"] == "CESM_REGRIDDED":
-
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
-
                 data = UnifiedBGCSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
@@ -363,8 +400,28 @@ class SurfaceForcing:
 
         self.variable_info = variable_info
 
-    def _apply_correction(self, processed_fields, data):
+    def _apply_radiation_correction(
+        self, radiation: xr.DataArray, data: Dataset
+    ) -> xr.DataArray:
+        """Apply a climatological correction to shortwave radiation.
 
+        This method scales the input `radiation` field using a correction factor
+        derived from climatological data, interpolated in time and regridded
+        to the ROMS domain.
+
+        Parameters
+        ----------
+        radiation : xr.DataArray
+            Shortwave radiation field to be corrected. Must include a `time` coordinate.
+
+        data : Dataset
+            Dataset containing ROMS grid and mask information used to align correction data.
+
+        Returns
+        -------
+        radiation_corrected : xr.DataArray
+            Radiation field scaled by the correction factor, with original coordinates.
+        """
         correction_data = self._get_correction_data()
         # Match subdomain to forcing data to reuse the mask
         coords_correction = {
@@ -391,7 +448,7 @@ class SurfaceForcing:
                         correction_data.dim_names["time"],
                         time=time,
                     )
-                    for time in processed_fields["swrad"].time
+                    for time in radiation.time
                 ],
                 dim="time",
             )
@@ -400,7 +457,7 @@ class SurfaceForcing:
             corr_factor = interpolate_from_climatology(
                 correction_data.ds[correction_data.var_names["swr_corr"]],
                 correction_data.dim_names["time"],
-                time=processed_fields["swrad"].time,
+                time=radiation.time,
             )
 
         # Spatial regridding
@@ -409,9 +466,59 @@ class SurfaceForcing:
         )
         corr_factor = lateral_regrid.apply(corr_factor)
 
-        processed_fields["swrad"] = processed_fields["swrad"] * corr_factor
+        radiation_corrected = radiation * corr_factor
 
-        return processed_fields
+        return radiation_corrected
+
+    def _apply_wind_correction(
+        self, uwnd: xr.DataArray, vwnd: xr.DataArray
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Apply coastal wind drop-off correction to wind components.
+
+        This correction reduces wind speed near the coastline by up to 40%,
+        transitioning smoothly from full magnitude offshore using an
+        exponential decay with an e-folding scale of 12.5 km.
+
+        Reanalysis wind products often lack sufficient resolution to capture
+        sharp coastal wind gradients caused by orography and land-sea contrasts.
+        This method adjusts wind magnitude to better reflect these coastal effects.
+
+        Parameters
+        ----------
+        uwnd : xr.DataArray
+            Zonal (east-west) wind component on the ROMS grid.
+        vwnd : xr.DataArray
+            Meridional (north-south) wind component on the ROMS grid.
+
+        Returns
+        -------
+        uwnd_corrected : xr.DataArray
+            Corrected zonal wind component with reduced coastal values.
+        vwnd_corrected : xr.DataArray
+            Corrected meridional wind component with reduced coastal values.
+        """
+
+        # Compute great-circle distance from each grid point to the nearest land point
+        dist_mask = gc_dist(
+            self.target_coords["lon"].where(1 - self.target_coords["mask"]),
+            self.target_coords["lat"].where(1 - self.target_coords["mask"]),
+            self.target_coords["lon"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
+            self.target_coords["lat"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
+        )
+        # Find the minimum distance to land for each ocean point (in meters)
+        cdist = dist_mask.min(dim=["eta_rho", "xi_rho"]).rename(
+            {"eta": "eta_rho", "xi": "xi_rho"}
+        )
+
+        # Compute a spatially varying scaling factor to reduce wind near the coast.
+        # This uses an exponential decay with a 12.5 km e-folding scale,
+        # reducing wind magnitude by up to 40% at the coastline.
+        mult = 1 - 0.4 * np.exp(-0.08 * cdist / 1000)
+
+        uwnd_corrected = mult * uwnd
+        vwnd_corrected = mult * vwnd
+
+        return uwnd_corrected, vwnd_corrected
 
     def _write_into_dataset(self, processed_fields, data, d_meta):
 
@@ -494,6 +601,7 @@ class SurfaceForcing:
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["source"] = self.source["name"]
         ds.attrs["correct_radiation"] = str(self.correct_radiation)
+        ds.attrs["wind_dropoff"] = str(self.wind_dropoff)
         ds.attrs["use_coarse_grid"] = str(self.use_coarse_grid)
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
 

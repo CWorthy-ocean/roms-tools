@@ -447,12 +447,7 @@ class Grid:
                 field=field, title=title, with_dim_names=with_dim_names, plot_data=False
             )
 
-    def plot_vertical_coordinate(
-        self,
-        s=None,
-        eta=None,
-        xi=None,
-    ) -> None:
+    def plot_vertical_coordinate(self, s=None, eta=None, xi=None, ax=None) -> None:
         """Plot the layer depth for a given eta-, xi-, or s-slice.
 
         Parameters
@@ -464,7 +459,7 @@ class Grid:
         xi : int, optional
             The xi-index to plot. Default is None.
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots.
+            The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots.
 
         Returns
         -------
@@ -528,6 +523,7 @@ class Grid:
                 interface_depth=interface_depth,
                 title=title,
                 kwargs=kwargs,
+                ax=ax,
             )
 
     def save(self, filepath: Union[str, Path]) -> None:
@@ -665,17 +661,27 @@ class Grid:
         for attr in [
             "size_x",
             "size_y",
-            "topography_source",
             "hmin",
         ]:
             if attr in ds.attrs:
-                if attr == "topography_source":
-                    a = {"name": ds.attrs[attr]}
-                else:
-                    a = float(ds.attrs[attr])
+                a = float(ds.attrs[attr])
             else:
                 a = None
+
             object.__setattr__(grid, attr, a)
+
+        if "topography_source_name" in ds.attrs:
+            if "topography_source_path" in ds.attrs:
+                a = {
+                    "name": ds.attrs["topography_source_name"],
+                    "path": ds.attrs["topography_source_path"],
+                }
+            else:
+                a = {"name": ds.attrs["topography_source_name"]}
+        else:
+            a = None
+
+        object.__setattr__(grid, "topography_source", a)
 
         return grid
 

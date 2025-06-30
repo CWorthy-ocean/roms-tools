@@ -20,6 +20,7 @@ from roms_tools.utils import (
     _remove_edge_nans,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    normalize_longitude,
 )
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
@@ -138,7 +139,7 @@ class ROMSOutput:
             By default, depth contours are not shown (False).
 
         ax : matplotlib.axes.Axes, optional
-            The axes to plot on. If None, a new figure is created. Note that this argument does not work for 2D horizontal plots. Default is None.
+            The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots. Default is None.
 
         save_path : str, optional
             Path to save the generated plot. If None, the plot is shown interactively.
@@ -214,6 +215,9 @@ class ROMSOutput:
         lon_deg = self.grid.ds[f"lon_{loc}"]
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        if lon is not None:
+            lon = normalize_longitude(lon, self.grid.straddle)
+
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 
         # Mask the field

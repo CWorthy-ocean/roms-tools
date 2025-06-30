@@ -274,62 +274,6 @@ def test_grid_straddle_crosses_meridian():
     assert not grid.straddle
 
 
-def test_compatability_with_matlab_grid(tmp_path):
-
-    fname = download_test_data("grid_created_with_matlab.nc")
-
-    grid = Grid.from_file(fname)
-
-    assert not grid.straddle
-    assert grid.theta_s == 5.0
-    assert grid.theta_b == 2.0
-    assert grid.hc == 300.0
-    assert grid.N == 100
-    assert grid.nx == 24
-    assert grid.ny == 24
-    assert grid.center_lon == -4.1
-    assert grid.center_lat == 52.4
-    assert grid.rot == 0.0
-
-    expected_coords = set(
-        [
-            "lat_rho",
-            "lon_rho",
-            "lat_u",
-            "lon_u",
-            "lat_v",
-            "lon_v",
-            "lat_coarse",
-            "lon_coarse",
-        ]
-    )
-    actual_coords = set(grid.ds.coords.keys())
-    assert actual_coords == expected_coords
-
-    grid.plot(bathymetry=True)
-
-    for file_str in ["test_grid", "test_grid.nc"]:
-        # Create a temporary filepath using the tmp_path fixture
-        for filepath in [
-            tmp_path / file_str,
-            str(tmp_path / file_str),
-        ]:  # test for Path object and str
-
-            # Test saving without partitioning
-            _ = grid.save(filepath)
-
-            filepath = Path(filepath)
-
-            # Load the grid from the file
-            grid_from_file = Grid.from_file(filepath.with_suffix(".nc"))
-
-            # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
-            assert grid == grid_from_file
-
-            # Clean up the .nc file
-            (filepath.with_suffix(".nc")).unlink()
-
-
 @pytest.mark.parametrize(
     "grid_fixture",
     [
@@ -671,9 +615,127 @@ def test_plot_vertical_coordinate():
         grid.plot_vertical_coordinate(eta=-1, xi=0, s=-1)
 
 
+# More Grid.from_file() tests
+
+
+def test_compatability_with_matlab_grid(tmp_path):
+
+    fname = download_test_data("grid_created_with_matlab.nc")
+
+    grid = Grid.from_file(fname)
+
+    assert not grid.straddle
+    assert grid.theta_s == 5.0
+    assert grid.theta_b == 2.0
+    assert grid.hc == 300.0
+    assert grid.N == 100
+    assert grid.nx == 24
+    assert grid.ny == 24
+    assert grid.center_lon == -4.1
+    assert grid.center_lat == 52.4
+    assert grid.rot == 0.0
+
+    expected_coords = set(
+        [
+            "lat_rho",
+            "lon_rho",
+            "lat_u",
+            "lon_u",
+            "lat_v",
+            "lon_v",
+            "lat_coarse",
+            "lon_coarse",
+        ]
+    )
+    actual_coords = set(grid.ds.coords.keys())
+    assert actual_coords == expected_coords
+
+    grid.plot(bathymetry=True)
+
+    for file_str in ["test_grid", "test_grid.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
+
+            # Test saving without partitioning
+            _ = grid.save(filepath)
+
+            filepath = Path(filepath)
+
+            # Load the grid from the file
+            grid_from_file = Grid.from_file(filepath.with_suffix(".nc"))
+
+            # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
+            assert grid == grid_from_file
+
+            # Clean up the .nc file
+            (filepath.with_suffix(".nc")).unlink()
+
+
+def test_from_file_with_vertical_coords(grid, tmp_path):
+
+    theta_s = 6.0
+    theta_b = 4.0
+    hc = 300.0
+    N = 10
+
+    grid.update_vertical_coordinate(theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
+    Cs_r = grid.ds.Cs_r
+    Cs_w = grid.ds.Cs_w
+    path = tmp_path / "grid.nc"
+    grid.save(path)
+
+    grid_from_file = Grid.from_file(path, theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
+    assert np.allclose(grid_from_file.ds.Cs_r, Cs_r)
+    assert np.allclose(grid_from_file.ds.Cs_w, Cs_w)
+    assert grid_from_file.theta_s == theta_s
+    assert grid_from_file.theta_b == theta_b
+    assert grid_from_file.hc == hc
+    assert grid_from_file.N == N
+
+
+def test_from_file_with_conflicting_vertical_coords(grid, tmp_path):
+
+    theta_s = 6.0
+    theta_b = 4.0
+    hc = 300.0
+    N = 10
+
+    grid.update_vertical_coordinate(theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
+
+    path = tmp_path / "grid.nc"
+    grid.save(path)
+
+    with pytest.raises(ValueError, match="inconsistent with the provided N"):
+        Grid.from_file(path, theta_s=5.0, theta_b=2.0, hc=300.0, N=100)
+
+    with pytest.raises(ValueError, match="inconsistent with the provided theta_s, "):
+        Grid.from_file(path, theta_s=5.0, theta_b=2.0, hc=300.0, N=10)
+
+
+def test_from_file_missing_attributes(grid, tmp_path):
+
+    del grid.ds.attrs["theta_b"]
+
+    path = tmp_path / "grid.nc"
+    grid.save(path)
+
+    with pytest.raises(ValueError, match="Missing vertical coordinate attributes"):
+        Grid.from_file(path)
+
+
+def test_from_file_partial_parameters_raises_error(grid, tmp_path):
+
+    path = tmp_path / "grid.nc"
+    grid.save(path)
+
+    with pytest.raises(ValueError, match="must provide all of"):
+        Grid.from_file(path, theta_s=5.0)
+
+
 # Topography tests
-
-
 def test_enclosed_regions():
     """Test that there are only two connected regions, one dry and one wet."""
 

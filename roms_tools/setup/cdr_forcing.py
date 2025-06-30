@@ -1033,20 +1033,20 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
     # mean dx in grid
     dx = (((1 / grid.ds.pm).mean() + (1 / grid.ds.pn).mean()) / 2).item()
 
-    # since GCM-Filters assumes periodic domain, we extend the domain by one grid cell in each dimension
-    # and set that margin to land
+    # GCM-Filters assumes a periodic domain, so we extend the grid by two cells in each dimension:
+    # the first added cell has a very large distance (to break boundary reflection artifacts), and the second is land.
     mask = xr.ones_like(grid.ds.mask_rho)  # ignore land here, renormalize later
-    margin_mask = xr.concat([mask, 0 * mask.isel(eta_rho=-1)], dim="eta_rho")
+    margin_mask = xr.concat([mask, mask.isel(eta_rho=-1), 0 * mask.isel(eta_rho=-1)], dim="eta_rho")
     margin_mask = xr.concat(
-        [margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
+        [margin_mask, margin_mask.isel(xi_rho=-1), 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
     )
-    delta_extended = xr.concat([delta, delta.isel(eta_rho=-1)], dim="eta_rho")
+    delta_extended = xr.concat([delta, 0 * delta.isel(eta_rho=-1),  0 * delta.isel(eta_rho=-1)], dim="eta_rho")
     delta_extended = xr.concat(
-        [delta_extended, delta_extended.isel(xi_rho=-1)], dim="xi_rho"
+        [delta_extended, 0 * delta_extended.isel(xi_rho=-1),  0 * delta_extended.isel(xi_rho=-1)], dim="xi_rho"
     )
-    area_extended = xr.concat([area, area.isel(eta_rho=-1)], dim="eta_rho")
+    area_extended = xr.concat([area, 10000 * area.isel(eta_rho=-1), area.isel(eta_rho=-1)], dim="eta_rho")
     area_extended = xr.concat(
-        [area_extended, area_extended.isel(xi_rho=-1)], dim="xi_rho"
+        [area_extended, 10000 * area_extended.isel(xi_rho=-1), area_extended.isel(xi_rho=-1)], dim="xi_rho"
     )
     # The GCM-Filters Gaussian filter kernel uses a Gaussian with standard deviation filter_scale/sqrt(12)
     # because this standard deviation matches the standard deviation of a boxcar kernel with total width equal to factor.

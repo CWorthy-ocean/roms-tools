@@ -1024,33 +1024,57 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
     eta_rho = indices[0][0]
     xi_rho = indices[1][0]
 
-    # Deploy delta function at center of Gaussian
+    # Create a delta function at the center of the Gaussian release
     delta = xr.zeros_like(grid.ds.mask_rho)
     delta[eta_rho, xi_rho] = 1
 
-    # Grid cell area
+    # Calculate the grid cell area from the inverse grid metrics (pm, pn)
     area = 1 / (grid.ds.pm * grid.ds.pn)
-    # mean dx in grid
+
+    # Compute the mean grid spacing (dx) as the average of mean dx and dy
     dx = (((1 / grid.ds.pm).mean() + (1 / grid.ds.pn).mean()) / 2).item()
 
-    # GCM-Filters assumes a periodic domain, so we extend the grid by two cells in each dimension:
-    # the first added cell has a very large distance (to break boundary reflection artifacts), and the second is land.
-    mask = xr.ones_like(grid.ds.mask_rho)  # ignore land here, renormalize later
-    margin_mask = xr.concat([mask, mask.isel(eta_rho=-1), 0 * mask.isel(eta_rho=-1)], dim="eta_rho")
+    # Extend the domain in both dimensions to mitigate boundary effects during filtering
+    # - Create a mask of ones ignoring land (will be renormalized later)
+    mask = xr.ones_like(grid.ds.mask_rho)
+
+    # Extend the mask along eta_rho by concatenating three copies plus a zeroed edge cell
     margin_mask = xr.concat(
-        [margin_mask, margin_mask.isel(xi_rho=-1), 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
+        [mask, mask, mask, 0 * mask.isel(eta_rho=-1)], dim="eta_rho"
     )
-    delta_extended = xr.concat([delta, 0 * delta.isel(eta_rho=-1),  0 * delta.isel(eta_rho=-1)], dim="eta_rho")
+    # Similarly extend along xi_rho
+    margin_mask = xr.concat(
+        [margin_mask, margin_mask, margin_mask, 0 * margin_mask.isel(xi_rho=-1)],
+        dim="xi_rho",
+    )
+
+    # Extend the delta function in the same manner to match the enlarged domain
     delta_extended = xr.concat(
-        [delta_extended, 0 * delta_extended.isel(xi_rho=-1),  0 * delta_extended.isel(xi_rho=-1)], dim="xi_rho"
+        [0 * delta, delta, 0 * delta, 0 * delta.isel(eta_rho=-1)], dim="eta_rho"
     )
-    area_extended = xr.concat([area, 10000 * area.isel(eta_rho=-1), area.isel(eta_rho=-1)], dim="eta_rho")
+    delta_extended = xr.concat(
+        [
+            0 * delta_extended,
+            delta_extended,
+            0 * delta_extended,
+            0 * delta_extended.isel(xi_rho=-1),
+        ],
+        dim="xi_rho",
+    )
+
+    # Extend the cell area array to match the enlarged domain
+    area_extended = xr.concat([area, area, area, area.isel(eta_rho=-1)], dim="eta_rho")
     area_extended = xr.concat(
-        [area_extended, 10000 * area_extended.isel(xi_rho=-1), area_extended.isel(xi_rho=-1)], dim="xi_rho"
+        [area_extended, area_extended, area_extended, area_extended.isel(xi_rho=-1)],
+        dim="xi_rho",
     )
-    # The GCM-Filters Gaussian filter kernel uses a Gaussian with standard deviation filter_scale/sqrt(12)
-    # because this standard deviation matches the standard deviation of a boxcar kernel with total width equal to factor.
+
+    # Define Gaussian filter parameters:
+    # - filter_scale is computed so that the Gaussian's std dev matches
+    #   the equivalent boxcar filter of width equal to release.hsc / dx
+    #   multiplied by sqrt(12) to convert from boxcar to Gaussian std dev.
     filter_scale = release.hsc / dx * np.sqrt(12)
+
     filter = gcm_filters.Filter(
         filter_scale=filter_scale,
         dx_min=1,
@@ -1059,11 +1083,19 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
         grid_vars={"wet_mask": margin_mask, "area": area_extended},
     )
 
+    # Apply the Gaussian filter to the extended delta function over spatial dimensions
     delta_smooth = filter.apply(delta_extended, dims=["eta_rho", "xi_rho"])
-    delta_smooth = delta_smooth.isel(eta_rho=slice(None, -1), xi_rho=slice(None, -1))
 
-    # Now account for land and renormalize over ocean
+    # Remove the extended margins to return to the original domain size
+    delta_smooth = delta_smooth.isel(
+        eta_rho=slice(grid.ds.sizes["eta_rho"], -grid.ds.sizes["eta_rho"] - 1),
+        xi_rho=slice(grid.ds.sizes["xi_rho"], -grid.ds.sizes["eta_rho"] - 1),
+    )
+
+    # Mask out land cells and set values to zero there
     delta_smooth = delta_smooth.where(grid.ds.mask_rho, 0.0)
+
+    # Renormalize so the integral over ocean points sums to 1
     integral = delta_smooth.sum(dim=["eta_rho", "xi_rho"])
     delta_smooth = delta_smooth / integral
 

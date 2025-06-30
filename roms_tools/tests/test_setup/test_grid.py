@@ -1,3 +1,4 @@
+import copy
 import importlib.metadata
 import logging
 import textwrap
@@ -681,11 +682,12 @@ def test_from_file_with_vertical_coords(grid, tmp_path):
     hc = 300.0
     N = 10
 
-    grid.update_vertical_coordinate(theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
-    Cs_r = grid.ds.Cs_r
-    Cs_w = grid.ds.Cs_w
+    grid_copy = copy.deepcopy(grid)
+    grid_copy.update_vertical_coordinate(theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
+    Cs_r = grid_copy.ds.Cs_r
+    Cs_w = grid_copy.ds.Cs_w
     path = tmp_path / "grid.nc"
-    grid.save(path)
+    grid_copy.save(path)
 
     grid_from_file = Grid.from_file(path, theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
     assert np.allclose(grid_from_file.ds.Cs_r, Cs_r)
@@ -703,10 +705,11 @@ def test_from_file_with_conflicting_vertical_coords(grid, tmp_path):
     hc = 300.0
     N = 10
 
-    grid.update_vertical_coordinate(theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
+    grid_copy = copy.deepcopy(grid)
+    grid_copy.update_vertical_coordinate(theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
 
     path = tmp_path / "grid.nc"
-    grid.save(path)
+    grid_copy.save(path)
 
     with pytest.raises(ValueError, match="inconsistent with the provided N"):
         Grid.from_file(path, theta_s=5.0, theta_b=2.0, hc=300.0, N=100)
@@ -717,10 +720,11 @@ def test_from_file_with_conflicting_vertical_coords(grid, tmp_path):
 
 def test_from_file_missing_attributes(grid, tmp_path):
 
-    del grid.ds.attrs["theta_b"]
+    grid_copy = copy.deepcopy(grid)
+    del grid_copy.ds.attrs["theta_b"]
 
     path = tmp_path / "grid.nc"
-    grid.save(path)
+    grid_copy.save(path)
 
     with pytest.raises(ValueError, match="Missing vertical coordinate attributes"):
         Grid.from_file(path)

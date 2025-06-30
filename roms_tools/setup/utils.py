@@ -1237,6 +1237,7 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     the input is assumed to already be in radians.
 
     This function is a wrapper two numba-vectorized versions of the function, one each for degrees and radians.
+    The wrapper is additionally needed to be able to use kwargs.
 
     Parameters
     ----------
@@ -1266,7 +1267,12 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)], nopython=True
 )
 def _gc_dist_degrees(lon1, lat1, lon2, lat2):
+    """Calculate the great circle distance, given lat and lon in degrees.
 
+    Returns
+    -------
+    Great circle distance in meters
+    """
     # Convert degrees to radians
     d2r = np.pi / 180
     lon1 = lon1 * d2r
@@ -1295,6 +1301,12 @@ def _gc_dist_degrees(lon1, lat1, lon2, lat2):
     [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)], nopython=True
 )
 def _gc_dist_radians(lon1, lat1, lon2, lat2):
+    """Calculate the great circle distance, given lat and lon in radians.
+
+    Returns
+    -------
+    Great circle distance in meters
+    """
     # Difference in latitudes and longitudes
     dlat = lat2 - lat1
     dlon = lon2 - lon1
@@ -1314,279 +1326,10 @@ def _gc_dist_radians(lon1, lat1, lon2, lat2):
 
 @nb.njit(
     [
-        nb.void(
-            nb.float64[:, :],
-            nb.float64[:, :],
-            nb.float64[:, :],
-            nb.float64[:, :],
-            nb.float64[:, :],
-        )
-    ],
-    parallel=True,
-)
-def min_dist_between_point_arrays_in_degrees(
-    lon1: np.ndarray[float, float],
-    lat1: np.ndarray[float, float],
-    lon2: np.ndarray[float, float],
-    lat2: np.ndarray[float, float],
-    result: np.ndarray[float, float],
-):
-    """Calculate the distance between one set of points (lon1, lat1) to the closest of
-    another set of points (lon2, lat2).
-
-    Parameters
-    ----------
-    lon1, lat1 : np.ndarray
-        2-D Arrays of longitude and latitude of the first set of points (origin points).
-    lon2, lat2 : np.ndarray
-        2-D Arrays of longitude and latitude of the second set of points (target points).
-    result: np.ndarray
-        2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
-        to the nearest non-nan lon2, lat2 point
-
-    Returns
-    -------
-    None (output is stored in `result` input array)
-    """
-    for i in nb.prange(lon1.shape[0]):
-        for j in nb.prange(lon1.shape[1]):
-            result[i, j] = np.nanmin(
-                _gc_dist_degrees(lon1[i, j], lat1[i, j], lon2, lat2)
-            )
-
-
-#
-# def min_dist_to_land_4(
-#     lon: np.ndarray,
-#     lat: np.ndarray,
-#     mask: np.ndarray,
-# ):
-#     """Calculate the distance between one set of points (lon1, lat1) to the closest of
-#     another set of points (lon2, lat2).
-#
-#     Parameters
-#     ----------
-#     lon1, lat1 : np.ndarray
-#         2-D Arrays of longitude and latitude of the first set of points (origin points).
-#     lon2, lat2 : np.ndarray
-#         2-D Arrays of longitude and latitude of the second set of points (target points).
-#     result: np.ndarray
-#         2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
-#         to the nearest non-nan lon2, lat2 point
-#
-#     Returns
-#     -------
-#     None (output is stored in `result` input array)
-#     """
-#     ocean = (mask == 1).ravel()
-#     land = (mask == 0).ravel()
-#     ocean_lon = lon.ravel()[ocean]
-#     ocean_lat = lat.ravel()[ocean]
-#     land_lon = lon.ravel()[land]
-#     land_lat = lat.ravel()[land]
-#     ocean_indices = mask.nonzero()
-#     result = np.zeros_like(lon)
-#
-#     # land_indices = (~mask).nonzero()
-#     subresult = _min_dist_to_land2(ocean_lon, ocean_lat, land_lon, land_lat)
-#     result[ocean_indices] = subresult
-#
-#     return result
-
-
-def _min_dist_to_land4(
-    ocean_lon: np.ndarray,
-    ocean_lat: np.ndarray,
-    land_lon,
-    land_lat,
-):
-    """Calculate the distance between one set of points (lon1, lat1) to the closest of
-    another set of points (lon2, lat2).
-
-    Parameters
-    ----------
-    lon1, lat1 : np.ndarray
-        2-D Arrays of longitude and latitude of the first set of points (origin points).
-    lon2, lat2 : np.ndarray
-        2-D Arrays of longitude and latitude of the second set of points (target points).
-    result: np.ndarray
-        2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
-        to the nearest non-nan lon2, lat2 point
-
-    Returns
-    -------
-    None (output is stored in `result` input array)
-    """
-    # result = np.zeros(shape=ocean_lon.shape, dtype=np.float64)
-    result = np.min(
-        _gc_dist_degrees(
-            ocean_lon[:, np.newaxis], ocean_lat[:, np.newaxis], land_lon, land_lat
-        ),
-        1,
-    )
-    # print(result.shape)
-    return result
-    # print("stop")
-
-
-# @nb.njit(
-#     [
-#         nb.float64[:](
-#             nb.float64[:],
-#             nb.float64[:],
-#             nb.float64[:],
-#             nb.float64[:],
-
-#         )
-#     ],
-#     parallel=True,
-# )
-# def _min_dist_to_land2(
-#     ocean_lon: np.ndarray,
-#     ocean_lat: np.ndarray,
-#     land_lon,
-#     land_lat,
-# ):
-#     """Calculate the distance between one set of points (lon1, lat1) to the closest of
-#     another set of points (lon2, lat2).
-
-#     Parameters
-#     ----------
-#     lon1, lat1 : np.ndarray
-#         2-D Arrays of longitude and latitude of the first set of points (origin points).
-#     lon2, lat2 : np.ndarray
-#         2-D Arrays of longitude and latitude of the second set of points (target points).
-#     result: np.ndarray
-#         2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
-#         to the nearest non-nan lon2, lat2 point
-
-#     Returns
-#     -------
-#     None (output is stored in `result` input array)
-#     """
-#     result = np.zeros(shape=ocean_lon.shape, dtype=np.float64)
-#     for i in range(ocean_lon.shape[0]):
-#             result[i] = np.min(
-#                 _gc_dist_degrees(ocean_lon[i], ocean_lat[i], land_lon, land_lat)
-#             )
-#     return result
-# print("stop")
-
-
-@nb.njit(
-    [
-        nb.void(
-            nb.float64[:],
-            nb.float64[:],
-            nb.float64[:],
-            nb.float64[:],
-            nb.int64[:],
-            nb.int64[:],
-            nb.float64[:, :],
-        )
-    ],
-    parallel=True,
-)
-def _min_dist_to_land3(
-    ocean_lon: np.ndarray,
-    ocean_lat: np.ndarray,
-    land_lon,
-    land_lat,
-    ocean_indices_lon: np.ndarray,
-    ocean_indices_lat,
-    result: np.ndarray,
-):
-    """Calculate the distance between one set of points (lon1, lat1) to the closest of
-    another set of points (lon2, lat2).
-
-    Parameters
-    ----------
-    lon1, lat1 : np.ndarray
-        2-D Arrays of longitude and latitude of the first set of points (origin points).
-    lon2, lat2 : np.ndarray
-        2-D Arrays of longitude and latitude of the second set of points (target points).
-    result: np.ndarray
-        2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
-        to the nearest non-nan lon2, lat2 point
-
-    Returns
-    -------
-    None (output is stored in `result` input array)
-    """
-
-    for i in nb.prange(ocean_lon.shape[0]):
-        result[ocean_indices_lon[i], ocean_indices_lat[i]] = np.min(
-            _gc_dist_degrees(ocean_lon[i], ocean_lat[i], land_lon, land_lat)
-        )
-
-
-@nb.njit(
-    [
-        nb.void(
+        nb.float64[:, :](
             nb.float64[:, :],
             nb.float64[:, :],
             nb.int32[:, :],
-            nb.float64[:, :],
-        )
-    ],
-    parallel=True,
-)
-def min_dist_to_land_2(
-    lon: np.ndarray,
-    lat: np.ndarray,
-    mask: np.ndarray,
-    result: np.ndarray,
-):
-    """Calculate the distance between one set of points (lon1, lat1) to the closest of
-    another set of points (lon2, lat2).
-
-    Parameters
-    ----------
-    lon1, lat1 : np.ndarray
-        2-D Arrays of longitude and latitude of the first set of points (origin points).
-    lon2, lat2 : np.ndarray
-        2-D Arrays of longitude and latitude of the second set of points (target points).
-    result: np.ndarray
-        2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
-        to the nearest non-nan lon2, lat2 point
-
-    Returns
-    -------
-    None (output is stored in `result` input array)
-    """
-    ocean = (mask == 1).ravel()
-    land = (mask == 0).ravel()
-    ocean_lon = lon.ravel()[ocean]
-    ocean_lat = lat.ravel()[ocean]
-    land_lon = lon.ravel()[land]
-    land_lat = lat.ravel()[land]
-    ocean_indices = mask.nonzero()
-    # land_indices = (~mask).nonzero()
-    _min_dist_to_land3(
-        ocean_lon,
-        ocean_lat,
-        land_lon,
-        land_lat,
-        ocean_indices[0],
-        ocean_indices[1],
-        result,
-    )
-
-    # for i in nb.prange(ocean_lon.shape[0]):
-    #         result[ocean_indices[0][i], ocean_indices[1][i]] = np.min(
-    #             _gc_dist_degrees(ocean_lon[i], ocean_lat[i], land_lon, land_lat)
-    #         )
-
-    # print("stop")
-
-
-@nb.njit(
-    [
-        nb.void(
-            nb.float64[:, :],
-            nb.float64[:, :],
-            nb.int32[:, :],
-            nb.float64[:, :],
         )
     ],
     parallel=True,
@@ -1595,39 +1338,52 @@ def min_dist_to_land(
     lon: np.ndarray,
     lat: np.ndarray,
     mask: np.ndarray,
-    result: np.ndarray,
 ):
     """Calculate the distance between one set of points (lon1, lat1) to the closest of
     another set of points (lon2, lat2).
 
     Parameters
     ----------
-    lon1, lat1 : np.ndarray
-        2-D Arrays of longitude and latitude of the first set of points (origin points).
-    lon2, lat2 : np.ndarray
-        2-D Arrays of longitude and latitude of the second set of points (target points).
-    result: np.ndarray
-        2-D Array of the same shape as lon1, lat1, which will be filled with the resulting distance values
-        to the nearest non-nan lon2, lat2 point
+    lon : np.ndarray
+        2-D Array of longitudes (in degrees) for all points on the grid
+    lat : np.ndarray
+        2-D Arrays of latitudes (in degrees) for all points on the grid
+    mask: np.ndarray
+        2-D integer array where ocean points have value 1 and land points are 0
 
     Returns
     -------
-    None (output is stored in `result` input array)
+    2-D Array of the same shape as lon and lat, which will be filled with the resulting distance values
+    to the nearest non-nan lon2, lat2 point
     """
+
+    # get flatten ocean/land indices
     ocean = (mask == 1).ravel()
     land = (mask == 0).ravel()
+
+    # get flatten and separate lon/lat arrays for ocean and land
     ocean_lon = lon.ravel()[ocean]
     ocean_lat = lat.ravel()[ocean]
     land_lon = lon.ravel()[land]
     land_lat = lat.ravel()[land]
+
+    # keep track of the alignment between the full 2-D grid and the 1-D ocean indices
+    # (nonzero() returns a tuple of the i, j indices where mask is 1)
     ocean_indices = mask.nonzero()
-    # land_indices = (~mask).nonzero()
-    for i in range(ocean_lon.shape[0]):
+
+    # create a results array that will hold the distances from each ocean point to the nearest land point
+    # initially fill arrays with zeros, as we will not do this calculation for land points, and land points
+    # have zero distance to land by definition.
+    result = np.zeros_like(lon)
+
+    # iterate in parallel and do the distance calculation, taking the min for each ocean point without needing to
+    # allocate a huge array for the entire calculation space
+    for i in nb.prange(ocean_lon.shape[0]):
         result[ocean_indices[0][i], ocean_indices[1][i]] = np.min(
             _gc_dist_degrees(ocean_lon[i], ocean_lat[i], land_lon, land_lat)
         )
 
-    # print("stop")
+    return result
 
 
 def convert_to_relative_days(

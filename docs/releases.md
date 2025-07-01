@@ -5,6 +5,7 @@
 ### New Features
 
 * Make `Grid.from_file()` more robust for non-ROMS-Tools-generated grids ([#365](https://github.com/CWorthy-ocean/roms-tools/pull/365))
+* Optimize wind drop-off calculation to avoid out-of-memory errors ([#367](https://github.com/CWorthy-ocean/roms-tools/pull/367))
 * Option to stream ERA5 data directly from the cloud so that users do not have to pre-download ERA5 data ([#357](https://github.com/CWorthy-ocean/roms-tools/pull/357))
 * Option for wind drop-off near the coasts in `SurfaceForcing` ([#351](https://github.com/CWorthy-ocean/roms-tools/pull/351))
 * Option to ignore coarse dimensions when partitioning ([#348](https://github.com/CWorthy-ocean/roms-tools/pull/348))

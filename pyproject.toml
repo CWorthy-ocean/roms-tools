@@ -22,7 +22,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "xarray >=2022.6.0",
-    "numpy",
+    "numpy>2.0,<2.3",
     "pooch",
     "matplotlib",
     "cartopy",
@@ -35,8 +35,8 @@ dependencies = [
     "bottleneck",
     "regionmask",
     "xgcm",
-    "numba",
-    "pydantic",
+    "numba>=0.61.2",
+    "pydantic>2,<3"
 ]
 dynamic = ["version"]
 

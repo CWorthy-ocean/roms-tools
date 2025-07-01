@@ -609,10 +609,14 @@ def test_apply_wind_correction(surface_forcing):
     uwnd = surface_forcing.ds["uwnd"]
     vwnd = surface_forcing.ds["vwnd"]
 
+    prev_coords = surface_forcing.target_coords.copy()
     uwnd_corr, vwnd_corr = surface_forcing._apply_wind_correction(uwnd, vwnd)
 
     assert isinstance(uwnd_corr, xr.DataArray)
     assert isinstance(vwnd_corr, xr.DataArray)
+
+    # sanity check that the degrees conversion doesn't change the coords on our xarray
+    assert prev_coords == surface_forcing.target_coords
 
     # Wind correction should not increase magnitude
     assert (abs(uwnd_corr) <= abs(uwnd)).all()
@@ -621,6 +625,13 @@ def test_apply_wind_correction(surface_forcing):
     # Direction (sign) should be preserved
     assert (np.sign(uwnd_corr) == np.sign(uwnd)).all()
     assert (np.sign(vwnd_corr) == np.sign(vwnd)).all()
+
+    # the ratio should be 1 far away, and 0.6 over/near land
+    assert np.isclose((uwnd_corr / uwnd).max(), 1.0)
+    assert np.isclose((vwnd_corr / vwnd).max(), 1.0)
+
+    assert np.isclose((uwnd_corr / uwnd).min(), 0.6)
+    assert np.isclose((vwnd_corr / vwnd).min(), 0.6)
 
 
 @pytest.mark.parametrize(

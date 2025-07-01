@@ -1154,11 +1154,7 @@ class Grid:
 
         k = np.arange(1, Nz + 2)
 
-        # Define the exponential profile function
-        def exponential_profile(k, Nz, h):
-            return np.exp(k / h)
-
-        z_faces = np.vectorize(exponential_profile)(k, Nz, h)
+        z_faces = np.exp(k / h)
 
         # Normalize
         z_faces -= z_faces[0]

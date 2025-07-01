@@ -609,10 +609,14 @@ def test_apply_wind_correction(surface_forcing):
     uwnd = surface_forcing.ds["uwnd"]
     vwnd = surface_forcing.ds["vwnd"]
 
+    prev_coords = surface_forcing.target_coords.copy()
     uwnd_corr, vwnd_corr = surface_forcing._apply_wind_correction(uwnd, vwnd)
 
     assert isinstance(uwnd_corr, xr.DataArray)
     assert isinstance(vwnd_corr, xr.DataArray)
+
+    # sanity check that the degrees conversion doesn't change the coords on our xarray
+    assert prev_coords == surface_forcing.target_coords
 
     # Wind correction should not increase magnitude
     assert (abs(uwnd_corr) <= abs(uwnd)).all()
@@ -621,6 +625,13 @@ def test_apply_wind_correction(surface_forcing):
     # Direction (sign) should be preserved
     assert (np.sign(uwnd_corr) == np.sign(uwnd)).all()
     assert (np.sign(vwnd_corr) == np.sign(vwnd)).all()
+
+    # the ratio should be 1 far away, and 0.6 over/near land
+    assert np.isclose((uwnd_corr / uwnd).max(), 1.0)
+    assert np.isclose((vwnd_corr / vwnd).max(), 1.0)
+
+    assert np.isclose((uwnd_corr / uwnd).min(), 0.6)
+    assert np.isclose((vwnd_corr / vwnd).min(), 0.6)
 
 
 @pytest.mark.parametrize(
@@ -907,3 +918,35 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
             SurfaceForcing.from_yaml(yaml_filepath, use_dask=use_dask)
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
+
+
+@pytest.mark.stream
+def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
+    """One big integration test for cloud-based ERA5 data because the streaming takes a
+    long time."""
+
+    # Test plotting
+    surface_forcing_arco.plot(var_name="uwnd", time=0)
+
+    # Roundtrip yaml
+    yaml_filepath = tmp_path / "test_yaml.yaml"
+    surface_forcing_arco.to_yaml(yaml_filepath)
+    sfc_forcing_from_yaml = SurfaceForcing.from_yaml(yaml_filepath, use_dask=True)
+    assert surface_forcing_arco == sfc_forcing_from_yaml
+
+    # Compare hashes
+    filepath1 = tmp_path / "test1.nc"
+    filepath2 = tmp_path / "test2.nc"
+    surface_forcing_arco.save(filepath1, group=True)
+    sfc_forcing_from_yaml.save(filepath2, group=True)
+    filepath_str1 = str(Path(filepath1).with_suffix(""))
+    filepath_str2 = str(Path(filepath2).with_suffix(""))
+    expected_filepath1 = f"{filepath_str1}_202002.nc"
+    expected_filepath2 = f"{filepath_str2}_202002.nc"
+    hash1 = calculate_data_hash(expected_filepath1)
+    hash2 = calculate_data_hash(expected_filepath2)
+    assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
+
+    yaml_filepath.unlink()
+    Path(expected_filepath1).unlink()
+    Path(expected_filepath2).unlink()

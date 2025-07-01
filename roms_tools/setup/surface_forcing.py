@@ -15,6 +15,7 @@ from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
     Dataset,
+    ERA5ARCODataset,
     ERA5Correction,
     ERA5Dataset,
     UnifiedBGCSurfaceDataset,
@@ -25,16 +26,20 @@ from roms_tools.setup.utils import (
     _write_to_yaml,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
-    gc_dist,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
     interpolate_from_climatology,
+    min_dist_to_land,
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
 )
 from roms_tools.utils import save_datasets, transpose_dimensions
+
+DEFAULT_ERA5_ARCO_PATH = (
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
 
 
 @dataclass(kw_only=True)
@@ -56,12 +61,13 @@ class SurfaceForcing:
     source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
         Dictionary specifying the source of the surface forcing data. Keys include:
 
-          - "name" (str): Name of the data source (e.g., "ERA5").
-          - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file(s). This can be:
+          - "name" (str): Name of the data source. Currently supported: "ERA5"
+          - "path" (optional; Union[str, Path, List[Union[str, Path]]]): Path(s) to the raw data file(s). Accepted formats:
 
-            - A single string (with or without wildcards).
-            - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+            - A single string (supports wildcards),
+            - A single Path object,
+            - A list of strings or Path objects.
+            If omitted or set to the ARCO URL, the data will be streamed from the cloud.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str
@@ -230,7 +236,13 @@ class SurfaceForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] == "ERA5":
+                logging.info(
+                    "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
+                )
+                self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            else:
+                raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
         self.source = {
@@ -291,7 +303,16 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
-                data = ERA5Dataset(**data_dict)
+                if str(self.source["path"]).startswith("gs://") or str(
+                    self.source["path"]
+                ).startswith("gcs://"):
+                    if not self.use_dask:
+                        raise ValueError(
+                            "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
+                        )
+                    data = ERA5ARCODataset(**data_dict)
+                else:
+                    data = ERA5Dataset(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -299,10 +320,8 @@ class SurfaceForcing:
 
         elif self.type == "bgc":
             if self.source["name"] == "CESM_REGRIDDED":
-
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
-
                 data = UnifiedBGCSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
@@ -479,22 +498,19 @@ class SurfaceForcing:
             Corrected meridional wind component with reduced coastal values.
         """
 
-        # Compute great-circle distance from each grid point to the nearest land point
-        dist_mask = gc_dist(
-            self.target_coords["lon"].where(1 - self.target_coords["mask"]),
-            self.target_coords["lat"].where(1 - self.target_coords["mask"]),
-            self.target_coords["lon"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
-            self.target_coords["lat"].rename({"eta_rho": "eta", "xi_rho": "xi"}),
-        )
-        # Find the minimum distance to land for each ocean point (in meters)
-        cdist = dist_mask.min(dim=["eta_rho", "xi_rho"]).rename(
-            {"eta": "eta_rho", "xi": "xi_rho"}
+        # calculate the distance from each ocean point to the closest land point
+        cdist = min_dist_to_land(
+            self.target_coords["lon"].values,
+            self.target_coords["lat"].values,
+            self.target_coords["mask"].values,
         )
 
         # Compute a spatially varying scaling factor to reduce wind near the coast.
         # This uses an exponential decay with a 12.5 km e-folding scale,
         # reducing wind magnitude by up to 40% at the coastline.
         mult = 1 - 0.4 * np.exp(-0.08 * cdist / 1000)
+
+        mult = xr.DataArray(data=mult, dims=["eta_rho", "xi_rho"])
 
         uwnd_corrected = mult * uwnd
         vwnd_corrected = mult * vwnd

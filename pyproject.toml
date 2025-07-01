@@ -4,7 +4,8 @@ description = "Tools for running and analysing UCLA-ROMS simulations"
 readme = "README.md"
 authors = [
     {name = "Nora Loose", email = "nora.loose@gmail.com"},
-    {name = "Thomas Nicholas", email = "tom@cworthy.org"}
+    {name = "Thomas Nicholas", email = "tom@cworthy.org"},
+    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"}
 ]
 license = {text = "Apache-2"}
 classifiers = [
@@ -42,7 +43,11 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 dask = [
-    "dask[diagnostics]"
+    "dask[diagnostics]",
+]
+stream = [
+    "dask[diagnostics]",
+    "gcsfs"
 ]
 
 

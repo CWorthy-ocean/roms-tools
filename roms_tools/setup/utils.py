@@ -1236,7 +1236,7 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     Latitude and longitude are assumed to be in degrees by default. If `input_in_degrees` is set to `False`,
     the input is assumed to already be in radians.
 
-    This function is a wrapper two numba-vectorized versions of the function, one each for degrees and radians.
+    This function is a wrapper for two numba-vectorized versions of the function, one each for degrees and radians.
     The wrapper is additionally needed to be able to use kwargs.
 
     Parameters
@@ -1357,11 +1357,11 @@ def min_dist_to_land(
     to the nearest non-nan lon2, lat2 point
     """
 
-    # get flatten ocean/land indices
+    # get flattened ocean/land indices
     ocean = (mask == 1).ravel()
     land = (mask == 0).ravel()
 
-    # get flatten and separate lon/lat arrays for ocean and land
+    # get flattened and separate lon/lat arrays for ocean and land
     ocean_lon = lon.ravel()[ocean]
     ocean_lat = lat.ravel()[ocean]
     land_lon = lon.ravel()[land]

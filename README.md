@@ -6,13 +6,6 @@
 ![Run Tests](https://github.com/CWorthy-ocean/roms-tools/actions/workflows/tests.yaml/badge.svg)
 ![Supported Python Versions](https://img.shields.io/pypi/pyversions/roms-tools)
 
-> [!Warning]
-> **This project is still in an early phase of development.**
->
-> The [Python API](https://roms-tools.readthedocs.io/en/latest/api.html) is not yet stable.
-> Therefore whilst you are welcome to try out using the package, we cannot yet guarantee backwards compatibility.
-> We expect to reach a more stable version in Q1 2025.
-
 ## Overview
 
 A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://github.com/CESR-lab/ucla-roms) simulation.

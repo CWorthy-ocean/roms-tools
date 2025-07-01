@@ -1200,7 +1200,7 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
 
     # Redistribute Gaussian mass from under topography to open ocean
     weights = weights.where(depth_levels < h)
-    weights = weights / weights.sum(dim="depth")
+    weights = weights / weights.sum()
 
     # Map 1D to 2D Gaussian
     vertical_field = field * weights

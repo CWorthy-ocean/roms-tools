@@ -413,21 +413,21 @@ def get_dask_chunks(location, chunk_size):
     return chunk_mapping.get(location, {})
 
 
-def _generate_coordinate_range(min, max, resolution):
+def _generate_coordinate_range(min_val: float, max_val: float, resolution: float):
     """Generate an array of target coordinates (e.g., latitude or longitude) within a
     specified range, with a resolution that is rounded to the nearest value of the form
     `1/n` (or integer).
 
-    This method generates an array of target coordinates between the provided `min` and `max`
-    values, ensuring that both `min` and `max` are included in the resulting range. The resolution
+    This method generates an array of target coordinates between the provided `min_val` and `max_val`
+    values, ensuring that both `min_val` and `max_val` are included in the resulting range. The resolution
     is rounded to the nearest fraction of the form `1/n` or an integer, based on the input.
 
     Parameters
     ----------
-    min : float
+    min_val : float
         The minimum value (in degrees) of the coordinate range (inclusive).
 
-    max : float
+    max_val : float
         The maximum value (in degrees) of the coordinate range (inclusive).
 
     resolution : float
@@ -464,8 +464,8 @@ def _generate_coordinate_range(min, max, resolution):
             resolution_rounded = fraction  # Update the best fraction (or integer) found
 
     # Adjust the start and end of the range to include integer values
-    start_int = np.floor(min)  # Round the minimum value down to the nearest integer
-    end_int = np.ceil(max)  # Round the maximum value up to the nearest integer
+    start_int = np.floor(min_val)  # Round the minimum value down to the nearest integer
+    end_int = np.ceil(max_val)  # Round the maximum value up to the nearest integer
 
     # Generate the array of target coordinates, including both the min and max values
     target = np.arange(start_int, end_int + resolution_rounded, resolution_rounded)
@@ -476,47 +476,161 @@ def _generate_coordinate_range(min, max, resolution):
     return target.astype(np.float32)
 
 
-def _remove_edge_nans(field, xdim, layer_depth=None):
-    """Trim NaN-only edges along a specified dimension.
+def _generate_focused_coordinate_range(
+    center: float,
+    sc: float,
+    min_val: float,
+    max_val: float,
+    N: int,
+    stretch_factor: float = 3.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generate an array of target coordinates within [min_val, max_val] with two.
 
-    Useful when a ROMS grid has been regridded to a fixed lat/lon section,
-    leaving NaN-filled edges (e.g., over land or outside the domain).
-    Removes leading/trailing slices along `xdim` where all values are NaN,
-    based on `field` or optionally `layer_depth`.
+    resolution zones: a higher resolution region centered near `center` ± stretch_factor
+    * `sc`, and coarser resolution outside.
+
+    Parameters
+    ----------
+    min_val : float
+        Minimum coordinate value (inclusive).
+        Units: degrees or meters.
+    max_val : float
+        Maximum coordinate value (inclusive).
+        Units: degrees or meters.
+    center : float
+        Coordinate around which to increase resolution.
+        Units: degrees or meters.
+    sc : float
+        Width controlling the size of the high-resolution region.
+        If 0, treated as a small default to avoid zero-width window.
+        Units: degrees or meters.
+    N : int
+        Number of desired coordinate points.
+    stretch_factor : float, default 3.0
+        Multiplier for `sc` to define the width of the high-resolution window.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        Tuple of two arrays:
+        - centers: cell centers.
+        - faces: cell faces.
+
+    Notes
+    -----
+    - About 20% of the faces are placed in the high-resolution region.
+    - Remaining faces are split evenly in the coarse resolution regions
+    - Faces and centers are returned sorted and unique.
+    """
+
+    # Define the bounds of the high-res region
+    if sc == 0.0:
+        sc = 1
+    low_bound = max(center - stretch_factor * sc, min_val)
+    high_bound = min(center + stretch_factor * sc, max_val)
+
+    # Decide how many points for high and low resolution
+    high_res_points = int(N * 0.2)  # 20% of the points in high-res region
+    low_res_points = N + 1 - high_res_points * 2  # rest split
+
+    # First coarse region
+    first_coarse_res_faces = (
+        np.linspace(min_val, low_bound, low_res_points // 2, endpoint=False)
+        if low_bound > 0
+        else np.array([])
+    )
+    # High-res region faces (low_bound to high_bound)
+    high_res_faces = np.linspace(low_bound, high_bound, high_res_points, endpoint=False)
+    # Second coarse region
+    second_coarse_res_faces = (
+        np.linspace(
+            high_bound,
+            max_val,
+            low_res_points - len(first_coarse_res_faces),
+            endpoint=True,
+        )
+        if high_bound < max_val
+        else np.array([])
+    )
+
+    faces = np.unique(
+        np.concatenate(
+            [first_coarse_res_faces, high_res_faces, second_coarse_res_faces]
+        )
+    )
+    centers = (faces[:-1] + faces[1:]) / 2
+
+    return centers, faces
+
+
+def _remove_edge_nans(
+    field: xr.DataArray, xdim: str, layer_depth: xr.DataArray | None = None
+) -> tuple[xr.DataArray, xr.DataArray | None]:
+    """Remove NaN-only slices at the edges of a specified dimension.
+
+    This function trims leading and trailing slices along the specified `xdim` where all values
+    are NaN. It assumes that the data has only one other relevant dimension (typically depth).
+    If `layer_depth` is provided, it is used instead of `field` to determine which slices are NaN-only.
 
     Parameters
     ----------
     field : xr.DataArray
-        Data to trim.
+        Input array to trim. May contain NaNs at the edges along `xdim`.
     xdim : str
-        Dimension along which to remove NaN edges.
+        The dimension along which to remove NaN-only slices.
     layer_depth : xr.DataArray, optional
-        Optional field to determine where NaNs occur.
+        Optional array to evaluate NaN positions. If not provided, `field` is used instead.
 
     Returns
     -------
     field : xr.DataArray
-        Trimmed data.
+        Trimmed `field`, with leading and trailing NaN-only slices removed along `xdim`.
     layer_depth : xr.DataArray or None
-        Trimmed `layer_depth` if provided.
+        Trimmed `layer_depth`, if provided. Otherwise, returns None.
+
+    Raises
+    ------
+    ValueError
+        If `field` has more than one additional dimension besides `xdim`.
+
+    Notes
+    -----
+    - If `xdim` is not in `field.dims`, no trimming is performed.
+    - This is typically used for visualizing or extracting clean sections from 2D slices
+      (e.g., vertical sections) that have NaNs at the spatial boundaries.
     """
     if xdim in field.dims:
-        if layer_depth is not None:
-            nan_mask = layer_depth.isnull().sum(
-                dim=[dim for dim in layer_depth.dims if dim != xdim]
-            )
+        other_dims = [dim for dim in field.dims if dim != xdim]
+        if len(other_dims) == 0:
+            if layer_depth is not None:
+                nan_mask = layer_depth.isnull()
+            else:
+                nan_mask = field.isnull()
+
+        elif len(other_dims) == 1:
+
+            depth_dim = other_dims[0]
+
+            if layer_depth is not None:
+                if depth_dim in layer_depth.dims:
+                    nan_mask = layer_depth.isnull().sum(dim=depth_dim)
+                else:
+                    nan_mask = layer_depth.isnull()
+            else:
+                N = field.sizes[depth_dim]
+                nan_mask = field.isnull().sum(dim=depth_dim) == N
+
         else:
-            nan_mask = field.isnull().sum(
-                dim=[dim for dim in field.dims if dim != xdim]
+            raise ValueError(
+                f"Cannot trim along dimension '{xdim}': expected at most one other dimension, "
+                f"but got {len(other_dims)} ({other_dims})."
             )
 
-        # Find the valid indices where the sum of the nans is 0
         valid_indices = np.where(nan_mask.values == 0)[0]
 
         if len(valid_indices) > 0:
             first_valid = valid_indices[0]
             last_valid = valid_indices[-1]
-
             field = field.isel({xdim: slice(first_valid, last_valid + 1)})
             if layer_depth is not None:
                 layer_depth = layer_depth.isel(

@@ -1,5 +1,6 @@
 import importlib.metadata
 import logging
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -392,7 +393,8 @@ class Grid:
                 "long_name", ds[fine_var].attrs.get("Long_name", "")
             )
             ds[coarse_var].attrs["long_name"] = f"{long_name} on coarsened grid"
-            ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
+            if "units" in ds[fine_var].attrs:
+                ds[coarse_var].attrs["units"] = ds[fine_var].attrs["units"]
 
         self.ds = ds
 
@@ -555,13 +557,29 @@ class Grid:
         return saved_filenames
 
     @classmethod
-    def from_file(cls, filepath: Union[str, Path], verbose: bool = False) -> "Grid":
+    def from_file(
+        cls,
+        filepath: str | Path,
+        theta_s: float | None = None,
+        theta_b: float | None = None,
+        hc: float | None = None,
+        N: int | None = None,
+        verbose: bool = False,
+    ) -> "Grid":
         """Create a Grid instance from an existing file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             Path to the file containing the grid information.
+        theta_s : float, optional
+            Surface stretching parameter for vertical coordinate.
+        theta_b : float, optional
+            Bottom stretching parameter for vertical coordinate.
+        hc : float, optional
+            Critical depth for vertical coordinate.
+        N : int, optional
+            Number of vertical levels for vertical coordinate.
         verbose: bool, optional
             Indicates whether to print grid generation steps with timing. Defaults to False.
 
@@ -570,6 +588,15 @@ class Grid:
         Grid
             A new instance of Grid populated with data from the file.
         """
+        # Validate that either all or none of the vertical grid parameters are provided
+        user_params = [theta_s, theta_b, hc, N]
+        num_provided = sum(p is not None for p in user_params)
+        if 0 < num_provided < 4:
+            raise ValueError(
+                "If specifying vertical coordinate parameters, you must provide all of: "
+                "theta_s, theta_b, hc, and N."
+            )
+
         # Load the dataset from the file
         ds = xr.open_dataset(filepath)
 
@@ -607,22 +634,60 @@ class Grid:
                 ds = grid.ds.set_coords(var)
                 grid.ds = ds
 
-        # Update vertical coordinate if necessary
-        if not all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
-            logging.warning("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
-            N = 100
-            theta_s = 5.0
-            theta_b = 2.0
-            hc = 300.0
+        # Check if vertical coordinates already exist
+        if all(var in grid.ds for var in ["Cs_r", "Cs_w"]):
+            prior_Cs_r = grid.ds.Cs_r.copy(deep=True)
+            prior_Cs_w = grid.ds.Cs_w.copy(deep=True)
+        else:
+            prior_Cs_r = None
+            prior_Cs_w = None
 
+        # Case: user provides all vertical coordinate parameters
+        if num_provided == 4:
             grid.update_vertical_coordinate(
                 N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=True
             )
+
+            if prior_Cs_r is not None and prior_Cs_w is not None:
+                # Check for consistency between provided and file-stored vertical coordinates
+                if (grid.ds.Cs_r.shape != prior_Cs_r.shape) or (
+                    grid.ds.Cs_w.shape != prior_Cs_w.shape
+                ):
+                    raise ValueError(
+                        "The grid file contains vertical coordinates (Cs_r, Cs_w), but their shapes "
+                        "are inconsistent with the provided N."
+                    )
+                if not (
+                    np.allclose(grid.ds.Cs_r, prior_Cs_r)
+                    and np.allclose(grid.ds.Cs_w, prior_Cs_w)
+                ):
+                    raise ValueError(
+                        "The grid file contains vertical coordinates (Cs_r, Cs_w), "
+                        "but they are inconsistent with the provided theta_s, theta_b, hc, and N."
+                    )
+
+        # Case: user did not provide vertical coordinate parameters
+        elif prior_Cs_r is None or prior_Cs_w is None:
+            logging.warning("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
+
+            # Use fallback parameters
+            grid.update_vertical_coordinate(
+                N=100, theta_s=5.0, theta_b=2.0, hc=300.0, verbose=True
+            )
+
+        # Final fallback: get vertical coordinate parameters from attributes if available
         else:
-            grid.theta_s = ds.attrs["theta_s"].item()
-            grid.theta_b = ds.attrs["theta_b"].item()
-            grid.hc = ds.attrs["hc"].item()
-            grid.N = len(ds.s_rho)
+            if not all(attr in grid.ds.attrs for attr in ["theta_s", "theta_b", "hc"]):
+                raise ValueError(
+                    "Missing vertical coordinate attributes in grid file: "
+                    "'theta_s', 'theta_b', or 'hc'."
+                )
+
+        # Assign vertical coordinate metadata
+        grid.theta_s = grid.ds.attrs["theta_s"].item()
+        grid.theta_b = grid.ds.attrs["theta_b"].item()
+        grid.hc = grid.ds.attrs["hc"].item()
+        grid.N = len(grid.ds.s_rho)
 
         # Manually set the remaining attributes by extracting parameters from dataset
         grid.nx = ds.sizes["xi_rho"] - 2
@@ -631,9 +696,18 @@ class Grid:
             center_lon = float(ds.attrs["center_lon"])
         elif "tra_lon" in ds:
             center_lon = float(extract_single_value(ds["tra_lon"]))
+        elif "title" in ds.attrs:
+            match = re.search(r"Lon:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
+            if match:
+                center_lon = float(match.group(1))
+            else:
+                raise ValueError(
+                    "Could not extract 'center_lon' from title attribute. "
+                    "Expected format: '... Lon: <value> ...'"
+                )
         else:
             raise ValueError(
-                "Missing grid information: 'center_lon' attribute or 'tra_lon' variable "
+                "Missing grid information: 'center_lon' attribute, 'tra_lon' variable, or 'Lon:' in 'title' attribute "
                 "must be present in the dataset."
             )
         grid.center_lon = center_lon
@@ -641,9 +715,18 @@ class Grid:
             center_lat = float(ds.attrs["center_lat"])
         elif "tra_lat" in ds:
             center_lat = float(extract_single_value(ds["tra_lat"]))
+        elif "title" in ds.attrs:
+            match = re.search(r"Lat:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
+            if match:
+                center_lat = float(match.group(1))
+            else:
+                raise ValueError(
+                    "Could not extract 'center_lat' from title attribute. "
+                    "Expected format: '... Lon: <value> ...'"
+                )
         else:
             raise ValueError(
-                "Missing grid information: 'center_lat' attribute or 'tra_lat' variable "
+                "Missing grid information: 'center_lat' attribute, 'tra_lat' variable, or 'Lat:' in 'title' attribute "
                 "must be present in the dataset."
             )
         grid.center_lat = center_lat
@@ -651,9 +734,18 @@ class Grid:
             rot = float(ds.attrs["rot"])
         elif "rotate" in ds:
             rot = float(extract_single_value(ds["rotate"]))
+        elif "title" in ds.attrs:
+            match = re.search(r"rotate:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
+            if match:
+                rot = float(match.group(1))
+            else:
+                raise ValueError(
+                    "Could not extract 'rot' from title attribute. "
+                    "Expected format: '... rotate: <value> ...'"
+                )
         else:
             raise ValueError(
-                "Missing grid information: 'rot' attribute or 'rotate' variable "
+                "Missing grid information: 'rot' attribute, 'rotate' variable, or 'rotate:' in 'title' attribute "
                 "must be present in the dataset."
             )
         grid.rot = rot

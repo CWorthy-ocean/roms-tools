@@ -1,6 +1,18 @@
 # Release notes
 
-## v2.8.0 (unreleased)
+## v3.1.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v3.0.0
 
 ### New Features
 

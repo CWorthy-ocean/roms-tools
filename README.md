@@ -14,7 +14,7 @@ A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://githu
 
 ### ⚡️ **Installation from Conda-Forge**
 
-To install `ROMS-Tools` with all dependencies, including `xesmf` and `dask`, use:
+To install `ROMS-Tools` with all dependencies, including `xesmf`, `dask` and all packages required for streaming source data directly from the cloud, use:
 
 ```bash
 conda install -c conda-forge roms-tools
@@ -36,6 +36,13 @@ If you want to use `ROMS-Tools` with `dask` (recommended for parallel and out-of
 ```bash
 pip install roms-tools[dask]
 ```
+
+If you want to use `ROMS-Tools` with `dask` and all packages required for streaming source data directly from the cloud, install it with the additional dependencies:
+
+```bash
+pip install roms-tools[stream]
+```
+
 
 > [!Note]
 >  The PyPI versions of `ROMS-Tools` do not include `xesmf`, so some features will be unavailable.
@@ -70,18 +77,11 @@ install `ROMS-Tools` along with the additional dependency via:
 pip install -e ".[dask]"
 ```
 
-### Run the tests
-
-Before running the tests, you can activate the conda environment created in the previous section:
+If you want to use `ROMS-Tools` with `dask` and all packages required for streaming source data directly from the cloud, you can
+install `ROMS-Tools` along with the additional dependencies via:
 
 ```bash
-conda activate romstools-test
-```
-
-Check the installation of `ROMS-Tools` has worked by running the test suite
-```bash
-cd roms-tools
-pytest
+pip install -e ".[stream]"
 ```
 
 ## Getting Started

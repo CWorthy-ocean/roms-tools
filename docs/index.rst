@@ -19,13 +19,13 @@ The package is designed with the following goals in mind:
 
 ROMS-Tools streamlines the creation of the following inputs:
 
-- **Grid**
+- **Grid**:
 
   - Coordinates and metrics
   - Bathymetry (derived from SRTM15)
   - Land-sea mask (based on Natural Earth datasets)
 
-- **Tidal forcing**
+- **Tidal forcing**:
 
   - Derived from TPXO tidal constituents
 

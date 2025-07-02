@@ -8,7 +8,7 @@
 
 ## Overview
 
-A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://github.com/CESR-lab/ucla-roms) simulation.
+A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://github.com/CESR-lab/ucla-roms) simulation with or without [MARBL biogeochemistry](https://marbl-ecosys.github.io/versions/latest_release/index.html).
 
 ## Installation
 

@@ -689,3 +689,109 @@ class TestRiverForcingWithPrescribedIndices:
                 end_time=self.end_time,
                 indices=indices,
             )
+
+
+class TestRiverForcingWithOverlappingIndices:
+    @pytest.fixture
+    def mock_river_dataset_with_simple_overlap(self):
+        """Creates a small mock dataset with overlapping rivers."""
+        ntracers = 1
+        river_names = ["RiverA", "RiverB", "RiverC"]
+        tracer_names = ["temp"]
+        nriver = len(river_names)
+
+        ds = xr.Dataset(
+            {
+                "river_volume": (("time", "nriver"), [[1.0, 2.0, 3.0]]),
+                "river_tracer": (
+                    ("time", "ntracers", "nriver"),
+                    [[[10.0, 20.0, 30.0]]],
+                ),
+            },
+            coords={
+                "time": [0],
+                "ntracers": range(ntracers),
+                "nriver": range(nriver),
+                "river_name": ("nriver", river_names),
+                "tracer_name": ("ntracers", tracer_names),
+            },
+        )
+
+        # Assign overlapping indices to two rivers
+        indices = {
+            "RiverA": [(10, 20)],
+            "RiverB": [(10, 20)],  # overlaps with RiverA
+            "RiverC": [(15, 25)],
+        }
+
+        return ds, indices
+
+    @pytest.fixture
+    def mock_river_dataset_with_complex_overlap(self):
+        """Creates a small mock dataset with overlapping rivers."""
+        ntracers = 1
+        river_names = ["RiverA", "RiverB", "RiverC"]
+        tracer_names = ["temp"]
+        nriver = len(river_names)
+
+        ds = xr.Dataset(
+            {
+                "river_volume": (("time", "nriver"), [[1.0, 2.0, 3.0]]),
+                "river_tracer": (
+                    ("time", "ntracers", "nriver"),
+                    [[[10.0, 20.0, 30.0]]],
+                ),
+            },
+            coords={
+                "time": [0],
+                "ntracers": range(ntracers),
+                "nriver": range(nriver),
+                "river_name": ("nriver", river_names),
+                "tracer_name": ("ntracers", tracer_names),
+            },
+        )
+
+        # Assign overlapping indices to two rivers
+        indices = {
+            "RiverA": [(10, 20), (11, 20)],
+            "RiverB": [(10, 20), (10, 21)],  # overlaps with RiverA
+            "RiverC": [(15, 25)],
+        }
+
+        return ds, indices
+
+    @pytest.mark.parametrize(
+        "mock_river_dataset_fixture",
+        [
+            "mock_river_dataset_with_simple_overlap",
+            "mock_river_dataset_with_complex_overlap",
+        ],
+    )
+    def test_handle_overlapping_rivers(self, mock_river_dataset_fixture, request):
+        mock_river_dataset = request.getfixturevalue(mock_river_dataset_fixture)
+
+        ds, indices = mock_river_dataset
+
+        # Create a dummy RiverForcing instance
+        rf = RiverForcing.__new__(RiverForcing)
+        rf.indices = indices
+        rf.original_indices = indices.copy()
+        rf.grid = None  # Not needed for this test
+
+        ds_out = rf._handle_overlapping_rivers(ds)
+
+        # Assert a new river was added
+        assert ds_out.dims["nriver"] == 4  # one new synthetic river
+        assert any(name.startswith("overlap_") for name in rf.indices)
+
+        # Check that the old rivers with overlap have been reduced in volume
+        assert float(ds_out["river_volume"].isel(nriver=0)) < 1.0
+        assert float(ds_out["river_volume"].isel(nriver=1)) < 2.0
+
+        # Check that total volume is preserved
+        assert ds_out["river_volume"].sum(dim="nriver").values == 6
+
+        # Ensure the synthetic river has nonzero volume
+        assert float(ds_out["river_volume"].isel(nriver=3)) > 0
+
+        assert not np.isnan(ds_out["river_tracer"].isel(nriver=3).item())

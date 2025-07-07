@@ -442,7 +442,9 @@ class RiverForcing:
         }
 
         if len(overlapping_rivers) > 0:
-            logging.info(f"Creating {len(overlapping_rivers)} synthetic river(s) to handle overlapping entries.")
+            logging.info(
+                f"Creating {len(overlapping_rivers)} synthetic river(s) to handle overlapping entries."
+            )
 
             # Add new unique river for each overlapping index
             combined_river_volumes = []

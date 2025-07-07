@@ -415,7 +415,6 @@ class RiverForcing:
         For each overlapping grid cell:
         - A new river is created using a volume-weighted sum of the original rivers' volume and tracer.
         - The volume fraction of the original river is reduced proportionally to reflect the removal of the shared grid cell.
-        - The overlapping grid cell is removed from each contributing river in `self.indices`.
         - The new river is appended to the dataset and indexed in `self.indices`.
 
         Parameters
@@ -442,83 +441,89 @@ class RiverForcing:
             idx: names for idx, names in index_to_rivers.items() if len(names) > 1
         }
 
-        # Add new unique river for each overlapping index
-        combined_river_volumes = []
-        combined_river_tracers = []
+        if len(overlapping_rivers) > 0:
+            logging.info(f"Creating {len(overlapping_rivers)} synthetic river(s) to handle overlapping entries.")
 
-        for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
-            new_name = f"overlap_{i+1}"
-            self.indices[new_name] = [idx_pair]
+            # Add new unique river for each overlapping index
+            combined_river_volumes = []
+            combined_river_tracers = []
 
-            # Get index of all rivers contributing to this overlapping cell
-            contributing_indices = [
-                np.where(ds["river_name"].values == name)[0].item()
-                for name in river_list
-            ]
+            for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
+                new_name = f"overlap_{i+1}"
+                self.indices[new_name] = [idx_pair]
 
-            # Get the number of grid points each river originally contributed to
-            num_cells_per_river = [len(self.indices[name]) for name in river_list]
+                # Get index of all rivers contributing to this overlapping cell
+                contributing_indices = [
+                    np.where(ds["river_name"].values == name)[0].item()
+                    for name in river_list
+                ]
 
-            # Weighted sum of river volume contributions at the overlapping location
-            weighted_volumes = xr.concat(
-                [
-                    (ds["river_volume"].isel(nriver=i) / n_cells).astype("float64")
-                    for i, n_cells in zip(contributing_indices, num_cells_per_river)
-                ],
-                dim="tmp",
-            )
-            combined_river_volume = weighted_volumes.sum(dim="tmp", skipna=True)
+                # Get the number of grid points each river originally contributed to
+                num_cells_per_river = [len(self.indices[name]) for name in river_list]
 
-            # Volume-weighted sum of river tracer contributions at the overlapping location
-            weighted_tracers = xr.concat(
-                [
-                    (ds["river_tracer"].isel(nriver=i) * weight.fillna(0.0)).astype(
-                        "float64"
-                    )
-                    for i, weight in zip(contributing_indices, weighted_volumes)
-                ],
-                dim="tmp",
-            )
-            combined_river_tracer = (
-                weighted_tracers.sum(dim="tmp", skipna=True) / combined_river_volume
-            )
-            # If combined_river_volume is 0.0, the result will be NaN. Replace with default for clarity.
-            # This is mainly for plotting and to avoid confusing users—ROMS will ignore tracers with zero volume anyway.
-            defaults = get_tracer_defaults()
-            for ntracer in range(combined_river_tracer.sizes["ntracers"]):
-                tracer_name = combined_river_tracer.tracer_name[ntracer].item()
-                default = defaults[tracer_name]
-                combined_river_tracer.loc[
-                    {"ntracers": ntracer}
-                ] = combined_river_tracer.loc[{"ntracers": ntracer}].fillna(default)
+                # Weighted sum of river volume contributions at the overlapping location
+                weighted_volumes = xr.concat(
+                    [
+                        (ds["river_volume"].isel(nriver=i) / n_cells).astype("float64")
+                        for i, n_cells in zip(contributing_indices, num_cells_per_river)
+                    ],
+                    dim="tmp",
+                )
+                combined_river_volume = weighted_volumes.sum(dim="tmp", skipna=True)
 
-            # Expand, assign coordinates, and name for both volume and tracer
-            new_nriver = ds.sizes["nriver"] + len(combined_river_volumes)
-            combined_river_volume = combined_river_volume.expand_dims(nriver=1)
-            combined_river_volume = combined_river_volume.assign_coords(
-                nriver=[new_nriver + 1], river_name=new_name
-            )
-            combined_river_tracer = combined_river_tracer.expand_dims(nriver=1)
-            combined_river_tracer = combined_river_tracer.assign_coords(
-                nriver=[new_nriver + 1], river_name=new_name
-            )
+                # Volume-weighted sum of river tracer contributions at the overlapping location
+                weighted_tracers = xr.concat(
+                    [
+                        (ds["river_tracer"].isel(nriver=i) * weight.fillna(0.0)).astype(
+                            "float64"
+                        )
+                        for i, weight in zip(contributing_indices, weighted_volumes)
+                    ],
+                    dim="tmp",
+                )
+                combined_river_tracer = (
+                    weighted_tracers.sum(dim="tmp", skipna=True) / combined_river_volume
+                )
+                # If combined_river_volume is 0.0, the result will be NaN. Replace with default for clarity.
+                # This is mainly for plotting and to avoid confusing users—ROMS will ignore tracers with zero volume anyway.
+                defaults = get_tracer_defaults()
+                for ntracer in range(combined_river_tracer.sizes["ntracers"]):
+                    tracer_name = combined_river_tracer.tracer_name[ntracer].item()
+                    default = defaults[tracer_name]
+                    combined_river_tracer.loc[
+                        {"ntracers": ntracer}
+                    ] = combined_river_tracer.loc[{"ntracers": ntracer}].fillna(default)
 
-            combined_river_volumes.append(combined_river_volume)
-            combined_river_tracers.append(combined_river_tracer)
-
-            # Reduce volume fraction of each original river by appropriate amount
-            for i, n_cells in zip(contributing_indices, num_cells_per_river):
-                ds["river_volume"].loc[{"nriver": ds.nriver[i]}] = (
-                    ds["river_volume"].isel(nriver=i) * (n_cells - 1) / n_cells
+                # Expand, assign coordinates, and name for both volume and tracer
+                new_nriver = ds.sizes["nriver"] + len(combined_river_volumes)
+                combined_river_volume = combined_river_volume.expand_dims(nriver=1)
+                combined_river_volume = combined_river_volume.assign_coords(
+                    nriver=[new_nriver + 1], river_name=new_name
+                )
+                combined_river_tracer = combined_river_tracer.expand_dims(nriver=1)
+                combined_river_tracer = combined_river_tracer.assign_coords(
+                    nriver=[new_nriver + 1], river_name=new_name
                 )
 
-        ds_updated = xr.Dataset()
-        ds_updated["river_volume"] = xr.concat(
-            [ds["river_volume"]] + combined_river_volumes, dim="nriver"
-        )
-        ds_updated["river_tracer"] = xr.concat(
-            [ds["river_tracer"]] + combined_river_tracers, dim="nriver"
-        )
+                combined_river_volumes.append(combined_river_volume)
+                combined_river_tracers.append(combined_river_tracer)
+
+                # Reduce volume fraction of each original river by appropriate amount
+                for i, n_cells in zip(contributing_indices, num_cells_per_river):
+                    ds["river_volume"].loc[{"nriver": ds.nriver[i]}] = (
+                        ds["river_volume"].isel(nriver=i) * (n_cells - 1) / n_cells
+                    )
+
+            ds_updated = xr.Dataset()
+            ds_updated["river_volume"] = xr.concat(
+                [ds["river_volume"]] + combined_river_volumes, dim="nriver"
+            )
+            ds_updated["river_tracer"] = xr.concat(
+                [ds["river_tracer"]] + combined_river_tracers, dim="nriver"
+            )
+            ds_updated.attrs = ds.attrs
+        else:
+            ds_updated = ds
 
         return ds_updated
 

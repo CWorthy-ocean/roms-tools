@@ -460,23 +460,40 @@ class RiverForcing:
             num_cells_per_river = [len(self.indices[name]) for name in river_list]
 
             # Weighted sum of river volume contributions at the overlapping location
-            combined_river_volume = sum(
-                ds["river_volume"].isel(nriver=i) / n_cells
-                for idx, n_cells in zip(contributing_indices, num_cells_per_river)
+            weighted_volumes = xr.concat(
+                [
+                    (ds["river_volume"].isel(nriver=i) / n_cells).astype("float64")
+                    for i, n_cells in zip(contributing_indices, num_cells_per_river)
+                ],
+                dim="tmp",
             )
+            combined_river_volume = weighted_volumes.sum(dim="tmp", skipna=True)
 
             # Volume-weighted sum of river tracer contributions at the overlapping location
-            combined_river_tracer = (
-                sum(
-                    ds["river_tracer"].isel(nriver=i)
-                    * (ds["river_volume"].isel(nriver=i) / n_cells)
-                    for id, n_cells in zip(contributing_indices, num_cells_per_river)
-                )
-                / combined_river_volume
+            weighted_tracers = xr.concat(
+                [
+                    (ds["river_tracer"].isel(nriver=i) * weight.fillna(0.0)).astype(
+                        "float64"
+                    )
+                    for i, weight in zip(contributing_indices, weighted_volumes)
+                ],
+                dim="tmp",
             )
+            combined_river_tracer = (
+                weighted_tracers.sum(dim="tmp", skipna=True) / combined_river_volume
+            )
+            # If combined_river_volume is 0.0, the result will be NaN. Replace with default for clarity.
+            # This is mainly for plotting and to avoid confusing users—ROMS will ignore tracers with zero volume anyway.
+            defaults = get_tracer_defaults()
+            for ntracer in range(combined_river_tracer.sizes["ntracers"]):
+                tracer_name = combined_river_tracer.tracer_name[ntracer].item()
+                default = defaults[tracer_name]
+                combined_river_tracer.loc[
+                    {"ntracers": ntracer}
+                ] = combined_river_tracer.loc[{"ntracers": ntracer}].fillna(default)
 
             # Expand, assign coordinates, and name for both volume and tracer
-            new_nriver = ds.dims["nriver"] + len(combined_river_volumes)
+            new_nriver = ds.sizes["nriver"] + len(combined_river_volumes)
             combined_river_volume = combined_river_volume.expand_dims(nriver=1)
             combined_river_volume = combined_river_volume.assign_coords(
                 nriver=[new_nriver + 1], river_name=new_name
@@ -494,12 +511,6 @@ class RiverForcing:
                 ds["river_volume"].loc[{"nriver": ds.nriver[i]}] = (
                     ds["river_volume"].isel(nriver=i) * (n_cells - 1) / n_cells
                 )
-
-            # Remove shared index from each original river
-            for river_name in river_list:
-                self.indices[river_name] = [
-                    idx for idx in self.indices[river_name] if idx != idx_pair
-                ]
 
         ds_updated = xr.Dataset()
         ds_updated["river_volume"] = xr.concat(
@@ -535,11 +546,7 @@ class RiverForcing:
         for nriver in ds.nriver:
             river_name = str(ds.river_name.sel(nriver=nriver).values)
             indices = self.indices[river_name]
-            if len(indices) > 1:
-                fraction = 1.0 / len(indices)
-            else:
-                fraction = 1.0
-
+            fraction = 1.0 / len(indices)
             for eta_index, xi_index in indices:
 
                 # Assign unique nriver ID (Fortran-based indexing)
@@ -796,7 +803,15 @@ class RiverForcing:
         serialized_indices = {"_convention": "eta_rho, xi_rho"}
         for key, value in indices_data.items():
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
-        forcing_dict["RiverForcing"]["indices"] = serialized_indices
+
+        # Remove keys starting with "overlap_"
+        filtered_indices = {
+            key: value
+            for key, value in serialized_indices.items()
+            if not key.startswith("overlap_")
+        }
+
+        forcing_dict["RiverForcing"]["indices"] = filtered_indices
 
         _write_to_yaml(forcing_dict, filepath)
 

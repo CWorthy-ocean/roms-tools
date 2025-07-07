@@ -2,16 +2,16 @@
   "shape": [
     12,
     34,
-    6
+    7
   ],
-  "data_type": "float32",
+  "data_type": "float64",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
       "chunk_shape": [
         12,
         34,
-        6
+        7
       ]
     }
   },

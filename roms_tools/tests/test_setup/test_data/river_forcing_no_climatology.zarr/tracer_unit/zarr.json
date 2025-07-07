@@ -1,13 +1,13 @@
 {
   "shape": [
-    7
+    2
   ],
   "data_type": "string",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        7
+        2
       ]
     }
   },
@@ -32,10 +32,10 @@
     }
   ],
   "attributes": {
-    "long_name": "River name"
+    "long_name": "Tracer concentration unit"
   },
   "dimension_names": [
-    "nriver"
+    "ntracers"
   ],
   "zarr_format": 3,
   "node_type": "array",

@@ -12,6 +12,8 @@
 
 ### Bugfixes
 
+* Handle overlapping rivers correctly ([#356](https://github.com/CWorthy-ocean/roms-tools/pull/356))
+
 ## v3.0.0
 
 ### New Features

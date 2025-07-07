@@ -4,7 +4,7 @@ Installation
 Installation from Conda-Forge
 =============================
 
-To install ``ROMS-Tools`` with all dependencies, including ``xesmf`` and ``dask``, use::
+To install ``ROMS-Tools`` with all dependencies, including ``xesmf``, ``dask`` and all packages required for streaming source data directly from the cloud, use::
 
     conda install -c conda-forge roms-tools
 
@@ -21,6 +21,11 @@ Installation from PyPI (pip)
 If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend for parallel and out-of-core computation), you can install ``ROMS-Tools`` along with the additional dependency via::
 
     pip install roms-tools[dask]
+
+If you want to use ``ROMS-Tools`` with ``dask`` and all packages required for streaming source data directly from the cloud, install it with the additional dependencies via::
+
+    pip install roms-tools[stream]
+
 
 Note: The PyPI versions of ``ROMS-Tools`` do not include ``xesmf``, so some features will be unavailable.
 
@@ -47,3 +52,9 @@ If you want to use ``ROMS-Tools`` together with ``dask`` (which we recommend), y
 install ``ROMS-Tools`` along with the additional dependency via::
 
     pip install ".[dask]"
+
+If you want to use ``ROMS-Tools`` together with ``dask`` and all packages required for
+streaming source data directly from the cloud, you can
+install ``ROMS-Tools`` along with the additional dependencies via::
+
+    pip install ".[stream]"

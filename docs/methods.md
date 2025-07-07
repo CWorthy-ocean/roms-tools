@@ -160,8 +160,8 @@ After these corrections, the corrected data is regridded onto the ROMS grid, via
 1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is important because the TPXO and ROMS grids may have differing land masks, particularly when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in zero values at certain ocean points in the ROMS grid, where the TPXO data considers them land.
 2. **Horizontal Regridding**: The horizontally filled TPXO data is then **linearly** regridded onto the ROMS grid.
 
-```{warning}
-It’s important to note that the tidal velocities are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts.
+```{note}
+The tidal velocities are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts.
 ```
 
 3. **Rotation of Velocities**: The tidal velocities are rotated onto the ROMS grid to align with its orientation.
@@ -182,9 +182,10 @@ The surface forcing data is sourced from **ERA5** (for meteorological forcing) a
 1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the ERA5/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in skewed values at certain ocean points in the ROMS grid that the ERA5/CESM data considers land. Surface forcing over land differs significantly from surface forcing over the ocean, making the horizontal land fill essential.
 2. **Horizontal Regridding**: The horizontally filled surface forcing data is then regridded onto the ROMS grid using **linear** interpolation.
 
-```{warning}
-It’s important to note that the 10m wind components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts.
+```{note}
+The 10m wind components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts.
 ```
+
 3. **Rotation of Wind Velocities**: The 10m wind components are rotated onto the ROMS grid to align with its orientation.
 4. **Radiation Correction**: If specified, shortwave radiation is corrected. It is widely recognized that global data products like ERA5 can have biases in radiation due to uncertain cloud-radiative feedbacks. `ROMS-Tools` includes functionality to correct for these biases. If `correct_radiation = True`, a multiplicative correction factor is applied to the ERA5 shortwave radiation. The correction factors have been pre-computed based on the differences between ERA5 climatology and the COREv2 climatology.
 
@@ -220,9 +221,10 @@ The initial conditions data is sourced from **GLORYS** (for physical fields) and
 2. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the GLORYS/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in NaN values at certain ocean points in the ROMS grid that the GLORYS/CESM data considers land.
 3. **Horizontal Regridding**: The horizontally filled initial conditions data is then regridded onto the ROMS grid using **linear** interpolation.
 
-```{warning}
-It’s important to note that the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts.
+```{note}
+The ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts.
 ```
+
 4. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid to align with its orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
 5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points. To compute the depth in the terrain-following vertical coordinate, `ROMS-Tools` handles sea surface height (SSH) based on the value of `adjust_depth_for_sea_surface_height` (see also [this section](#vertical-coordinate-system)):
 
@@ -307,8 +309,8 @@ The user can choose between two options for how to proceed with the regridding o
 Option A is faster and the default choice. Option B is more thorough but slower, as it fills an entire 2D domain at each depth level, often covering interior areas that won’t ultimately be used for the boundary forcing. However, Option A may not be safe in all situations. Limitations are explained in detail [here](boundary_forcing.ipynb#1D-versus-2D-horizontal-fill), and `ROMS-Tools` will issue errors and warnings if it detects one of these unsafe situations while the user has chosen Option A.
 ```
 
-```{warning}
-It’s important to note that in both Option A and B the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-, rather than as a vector field. This approach could potentially introduce artifacts, so in future versions, the velocity components should be handled as a vector field.
+```{note}
+In both Option A and B the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-, rather than as a vector field. This approach could potentially introduce artifacts.
 ```
 
 5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points. To compute the depth in the terrain-following vertical coordinate, `ROMS-Tools` handles sea surface height (SSH) based on the value of `adjust_depth_for_sea_surface_height` (see also [this section](#vertical-coordinate-system)):

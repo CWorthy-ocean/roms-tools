@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Sequence, Type, Union
 
 import cftime
+import numba as nb
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -1235,6 +1236,9 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     Latitude and longitude are assumed to be in degrees by default. If `input_in_degrees` is set to `False`,
     the input is assumed to already be in radians.
 
+    This function is a wrapper for two numba-vectorized versions of the function, one each for degrees and radians.
+    The wrapper is additionally needed to be able to use kwargs.
+
     Parameters
     ----------
     lon1, lat1 : float
@@ -1247,21 +1251,34 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
 
     Returns
     -------
-    dis : float
+    dist : float
         The great circle distance between the two points in meters.
 
     Notes
     -----
     The radius of the Earth is taken to be 6371315 meters.
     """
-
-    # Convert degrees to radians
     if input_in_degrees:
-        d2r = np.pi / 180
-        lon1 = lon1 * d2r
-        lat1 = lat1 * d2r
-        lon2 = lon2 * d2r
-        lat2 = lat2 * d2r
+        return _gc_dist_degrees(lon1, lat1, lon2, lat2)
+    return _gc_dist_radians(lon1, lat1, lon2, lat2)
+
+
+@nb.vectorize(
+    [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)], nopython=True
+)
+def _gc_dist_degrees(lon1, lat1, lon2, lat2):
+    """Calculate the great circle distance, given lat and lon in degrees.
+
+    Returns
+    -------
+    Great circle distance in meters
+    """
+    # Convert degrees to radians
+    d2r = np.pi / 180
+    lon1 = lon1 * d2r
+    lat1 = lat1 * d2r
+    lon2 = lon2 * d2r
+    lat2 = lat2 * d2r
 
     # Difference in latitudes and longitudes
     dlat = lat2 - lat1
@@ -1278,6 +1295,95 @@ def gc_dist(lon1, lat1, lon2, lat2, input_in_degrees=True):
     dis = R_EARTH * dang
 
     return dis
+
+
+@nb.vectorize(
+    [nb.float64(nb.float64, nb.float64, nb.float64, nb.float64)], nopython=True
+)
+def _gc_dist_radians(lon1, lat1, lon2, lat2):
+    """Calculate the great circle distance, given lat and lon in radians.
+
+    Returns
+    -------
+    Great circle distance in meters
+    """
+    # Difference in latitudes and longitudes
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    # Haversine formula
+    dang = 2 * np.arcsin(
+        np.sqrt(
+            np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+        )
+    )
+
+    # Distance in meters
+    dis = R_EARTH * dang
+
+    return dis
+
+
+@nb.njit(
+    [
+        nb.float64[:, :](
+            nb.float64[:, :],
+            nb.float64[:, :],
+            nb.int32[:, :],
+        )
+    ],
+    parallel=True,
+)
+def min_dist_to_land(
+    lon: np.ndarray,
+    lat: np.ndarray,
+    mask: np.ndarray,
+):
+    """Calculate the distance between one set of points (lon1, lat1) to the closest of
+    another set of points (lon2, lat2).
+
+    Parameters
+    ----------
+    lon : np.ndarray
+        2-D Array of longitudes (in degrees) for all points on the grid
+    lat : np.ndarray
+        2-D Arrays of latitudes (in degrees) for all points on the grid
+    mask: np.ndarray
+        2-D integer array where ocean points have value 1 and land points are 0
+
+    Returns
+    -------
+    2-D Array of the same shape as lon and lat, which will be filled with the resulting distance values
+    to the nearest non-nan lon2, lat2 point
+    """
+
+    # get flattened ocean/land indices
+    ocean = (mask == 1).ravel()
+    land = (mask == 0).ravel()
+
+    # get flattened and separate lon/lat arrays for ocean and land
+    ocean_lon = lon.ravel()[ocean]
+    ocean_lat = lat.ravel()[ocean]
+    land_lon = lon.ravel()[land]
+    land_lat = lat.ravel()[land]
+
+    # keep track of the alignment between the full 2-D grid and the 1-D ocean indices
+    # (nonzero() returns a tuple of the i, j indices where mask is 1)
+    ocean_indices = mask.nonzero()
+
+    # create a results array that will hold the distances from each ocean point to the nearest land point
+    # initially fill arrays with zeros, as we will not do this calculation for land points, and land points
+    # have zero distance to land by definition.
+    result = np.zeros_like(lon)
+
+    # iterate in parallel and do the distance calculation, taking the min for each ocean point without needing to
+    # allocate a huge array for the entire calculation space
+    for i in nb.prange(ocean_lon.shape[0]):
+        result[ocean_indices[0][i], ocean_indices[1][i]] = np.min(
+            _gc_dist_degrees(ocean_lon[i], ocean_lat[i], land_lon, land_lat)
+        )
+
+    return result
 
 
 def convert_to_relative_days(

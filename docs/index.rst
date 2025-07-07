@@ -6,35 +6,53 @@
 Welcome to the ROMS-Tools Documentation!
 ========================================
 
-**ROMS-Tools** is a Python package designed for creating the input files necessary
-to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation, with or without MARBL. This tool simplifies the process of generating:
+**ROMS-Tools** is a Python package designed for creating the input files necessary to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation, with or without `MARBL biogeochemistry <https://marbl-ecosys.github.io/versions/latest_release/index.html>`_.
 
-- **Grid**
-- **Tidal forcing**
+
+The package is designed with the following goals in mind:
+
+- **Automation** of complex preprocessing steps
+- **Intuitive usability** for new and experienced users
+- **Reproducibility** through configuration-based workflows
+- **Code efficiency** with support for parallel and lazy evaluation
+- **Commitment to best software practices**, including testing and documentation
+
+ROMS-Tools streamlines the creation of the following inputs:
+
+- **Grid**:
+
+  - Coordinates and metrics
+  - Bathymetry (derived from SRTM15)
+  - Land-sea mask (based on Natural Earth datasets)
+
+- **Tidal forcing**:
+
+  - Derived from TPXO tidal constituents
+
 - **Surface forcing**:
 
-  - Physical/Meteorological forcing: wind, radiation, etc.
-  - Biogeochemical forcing: atmospheric pCO₂, etc.
+  - Physical/Meteorological forcing: wind, radiation, etc. (from ERA5)
+  - Biogeochemical forcing: atmospheric pCO₂, etc. (from CESM or hybrid observational/model sources)
 
 - **Initial conditions**:
 
-  - Physical conditions: temperature, velocities, etc.
-  - Biogeochemical conditions: alkalinity, etc.
+  - Physical conditions: temperature, velocities, etc. (from GLORYS)
+  - Biogeochemical conditions: alkalinity, etc. (from CESM or hybrid observational/model sources)
 
 - **Boundary forcing**:
 
-  - Physical forcing: temperature, velocities, etc.
-  - Biogeochemical forcing: alkalinity, etc.
+  - Physical forcing: temperature, velocities, etc. (from GLORYS)
+  - Biogeochemical forcing: alkalinity, etc. (from CESM or hybrid observational/model sources)
 
 - **River forcing**:
 
-  - Physical forcing: river volume flux, river temperature, river salinity
+  - Physical forcing: river volume flux, river temperature, river salinity (from Dai and Trenberth, 2019, or a custom river dataset)
 
 - **Carbon Dioxide Removal (CDR) forcing**
 
 - **Nesting**
 
-Additionally, it provides several analysis tools.
+In addition to input generation, ROMS-Tools includes utilities for postprocessing and analysis, particularly for CDR monitoring, reporting, and verification (MRV).
 
 This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
 

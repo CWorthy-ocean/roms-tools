@@ -456,7 +456,7 @@ class ROMSOutput:
 
         # Prepare vertical regrid
         if depth_levels is None:
-            depth_levels, _ = self._compute_exponential_depth_levels()
+            depth_levels, _ = self.grid._compute_exponential_depth_levels()
 
         # Ensure depth_levels is an xarray.DataArray
         if not isinstance(depth_levels, xr.DataArray):
@@ -792,52 +792,3 @@ class ROMSOutput:
         # Add all necessary coordinates in one go
         ds = ds.assign_coords(coords_to_add)
         return ds
-
-    def _compute_exponential_depth_levels(self, Nz=None, depth=None, h=None):
-        """Compute vertical grid center and face depths using an exponential profile.
-
-        Parameters
-        ----------
-        Nz : int, optional
-            Number of vertical levels. Defaults to `len(self.ds.s_rho)`.
-
-        depth : float, optional
-            Total depth of the domain. Defaults to `grid.ds.h.max().values`.
-
-        h : float, optional
-            Scaling parameter for the exponential profile. Defaults to `Nz / 4.5`.
-
-        Returns
-        -------
-        tuple of numpy.ndarray
-            Depth values at the vertical grid centers (`z_centers`) and grid faces (`z_faces`),
-            both rounded to two decimal places.
-        """
-        if Nz is None:
-            Nz = len(self.ds.s_rho)
-        if depth is None:
-            depth = self.grid.ds.h.max().values
-        if h is None:
-            h = Nz / 4.5
-
-        k = np.arange(1, Nz + 2)
-
-        # Define the exponential profile function
-        def exponential_profile(k, Nz, h):
-            return np.exp(k / h)
-
-        z_faces = np.vectorize(exponential_profile)(k, Nz, h)
-
-        # Normalize
-        z_faces -= z_faces[0]
-        z_faces *= depth / z_faces[-1]
-        z_faces[0] = 0.0
-
-        # Calculate center depths (average between adjacent face depths)
-        z_centers = (z_faces[:-1] + z_faces[1:]) / 2
-
-        # Round both z_faces and z_centers to two decimal places
-        z_faces = np.round(z_faces, 2)
-        z_centers = np.round(z_centers, 2)
-
-        return z_centers, z_faces

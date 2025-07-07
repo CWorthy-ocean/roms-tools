@@ -1,10 +1,26 @@
 # Release notes
 
-## v2.8.0 (unreleased)
+## v3.1.0 (unreleased)
 
 ### New Features
 
-* Fix plotting `ROMSOutput` for grids that straddle the dateline ([#347](https://github.com/CWorthy-ocean/roms-tools/pull/347))
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v3.0.0
+
+### New Features
+
+* Visualize Gaussian distribution associated with CDR releases ([#345](https://github.com/CWorthy-ocean/roms-tools/pull/345))
+* Make `Grid.from_file()` more robust for non-ROMS-Tools-generated grids ([#365](https://github.com/CWorthy-ocean/roms-tools/pull/365))
+* Optimize wind drop-off calculation to avoid out-of-memory errors ([#367](https://github.com/CWorthy-ocean/roms-tools/pull/367))
+* Option to stream ERA5 data directly from the cloud so that users do not have to pre-download ERA5 data ([#357](https://github.com/CWorthy-ocean/roms-tools/pull/357))
+* Option for wind drop-off near the coasts in `SurfaceForcing` ([#351](https://github.com/CWorthy-ocean/roms-tools/pull/351))
 * Option to ignore coarse dimensions when partitioning ([#348](https://github.com/CWorthy-ocean/roms-tools/pull/348))
 * Ensure clean initialization of `SurfaceForcing` with ERA5 data (no warnings) ([#337](https://github.com/CWorthy-ocean/roms-tools/pull/337))
 * Handle duplicate time entries in source data ([#336](https://github.com/CWorthy-ocean/roms-tools/pull/336))
@@ -37,6 +53,8 @@
 
 ### Bugfixes
 
+* Fix plotting `ROMSOutput` for grids that straddle the dateline ([#347](https://github.com/CWorthy-ocean/roms-tools/pull/347))
+* Report topography source path in NetCDF grid file so that the sequence `Grid.from_file()` --> `grid.to_yaml()` works ([#353](https://github.com/CWorthy-ocean/roms-tools/pull/353))
 * Fix bug related to passing an `ax` to plotting methods ([#325](https://github.com/CWorthy-ocean/roms-tools/pull/325))
 * Fix bug for `grid = Grid.from_file()` --> `grid.to_yaml()` sequence ([#334](https://github.com/CWorthy-ocean/roms-tools/pull/334))
 * Fix handling of optional variables in Unified BGC datasets ([#320](https://github.com/CWorthy-ocean/roms-tools/pull/320))

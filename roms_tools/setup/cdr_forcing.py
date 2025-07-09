@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Annotated, Iterator
 
 import cartopy.crs as ccrs
-import gcm_filters
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,9 +21,7 @@ from pydantic import (
 )
 
 from roms_tools import Grid
-from roms_tools.constants import R_EARTH
 from roms_tools.plot import _get_projection, _plot
-from roms_tools.regrid import LateralRegridFromROMS
 from roms_tools.setup.cdr_release import (
     Release,
     ReleaseType,
@@ -41,11 +38,10 @@ from roms_tools.setup.utils import (
     get_target_coords,
 )
 from roms_tools.utils import (
-    _generate_focused_coordinate_range,
-    _remove_edge_nans,
     normalize_longitude,
     save_datasets,
 )
+from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 INCLUDE_ALL_RELEASE_NAMES = "all"
 
@@ -1017,98 +1013,35 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
     else:
         lon = xr.where(lon < 0, lon + 360, lon)
     dist = gc_dist(target_coords["lon"], target_coords["lat"], lon, release.lat)
-    dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
-    # Find the indices of the closest grid cell
-    indices = np.where(dist == dist_min)
-    eta_rho = indices[0][0]
-    xi_rho = indices[1][0]
+    if release.hsc == 0:
 
-    # Create a delta function at the center of the Gaussian release
-    delta = xr.zeros_like(grid.ds.mask_rho)
-    delta[eta_rho, xi_rho] = 1
+        dist_min = dist.min(dim=["eta_rho", "xi_rho"])
+        # Find the indices of the closest grid cell
+        indices = np.where(dist == dist_min)
+        eta_rho = indices[0][0]
+        xi_rho = indices[1][0]
 
-    # Calculate the grid cell area from the inverse grid metrics (pm, pn)
-    area = 1 / (grid.ds.pm * grid.ds.pn)
+        # Create a delta function at the center of the Gaussian release
+        distribution_2d = xr.zeros_like(grid.ds.mask_rho)
+        distribution_2d[eta_rho, xi_rho] = 1
 
-    # Compute the mean grid spacing (dx) as the average of mean dx and dy
-    dx = (((1 / grid.ds.pm).mean() + (1 / grid.ds.pn).mean()) / 2).item()
+    else:
+        frac = np.exp(-((dist / release.hsc) ** 2))
+        distribution_2d = frac.where(frac > 1e-3, 0.0)
 
-    # Extend the domain in both dimensions to mitigate boundary effects during filtering
-    # - Create a mask of ones ignoring land (will be renormalized later)
-    mask = xr.ones_like(grid.ds.mask_rho)
+        # Mask out land
+        distribution_2d = distribution_2d.where(grid.ds.mask_rho, 0.0)
 
-    # Extend the mask along eta_rho by concatenating three copies plus a zeroed edge cell
-    margin_mask = xr.concat(
-        [mask, mask, mask, 0 * mask.isel(eta_rho=-1)], dim="eta_rho"
-    )
-    # Similarly extend along xi_rho
-    margin_mask = xr.concat(
-        [margin_mask, margin_mask, margin_mask, 0 * margin_mask.isel(xi_rho=-1)],
-        dim="xi_rho",
-    )
+        # Renormalize so the integral over ocean points sums to 1
+        integral = distribution_2d.sum(dim=["eta_rho", "xi_rho"])
+        distribution_2d = distribution_2d / integral
 
-    # Extend the delta function in the same manner to match the enlarged domain
-    delta_extended = xr.concat(
-        [0 * delta, delta, 0 * delta, 0 * delta.isel(eta_rho=-1)], dim="eta_rho"
-    )
-    delta_extended = xr.concat(
-        [
-            0 * delta_extended,
-            delta_extended,
-            0 * delta_extended,
-            0 * delta_extended.isel(xi_rho=-1),
-        ],
-        dim="xi_rho",
-    )
-
-    # Extend the cell area array to match the enlarged domain
-    area_extended = xr.concat([area, area, area, area.isel(eta_rho=-1)], dim="eta_rho")
-    area_extended = xr.concat(
-        [area_extended, area_extended, area_extended, area_extended.isel(xi_rho=-1)],
-        dim="xi_rho",
-    )
-
-    # Define Gaussian filter parameters:
-    # - filter_scale is computed so that the Gaussian's std dev matches
-    #   the equivalent boxcar filter of width equal to release.hsc / dx
-    #   multiplied by sqrt(12) to convert from boxcar to Gaussian std dev.
-    filter_scale = release.hsc / dx * np.sqrt(12)
-
-    filter = gcm_filters.Filter(
-        filter_scale=filter_scale,
-        dx_min=1,
-        filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-        grid_type=gcm_filters.GridType.REGULAR_WITH_LAND_AREA_WEIGHTED,
-        grid_vars={"wet_mask": margin_mask, "area": area_extended},
-    )
-
-    # Apply the Gaussian filter to the extended delta function over spatial dimensions
-    delta_smooth = filter.apply(delta_extended, dims=["eta_rho", "xi_rho"])
-
-    # Remove the extended margins to return to the original domain size
-    delta_smooth = delta_smooth.isel(
-        eta_rho=slice(grid.ds.sizes["eta_rho"], -grid.ds.sizes["eta_rho"] - 1),
-        xi_rho=slice(grid.ds.sizes["xi_rho"], -grid.ds.sizes["eta_rho"] - 1),
-    )
-
-    # Mask out land cells and set values to zero there
-    delta_smooth = delta_smooth.where(grid.ds.mask_rho, 0.0)
-
-    # Renormalize so the integral over ocean points sums to 1
-    integral = delta_smooth.sum(dim=["eta_rho", "xi_rho"])
-    delta_smooth = delta_smooth / integral
-
-    return delta_smooth
+    return distribution_2d
 
 
-def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
-    """Extract a vertical section from a ROMS grid and apply a Gaussian distribution in
-    depth.
-
-    This function interpolates a horizontally Gaussian field (e.g., from a tracer release)
-    along either a constant latitude or longitude section and distributes it vertically using
-    a Gaussian profile centered around the release depth.
+def _map_3d_gaussian(grid, release, distribution_2d, orientation="latitude"):
+    """Extends 2D Gaussian to 3D Gaussian.
 
     Parameters
     ----------
@@ -1118,102 +1051,48 @@ def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
     release : Release
         Release object containing coordinates (`lat`, `lon`, `depth`) and vertical
         spread (`vsc`) for the Gaussian distribution.
-    field : xr.DataArray
+    distribution_2d : xr.DataArray
         2D horizontal tracer field defined on the ROMS grid.
     orientation : {"latitude", "longitude"}, default "latitude"
-        Orientation of the extracted vertical section. If "latitude", extracts
-        a section along constant longitude. If "longitude", extracts a section
-        along constant latitude.
+        Orientation of the extracted vertical section.
 
     Returns
     -------
-    vertical_field : xr.DataArray
-        2D field (depth vs. latitude or longitude) with the vertically-distributed
-        Gaussian mapped along the specified section.
+    xr.DataArray
+        3D tracer distribution (z vs lat/lon) with Gaussian vertical structure.
     """
-    meters_per_degree = 2 * np.pi * R_EARTH / 360
-    release_lon = normalize_longitude(release.lon, grid.straddle)
-
-    if orientation == "longitude":
-        lon_deg = grid.ds.lon_rho
-        if grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        hsc_in_degrees = release.hsc / (meters_per_degree * np.cos(release.lat))
-        lons, _ = _generate_focused_coordinate_range(
-            center=release_lon,
-            sc=hsc_in_degrees,
-            min_val=lon_deg.min().values,
-            max_val=lon_deg.max().values,
-            N=2000,
-        )
-        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
-        lats = [release.lat]
-
-    elif orientation == "latitude":
-        lons = [release_lon]
-        hsc_in_degrees = release.hsc / (
-            meters_per_degree * np.cos(grid.ds.lat_rho.mean().values)
-        )
-        lats, _ = _generate_focused_coordinate_range(
-            center=release.lat,
-            sc=hsc_in_degrees,
-            min_val=grid.ds.lat_rho.min().values,
-            max_val=grid.ds.lat_rho.max().values,
-            N=2000,
-        )
-        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
-    else:
-        raise ValueError(
-            "`section_orientation` must be either 'latitude' or 'longitude'."
-        )
-
-    # Regrid 2D horizontal Gaussian onto desired 1D horizontal section
-    target_coords = {"lat": lats, "lon": lons}
-    lateral_regrid = LateralRegridFromROMS(field, target_coords)
-    field = lateral_regrid.apply(field).squeeze()
-    h = lateral_regrid.apply(grid.ds.h).squeeze()
-
-    # Define depth levels
-    depth_levels, _ = _generate_focused_coordinate_range(
-        center=release.depth,
-        sc=release.vsc,
-        min_val=0.0,
-        max_val=h.max().values,
-        N=2000,
+    # Compute depth at rho-points (3D: s_rho, eta_rho, xi_rho)
+    depth = compute_depth_coordinates(
+        grid.ds, zeta=0, depth_type="layer", location="rho"
     )
-    depth_levels = xr.DataArray(
-        np.asarray(depth_levels),
-        dims=["depth"],
-        attrs={"long_name": "Depth", "units": "m"},
-    )
-    depth_levels = depth_levels.astype(np.float32)
+
+    # Initialize 3D distribution with zeros
+    distribution_3d = xr.zeros_like(depth)
 
     if release.vsc == 0:
-        # Find index of depth_level closest to release.depth
-        closest_idx = np.abs(depth_levels - release.depth).argmin()
-        weights = xr.zeros_like(depth_levels)
-        weights[closest_idx] = 1.0
+        # Find vertical index closest to release depth
+        abs_diff = abs(depth - release.depth)
+        vertical_idx = abs_diff.argmin(dim="s_rho")
+        # Stack 2D distribution at that vertical level
+        distribution_3d[{"s_rho": vertical_idx}] = distribution_2d
     else:
-        # Compute Gaussian weights at each layer center
-        weights = np.exp(-0.5 * ((depth_levels - release.depth) / release.vsc) ** 2)
-        weights /= weights.sum()
+        # Compute layer thickness
+        depth_interface = compute_depth_coordinates(
+            grid.ds, zeta=0, depth_type="interface", location="rho"
+        )
+        dz = depth_interface.diff("s_w")
 
-    # Redistribute Gaussian mass from under topography to open ocean
-    weights = weights.where(depth_levels < h)
-    weights = weights / weights.sum()
+        # Compute vertical Gaussian shape
+        exponent = -(((depth - release.depth) / release.vsc) ** 2)
+        vertical_profile = np.exp(exponent)
 
-    # Map 1D to 2D Gaussian
-    vertical_field = field * weights
+        # Apply vertical Gaussian scaling
+        distribution_3d = distribution_2d * vertical_profile * dz
 
-    # Remove NaNs at the edges
-    if orientation == "longitude":
-        vertical_field, _ = _remove_edge_nans(vertical_field, "lon", layer_depth=h)
-    if orientation == "latitude":
-        vertical_field, _ = _remove_edge_nans(vertical_field, "lat", layer_depth=h)
+        # Normalize to preserve integral (optional depending on context)
+        distribution_3d /= distribution_3d.sum()
 
-    vertical_field = vertical_field.assign_coords({"depth": depth_levels})
-
-    return vertical_field
+    return distribution_3d
 
 
 def _plot_location(

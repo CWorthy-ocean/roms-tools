@@ -82,16 +82,6 @@ class RiverForcing:
 
         In the example, the dictionary provides the river names as keys, and the values are lists of tuples, where each tuple represents the
         `(eta_rho, xi_rho)` indices for a river location.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the river forcing data.
-    climatology : bool
-        Indicates whether the final river forcing is climatological.
-    Dict[str, Union[int, List[int]]]
-        A dictionary of river indices. If not provided during initialization, it will be automatically determined
-        based on the grid and the source dataset. The dictionary structure is the same as described in the `indices` parameter docstring.
     """
 
     grid: Grid
@@ -101,10 +91,18 @@ class RiverForcing:
     convert_to_climatology: str = "if_any_missing"
     include_bgc: bool = False
     model_reference_date: datetime = datetime(2000, 1, 1)
-    indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
 
+    indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
+    """A dictionary of river indices.
+
+    If not provided during initialization, it will be automatically determined based on
+    the grid and the source dataset.
+    """
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
     climatology: xr.Dataset = field(init=False, repr=False)
+    """Indicates whether the final river forcing is climatological."""
 
     def __post_init__(self):
         self._input_checks()

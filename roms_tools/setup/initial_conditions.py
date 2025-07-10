@@ -114,6 +114,8 @@ class InitialConditions:
     bypass_validation: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
 
     def __post_init__(self):
 

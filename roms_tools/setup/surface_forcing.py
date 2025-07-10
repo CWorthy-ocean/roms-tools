@@ -125,6 +125,10 @@ class SurfaceForcing:
     bypass_validation: bool = False
 
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
+    use_coarse_grid: bool = field(init=False, repr=False)
+    """Whether data is interpolated onto grid coarsened by factor 2."""
 
     def __post_init__(self):
 

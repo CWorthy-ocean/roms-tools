@@ -47,13 +47,6 @@ class ChildGrid(Grid):
 
         - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
         - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        Dataset containing child grid variables aligned with the parent grid’s topography and mask at the boundaries.
-    ds_nesting : xr.Dataset
-        Dataset containing boundary mappings, where child grid boundaries are mapped onto parent grid indices.
     """
 
     parent_grid: Grid
@@ -68,6 +61,13 @@ class ChildGrid(Grid):
     metadata: Dict[str, Any] = field(
         default_factory=lambda: {"prefix": "child", "period": 3600.0}
     )
+
+    ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing child grid variables aligned with the parent grid’s
+    topography and mask at the boundaries."""
+    ds_nesting: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing boundary mappings, where child grid boundaries are
+    mapped onto parent grid indices."""
 
     def __post_init__(self):
 

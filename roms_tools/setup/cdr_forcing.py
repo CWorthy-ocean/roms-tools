@@ -326,11 +326,6 @@ class CDRForcing(BaseModel):
         Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
     releases : list of Release
         A list of one or more CDR release objects.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray dataset containing release metadata and forcing variables.
     """
 
     grid: Grid | None = None
@@ -369,6 +364,7 @@ class CDRForcing(BaseModel):
 
     @property
     def ds(self) -> xr.Dataset:
+        """The xarray dataset containing release metadata and forcing variables."""
         return self._ds
 
     def plot_volume_flux(

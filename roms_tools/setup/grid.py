@@ -98,8 +98,12 @@ class Grid:
     topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
     hmin: float = 5.0
     verbose: bool = False
+
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
     straddle: bool = field(init=False, repr=False)
+    """Whether the grid straddles the dateline."""
 
     def __post_init__(self):
 

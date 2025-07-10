@@ -52,7 +52,9 @@ class ROMSOutput:
     use_dask: bool = False
     model_reference_date: Optional[datetime] = None
     adjust_depth_for_sea_surface_height: Optional[bool] = False
+
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing the ROMS output."""
 
     def __post_init__(self):
 

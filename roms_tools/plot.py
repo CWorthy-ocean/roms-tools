@@ -17,7 +17,7 @@ from roms_tools.vertical_coordinate import compute_depth_coordinates
 def _plot(
     field,
     depth_contours=False,
-    c="red",
+    c="k",
     title="",
     with_dim_names=False,
     plot_data=True,
@@ -36,7 +36,7 @@ def _plot(
     depth_contours : bool, optional
         If True, adds depth contours to the plot.
     c : str, optional
-        Color for the boundary plot (default is 'red').
+        Color for the boundary plot (default is "k").
     title : str, optional
         Title of the plot.
     plot_data : bool, optional
@@ -75,10 +75,7 @@ def _plot(
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
-    lon_deg = lon_deg.values
-    lat_deg = lat_deg.values
-
-    if c is not None:
+    if c is not None or with_dim_names:
         _add_boundary_to_ax(
             ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names
         )
@@ -157,11 +154,6 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
         )
 
     trans = _get_projection(parent_lon_deg, parent_lat_deg)
-
-    parent_lon_deg = parent_lon_deg.values
-    parent_lat_deg = parent_lat_deg.values
-    child_lon_deg = child_lon_deg.values
-    child_lat_deg = child_lat_deg.values
 
     fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
@@ -464,8 +456,18 @@ def _line_plot(field, title="", ax=None):
         return fig
 
 
+def _get_edge(arr: xr.DataArray, dim_name: str, pos: str) -> xr.DataArray:
+    """Helper to extract first or last slice along a dimension."""
+    if pos == "start":
+        return arr.isel({dim_name: 0})
+    elif pos == "end":
+        return arr.isel({dim_name: -1})
+    else:
+        raise ValueError("pos must be 'start' or 'end'")
+
+
 def _add_boundary_to_ax(
-    ax, lon_deg, lat_deg, trans, c="red", label="", with_dim_names=False
+    ax, lon_deg, lat_deg, trans, c="k", label="", with_dim_names=False
 ):
     """Plots a grid or field on a map with optional depth contours.
 
@@ -484,65 +486,83 @@ def _add_boundary_to_ax(
         The projection for transforming coordinates.
 
     c : str, optional
-        Color of the grid boundary (default is 'red').
+        Color of the grid boundary (default is 'k').
     """
     proj = ccrs.PlateCarree()
 
-    # find corners
-    corners = [
-        (lon_deg[0, 0], lat_deg[0, 0]),
-        (lon_deg[0, -1], lat_deg[0, -1]),
-        (lon_deg[-1, -1], lat_deg[-1, -1]),
-        (lon_deg[-1, 0], lat_deg[-1, 0]),
+    xi_dim = [d for d in lon_deg.dims if d.startswith("xi_")][0]
+    eta_dim = [d for d in lon_deg.dims if d.startswith("eta_")][0]
+
+    edges = [
+        (
+            _get_edge(lon_deg, xi_dim, "start"),
+            _get_edge(lat_deg, xi_dim, "start"),
+            r"$\eta$",
+        ),  # left
+        (
+            _get_edge(lon_deg, xi_dim, "end"),
+            _get_edge(lat_deg, xi_dim, "end"),
+            r"$\eta$",
+        ),  # right
+        (
+            _get_edge(lon_deg, eta_dim, "start"),
+            _get_edge(lat_deg, eta_dim, "start"),
+            r"$\xi$",
+        ),  # bottom
+        (
+            _get_edge(lon_deg, eta_dim, "end"),
+            _get_edge(lat_deg, eta_dim, "end"),
+            r"$\xi$",
+        ),  # top
     ]
 
-    # transform coordinates to projected space
-    transformed_corners = [trans.transform_point(lo, la, proj) for lo, la in corners]
-    transformed_lons, transformed_lats = zip(*transformed_corners)
+    for i, (lon, lat, dim_name) in enumerate(edges):
+        ax.plot(lon, lat, transform=proj, c=c, label=label if i == 0 else None)
 
-    ax.plot(
-        list(transformed_lons) + [transformed_lons[0]],
-        list(transformed_lats) + [transformed_lats[0]],
-        "o-",
-        c=c,
-        label=label,
-    )
+        if with_dim_names:
+            # Get start and end point
+            start_lon = float(lon[0])
+            start_lat = float(lat[0])
+            end_lon = float(lon[-1])
+            end_lat = float(lat[-1])
 
-    if with_dim_names:
-        for i in range(len(corners)):
-            if i in [0, 2]:
-                dim_name = r"$\xi$"
-            else:
-                dim_name = r"$\eta$"
-            # Define start and end points for each edge
-            start_lon, start_lat = transformed_corners[i]
-            end_lon, end_lat = transformed_corners[(i + 1) % len(corners)]
+            # Midpoint of the edge
+            mid_lon = float(lon[len(lon) // 2])
+            mid_lat = float(lat[len(lat) // 2])
 
-            # Compute midpoint
-            mid_lon = (start_lon + end_lon) / 2
-            mid_lat = (start_lat + end_lat) / 2
+            # Direction of edge (unit vector)
+            dx = end_lon - start_lon
+            dy = end_lat - start_lat
+            norm = np.hypot(dx, dy)
+            if norm == 0:
+                continue
+            ux = dx / norm
+            uy = dy / norm
 
-            # Compute vector direction for arrow
-            arrow_dx = (end_lon - start_lon) * 0.4  # Scale arrow size
-            arrow_dy = (end_lat - start_lat) * 0.4
-
-            # Reverse arrow direction for edges 2 and 3
-            if i in [2, 3]:
-                arrow_dx *= -1
-                arrow_dy *= -1
-
-            # Add arrow
+            # Arrowhead only (zero-length shaft)
+            head_size = 0.02 * norm
             ax.annotate(
                 "",
-                xy=(mid_lon + arrow_dx, mid_lat + arrow_dy),
-                xytext=(mid_lon - arrow_dx, mid_lat - arrow_dy),
-                arrowprops=dict(arrowstyle="->", color=c, lw=1.5),
+                xy=(mid_lon + ux * head_size, mid_lat + uy * head_size),
+                xytext=(mid_lon, mid_lat),
+                transform=proj,
+                arrowprops=dict(
+                    arrowstyle="->",
+                    color=c,
+                    lw=1.5,
+                    mutation_scale=20,
+                ),
             )
 
+            # Label position on edge
+            label_lon = float(lon[len(lon) // 4 * 3])
+            label_lat = float(lat[len(lat) // 4 * 3])
+
             ax.text(
-                mid_lon,
-                mid_lat,
+                label_lon,
+                label_lat,
                 dim_name,
+                transform=proj,
                 color=c,
                 fontsize=10,
                 ha="center",

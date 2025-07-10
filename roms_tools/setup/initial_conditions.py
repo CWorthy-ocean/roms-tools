@@ -827,7 +827,6 @@ class InitialConditions:
                 depth_contours=depth_contours,
                 title=title,
                 kwargs=kwargs,
-                c="g",
             )
         else:
             if len(field.dims) == 2:

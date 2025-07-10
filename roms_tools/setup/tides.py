@@ -411,7 +411,6 @@ class TidalForcing:
         _plot(
             field=field,
             title=title,
-            c="g",
             kwargs=kwargs,
         )
 

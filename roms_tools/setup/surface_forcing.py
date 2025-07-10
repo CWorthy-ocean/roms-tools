@@ -688,7 +688,6 @@ class SurfaceForcing:
         _plot(
             field=field,
             title=title,
-            c="g",
             kwargs=kwargs,
         )
 

@@ -11,7 +11,7 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.plot import _get_projection, _plot
+from roms_tools.plot import get_projection, plot_2d_horizontal_field
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
     _from_yaml,
@@ -486,14 +486,16 @@ class RiverForcing:
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
-        trans = _get_projection(lon_deg, lat_deg)
+        trans = get_projection(lon_deg, lat_deg)
 
         fig, axs = plt.subplots(
             1, 2, figsize=(13, 13), subplot_kw={"projection": trans}
         )
 
         for ax in axs:
-            _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
+            plot_2d_horizontal_field(
+                field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False
+            )
 
         proj = ccrs.PlateCarree()
 

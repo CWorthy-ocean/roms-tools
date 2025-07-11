@@ -197,28 +197,28 @@ class ROMSOutput:
         # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
             cmap_name = "RdBu_r"
+        elif var_name in ["temp", "salt"]:
+            cmap_name = "YlOrRd"
         else:
-            if var_name in ["temp", "salt"]:
-                cmap_name = "YlOrRd"
-            else:
-                cmap_name = "YlGn"
+            cmap_name = "YlGn"
 
         plot(
-            field,
-            self.grid.ds,
-            self.grid.straddle,
-            zeta,
-            s,
-            eta,
-            xi,
-            depth,
-            lat,
-            lon,
-            include_boundary,
-            depth_contours,
-            ax,
-            save_path,
-            cmap_name,
+            field=field,
+            grid_ds=self.grid.ds,
+            grid_straddle=self.grid.straddle,
+            zeta=zeta,
+            s=s,
+            eta=eta,
+            xi=xi,
+            depth=depth,
+            lat=lat,
+            lon=lon,
+            include_boundary=include_boundary,
+            depth_contours=depth_contours,
+            layer_contours=False,
+            ax=ax,
+            save_path=save_path,
+            cmap_name=cmap_name,
         )
 
     def regrid(self, var_names=None, horizontal_resolution=None, depth_levels=None):

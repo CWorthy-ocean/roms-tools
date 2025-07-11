@@ -23,7 +23,7 @@ from pydantic import (
 
 from roms_tools import Grid
 from roms_tools.constants import R_EARTH
-from roms_tools.plot import _get_projection, _plot
+from roms_tools.plot import get_projection, plot_2d_horizontal_field
 from roms_tools.regrid import LateralRegridFromROMS
 from roms_tools.setup.cdr_release import (
     Release,
@@ -615,7 +615,7 @@ class CDRForcing(BaseModel):
         lat_deg = self.grid.ds.lat_rho
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        trans = _get_projection(lon_deg, lat_deg)
+        trans = get_projection(lon_deg, lat_deg)
         fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
         # Plot blue background on map
@@ -625,7 +625,9 @@ class CDRForcing(BaseModel):
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-        _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
+        plot_2d_horizontal_field(
+            field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False
+        )
 
         # Plot release locations
         colors = _get_release_colors(valid_release_names)
@@ -676,7 +678,7 @@ class CDRForcing(BaseModel):
         # Setup figure
         fig = plt.figure(figsize=(12, 5.5))
         gs = gridspec.GridSpec(nrows=2, ncols=2, figure=fig)
-        trans = _get_projection(lon_deg, lat_deg)
+        trans = get_projection(lon_deg, lat_deg)
         ax0 = fig.add_subplot(gs[:, 0], projection=trans)
         ax1 = fig.add_subplot(gs[0, 1])
         ax2 = fig.add_subplot(gs[1, 1])
@@ -689,7 +691,7 @@ class CDRForcing(BaseModel):
         horizontal_field = horizontal_field.assign_coords(
             {"lon": lon_deg, "lat": lat_deg}
         )
-        _plot(
+        plot_2d_horizontal_field(
             horizontal_field.where(self.grid.ds.mask_rho),
             kwargs=kwargs,
             ax=ax0,
@@ -1256,7 +1258,7 @@ def _plot_location(
     lat_deg = grid.ds.lat_rho
     if grid.straddle:
         lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-    trans = _get_projection(lon_deg, lat_deg)
+    trans = get_projection(lon_deg, lat_deg)
 
     proj = ccrs.PlateCarree()
 

@@ -1,13 +1,25 @@
+from typing import Any
+
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from matplotlib.axes import Axes
+
+from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
+from roms_tools.utils import (
+    _generate_coordinate_range,
+    _remove_edge_nans,
+    infer_nominal_horizontal_resolution,
+    normalize_longitude,
+)
+from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 
-def _plot(
+def plot_2d_horizontal_field(
     field,
     depth_contours=False,
-    c="red",
+    c="k",
     title="",
     with_dim_names=False,
     plot_data=True,
@@ -26,7 +38,7 @@ def _plot(
     depth_contours : bool, optional
         If True, adds depth contours to the plot.
     c : str, optional
-        Color for the boundary plot (default is 'red').
+        Color for the boundary plot (default is "k").
     title : str, optional
         Title of the plot.
     plot_data : bool, optional
@@ -60,15 +72,12 @@ def _plot(
             "Plotting is not implemented for the case that the domain contains the North or South pole."
         )
 
-    trans = _get_projection(lon_deg, lat_deg)
+    trans = get_projection(lon_deg, lat_deg)
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
-    lon_deg = lon_deg.values
-    lat_deg = lat_deg.values
-
-    if c is not None:
+    if c is not None or with_dim_names:
         _add_boundary_to_ax(
             ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names
         )
@@ -110,7 +119,7 @@ def _plot(
         return fig
 
 
-def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
+def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
     """Plots nested parent and child grids with boundary overlays and grid masking.
 
     Parameters
@@ -146,12 +155,7 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
             child_lon_deg > 180, child_lon_deg - 360, child_lon_deg
         )
 
-    trans = _get_projection(parent_lon_deg, parent_lat_deg)
-
-    parent_lon_deg = parent_lon_deg.values
-    parent_lat_deg = parent_lat_deg.values
-    child_lon_deg = child_lon_deg.values
-    child_lat_deg = child_lat_deg.values
+    trans = get_projection(parent_lon_deg, parent_lat_deg)
 
     fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
@@ -213,7 +217,7 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
     return fig
 
 
-def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
+def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
     """Plots a vertical section of a field with optional interface depths.
 
     Parameters
@@ -308,7 +312,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         return fig
 
 
-def _profile_plot(field, title="", ax=None):
+def profile_plot(field, title="", ax=None):
     """Plots a vertical profile of the given field against depth.
 
     This function generates a profile plot by plotting the field values against
@@ -366,7 +370,7 @@ def _profile_plot(field, title="", ax=None):
         return fig
 
 
-def _line_plot(field, title="", ax=None):
+def line_plot(field, title="", ax=None):
     """Plots a line graph of the given field with grey vertical bars indicating NaN
     regions.
 
@@ -454,8 +458,18 @@ def _line_plot(field, title="", ax=None):
         return fig
 
 
+def _get_edge(arr: xr.DataArray, dim_name: str, pos: str) -> xr.DataArray:
+    """Helper to extract first or last slice along a dimension."""
+    if pos == "start":
+        return arr.isel({dim_name: 0})
+    elif pos == "end":
+        return arr.isel({dim_name: -1})
+    else:
+        raise ValueError("pos must be 'start' or 'end'")
+
+
 def _add_boundary_to_ax(
-    ax, lon_deg, lat_deg, trans, c="red", label="", with_dim_names=False
+    ax, lon_deg, lat_deg, trans, c="k", label="", with_dim_names=False
 ):
     """Plots a grid or field on a map with optional depth contours.
 
@@ -474,65 +488,83 @@ def _add_boundary_to_ax(
         The projection for transforming coordinates.
 
     c : str, optional
-        Color of the grid boundary (default is 'red').
+        Color of the grid boundary (default is 'k').
     """
     proj = ccrs.PlateCarree()
 
-    # find corners
-    corners = [
-        (lon_deg[0, 0], lat_deg[0, 0]),
-        (lon_deg[0, -1], lat_deg[0, -1]),
-        (lon_deg[-1, -1], lat_deg[-1, -1]),
-        (lon_deg[-1, 0], lat_deg[-1, 0]),
+    xi_dim = [d for d in lon_deg.dims if d.startswith("xi_")][0]
+    eta_dim = [d for d in lon_deg.dims if d.startswith("eta_")][0]
+
+    edges = [
+        (
+            _get_edge(lon_deg, xi_dim, "start"),
+            _get_edge(lat_deg, xi_dim, "start"),
+            r"$\eta$",
+        ),  # left
+        (
+            _get_edge(lon_deg, xi_dim, "end"),
+            _get_edge(lat_deg, xi_dim, "end"),
+            r"$\eta$",
+        ),  # right
+        (
+            _get_edge(lon_deg, eta_dim, "start"),
+            _get_edge(lat_deg, eta_dim, "start"),
+            r"$\xi$",
+        ),  # bottom
+        (
+            _get_edge(lon_deg, eta_dim, "end"),
+            _get_edge(lat_deg, eta_dim, "end"),
+            r"$\xi$",
+        ),  # top
     ]
 
-    # transform coordinates to projected space
-    transformed_corners = [trans.transform_point(lo, la, proj) for lo, la in corners]
-    transformed_lons, transformed_lats = zip(*transformed_corners)
+    for i, (lon, lat, dim_name) in enumerate(edges):
+        ax.plot(lon, lat, transform=proj, c=c, label=label if i == 0 else None)
 
-    ax.plot(
-        list(transformed_lons) + [transformed_lons[0]],
-        list(transformed_lats) + [transformed_lats[0]],
-        "o-",
-        c=c,
-        label=label,
-    )
+        if with_dim_names:
+            # Get start and end point
+            start_lon = float(lon[0])
+            start_lat = float(lat[0])
+            end_lon = float(lon[-1])
+            end_lat = float(lat[-1])
 
-    if with_dim_names:
-        for i in range(len(corners)):
-            if i in [0, 2]:
-                dim_name = r"$\xi$"
-            else:
-                dim_name = r"$\eta$"
-            # Define start and end points for each edge
-            start_lon, start_lat = transformed_corners[i]
-            end_lon, end_lat = transformed_corners[(i + 1) % len(corners)]
+            # Midpoint of the edge
+            mid_lon = float(lon[len(lon) // 2])
+            mid_lat = float(lat[len(lat) // 2])
 
-            # Compute midpoint
-            mid_lon = (start_lon + end_lon) / 2
-            mid_lat = (start_lat + end_lat) / 2
+            # Direction of edge (unit vector)
+            dx = end_lon - start_lon
+            dy = end_lat - start_lat
+            norm = np.hypot(dx, dy)
+            if norm == 0:
+                continue
+            ux = dx / norm
+            uy = dy / norm
 
-            # Compute vector direction for arrow
-            arrow_dx = (end_lon - start_lon) * 0.4  # Scale arrow size
-            arrow_dy = (end_lat - start_lat) * 0.4
-
-            # Reverse arrow direction for edges 2 and 3
-            if i in [2, 3]:
-                arrow_dx *= -1
-                arrow_dy *= -1
-
-            # Add arrow
+            # Arrowhead only (zero-length shaft)
+            head_size = 0.02 * norm
             ax.annotate(
                 "",
-                xy=(mid_lon + arrow_dx, mid_lat + arrow_dy),
-                xytext=(mid_lon - arrow_dx, mid_lat - arrow_dy),
-                arrowprops=dict(arrowstyle="->", color=c, lw=1.5),
+                xy=(mid_lon + ux * head_size, mid_lat + uy * head_size),
+                xytext=(mid_lon, mid_lat),
+                transform=proj,
+                arrowprops=dict(
+                    arrowstyle="->",
+                    color=c,
+                    lw=1.5,
+                    mutation_scale=20,
+                ),
             )
 
+            # Label position on edge
+            label_lon = float(lon[len(lon) // 4 * 3])
+            label_lat = float(lat[len(lat) // 4 * 3])
+
             ax.text(
-                mid_lon,
-                mid_lat,
+                label_lon,
+                label_lat,
                 dim_name,
+                transform=proj,
                 color=c,
                 fontsize=10,
                 ha="center",
@@ -597,13 +629,476 @@ def _add_field_to_ax(
     if add_colorbar:
         plt.colorbar(p, label=label)
 
-    if depth_contours:
+    if depth_contours and "layer_depth" in field.coords:
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=10)
 
 
-def _get_projection(lon, lat):
+def get_projection(lon, lat):
 
     return ccrs.NearsidePerspective(
         central_longitude=lon.mean().values, central_latitude=lat.mean().values
     )
+
+
+def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
+    """Validate input parameters for the plot method.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        Input data to be plotted.
+    s : int, float, or None
+        Depth level index or value for the s-coordinate. Use None for surface plotting.
+    eta : int or None
+        Eta index for ROMS grid selection. Must be within bounds.
+    xi : int or None
+        Xi index for ROMS grid selection. Must be within bounds.
+    depth : int, float, or None
+        Depth value for slicing. Not yet implemented.
+    lat : float or None
+        Latitude value for slicing. Must be specified with `lon` if provided.
+    lon : float or None
+        Longitude value for slicing. Must be specified with `lat` if provided.
+    include_boundary : bool
+        Whether to include boundary points when selecting grid indices.
+
+    Raises
+    ------
+    ValueError
+        If conflicting dimensions are specified.
+        If eta or xi indices are out of bounds.
+        If eta or xi lie on the boundary when `include_boundary=False`.
+    """
+
+    # Check conflicting dimension choices
+    if s is not None and depth is not None:
+        raise ValueError(
+            "Conflicting input: You cannot specify both 's' and 'depth' at the same time."
+        )
+    if any([eta is not None, xi is not None]) and any(
+        [lat is not None, lon is not None]
+    ):
+        raise ValueError(
+            "Conflicting input: You cannot specify 'lat' or 'lon' simultaneously with 'eta' or 'xi'."
+        )
+
+    # 3D fields: Check for valid dimension specification
+    if len(field.dims) == 3:
+        if not any(
+            [
+                s is not None,
+                eta is not None,
+                xi is not None,
+                depth is not None,
+                lat is not None,
+                lon is not None,
+            ]
+        ):
+            raise ValueError(
+                "Invalid input: For 3D fields, you must specify at least one of the dimensions 's', 'eta', 'xi', 'depth', 'lat', or 'lon'."
+            )
+        if sum([dim is not None for dim in [s, eta, xi, depth, lat, lon]]) > 2:
+            raise ValueError(
+                "Ambiguous input: For 3D fields, specify at most two of 's', 'eta', 'xi', 'depth', 'lat', or 'lon'. Specifying more than two is not allowed."
+            )
+
+    # 2D fields: Check for conflicts in dimension choices
+    if len(field.dims) == 2:
+        if s is not None:
+            raise ValueError("Vertical dimension 's' should be None for 2D fields.")
+        if depth is not None:
+            raise ValueError("Vertical dimension 'depth' should be None for 2D fields.")
+        if all([eta is not None, xi is not None]):
+            raise ValueError(
+                "Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both."
+            )
+        if all([lat is not None, lon is not None]):
+            raise ValueError(
+                "Conflicting input: For 2D fields, specify only one dimension, either 'lat' or 'lon', not both."
+            )
+
+    # Check that indices are within bounds
+    if eta is not None:
+        dim = "eta_rho" if "eta_rho" in field.dims else "eta_v"
+        if not eta < len(field[dim]):
+            raise ValueError(
+                f"Invalid eta index: {eta} is out of bounds. Must be between 0 and {len(field[dim]) - 1}."
+            )
+        if not include_boundary:
+            if eta == 0 or eta == len(field[dim]) - 1:
+                raise ValueError(
+                    f"Invalid eta index: {eta} lies on the boundary, which is excluded when `include_boundary = False`. "
+                    "Either set `include_boundary = True`, or adjust eta to avoid boundary values."
+                )
+
+    if xi is not None:
+        dim = "xi_rho" if "xi_rho" in field.dims else "xi_u"
+        if not xi < len(field[dim]):
+            raise ValueError(
+                f"Invalid eta index: {xi} is out of bounds. Must be between 0 and {len(field[dim]) - 1}."
+            )
+        if not include_boundary:
+            if xi == 0 or xi == len(field[dim]) - 1:
+                raise ValueError(
+                    f"Invalid xi index: {xi} lies on the boundary, which is excluded when `include_boundary = False`. "
+                    "Either set `include_boundary = True`, or adjust eta to avoid boundary values."
+                )
+
+
+def _set_plotting_kwargs(field: xr.DataArray, cmap_name: str) -> dict[str, Any]:
+    """Return vmin, vmax, and colormap for plotting."""
+
+    if cmap_name == "RdBu_r":
+        vmax = max(field.max().values, -field.min().values)
+        vmin = -vmax
+    else:
+        vmax = field.max().values
+        vmin = field.min().values
+
+    cmap = plt.colormaps.get_cmap(cmap_name)
+    cmap.set_bad(color="gray")
+
+    return {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+
+def plot(
+    field: xr.DataArray,
+    grid_ds: xr.DataArray,
+    grid_straddle: bool,
+    zeta: xr.DataArray | float = 0.0,
+    s: int | None = None,
+    eta: int | None = None,
+    xi: int | None = None,
+    depth: float | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    include_boundary: bool = True,
+    depth_contours: bool = False,
+    layer_contours: bool = False,
+    max_nr_layer_contours: int | None = 10,
+    use_coarse_grid: bool = False,
+    with_dim_names: bool = False,
+    ax: Axes | None = None,
+    save_path: str | None = None,
+    cmap_name: str | None = "YlOrRd",
+    add_colorbar: bool = True,
+) -> None:
+    """Generate a plot of a 2D or 3D field defined on a ROMS grid for a specified
+    horizontal or vertical slice.
+
+    This function supports fields with both horizontal dimensions (e.g., eta, xi) and optionally a vertical dimension (s_rho).
+    It allows plotting horizontal layers, vertical sections, or depth slices depending on the specified parameters.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        ROMS output variable already selected at a single time index.
+
+    s : int, optional
+        The index of the vertical layer (`s_rho`) to plot. If specified, the plot
+        will display a horizontal slice at that layer. Cannot be used simultaneously
+        with `depth`. Default is None.
+
+    eta : int, optional
+        The eta-index to plot. Used for generating vertical sections or plotting
+        horizontal slices along a constant eta-coordinate. Cannot be used simultaneously
+        with `lat` or `lon`, but can be combined with `xi`. Default is None.
+
+    xi : int, optional
+        The xi-index to plot. Used for generating vertical sections or plotting
+        horizontal slices along a constant xi-coordinate. Cannot be used simultaneously
+        with `lat` or `lon`, but can be combined with `eta`. Default is None.
+
+    depth : float, optional
+        Depth (in meters) to plot a horizontal slice at a specific depth level.
+        If specified, the plot will interpolate the field to the given depth.
+        Cannot be used simultaneously with `s` or for fields that are inherently
+        2D (such as "zeta"). Default is None.
+
+    lat : float, optional
+        Latitude (in degrees) to plot a vertical section at a specific
+        latitude. This option is useful for generating zonal (west-east)
+        sections. Cannot be used simultaneously with `eta` or `xi`, bu can be
+        combined with `lon`. Default is None.
+
+    lon : float, optional
+        Longitude (in degrees) to plot a vertical section at a specific
+        longitude. This option is useful for generating meridional (south-north) sections.
+        Cannot be used simultaneously with `eta` or `xi`, but can be combined
+        with `lat`. Default is None.
+
+    include_boundary : bool, optional
+        Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
+        In diagnostic ROMS output fields, these boundary cells are set to zero, so excluding them can improve visualization.
+        Default is False.
+
+    depth_contours : bool, optional
+        If True, overlays contours representing lines of constant depth on the plot.
+        This option is only relevant when the `s` parameter is provided (i.e., not None).
+        By default, depth contours are not shown (False).
+
+    layer_contours : bool, optional
+        If True, contour lines representing the boundaries between vertical layers will
+        be added to the plot. This is particularly useful in vertical sections to
+        visualize the layering of the water column. Default is False.
+
+    max_nr_layer_contours : int, optional
+        Number of layer contours displayed. Default is 10.
+
+    use_coarse_grid : bool, optional
+        Use coarse grid data if True. Defaults to False.
+
+    with_dim_names : bool, optional
+        Whether or not to plot the dimension names. Only relevant for 2D horizontal plots. Default is False.
+
+    ax : matplotlib.axes.Axes, optional
+        The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots. Default is None.
+
+    save_path : str, optional
+        Path to save the generated plot. If None, the plot is shown interactively.
+        Default is None.
+
+    cmap_name : str, optional
+        Colormap name to use.
+
+    add_colorbar : bool, optional
+        Whether to include a colorbar. Defaults to True.
+
+    Returns
+    -------
+    None
+        This method does not return any value. It generates and displays a plot.
+
+    Raises
+    ------
+    ValueError
+        - If the field is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
+        - If the field is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
+        - If conflicting dimensions are specified (e.g., specifying `eta`/`xi` with `lat`/`lon` or both `s` and `depth`).
+        - If more than two dimensions are specified for a 3D field.
+        - If `eta` or `xi` indices are out of bounds.
+        - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
+    """
+    # Input checks
+    _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
+
+    # Get horizontal dimensions and grid location
+    horizontal_dims_dict = {
+        "rho": {"eta": "eta_rho", "xi": "xi_rho"},
+        "u": {"eta": "eta_rho", "xi": "xi_u"},
+        "v": {"eta": "eta_v", "xi": "xi_rho"},
+    }
+    for loc, horizontal_dims in horizontal_dims_dict.items():
+        if all(dim in field.dims for dim in horizontal_dims.values()):
+            break
+
+    # Convert relative to absolute indices
+    def _get_absolute_index(idx, field, dim_name):
+        index = field[dim_name].isel(**{dim_name: idx}).item()
+        return index
+
+    if eta is not None and eta < 0:
+        eta = _get_absolute_index(eta, field, horizontal_dims["eta"])
+    if xi is not None and xi < 0:
+        xi = _get_absolute_index(xi, field, horizontal_dims["xi"])
+    if s is not None and s < 0:
+        s = _get_absolute_index(s, field, "s_rho")
+
+    # Set spatial coordinates
+    if use_coarse_grid:
+        if loc != "rho":
+            raise ValueError("If using coarse grid, can only plot on rho-points.")
+        lat_deg = grid_ds["lat_coarse"].rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        lon_deg = grid_ds["lon_coarse"].rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        mask = grid_ds["mask_coarse"].rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+    else:
+        lat_deg = grid_ds[f"lat_{loc}"]
+        lon_deg = grid_ds[f"lon_{loc}"]
+        mask = grid_ds[f"mask_{loc}"]
+    if grid_straddle:
+        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+    if lon is not None:
+        lon = normalize_longitude(lon, grid_straddle)
+
+    field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
+    # Mask the field
+    field = field.where(mask)
+
+    # Assign eta and xi as coordinates
+    coords_to_assign = {dim: field[dim] for dim in horizontal_dims.values()}
+    field = field.assign_coords(**coords_to_assign)
+
+    # Remove horizontal boundary if desired
+    slice_dict = {
+        "rho": {"eta_rho": slice(1, -1), "xi_rho": slice(1, -1)},
+        "u": {"eta_rho": slice(1, -1), "xi_u": slice(1, -1)},
+        "v": {"eta_v": slice(1, -1), "xi_rho": slice(1, -1)},
+    }
+    if not include_boundary:
+        field = field.isel(**slice_dict[loc])
+
+    # Prepare figure title
+    if "abs_time" in field.coords:
+        formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
+        title = f"time: {formatted_time}"
+    elif "ntides" in field.coords:
+        title = f"constituent: {field.ntides.values.item().decode('utf-8')}"
+    elif "long_name" in field.attrs:
+        title = field.long_name
+    else:
+        title = ""
+
+    # Slice the field horizontally as desired
+    def _slice_along_dimension(field, title, dim_name, idx):
+        field = field.sel(**{dim_name: idx})
+        title = title + f", {dim_name} = {idx}"
+        return field, title
+
+    if eta is not None:
+        field, title = _slice_along_dimension(field, title, horizontal_dims["eta"], eta)
+    if xi is not None:
+        field, title = _slice_along_dimension(field, title, horizontal_dims["xi"], xi)
+    if s is not None:
+        field, title = _slice_along_dimension(field, title, "s_rho", s)
+
+    # Compute layer and interface depth if necessary
+    compute_layer_depth = ("s_rho" in field.dims) or (
+        depth_contours and s is not None and lat is None and lon is None
+    )
+    compute_interface_depth = (
+        len(field.dims) == 2
+        and "s_rho" in field.dims
+        and layer_contours
+        and (lat is None)
+        and (lon is None)
+        and (depth is None)
+    )
+
+    def _compute_and_slice_depth(depth_type):
+        depth = compute_depth_coordinates(
+            grid_ds, zeta, depth_type=depth_type, location=loc, eta=eta, xi=xi
+        )
+        if not include_boundary:
+            depth = depth.isel(
+                **{
+                    dim: s
+                    for dim, s in slice_dict.get(loc, {}).items()
+                    if dim in depth.dims
+                }
+            )
+        if s is not None:
+            depth = depth.isel(s_rho=s)
+        return depth.load()
+
+    if compute_layer_depth:
+        layer_depth = _compute_and_slice_depth("layer")
+
+    if compute_interface_depth:
+        interface_depth = _compute_and_slice_depth("interface")
+
+    # Regrid laterally
+    if lat is not None or lon is not None:
+        if lat is not None:
+            lats = [lat]
+            title = title + f", lat = {lat}°N"
+        else:
+            resolution = infer_nominal_horizontal_resolution(grid_ds)
+            lats = _generate_coordinate_range(
+                field.lat.min().values, field.lat.max().values, resolution
+            )
+        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
+
+        if lon is not None:
+            lons = [lon]
+            title = title + f", lon = {lon}°E"
+        else:
+            resolution = infer_nominal_horizontal_resolution(grid_ds, lat)
+            lons = _generate_coordinate_range(
+                field.lon.min().values, field.lon.max().values, resolution
+            )
+        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
+
+        target_coords = {"lat": lats, "lon": lons}
+        lateral_regrid = LateralRegridFromROMS(field, target_coords)
+        field = lateral_regrid.apply(field).squeeze()
+
+        if compute_layer_depth:
+            layer_depth = lateral_regrid.apply(layer_depth).squeeze()
+
+    # Assign depth as coordinate
+    if compute_layer_depth:
+        field = field.assign_coords({"layer_depth": layer_depth})
+
+    if lat is not None:
+        field, layer_depth = _remove_edge_nans(
+            field, "lon", layer_depth if "layer_depth" in locals() else None
+        )
+    if lon is not None:
+        field, layer_depth = _remove_edge_nans(
+            field, "lat", layer_depth if "layer_depth" in locals() else None
+        )
+
+    # Regrid vertically
+    if depth is not None:
+        ds = xr.Dataset()
+        ds["s_rho"] = field["s_rho"]
+        vertical_regrid = VerticalRegridFromROMS(ds)
+        # Save attributes before vertical regridding
+        attrs = field.attrs
+        field = vertical_regrid.apply(field, layer_depth, np.array([depth])).squeeze()
+        # Reset attributes
+        field.attrs = attrs
+        title = title + f", depth = {depth}m"
+        depth_contours = False
+
+    # Plotting
+    kwargs = _set_plotting_kwargs(field, cmap_name)
+
+    if (eta is None and xi is None) and (lat is None and lon is None):
+        fig = plot_2d_horizontal_field(
+            field=field,
+            depth_contours=depth_contours,
+            with_dim_names=with_dim_names,
+            title=title,
+            kwargs=kwargs,
+            add_colorbar=add_colorbar,
+        )
+    else:
+        if len(field.dims) == 2:
+            if compute_interface_depth:
+                if max_nr_layer_contours:
+                    # restrict number of layer_contours to 10 for the sake of plot clearity
+                    nr_layers = len(interface_depth["s_w"])
+                    selected_layers = np.linspace(
+                        0,
+                        nr_layers - 1,
+                        min(nr_layers, max_nr_layer_contours),
+                        dtype=int,
+                    )
+                    interface_depth = interface_depth.isel(s_w=selected_layers)
+            else:
+                interface_depth = None
+
+            fig = section_plot(
+                field,
+                interface_depth=interface_depth,
+                title=title,
+                kwargs={**kwargs, "add_colorbar": add_colorbar},
+                ax=ax,
+            )
+        else:
+            if "s_rho" in field.dims:
+                fig = profile_plot(field, title=title, ax=ax)
+            else:
+                fig = line_plot(field, title=title, ax=ax)
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")

@@ -11,7 +11,7 @@ import xarray as xr
 from scipy.ndimage import label
 
 from roms_tools import Grid
-from roms_tools.plot import _line_plot, _section_plot
+from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
@@ -941,7 +941,7 @@ class BoundaryForcing:
             else:
                 interface_depth = None
 
-            _section_plot(
+            section_plot(
                 field,
                 interface_depth=interface_depth,
                 title=title,
@@ -949,7 +949,7 @@ class BoundaryForcing:
                 ax=ax,
             )
         else:
-            _line_plot(field.where(mask), title=title, ax=ax)
+            line_plot(field.where(mask), title=title, ax=ax)
 
     def save(
         self,

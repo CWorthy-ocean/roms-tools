@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from roms_tools.constants import R_EARTH
+
 
 def _load_data(
     filename,
@@ -669,3 +671,44 @@ def normalize_longitude(lon: float, straddle: bool) -> float:
         return lon - 360 if lon > 180 else lon
     else:
         return lon + 360 if lon < 0 else lon
+
+
+def infer_nominal_horizontal_resolution(
+    grid_ds: xr.Dataset, lat: float | None = None
+) -> float:
+    """Estimate the nominal horizontal resolution of the ROMS grid in degrees at a
+    specified latitude.
+
+    This function calculates the average horizontal grid spacing (based on `pm` and `pn`),
+    then converts that spacing from meters to degrees longitude, accounting for Earth's curvature
+    and the cosine of the latitude.
+
+    Parameters
+    ----------
+    grid_ds : xr.Dataset
+        ROMS grid dataset containing `pm`, `pn`, and `lat_rho` coordinates.
+    lat : float, optional
+        Latitude (in degrees) at which to estimate resolution. If None, the average latitude
+        over the grid is used.
+
+    Returns
+    -------
+    float
+        Estimated nominal horizontal resolution in degrees longitude.
+    """
+    if lat is None:
+        # Use center of the domain in latitude
+        lat = float((grid_ds.lat_rho.max() + grid_ds.lat_rho.min()) / 2)
+
+    lat_rad = np.deg2rad(lat)
+
+    # Mean grid spacing in meters (pm and pn are in 1/m)
+    resolution_in_m = ((1 / grid_ds.pm).mean() + (1 / grid_ds.pn).mean()) / 2
+
+    # Meters per degree at the equator
+    meters_per_degree = 2 * np.pi * R_EARTH / 360
+
+    # Adjust resolution to degrees longitude at the specified latitude
+    resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
+
+    return float(resolution_in_degrees)

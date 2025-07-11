@@ -191,8 +191,8 @@ def test_plot():
         nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
     )
 
-    grid.plot(bathymetry=True)
-    grid.plot(bathymetry=False)
+    grid.plot(with_dim_names=False)
+    grid.plot(with_dim_names=True)
 
 
 def test_save(tmp_path):
@@ -601,6 +601,9 @@ def test_plot_vertical_coordinate():
     grid.plot_vertical_coordinate(s=-1)
     grid.plot_vertical_coordinate(eta=0)
     grid.plot_vertical_coordinate(xi=0)
+    # Test that passing a maximum number of layer contours works
+    grid.plot_vertical_coordinate(xi=0, max_nr_layer_contours=2)
+    grid.plot_vertical_coordinate(xi=0, max_nr_layer_contours=100)
     # Test that passing a matplotlib.axes.Axes works
     fig, ax = plt.subplots(1, 1)
     grid.plot_vertical_coordinate(s=-1, ax=ax)
@@ -651,7 +654,7 @@ def test_compatability_with_matlab_grid(tmp_path):
     actual_coords = set(grid.ds.coords.keys())
     assert actual_coords == expected_coords
 
-    grid.plot(bathymetry=True)
+    grid.plot()
 
     for file_str in ["test_grid", "test_grid.nc"]:
         # Create a temporary filepath using the tmp_path fixture

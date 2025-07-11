@@ -4,12 +4,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.plot import _plot
+from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import TPXOManager
 from roms_tools.setup.utils import (
@@ -325,7 +324,12 @@ class TidalForcing:
                 da = ds[var_name].isel(ntides=0)
                 nan_check(da, mask)
 
-    def plot(self, var_name, ntides=0) -> None:
+    def plot(
+        self,
+        var_name: str,
+        ntides: int = 0,
+        save_path: str | None = None,
+    ) -> None:
         """Plot the specified tidal forcing variable for a given tidal constituent.
 
         Parameters
@@ -346,6 +350,10 @@ class TidalForcing:
             The index of the tidal constituent to plot. Default is 0, which corresponds
             to the first constituent.
 
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
+
         Returns
         -------
         None
@@ -360,11 +368,12 @@ class TidalForcing:
         Examples
         --------
         >>> tidal_forcing = TidalForcing(grid)
-        >>> tidal_forcing.plot("ssh_Re", nc=0)
+        >>> tidal_forcing.plot("ssh_Re", ntides=0)
         """
 
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
+
         field = self.ds[var_name].isel(ntides=ntides)
 
         if self.use_dask:
@@ -373,45 +382,12 @@ class TidalForcing:
             with ProgressBar():
                 field = field.load()
 
-        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            lon_deg = self.grid.ds["lon_rho"]
-            lat_deg = self.grid.ds["lat_rho"]
-            mask = self.grid.ds["mask_rho"]
-
-        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            lon_deg = self.grid.ds["lon_u"]
-            lat_deg = self.grid.ds["lat_u"]
-            mask = self.grid.ds["mask_u"]
-
-        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            lon_deg = self.grid.ds["lon_v"]
-            lat_deg = self.grid.ds["lat_v"]
-            mask = self.grid.ds["mask_v"]
-
-        else:
-            ValueError("provided field does not have two horizontal dimension")
-
-        field = field.where(mask)
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-        title = "%s, constituent: %s" % (
-            field.long_name,
-            self.ds[var_name].ntides[ntides].values.item().decode("utf-8"),
-        )
-
-        vmax = max(field.max(), -field.min())
-        vmin = -vmax
-        cmap = plt.colormaps.get_cmap("RdBu_r")
-        cmap.set_bad(color="gray")
-
-        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-        _plot(
+        plot(
             field=field,
-            title=title,
-            kwargs=kwargs,
+            grid_ds=self.grid.ds,
+            grid_straddle=self.grid.straddle,
+            save_path=save_path,
+            cmap_name="RdBu_r",
         )
 
     def save(self, filepath: Union[str, Path]) -> None:

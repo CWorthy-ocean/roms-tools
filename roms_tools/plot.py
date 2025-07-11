@@ -14,7 +14,7 @@ from roms_tools.utils import (
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 
-def _plot(
+def plot_2d_horizontal_field(
     field,
     depth_contours=False,
     c="k",
@@ -70,7 +70,7 @@ def _plot(
             "Plotting is not implemented for the case that the domain contains the North or South pole."
         )
 
-    trans = _get_projection(lon_deg, lat_deg)
+    trans = get_projection(lon_deg, lat_deg)
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
@@ -117,7 +117,7 @@ def _plot(
         return fig
 
 
-def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
+def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
     """Plots nested parent and child grids with boundary overlays and grid masking.
 
     Parameters
@@ -153,7 +153,7 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
             child_lon_deg > 180, child_lon_deg - 360, child_lon_deg
         )
 
-    trans = _get_projection(parent_lon_deg, parent_lat_deg)
+    trans = get_projection(parent_lon_deg, parent_lat_deg)
 
     fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
@@ -215,7 +215,7 @@ def _plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names
     return fig
 
 
-def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
+def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
     """Plots a vertical section of a field with optional interface depths.
 
     Parameters
@@ -310,7 +310,7 @@ def _section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         return fig
 
 
-def _profile_plot(field, title="", ax=None):
+def profile_plot(field, title="", ax=None):
     """Plots a vertical profile of the given field against depth.
 
     This function generates a profile plot by plotting the field values against
@@ -368,7 +368,7 @@ def _profile_plot(field, title="", ax=None):
         return fig
 
 
-def _line_plot(field, title="", ax=None):
+def line_plot(field, title="", ax=None):
     """Plots a line graph of the given field with grey vertical bars indicating NaN
     regions.
 
@@ -627,300 +627,16 @@ def _add_field_to_ax(
     if add_colorbar:
         plt.colorbar(p, label=label)
 
-    if depth_contours:
+    if depth_contours and "layer_depth" in field.coords:
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=10)
 
 
-def _get_projection(lon, lat):
+def get_projection(lon, lat):
 
     return ccrs.NearsidePerspective(
         central_longitude=lon.mean().values, central_latitude=lat.mean().values
     )
-
-
-def plot(
-    field: xr.DataArray,
-    grid_ds: xr.DataArray,
-    grid_straddle: bool,
-    zeta: xr.DataArray | float = 0.0,
-    s: int | None = None,
-    eta: int | None = None,
-    xi: int | None = None,
-    depth: float | None = None,
-    lat: float | None = None,
-    lon: float | None = None,
-    include_boundary: bool = False,
-    depth_contours: bool = False,
-    ax: Axes | None = None,
-    save_path: str | None = None,
-    cmap_name: str | None = "YlOrRd",
-) -> None:
-    """Generate a plot of a ROMS output field for a specified vertical or horizontal
-    slice.
-
-    Parameters
-    ----------
-    field : xr.DataArray
-        ROMS output variable already selected at a single time index.
-
-    s : int, optional
-        The index of the vertical layer (`s_rho`) to plot. If specified, the plot
-        will display a horizontal slice at that layer. Cannot be used simultaneously
-        with `depth`. Default is None.
-
-    eta : int, optional
-        The eta-index to plot. Used for generating vertical sections or plotting
-        horizontal slices along a constant eta-coordinate. Cannot be used simultaneously
-        with `lat` or `lon`, but can be combined with `xi`. Default is None.
-
-    xi : int, optional
-        The xi-index to plot. Used for generating vertical sections or plotting
-        horizontal slices along a constant xi-coordinate. Cannot be used simultaneously
-        with `lat` or `lon`, but can be combined with `eta`. Default is None.
-
-    depth : float, optional
-        Depth (in meters) to plot a horizontal slice at a specific depth level.
-        If specified, the plot will interpolate the field to the given depth.
-        Cannot be used simultaneously with `s` or for fields that are inherently
-        2D (such as "zeta"). Default is None.
-
-    lat : float, optional
-        Latitude (in degrees) to plot a vertical section at a specific
-        latitude. This option is useful for generating zonal (west-east)
-        sections. Cannot be used simultaneously with `eta` or `xi`, bu can be
-        combined with `lon`. Default is None.
-
-    lon : float, optional
-        Longitude (in degrees) to plot a vertical section at a specific
-        longitude. This option is useful for generating meridional (south-north) sections.
-        Cannot be used simultaneously with `eta` or `xi`, but can be combined
-        with `lat`. Default is None.
-
-    include_boundary : bool, optional
-        Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
-        In diagnostic ROMS output fields, these boundary cells are set to zero, so excluding them can improve visualization.
-        Default is False.
-
-    depth_contours : bool, optional
-        If True, overlays contours representing lines of constant depth on the plot.
-        This option is only relevant when the `s` parameter is provided (i.e., not None).
-        By default, depth contours are not shown (False).
-
-    ax : matplotlib.axes.Axes, optional
-        The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots. Default is None.
-
-    save_path : str, optional
-        Path to save the generated plot. If None, the plot is shown interactively.
-        Default is None.
-
-    cmap_name : str, optional
-        Colormap name to use.
-
-    Returns
-    -------
-    None
-        This method does not return any value. It generates and displays a plot.
-
-    Raises
-    ------
-    ValueError
-        - If the specified `var_name` is not one of the valid options.
-        - If the field specified by `var_name` is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
-        - If the field specified by `var_name` is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
-        - If conflicting dimensions are specified (e.g., specifying `eta`/`xi` with `lat`/`lon` or both `s` and `depth`).
-        - If more than two dimensions are specified for a 3D field.
-        - If `time` exceeds the bounds of the time dimension.
-        - If `time` is specified for a field that does not have a time dimension.
-        - If `eta` or `xi` indices are out of bounds.
-        - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
-    """
-    # Input checks
-    _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
-
-    # Get horizontal dimensions and grid location
-    horizontal_dims_dict = {
-        "rho": {"eta": "eta_rho", "xi": "xi_rho"},
-        "u": {"eta": "eta_rho", "xi": "xi_u"},
-        "v": {"eta": "eta_v", "xi": "xi_rho"},
-    }
-    for loc, horizontal_dims in horizontal_dims_dict.items():
-        if all(dim in field.dims for dim in horizontal_dims.values()):
-            break
-
-    # Convert relative to absolute indices
-    def _get_absolute_index(idx, field, dim_name):
-        index = field[dim_name].isel(**{dim_name: idx}).item()
-        return index
-
-    if eta is not None and eta < 0:
-        eta = _get_absolute_index(eta, field, horizontal_dims["eta"])
-    if xi is not None and xi < 0:
-        xi = _get_absolute_index(xi, field, horizontal_dims["xi"])
-    if s is not None and s < 0:
-        s = _get_absolute_index(s, field, "s_rho")
-
-    # Set spatial coordinates
-    lat_deg = grid_ds[f"lat_{loc}"]
-    lon_deg = grid_ds[f"lon_{loc}"]
-    if grid_straddle:
-        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-    if lon is not None:
-        lon = normalize_longitude(lon, grid_straddle)
-
-    field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-    # Mask the field
-    mask = grid_ds[f"mask_{loc}"]
-    field = field.where(mask)
-
-    # Assign eta and xi as coordinates
-    coords_to_assign = {dim: field[dim] for dim in horizontal_dims.values()}
-    field = field.assign_coords(**coords_to_assign)
-
-    # Remove horizontal boundary if desired
-    slice_dict = {
-        "rho": {"eta_rho": slice(1, -1), "xi_rho": slice(1, -1)},
-        "u": {"eta_rho": slice(1, -1), "xi_u": slice(1, -1)},
-        "v": {"eta_v": slice(1, -1), "xi_rho": slice(1, -1)},
-    }
-    if not include_boundary:
-        field = field.isel(**slice_dict[loc])
-
-    # Compute layer depth for 3D fields when depth contours are requested or no vertical layer is specified.
-    compute_layer_depth = len(field.dims) > 2 and (depth_contours or s is None)
-    if compute_layer_depth:
-        layer_depth = compute_depth_coordinates(
-            grid_ds,
-            zeta,
-            depth_type="layer",
-            location=loc,
-            eta=eta,
-            xi=xi,
-        )
-
-        if not include_boundary:
-            # Apply valid slices only for dimensions that exist in layer_depth.dims
-            layer_depth = layer_depth.isel(
-                **{
-                    dim: s
-                    for dim, s in slice_dict.get(loc, {}).items()
-                    if dim in layer_depth.dims
-                }
-            )
-        layer_depth.load()
-
-    # Prepare figure title
-    formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
-    title = f"time: {formatted_time}"
-
-    # Slice the field horizontally as desired
-    def _slice_along_dimension(field, title, dim_name, idx):
-        field = field.sel(**{dim_name: idx})
-        title = title + f", {dim_name} = {idx}"
-        return field, title
-
-    if eta is not None:
-        field, title = _slice_along_dimension(field, title, horizontal_dims["eta"], eta)
-    if xi is not None:
-        field, title = _slice_along_dimension(field, title, horizontal_dims["xi"], xi)
-    if s is not None:
-        field, title = _slice_along_dimension(field, title, "s_rho", s)
-        if compute_layer_depth:
-            layer_depth = layer_depth.isel(s_rho=s)
-    else:
-        depth_contours = False
-
-    # Regrid laterally
-    if lat is not None or lon is not None:
-        if lat is not None:
-            lats = [lat]
-            title = title + f", lat = {lat}°N"
-        else:
-            resolution = infer_nominal_horizontal_resolution(grid_ds)
-            lats = _generate_coordinate_range(
-                field.lat.min().values, field.lat.max().values, resolution
-            )
-        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
-
-        if lon is not None:
-            lons = [lon]
-            title = title + f", lon = {lon}°E"
-        else:
-            resolution = infer_nominal_horizontal_resolution(grid_ds, lat)
-            lons = _generate_coordinate_range(
-                field.lon.min().values, field.lon.max().values, resolution
-            )
-        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
-
-        target_coords = {"lat": lats, "lon": lons}
-        lateral_regrid = LateralRegridFromROMS(field, target_coords)
-        field = lateral_regrid.apply(field).squeeze()
-
-        if compute_layer_depth:
-            layer_depth = lateral_regrid.apply(layer_depth).squeeze()
-
-    # Assign depth as coordinate
-    if compute_layer_depth:
-        field = field.assign_coords({"layer_depth": layer_depth})
-
-    if lat is not None:
-        field, layer_depth = _remove_edge_nans(
-            field, "lon", layer_depth if "layer_depth" in locals() else None
-        )
-    if lon is not None:
-        field, layer_depth = _remove_edge_nans(
-            field, "lat", layer_depth if "layer_depth" in locals() else None
-        )
-
-    # Regrid vertically
-    if depth is not None:
-        ds = xr.Dataset()
-        ds["s_rho"] = field["s_rho"]
-        vertical_regrid = VerticalRegridFromROMS(ds)
-        # Save attributes before vertical regridding
-        attrs = field.attrs
-        field = vertical_regrid.apply(field, layer_depth, np.array([depth])).squeeze()
-        # Reset attributes
-        field.attrs = attrs
-        title = title + f", depth = {depth}m"
-
-    # Plotting
-    if cmap_name == "RdBu_r":
-        vmax = max(field.max().values, -field.min().values)
-        vmin = -vmax
-    else:
-        vmax = field.max().values
-        vmin = field.min().values
-
-    cmap = plt.colormaps.get_cmap(cmap_name)
-    cmap.set_bad(color="gray")
-
-    if (eta is None and xi is None) and (lat is None and lon is None):
-        fig = _plot(
-            field=field,
-            depth_contours=depth_contours,
-            title=title,
-            kwargs={"vmax": vmax, "vmin": vmin, "cmap": cmap},
-            c=None,
-        )
-    else:
-        if len(field.dims) == 2:
-            fig = _section_plot(
-                field,
-                interface_depth=None,
-                title=title,
-                kwargs={"vmax": vmax, "vmin": vmin, "cmap": cmap},
-                ax=ax,
-            )
-        else:
-            if "s_rho" in field.dims:
-                fig = _profile_plot(field, title=title, ax=ax)
-            else:
-                fig = _line_plot(field, title=title, ax=ax)
-
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
 
 
 def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
@@ -1026,3 +742,355 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
                     f"Invalid xi index: {xi} lies on the boundary, which is excluded when `include_boundary = False`. "
                     "Either set `include_boundary = True`, or adjust eta to avoid boundary values."
                 )
+
+
+def plot(
+    field: xr.DataArray,
+    grid_ds: xr.DataArray,
+    grid_straddle: bool,
+    zeta: xr.DataArray | float = 0.0,
+    s: int | None = None,
+    eta: int | None = None,
+    xi: int | None = None,
+    depth: float | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    include_boundary: bool = True,
+    depth_contours: bool = False,
+    layer_contours: bool = False,
+    max_nr_layer_contours: int | None = 10,
+    use_coarse_grid: bool = False,
+    with_dim_names: bool = False,
+    ax: Axes | None = None,
+    save_path: str | None = None,
+    cmap_name: str | None = "YlOrRd",
+    add_colorbar: bool = True,
+) -> None:
+    """Generate a plot of a 2D or 3D field defined on a ROMS grid for a specified
+    horizontal or vertical slice.
+
+    This function supports fields with both horizontal dimensions (e.g., eta, xi) and optionally a vertical dimension (s_rho).
+    It allows plotting horizontal layers, vertical sections, or depth slices depending on the specified parameters.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        ROMS output variable already selected at a single time index.
+
+    s : int, optional
+        The index of the vertical layer (`s_rho`) to plot. If specified, the plot
+        will display a horizontal slice at that layer. Cannot be used simultaneously
+        with `depth`. Default is None.
+
+    eta : int, optional
+        The eta-index to plot. Used for generating vertical sections or plotting
+        horizontal slices along a constant eta-coordinate. Cannot be used simultaneously
+        with `lat` or `lon`, but can be combined with `xi`. Default is None.
+
+    xi : int, optional
+        The xi-index to plot. Used for generating vertical sections or plotting
+        horizontal slices along a constant xi-coordinate. Cannot be used simultaneously
+        with `lat` or `lon`, but can be combined with `eta`. Default is None.
+
+    depth : float, optional
+        Depth (in meters) to plot a horizontal slice at a specific depth level.
+        If specified, the plot will interpolate the field to the given depth.
+        Cannot be used simultaneously with `s` or for fields that are inherently
+        2D (such as "zeta"). Default is None.
+
+    lat : float, optional
+        Latitude (in degrees) to plot a vertical section at a specific
+        latitude. This option is useful for generating zonal (west-east)
+        sections. Cannot be used simultaneously with `eta` or `xi`, bu can be
+        combined with `lon`. Default is None.
+
+    lon : float, optional
+        Longitude (in degrees) to plot a vertical section at a specific
+        longitude. This option is useful for generating meridional (south-north) sections.
+        Cannot be used simultaneously with `eta` or `xi`, but can be combined
+        with `lat`. Default is None.
+
+    include_boundary : bool, optional
+        Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
+        In diagnostic ROMS output fields, these boundary cells are set to zero, so excluding them can improve visualization.
+        Default is False.
+
+    depth_contours : bool, optional
+        If True, overlays contours representing lines of constant depth on the plot.
+        This option is only relevant when the `s` parameter is provided (i.e., not None).
+        By default, depth contours are not shown (False).
+
+    layer_contours : bool, optional
+        If True, contour lines representing the boundaries between vertical layers will
+        be added to the plot. This is particularly useful in vertical sections to
+        visualize the layering of the water column. Default is False.
+
+    max_nr_layer_contours : int, optional
+        Number of layer contours displayed. Default is 10.
+
+    use_coarse_grid : bool, optional
+        Use coarse grid data if True. Defaults to False.
+
+    with_dim_names : bool, optional
+        Whether or not to plot the dimension names. Only relevant for 2D horizontal plots. Default is False.
+
+    ax : matplotlib.axes.Axes, optional
+        The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots. Default is None.
+
+    save_path : str, optional
+        Path to save the generated plot. If None, the plot is shown interactively.
+        Default is None.
+
+    cmap_name : str, optional
+        Colormap name to use.
+
+    add_colorbar : bool, optional
+        Whether to include a colorbar. Defaults to True.
+
+    Returns
+    -------
+    None
+        This method does not return any value. It generates and displays a plot.
+
+    Raises
+    ------
+    ValueError
+        - If the field is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
+        - If the field is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
+        - If conflicting dimensions are specified (e.g., specifying `eta`/`xi` with `lat`/`lon` or both `s` and `depth`).
+        - If more than two dimensions are specified for a 3D field.
+        - If `eta` or `xi` indices are out of bounds.
+        - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
+    """
+    # Input checks
+    _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
+
+    # Get horizontal dimensions and grid location
+    horizontal_dims_dict = {
+        "rho": {"eta": "eta_rho", "xi": "xi_rho"},
+        "u": {"eta": "eta_rho", "xi": "xi_u"},
+        "v": {"eta": "eta_v", "xi": "xi_rho"},
+    }
+    for loc, horizontal_dims in horizontal_dims_dict.items():
+        if all(dim in field.dims for dim in horizontal_dims.values()):
+            break
+
+    # Convert relative to absolute indices
+    def _get_absolute_index(idx, field, dim_name):
+        index = field[dim_name].isel(**{dim_name: idx}).item()
+        return index
+
+    if eta is not None and eta < 0:
+        eta = _get_absolute_index(eta, field, horizontal_dims["eta"])
+    if xi is not None and xi < 0:
+        xi = _get_absolute_index(xi, field, horizontal_dims["xi"])
+    if s is not None and s < 0:
+        s = _get_absolute_index(s, field, "s_rho")
+
+    # Set spatial coordinates
+    if use_coarse_grid:
+        if loc != "rho":
+            raise ValueError("If using coarse grid, can only plot on rho-points.")
+        lat_deg = grid_ds["lat_coarse"].rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        lon_deg = grid_ds["lon_coarse"].rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+        mask = grid_ds["mask_coarse"].rename(
+            {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
+        )
+    else:
+        lat_deg = grid_ds[f"lat_{loc}"]
+        lon_deg = grid_ds[f"lon_{loc}"]
+        mask = grid_ds[f"mask_{loc}"]
+    if grid_straddle:
+        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+    if lon is not None:
+        lon = normalize_longitude(lon, grid_straddle)
+
+    field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+
+    # Mask the field
+    field = field.where(mask)
+
+    # Assign eta and xi as coordinates
+    coords_to_assign = {dim: field[dim] for dim in horizontal_dims.values()}
+    field = field.assign_coords(**coords_to_assign)
+
+    # Remove horizontal boundary if desired
+    slice_dict = {
+        "rho": {"eta_rho": slice(1, -1), "xi_rho": slice(1, -1)},
+        "u": {"eta_rho": slice(1, -1), "xi_u": slice(1, -1)},
+        "v": {"eta_v": slice(1, -1), "xi_rho": slice(1, -1)},
+    }
+    if not include_boundary:
+        field = field.isel(**slice_dict[loc])
+
+    # Prepare figure title
+    if "abs_time" in field.coords:
+        formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
+        title = f"time: {formatted_time}"
+    elif "ntides" in field.coords:
+        title = f"constituent: {field.ntides.values.item().decode('utf-8')}"
+    elif "long_name" in field.attrs:
+        title = field.long_name
+    else:
+        title = ""
+
+    # Slice the field horizontally as desired
+    def _slice_along_dimension(field, title, dim_name, idx):
+        field = field.sel(**{dim_name: idx})
+        title = title + f", {dim_name} = {idx}"
+        return field, title
+
+    if eta is not None:
+        field, title = _slice_along_dimension(field, title, horizontal_dims["eta"], eta)
+    if xi is not None:
+        field, title = _slice_along_dimension(field, title, horizontal_dims["xi"], xi)
+    if s is not None:
+        field, title = _slice_along_dimension(field, title, "s_rho", s)
+
+    # Compute layer and interface depth if necessary
+    compute_layer_depth = ("s_rho" in field.dims) or (
+        depth_contours and s is not None and lat is None and lon is None
+    )
+    compute_interface_depth = (
+        len(field.dims) == 2
+        and "s_rho" in field.dims
+        and layer_contours
+        and (lat is None)
+        and (lon is None)
+        and (depth is None)
+    )
+
+    def _compute_and_slice_depth(depth_type):
+        depth = compute_depth_coordinates(
+            grid_ds, zeta, depth_type=depth_type, location=loc, eta=eta, xi=xi
+        )
+        if not include_boundary:
+            depth = depth.isel(
+                **{
+                    dim: s
+                    for dim, s in slice_dict.get(loc, {}).items()
+                    if dim in depth.dims
+                }
+            )
+        if s is not None:
+            depth = depth.isel(s_rho=s)
+        return depth.load()
+
+    if compute_layer_depth:
+        layer_depth = _compute_and_slice_depth("layer")
+
+    if compute_interface_depth:
+        interface_depth = _compute_and_slice_depth("interface")
+
+    # Regrid laterally
+    if lat is not None or lon is not None:
+        if lat is not None:
+            lats = [lat]
+            title = title + f", lat = {lat}°N"
+        else:
+            resolution = infer_nominal_horizontal_resolution(grid_ds)
+            lats = _generate_coordinate_range(
+                field.lat.min().values, field.lat.max().values, resolution
+            )
+        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
+
+        if lon is not None:
+            lons = [lon]
+            title = title + f", lon = {lon}°E"
+        else:
+            resolution = infer_nominal_horizontal_resolution(grid_ds, lat)
+            lons = _generate_coordinate_range(
+                field.lon.min().values, field.lon.max().values, resolution
+            )
+        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
+
+        target_coords = {"lat": lats, "lon": lons}
+        lateral_regrid = LateralRegridFromROMS(field, target_coords)
+        field = lateral_regrid.apply(field).squeeze()
+
+        if compute_layer_depth:
+            layer_depth = lateral_regrid.apply(layer_depth).squeeze()
+
+    # Assign depth as coordinate
+    if compute_layer_depth:
+        field = field.assign_coords({"layer_depth": layer_depth})
+
+    if lat is not None:
+        field, layer_depth = _remove_edge_nans(
+            field, "lon", layer_depth if "layer_depth" in locals() else None
+        )
+    if lon is not None:
+        field, layer_depth = _remove_edge_nans(
+            field, "lat", layer_depth if "layer_depth" in locals() else None
+        )
+
+    # Regrid vertically
+    if depth is not None:
+        ds = xr.Dataset()
+        ds["s_rho"] = field["s_rho"]
+        vertical_regrid = VerticalRegridFromROMS(ds)
+        # Save attributes before vertical regridding
+        attrs = field.attrs
+        field = vertical_regrid.apply(field, layer_depth, np.array([depth])).squeeze()
+        # Reset attributes
+        field.attrs = attrs
+        title = title + f", depth = {depth}m"
+        depth_contours = False
+
+    # Plotting
+    if cmap_name == "RdBu_r":
+        vmax = max(field.max().values, -field.min().values)
+        vmin = -vmax
+    else:
+        vmax = field.max().values
+        vmin = field.min().values
+
+    cmap = plt.colormaps.get_cmap(cmap_name)
+    cmap.set_bad(color="gray")
+
+    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+    if (eta is None and xi is None) and (lat is None and lon is None):
+        fig = plot_2d_horizontal_field(
+            field=field,
+            depth_contours=depth_contours,
+            with_dim_names=with_dim_names,
+            title=title,
+            kwargs=kwargs,
+            add_colorbar=add_colorbar,
+        )
+    else:
+        if len(field.dims) == 2:
+            if compute_interface_depth:
+                if max_nr_layer_contours:
+                    # restrict number of layer_contours to 10 for the sake of plot clearity
+                    nr_layers = len(interface_depth["s_w"])
+                    selected_layers = np.linspace(
+                        0,
+                        nr_layers - 1,
+                        min(nr_layers, max_nr_layer_contours),
+                        dtype=int,
+                    )
+                    interface_depth = interface_depth.isel(s_w=selected_layers)
+            else:
+                interface_depth = None
+
+            fig = section_plot(
+                field,
+                interface_depth=interface_depth,
+                title=title,
+                kwargs={**kwargs, "add_colorbar": add_colorbar},
+                ax=ax,
+            )
+        else:
+            if "s_rho" in field.dims:
+                fig = profile_plot(field, title=title, ax=ax)
+            else:
+                fig = line_plot(field, title=title, ax=ax)
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")

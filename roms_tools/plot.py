@@ -1,3 +1,5 @@
+from typing import Any
+
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
@@ -744,6 +746,22 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
                 )
 
 
+def _set_plotting_kwargs(field: xr.DataArray, cmap_name: str) -> dict[str, Any]:
+    """Return vmin, vmax, and colormap for plotting."""
+
+    if cmap_name == "RdBu_r":
+        vmax = max(field.max().values, -field.min().values)
+        vmin = -vmax
+    else:
+        vmax = field.max().values
+        vmin = field.min().values
+
+    cmap = plt.colormaps.get_cmap(cmap_name)
+    cmap.set_bad(color="gray")
+
+    return {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+
+
 def plot(
     field: xr.DataArray,
     grid_ds: xr.DataArray,
@@ -1042,17 +1060,7 @@ def plot(
         depth_contours = False
 
     # Plotting
-    if cmap_name == "RdBu_r":
-        vmax = max(field.max().values, -field.min().values)
-        vmin = -vmax
-    else:
-        vmax = field.max().values
-        vmin = field.min().values
-
-    cmap = plt.colormaps.get_cmap(cmap_name)
-    cmap.set_bad(color="gray")
-
-    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+    kwargs = _set_plotting_kwargs(field, cmap_name)
 
     if (eta is None and xi is None) and (lat is None and lon is None):
         fig = plot_2d_horizontal_field(

@@ -113,16 +113,28 @@ class SurfaceForcing:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     start_time: Optional[datetime] = None
+    """The start time of the desired surface forcing data."""
     end_time: Optional[datetime] = None
+    """The end time of the desired surface forcing data."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
+    """Specifies the type of forcing data ("physics", "bgc")."""
     correct_radiation: bool = True
+    """Whether to correct shortwave radiation."""
     wind_dropoff: bool = False
+    """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
+    off."""
     coarse_grid_mode: str = "auto"
+    """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """Reference date for the model."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into

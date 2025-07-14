@@ -85,19 +85,34 @@ class Grid:
     """
 
     nx: int
+    """Number of grid points in the x-direction."""
     ny: int
+    """Number of grid points in the y-direction."""
     size_x: float
+    """Domain size in the x-direction (in kilometers)."""
     size_y: float
+    """Domain size in the y-direction (in kilometers)."""
     center_lon: float
+    """Longitude of grid center."""
     center_lat: float
+    """Latitude of grid center."""
     rot: float = 0
+    """Rotation of grid x-direction from lines of constant latitude, measured in
+    degrees."""
     N: int = 100
+    """The number of vertical levels."""
     theta_s: float = 5.0
+    """The surface control parameter."""
     theta_b: float = 2.0
+    """The bottom control parameter."""
     hc: float = 300.0
+    """The critical depth (in meters)."""
     topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
+    """Dictionary specifying the source of the topography data."""
     hmin: float = 5.0
+    """The minimum ocean depth (in meters)."""
     verbose: bool = False
+    """Whether to print grid generation steps with timing."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into

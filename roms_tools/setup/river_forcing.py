@@ -63,7 +63,7 @@ class RiverForcing:
     include_bgc : bool, optional
         Whether to include BGC tracers. Defaults to `False`.
     model_reference_date : datetime, optional
-        Reference date for the model. Default is January 1, 2000.
+        Reference date for the ROMS simulation. Default is January 1, 2000.
     indices : dict[str, list[tuple]], optional
         A dictionary specifying the river indices for each river to be included in the river forcing. This parameter is optional. If not provided,
         the river indices will be automatically determined based on the grid and the source dataset. If provided, it allows for explicit specification
@@ -85,12 +85,19 @@ class RiverForcing:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     start_time: datetime
+    """Start time of the desired river forcing data."""
     end_time: datetime
+    """End time of the desired river forcing data."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
+    """Dictionary specifying the source of the river forcing data."""
     convert_to_climatology: str = "if_any_missing"
+    """Determines when to compute climatology for river forcing."""
     include_bgc: bool = False
+    """Whether to include BGC tracers."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """Reference date for the ROMS simulation."""
 
     indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
     """A dictionary of river indices.

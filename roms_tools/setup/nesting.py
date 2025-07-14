@@ -50,6 +50,8 @@ class ChildGrid(Grid):
     """
 
     parent_grid: Grid
+    """The parent grid object, providing the reference for the child grid's topography
+    and mask."""
     boundaries: Dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
@@ -58,9 +60,12 @@ class ChildGrid(Grid):
             "west": True,
         }
     )
+    """Specifies which child grid boundaries (south, east, north, west) should be
+    adjusted for topography/mask and included in `ds_nesting`."""
     metadata: Dict[str, Any] = field(
         default_factory=lambda: {"prefix": "child", "period": 3600.0}
     )
+    """Dictionary configuring the boundary nesting process."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing child grid variables aligned with the parent grid’s

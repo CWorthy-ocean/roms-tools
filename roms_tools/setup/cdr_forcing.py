@@ -317,7 +317,7 @@ class CDRForcing(BaseModel):
     Parameters
     ----------
     grid : Grid, optional
-        Object representing the grid for spatial context.
+        Object representing the grid.
     start_time : datetime
         Start time of the ROMS model simulation.
     end_time : datetime
@@ -329,10 +329,15 @@ class CDRForcing(BaseModel):
     """
 
     grid: Grid | None = None
+    """Object representing the grid."""
     start_time: datetime
+    """Start time of the ROMS model simulation."""
     end_time: datetime
+    """End time of the ROMS model simulation."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """The reference date for the ROMS simulation."""
     releases: ReleaseCollector
+    """A list of one or more CDR release objects."""
 
     # this is defined during init and shouldn't be serialized
     _ds: xr.Dataset = None

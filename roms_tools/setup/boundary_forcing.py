@@ -104,8 +104,11 @@ class BoundaryForcing:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     start_time: Optional[datetime] = None
+    """The start time of the desired surface forcing data."""
     end_time: Optional[datetime] = None
+    """The end time of the desired surface forcing data."""
     boundaries: Dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
@@ -114,13 +117,23 @@ class BoundaryForcing:
             "west": True,
         }
     )
+    """Dictionary specifying which boundaries are forced (south, east, north, west)."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying the source of the boundary forcing data."""
     type: str = "physics"
+    """Specifies the type of forcing data ("physics", "bgc")."""
     apply_2d_horizontal_fill: bool = False
+    """Whether to perform a two-dimensional horizontal fill on the source data prior to
+    regridding to boundaries."""
     adjust_depth_for_sea_surface_height: bool = False
+    """Whether to account for sea surface height (`zeta`) variations when computing
+    depth coordinates."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """Reference date for the model."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into

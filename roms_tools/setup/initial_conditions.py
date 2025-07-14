@@ -104,14 +104,26 @@ class InitialConditions:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     ini_time: datetime
+    """The date and time at which the initial conditions are set."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying the source of the physical initial condition data."""
     bgc_source: Optional[Dict[str, Union[str, Path, List[Union[str, Path]]]]] = None
+    """Dictionary specifying the source of the biogeochemical (BGC) initial condition
+    data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """The reference date for the model."""
     adjust_depth_for_sea_surface_height: bool = False
+    """Whether to account for sea surface height variations when computing depth
+    coordinates."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     horizontal_chunk_size: int = 50
+    """The chunk size used for horizontal partitioning for the vertical regridding when
+    `use_dask = True`."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into

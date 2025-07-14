@@ -205,7 +205,6 @@ class ROMSOutput:
         plot(
             field=field,
             grid_ds=self.grid.ds,
-            grid_straddle=self.grid.straddle,
             zeta=zeta,
             s=s,
             eta=eta,

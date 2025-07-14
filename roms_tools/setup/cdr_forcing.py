@@ -162,6 +162,7 @@ class ReleaseCollector(RootModel):
 
     @property
     def release_type(self):
+        """Type of all releases."""
         release_types = set(r.release_type for r in self.root)
         return release_types.pop()
 

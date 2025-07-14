@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -105,11 +105,11 @@ class BoundaryForcing:
 
     grid: Grid
     """Object representing the grid information."""
-    start_time: Optional[datetime] = None
+    start_time: datetime | None = None
     """The start time of the desired surface forcing data."""
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
     """The end time of the desired surface forcing data."""
-    boundaries: Dict[str, bool] = field(
+    boundaries: dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
             "east": True,
@@ -118,7 +118,7 @@ class BoundaryForcing:
         }
     )
     """Dictionary specifying which boundaries are forced (south, east, north, west)."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: dict[str, str | Path | list[str | Path]]
     """Dictionary specifying the source of the boundary forcing data."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""

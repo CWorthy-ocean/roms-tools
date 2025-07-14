@@ -7,7 +7,7 @@
 * A unified `plot` function is now available, enabling users to create custom plots more easily. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 ```python
 from roms_tools.plot import plot
-plot(field, grid_ds)
+plot(field, grid.ds)
 ```
 
 ### Breaking Changes

@@ -786,6 +786,7 @@ def plot(
     """Generate a plot of a 2D or 3D ROMS field for a horizontal or vertical slice.
 
     This function supports plotting:
+
     - horizontal slices at a specific vertical level or depth,
     - vertical sections along constant indices or geographic lines,
     - or 2D fields directly.

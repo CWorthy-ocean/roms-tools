@@ -350,6 +350,8 @@ class Grid:
         else:
             self.straddle = False
 
+        self.ds.attrs["straddle"] = str(self.straddle)
+
     def _coarsen(self):
         """Update the grid by adding grid variables that are coarsened versions of the
         original fine-resoluion grid variables. The coarsening is by a factor of two.
@@ -425,7 +427,6 @@ class Grid:
         plot(
             field=field,
             grid_ds=self.ds,
-            grid_straddle=self.straddle,
             with_dim_names=with_dim_names,
             save_path=save_path,
             cmap_name="YlGnBu",
@@ -483,7 +484,6 @@ class Grid:
         plot(
             field=field,
             grid_ds=self.ds,
-            grid_straddle=self.straddle,
             s=s,
             eta=eta,
             xi=xi,

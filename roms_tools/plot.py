@@ -765,7 +765,6 @@ def _set_plotting_kwargs(field: xr.DataArray, cmap_name: str) -> dict[str, Any]:
 def plot(
     field: xr.DataArray,
     grid_ds: xr.DataArray,
-    grid_straddle: bool,
     zeta: xr.DataArray | float = 0.0,
     s: int | None = None,
     eta: int | None = None,
@@ -784,104 +783,100 @@ def plot(
     cmap_name: str | None = "YlOrRd",
     add_colorbar: bool = True,
 ) -> None:
-    """Generate a plot of a 2D or 3D field defined on a ROMS grid for a specified
-    horizontal or vertical slice.
+    """Generate a plot of a 2D or 3D ROMS field for a horizontal or vertical slice.
 
-    This function supports fields with both horizontal dimensions (e.g., eta, xi) and optionally a vertical dimension (s_rho).
-    It allows plotting horizontal layers, vertical sections, or depth slices depending on the specified parameters.
+    This function supports plotting:
+    - horizontal slices at a specific vertical level or depth,
+    - vertical sections along constant indices or geographic lines,
+    - or 2D fields directly.
 
     Parameters
     ----------
     field : xr.DataArray
-        ROMS output variable already selected at a single time index.
+        ROMS variable already selected at a single time index.
+
+    grid_ds : xr.DataArray
+        ROMS grid dataset containing the grid geometry, including latitude/longitude,
+        inverse grid spacing (`pm`, `pn`), depth (`h`), and land/sea mask.
+        It must also include the attribute `"straddle"` to indicate whether
+        the grid crosses the dateline.
+
+    zeta : xr.DataArray or float, optional
+        Sea surface height for computing vertical coordinates. Defaults to 0.0 (flat surface).
 
     s : int, optional
-        The index of the vertical layer (`s_rho`) to plot. If specified, the plot
-        will display a horizontal slice at that layer. Cannot be used simultaneously
-        with `depth`. Default is None.
+        Vertical layer index (`s_rho`) to plot. Cannot be used with `depth`. Default is None.
 
     eta : int, optional
-        The eta-index to plot. Used for generating vertical sections or plotting
-        horizontal slices along a constant eta-coordinate. Cannot be used simultaneously
-        with `lat` or `lon`, but can be combined with `xi`. Default is None.
+        Eta index for vertical sections or constant-eta horizontal slices.
+        Cannot be used with `lat` or `lon`. Default is None.
 
     xi : int, optional
-        The xi-index to plot. Used for generating vertical sections or plotting
-        horizontal slices along a constant xi-coordinate. Cannot be used simultaneously
-        with `lat` or `lon`, but can be combined with `eta`. Default is None.
+        Xi index for vertical sections or constant-xi horizontal slices.
+        Cannot be used with `lat` or `lon`. Default is None.
 
     depth : float, optional
-        Depth (in meters) to plot a horizontal slice at a specific depth level.
-        If specified, the plot will interpolate the field to the given depth.
-        Cannot be used simultaneously with `s` or for fields that are inherently
-        2D (such as "zeta"). Default is None.
+        Physical depth (in meters) for horizontal slices. Cannot be used with `s`. Default is None.
 
     lat : float, optional
-        Latitude (in degrees) to plot a vertical section at a specific
-        latitude. This option is useful for generating zonal (west-east)
-        sections. Cannot be used simultaneously with `eta` or `xi`, bu can be
-        combined with `lon`. Default is None.
+        Latitude (in degrees) for vertical sections. Cannot be combined with `eta` or `xi`. Default is None.
 
     lon : float, optional
-        Longitude (in degrees) to plot a vertical section at a specific
-        longitude. This option is useful for generating meridional (south-north) sections.
-        Cannot be used simultaneously with `eta` or `xi`, but can be combined
-        with `lat`. Default is None.
+        Longitude (in degrees) for vertical sections. Cannot be combined with `eta` or `xi`. Default is None.
 
     include_boundary : bool, optional
         Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
-        In diagnostic ROMS output fields, these boundary cells are set to zero, so excluding them can improve visualization.
-        Default is False.
+        Useful to exclude ghost points. Default is True.
 
     depth_contours : bool, optional
-        If True, overlays contours representing lines of constant depth on the plot.
-        This option is only relevant when the `s` parameter is provided (i.e., not None).
-        By default, depth contours are not shown (False).
+        If True, add contours of constant bathymetry to horizontal plots. Ignored otherwise.
+        Default is False.
 
     layer_contours : bool, optional
-        If True, contour lines representing the boundaries between vertical layers will
-        be added to the plot. This is particularly useful in vertical sections to
-        visualize the layering of the water column. Default is False.
+        If True, show vertical layer boundaries in vertical sections. Default is False.
 
     max_nr_layer_contours : int, optional
-        Number of layer contours displayed. Default is 10.
+        Maximum number of vertical layer contours to draw. Default is 10.
 
     use_coarse_grid : bool, optional
-        Use coarse grid data if True. Defaults to False.
+        Use precomputed coarse-resolution grid. Default is False.
 
     with_dim_names : bool, optional
-        Whether or not to plot the dimension names. Only relevant for 2D horizontal plots. Default is False.
+        Add grid dimension names (`xi`, `eta`) to the outer plot edges. Only for 2D plots. Default is False.
 
-    ax : matplotlib.axes.Axes, optional
-        The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots. Default is None.
+    ax : Axes, optional
+        Matplotlib axes object. If None, a new figure is created. Default is None.
 
     save_path : str, optional
-        Path to save the generated plot. If None, the plot is shown interactively.
-        Default is None.
+        File path to save the plot. If None, the plot is shown interactively. Default is None.
 
     cmap_name : str, optional
-        Colormap name to use.
+        Name of matplotlib colormap. Default is "YlOrRd".
 
     add_colorbar : bool, optional
-        Whether to include a colorbar. Defaults to True.
+        Whether to add a colorbar to the plot. Default is True.
 
     Returns
     -------
     None
-        This method does not return any value. It generates and displays a plot.
+        The function generates and shows or saves a plot. No value is returned.
 
     Raises
     ------
     ValueError
-        - If the field is 3D and none of `s`, `eta`, `xi`, `depth`, `lat`, or `lon` are specified.
-        - If the field is 2D and both `eta` and `xi` or both `lat` and `lon` are specified.
-        - If conflicting dimensions are specified (e.g., specifying `eta`/`xi` with `lat`/`lon` or both `s` and `depth`).
-        - If more than two dimensions are specified for a 3D field.
-        - If `eta` or `xi` indices are out of bounds.
-        - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
+        - If no plotting dimensions are specified for 3D fields.
+        - If conflicting dimensions are specified (e.g., both `s` and `depth`).
+        - If incompatible combinations of grid indices and geographic coordinates are provided.
+        - If specified `eta` or `xi` indices are out of bounds.
+        - If boundary indices are used when `include_boundary=False`.
     """
+
     # Input checks
     _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
+
+    if "straddle" not in grid_ds.attrs:
+        raise AttributeError("Grid dataset must have a 'straddle' attribute.")
+    straddle = grid_ds.attrs["straddle"]
 
     # Get horizontal dimensions and grid location
     horizontal_dims_dict = {
@@ -922,10 +917,11 @@ def plot(
         lat_deg = grid_ds[f"lat_{loc}"]
         lon_deg = grid_ds[f"lon_{loc}"]
         mask = grid_ds[f"mask_{loc}"]
-    if grid_straddle:
+
+    if straddle:
         lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
     if lon is not None:
-        lon = normalize_longitude(lon, grid_straddle)
+        lon = normalize_longitude(lon, straddle)
 
     field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
 

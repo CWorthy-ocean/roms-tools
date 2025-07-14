@@ -385,7 +385,6 @@ class TidalForcing:
         plot(
             field=field,
             grid_ds=self.grid.ds,
-            grid_straddle=self.grid.straddle,
             save_path=save_path,
             cmap_name="RdBu_r",
         )

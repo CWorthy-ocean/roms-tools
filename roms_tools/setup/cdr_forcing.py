@@ -946,13 +946,18 @@ def _validate_release_location(grid, release: Release):
 
         dx = 1 / grid.ds.pm
         dy = 1 / grid.ds.pn
-        max_grid_spacing = np.sqrt(dx**2 + dy**2) / 2
+
+        # Compute the maximum half-diagonal grid spacing across the domain
+        max_grid_spacing = (np.sqrt(dx**2 + dy**2) / 2).max()
+
+        # Apply a 10% safety margin
+        max_grid_spacing *= 1.1
 
         # Compute great-circle distance to all grid points
         dist = gc_dist(grid.ds.lon_rho, grid.ds.lat_rho, lon, release.lat)
         dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
-        if (dist_min > max_grid_spacing).all():
+        if dist_min > max_grid_spacing:
             raise ValueError(
                 f"Release site '{release.name}' is outside of the grid domain. "
                 "Ensure the provided (lat, lon) falls within the model grid extent."

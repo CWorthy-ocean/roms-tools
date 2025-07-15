@@ -12,6 +12,8 @@
 
 ### Bugfixes
 
+* Fix bug incorrectly identifying CDR releases as outside the domain ([#377](https://github.com/CWorthy-ocean/roms-tools/pull/377))
+
 ## v3.0.0
 
 ### New Features

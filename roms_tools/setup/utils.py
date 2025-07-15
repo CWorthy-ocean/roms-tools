@@ -1593,6 +1593,7 @@ def _to_dict(forcing_object) -> dict:
             "climatology",
             "verbose",
             "straddle",
+            "use_coarse_grid",
         )
     ]
 

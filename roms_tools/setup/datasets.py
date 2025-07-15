@@ -1,5 +1,6 @@
 import logging
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1828,7 +1829,7 @@ class RiverDataset:
         return ds
 
     def check_dataset(self, ds: xr.Dataset) -> None:
-        """Check if the dataset contains the specified variables and dimensions.
+        """Validate required variables, dimensions, and uniqueness of river names.
 
         Parameters
         ----------
@@ -1842,6 +1843,16 @@ class RiverDataset:
         """
 
         _check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
+
+        # Check that there are no duplicate river names
+        names = ds[self.var_names["name"]].values
+        names = names.astype(str)  # ensure they are strings
+
+        name_counts = Counter(names)
+        duplicates = [name for name, count in name_counts.items() if count > 1]
+
+        if duplicates:
+            raise ValueError(f"Duplicate river names found: {duplicates}")
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Dummy method to be overridden by child classes to add time information to the

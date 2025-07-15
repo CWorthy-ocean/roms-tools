@@ -520,10 +520,10 @@ def _add_boundary_to_ax(
         ),  # top
     ]
 
-    for i, (lon, lat, dim_name) in enumerate(edges):
-        ax.plot(lon, lat, transform=proj, c=c, label=label if i == 0 else None)
+    if with_dim_names:
+        for i, (lon, lat, dim_name) in enumerate(edges):
+            ax.plot(lon, lat, transform=proj, c=c, label=label if i == 0 else None)
 
-        if with_dim_names:
             # Get start and end point
             start_lon = float(lon[0])
             start_lat = float(lat[0])

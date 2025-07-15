@@ -71,7 +71,7 @@ def _add_topography(
     hraw = _smooth_topography_globally(hraw, smooth_factor)
     if verbose:
         logging.info(
-            f"Domain-wide topograhy smoothing: {time.time() - start_time:.3f} seconds"
+            f"Domain-wide topography smoothing: {time.time() - start_time:.3f} seconds"
         )
 
     # smooth topography locally to satisfy r < rmax

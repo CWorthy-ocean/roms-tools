@@ -687,16 +687,7 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
 
     # 3D fields: Check for valid dimension specification
     if len(field.dims) == 3:
-        if not any(
-            [
-                s is not None,
-                eta is not None,
-                xi is not None,
-                depth is not None,
-                lat is not None,
-                lon is not None,
-            ]
-        ):
+        if all(val is None for val in [s, eta, xi, depth, lat, lon]):
             raise ValueError(
                 "Invalid input: For 3D fields, you must specify at least one of the dimensions 's', 'eta', 'xi', 'depth', 'lat', or 'lon'."
             )
@@ -723,9 +714,9 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
     # Check that indices are within bounds
     if eta is not None:
         dim = "eta_rho" if "eta_rho" in field.dims else "eta_v"
-        if not eta < len(field[dim]):
+        if eta >= len(field[dim]):
             raise ValueError(
-                f"Invalid eta index: {eta} is out of bounds. Must be between 0 and {len(field[dim]) - 1}."
+                f"Invalid eta index: {eta} is out of bounds. Must be less than {len(field[dim])}."
             )
         if not include_boundary:
             if eta == 0 or eta == len(field[dim]) - 1:
@@ -738,7 +729,7 @@ def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
         dim = "xi_rho" if "xi_rho" in field.dims else "xi_u"
         if not xi < len(field[dim]):
             raise ValueError(
-                f"Invalid eta index: {xi} is out of bounds. Must be between 0 and {len(field[dim]) - 1}."
+                f"Invalid eta index: {xi} is out of bounds. Must be less than {len(field[dim])}."
             )
         if not include_boundary:
             if xi == 0 or xi == len(field[dim]) - 1:

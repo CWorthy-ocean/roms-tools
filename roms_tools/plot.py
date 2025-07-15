@@ -77,7 +77,7 @@ def plot_2d_horizontal_field(
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
-    if c is not None or with_dim_names:
+    if c or with_dim_names:
         _add_boundary_to_ax(
             ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names
         )

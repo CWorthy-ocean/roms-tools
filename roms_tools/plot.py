@@ -461,7 +461,7 @@ def line_plot(field, title="", ax=None):
 def _get_edge(
     arr: xr.DataArray, dim_name: str, pos: Literal["start", "end"]
 ) -> xr.DataArray:
-    """Extract the first or last slice along the given dimension."""
+    """Extract the first ("start") or last ("end") slice along the given dimension."""
     if pos == "start":
         return arr.isel({dim_name: 0})
     elif pos == "end":

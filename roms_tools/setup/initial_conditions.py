@@ -703,7 +703,6 @@ class InitialConditions:
             If the field specified by `var_name` is 3D and none of `s`, `eta`, or `xi` are specified.
             If the field specified by `var_name` is 2D and both `eta` and `xi` are specified.
         """
-        # Check if variable exists
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in the dataset.")
 
@@ -721,7 +720,6 @@ class InitialConditions:
 
         field = self.ds[var_name].squeeze()
 
-        # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
             cmap_name = "RdBu_r"
         elif var_name in ["temp", "salt"]:

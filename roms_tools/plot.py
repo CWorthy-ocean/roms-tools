@@ -17,16 +17,16 @@ from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 
 def plot_2d_horizontal_field(
-    field,
-    depth_contours=False,
-    c="k",
-    title="",
-    with_dim_names=False,
-    plot_data=True,
-    add_colorbar=True,
-    kwargs={},
-    ax=None,
-):
+    field: xr.DataArray,
+    depth_contours: bool = False,
+    c: str = "k",
+    title: str = "",
+    with_dim_names: bool = False,
+    plot_data: bool = True,
+    add_colorbar: bool = True,
+    kwargs: dict[str, Any] | None = None,
+    ax: Axes | None = None,
+) -> None:
     """Plot a grid or field on a map using Cartopy projection.
 
     Supports adding depth contours, if desired.

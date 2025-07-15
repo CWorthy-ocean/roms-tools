@@ -27,9 +27,9 @@ def plot_2d_horizontal_field(
     kwargs={},
     ax=None,
 ):
-    """Plots a grid or field on a map with optional depth contours.
+    """Plot a grid or field on a map using Cartopy projection.
 
-    This function plots a map using Cartopy projections. It supports plotting a grid, a field, and adding depth contours if desired.
+    Supports adding depth contours, if desired.
 
     Parameters
     ----------

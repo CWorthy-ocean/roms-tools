@@ -11,13 +11,14 @@ from roms_tools import Grid
 from roms_tools.plot import _plot_nesting
 from roms_tools.setup.topography import _clip_depth
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
+    from_yaml,
     get_boundary_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    pop_grid_data,
+    to_dict,
     wrap_longitudes,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 
@@ -47,16 +48,11 @@ class ChildGrid(Grid):
 
         - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
         - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        Dataset containing child grid variables aligned with the parent grid’s topography and mask at the boundaries.
-    ds_nesting : xr.Dataset
-        Dataset containing boundary mappings, where child grid boundaries are mapped onto parent grid indices.
     """
 
     parent_grid: Grid
+    """The parent grid object, providing the reference for the child grid's topography
+    and mask."""
     boundaries: Dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
@@ -65,9 +61,19 @@ class ChildGrid(Grid):
             "west": True,
         }
     )
+    """Specifies which child grid boundaries (south, east, north, west) should be
+    adjusted for topography/mask and included in `ds_nesting`."""
     metadata: Dict[str, Any] = field(
         default_factory=lambda: {"prefix": "child", "period": 3600.0}
     )
+    """Dictionary configuring the boundary nesting process."""
+
+    ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing child grid variables aligned with the parent grid’s
+    topography and mask at the boundaries."""
+    ds_nesting: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing boundary mappings, where child grid boundaries are
+    mapped onto parent grid indices."""
 
     def __post_init__(self):
 
@@ -211,8 +217,9 @@ class ChildGrid(Grid):
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["ds_nesting"])
+        forcing_dict["ChildGrid"] = pop_grid_data(forcing_dict["ChildGrid"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "ChildGrid":
@@ -231,7 +238,7 @@ class ChildGrid(Grid):
         filepath = Path(filepath)
 
         parent_grid = Grid.from_yaml(filepath, "ParentGrid")
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         return cls(parent_grid=parent_grid, **params)
 

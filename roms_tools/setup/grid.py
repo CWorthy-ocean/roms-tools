@@ -16,13 +16,13 @@ from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.mask import _add_mask, _add_velocity_masks
 from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.utils import (
-    _pop_grid_data,
-    _write_to_yaml,
     extract_single_value,
     gc_dist,
     get_target_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    pop_grid_data,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
@@ -85,21 +85,40 @@ class Grid:
     """
 
     nx: int
+    """Number of grid points in the x-direction."""
     ny: int
+    """Number of grid points in the y-direction."""
     size_x: float
+    """Domain size in the x-direction (in kilometers)."""
     size_y: float
+    """Domain size in the y-direction (in kilometers)."""
     center_lon: float
+    """Longitude of grid center."""
     center_lat: float
+    """Latitude of grid center."""
     rot: float = 0
+    """Rotation of grid x-direction from lines of constant latitude, measured in
+    degrees."""
     N: int = 100
+    """The number of vertical levels."""
     theta_s: float = 5.0
+    """The surface control parameter."""
     theta_b: float = 2.0
+    """The bottom control parameter."""
     hc: float = 300.0
+    """The critical depth (in meters)."""
     topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
+    """Dictionary specifying the source of the topography data."""
     hmin: float = 5.0
+    """The minimum ocean depth (in meters)."""
     verbose: bool = False
+    """Whether to print grid generation steps with timing."""
+
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
     straddle: bool = field(init=False, repr=False)
+    """Whether the grid straddles the dateline."""
 
     def __post_init__(self):
 
@@ -787,10 +806,10 @@ class Grid:
             The path to the YAML file where the parameters will be saved.
         """
         data = asdict(self)
-        data = _pop_grid_data(data)
+        data = pop_grid_data(data)
         forcing_dict = {self.__class__.__name__: data}
 
-        _write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

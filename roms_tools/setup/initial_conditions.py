@@ -14,16 +14,16 @@ from roms_tools.plot import _line_plot, _plot, _profile_plot, _section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
+    from_yaml,
     get_target_coords,
     get_variable_metadata,
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import (
     get_dask_chunks,
@@ -104,16 +104,30 @@ class InitialConditions:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     ini_time: datetime
+    """The date and time at which the initial conditions are set."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying the source of the physical initial condition data."""
     bgc_source: Optional[Dict[str, Union[str, Path, List[Union[str, Path]]]]] = None
+    """Dictionary specifying the source of the biogeochemical (BGC) initial condition
+    data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """The reference date for the model."""
     adjust_depth_for_sea_surface_height: bool = False
+    """Whether to account for sea surface height variations when computing depth
+    coordinates."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     horizontal_chunk_size: int = 50
+    """The chunk size used for horizontal partitioning for the vertical regridding when
+    `use_dask = True`."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
 
     def __post_init__(self):
 
@@ -929,8 +943,8 @@ class InitialConditions:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -955,7 +969,7 @@ class InitialConditions:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        initial_conditions_params = _from_yaml(cls, filepath)
+        initial_conditions_params = from_yaml(cls, filepath)
         return cls(
             grid=grid,
             **initial_conditions_params,

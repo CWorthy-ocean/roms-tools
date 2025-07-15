@@ -21,11 +21,9 @@ from roms_tools.setup.datasets import (
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
+    from_yaml,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
@@ -34,6 +32,8 @@ from roms_tools.setup.utils import (
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets, transpose_dimensions
 
@@ -113,18 +113,34 @@ class SurfaceForcing:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     start_time: Optional[datetime] = None
+    """The start time of the desired surface forcing data."""
     end_time: Optional[datetime] = None
+    """The end time of the desired surface forcing data."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
+    """Specifies the type of forcing data ("physics", "bgc")."""
     correct_radiation: bool = True
+    """Whether to correct shortwave radiation."""
     wind_dropoff: bool = False
+    """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
+    off."""
     coarse_grid_mode: str = "auto"
+    """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """Reference date for the model."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
+    use_coarse_grid: bool = field(init=False, repr=False)
+    """Whether data is interpolated onto grid coarsened by factor 2."""
 
     def __post_init__(self):
 
@@ -746,8 +762,8 @@ class SurfaceForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask", "use_coarse_grid"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -772,6 +788,6 @@ class SurfaceForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         return cls(grid=grid, **params, use_dask=use_dask)

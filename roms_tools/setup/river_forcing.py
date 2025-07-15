@@ -14,16 +14,16 @@ from roms_tools import Grid
 from roms_tools.plot import _get_projection, _plot
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
+    from_yaml,
     gc_dist,
     get_target_coords,
     get_tracer_defaults,
     get_variable_metadata,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 
@@ -63,7 +63,7 @@ class RiverForcing:
     include_bgc : bool, optional
         Whether to include BGC tracers. Defaults to `False`.
     model_reference_date : datetime, optional
-        Reference date for the model. Default is January 1, 2000.
+        Reference date for the ROMS simulation. Default is January 1, 2000.
     indices : dict[str, list[tuple]], optional
         A dictionary specifying the river indices for each river to be included in the river forcing. This parameter is optional. If not provided,
         the river indices will be automatically determined based on the grid and the source dataset. If provided, it allows for explicit specification
@@ -82,29 +82,34 @@ class RiverForcing:
 
         In the example, the dictionary provides the river names as keys, and the values are lists of tuples, where each tuple represents the
         `(eta_rho, xi_rho)` indices for a river location.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the river forcing data.
-    climatology : bool
-        Indicates whether the final river forcing is climatological.
-    Dict[str, Union[int, List[int]]]
-        A dictionary of river indices. If not provided during initialization, it will be automatically determined
-        based on the grid and the source dataset. The dictionary structure is the same as described in the `indices` parameter docstring.
     """
 
     grid: Grid
+    """Object representing the grid information."""
     start_time: datetime
+    """Start time of the desired river forcing data."""
     end_time: datetime
+    """End time of the desired river forcing data."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
+    """Dictionary specifying the source of the river forcing data."""
     convert_to_climatology: str = "if_any_missing"
+    """Determines when to compute climatology for river forcing."""
     include_bgc: bool = False
+    """Whether to include BGC tracers."""
     model_reference_date: datetime = datetime(2000, 1, 1)
-    indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
+    """Reference date for the ROMS simulation."""
 
+    indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
+    """A dictionary of river indices.
+
+    If not provided during initialization, it will be automatically determined based on
+    the grid and the source dataset.
+    """
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
     climatology: xr.Dataset = field(init=False, repr=False)
+    """Indicates whether the final river forcing is climatological."""
 
     def __post_init__(self):
         self._input_checks()
@@ -678,7 +683,7 @@ class RiverForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
+        forcing_dict = to_dict(self, exclude=["climatology"])
 
         # Convert indices format
         indices_data = forcing_dict["RiverForcing"]["indices"]
@@ -687,7 +692,7 @@ class RiverForcing:
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
         forcing_dict["RiverForcing"]["indices"] = serialized_indices
 
-        _write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":
@@ -706,7 +711,7 @@ class RiverForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         def convert_indices_format(indices):
             indices = {

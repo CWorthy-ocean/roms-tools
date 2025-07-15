@@ -643,7 +643,16 @@ def get_projection(lon, lat):
     )
 
 
-def _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary):
+def _validate_plot_inputs(
+    field: xr.DataArray,
+    s: int | None,
+    eta: int | None,
+    xi: int | None,
+    depth: float | None,
+    lat: float | None,
+    lon: float | None,
+    include_boundary: bool,
+) -> None:
     """Validate input parameters for the plot method.
 
     Parameters

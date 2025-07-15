@@ -218,7 +218,7 @@ class ChildGrid(Grid):
         """
 
         forcing_dict = to_dict(self, exclude=["ds_nesting"])
-        forcing_dict = pop_grid_data(forcing_dict)
+        forcing_dict["ChildGrid"] = pop_grid_data(forcing_dict["ChildGrid"])
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod

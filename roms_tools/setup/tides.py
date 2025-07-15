@@ -13,9 +13,7 @@ from roms_tools.plot import _plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import TPXOManager
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
+    from_yaml,
     get_target_coords,
     get_variable_metadata,
     get_vector_pairs,
@@ -24,6 +22,8 @@ from roms_tools.setup.utils import (
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 
@@ -464,8 +464,8 @@ class TidalForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -490,7 +490,7 @@ class TidalForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        tidal_forcing_params = _from_yaml(cls, filepath)
+        tidal_forcing_params = from_yaml(cls, filepath)
         return cls(
             grid=grid,
             **tidal_forcing_params,

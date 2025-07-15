@@ -32,13 +32,13 @@ from roms_tools.setup.cdr_release import (
     VolumeRelease,
 )
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_tracer_metadata_to_ds,
     convert_to_relative_days,
+    from_yaml,
     gc_dist,
     get_target_coords,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import (
     _generate_focused_coordinate_range,
@@ -782,7 +782,7 @@ class CDRForcing(BaseModel):
 
     @model_serializer
     def _serialize(self) -> dict:
-        return _to_dict(self)
+        return to_dict(self)
 
     def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
@@ -798,7 +798,7 @@ class CDRForcing(BaseModel):
         metadata = self.releases[0].get_tracer_metadata()
         forcing_dict["CDRForcing"]["_tracer_metadata"] = metadata
 
-        _write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: str | Path) -> "CDRForcing":
@@ -817,7 +817,7 @@ class CDRForcing(BaseModel):
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
         params.pop("_tracer_metadata", None)
 
         return cls(grid=grid, **params)

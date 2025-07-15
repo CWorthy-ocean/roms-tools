@@ -14,16 +14,16 @@ from roms_tools.plot import _line_plot, _plot, _profile_plot, _section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
+    from_yaml,
     get_target_coords,
     get_variable_metadata,
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import (
     get_dask_chunks,
@@ -943,8 +943,8 @@ class InitialConditions:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -969,7 +969,7 @@ class InitialConditions:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        initial_conditions_params = _from_yaml(cls, filepath)
+        initial_conditions_params = from_yaml(cls, filepath)
         return cls(
             grid=grid,
             **initial_conditions_params,

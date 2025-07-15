@@ -21,11 +21,9 @@ from roms_tools.setup.datasets import (
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
+    from_yaml,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
@@ -34,6 +32,8 @@ from roms_tools.setup.utils import (
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets, transpose_dimensions
 
@@ -762,8 +762,8 @@ class SurfaceForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask", "use_coarse_grid"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -788,6 +788,6 @@ class SurfaceForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         return cls(grid=grid, **params, use_dask=use_dask)

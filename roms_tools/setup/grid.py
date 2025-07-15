@@ -16,13 +16,13 @@ from roms_tools.plot import _plot, _section_plot
 from roms_tools.setup.mask import _add_mask, _add_velocity_masks
 from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.utils import (
-    _pop_grid_data,
-    _write_to_yaml,
     extract_single_value,
     gc_dist,
     get_target_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    pop_grid_data,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
@@ -806,10 +806,10 @@ class Grid:
             The path to the YAML file where the parameters will be saved.
         """
         data = asdict(self)
-        data = _pop_grid_data(data)
+        data = pop_grid_data(data)
         forcing_dict = {self.__class__.__name__: data}
 
-        _write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(

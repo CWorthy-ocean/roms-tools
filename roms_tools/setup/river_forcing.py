@@ -14,16 +14,16 @@ from roms_tools import Grid
 from roms_tools.plot import _get_projection, _plot
 from roms_tools.setup.datasets import DaiRiverDataset
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
+    from_yaml,
     gc_dist,
     get_target_coords,
     get_tracer_defaults,
     get_variable_metadata,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 
@@ -683,7 +683,7 @@ class RiverForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
+        forcing_dict = to_dict(self, exclude=["climatology"])
 
         # Convert indices format
         indices_data = forcing_dict["RiverForcing"]["indices"]
@@ -692,7 +692,7 @@ class RiverForcing:
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
         forcing_dict["RiverForcing"]["indices"] = serialized_indices
 
-        _write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":
@@ -711,7 +711,7 @@ class RiverForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         def convert_indices_format(indices):
             indices = {

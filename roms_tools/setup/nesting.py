@@ -11,13 +11,14 @@ from roms_tools import Grid
 from roms_tools.plot import _plot_nesting
 from roms_tools.setup.topography import _clip_depth
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
+    from_yaml,
     get_boundary_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    pop_grid_data,
+    to_dict,
     wrap_longitudes,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 
@@ -216,8 +217,9 @@ class ChildGrid(Grid):
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["ds_nesting"])
+        forcing_dict = pop_grid_data(forcing_dict)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: Union[str, Path]) -> "ChildGrid":
@@ -236,7 +238,7 @@ class ChildGrid(Grid):
         filepath = Path(filepath)
 
         parent_grid = Grid.from_yaml(filepath, "ParentGrid")
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         return cls(parent_grid=parent_grid, **params)
 

@@ -1482,7 +1482,7 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
-def _write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
+def write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
     This function writes the provided pre-serialized YAML data along with metadata, such as the version
@@ -1527,7 +1527,7 @@ def _write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
         )
 
 
-def _to_dict(forcing_object) -> dict:
+def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     """Serialize a forcing object (including its grid) into a dictionary.
 
     This function serializes a dataclass object (forcing_object) and its associated
@@ -1542,6 +1542,8 @@ def _to_dict(forcing_object) -> dict:
     forcing_object : object
         The object that contains the forcing data, typically a dataclass with attributes
         such as `grid`, `start_time`, `end_time`, etc.
+    exclude : list[str], optional
+        List of keys to exclude from the serialized output. Defaults to empty list. The field "ds" is always excluded by default.
 
     Returns
     -------
@@ -1551,10 +1553,10 @@ def _to_dict(forcing_object) -> dict:
     # Serialize Grid data
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
         grid_data = asdict(forcing_object.grid)
-        grid_yaml_data = {"Grid": _pop_grid_data(grid_data)}
+        grid_yaml_data = {"Grid": pop_grid_data(grid_data)}
     elif hasattr(forcing_object, "parent_grid"):
         grid_data = asdict(forcing_object.parent_grid)
-        grid_yaml_data = {"ParentGrid": _pop_grid_data(grid_data)}
+        grid_yaml_data = {"ParentGrid": pop_grid_data(grid_data)}
 
     # Ensure Paths are Strings
     def ensure_paths_are_strings(obj, key):
@@ -1581,21 +1583,11 @@ def _to_dict(forcing_object) -> dict:
     else:
         raise TypeError("Forcing object is not a dataclass or pydantic model")
 
-    filtered_field_names = [
-        param
-        for param in field_names
-        if param
-        not in (
-            "grid",
-            "parent_grid",
-            "ds",
-            "use_dask",
-            "climatology",
-            "verbose",
-            "straddle",
-            "use_coarse_grid",
-        )
-    ]
+    if exclude is None:
+        exclude = []
+    exclude = ["grid", "parent_grid", "ds"] + exclude
+
+    filtered_field_names = [param for param in field_names if param not in exclude]
 
     for field_name in filtered_field_names:
         # Retrieve the value of each field using getattr
@@ -1620,7 +1612,7 @@ def _to_dict(forcing_object) -> dict:
     return yaml_data
 
 
-def _pop_grid_data(grid_data):
+def pop_grid_data(grid_data):
     grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
     grid_data.pop("straddle", None)
     grid_data.pop("verbose", None)
@@ -1628,7 +1620,7 @@ def _pop_grid_data(grid_data):
     return grid_data
 
 
-def _from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, Any]:
+def from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, Any]:
     """Extract the configuration data for a given forcing object from a YAML file.
 
     This function reads a YAML file, searches for the configuration data associated

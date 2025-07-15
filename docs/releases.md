@@ -12,6 +12,8 @@
 
 ### Bugfixes
 
+* Add a validation step that makes sure that river names in the source river dataset are unique ([#378](https://github.com/CWorthy-ocean/roms-tools/pull/378))
+
 ## v3.0.0
 
 ### New Features

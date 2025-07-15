@@ -1065,7 +1065,7 @@ def plot(
         if len(field.dims) == 2:
             if compute_interface_depth:
                 if max_nr_layer_contours:
-                    # restrict number of layer_contours to 10 for the sake of plot clearity
+                    # restrict number of layer_contours for the sake of plot clearity
                     nr_layers = len(interface_depth["s_w"])
                     selected_layers = np.linspace(
                         0,

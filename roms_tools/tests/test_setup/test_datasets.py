@@ -648,7 +648,7 @@ class TestTPXODataset:
 
 
 class TestRiverDataset:
-    def test_duplicate_river_names_raises(self, tmp_path):
+    def test_deduplicate_river_names(self, tmp_path):
         sample_dim_and_var_names = {
             "dim_names": {"station": "station", "time": "time"},
             "var_names": {
@@ -674,11 +674,16 @@ class TestRiverDataset:
         file_path = tmp_path / "rivers.nc"
         ds.to_netcdf(file_path)
 
-        with pytest.raises(ValueError, match="Duplicate river names found: .*Amazon.*"):
-            RiverDataset(
-                filename=file_path,
-                start_time=datetime(2000, 1, 1),
-                end_time=datetime(2000, 1, 2),
-                dim_names=sample_dim_and_var_names["dim_names"],
-                var_names=sample_dim_and_var_names["var_names"],
-            )
+        river_dataset = RiverDataset(
+            filename=file_path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 1, 2),
+            dim_names=sample_dim_and_var_names["dim_names"],
+            var_names=sample_dim_and_var_names["var_names"],
+        )
+
+        names = river_dataset.ds["name"].values
+        assert "Amazon_1" in names
+        assert "Amazon_2" in names
+        assert "Nile" in names
+        assert len(set(names)) == len(names)  # all names must be unique

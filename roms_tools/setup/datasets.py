@@ -1,6 +1,6 @@
 import logging
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1768,6 +1768,9 @@ class RiverDataset:
         ds = self.load_data()
         ds = self.clean_up(ds)
         self.check_dataset(ds)
+        ds = _deduplicate_river_names(
+            ds, self.var_names["name"], self.dim_names["station"]
+        )
 
         # Select relevant times
         ds = self.add_time_info(ds)
@@ -1843,16 +1846,6 @@ class RiverDataset:
         """
 
         _check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
-
-        # Check that there are no duplicate river names
-        names = ds[self.var_names["name"]].values
-        names = names.astype(str)  # ensure they are strings
-
-        name_counts = Counter(names)
-        duplicates = [name for name, count in name_counts.items() if count > 1]
-
-        if duplicates:
-            raise ValueError(f"Duplicate river names found: {duplicates}")
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Dummy method to be overridden by child classes to add time information to the
@@ -2915,3 +2908,38 @@ def modified_julian_days(year, month, day, hour=0):
     mjd = jd - 2400000.5
 
     return mjd
+
+
+def _deduplicate_river_names(
+    ds: xr.Dataset, name_var: str, station_dim: str
+) -> xr.Dataset:
+    """Ensure river names are unique by appending _1, _2, etc.
+
+    to duplicates, excluding non-duplicates.
+    """
+    original = ds[name_var]
+
+    # Force cast to plain Python strings
+    names = [str(name) for name in original.values]
+
+    # Count all names
+    name_counts = Counter(names)
+    seen = defaultdict(int)
+
+    unique_names = []
+    for name in names:
+        if name_counts[name] > 1:
+            seen[name] += 1
+            unique_names.append(f"{name}_{seen[name]}")
+        else:
+            unique_names.append(name)
+
+    # Replace with updated names while preserving dtype, dims, attrs
+    updated_array = xr.DataArray(
+        data=np.array(unique_names, dtype=f"<U{max(len(n) for n in unique_names)}"),
+        dims=original.dims,
+        attrs=original.attrs,
+    )
+    ds[name_var] = updated_array
+
+    return ds

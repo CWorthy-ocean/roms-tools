@@ -494,8 +494,8 @@ def _add_boundary_to_ax(
     """
     proj = ccrs.PlateCarree()
 
-    xi_dim = [d for d in lon_deg.dims if d.startswith("xi_")][0]
-    eta_dim = [d for d in lon_deg.dims if d.startswith("eta_")][0]
+    xi_dim = next(d for d in lon_deg.dims if d.startswith("xi_"))
+    eta_dim = next(d for d in lon_deg.dims if d.startswith("eta_"))
 
     edges = [
         (

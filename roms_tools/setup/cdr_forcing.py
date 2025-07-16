@@ -38,6 +38,7 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    normalize_longitude,
     save_datasets,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates
@@ -622,9 +623,7 @@ class CDRForcing(BaseModel):
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-        plot_2d_horizontal_field(
-            field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False
-        )
+        plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         # Plot release locations
         colors = _get_release_colors(valid_release_names)
@@ -677,19 +676,20 @@ class CDRForcing(BaseModel):
         gs = gridspec.GridSpec(nrows=2, ncols=2, figure=fig)
         trans = get_projection(lon_deg, lat_deg)
         ax0 = fig.add_subplot(gs[:, 0], projection=trans)
-        # ax1 = fig.add_subplot(gs[0, 1])
-        # ax2 = fig.add_subplot(gs[1, 1])
+        ax1 = fig.add_subplot(gs[0, 1])
+        ax2 = fig.add_subplot(gs[1, 1])
 
-        # Top down view plot
+        # Top down view plot of depth-integrated Gaussian
         depth_integrated_field = _map_horizontal_gaussian(self.grid, release)
         depth_integrated_field = depth_integrated_field.assign_coords(
             {"lon": lon_deg, "lat": lat_deg}
         )
-        plot(
-            field=depth_integrated_field,
-            grid=self.grid.ds,
+        cmap = plt.colormaps.get_cmap("RdPu")
+        cmap.set_bad(color="gray")
+        plot_2d_horizontal_field(
+            field=depth_integrated_field.where(self.grid.ds.mask_rho),
             ax=ax0,
-            cmap_name="RdPu",
+            kwargs={"cmap": cmap},
             add_colorbar=False,
         )
         if mark_release_center:
@@ -697,47 +697,40 @@ class CDRForcing(BaseModel):
                 grid=self.grid, releases=[release], ax=ax0, include_legend=False
             )
 
-        ## Side view plots
-        # kwargs = {
-        #    "cmap": cmap,
-        #    "y": "depth",
-        #    "yincrease": False,
-        #    "add_colorbar": False,
-        # }
-        ## Plot along latitude
-        # vertical_field = _map_3d_gaussian(
-        #    self.grid, release, horizontal_field, orientation="latitude"
-        # )
-        # more_kwargs = {"x": "lat"}
-        # vertical_field.plot(**kwargs, **more_kwargs, ax=ax1)
-        # if mark_release_center:
-        #    ax1.plot(
-        #        release.lat,
-        #        release.depth,
-        #        color="k",
-        #        marker="x",
-        #        markersize=8,
-        #        markeredgewidth=2,
-        #    )
+        # Spread horizontal Gaussian field into the vertical
+        distribution_3d = _map_3d_gaussian(self.grid, release, depth_integrated_field)
 
-        # ax1.set(title=f"Longitude: {release.lon}°E", xlabel="Latitude [°N]")
-        ## Plot along longitude
-        # vertical_field = _map_vertical_gaussian(
-        #    self.grid, release, horizontal_field, orientation="longitude"
-        # )
-        # more_kwargs = {"x": "lon"}
-        # vertical_field.plot(**kwargs, **more_kwargs, ax=ax2)
-        # if mark_release_center:
-        #    release_lon = normalize_longitude(release.lon, self.grid.straddle)
-        #    ax2.plot(
-        #        release_lon,
-        #        release.depth,
-        #        color="k",
-        #        marker="x",
-        #        markersize=8,
-        #        markeredgewidth=2,
-        #    )
-        # ax2.set(title=f"Latitude: {release.lat}°N", xlabel="Longitude [°E]")
+        release_lon = normalize_longitude(release.lon, self.grid.straddle)
+
+        plot(
+            field=distribution_3d,
+            grid_ds=self.grid.ds,
+            lon=release_lon,
+            ax=ax1,
+            cmap_name="RdPu",
+            add_colorbar=False,
+        )
+        ax1.set(title=f"Longitude: {release.lon}°E", xlabel="Latitude [°N]")
+
+        plot(
+            field=distribution_3d,
+            grid_ds=self.grid.ds,
+            lat=release.lat,
+            ax=ax2,
+            cmap_name="RdPu",
+            add_colorbar=False,
+        )
+        ax2.set(title=f"Latitude: {release.lat}°N", xlabel="Longitude [°E]")
+
+        if mark_release_center:
+            kwargs = {
+                "color": "k",
+                "marker": "x",
+                "markersize": 8,
+                "markeredgewidth": 2,
+            }
+            ax1.plot(release.lat, release.depth, **kwargs)
+            ax2.plot(release_lon, release.depth, **kwargs)
 
         # Adjust layout and title
         fig.subplots_adjust(hspace=0.45)
@@ -1044,7 +1037,9 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
     return distribution_2d
 
 
-def _map_3d_gaussian(grid, release, distribution_2d, orientation="latitude"):
+def _map_3d_gaussian(
+    grid: Grid, release: Release, distribution_2d: xr.DataArray
+) -> xr.DataArray:
     """Extends 2D Gaussian to 3D Gaussian.
 
     Parameters
@@ -1057,8 +1052,6 @@ def _map_3d_gaussian(grid, release, distribution_2d, orientation="latitude"):
         spread (`vsc`) for the Gaussian distribution.
     distribution_2d : xr.DataArray
         2D horizontal tracer field defined on the ROMS grid.
-    orientation : {"latitude", "longitude"}, default "latitude"
-        Orientation of the extracted vertical section.
 
     Returns
     -------
@@ -1084,7 +1077,7 @@ def _map_3d_gaussian(grid, release, distribution_2d, orientation="latitude"):
         depth_interface = compute_depth_coordinates(
             grid.ds, zeta=0, depth_type="interface", location="rho"
         )
-        dz = depth_interface.diff("s_w")
+        dz = depth_interface.diff("s_w").rename({"s_w": "s_rho"})
 
         # Compute vertical Gaussian shape
         exponent = -(((depth - release.depth) / release.vsc) ** 2)
@@ -1093,7 +1086,8 @@ def _map_3d_gaussian(grid, release, distribution_2d, orientation="latitude"):
         # Apply vertical Gaussian scaling
         distribution_3d = distribution_2d * vertical_profile * dz
 
-        # Normalize to preserve integral (optional depending on context)
+        # Normalize
+        distribution_3d /= release.vsc * np.sqrt(np.pi)
         distribution_3d /= distribution_3d.sum()
 
     return distribution_3d

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
@@ -63,7 +64,7 @@ def plot_2d_horizontal_field(
     add_colorbar: bool = True,
     kwargs: dict[str, Any] | None = None,
     ax: Axes | None = None,
-) -> None:
+) -> Figure | None:
     """Plot a grid or field on a map using Cartopy projection.
 
     Supports adding depth contours, if desired.
@@ -98,6 +99,7 @@ def plot_2d_horizontal_field(
     NotImplementedError
         If the domain contains the North or South Pole.
     """
+    fig: Figure | None = None
 
     field = field.squeeze()
     lon_deg = field.lon
@@ -132,9 +134,7 @@ def plot_2d_horizontal_field(
 
     ax.set_title(title)
 
-    # Only return fig if it was created inside the function (i.e., ax was not provided)
-    if ax is None:
-        return fig
+    return fig
 
 
 def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):

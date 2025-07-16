@@ -2913,10 +2913,8 @@ def modified_julian_days(year, month, day, hour=0):
 def _deduplicate_river_names(
     ds: xr.Dataset, name_var: str, station_dim: str
 ) -> xr.Dataset:
-    """Ensure river names are unique by appending _1, _2, etc.
-
-    to duplicates, excluding non-duplicates.
-    """
+    """Ensure river names are unique by appending _1, _2 to duplicates, excluding non-
+    duplicates."""
     original = ds[name_var]
 
     # Force cast to plain Python strings

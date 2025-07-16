@@ -15,6 +15,43 @@ from roms_tools.utils import (
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
+LABEL_COLOR = "k"
+LABEL_SZ = 10
+
+
+def _add_gridlines(ax: Axes) -> None:
+    """Add styled gridlines with latitude and longitude labels to the plot.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes to which gridlines will be added.
+    """
+    gridlines = ax.gridlines(
+        draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
+    )
+    gridlines.top_labels = False  # Hide top labels
+    gridlines.right_labels = False  # Hide right labels
+    gridlines.xlabel_style = {
+        "size": LABEL_SZ,
+        "color": LABEL_COLOR,
+    }  # Customize longitude label style
+    gridlines.ylabel_style = {
+        "size": LABEL_SZ,
+        "color": LABEL_COLOR,
+    }  # Customize latitude label style
+
+
+def _add_coastlines(ax: Axes) -> None:
+    """Add coastlines to the plot with standard styling.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes to which coastlines will be added.
+    """
+    ax.coastlines(resolution="50m", linewidth=0.5, color="black")
+
 
 def plot_2d_horizontal_field(
     field: xr.DataArray,
@@ -90,24 +127,8 @@ def plot_2d_horizontal_field(
             kwargs=kwargs,
         )
 
-    ax.coastlines(
-        resolution="50m", linewidth=0.5, color="black"
-    )  # add map of coastlines
-
-    # Add gridlines with labels for latitude and longitude
-    gridlines = ax.gridlines(
-        draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
-    )
-    gridlines.top_labels = False  # Hide top labels
-    gridlines.right_labels = False  # Hide right labels
-    gridlines.xlabel_style = {
-        "size": 10,
-        "color": "black",
-    }  # Customize longitude label style
-    gridlines.ylabel_style = {
-        "size": 10,
-        "color": "black",
-    }  # Customize latitude label style
+    _add_coastlines(ax)
+    _add_gridlines(ax)
 
     ax.set_title(title)
 
@@ -190,24 +211,8 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
         kwargs=kwargs,
     )
 
-    ax.coastlines(
-        resolution="50m", linewidth=0.5, color="black"
-    )  # add map of coastlines
-
-    # Add gridlines with labels for latitude and longitude
-    gridlines = ax.gridlines(
-        draw_labels=True, linewidth=0.5, color="gray", alpha=0.7, linestyle="--"
-    )
-    gridlines.top_labels = False  # Hide top labels
-    gridlines.right_labels = False  # Hide right labels
-    gridlines.xlabel_style = {
-        "size": 10,
-        "color": "black",
-    }  # Customize longitude label style
-    gridlines.ylabel_style = {
-        "size": 10,
-        "color": "black",
-    }  # Customize latitude label style
+    _add_coastlines(ax)
+    _add_gridlines(ax)
 
     ax.legend(loc="best")
 

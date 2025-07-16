@@ -85,3 +85,4 @@ Utilities
    :toctree: generated/
 
    roms_tools.tiling.partition
+   roms_tools.plot.plot

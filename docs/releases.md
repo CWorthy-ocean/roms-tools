@@ -4,14 +4,27 @@
 
 ### New Features
 
+* A unified `plot` function is now available, enabling users to create custom plots more easily. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
+```python
+from roms_tools.plot import plot
+plot(field, grid.ds)
+```
+
 ### Breaking Changes
 
+* `Grid.plot()` no longer accepts the `bathymetry` argument. Bathymetry is now always plotted by default. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
+
 ### Internal Changes
+
+* Most classes now delegate their `.plot()` methods to the centralized plot function, reducing code duplication and simplifying maintenance. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 
 ### Documentation
 
 ### Bugfixes
 
+* Fix bug incorrectly identifying CDR releases as outside the domain ([#377](https://github.com/CWorthy-ocean/roms-tools/pull/377))
+* Add a de-duplication step that ensures that river names are unique ([#378](https://github.com/CWorthy-ocean/roms-tools/pull/378))
+* Grid boundary plotting now provides a more accurate and consistent visual representation, with a default edge color of black. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 * Handle overlapping rivers correctly ([#356](https://github.com/CWorthy-ocean/roms-tools/pull/356))
 
 ## v3.0.0

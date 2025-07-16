@@ -1,5 +1,6 @@
 import logging
 import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1767,6 +1768,9 @@ class RiverDataset:
         ds = self.load_data()
         ds = self.clean_up(ds)
         self.check_dataset(ds)
+        ds = _deduplicate_river_names(
+            ds, self.var_names["name"], self.dim_names["station"]
+        )
 
         # Select relevant times
         ds = self.add_time_info(ds)
@@ -1828,7 +1832,7 @@ class RiverDataset:
         return ds
 
     def check_dataset(self, ds: xr.Dataset) -> None:
-        """Check if the dataset contains the specified variables and dimensions.
+        """Validate required variables, dimensions, and uniqueness of river names.
 
         Parameters
         ----------
@@ -2930,3 +2934,36 @@ def get_indices_of_nearest_grid_cell_for_rivers(
     }
 
     return river_indices
+
+
+def _deduplicate_river_names(
+    ds: xr.Dataset, name_var: str, station_dim: str
+) -> xr.Dataset:
+    """Ensure river names are unique by appending _1, _2 to duplicates, excluding non-
+    duplicates."""
+    original = ds[name_var]
+
+    # Force cast to plain Python strings
+    names = [str(name) for name in original.values]
+
+    # Count all names
+    name_counts = Counter(names)
+    seen = defaultdict(int)
+
+    unique_names = []
+    for name in names:
+        if name_counts[name] > 1:
+            seen[name] += 1
+            unique_names.append(f"{name}_{seen[name]}")
+        else:
+            unique_names.append(name)
+
+    # Replace with updated names while preserving dtype, dims, attrs
+    updated_array = xr.DataArray(
+        data=np.array(unique_names, dtype=f"<U{max(len(n) for n in unique_names)}"),
+        dims=original.dims,
+        attrs=original.attrs,
+    )
+    ds[name_var] = updated_array
+
+    return ds

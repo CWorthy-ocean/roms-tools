@@ -32,13 +32,13 @@ from roms_tools.setup.cdr_release import (
     VolumeRelease,
 )
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_tracer_metadata_to_ds,
     convert_to_relative_days,
+    from_yaml,
     gc_dist,
     get_target_coords,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import (
     _generate_focused_coordinate_range,
@@ -162,6 +162,7 @@ class ReleaseCollector(RootModel):
 
     @property
     def release_type(self):
+        """Type of all releases."""
         release_types = set(r.release_type for r in self.root)
         return release_types.pop()
 
@@ -317,7 +318,7 @@ class CDRForcing(BaseModel):
     Parameters
     ----------
     grid : Grid, optional
-        Object representing the grid for spatial context.
+        Object representing the grid.
     start_time : datetime
         Start time of the ROMS model simulation.
     end_time : datetime
@@ -326,18 +327,18 @@ class CDRForcing(BaseModel):
         Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
     releases : list of Release
         A list of one or more CDR release objects.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray dataset containing release metadata and forcing variables.
     """
 
     grid: Grid | None = None
+    """Object representing the grid."""
     start_time: datetime
+    """Start time of the ROMS model simulation."""
     end_time: datetime
+    """End time of the ROMS model simulation."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """The reference date for the ROMS simulation."""
     releases: ReleaseCollector
+    """A list of one or more CDR release objects."""
 
     # this is defined during init and shouldn't be serialized
     _ds: xr.Dataset = None
@@ -369,6 +370,7 @@ class CDRForcing(BaseModel):
 
     @property
     def ds(self) -> xr.Dataset:
+        """The xarray dataset containing release metadata and forcing variables."""
         return self._ds
 
     def plot_volume_flux(
@@ -782,7 +784,7 @@ class CDRForcing(BaseModel):
 
     @model_serializer
     def _serialize(self) -> dict:
-        return _to_dict(self)
+        return to_dict(self)
 
     def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
@@ -798,7 +800,7 @@ class CDRForcing(BaseModel):
         metadata = self.releases[0].get_tracer_metadata()
         forcing_dict["CDRForcing"]["_tracer_metadata"] = metadata
 
-        _write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: str | Path) -> "CDRForcing":
@@ -817,7 +819,7 @@ class CDRForcing(BaseModel):
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
         params.pop("_tracer_metadata", None)
 
         return cls(grid=grid, **params)
@@ -946,13 +948,18 @@ def _validate_release_location(grid, release: Release):
 
         dx = 1 / grid.ds.pm
         dy = 1 / grid.ds.pn
-        max_grid_spacing = np.sqrt(dx**2 + dy**2) / 2
+
+        # Compute the maximum half-diagonal grid spacing across the domain
+        max_grid_spacing = (np.sqrt(dx**2 + dy**2) / 2).max()
+
+        # Apply a 10% safety margin
+        max_grid_spacing *= 1.1
 
         # Compute great-circle distance to all grid points
         dist = gc_dist(grid.ds.lon_rho, grid.ds.lat_rho, lon, release.lat)
         dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
-        if (dist_min > max_grid_spacing).all():
+        if dist_min > max_grid_spacing:
             raise ValueError(
                 f"Release site '{release.name}' is outside of the grid domain. "
                 "Ensure the provided (lat, lon) falls within the model grid extent."

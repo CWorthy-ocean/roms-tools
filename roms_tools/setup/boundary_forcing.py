@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,12 +15,10 @@ from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_time_info_to_ds,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
+    from_yaml,
     get_boundary_coords,
     get_target_coords,
     get_variable_metadata,
@@ -29,6 +27,8 @@ from roms_tools.setup.utils import (
     one_dim_fill,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import (
     interpolate_from_rho_to_u,
@@ -104,9 +104,12 @@ class BoundaryForcing:
     """
 
     grid: Grid
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    boundaries: Dict[str, bool] = field(
+    """Object representing the grid information."""
+    start_time: datetime | None = None
+    """The start time of the desired surface forcing data."""
+    end_time: datetime | None = None
+    """The end time of the desired surface forcing data."""
+    boundaries: dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
             "east": True,
@@ -114,15 +117,27 @@ class BoundaryForcing:
             "west": True,
         }
     )
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying which boundaries are forced (south, east, north, west)."""
+    source: dict[str, str | Path | list[str | Path]]
+    """Dictionary specifying the source of the boundary forcing data."""
     type: str = "physics"
+    """Specifies the type of forcing data ("physics", "bgc")."""
     apply_2d_horizontal_fill: bool = False
+    """Whether to perform a two-dimensional horizontal fill on the source data prior to
+    regridding to boundaries."""
     adjust_depth_for_sea_surface_height: bool = False
+    """Whether to account for sea surface height (`zeta`) variations when computing
+    depth coordinates."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """Reference date for the model."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
 
     def __post_init__(self):
 
@@ -1005,8 +1020,8 @@ class BoundaryForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -1031,7 +1046,7 @@ class BoundaryForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         # Create and return an instance of InitialConditions
         return cls(grid=grid, **params, use_dask=use_dask)

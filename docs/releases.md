@@ -22,6 +22,7 @@ plot(field, grid.ds)
 
 ### Bugfixes
 
+* Fix bug incorrectly identifying CDR releases as outside the domain ([#377](https://github.com/CWorthy-ocean/roms-tools/pull/377))
 * Grid boundary plotting now provides a more accurate and consistent visual representation, with a default edge color of black. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 
 ## v3.0.0

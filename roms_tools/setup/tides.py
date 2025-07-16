@@ -12,9 +12,7 @@ from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import TPXOManager
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
+    from_yaml,
     get_target_coords,
     get_variable_metadata,
     get_vector_pairs,
@@ -23,6 +21,8 @@ from roms_tools.setup.utils import (
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets
 
@@ -34,7 +34,7 @@ class TidalForcing:
     Parameters
     ----------
     grid : Grid
-        The grid object representing the ROMS grid associated with the tidal forcing data.
+        Object representing the grid information.
     source : Dict[str, Union[str, Path, Dict[str, Union[str, Path]]]]
         Dictionary specifying the source of the tidal data. Keys include:
 
@@ -80,13 +80,21 @@ class TidalForcing:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying the source of the tidal data."""
     ntides: int = 10
+    """Number of constituents to consider."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """The reference date for the ROMS simulation."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
 
     def __post_init__(self):
 
@@ -430,8 +438,8 @@ class TidalForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -456,7 +464,7 @@ class TidalForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        tidal_forcing_params = _from_yaml(cls, filepath)
+        tidal_forcing_params = from_yaml(cls, filepath)
         return cls(
             grid=grid,
             **tidal_forcing_params,

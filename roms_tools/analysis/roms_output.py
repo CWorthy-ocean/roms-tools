@@ -36,6 +36,7 @@ class ROMSOutput:
     path : Union[str, Path, List[Union[str, Path]]]
         Filename, or list of filenames with model output.
     model_reference_date : datetime, optional
+        Reference date of ROMS simulation.
         If not specified, this is inferred from metadata of the model output
         If specified and does not coincide with metadata, a warning is raised.
     adjust_depth_for_sea_surface_height : bool, optional
@@ -46,11 +47,19 @@ class ROMSOutput:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     path: Union[str, Path]
+    """Filename, or list of filenames with model output."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     model_reference_date: Optional[datetime] = None
+    """Reference date of ROMS simulation."""
     adjust_depth_for_sea_surface_height: Optional[bool] = False
+    """Whether to account for sea surface height variations when computing depth
+    coordinates."""
+
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing the ROMS output."""
 
     def __post_init__(self):
 

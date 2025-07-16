@@ -5,12 +5,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.plot import _plot
+from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
@@ -623,7 +622,12 @@ class SurfaceForcing:
 
         return ds
 
-    def plot(self, var_name, time=0) -> None:
+    def plot(
+        self,
+        var_name: str,
+        time: int = 0,
+        save_path: str | None = None,
+    ) -> None:
         """Plot the specified surface forcing field for a given time slice.
 
         Parameters
@@ -648,6 +652,10 @@ class SurfaceForcing:
         time : int, optional
             The time index to plot. Default is 0, which corresponds to the first
             time slice.
+
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
 
         Returns
         -------
@@ -676,36 +684,19 @@ class SurfaceForcing:
             with ProgressBar():
                 field = field.load()
 
-        field = field.where(self.target_coords["mask"])
-
-        lon_deg = self.target_coords["lon"]
-        lat_deg = self.target_coords["lat"]
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-        title = field.long_name
-
         if var_name in ["uwnd", "vwnd"]:
-            vmax = max(field.max().values, -field.min().values)
-            vmin = -vmax
-            cmap = plt.colormaps.get_cmap("RdBu_r")
+            cmap_name = "RdBu_r"
+        elif var_name in ["swrad", "lwrad", "Tair", "qair"]:
+            cmap_name = "YlOrRd"
         else:
-            vmax = field.max().values
-            vmin = field.min().values
-            if var_name in ["swrad", "lwrad", "Tair", "qair"]:
-                cmap = plt.colormaps.get_cmap("YlOrRd")
-            else:
-                cmap = plt.colormaps.get_cmap("YlGnBu")
-        cmap.set_bad(color="gray")
+            cmap_name = "YlGnBu"
 
-        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-        _plot(
+        plot(
             field=field,
-            title=title,
-            c="g",
-            kwargs=kwargs,
+            grid_ds=self.grid.ds,
+            use_coarse_grid=self.use_coarse_grid,
+            save_path=save_path,
+            cmap_name=cmap_name,
         )
 
     def save(

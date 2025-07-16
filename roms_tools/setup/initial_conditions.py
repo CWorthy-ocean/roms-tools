@@ -5,12 +5,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from matplotlib.axes import Axes
 
 from roms_tools import Grid
-from roms_tools.plot import _line_plot, _plot, _profile_plot, _section_plot
+from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
 from roms_tools.setup.utils import (
@@ -34,7 +34,6 @@ from roms_tools.utils import (
 )
 from roms_tools.vertical_coordinate import (
     compute_depth,
-    compute_depth_coordinates,
 )
 
 
@@ -625,13 +624,14 @@ class InitialConditions:
 
     def plot(
         self,
-        var_name,
-        s=None,
-        eta=None,
-        xi=None,
-        depth_contours=False,
-        layer_contours=False,
-        ax=None,
+        var_name: str,
+        s: int | None = None,
+        eta: int | None = None,
+        xi: int | None = None,
+        depth_contours: bool = False,
+        layer_contours: bool = False,
+        ax: Axes | None = None,
+        save_path: str | None = None,
     ) -> None:
         """Plot the initial conditions field for a given eta-, xi-, or s_rho- slice.
 
@@ -701,6 +701,9 @@ class InitialConditions:
             contours displayed is limited to a maximum of 10. Default is False.
         ax : matplotlib.axes.Axes, optional
             The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots. Default is None.
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
 
         Returns
         -------
@@ -714,44 +717,8 @@ class InitialConditions:
             If the field specified by `var_name` is 3D and none of `s`, `eta`, or `xi` are specified.
             If the field specified by `var_name` is 2D and both `eta` and `xi` are specified.
         """
-
-        field = self.ds[var_name].squeeze()
-
-        if len(field.dims) == 3:
-            if not any([s is not None, eta is not None, xi is not None]):
-                raise ValueError(
-                    "Invalid input: For 3D fields, you must specify at least one of the dimensions 's', 'eta', or 'xi'."
-                )
-            if all([s is not None, eta is not None, xi is not None]):
-                raise ValueError(
-                    "Ambiguous input: For 3D fields, specify at most two of 's', 'eta', or 'xi'. Specifying all three is not allowed."
-                )
-
-        if len(field.dims) == 2 and all([eta is not None, xi is not None]):
-            raise ValueError(
-                "Conflicting input: For 2D fields, specify only one dimension, either 'eta' or 'xi', not both."
-            )
-
-        field = self.ds[var_name].squeeze()
-
-        # Get correct mask and horizontal coordinates
-        if all(dim in field.dims for dim in ["eta_rho", "xi_rho"]):
-            loc = "rho"
-        elif all(dim in field.dims for dim in ["eta_rho", "xi_u"]):
-            loc = "u"
-        elif all(dim in field.dims for dim in ["eta_v", "xi_rho"]):
-            loc = "v"
-        else:
-            ValueError("provided field does not have two horizontal dimension")
-
-        mask = self.grid.ds[f"mask_{loc}"]
-        lat_deg = self.grid.ds[f"lat_{loc}"]
-        lon_deg = self.grid.ds[f"lon_{loc}"]
-
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+        if var_name not in self.ds:
+            raise ValueError(f"Variable '{var_name}' is not found in the dataset.")
 
         # Load the data
         if self.use_dask:
@@ -760,148 +727,33 @@ class InitialConditions:
             with ProgressBar():
                 self.ds[var_name].load()
 
-        # Retrieve depth coordinates
-        if s is not None:
-            layer_contours = False
-        # Note that `layer_depth_{loc}` has already been computed during `__post_init__`.
-        layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"].squeeze().load()
-
-        # Slice the field as desired
-        def _slice_and_assign(
-            field,
-            mask,
-            layer_depth,
-            title,
-            dim_name,
-            dim_values,
-            idx,
-        ):
-            if dim_name in field.dims:
-                title = title + f", {dim_name} = {dim_values[idx].item()}"
-                field = field.isel(**{dim_name: idx})
-                mask = mask.isel(**{dim_name: idx})
-                layer_depth = layer_depth.isel(**{dim_name: idx})
-                if "s_rho" in field.dims:
-                    field = field.assign_coords({"layer_depth": layer_depth})
-            else:
-                raise ValueError(
-                    f"None of the expected dimensions ({dim_name}) found in field."
-                )
-            return field, mask, layer_depth, title
-
-        title = field.long_name
-        if s is not None:
-            title = title + f", s_rho = {field.s_rho[s].item()}"
-            field = field.isel(s_rho=s)
-            layer_depth = layer_depth.isel(s_rho=s)
-            field = field.assign_coords({"layer_depth": layer_depth})
+        if self.adjust_depth_for_sea_surface_height:
+            zeta = self.ds.zeta.squeeze().load()
         else:
-            depth_contours = False
+            zeta = 0
 
-        if eta is not None:
-            field, mask, layer_depth, title = _slice_and_assign(
-                field,
-                mask,
-                layer_depth,
-                title,
-                "eta_rho" if "eta_rho" in field.dims else "eta_v",
-                field.eta_rho if "eta_rho" in field.dims else field.eta_v,
-                eta,
-            )
+        field = self.ds[var_name].squeeze()
 
-        if xi is not None:
-            field, mask, layer_depth, title = _slice_and_assign(
-                field,
-                mask,
-                layer_depth,
-                title,
-                "xi_rho" if "xi_rho" in field.dims else "xi_u",
-                field.xi_rho if "xi_rho" in field.dims else field.xi_u,
-                xi,
-            )
-
-        # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
-            vmax = max(field.max().values, -field.min().values)
-            vmin = -vmax
-            cmap = plt.colormaps.get_cmap("RdBu_r")
+            cmap_name = "RdBu_r"
+        elif var_name in ["temp", "salt"]:
+            cmap_name = "YlOrRd"
         else:
-            vmax = field.max().values
-            vmin = field.min().values
-            if var_name in ["temp", "salt"]:
-                cmap = plt.colormaps.get_cmap("YlOrRd")
-            else:
-                cmap = plt.colormaps.get_cmap("YlGn")
-        cmap.set_bad(color="gray")
-        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+            cmap_name = "YlGn"
 
-        if eta is None and xi is None:
-            _plot(
-                field=field.where(mask),
-                depth_contours=depth_contours,
-                title=title,
-                kwargs=kwargs,
-                c="g",
-            )
-        else:
-            if len(field.dims) == 2:
-                if layer_contours:
-                    if loc == "rho":
-                        # interface_depth_rho has not been computed yet
-                        interface_depth = compute_depth_coordinates(
-                            self.grid.ds,
-                            self.ds.zeta,
-                            depth_type="interface",
-                            location=loc,
-                            eta=eta,
-                            xi=xi,
-                        )
-                    elif loc == "u":
-                        index_kwargs = {}
-                        if eta is not None:
-                            index_kwargs["eta_rho"] = eta
-                        if xi is not None:
-                            index_kwargs["xi_u"] = xi
-
-                        interface_depth = (
-                            self.ds_depth_coords[f"interface_depth_{loc}"]
-                            .isel(**index_kwargs)
-                            .squeeze()
-                        )
-                    elif loc == "v":
-                        index_kwargs = {}
-                        if eta is not None:
-                            index_kwargs["eta_v"] = eta
-                        if xi is not None:
-                            index_kwargs["xi_rho"] = xi
-
-                        interface_depth = (
-                            self.ds_depth_coords[f"interface_depth_{loc}"]
-                            .isel(**index_kwargs)
-                            .squeeze()
-                        )
-
-                    # restrict number of layer_contours to 10 for the sake of plot clearity
-                    nr_layers = len(interface_depth["s_w"])
-                    selected_layers = np.linspace(
-                        0, nr_layers - 1, min(nr_layers, 10), dtype=int
-                    )
-                    interface_depth = interface_depth.isel(s_w=selected_layers)
-                else:
-                    interface_depth = None
-
-                _section_plot(
-                    field,
-                    interface_depth=interface_depth,
-                    title=title,
-                    kwargs=kwargs,
-                    ax=ax,
-                )
-            else:
-                if "s_rho" in field.dims:
-                    _profile_plot(field.where(mask), title=title, ax=ax)
-                else:
-                    _line_plot(field.where(mask), title=title, ax=ax)
+        plot(
+            field=field,
+            grid_ds=self.grid.ds,
+            zeta=zeta,
+            s=s,
+            eta=eta,
+            xi=xi,
+            depth_contours=depth_contours,
+            layer_contours=layer_contours,
+            ax=ax,
+            save_path=save_path,
+            cmap_name=cmap_name,
+        )
 
     def save(self, filepath: Union[str, Path]) -> None:
         """Save the initial conditions information to one netCDF4 file.

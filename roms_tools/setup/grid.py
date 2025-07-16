@@ -6,13 +6,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import yaml
+from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
-from roms_tools.plot import _plot, _section_plot
+from roms_tools.plot import plot
 from roms_tools.setup.mask import _add_mask, _add_velocity_masks
 from roms_tools.setup.topography import _add_topography
 from roms_tools.setup.utils import (
@@ -369,6 +369,8 @@ class Grid:
         else:
             self.straddle = False
 
+        self.ds.attrs["straddle"] = str(self.straddle)
+
     def _coarsen(self):
         """Update the grid by adding grid variables that are coarsened versions of the
         original fine-resoluion grid variables. The coarsening is by a factor of two.
@@ -418,19 +420,20 @@ class Grid:
         self.ds = ds
 
     def plot(
-        self, bathymetry: bool = True, title: str = None, with_dim_names: bool = False
+        self,
+        with_dim_names: bool = False,
+        save_path: str | None = None,
     ) -> None:
         """Plot the grid.
 
         Parameters
         ----------
-        bathymetry : bool, optional
-            Whether or not to plot the bathymetry. Default is True.
-        title : str, optional
-            The title of the plot. If not provided, it will be set to a default.
         with_dim_names : bool, optional
             Whether or not to plot the dimension names. Default is False.
 
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
 
         Returns
         -------
@@ -438,37 +441,24 @@ class Grid:
             This method does not return any value. It generates and displays a plot.
         """
 
-        field = self.ds.h.where(self.ds.mask_rho)
-        lat_deg = self.ds.lat_rho
-        lon_deg = self.ds.lon_rho
-        if self.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+        field = self.ds["h"]
 
-        if bathymetry:
-            if title is None:
-                title = "ROMS grid and bathymetry"
+        plot(
+            field=field,
+            grid_ds=self.ds,
+            with_dim_names=with_dim_names,
+            save_path=save_path,
+            cmap_name="YlGnBu",
+        )
 
-            vmax = field.max().values
-            vmin = field.min().values
-            cmap = plt.colormaps.get_cmap("YlGnBu")
-            cmap.set_bad(color="gray")
-            kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-            _plot(
-                field=field,
-                title=title,
-                with_dim_names=with_dim_names,
-                kwargs=kwargs,
-            )
-        else:
-            if title is None:
-                title = "ROMS grid"
-            _plot(
-                field=field, title=title, with_dim_names=with_dim_names, plot_data=False
-            )
-
-    def plot_vertical_coordinate(self, s=None, eta=None, xi=None, ax=None) -> None:
+    def plot_vertical_coordinate(
+        self,
+        s: int | None = None,
+        eta: int | None = None,
+        xi: int | None = None,
+        max_nr_layer_contours: int | None = None,
+        ax: Axes | None = None,
+    ) -> None:
         """Plot the layer depth for a given eta-, xi-, or s-slice.
 
         Parameters
@@ -479,6 +469,8 @@ class Grid:
             The eta-index to plot. Default is None.
         xi : int, optional
             The xi-index to plot. Default is None.
+        max_nr_layer_contours : int, optional
+            Number of layer contours displayed. Only relevant when plotting a vertical section. Default is all.
         ax : matplotlib.axes.Axes, optional
             The axes to plot on. If None, a new figure is created. Note that this argument is ignored for 2D horizontal plots.
 
@@ -493,59 +485,32 @@ class Grid:
             If not exactly one of s, eta, xi is specified.
         """
 
-        if sum(s is not None for s in [s, eta, xi]) != 1:
+        if sum(i is not None for i in [s, eta, xi]) != 1:
             raise ValueError("Exactly one of s, eta, or xi must be specified.")
 
-        depth = compute_depth_coordinates(
-            self.ds, zeta=0, depth_type="layer", location="rho", eta=eta, xi=xi
-        )
-
-        title = "Layer depth at rho-points"
-        if eta is not None:
-            title = title + f", eta_rho = {self.ds.eta_rho[eta].item()}"
-        if xi is not None:
-            title = title + f", xi_rho = {self.ds.xi_rho[xi].item()}"
         if s is not None:
-            title = title + f", s_rho = {depth.s_rho[s].item()}"
-            depth = depth.isel(s_rho=s)
-
-            vmax = depth.max().values
-            vmin = depth.min().values
-            cmap = plt.colormaps.get_cmap("YlGnBu")
-            cmap.set_bad(color="gray")
-            kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-            lat_deg = self.ds.lat_rho
-            lon_deg = self.ds.lon_rho
-            if self.straddle:
-                lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-            depth = depth.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-            _plot(
-                field=depth.where(self.ds.mask_rho),
-                depth_contours=False,
-                title=title,
-                kwargs=kwargs,
+            field = compute_depth_coordinates(
+                self.ds, zeta=0, depth_type="layer", location="rho"
             )
+            layer_contours = False
+            add_colorbar = True
         else:
-            field = xr.zeros_like(depth)
-            field = field.assign_coords({"layer_depth": depth})
+            field = xr.zeros_like(self.ds.s_rho * self.ds["h"])
+            field.attrs["long_name"] = "layer depth at rho-points"
+            layer_contours = True
+            add_colorbar = False
 
-            interface_depth = compute_depth_coordinates(
-                self.ds, zeta=0, depth_type="interface", eta=eta, xi=xi
-            )
-
-            cmap = plt.colormaps.get_cmap("YlGnBu")
-            cmap.set_bad(color="gray")
-            kwargs = {"vmax": 0.0, "vmin": 0.0, "cmap": cmap, "add_colorbar": False}
-
-            _section_plot(
-                field=field,
-                interface_depth=interface_depth,
-                title=title,
-                kwargs=kwargs,
-                ax=ax,
-            )
+        plot(
+            field=field,
+            grid_ds=self.ds,
+            s=s,
+            eta=eta,
+            xi=xi,
+            layer_contours=layer_contours,
+            max_nr_layer_contours=max_nr_layer_contours,
+            cmap_name="YlGnBu",
+            add_colorbar=add_colorbar,
+        )
 
     def save(self, filepath: Union[str, Path]) -> None:
         """Save the grid information to a netCDF4 file.
@@ -1196,45 +1161,6 @@ class Grid:
         )
 
         return ds
-
-    def _infer_nominal_horizontal_resolution(self, lat=None):
-        """Estimate the nominal horizontal resolution of the grid in degrees at a
-        specified latitude.
-
-        This method calculates the nominal horizontal resolution of the grid by first
-        determining the average grid spacing in meters. The spacing is then converted
-        to degrees, accounting for the Earth's curvature, and the latitude where the
-        resolution is being computed.
-
-        Parameters
-        ----------
-        lat : float, optional
-            Latitude (in degrees) at which to estimate the horizontal resolution.
-            If not provided, the resolution is calculated at the average latitude of
-            the grid (`lat_rho`).
-
-        Returns
-        -------
-        float
-            The estimated horizontal resolution in degrees, adjusted for the Earth's curvature.
-        """
-        if lat is None:
-            # Center latitude in degrees
-            lat = (self.ds.lat_rho.max() + self.ds.lat_rho.min()) / 2
-
-        # Convert latitude to radians
-        lat_rad = np.deg2rad(lat)
-
-        # Mean resolution in meters
-        resolution_in_m = ((1 / self.ds.pm).mean() + (1 / self.ds.pn).mean()) / 2
-
-        # Meters per degree at the equator
-        meters_per_degree = 2 * np.pi * R_EARTH / 360
-
-        # Correct for latitude by multiplying by cos(latitude) for longitude
-        resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
-
-        return resolution_in_degrees
 
     def _compute_exponential_depth_levels(self, Nz=None, max_depth=None, h=None):
         """Compute vertical grid center and face depths using an exponential profile.

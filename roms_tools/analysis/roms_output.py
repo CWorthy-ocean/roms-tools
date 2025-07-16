@@ -6,21 +6,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from matplotlib.axes import Axes
 
 from roms_tools import Grid
-from roms_tools.analysis.utils import _validate_plot_inputs
-from roms_tools.plot import _line_plot, _plot, _profile_plot, _section_plot
+from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
     _generate_coordinate_range,
     _load_data,
-    _remove_edge_nans,
+    infer_nominal_horizontal_resolution,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    normalize_longitude,
 )
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
@@ -77,18 +75,18 @@ class ROMSOutput:
 
     def plot(
         self,
-        var_name,
-        time=0,
-        s=None,
-        eta=None,
-        xi=None,
-        depth=None,
-        lat=None,
-        lon=None,
-        include_boundary=False,
-        depth_contours=False,
-        ax=None,
-        save_path=None,
+        var_name: str,
+        time: int = 0,
+        s: int | None = None,
+        eta: int | None = None,
+        xi: int | None = None,
+        depth: float | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        include_boundary: bool = False,
+        depth_contours: bool = False,
+        ax: Axes | None = None,
+        save_path: str | None = None,
     ) -> None:
         """Generate a plot of a ROMS output field for a specified vertical or horizontal
         slice.
@@ -193,59 +191,6 @@ class ROMSOutput:
                     f"Invalid input: The field does not have a 'time' dimension, "
                     f"but a time index ({time}) greater than 0 was provided."
                 )
-
-        # Input checks
-        _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
-
-        # Get horizontal dimensions and grid location
-        horizontal_dims_dict = {
-            "rho": {"eta": "eta_rho", "xi": "xi_rho"},
-            "u": {"eta": "eta_rho", "xi": "xi_u"},
-            "v": {"eta": "eta_v", "xi": "xi_rho"},
-        }
-        for loc, horizontal_dims in horizontal_dims_dict.items():
-            if all(dim in field.dims for dim in horizontal_dims.values()):
-                break
-
-        # Convert relative to absolute indices
-        def _get_absolute_index(idx, field, dim_name):
-            index = field[dim_name].isel(**{dim_name: idx}).item()
-            return index
-
-        if eta is not None and eta < 0:
-            eta = _get_absolute_index(eta, field, horizontal_dims["eta"])
-        if xi is not None and xi < 0:
-            xi = _get_absolute_index(xi, field, horizontal_dims["xi"])
-        if s is not None and s < 0:
-            s = _get_absolute_index(s, field, "s_rho")
-
-        # Set spatial coordinates
-        lat_deg = self.grid.ds[f"lat_{loc}"]
-        lon_deg = self.grid.ds[f"lon_{loc}"]
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        if lon is not None:
-            lon = normalize_longitude(lon, self.grid.straddle)
-
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-        # Mask the field
-        mask = self.grid.ds[f"mask_{loc}"]
-        field = field.where(mask)
-
-        # Assign eta and xi as coordinates
-        coords_to_assign = {dim: field[dim] for dim in horizontal_dims.values()}
-        field = field.assign_coords(**coords_to_assign)
-
-        # Remove horizontal boundary if desired
-        slice_dict = {
-            "rho": {"eta_rho": slice(1, -1), "xi_rho": slice(1, -1)},
-            "u": {"eta_rho": slice(1, -1), "xi_u": slice(1, -1)},
-            "v": {"eta_v": slice(1, -1), "xi_rho": slice(1, -1)},
-        }
-        if not include_boundary:
-            field = field.isel(**slice_dict[loc])
-
         # Load the data
         if self.use_dask:
             from dask.diagnostics import ProgressBar
@@ -253,162 +198,36 @@ class ROMSOutput:
             with ProgressBar():
                 field.load()
 
-        # Compute layer depth for 3D fields when depth contours are requested or no vertical layer is specified.
-        compute_layer_depth = len(field.dims) > 2 and (depth_contours or s is None)
-        if compute_layer_depth:
-            if eta is not None or xi is not None:
-                # Computing depth coordinates directly for the slice in question is more efficient
-                # than using .ds_depth_coords, which computes depth coordinates for full field
-                if self.adjust_depth_for_sea_surface_height:
-                    zeta = self.ds.zeta.isel(time=time)
-                else:
-                    zeta = 0
-                if compute_layer_depth:
-                    layer_depth = compute_depth_coordinates(
-                        self.grid.ds,
-                        zeta,
-                        depth_type="layer",
-                        location=loc,
-                        eta=eta,
-                        xi=xi,
-                    )
-            else:
-                self._get_depth_coordinates(depth_type="layer", locations=[loc])
-                layer_depth = self.ds_depth_coords[f"layer_depth_{loc}"]
-                if self.adjust_depth_for_sea_surface_height:
-                    layer_depth = layer_depth.isel(time=time)
-
-            if not include_boundary:
-                # Apply valid slices only for dimensions that exist in layer_depth.dims
-                layer_depth = layer_depth.isel(
-                    **{
-                        dim: s
-                        for dim, s in slice_dict.get(loc, {}).items()
-                        if dim in layer_depth.dims
-                    }
-                )
-            layer_depth.load()
-
-        # Prepare figure title
-        formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
-        title = f"time: {formatted_time}"
-
-        # Slice the field horizontally as desired
-        def _slice_along_dimension(field, title, dim_name, idx):
-            field = field.sel(**{dim_name: idx})
-            title = title + f", {dim_name} = {idx}"
-            return field, title
-
-        if eta is not None:
-            field, title = _slice_along_dimension(
-                field, title, horizontal_dims["eta"], eta
-            )
-        if xi is not None:
-            field, title = _slice_along_dimension(
-                field, title, horizontal_dims["xi"], xi
-            )
-        if s is not None:
-            field, title = _slice_along_dimension(field, title, "s_rho", s)
-            if compute_layer_depth:
-                layer_depth = layer_depth.isel(s_rho=s)
+        if self.adjust_depth_for_sea_surface_height:
+            zeta = self.ds.zeta.isel(time=time)
         else:
-            depth_contours = False
-
-        # Regrid laterally
-        if lat is not None or lon is not None:
-
-            if lat is not None:
-                lats = [lat]
-                title = title + f", lat = {lat}°N"
-            else:
-                resolution = self.grid._infer_nominal_horizontal_resolution()
-                lats = _generate_coordinate_range(
-                    field.lat.min().values, field.lat.max().values, resolution
-                )
-            lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
-
-            if lon is not None:
-                lons = [lon]
-                title = title + f", lon = {lon}°E"
-            else:
-                resolution = self.grid._infer_nominal_horizontal_resolution(lat)
-                lons = _generate_coordinate_range(
-                    field.lon.min().values, field.lon.max().values, resolution
-                )
-            lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
-
-            target_coords = {"lat": lats, "lon": lons}
-            lateral_regrid = LateralRegridFromROMS(field, target_coords)
-            field = lateral_regrid.apply(field).squeeze()
-            if compute_layer_depth:
-                layer_depth = lateral_regrid.apply(layer_depth).squeeze()
-
-        # Assign depth as coordinate
-        if compute_layer_depth:
-            field = field.assign_coords({"layer_depth": layer_depth})
-
-        if lat is not None:
-            field, layer_depth = _remove_edge_nans(
-                field, "lon", layer_depth if "layer_depth" in locals() else None
-            )
-        if lon is not None:
-            field, layer_depth = _remove_edge_nans(
-                field, "lat", layer_depth if "layer_depth" in locals() else None
-            )
-
-        # Regrid vertically
-        if depth is not None:
-            vertical_regrid = VerticalRegridFromROMS(self.ds)
-            # Save attributes before vertical regridding
-            attrs = field.attrs
-            field = vertical_regrid.apply(
-                field, layer_depth, np.array([depth])
-            ).squeeze()
-            # Reset attributes
-            field.attrs = attrs
-            title = title + f", depth = {depth}m"
+            zeta = 0
 
         # Choose colorbar
         if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
-            vmax = max(field.max().values, -field.min().values)
-            vmin = -vmax
-            cmap = plt.colormaps.get_cmap("RdBu_r")
+            cmap_name = "RdBu_r"
+        elif var_name in ["temp", "salt"]:
+            cmap_name = "YlOrRd"
         else:
-            vmax = field.max().values
-            vmin = field.min().values
-            if var_name in ["temp", "salt"]:
-                cmap = plt.colormaps.get_cmap("YlOrRd")
-            else:
-                cmap = plt.colormaps.get_cmap("YlGn")
-        cmap.set_bad(color="gray")
-        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
+            cmap_name = "YlGn"
 
-        # Plotting
-        if (eta is None and xi is None) and (lat is None and lon is None):
-            fig = _plot(
-                field=field,
-                depth_contours=depth_contours,
-                title=title,
-                kwargs=kwargs,
-                c=None,
-            )
-        else:
-            if len(field.dims) == 2:
-                fig = _section_plot(
-                    field,
-                    interface_depth=None,
-                    title=title,
-                    kwargs=kwargs,
-                    ax=ax,
-                )
-            else:
-                if "s_rho" in field.dims:
-                    fig = _profile_plot(field, title=title, ax=ax)
-                else:
-                    fig = _line_plot(field, title=title, ax=ax)
-
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        plot(
+            field=field,
+            grid_ds=self.grid.ds,
+            zeta=zeta,
+            s=s,
+            eta=eta,
+            xi=xi,
+            depth=depth,
+            lat=lat,
+            lon=lon,
+            include_boundary=include_boundary,
+            depth_contours=depth_contours,
+            layer_contours=False,
+            ax=ax,
+            save_path=save_path,
+            cmap_name=cmap_name,
+        )
 
     def regrid(self, var_names=None, horizontal_resolution=None, depth_levels=None):
         """Regrid the dataset both horizontally and vertically.
@@ -452,7 +271,7 @@ class ROMSOutput:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
         if horizontal_resolution is None:
-            horizontal_resolution = self.grid._infer_nominal_horizontal_resolution()
+            horizontal_resolution = infer_nominal_horizontal_resolution(self.grid.ds)
         lons = _generate_coordinate_range(
             lon_deg.min().values, lon_deg.max().values, horizontal_resolution
         )

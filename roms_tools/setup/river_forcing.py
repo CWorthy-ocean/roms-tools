@@ -13,7 +13,10 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.plot import _get_projection, _plot
-from roms_tools.setup.datasets import DaiRiverDataset
+from roms_tools.setup.datasets import (
+    DaiRiverDataset,
+    get_indices_of_nearest_grid_cell_for_rivers,
+)
 from roms_tools.setup.utils import (
     _from_yaml,
     _to_dict,
@@ -288,25 +291,9 @@ class RiverForcing:
             river_lon,
             river_lat,
         ).transpose(data.dim_names["station"], "eta_rho", "xi_rho")
-        dist_coast_min = dist_coast.min(dim=["eta_rho", "xi_rho"])
 
         # Find the indices of the closest coastal grid cell to the river mouth
-        indices = np.where(dist_coast == dist_coast_min)
-        stations = indices[0]
-        eta_rho_values = indices[1]
-        xi_rho_values = indices[2]
-        names = (
-            data.ds[data.var_names["name"]]
-            .isel({data.dim_names["station"]: stations})
-            .values
-        )
-        # Return the indices in a dictionary format
-        river_indices = {}
-        for i in range(len(stations)):
-            river_name = names[i]
-            river_indices[river_name] = [
-                (int(eta_rho_values[i]), int(xi_rho_values[i]))
-            ]  # list of tuples
+        river_indices = get_indices_of_nearest_grid_cell_for_rivers(dist_coast, data)
 
         return river_indices
 

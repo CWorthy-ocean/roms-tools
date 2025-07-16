@@ -77,10 +77,7 @@ def plot_2d_horizontal_field(
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
-    if c or with_dim_names:
-        _add_boundary_to_ax(
-            ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names
-        )
+    _add_boundary_to_ax(ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names)
 
     if plot_data:
         _add_field_to_ax(
@@ -520,9 +517,10 @@ def _add_boundary_to_ax(
         ),  # top
     ]
 
-    if with_dim_names:
-        for i, (lon, lat, dim_name) in enumerate(edges):
-            ax.plot(lon, lat, transform=proj, c=c, label=label if i == 0 else None)
+    for i, (lon, lat, dim_name) in enumerate(edges):
+        ax.plot(lon, lat, transform=proj, c=c, label=label if i == 0 else None)
+
+        if with_dim_names:
 
             # Get start and end point
             start_lon = float(lon[0])

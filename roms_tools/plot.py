@@ -464,12 +464,14 @@ def _get_edge(
     arr: xr.DataArray, dim_name: str, pos: Literal["start", "end"]
 ) -> xr.DataArray:
     """Extract the first ("start") or last ("end") slice along the given dimension."""
+
     if pos == "start":
         return arr.isel({dim_name: 0})
-    elif pos == "end":
+
+    if pos == "end":
         return arr.isel({dim_name: -1})
-    else:
-        raise ValueError("pos must be 'start' or 'end'")
+
+    raise ValueError("pos must be 'start' or 'end'")
 
 
 def _add_boundary_to_ax(

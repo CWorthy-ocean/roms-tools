@@ -21,7 +21,7 @@ from pydantic import (
 )
 
 from roms_tools import Grid
-from roms_tools.plot import _get_projection, _plot
+from roms_tools.plot import get_projection, plot, plot_2d_horizontal_field
 from roms_tools.setup.cdr_release import (
     Release,
     ReleaseType,
@@ -29,16 +29,15 @@ from roms_tools.setup.cdr_release import (
     VolumeRelease,
 )
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_tracer_metadata_to_ds,
     convert_to_relative_days,
+    from_yaml,
     gc_dist,
     get_target_coords,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import (
-    normalize_longitude,
     save_datasets,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates
@@ -158,6 +157,7 @@ class ReleaseCollector(RootModel):
 
     @property
     def release_type(self):
+        """Type of all releases."""
         release_types = set(r.release_type for r in self.root)
         return release_types.pop()
 
@@ -313,7 +313,7 @@ class CDRForcing(BaseModel):
     Parameters
     ----------
     grid : Grid, optional
-        Object representing the grid for spatial context.
+        Object representing the grid.
     start_time : datetime
         Start time of the ROMS model simulation.
     end_time : datetime
@@ -322,18 +322,18 @@ class CDRForcing(BaseModel):
         Reference date for converting absolute times to model-relative time. Defaults to Jan 1, 2000.
     releases : list of Release
         A list of one or more CDR release objects.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray dataset containing release metadata and forcing variables.
     """
 
     grid: Grid | None = None
+    """Object representing the grid."""
     start_time: datetime
+    """Start time of the ROMS model simulation."""
     end_time: datetime
+    """End time of the ROMS model simulation."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """The reference date for the ROMS simulation."""
     releases: ReleaseCollector
+    """A list of one or more CDR release objects."""
 
     # this is defined during init and shouldn't be serialized
     _ds: xr.Dataset = None
@@ -365,6 +365,7 @@ class CDRForcing(BaseModel):
 
     @property
     def ds(self) -> xr.Dataset:
+        """The xarray dataset containing release metadata and forcing variables."""
         return self._ds
 
     def plot_volume_flux(
@@ -611,7 +612,7 @@ class CDRForcing(BaseModel):
         lat_deg = self.grid.ds.lat_rho
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        trans = _get_projection(lon_deg, lat_deg)
+        trans = get_projection(lon_deg, lat_deg)
         fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
         # Plot blue background on map
@@ -621,7 +622,9 @@ class CDRForcing(BaseModel):
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-        _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
+        plot_2d_horizontal_field(
+            field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False
+        )
 
         # Plot release locations
         colors = _get_release_colors(valid_release_names)
@@ -672,24 +675,21 @@ class CDRForcing(BaseModel):
         # Setup figure
         fig = plt.figure(figsize=(12, 5.5))
         gs = gridspec.GridSpec(nrows=2, ncols=2, figure=fig)
-        trans = _get_projection(lon_deg, lat_deg)
+        trans = get_projection(lon_deg, lat_deg)
         ax0 = fig.add_subplot(gs[:, 0], projection=trans)
-        ax1 = fig.add_subplot(gs[0, 1])
-        ax2 = fig.add_subplot(gs[1, 1])
-        cmap = plt.colormaps.get_cmap("RdPu")
-        cmap.set_bad(color="gray")
-        kwargs = {"cmap": cmap}
+        # ax1 = fig.add_subplot(gs[0, 1])
+        # ax2 = fig.add_subplot(gs[1, 1])
 
         # Top down view plot
-        horizontal_field = _map_horizontal_gaussian(self.grid, release)
-        horizontal_field = horizontal_field.assign_coords(
+        depth_integrated_field = _map_horizontal_gaussian(self.grid, release)
+        depth_integrated_field = depth_integrated_field.assign_coords(
             {"lon": lon_deg, "lat": lat_deg}
         )
-        _plot(
-            horizontal_field.where(self.grid.ds.mask_rho),
-            kwargs=kwargs,
+        plot(
+            field=depth_integrated_field,
+            grid=self.grid.ds,
             ax=ax0,
-            c=None,
+            cmap_name="RdPu",
             add_colorbar=False,
         )
         if mark_release_center:
@@ -697,47 +697,47 @@ class CDRForcing(BaseModel):
                 grid=self.grid, releases=[release], ax=ax0, include_legend=False
             )
 
-        # Side view plots
-        kwargs = {
-            "cmap": cmap,
-            "y": "depth",
-            "yincrease": False,
-            "add_colorbar": False,
-        }
-        # Plot along latitude
-        vertical_field = _map_vertical_gaussian(
-            self.grid, release, horizontal_field, orientation="latitude"
-        )
-        more_kwargs = {"x": "lat"}
-        vertical_field.plot(**kwargs, **more_kwargs, ax=ax1)
-        if mark_release_center:
-            ax1.plot(
-                release.lat,
-                release.depth,
-                color="k",
-                marker="x",
-                markersize=8,
-                markeredgewidth=2,
-            )
+        ## Side view plots
+        # kwargs = {
+        #    "cmap": cmap,
+        #    "y": "depth",
+        #    "yincrease": False,
+        #    "add_colorbar": False,
+        # }
+        ## Plot along latitude
+        # vertical_field = _map_3d_gaussian(
+        #    self.grid, release, horizontal_field, orientation="latitude"
+        # )
+        # more_kwargs = {"x": "lat"}
+        # vertical_field.plot(**kwargs, **more_kwargs, ax=ax1)
+        # if mark_release_center:
+        #    ax1.plot(
+        #        release.lat,
+        #        release.depth,
+        #        color="k",
+        #        marker="x",
+        #        markersize=8,
+        #        markeredgewidth=2,
+        #    )
 
-        ax1.set(title=f"Longitude: {release.lon}°E", xlabel="Latitude [°N]")
-        # Plot along longitude
-        vertical_field = _map_vertical_gaussian(
-            self.grid, release, horizontal_field, orientation="longitude"
-        )
-        more_kwargs = {"x": "lon"}
-        vertical_field.plot(**kwargs, **more_kwargs, ax=ax2)
-        if mark_release_center:
-            release_lon = normalize_longitude(release.lon, self.grid.straddle)
-            ax2.plot(
-                release_lon,
-                release.depth,
-                color="k",
-                marker="x",
-                markersize=8,
-                markeredgewidth=2,
-            )
-        ax2.set(title=f"Latitude: {release.lat}°N", xlabel="Longitude [°E]")
+        # ax1.set(title=f"Longitude: {release.lon}°E", xlabel="Latitude [°N]")
+        ## Plot along longitude
+        # vertical_field = _map_vertical_gaussian(
+        #    self.grid, release, horizontal_field, orientation="longitude"
+        # )
+        # more_kwargs = {"x": "lon"}
+        # vertical_field.plot(**kwargs, **more_kwargs, ax=ax2)
+        # if mark_release_center:
+        #    release_lon = normalize_longitude(release.lon, self.grid.straddle)
+        #    ax2.plot(
+        #        release_lon,
+        #        release.depth,
+        #        color="k",
+        #        marker="x",
+        #        markersize=8,
+        #        markeredgewidth=2,
+        #    )
+        # ax2.set(title=f"Latitude: {release.lat}°N", xlabel="Longitude [°E]")
 
         # Adjust layout and title
         fig.subplots_adjust(hspace=0.45)
@@ -776,7 +776,7 @@ class CDRForcing(BaseModel):
 
     @model_serializer
     def _serialize(self) -> dict:
-        return _to_dict(self)
+        return to_dict(self)
 
     def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
@@ -792,7 +792,7 @@ class CDRForcing(BaseModel):
         metadata = self.releases[0].get_tracer_metadata()
         forcing_dict["CDRForcing"]["_tracer_metadata"] = metadata
 
-        _write_to_yaml(forcing_dict, filepath)
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(cls, filepath: str | Path) -> "CDRForcing":
@@ -811,7 +811,7 @@ class CDRForcing(BaseModel):
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
         params.pop("_tracer_metadata", None)
 
         return cls(grid=grid, **params)
@@ -940,13 +940,18 @@ def _validate_release_location(grid, release: Release):
 
         dx = 1 / grid.ds.pm
         dy = 1 / grid.ds.pn
-        max_grid_spacing = np.sqrt(dx**2 + dy**2) / 2
+
+        # Compute the maximum half-diagonal grid spacing across the domain
+        max_grid_spacing = (np.sqrt(dx**2 + dy**2) / 2).max()
+
+        # Apply a 10% safety margin
+        max_grid_spacing *= 1.1
 
         # Compute great-circle distance to all grid points
         dist = gc_dist(grid.ds.lon_rho, grid.ds.lat_rho, lon, release.lat)
         dist_min = dist.min(dim=["eta_rho", "xi_rho"])
 
-        if (dist_min > max_grid_spacing).all():
+        if dist_min > max_grid_spacing:
             raise ValueError(
                 f"Release site '{release.name}' is outside of the grid domain. "
                 "Ensure the provided (lat, lon) falls within the model grid extent."
@@ -1016,11 +1021,10 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
 
     if release.hsc == 0:
 
-        dist_min = dist.min(dim=["eta_rho", "xi_rho"])
         # Find the indices of the closest grid cell
-        indices = np.where(dist == dist_min)
-        eta_rho = indices[0][0]
-        xi_rho = indices[1][0]
+        indices = dist.argmin(dim=["eta_rho", "xi_rho"])
+        eta_rho = indices["eta_rho"].values
+        xi_rho = indices["xi_rho"].values
 
         # Create a delta function at the center of the Gaussian release
         distribution_2d = xr.zeros_like(grid.ds.mask_rho)
@@ -1135,7 +1139,7 @@ def _plot_location(
     lat_deg = grid.ds.lat_rho
     if grid.straddle:
         lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-    trans = _get_projection(lon_deg, lat_deg)
+    trans = get_projection(lon_deg, lat_deg)
 
     proj = ccrs.PlateCarree()
 

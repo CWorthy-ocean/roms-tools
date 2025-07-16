@@ -221,15 +221,23 @@ class Release(BaseModel):
     """
 
     name: str
+    """Unique identifier for the release."""
     lat: Annotated[float, Ge(-90), Le(90)]
+    """Latitude of the release location in degrees North."""
     lon: float
+    """Longitude of the release location in degrees East."""
     depth: NonNegativeFloat
+    """Depth of the release in meters."""
     hsc: NonNegativeFloat = 0.0
+    """Horizontal scale (standard deviation) of the release in meters."""
     vsc: NonNegativeFloat = 0.0
+    """Vertical scale (standard deviation) of the release in meters."""
     times: list[datetime]
+    """Time points of the release events."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
+    """Type of the release."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -275,7 +283,7 @@ class Release(BaseModel):
 class VolumeRelease(Release):
     """Represents a CDR release with volume flux and tracer concentrations.
 
-    Attributes
+    Parameters
     ----------
     name : str
         Unique identifier for the release.
@@ -332,12 +340,15 @@ class VolumeRelease(Release):
 
     times: list[datetime] = Field([])
     fill_values: Literal["auto", "zero"] = "auto"
+    """Strategy for filling missing tracer concentration values."""
     volume_fluxes: Flux | NonNegativeFloat | list[NonNegativeFloat] = Field(
         default=0.0, validate_default=True
     )
+    """Volume flux(es) of the release in m³/s over time."""
     tracer_concentrations: dict[
         str, Concentration | NonNegativeFloat | list[NonNegativeFloat]
     ] = Field({})
+    """Dictionary of tracer names and their concentration values."""
 
     release_type: Literal[ReleaseType.volume] = ReleaseType.volume
 
@@ -433,7 +444,7 @@ class VolumeRelease(Release):
 class TracerPerturbation(Release):
     """Represents a CDR release with tracer fluxes and without any volume.
 
-    Attributes
+    Parameters
     ----------
     name : str
         Unique identifier for the release.
@@ -473,6 +484,7 @@ class TracerPerturbation(Release):
     tracer_fluxes: dict[str, Flux | NonNegativeFloat | list[NonNegativeFloat]] = Field(
         {}
     )
+    """Dictionary of tracer names and their non-negative flux values."""
 
     release_type: Literal[
         ReleaseType.tracer_perturbation

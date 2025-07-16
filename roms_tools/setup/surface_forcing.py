@@ -5,12 +5,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.plot import _plot
+from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCSurfaceForcingDataset,
@@ -21,11 +20,9 @@ from roms_tools.setup.datasets import (
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
-    _from_yaml,
-    _to_dict,
-    _write_to_yaml,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
+    from_yaml,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
@@ -34,6 +31,8 @@ from roms_tools.setup.utils import (
     nan_check,
     rotate_velocities,
     substitute_nans_by_fillvalue,
+    to_dict,
+    write_to_yaml,
 )
 from roms_tools.utils import save_datasets, transpose_dimensions
 
@@ -113,18 +112,34 @@ class SurfaceForcing:
     """
 
     grid: Grid
+    """Object representing the grid information."""
     start_time: Optional[datetime] = None
+    """The start time of the desired surface forcing data."""
     end_time: Optional[datetime] = None
+    """The end time of the desired surface forcing data."""
     source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
+    """Specifies the type of forcing data ("physics", "bgc")."""
     correct_radiation: bool = True
+    """Whether to correct shortwave radiation."""
     wind_dropoff: bool = False
+    """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
+    off."""
     coarse_grid_mode: str = "auto"
+    """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)
+    """Reference date for the model."""
     use_dask: bool = False
+    """Whether to use dask for processing."""
     bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing post-processed variables ready for input into
+    ROMS."""
+    use_coarse_grid: bool = field(init=False, repr=False)
+    """Whether data is interpolated onto grid coarsened by factor 2."""
 
     def __post_init__(self):
 
@@ -607,7 +622,12 @@ class SurfaceForcing:
 
         return ds
 
-    def plot(self, var_name, time=0) -> None:
+    def plot(
+        self,
+        var_name: str,
+        time: int = 0,
+        save_path: str | None = None,
+    ) -> None:
         """Plot the specified surface forcing field for a given time slice.
 
         Parameters
@@ -632,6 +652,10 @@ class SurfaceForcing:
         time : int, optional
             The time index to plot. Default is 0, which corresponds to the first
             time slice.
+
+        save_path : str, optional
+            Path to save the generated plot. If None, the plot is shown interactively.
+            Default is None.
 
         Returns
         -------
@@ -660,36 +684,19 @@ class SurfaceForcing:
             with ProgressBar():
                 field = field.load()
 
-        field = field.where(self.target_coords["mask"])
-
-        lon_deg = self.target_coords["lon"]
-        lat_deg = self.target_coords["lat"]
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
-
-        title = field.long_name
-
         if var_name in ["uwnd", "vwnd"]:
-            vmax = max(field.max().values, -field.min().values)
-            vmin = -vmax
-            cmap = plt.colormaps.get_cmap("RdBu_r")
+            cmap_name = "RdBu_r"
+        elif var_name in ["swrad", "lwrad", "Tair", "qair"]:
+            cmap_name = "YlOrRd"
         else:
-            vmax = field.max().values
-            vmin = field.min().values
-            if var_name in ["swrad", "lwrad", "Tair", "qair"]:
-                cmap = plt.colormaps.get_cmap("YlOrRd")
-            else:
-                cmap = plt.colormaps.get_cmap("YlGnBu")
-        cmap.set_bad(color="gray")
+            cmap_name = "YlGnBu"
 
-        kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-        _plot(
+        plot(
             field=field,
-            title=title,
-            c="g",
-            kwargs=kwargs,
+            grid_ds=self.grid.ds,
+            use_coarse_grid=self.use_coarse_grid,
+            save_path=save_path,
+            cmap_name=cmap_name,
         )
 
     def save(
@@ -746,8 +753,8 @@ class SurfaceForcing:
             The path to the YAML file where the parameters will be saved.
         """
 
-        forcing_dict = _to_dict(self)
-        _write_to_yaml(forcing_dict, filepath)
+        forcing_dict = to_dict(self, exclude=["use_dask", "use_coarse_grid"])
+        write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
@@ -772,6 +779,6 @@ class SurfaceForcing:
         filepath = Path(filepath)
 
         grid = Grid.from_yaml(filepath)
-        params = _from_yaml(cls, filepath)
+        params = from_yaml(cls, filepath)
 
         return cls(grid=grid, **params, use_dask=use_dask)

@@ -18,6 +18,7 @@ from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 LABEL_COLOR = "k"
 LABEL_SZ = 10
+FONT_SZ = 10
 EDGE_POS_START = "start"
 EDGE_POS_END = "end"
 
@@ -575,7 +576,7 @@ def _add_boundary_to_ax(
                 dim_name,
                 transform=proj,
                 color=c,
-                fontsize=10,
+                fontsize=FONT_SZ,
                 ha="center",
                 va="center",
                 bbox=dict(
@@ -640,7 +641,7 @@ def _add_field_to_ax(
 
     if depth_contours and "layer_depth" in field.coords:
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
-        ax.clabel(cs, inline=True, fontsize=10)
+        ax.clabel(cs, inline=True, fontsize=FONT_SZ)
 
 
 def get_projection(lon, lat):

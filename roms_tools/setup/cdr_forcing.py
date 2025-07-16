@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Annotated, Iterator
 
 import cartopy.crs as ccrs
+import gcm_filters
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -20,6 +22,7 @@ from pydantic import (
 )
 
 from roms_tools import Grid
+from roms_tools.constants import R_EARTH
 from roms_tools.plot import _get_projection, _plot
 from roms_tools.regrid import LateralRegridFromROMS
 from roms_tools.setup.cdr_release import (
@@ -35,10 +38,12 @@ from roms_tools.setup.utils import (
     add_tracer_metadata_to_ds,
     convert_to_relative_days,
     gc_dist,
+    get_target_coords,
 )
 from roms_tools.utils import (
-    _generate_coordinate_range,
+    _generate_focused_coordinate_range,
     _remove_edge_nans,
+    normalize_longitude,
     save_datasets,
 )
 
@@ -105,8 +110,16 @@ class ReleaseCollector(RootModel):
     def __iter__(self) -> Iterator[Release]:
         return iter(self.root)
 
-    def __getitem__(self, item) -> Release:
-        return self.root[item]
+    def __getitem__(self, item: int | str) -> Release:
+        if isinstance(item, int):
+            return self.root[item]
+        elif isinstance(item, str):
+            for release in self.root:
+                if release.name == item:
+                    return release
+            raise KeyError(f"Release named '{item}' not found.")
+        else:
+            raise TypeError(f"Invalid key type: {type(item)}. Must be int or str.")
 
     @model_validator(mode="before")
     @classmethod
@@ -567,8 +580,8 @@ class CDRForcing(BaseModel):
         ax.set(title=title, ylabel=ylabel, xlabel="time")
         ax.set_xlim([start, end])
 
-    def plot_location_top_view(self, release_names="all"):
-        """Plot the top-down view of release locations.
+    def plot_locations(self, release_names="all"):
+        """Plot centers of release locations in top-down view.
 
         Parameters
         ----------
@@ -598,75 +611,52 @@ class CDRForcing(BaseModel):
 
         _validate_release_input(release_names, valid_release_names)
 
-        field = self.grid.ds.mask_rho
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
+        trans = _get_projection(lon_deg, lat_deg)
+        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
 
+        # Plot blue background on map
+        field = self.grid.ds.mask_rho
+        field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
         vmax = 6
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-        trans = _get_projection(lon_deg, lat_deg)
-
-        fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
-
         _plot(field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False)
 
-        proj = ccrs.PlateCarree()
-
+        # Plot release locations
         colors = _get_release_colors(valid_release_names)
+        _plot_location(
+            grid=self.grid,
+            releases=[self.releases[name] for name in release_names],
+            ax=ax,
+            colors=colors,
+        )
 
-        for name in release_names:
-            ncdr = np.where(self.ds["release_name"].values == name)[0].item()
+    def plot_distribution(self, release_name: str, mark_release_center: bool = True):
+        """Plot the release location from a top and side view.
 
-            # transform coordinates to projected space
-            transformed_lon, transformed_lat = trans.transform_point(
-                self.ds.cdr_lon.isel(ncdr=ncdr).item(),
-                self.ds.cdr_lat.isel(ncdr=ncdr).item(),
-                proj,
-            )
+        This method creates three plots:
 
-            ax.plot(
-                transformed_lon,
-                transformed_lat,
-                marker="x",
-                markersize=8,
-                markeredgewidth=2,
-                label=name,
-                color=colors[name],
-            )
-
-        ax.set_title("Release locations")
-        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
-
-    def plot_location_side_view(self, release_name: str = None):
-        """Plot the release location from a side view, showing bathymetry sections along
-        both fixed longitude and latitude.
-
-        This method creates two plots:
-
-        - A bathymetry section along a fixed longitude (latitudinal view),
-          with the release location marked by an "x".
-        - A bathymetry section along a fixed latitude (longitudinal view),
-          with the release location also marked by an "x".
+        - A top view of the release distribution.
+        - A side view of the release distribution along a fixed longitude.
+        - A side view of the release distribution along a fixed latitude.
 
         Parameters
         ----------
-        release_name : str, optional
-            Name of the release to plot. If only one release is available,
-            it is used by default. If multiple releases are available, this must be specified.
+        release_name : str
+            Name of the release to plot.
+        mark_release_center : bool, default True
+            Whether to mark the center of the release distribution with an "x".
 
         Raises
         ------
         ValueError
-
             If `self.grid` is not set.
             If the specified `release_name` does not exist in `self.releases`.
-            If no `release_name` is provided when multiple releases are available.
         """
         if self.grid is None:
             raise ValueError(
@@ -674,16 +664,8 @@ class CDRForcing(BaseModel):
             )
 
         valid_release_names = [r.name for r in self.releases]
-
-        if release_name is None:
-            if len(valid_release_names) == 1:
-                release_name = valid_release_names[0]
-            else:
-                raise ValueError(
-                    f"Multiple releases found: {valid_release_names}. Please specify a single release via `release_name` to plot."
-                )
-
         _validate_release_input(release_name, valid_release_names, list_allowed=False)
+        release = self.releases[release_name]
 
         # Prepare grid coordinates
         lon_deg = self.grid.ds.lon_rho
@@ -691,58 +673,79 @@ class CDRForcing(BaseModel):
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
 
-        resolution = self.grid._infer_nominal_horizontal_resolution()
-        h = self.grid.ds.h.assign_coords({"lon": lon_deg, "lat": lat_deg})
+        # Setup figure
+        fig = plt.figure(figsize=(12, 5.5))
+        gs = gridspec.GridSpec(nrows=2, ncols=2, figure=fig)
+        trans = _get_projection(lon_deg, lat_deg)
+        ax0 = fig.add_subplot(gs[:, 0], projection=trans)
+        ax1 = fig.add_subplot(gs[0, 1])
+        ax2 = fig.add_subplot(gs[1, 1])
+        cmap = plt.colormaps.get_cmap("RdPu")
+        cmap.set_bad(color="gray")
+        kwargs = {"cmap": cmap}
 
-        ncdr = np.where(self.ds["release_name"].values == release_name)[0].item()
-
-        # Set up plot
-        fig, axs = plt.subplots(2, 1, figsize=(7, 8))
-
-        # Plot along fixed longitude
-        _plot_bathymetry_section(
-            ax=axs[0],
-            h=h,
-            dim="lon",
-            fixed_val=self.ds.cdr_lon.isel(ncdr=ncdr),
-            coord_deg=lat_deg,
-            resolution=resolution,
-            title=f"Longitude: {self.ds.cdr_lon.isel(ncdr=ncdr).item()}°E",
+        # Top down view plot
+        horizontal_field = _map_horizontal_gaussian(self.grid, release)
+        horizontal_field = horizontal_field.assign_coords(
+            {"lon": lon_deg, "lat": lat_deg}
         )
-
-        colors = _get_release_colors(valid_release_names)
-
-        axs[0].plot(
-            self.ds.cdr_lat.isel(ncdr=ncdr),
-            self.ds.cdr_dep.isel(ncdr=ncdr),
-            color=colors[release_name],
-            marker="x",
-            markersize=8,
-            markeredgewidth=2,
+        _plot(
+            horizontal_field.where(self.grid.ds.mask_rho),
+            kwargs=kwargs,
+            ax=ax0,
+            c=None,
+            add_colorbar=False,
         )
+        if mark_release_center:
+            _plot_location(
+                grid=self.grid, releases=[release], ax=ax0, include_legend=False
+            )
 
-        # Plot along fixed latitude
-        _plot_bathymetry_section(
-            ax=axs[1],
-            h=h,
-            dim="lat",
-            fixed_val=self.ds.cdr_lat.isel(ncdr=ncdr),
-            coord_deg=lon_deg,
-            resolution=resolution,
-            title=f"Latitude: {self.ds.cdr_lat.isel(ncdr=ncdr).item()}°N",
+        # Side view plots
+        kwargs = {
+            "cmap": cmap,
+            "y": "depth",
+            "yincrease": False,
+            "add_colorbar": False,
+        }
+        # Plot along latitude
+        vertical_field = _map_vertical_gaussian(
+            self.grid, release, horizontal_field, orientation="latitude"
         )
-        axs[1].plot(
-            self.ds.cdr_lon.isel(ncdr=ncdr),
-            self.ds.cdr_dep.isel(ncdr=ncdr),
-            color=colors[release_name],
-            marker="x",
-            markersize=8,
-            markeredgewidth=2,
+        more_kwargs = {"x": "lat"}
+        vertical_field.plot(**kwargs, **more_kwargs, ax=ax1)
+        if mark_release_center:
+            ax1.plot(
+                release.lat,
+                release.depth,
+                color="k",
+                marker="x",
+                markersize=8,
+                markeredgewidth=2,
+            )
+
+        ax1.set(title=f"Longitude: {release.lon}°E", xlabel="Latitude [°N]")
+        # Plot along longitude
+        vertical_field = _map_vertical_gaussian(
+            self.grid, release, horizontal_field, orientation="longitude"
         )
+        more_kwargs = {"x": "lon"}
+        vertical_field.plot(**kwargs, **more_kwargs, ax=ax2)
+        if mark_release_center:
+            release_lon = normalize_longitude(release.lon, self.grid.straddle)
+            ax2.plot(
+                release_lon,
+                release.depth,
+                color="k",
+                marker="x",
+                markersize=8,
+                markeredgewidth=2,
+            )
+        ax2.set(title=f"Latitude: {release.lat}°N", xlabel="Longitude [°E]")
 
         # Adjust layout and title
-        fig.subplots_adjust(hspace=0.4)
-        fig.suptitle(f"Release location for: {release_name}")
+        fig.subplots_adjust(hspace=0.45)
+        fig.suptitle(f"Release distribution for: {release_name}")
 
     def save(
         self,
@@ -873,17 +876,18 @@ def _validate_release_input(releases, valid_releases, list_allowed=True):
         raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
 
 
-def _get_release_colors(valid_releases):
+def _get_release_colors(valid_releases: list[str]) -> dict[str, tuple]:
     """Returns a dictionary of colors for the valid releases, based on a consistent
     colormap.
 
     Parameters
     ----------
-    None
+    valid_releases : List[str]
+        List of release names to assign colors to.
 
     Returns
     -------
-    dict
+    Dict[str, tuple]
         A dictionary where the keys are release names and the values are their corresponding colors,
         assigned based on the order of releases in the valid releases list.
 
@@ -986,66 +990,298 @@ def _validate_release_location(grid, release: Release):
         )
 
 
-def _plot_bathymetry_section(
-    ax: Axes,
-    h: xr.DataArray,
-    dim: str,
-    fixed_val: float,
-    coord_deg: xr.DataArray,
-    resolution: float,
-    title: str,
-) -> None:
-    """Plots a bathymetry section along a fixed latitude or longitude.
+def _map_horizontal_gaussian(grid: Grid, release: Release):
+    """Map a tracer release to the ROMS grid as a normalized 2D Gaussian distribution.
+
+    The tracer is centered at the nearest grid cell to the release location, then smoothed
+    using a Gaussian filter (via GCM-Filters) with horizontal scale `release.hsc`. Land points
+    are masked out, and the distribution is renormalized to integrate to 1 over the ocean.
 
     Parameters
     ----------
+    grid : Grid
+        ROMS grid object with grid metrics and land mask.
+    release : Release
+        Release location and horizontal scale (hsc) in meters.
+
+    Returns
+    -------
+    delta_smooth : xarray.DataArray
+        Normalized 2D tracer distribution on the ROMS grid (zero over land).
+    """
+    # Find closest grid cell center
+    target_coords = get_target_coords(grid)
+    lon = release.lon
+    if target_coords["straddle"]:
+        lon = xr.where(lon > 180, lon - 360, lon)
+    else:
+        lon = xr.where(lon < 0, lon + 360, lon)
+    dist = gc_dist(target_coords["lon"], target_coords["lat"], lon, release.lat)
+    dist_min = dist.min(dim=["eta_rho", "xi_rho"])
+
+    # Find the indices of the closest grid cell
+    indices = np.where(dist == dist_min)
+    eta_rho = indices[0][0]
+    xi_rho = indices[1][0]
+
+    # Create a delta function at the center of the Gaussian release
+    delta = xr.zeros_like(grid.ds.mask_rho)
+    delta[eta_rho, xi_rho] = 1
+
+    # Calculate the grid cell area from the inverse grid metrics (pm, pn)
+    area = 1 / (grid.ds.pm * grid.ds.pn)
+
+    # Compute the mean grid spacing (dx) as the average of mean dx and dy
+    dx = (((1 / grid.ds.pm).mean() + (1 / grid.ds.pn).mean()) / 2).item()
+
+    # Extend the domain in both dimensions to mitigate boundary effects during filtering
+    # - Create a mask of ones ignoring land (will be renormalized later)
+    mask = xr.ones_like(grid.ds.mask_rho)
+
+    # Extend the mask along eta_rho by concatenating three copies plus a zeroed edge cell
+    margin_mask = xr.concat(
+        [mask, mask, mask, 0 * mask.isel(eta_rho=-1)], dim="eta_rho"
+    )
+    # Similarly extend along xi_rho
+    margin_mask = xr.concat(
+        [margin_mask, margin_mask, margin_mask, 0 * margin_mask.isel(xi_rho=-1)],
+        dim="xi_rho",
+    )
+
+    # Extend the delta function in the same manner to match the enlarged domain
+    delta_extended = xr.concat(
+        [0 * delta, delta, 0 * delta, 0 * delta.isel(eta_rho=-1)], dim="eta_rho"
+    )
+    delta_extended = xr.concat(
+        [
+            0 * delta_extended,
+            delta_extended,
+            0 * delta_extended,
+            0 * delta_extended.isel(xi_rho=-1),
+        ],
+        dim="xi_rho",
+    )
+
+    # Extend the cell area array to match the enlarged domain
+    area_extended = xr.concat([area, area, area, area.isel(eta_rho=-1)], dim="eta_rho")
+    area_extended = xr.concat(
+        [area_extended, area_extended, area_extended, area_extended.isel(xi_rho=-1)],
+        dim="xi_rho",
+    )
+
+    # Define Gaussian filter parameters:
+    # - filter_scale is computed so that the Gaussian's std dev matches
+    #   the equivalent boxcar filter of width equal to release.hsc / dx
+    #   multiplied by sqrt(12) to convert from boxcar to Gaussian std dev.
+    filter_scale = release.hsc / dx * np.sqrt(12)
+
+    filter = gcm_filters.Filter(
+        filter_scale=filter_scale,
+        dx_min=1,
+        filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+        grid_type=gcm_filters.GridType.REGULAR_WITH_LAND_AREA_WEIGHTED,
+        grid_vars={"wet_mask": margin_mask, "area": area_extended},
+    )
+
+    # Apply the Gaussian filter to the extended delta function over spatial dimensions
+    delta_smooth = filter.apply(delta_extended, dims=["eta_rho", "xi_rho"])
+
+    # Remove the extended margins to return to the original domain size
+    delta_smooth = delta_smooth.isel(
+        eta_rho=slice(grid.ds.sizes["eta_rho"], -grid.ds.sizes["eta_rho"] - 1),
+        xi_rho=slice(grid.ds.sizes["xi_rho"], -grid.ds.sizes["eta_rho"] - 1),
+    )
+
+    # Mask out land cells and set values to zero there
+    delta_smooth = delta_smooth.where(grid.ds.mask_rho, 0.0)
+
+    # Renormalize so the integral over ocean points sums to 1
+    integral = delta_smooth.sum(dim=["eta_rho", "xi_rho"])
+    delta_smooth = delta_smooth / integral
+
+    return delta_smooth
+
+
+def _map_vertical_gaussian(grid, release, field, orientation="latitude"):
+    """Extract a vertical section from a ROMS grid and apply a Gaussian distribution in
+    depth.
+
+    This function interpolates a horizontally Gaussian field (e.g., from a tracer release)
+    along either a constant latitude or longitude section and distributes it vertically using
+    a Gaussian profile centered around the release depth.
+
+    Parameters
+    ----------
+    grid : Grid
+        ROMS grid object with methods and attributes used for horizontal resolution,
+        depth computation, and straddling logic.
+    release : Release
+        Release object containing coordinates (`lat`, `lon`, `depth`) and vertical
+        spread (`vsc`) for the Gaussian distribution.
+    field : xr.DataArray
+        2D horizontal tracer field defined on the ROMS grid.
+    orientation : {"latitude", "longitude"}, default "latitude"
+        Orientation of the extracted vertical section. If "latitude", extracts
+        a section along constant longitude. If "longitude", extracts a section
+        along constant latitude.
+
+    Returns
+    -------
+    vertical_field : xr.DataArray
+        2D field (depth vs. latitude or longitude) with the vertically-distributed
+        Gaussian mapped along the specified section.
+    """
+    meters_per_degree = 2 * np.pi * R_EARTH / 360
+    release_lon = normalize_longitude(release.lon, grid.straddle)
+
+    if orientation == "longitude":
+        lon_deg = grid.ds.lon_rho
+        if grid.straddle:
+            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+        hsc_in_degrees = release.hsc / (meters_per_degree * np.cos(release.lat))
+        lons, _ = _generate_focused_coordinate_range(
+            center=release_lon,
+            sc=hsc_in_degrees,
+            min_val=lon_deg.min().values,
+            max_val=lon_deg.max().values,
+            N=2000,
+        )
+        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
+        lats = [release.lat]
+
+    elif orientation == "latitude":
+        lons = [release_lon]
+        hsc_in_degrees = release.hsc / (
+            meters_per_degree * np.cos(grid.ds.lat_rho.mean().values)
+        )
+        lats, _ = _generate_focused_coordinate_range(
+            center=release.lat,
+            sc=hsc_in_degrees,
+            min_val=grid.ds.lat_rho.min().values,
+            max_val=grid.ds.lat_rho.max().values,
+            N=2000,
+        )
+        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
+    else:
+        raise ValueError(
+            "`section_orientation` must be either 'latitude' or 'longitude'."
+        )
+
+    # Regrid 2D horizontal Gaussian onto desired 1D horizontal section
+    target_coords = {"lat": lats, "lon": lons}
+    lateral_regrid = LateralRegridFromROMS(field, target_coords)
+    field = lateral_regrid.apply(field).squeeze()
+    h = lateral_regrid.apply(grid.ds.h).squeeze()
+
+    # Define depth levels
+    depth_levels, _ = _generate_focused_coordinate_range(
+        center=release.depth,
+        sc=release.vsc,
+        min_val=0.0,
+        max_val=h.max().values,
+        N=2000,
+    )
+    depth_levels = xr.DataArray(
+        np.asarray(depth_levels),
+        dims=["depth"],
+        attrs={"long_name": "Depth", "units": "m"},
+    )
+    depth_levels = depth_levels.astype(np.float32)
+
+    if release.vsc == 0:
+        # Find index of depth_level closest to release.depth
+        closest_idx = np.abs(depth_levels - release.depth).argmin()
+        weights = xr.zeros_like(depth_levels)
+        weights[closest_idx] = 1.0
+    else:
+        # Compute Gaussian weights at each layer center
+        weights = np.exp(-0.5 * ((depth_levels - release.depth) / release.vsc) ** 2)
+        weights /= weights.sum()
+
+    # Redistribute Gaussian mass from under topography to open ocean
+    weights = weights.where(depth_levels < h)
+    weights = weights / weights.sum()
+
+    # Map 1D to 2D Gaussian
+    vertical_field = field * weights
+
+    # Remove NaNs at the edges
+    if orientation == "longitude":
+        vertical_field, _ = _remove_edge_nans(vertical_field, "lon", layer_depth=h)
+    if orientation == "latitude":
+        vertical_field, _ = _remove_edge_nans(vertical_field, "lat", layer_depth=h)
+
+    vertical_field = vertical_field.assign_coords({"depth": depth_levels})
+
+    return vertical_field
+
+
+def _plot_location(
+    grid: Grid,
+    releases: ReleaseCollector,
+    ax: Axes,
+    colors: dict[str, tuple] | None = None,
+    include_legend: bool = True,
+) -> None:
+    """Plot the center location of each release on a top-down map view.
+
+    Each release is represented as a point on the map, with its color
+    determined by the `colors` dictionary.
+
+    Parameters
+    ----------
+    grid : Grid
+        The grid object defining the spatial extent and coordinate system for the plot.
+
+    releases : ReleaseCollector
+        Collection of `Release` objects to plot. Each `Release` must have `.lat`, `.lon`,
+        and `.name` attributes.
+
     ax : matplotlib.axes.Axes
-        The axis on which the plot will be drawn.
+        The Matplotlib axis object to plot on.
 
-    h : xarray.DataArray
-        The bathymetry data to plot.
+    colors : dict of str to tuple, optional
+        Optional dictionary mapping release names to RGBA color tuples. If not provided,
+        all releases are plotted in a default color (`"#dd1c77"`).
 
-    dim : str
-        The dimension along which to plot the section, either "lat" or "lon".
-
-    fixed_val : float
-        The fixed value of latitude or longitude for the section.
-
-    coord_deg : xarray.DataArray
-        The array of latitude or longitude coordinates.
-
-    resolution : float
-        The resolution at which to generate the coordinate range.
-
-    title : str
-        The title for the plot.
+    include_legend : bool, default True
+        Whether to include a legend showing release names.
 
     Returns
     -------
     None
-        The function does not return anything. It directly plots the bathymetry section on the provided axis.
     """
-    # Determine coordinate names and build target range
-    var_range = _generate_coordinate_range(
-        coord_deg.min().values, coord_deg.max().values, resolution
-    )
-    var_name = "lat" if dim == "lon" else "lon"
-    range_da = xr.DataArray(
-        var_range,
-        dims=[var_name],
-        attrs={"units": "°N" if var_name == "lat" else "°E"},
-    )
 
-    # Construct target coordinates for regridding
-    target_coords = {dim: [fixed_val], var_name: range_da}
-    regridder = LateralRegridFromROMS(h, target_coords)
-    section = regridder.apply(h)
-    section, _ = _remove_edge_nans(section, var_name)
+    lon_deg = grid.ds.lon_rho
+    lat_deg = grid.ds.lat_rho
+    if grid.straddle:
+        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+    trans = _get_projection(lon_deg, lat_deg)
 
-    # Plot the bathymetry section
-    section.plot(ax=ax, color="k")
-    ax.fill_between(section[var_name], section.squeeze(), y2=0, color="#deebf7")
-    ax.invert_yaxis()
-    ax.set_xlabel("Latitude [°N]" if var_name == "lat" else "Longitude [°E]")
-    ax.set_ylabel("Depth [m]")
-    ax.set_title(title)
+    proj = ccrs.PlateCarree()
+
+    for release in releases:
+        # transform coordinates to projected space
+        transformed_lon, transformed_lat = trans.transform_point(
+            release.lon,
+            release.lat,
+            proj,
+        )
+
+        if colors is not None:
+            color = colors[release.name]
+        else:
+            color = "k"
+
+        ax.plot(
+            transformed_lon,
+            transformed_lat,
+            marker="x",
+            markersize=8,
+            markeredgewidth=2,
+            label=release.name,
+            color=color,
+        )
+
+    if include_legend:
+        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))

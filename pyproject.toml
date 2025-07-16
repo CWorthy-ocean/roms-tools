@@ -4,7 +4,8 @@ description = "Tools for running and analysing UCLA-ROMS simulations"
 readme = "README.md"
 authors = [
     {name = "Nora Loose", email = "nora.loose@gmail.com"},
-    {name = "Thomas Nicholas", email = "tom@cworthy.org"}
+    {name = "Thomas Nicholas", email = "tom@cworthy.org"},
+    {name = "Scott Eilerman", email = "scott.eilerman@cworthy.org"}
 ]
 license = {text = "Apache-2"}
 classifiers = [
@@ -21,28 +22,32 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "xarray >=2022.6.0",
-    "numpy",
+    "numpy>2.0,<2.3",
     "pooch",
     "matplotlib",
     "cartopy",
     "packaging",
     "scipy",
-    "gcm_filters",
+    "gcm_filters >=0.5.1",
     "netcdf4",
     "PyYAML",
     "pyamg",
     "bottleneck",
     "regionmask",
     "xgcm",
-    "numba",
-    "pydantic"
+    "numba>=0.61.2",
+    "pydantic>2,<3"
 ]
 dynamic = ["version"]
 
 
 [project.optional-dependencies]
 dask = [
-    "dask[diagnostics]"
+    "dask[diagnostics]",
+]
+stream = [
+    "dask[diagnostics]",
+    "gcsfs"
 ]
 
 

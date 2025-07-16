@@ -18,6 +18,8 @@ from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 LABEL_COLOR = "k"
 LABEL_SZ = 10
+EDGE_POS_START = "start"
+EDGE_POS_END = "end"
 
 
 def _add_gridlines(ax: Axes) -> None:
@@ -461,17 +463,17 @@ def line_plot(field, title="", ax=None):
 
 
 def _get_edge(
-    arr: xr.DataArray, dim_name: str, pos: Literal["start", "end"]
+    arr: xr.DataArray, dim_name: str, pos: Literal[EDGE_POS_START, EDGE_POS_END]
 ) -> xr.DataArray:
     """Extract the first ("start") or last ("end") slice along the given dimension."""
 
-    if pos == "start":
+    if pos == EDGE_POS_START:
         return arr.isel({dim_name: 0})
 
-    if pos == "end":
+    if pos == EDGE_POS_END:
         return arr.isel({dim_name: -1})
 
-    raise ValueError("pos must be 'start' or 'end'")
+    raise ValueError(f"pos must be {EDGE_POS_START} or {EDGE_POS_END}")
 
 
 def _add_boundary_to_ax(
@@ -503,23 +505,23 @@ def _add_boundary_to_ax(
 
     edges = [
         (
-            _get_edge(lon_deg, xi_dim, "start"),
-            _get_edge(lat_deg, xi_dim, "start"),
+            _get_edge(lon_deg, xi_dim, EDGE_POS_START),
+            _get_edge(lat_deg, xi_dim, EDGE_POS_START),
             r"$\eta$",
         ),  # left
         (
-            _get_edge(lon_deg, xi_dim, "end"),
-            _get_edge(lat_deg, xi_dim, "end"),
+            _get_edge(lon_deg, xi_dim, EDGE_POS_END),
+            _get_edge(lat_deg, xi_dim, EDGE_POS_END),
             r"$\eta$",
         ),  # right
         (
-            _get_edge(lon_deg, eta_dim, "start"),
-            _get_edge(lat_deg, eta_dim, "start"),
+            _get_edge(lon_deg, eta_dim, EDGE_POS_START),
+            _get_edge(lat_deg, eta_dim, EDGE_POS_START),
             r"$\xi$",
         ),  # bottom
         (
-            _get_edge(lon_deg, eta_dim, "end"),
-            _get_edge(lat_deg, eta_dim, "end"),
+            _get_edge(lon_deg, eta_dim, EDGE_POS_END),
+            _get_edge(lat_deg, eta_dim, EDGE_POS_END),
             r"$\xi$",
         ),  # top
     ]

@@ -417,16 +417,8 @@ class RiverForcing:
         xr.Dataset
             A new dataset with overlapping rivers resolved and new entries added.
         """
-        index_to_rivers = defaultdict(list)
 
-        # Collect all index pairs used by multiple rivers
-        for river_name, index_list in self.indices.items():
-            for idx_pair in index_list:
-                index_to_rivers[idx_pair].append(river_name)
-
-        overlapping_rivers = {
-            idx: names for idx, names in index_to_rivers.items() if len(names) > 1
-        }
+        overlapping_rivers = self._get_overlapping_rivers()
 
         if len(overlapping_rivers) > 0:
             logging.info(
@@ -461,6 +453,32 @@ class RiverForcing:
         ds_updated = self._reduce_river_volumes(ds_updated, overlapping_rivers)
 
         return ds_updated
+
+    def _get_overlapping_rivers(self) -> dict[tuple[int, int], list[str]]:
+        """Identify grid cells shared by multiple rivers.
+
+        Scans through the river indices and finds all grid cell indices
+        (as tuples) that are associated with more than one river.
+
+        Returns
+        -------
+        overlapping_rivers : dict[tuple[int, int], list[str]]
+            A dictionary mapping grid cell indices (eta_rho, xi_rho) to a list
+            of river names that overlap at that grid cell.
+        """
+
+        index_to_rivers = defaultdict(list)
+
+        # Collect all index pairs used by multiple rivers
+        for river_name, index_list in self.indices.items():
+            for idx_pair in index_list:
+                index_to_rivers[idx_pair].append(river_name)
+
+        overlapping_rivers = {
+            idx: names for idx, names in index_to_rivers.items() if len(names) > 1
+        }
+
+        return overlapping_rivers
 
     def _create_combined_river(
         self,

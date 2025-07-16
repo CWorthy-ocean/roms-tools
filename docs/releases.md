@@ -23,6 +23,7 @@ plot(field, grid.ds)
 ### Bugfixes
 
 * Fix bug incorrectly identifying CDR releases as outside the domain ([#377](https://github.com/CWorthy-ocean/roms-tools/pull/377))
+* Add a de-duplication step that ensures that river names are unique ([#378](https://github.com/CWorthy-ocean/roms-tools/pull/378))
 * Grid boundary plotting now provides a more accurate and consistent visual representation, with a default edge color of black. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 
 ## v3.0.0

@@ -899,7 +899,6 @@ def plot(
         if all(dim in field.dims for dim in horizontal_dims.values()):
             break
 
-    # Convert relative to absolute indices
     def _get_absolute_index(idx, field, dim_name):
         index = field[dim_name].isel(**{dim_name: idx}).item()
         return index
@@ -963,7 +962,6 @@ def plot(
     else:
         title = ""
 
-    # Slice the field horizontally as desired
     def _slice_along_dimension(field, title, dim_name, idx):
         field = field.sel(**{dim_name: idx})
         title = title + f", {dim_name} = {idx}"
@@ -996,8 +994,8 @@ def plot(
         if not include_boundary:
             depth = depth.isel(
                 **{
-                    dim: s
-                    for dim, s in slice_dict.get(loc, {}).items()
+                    dim: i
+                    for dim, i in slice_dict.get(loc, {}).items()
                     if dim in depth.dims
                 }
             )

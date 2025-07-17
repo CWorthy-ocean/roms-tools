@@ -9,6 +9,8 @@
 from roms_tools.plot import plot
 plot(field, grid.ds)
 ```
+* Gaussian CDR plots replicate the internal behavior of ROMS more accurately ([#379](https://github.com/CWorthy-ocean/roms-tools/pull/379))
+* Section plots now include gray topography shading ([#379](https://github.com/CWorthy-ocean/roms-tools/pull/379))
 
 ### Breaking Changes
 

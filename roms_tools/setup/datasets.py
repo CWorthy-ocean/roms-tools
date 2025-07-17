@@ -2016,24 +2016,8 @@ class RiverDataset:
             dist = dist.where(dist_min < dx, drop=True).transpose(
                 self.dim_names["station"], "eta_rho", "xi_rho"
             )
-            dist_min = dist_min.where(dist_min < dx, drop=True)
 
-            # Find the indices of the closest grid cell to the river mouth
-            indices = np.where(dist == dist_min)
-            stations = indices[0]
-            eta_rho_values = indices[1]
-            xi_rho_values = indices[2]
-            names = (
-                ds[self.var_names["name"]]
-                .isel({self.dim_names["station"]: stations})
-                .values
-            )
-            river_indices = {}
-            for i in range(len(stations)):
-                river_name = names[i]
-                river_indices[river_name] = [
-                    (int(eta_rho_values[i]), int(xi_rho_values[i]))
-                ]  # list of tuples
+            river_indices = get_indices_of_nearest_grid_cell_for_rivers(dist, self)
         else:
             ds = xr.Dataset()
             river_indices = {}
@@ -2908,6 +2892,48 @@ def modified_julian_days(year, month, day, hour=0):
     mjd = jd - 2400000.5
 
     return mjd
+
+
+def get_indices_of_nearest_grid_cell_for_rivers(
+    dist: xr.DataArray, data: RiverDataset
+) -> dict[str, list[tuple[int, int]]]:
+    """Get the indices of the nearest grid cell for each river based on distance.
+
+    Parameters
+    ----------
+    dist : xr.DataArray
+        A 2D or 3D array representing distances from each river to coastal grid cells,
+        with dimensions including "eta_rho" and "xi_rho".
+    data : RiverDataset
+        An instance of RiverDataset containing river names and dimension metadata.
+
+    Returns
+    -------
+    dict[str, list[tuple[int, int]]]
+        Dictionary mapping each river name to a list containing the (eta_rho, xi_rho) index
+        of the closest coastal grid cell.
+    """
+    # Find indices of the nearest coastal grid cell for each river
+    indices = dist.argmin(dim=["eta_rho", "xi_rho"])
+
+    eta_rho_values = indices["eta_rho"].values
+    xi_rho_values = indices["xi_rho"].values
+
+    # Get the corresponding station indices and river names
+    stations = indices["eta_rho"][data.dim_names["station"]].values
+    names = (
+        data.ds[data.var_names["name"]]
+        .sel({data.dim_names["station"]: stations})
+        .values
+    )
+
+    # Build dictionary of river name to grid index
+    river_indices = {
+        str(names[i]): [(int(eta_rho_values[i]), int(xi_rho_values[i]))]
+        for i in range(len(stations))
+    }
+
+    return river_indices
 
 
 def _deduplicate_river_names(

@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,10 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.plot import get_projection, plot_2d_horizontal_field
-from roms_tools.setup.datasets import DaiRiverDataset
+from roms_tools.setup.datasets import (
+    DaiRiverDataset,
+    get_indices_of_nearest_grid_cell_for_rivers,
+)
 from roms_tools.setup.utils import (
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
@@ -140,6 +144,7 @@ class RiverForcing:
             data.extract_named_rivers(self.indices)
 
         ds = self._create_river_forcing(data)
+        ds = self._handle_overlapping_rivers(ds)
         ds = self._write_indices_into_dataset(ds)
         self._validate(ds)
 
@@ -184,8 +189,8 @@ class RiverForcing:
                         f"Data for river `{river_name}` must be a list of tuples."
                     )
 
-                # Ensure each element in the list is a tuple of length 2
                 seen_tuples = set()
+                # Ensure each element in the list is a tuple of length 2
                 for idx_pair in river_data:
                     if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
                         raise ValueError(
@@ -214,7 +219,7 @@ class RiverForcing:
                             f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho)-1}]."
                         )
 
-                    # Check for duplicate tuples
+                    # Check for duplicate tuples for a single river
                     if idx_pair in seen_tuples:
                         raise ValueError(
                             f"Duplicate location {idx_pair} found for river `{river_name}`."
@@ -237,6 +242,65 @@ class RiverForcing:
             raise ValueError('Only "DAI" is a valid option for source["name"].')
 
         return data
+
+    def _move_rivers_to_closest_coast(self, target_coords, data):
+        """Move river mouths to the closest coastal grid cell.
+
+        This method computes the closest coastal grid point to each river mouth
+        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
+
+        Parameters:
+        -----------
+        target_coords : dict
+            A dictionary containing the following keys:
+            - "lon" (xarray.DataArray): Longitude coordinates of the target grid points.
+            - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
+            - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
+
+        data : object
+            An object that contains the dataset and related variables. It must have the following attributes:
+            - `ds`: The dataset containing river information.
+            - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
+            - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
+
+        Returns
+        -------
+        indices : dict[str, list[tuple]]
+            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
+            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+        """
+
+        # Retrieve longitude and latitude of river mouths
+        river_lon = data.ds[data.var_names["longitude"]]
+        river_lat = data.ds[data.var_names["latitude"]]
+
+        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
+        if target_coords["straddle"]:
+            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
+        else:
+            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+
+        mask = self.grid.ds.mask_rho
+        faces = (
+            mask.shift(eta_rho=1)
+            + mask.shift(eta_rho=-1)
+            + mask.shift(xi_rho=1)
+            + mask.shift(xi_rho=-1)
+        )
+
+        # We want all grid points on land that are adjacent to the ocean
+        coast = (1 - mask) * (faces > 0)
+        dist_coast = gc_dist(
+            target_coords["lon"].where(coast),
+            target_coords["lat"].where(coast),
+            river_lon,
+            river_lat,
+        ).transpose(data.dim_names["station"], "eta_rho", "xi_rho")
+
+        # Find the indices of the closest coastal grid cell to the river mouth
+        river_indices = get_indices_of_nearest_grid_cell_for_rivers(dist_coast, data)
+
+        return river_indices
 
     def _create_river_forcing(self, data):
         """Create river forcing data for volume flux and tracers (temperature, salinity,
@@ -333,80 +397,223 @@ class RiverForcing:
 
         return ds
 
-    def _move_rivers_to_closest_coast(self, target_coords, data):
-        """Move river mouths to the closest coastal grid cell.
+    def _handle_overlapping_rivers(self, ds: xr.Dataset) -> xr.Dataset:
+        """Detect and resolve overlapping river grid cell assignments.
 
-        This method computes the closest coastal grid point to each river mouth
-        based on geographical distance. It identifies the nearest grid point on the coast and returns the updated river mouth indices.
+        If multiple rivers are assigned to the same grid cell (i.e., overlapping index pairs),
+        this method creates new uniquely named rivers ('overlap_1', 'overlap_2', ...)
+        that consolidate the contributions from all original rivers sharing that location.
 
-        Parameters:
-        -----------
-        target_coords : dict
-            A dictionary containing the following keys:
-            - "lon" (xarray.DataArray): Longitude coordinates of the target grid points.
-            - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
-            - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
+        For each overlapping grid cell:
+        - A new river is created using a volume-weighted sum of the original rivers' volume and tracer.
+        - The volume fraction of the original river is reduced proportionally to reflect the removal of the shared grid cell.
+        - The new river is appended to the dataset and indexed in `self.indices`.
 
-        data : object
-            An object that contains the dataset and related variables. It must have the following attributes:
-            - `ds`: The dataset containing river information.
-            - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
-            - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing the existing river forcing fields, including:
+            - `river_volume` : volume transport per river [river_time, nriver]
+            - `river_tracer` : tracer concentration per river [river_time, ntracers, nriver]
+            - `river_name`   : river name labels [nriver]
 
         Returns
         -------
-        indices : dict[str, list[tuple]]
-            A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
-            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+        xr.Dataset
+            A new dataset with overlapping rivers resolved and new entries added.
         """
 
-        # Retrieve longitude and latitude of river mouths
-        river_lon = data.ds[data.var_names["longitude"]]
-        river_lat = data.ds[data.var_names["latitude"]]
+        overlapping_rivers = self._get_overlapping_rivers()
 
-        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
-        if target_coords["straddle"]:
-            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
+        if len(overlapping_rivers) > 0:
+            logging.info(
+                f"Creating {len(overlapping_rivers)} synthetic river(s) to handle overlapping entries."
+            )
+
+            # Add new unique river for each overlapping index
+            combined_river_volumes = []
+            combined_river_tracers = []
+
+            for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
+
+                (
+                    combined_river_volume,
+                    combined_river_tracer,
+                ) = self._create_combined_river(ds, i + 1, idx_pair, river_list)
+                combined_river_volumes.append(combined_river_volume)
+                combined_river_tracers.append(combined_river_tracer)
+
+            ds_updated = xr.Dataset()
+            ds_updated["river_volume"] = xr.concat(
+                [ds["river_volume"]] + combined_river_volumes, dim="nriver"
+            )
+            ds_updated["river_tracer"] = xr.concat(
+                [ds["river_tracer"]] + combined_river_tracers, dim="nriver"
+            )
+            ds_updated.attrs = ds.attrs
         else:
-            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+            ds_updated = ds
 
-        mask = self.grid.ds.mask_rho
-        faces = (
-            mask.shift(eta_rho=1)
-            + mask.shift(eta_rho=-1)
-            + mask.shift(xi_rho=1)
-            + mask.shift(xi_rho=-1)
+        # Reduce volume fraction of original rivers by appropriate amount
+        ds_updated = self._reduce_river_volumes(ds_updated, overlapping_rivers)
+
+        return ds_updated
+
+    def _get_overlapping_rivers(self) -> dict[tuple[int, int], list[str]]:
+        """Identify grid cells shared by multiple rivers.
+
+        Scans through the river indices and finds all grid cell indices
+        (as tuples) that are associated with more than one river.
+
+        Returns
+        -------
+        overlapping_rivers : dict[tuple[int, int], list[str]]
+            A dictionary mapping grid cell indices (eta_rho, xi_rho) to a list
+            of river names that overlap at that grid cell.
+        """
+
+        index_to_rivers = defaultdict(list)
+
+        # Collect all index pairs used by multiple rivers
+        for river_name, index_list in self.indices.items():
+            for idx_pair in index_list:
+                index_to_rivers[idx_pair].append(river_name)
+
+        overlapping_rivers = {
+            idx: names for idx, names in index_to_rivers.items() if len(names) > 1
+        }
+
+        return overlapping_rivers
+
+    def _create_combined_river(
+        self,
+        ds: xr.Dataset,
+        i: int,
+        idx_pair: tuple[int, int],
+        river_list: list[str],
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Create a combined river entry from multiple overlapping rivers.
+
+        This method generates a synthetic river by merging contributions from several rivers
+        that map to the same grid cell. It performs a weighted sum of river volumes and
+        computes volume-weighted averages of tracer concentrations. The new synthetic river is also
+        registered in `self.indices`.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing river data, including `river_volume`, `river_tracer`, and `river_name`.
+        i : int
+            Index used for naming the new synthetic river (e.g., "overlap_1", "overlap_2", ...).
+        idx_pair : tuple[int, int]
+            Grid cell index (eta_rho, xi_rho) that the combined river will occupy.
+        river_list : list[str]
+            List of river names contributing to the overlapping grid cell.
+
+        Returns
+        -------
+        combined_river_volume : xr.DataArray
+            The total river volume at the overlapping grid cell, as a new 1-entry DataArray with updated coordinates.
+        combined_river_tracer : xr.DataArray
+            The volume-weighted tracer concentration at the overlapping grid cell,
+            as a new 1-entry DataArray with updated coordinates.
+        """
+
+        new_name = f"overlap_{i}"
+        self.indices[new_name] = [idx_pair]
+
+        # Get index of all rivers contributing to this overlapping cell
+        contributing_indices = [
+            np.where(ds["river_name"].values == name)[0].item() for name in river_list
+        ]
+
+        # Get the number of grid points each river originally contributed to
+        num_cells_per_river = [len(self.indices[name]) for name in river_list]
+
+        # Weighted sum of river volume contributions at the overlapping location
+        weighted_volumes = xr.concat(
+            [
+                (ds["river_volume"].isel(nriver=i) / n_cells).astype("float64")
+                for i, n_cells in zip(contributing_indices, num_cells_per_river)
+            ],
+            dim="tmp",
+        )
+        combined_river_volume = weighted_volumes.sum(dim="tmp", skipna=True)
+
+        # Volume-weighted sum of river tracer contributions at the overlapping location
+        weighted_tracers = xr.concat(
+            [
+                (ds["river_tracer"].isel(nriver=i) * weight.fillna(0.0)).astype(
+                    "float64"
+                )
+                for i, weight in zip(contributing_indices, weighted_volumes)
+            ],
+            dim="tmp",
+        )
+        combined_river_tracer = (
+            weighted_tracers.sum(dim="tmp", skipna=True) / combined_river_volume
+        )
+        # If combined_river_volume is 0.0, the result will be NaN. Replace with default for clarity.
+        # This is mainly for plotting and to avoid confusing users—ROMS will ignore tracers with zero volume anyway.
+        defaults = get_tracer_defaults()
+        for ntracer in range(combined_river_tracer.sizes["ntracers"]):
+            tracer_name = combined_river_tracer.tracer_name[ntracer].item()
+            default = defaults[tracer_name]
+            combined_river_tracer.loc[
+                {"ntracers": ntracer}
+            ] = combined_river_tracer.loc[{"ntracers": ntracer}].fillna(default)
+
+        # Expand, assign coordinates, and name for both volume and tracer
+        new_nriver = ds.sizes["nriver"] + i
+        combined_river_volume = combined_river_volume.expand_dims(nriver=1)
+        combined_river_volume = combined_river_volume.assign_coords(
+            nriver=[new_nriver], river_name=new_name
+        )
+        combined_river_tracer = combined_river_tracer.expand_dims(nriver=1)
+        combined_river_tracer = combined_river_tracer.assign_coords(
+            nriver=[new_nriver], river_name=new_name
         )
 
-        # We want all grid points on land that are adjacent to the ocean
-        coast = (1 - mask) * (faces > 0)
-        dist_coast = gc_dist(
-            target_coords["lon"].where(coast),
-            target_coords["lat"].where(coast),
-            river_lon,
-            river_lat,
-        ).transpose(data.dim_names["station"], "eta_rho", "xi_rho")
-        dist_coast_min = dist_coast.min(dim=["eta_rho", "xi_rho"])
+        return combined_river_volume, combined_river_tracer
 
-        # Find the indices of the closest coastal grid cell to the river mouth
-        indices = np.where(dist_coast == dist_coast_min)
-        stations = indices[0]
-        eta_rho_values = indices[1]
-        xi_rho_values = indices[2]
-        names = (
-            data.ds[data.var_names["name"]]
-            .isel({data.dim_names["station"]: stations})
-            .values
-        )
-        # Return the indices in a dictionary format
-        river_indices = {}
-        for i in range(len(stations)):
-            river_name = names[i]
-            river_indices[river_name] = [
-                (int(eta_rho_values[i]), int(xi_rho_values[i]))
-            ]  # list of tuples
+    def _reduce_river_volumes(
+        self, ds: xr.Dataset, overlapping_rivers: dict[tuple[int, int], list[str]]
+    ) -> xr.Dataset:
+        """Reduce river volumes for rivers contributing to overlapping grid cells.
 
-        return river_indices
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing `river_name` and `river_volume` variables.
+        overlapping_rivers : dict
+            Mapping from (eta_rho, xi_rho) grid cell indices to lists of river names
+            contributing to that cell.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Updated dataset with reduced river volumes.
+        """
+        # Count number of overlaps for each river
+        river_overlap_count = defaultdict(int)
+        for rivers in overlapping_rivers.values():
+            for name in rivers:
+                river_overlap_count[name] += 1
+
+        for name in ds["river_name"].values:
+            n_cells = len(self.indices[name])
+            n_overlaps = river_overlap_count.get(name, 0)
+
+            if n_cells == 0:
+                continue  # Avoid division by zero
+
+            # Scale river volume based on non-overlapping cells
+            scale_factor = (n_cells - n_overlaps) / n_cells
+            river_idx = np.where(ds["river_name"].values == name)[0].item()
+            nriver_val = ds["nriver"].values[river_idx]
+            ds["river_volume"].loc[{"nriver": nriver_val}] *= scale_factor
+
+        return ds
 
     def _write_indices_into_dataset(self, ds):
         """Adds river location indices to the dataset as the "river_index" and
@@ -433,7 +640,6 @@ class RiverForcing:
             river_name = str(ds.river_name.sel(nriver=nriver).values)
             indices = self.indices[river_name]
             fraction = 1.0 / len(indices)
-
             for eta_index, xi_index in indices:
 
                 # Assign unique nriver ID (Fortran-based indexing)
@@ -498,9 +704,7 @@ class RiverForcing:
         )
 
         for ax in axs:
-            plot_2d_horizontal_field(
-                field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False
-            )
+            plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         proj = ccrs.PlateCarree()
 
@@ -692,7 +896,15 @@ class RiverForcing:
         serialized_indices = {"_convention": "eta_rho, xi_rho"}
         for key, value in indices_data.items():
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
-        forcing_dict["RiverForcing"]["indices"] = serialized_indices
+
+        # Remove keys starting with "overlap_"
+        filtered_indices = {
+            key: value
+            for key, value in serialized_indices.items()
+            if not key.startswith("overlap_")
+        }
+
+        forcing_dict["RiverForcing"]["indices"] = filtered_indices
 
         write_to_yaml(forcing_dict, filepath)
 

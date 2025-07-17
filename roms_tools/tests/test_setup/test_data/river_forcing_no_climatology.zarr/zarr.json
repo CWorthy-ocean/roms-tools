@@ -1,12 +1,143 @@
 {
-  "attributes": {
-    "climatology": "True"
-  },
+  "attributes": {},
   "zarr_format": 3,
   "consolidated_metadata": {
     "kind": "inline",
     "must_understand": false,
     "metadata": {
+      "river_time": {
+        "shape": [
+          4
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "relative time: days since 2000-01-01 00:00:00",
+          "units": "days",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "river_time"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "tracer_long_name": {
+        "shape": [
+          2
+        ],
+        "data_type": "string",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "",
+        "codecs": [
+          {
+            "name": "vlen-utf8",
+            "configuration": {}
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "Tracer long name"
+        },
+        "dimension_names": [
+          "ntracers"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "tracer_name": {
+        "shape": [
+          2
+        ],
+        "data_type": "string",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "",
+        "codecs": [
+          {
+            "name": "vlen-utf8",
+            "configuration": {}
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "Tracer name"
+        },
+        "dimension_names": [
+          "ntracers"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
       "river_name": {
         "shape": [
           7
@@ -50,52 +181,9 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "tracer_unit": {
-        "shape": [
-          34
-        ],
-        "data_type": "string",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              34
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": "",
-        "codecs": [
-          {
-            "name": "vlen-utf8",
-            "configuration": {}
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Tracer concentration unit"
-        },
-        "dimension_names": [
-          "ntracers"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
       "river_volume": {
         "shape": [
-          12,
+          4,
           7
         ],
         "data_type": "float64",
@@ -103,7 +191,7 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
+              4,
               7
             ]
           }
@@ -133,147 +221,12 @@
         "attributes": {
           "long_name": "River volume flux",
           "units": "m^3/s",
-          "coordinates": "abs_time month river_name",
+          "coordinates": "abs_time river_name",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
           "river_time",
           "nriver"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "tracer_name": {
-        "shape": [
-          34
-        ],
-        "data_type": "string",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              34
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": "",
-        "codecs": [
-          {
-            "name": "vlen-utf8",
-            "configuration": {}
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Tracer name"
-        },
-        "dimension_names": [
-          "ntracers"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "month": {
-        "shape": [
-          12
-        ],
-        "data_type": "int64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              12
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Month index (1-12)"
-        },
-        "dimension_names": [
-          "river_time"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "abs_time": {
-        "shape": [
-          12
-        ],
-        "data_type": "int64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              12
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "absolute time",
-          "units": "days since 2000-01-16 00:00:00",
-          "calendar": "proleptic_gregorian"
-        },
-        "dimension_names": [
-          "river_time"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -329,58 +282,10 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "river_time": {
-        "shape": [
-          12
-        ],
-        "data_type": "float64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              12
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "cycle_length": 365.25,
-          "long_name": "relative time: days since 2000-01-01 00:00:00",
-          "units": "days",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "river_time"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
       "river_tracer": {
         "shape": [
-          12,
-          34,
+          4,
+          2,
           7
         ],
         "data_type": "float64",
@@ -388,8 +293,8 @@
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              12,
-              34,
+              4,
+              2,
               7
             ]
           }
@@ -418,7 +323,7 @@
         ],
         "attributes": {
           "long_name": "River tracer data",
-          "coordinates": "abs_time month river_name tracer_long_name tracer_name tracer_unit",
+          "coordinates": "abs_time river_name tracer_long_name tracer_name tracer_unit",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -430,16 +335,16 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "tracer_long_name": {
+      "tracer_unit": {
         "shape": [
-          34
+          2
         ],
         "data_type": "string",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              34
+              2
             ]
           }
         },
@@ -464,10 +369,102 @@
           }
         ],
         "attributes": {
-          "long_name": "Tracer long name"
+          "long_name": "Tracer concentration unit"
         },
         "dimension_names": [
           "ntracers"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "abs_time": {
+        "shape": [
+          4
+        ],
+        "data_type": "int64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "absolute time",
+          "units": "days since 1997-12-15 00:00:00",
+          "calendar": "proleptic_gregorian"
+        },
+        "dimension_names": [
+          "river_time"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "nriver": {
+        "shape": [
+          7
+        ],
+        "data_type": "int64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              7
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "River ID (1-based Fortran indexing)"
+        },
+        "dimension_names": [
+          "nriver"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -518,51 +515,6 @@
         "dimension_names": [
           "eta_rho",
           "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "nriver": {
-        "shape": [
-          7
-        ],
-        "data_type": "int64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              7
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "River ID (1-based Fortran indexing)"
-        },
-        "dimension_names": [
-          "nriver"
         ],
         "zarr_format": 3,
         "node_type": "array",

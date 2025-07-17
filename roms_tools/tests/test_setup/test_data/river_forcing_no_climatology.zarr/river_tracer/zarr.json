@@ -1,12 +1,16 @@
 {
   "shape": [
+    4,
+    2,
     7
   ],
-  "data_type": "string",
+  "data_type": "float64",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
       "chunk_shape": [
+        4,
+        2,
         7
       ]
     }
@@ -17,11 +21,13 @@
       "separator": "/"
     }
   },
-  "fill_value": "",
+  "fill_value": 0.0,
   "codecs": [
     {
-      "name": "vlen-utf8",
-      "configuration": {}
+      "name": "bytes",
+      "configuration": {
+        "endian": "little"
+      }
     },
     {
       "name": "zstd",
@@ -32,9 +38,13 @@
     }
   ],
   "attributes": {
-    "long_name": "River name"
+    "long_name": "River tracer data",
+    "coordinates": "abs_time river_name tracer_long_name tracer_name tracer_unit",
+    "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
+    "river_time",
+    "ntracers",
     "nriver"
   ],
   "zarr_format": 3,

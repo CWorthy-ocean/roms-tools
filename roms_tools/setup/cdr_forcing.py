@@ -691,6 +691,7 @@ class CDRForcing(BaseModel):
             ax=ax0,
             kwargs={"cmap": cmap},
             add_colorbar=False,
+            title="Depth-integrated distribution",
         )
         if mark_release_center:
             _plot_location(

@@ -496,7 +496,8 @@ class RiverForcing:
 
         This method generates a synthetic river by merging contributions from several rivers
         that map to the same grid cell. It performs a weighted sum of river volumes and
-        computes volume-weighted averages of tracer concentrations.
+        computes volume-weighted averages of tracer concentrations. The new synthetic river is also
+        registered in `self.indices`.
 
         Parameters
         ----------
@@ -566,11 +567,11 @@ class RiverForcing:
         new_nriver = ds.sizes["nriver"] + i
         combined_river_volume = combined_river_volume.expand_dims(nriver=1)
         combined_river_volume = combined_river_volume.assign_coords(
-            nriver=[new_nriver + 1], river_name=new_name
+            nriver=[new_nriver], river_name=new_name
         )
         combined_river_tracer = combined_river_tracer.expand_dims(nriver=1)
         combined_river_tracer = combined_river_tracer.assign_coords(
-            nriver=[new_nriver + 1], river_name=new_name
+            nriver=[new_nriver], river_name=new_name
         )
 
         return combined_river_volume, combined_river_tracer
@@ -703,9 +704,7 @@ class RiverForcing:
         )
 
         for ax in axs:
-            plot_2d_horizontal_field(
-                field, kwargs=kwargs, ax=ax, c=None, add_colorbar=False
-            )
+            plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         proj = ccrs.PlateCarree()
 

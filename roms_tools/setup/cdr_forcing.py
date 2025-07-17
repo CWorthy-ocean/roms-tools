@@ -697,7 +697,6 @@ class CDRForcing(BaseModel):
             horizontal_field.where(self.grid.ds.mask_rho),
             kwargs=kwargs,
             ax=ax0,
-            c=None,
             add_colorbar=False,
         )
         if mark_release_center:

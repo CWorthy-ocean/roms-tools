@@ -301,6 +301,13 @@ def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
             ax.plot(
                 interface_depth[xdim], interface_depth.isel({layer_key: i}), color="k"
             )
+    # Fill everything below the bathymetry line in gray
+    ax.fill_between(
+        field[xdim],
+        field[depth_label][0],
+        y2=ax.get_ylim()[0],
+        color="gray",
+    )
 
     ax.set_title(title)
     ax.set_ylabel("Depth [m]")

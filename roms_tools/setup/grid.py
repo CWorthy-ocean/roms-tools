@@ -987,38 +987,58 @@ class Grid:
         # initially define the domain to be longer in x-direction (dimension "length")
         # than in y-direction (dimension "width") to keep grid distortion minimal
         if self.size_y > self.size_x:
-            domain_length, domain_width = self.size_y * 1e3, self.size_x * 1e3  # in m
+            domain_length = self.size_y * 1e3  # in meters
+            domain_width = self.size_x * 1e3
             nl, nw = self.ny, self.nx
         else:
-            domain_length, domain_width = self.size_x * 1e3, self.size_y * 1e3  # in m
+            domain_length = self.size_x * 1e3
+            domain_width = self.size_y * 1e3
             nl, nw = self.nx, self.ny
 
-        domain_length_in_degrees = domain_length / R_EARTH
-        domain_width_in_degrees = domain_width / R_EARTH
+        dlon = domain_length / R_EARTH
+        dlat = domain_width / R_EARTH
 
-        # Generate 1D longitude arrays at cell centers and corners
-        lon_array_1d_in_degrees = domain_length_in_degrees * (
-            np.arange(-0.5, nl + 1.5) / nl - 0.5
-        )
-        lonq_array_1d_in_degrees_q = domain_length_in_degrees * (
-            np.arange(-1, nl + 2) / nl - 0.5
-        )
+        # 1D longitude arrays at centers and corners (cell and cell+1)
+        lon_array_1d_in_degrees = dlon * np.arange(-0.5, nl + 1.5) / nl - dlon / 2
+        lonq_array_1d_in_degrees = dlon * np.arange(-1, nl + 2) / nl - dlon / 2
 
-        # Mercator projection for latitude
-        y1 = np.log(np.tan(np.pi / 4 - domain_width_in_degrees / 4))
-        y2 = np.log(np.tan(np.pi / 4 + domain_width_in_degrees / 4))
+        mul = 1.0
+        # Central longitude spacing (in radians)
+        dlon_cen = dlon / nl
 
-        # Generate 1D latitude arrays with inverse Mercator projection
-        lat_array_1d_in_degrees = np.arctan(
-            np.sinh((y2 - y1) * (np.arange(-0.5, nw + 1.5) / nw) + y1)
-        )
+        for _ in range(100):
+
+            # Compute Mercator y-limits
+            y1 = np.log(np.tan(np.pi / 4 - dlat / 4))
+            y2 = np.log(np.tan(np.pi / 4 + dlat / 4))
+
+            # Mercator-transformed latitude coordinates
+            y = (y2 - y1) * np.arange(-0.5, nw + 1.5) / nw + y1
+            lat_array_1d_in_degrees = np.arctan(np.sinh(y))  # Inverse Mercator
+
+            # Central latitude spacing (in radians)
+            i_mid = int(round(nw / 2))
+            dlat_cen = 0.5 * (
+                lat_array_1d_in_degrees[i_mid + 1] - lat_array_1d_in_degrees[i_mid - 1]
+            )
+
+            # Update multiplicative scaling factor
+            mul = dlat_cen / dlon_cen * domain_length / domain_width * nw / nl
+
+            # Update dlat for next iteration
+            dlat /= mul
+
+        # Latitudes of corners
         latq_array_1d_in_degrees = np.arctan(
-            np.sinh((y2 - y1) * (np.arange(-1, nw + 2) / nw) + y1)
+            np.sinh((y2 - y1) * np.arange(-1, nw + 2) / nw + y1)
         )
+
+        # Rescale
+        latq_array_1d_in_degrees = latq_array_1d_in_degrees / mul
 
         # 2D grids for cell centers and corners
         lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
-        lonq, latq = np.meshgrid(lonq_array_1d_in_degrees_q, latq_array_1d_in_degrees)
+        lonq, latq = np.meshgrid(lonq_array_1d_in_degrees, latq_array_1d_in_degrees)
 
         if self.size_y > self.size_x:
             # Rotate grid by 90 degrees because until here the grid has been defined

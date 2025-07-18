@@ -894,7 +894,9 @@ def plot(
 
     if "straddle" not in grid_ds.attrs:
         raise AttributeError("Grid dataset must have a 'straddle' attribute.")
+
     straddle = grid_ds.attrs["straddle"]
+    straddle = straddle == "True"  # convert string 'True' / 'False' into boolean
 
     # Get horizontal dimensions and grid location
     horizontal_dims_dict = {

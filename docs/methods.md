@@ -20,25 +20,6 @@ The horizontal grid parameters are as follows:
 
 Using these parameters, `ROMS-Tools` generates a curvilinear orthogonal grid designed to minimize variations in grid cell size across the domain. To achieve this, `ROMS-Tools` employs a Transverse Mercator projection.
 
-**Detailed Steps**:
-
-1. **Domain Orientation**: Given the `size_x` and `size_y` parameters, the domain is initially oriented to prioritize the x-direction as longer than the y-direction. This may involve swapping `size_x` with `size_y` and `nx` with `ny`. This step is performed to minimize grid distortion.
-
-2. **Longitude Grid Points**: `nx` + 2 grid points are spaced uniformly in longitude.
-
-3. **Mercator Projection**: A Mercator projection is applied across the equator to convert latitude degrees into y-coordinates. `ny` + 2 grid points are spaced uniformly in the y-coordinate. An inverse Mercator projection is then performed to return to geographic coordinates.
-
-4. **Grid Rotation Back to Original Orientation**: If there was a swap in step 1, the grid is now rotated by 90 degrees back to its original orientation.
-
-5. **Coordinate System Rotation**: The coordinate system is rotated by the specified angle `rot` to align with the desired orientation.
-
-6. **Grid Centering**: Coordinates are translated to center the grid at the specified longitude `center_lon` and latitude `center_lat`.
-
-7. **Grid Metrics Computation**: Grid metrics `pm = 1 / dx` and `pn = 1 / dy` are computed, where `dx` and `dy` represent the grid spacing in the x and y directions, respectively.
-
-8. **Angle computation**: The angle between the positive x-axis of the local grid and East is computed to establish the orientation relative to geographic directions.
-
-
 ## Mask
 
 During the grid generation process, when an instance of the {py:obj}`roms_tools.Grid` class is created, `ROMS-Tools` also generates a land mask. For practical examples, refer to [this notebook](grid.ipynb).

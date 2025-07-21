@@ -188,9 +188,9 @@ def _smooth_topography_globally(hraw, factor, area) -> xr.DataArray:
     margin_mask = xr.concat(
         [margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
     )
-    area_extended = xr.concat([area, 0 * area.isel(eta_rho=-1)], dim="eta_rho")
+    area_extended = xr.concat([area, area.isel(eta_rho=-1)], dim="eta_rho")
     area_extended = xr.concat(
-        [area_extended, 0 * area_extended.isel(xi_rho=-1)], dim="xi_rho"
+        [area_extended, area_extended.isel(xi_rho=-1)], dim="xi_rho"
     )
 
     # we choose a Gaussian filter kernel corresponding to a Gaussian with standard deviation factor/sqrt(12);

@@ -1455,7 +1455,7 @@ def add_time_info_to_ds(
     abs_time.attrs["long_name"] = "absolute time"
     ds = ds.assign_coords({"abs_time": abs_time})
 
-    time.attrs["long_name"] = f"relative time: days since {str(model_reference_date)}"
+    time.attrs["long_name"] = f"relative time: days since {model_reference_date!s}"
     time.encoding["units"] = "days"
     time.attrs["units"] = "days"
     ds.encoding["unlimited_dims"] = time_name
@@ -1569,7 +1569,7 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
 
     if exclude is None:
         exclude = []
-    exclude = ["grid", "parent_grid", "ds"] + exclude
+    exclude = ["grid", "parent_grid", "ds", *exclude]
 
     filtered_field_names = [param for param in field_names if param not in exclude]
 

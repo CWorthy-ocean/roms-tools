@@ -119,8 +119,8 @@ def compute_depth_coordinates(
     zeta: xr.DataArray | float = 0,
     depth_type: str = "layer",
     location: str = "rho",
-    eta: int = None,
-    xi: int = None,
+    eta: int | None = None,
+    xi: int | None = None,
 ) -> "xr.DataArray":
     """Compute vertical depth coordinates for a given ROMS grid location.
 

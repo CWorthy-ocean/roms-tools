@@ -548,7 +548,7 @@ class InitialConditions:
         ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
         ds = ds.assign_coords(ocean_time=("time", ocean_time.data.astype("float64")))
         ds["ocean_time"].attrs["long_name"] = (
-            f"relative time: seconds since {str(self.model_reference_date)}"
+            f"relative time: seconds since {self.model_reference_date!s}"
         )
         ds["ocean_time"].attrs["units"] = "seconds"
         ds = ds.swap_dims({"time": "ocean_time"})

@@ -441,10 +441,10 @@ class RiverForcing:
 
             ds_updated = xr.Dataset()
             ds_updated["river_volume"] = xr.concat(
-                [ds["river_volume"]] + combined_river_volumes, dim="nriver"
+                [ds["river_volume"], *combined_river_volumes], dim="nriver"
             )
             ds_updated["river_tracer"] = xr.concat(
-                [ds["river_tracer"]] + combined_river_tracers, dim="nriver"
+                [ds["river_tracer"], *combined_river_tracers], dim="nriver"
             )
             ds_updated.attrs = ds.attrs
         else:

@@ -622,7 +622,7 @@ class TestTPXODataset:
 
     def test_select_constituents_omega_mismatch(self, regional_tpxo_dataset, omega):
         omega = OrderedDict(
-            list(omega.items())[:3] + [("fake", 6.495854e-05)] + list(omega.items())[3:]
+            [*list(omega.items())[:3], ("fake", 6.495854e-05), *list(omega.items())[3:]]
         )
         with pytest.raises(ValueError, match="The dataset contains tidal constituents"):
             regional_tpxo_dataset.select_constituents(11, omega)

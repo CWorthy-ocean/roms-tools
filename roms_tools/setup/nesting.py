@@ -31,15 +31,15 @@ class ChildGrid(Grid):
     It generates two datasets:
 
     1. `ds`: Contains child grid variables, ensuring compatibility with the parent grid.
-       The child grid’s topography and mask are adjusted to match the parent grid at the boundaries.
+       The child grid topography and mask are adjusted to match the parent grid at the boundaries.
 
-    2. `ds_nesting`: Contains boundary mappings, linking the child grid’s boundaries
+    2. `ds_nesting`: Contains boundary mappings, linking the boundaries of the child grid
        to the corresponding parent grid indices.
 
     Parameters
     ----------
     parent_grid : Grid
-        The parent grid object, providing the reference for the child grid's topography and mask.
+        The parent grid object, providing the reference for the topography and mask of the child grid.
     boundaries : Dict[str, bool]
         Specifies which child grid boundaries (south, east, north, west) should be adjusted for topography/mask
         and included in `ds_nesting`. Defaults to all `True`.
@@ -51,8 +51,8 @@ class ChildGrid(Grid):
     """
 
     parent_grid: Grid
-    """The parent grid object, providing the reference for the child grid's topography
-    and mask."""
+    """The parent grid object, providing the reference for the child topography
+    and mask of the child grid."""
     boundaries: Dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
@@ -69,8 +69,8 @@ class ChildGrid(Grid):
     """Dictionary configuring the boundary nesting process."""
 
     ds: xr.Dataset = field(init=False, repr=False)
-    """An xarray Dataset containing child grid variables aligned with the parent grid’s
-    topography and mask at the boundaries."""
+    """An xarray Dataset containing child grid variables aligned with the
+    topography and mask of the parent grid at the boundaries."""
     ds_nesting: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing boundary mappings, where child grid boundaries are
     mapped onto parent grid indices."""
@@ -97,7 +97,7 @@ class ChildGrid(Grid):
         self.ds_nesting = ds_nesting
 
     def _modify_child_topography_and_mask(self):
-        """Adjust the child grid's topography and mask to align with the parent grid.
+        """Adjust the topography and mask of the child grid to align with the parent grid.
 
         Uses a weighted sum based on boundary distance and clips depth values to a
         minimum.
@@ -591,7 +591,7 @@ def modify_child_topography_and_mask(
 ):
     """Adjust the child grid topography and mask to align with the parent grid.
 
-    The child grid's topography is adjusted using a weighted sum based on the boundary distance,
+    The topography of the child grid is adjusted using a weighted sum based on the boundary distance,
     and the depth values are clipped to enforce a minimum depth constraint.
 
     Parameters

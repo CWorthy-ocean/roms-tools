@@ -625,7 +625,7 @@ def _add_field_to_ax(
 
     Notes
     -----
-    - If `depth_contours` is True, the field’s `layer_depth` is used to add contours.
+    - If `depth_contours` is True, the `layer_depth` of `field` is used to add contours.
     """
     proj = ccrs.PlateCarree()
 

@@ -79,7 +79,7 @@ line-length = 88
 exclude = ["docs"]
 
 [tool.ruff.lint]
-extend-select = ["I", "E", "W", "F" , "D"] #, "RUF", "UP"]
+extend-select = ["I", "E", "W", "F" , "D", "RUF"] #, "UP"]
 ignore = ["E501", "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104"]
 
 [tool.ruff.lint.pydocstyle]

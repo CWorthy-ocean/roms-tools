@@ -1,9 +1,10 @@
 import itertools
 import logging
 from collections import Counter
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Iterator
+from typing import Annotated
 
 import cartopy.crs as ccrs
 import matplotlib.gridspec as gridspec
@@ -48,7 +49,8 @@ INCLUDE_ALL_RELEASE_NAMES = "all"
 
 class ReleaseSimulationManager(BaseModel):
     """Validates and adjusts a single release against a ROMS simulation time window and
-    grid."""
+    grid.
+    """
 
     release: Release
     grid: Grid | None = None
@@ -60,8 +62,8 @@ class ReleaseSimulationManager(BaseModel):
         self,
     ) -> "ReleaseSimulationManager":
         """Ensure the release times are within the [start_time, end_time] simulation
-        window."""
-
+        window.
+        """
         times = self.release.times
         if len(times) == 0:
             return self
@@ -121,7 +123,8 @@ class ReleaseCollector(RootModel):
     @classmethod
     def unpack_dict(cls, data):
         """This helps directly translate a dict of {"releases": [...]} into just the
-        list of releases."""
+        list of releases.
+        """
         if isinstance(data, dict):
             try:
                 return data["releases"]
@@ -166,14 +169,30 @@ class ReleaseCollector(RootModel):
 class CDRForcingDatasetBuilder:
     """Constructs the xarray `Dataset` to be saved as NetCDF."""
 
-    def __init__(self, releases, model_reference_date, release_type: ReleaseType):
+    def __init__(
+        self,
+        releases: ReleaseCollector,
+        model_reference_date: datetime,
+        release_type: ReleaseType,
+    ):
+        """
+        Initialize the dataset builder.
+
+        Parameters
+        ----------
+        releases : list
+            List of release objects.
+        model_reference_date : datetime
+            Reference date for relative time conversion.
+        release_type : ReleaseType
+            Type of release.
+        """
         self.releases = releases
         self.model_reference_date = model_reference_date
         self.release_type = release_type
 
     def build(self) -> xr.Dataset:
         """Build the CDR forcing dataset."""
-
         all_times = itertools.chain.from_iterable(r.times for r in self.releases)
         unique_times = np.unique(np.array(list(all_times), dtype="datetime64[ns]"))
         unique_rel_times = convert_to_relative_days(
@@ -221,7 +240,6 @@ class CDRForcingDatasetBuilder:
         xr.Dataset
             Initialized dataset with time, location, and release-type-dependent variables.
         """
-
         ds = xr.Dataset()
         ds["time"] = ("time", unique_times)
         ds["cdr_time"] = ("time", unique_rel_times)
@@ -392,7 +410,6 @@ class CDRForcing(BaseModel):
             If `release_names` is not a list of strings or "all".
             If any of the specified release names do not exist in `self.releases`.
         """
-
         if self.release_type != ReleaseType.volume:
             raise ValueError(
                 "plot_volume_flux is only supported when all releases are of type VolumeRelease."
@@ -595,7 +612,6 @@ class CDRForcing(BaseModel):
             If any of the specified release names do not exist in `self.releases`.
             If `self.grid` is not set.
         """
-
         # Ensure that the grid is provided
         if self.grid is None:
             raise ValueError(
@@ -753,7 +769,6 @@ class CDRForcing(BaseModel):
         list[Path]
             A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -781,7 +796,6 @@ class CDRForcing(BaseModel):
         filepath : str | Path
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = self.model_dump()
         metadata = self.releases[0].get_tracer_metadata()
         forcing_dict["CDRForcing"]["_tracer_metadata"] = metadata
@@ -841,7 +855,6 @@ def _validate_release_input(releases, valid_releases, list_allowed=True):
     If `list_allowed` is set to `False`, only a single release name (string) will be accepted. Otherwise, a
     list of release names is also acceptable.
     """
-
     # Ensure that a list of releases is only allowed if `list_allowed` is True
     if not list_allowed and not isinstance(releases, str):
         raise ValueError(
@@ -894,7 +907,6 @@ def _get_release_colors(valid_releases: list[str]) -> dict[str, tuple]:
     - If there are more than 10 but fewer than or equal to 20 releases, the "tab20" colormap is used.
     - For more than 20 releases, the "tab20b" colormap is used.
     """
-
     # Determine the colormap based on the number of releases
     if len(valid_releases) <= 10:
         color_map = plt.get_cmap("tab10")
@@ -1014,7 +1026,6 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
     dist = gc_dist(target_coords["lon"], target_coords["lat"], lon, release.lat)
 
     if release.hsc == 0:
-
         # Find the indices of the closest grid cell
         indices = dist.argmin(dim=["eta_rho", "xi_rho"])
         eta_rho = indices["eta_rho"].values
@@ -1129,7 +1140,6 @@ def _plot_location(
     -------
     None
     """
-
     lon_deg = grid.ds.lon_rho
     lat_deg = grid.ds.lat_rho
     if grid.straddle:

@@ -83,7 +83,6 @@ class TestReleaseSimulationManager:
         self.end_time = datetime(2022, 12, 31)
 
     def test_volume_release_correctly_extended(self):
-
         # Save copies of mutable fields before they are modified by ReleaseSimulationManager
         times = self.volume_release_with_times.times.copy()  # list
         volume_fluxes = (
@@ -118,7 +117,6 @@ class TestReleaseSimulationManager:
         ].values == 4 * [tracer_concentrations_temp]
 
     def test_tracer_perturbation_correctly_extended(self):
-
         # Save copies of mutable fields before they are modified by ReleaseSimulationManager
         times = self.tracer_perturbation_with_times.times.copy()  # list
         tracer_fluxes_dic = self.tracer_perturbation_with_times.tracer_fluxes[
@@ -146,7 +144,6 @@ class TestReleaseSimulationManager:
         ]
 
     def test_release_starts_too_early(self):
-
         for release in [
             self.volume_release_with_times,
             self.tracer_perturbation_with_times,
@@ -164,7 +161,6 @@ class TestReleaseSimulationManager:
                 )
 
     def test_release_ends_too_late(self):
-
         for release in [
             self.volume_release_with_times,
             self.tracer_perturbation_with_times,
@@ -182,12 +178,10 @@ class TestReleaseSimulationManager:
                 )
 
     def test_warning_no_grid(self, caplog):
-
         for release in [
             self.volume_release_with_times,
             self.tracer_perturbation_with_times,
         ]:
-
             caplog.clear()
             with caplog.at_level(logging.WARNING):
                 ReleaseSimulationManager(
@@ -201,14 +195,12 @@ class TestReleaseSimulationManager:
 
     def test_invalid_release_longitude(self):
         """Test that error is raised if release location is outside grid."""
-
         # Define release location both outside of Iceland grid and grid that straddles dateline
         lon0 = -30
         lat0 = 60
         depth0 = 0
 
         for lon in [lon0, lon0 - 360, lon0 + 360]:
-
             params = {"lon": lon, "lat": lat0, "depth": depth0}
 
             for grid in [self.grid, self.grid_that_straddles]:
@@ -226,7 +218,6 @@ class TestReleaseSimulationManager:
 
     def test_invalid_release_location(self):
         """Test that error is raised if release location is outside grid or on land."""
-
         # Release location too close to boundary of Iceland domain; lat_rho[0, 0] = 60.97, lon_rho[0, 0] = 334.17
         params = {"lon": 334.17, "lat": 60.97, "depth": 0.0}
         for release in [
@@ -305,7 +296,6 @@ class TestReleaseCollector:
             )
 
     def test_raises_inconsistent_release_type(self):
-
         with pytest.raises(
             ValidationError, match="Not all releases have the same type"
         ):
@@ -313,7 +303,6 @@ class TestReleaseCollector:
 
     def test_determine_release_type(self):
         """Test that release type is correctly inferred."""
-
         collector = ReleaseCollector(releases=[self.volume_release])
         assert collector.release_type == ReleaseType.volume
 
@@ -410,7 +399,6 @@ class TestCDRForcingDatasetBuilder:
         self, ds, num_times, num_releases, release_type=VolumeRelease
     ):
         """Assert expected dimensions and coordinates for a CDR dataset."""
-
         # Dimensions
         assert ds.time.size == num_times
         assert ds.ncdr.size == num_releases
@@ -436,7 +424,6 @@ class TestCDRForcingDatasetBuilder:
 
     def check_ds_name_and_location(self, ds, release, ncdr_index):
         """Assert expected release name and location for a CDR dataset."""
-
         # Name
         assert release.name in ds["release_name"].values
 
@@ -450,7 +437,6 @@ class TestCDRForcingDatasetBuilder:
         # TODO: Check for tracer metadata
 
     def test_build_with_single_volume_release(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_volume_release],
             model_reference_date=datetime(2000, 1, 1),
@@ -488,7 +474,6 @@ class TestCDRForcingDatasetBuilder:
             )
 
     def test_build_with_single_tracer_perturbation(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_tracer_perturbation],
             model_reference_date=datetime(2000, 1, 1),
@@ -520,7 +505,6 @@ class TestCDRForcingDatasetBuilder:
             )
 
     def test_build_with_multiple_volume_releases(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_volume_release, self.second_volume_release],
             model_reference_date=datetime(2000, 1, 1),
@@ -587,7 +571,6 @@ class TestCDRForcingDatasetBuilder:
         )
 
     def test_build_with_multiple_tracer_perturbations(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_tracer_perturbation, self.second_tracer_perturbation],
             model_reference_date=datetime(2000, 1, 1),
@@ -779,7 +762,6 @@ class TestCDRForcing:
         )
 
     def test_inconsistent_start_end_time(self):
-
         start_time = datetime(2022, 5, 1)
         end_time = datetime(2022, 5, 1)
         with pytest.raises(ValueError, match="must be earlier"):
@@ -796,12 +778,10 @@ class TestCDRForcing:
             )
 
     def test_empty_release_list(self):
-
         with pytest.raises(ValidationError):
             CDRForcing(start_time=self.start_time, end_time=self.end_time)
 
     def test_ds_attribute(self):
-
         assert isinstance(self.volume_release_cdr_forcing_without_grid.ds, xr.Dataset)
         assert isinstance(
             self.tracer_perturbation_cdr_forcing_without_grid.ds, xr.Dataset
@@ -816,12 +796,10 @@ class TestCDRForcing:
         )
 
     def test_plot_error_when_no_grid(self):
-
         for cdr in [
             self.volume_release_cdr_forcing_without_grid,
             self.tracer_perturbation_cdr_forcing_without_grid,
         ]:
-
             with pytest.raises(
                 ValueError, match="A grid must be provided for plotting"
             ):
@@ -833,7 +811,6 @@ class TestCDRForcing:
                 cdr.plot_distribution("first_release")
 
     def test_plot_volume_release(self):
-
         for cdr in [
             self.volume_release_cdr_forcing_without_grid,
             self.volume_release_cdr_forcing,
@@ -847,7 +824,6 @@ class TestCDRForcing:
         self.volume_release_cdr_forcing.plot_locations(release_names=["first_release"])
 
     def test_plot_tracer_perturbation(self):
-
         for cdr in [
             self.tracer_perturbation_cdr_forcing_without_grid,
             self.tracer_perturbation_cdr_forcing,
@@ -863,7 +839,6 @@ class TestCDRForcing:
 
     @pytest.mark.skipif(xesmf is None, reason="xesmf required")
     def test_plot_distribution(self):
-
         self.volume_release_cdr_forcing.plot_distribution("first_release")
         self.volume_release_cdr_forcing_with_straddling_grid.plot_distribution(
             "first_release"
@@ -875,7 +850,6 @@ class TestCDRForcing:
 
     def test_plot_more_errors(self):
         """Test that error is raised on bad plot args or ambiguous release."""
-
         with pytest.raises(ValueError, match="Invalid release"):
             self.volume_release_cdr_forcing.plot_distribution(release_name="fake")
 
@@ -890,7 +864,6 @@ class TestCDRForcing:
 
     def test_cdr_forcing_save(self, tmp_path):
         """Test save method."""
-
         for cdr_forcing in [
             self.volume_release_cdr_forcing,
             self.tracer_perturbation_cdr_forcing,
@@ -898,7 +871,6 @@ class TestCDRForcing:
             for file_str in ["test_cdr_forcing", "test_cdr_forcing.nc"]:
                 # Create a temporary filepath using the tmp_path fixture
                 for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                     saved_filenames = cdr_forcing.save(filepath)
                     # Check if the .nc file was created
                     filepath = Path(filepath).with_suffix(".nc")
@@ -909,8 +881,8 @@ class TestCDRForcing:
 
     def test_roundtrip_yaml(self, tmp_path):
         """Test that creating a CDRVolumePointSource object, saving its parameters to
-        yaml file, and re-opening yaml file creates the same object."""
-
+        yaml file, and re-opening yaml file creates the same object.
+        """
         for cdr_forcing in [
             self.volume_release_cdr_forcing,
             self.tracer_perturbation_cdr_forcing,
@@ -921,7 +893,6 @@ class TestCDRForcing:
                 tmp_path / file_str,
                 str(tmp_path / file_str),
             ]:  # test for Path object and str
-
                 cdr_forcing.to_yaml(filepath)
 
                 cdr_forcing_from_file = CDRForcing.from_yaml(filepath)
@@ -933,8 +904,8 @@ class TestCDRForcing:
 
     def test_files_have_same_hash(self, tmp_path):
         """Test that saving the same CDR forcing configuration to NetCDF twice results
-        in reproducible file hashes."""
-
+        in reproducible file hashes.
+        """
         for cdr_forcing in [
             self.volume_release_cdr_forcing,
             self.tracer_perturbation_cdr_forcing,

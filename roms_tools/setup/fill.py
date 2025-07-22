@@ -24,7 +24,6 @@ class LateralFill:
         NotImplementedError
             If the input mask has more than two dimensions, which is not supported by the current implementation.
         """
-
         if len(mask.shape) > 2:
             raise NotImplementedError("LateralFill currently supports only 2D masks.")
 
@@ -121,7 +120,6 @@ def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):
         The filled 2D array where NaN values have been replaced with iteratively
         computed values, and non-NaN values remain unchanged.
     """
-
     b_flat = b.flatten()
     x0_flat = x0.flatten()
     x = ml.solve(b_flat, x0_flat, tol=tol)
@@ -217,7 +215,6 @@ def stencil_grid_mod(S, grid, msk, dtype=None, format=None):
     The stencil is applied in all directions, and boundary conditions are
     respected by zeroing out connections to boundary points.
     """
-
     S = np.asarray(S, dtype=dtype)
     grid = tuple(grid)
 

@@ -15,7 +15,8 @@ from roms_tools.download import download_test_data
 @pytest.fixture
 def grid_that_straddles_dateline():
     """Fixture for creating a domain that straddles the dateline and lies within the
-    bounds of the regional ERA5 data."""
+    bounds of the regional ERA5 data.
+    """
     grid = Grid(
         nx=20,
         ny=20,
@@ -78,7 +79,6 @@ def grid_that_lies_east_of_dateline_less_than_five_degrees_away():
     We care about the 5 degree mark because it decides whether the code handles the
     longitudes as straddling the dateline or not.
     """
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -121,7 +121,6 @@ def grid_that_lies_west_of_dateline_less_than_five_degrees_away():
     We care about the 5 degree mark because it decides whether the code handles the
     longitudes as straddling the dateline or not.
     """
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -143,7 +142,6 @@ def grid_that_lies_west_of_dateline_more_than_five_degrees_away():
     We care about the 5 degree mark because it decides whether the code handles the
     longitudes as straddling the dateline or not.
     """
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -230,7 +228,6 @@ def test_successful_initialization_with_regional_data(
     - First with the default fine grid.
     - Then with the coarse grid enabled.
     """
-
     fname = Path(download_test_data("ERA5_regional_test_data.nc"))
     grid = request.getfixturevalue(grid_fixture)
 
@@ -268,7 +265,6 @@ def test_successful_initialization_with_global_data(
     including the correct handling of the grid and physics data. Checks both coarse and
     fine grid initialization.
     """
-
     fname = Path(download_test_data("ERA5_global_test_data.nc"))
     grid = request.getfixturevalue(grid_fixture)
 
@@ -307,7 +303,6 @@ def test_nan_detection_initialization_with_regional_data(
 
     for coarse_grid_mode in ["always", "never"]:
         with pytest.raises(ValueError, match="NaN values found"):
-
             SurfaceForcing(
                 grid=grid,
                 coarse_grid_mode=coarse_grid_mode,
@@ -336,7 +331,6 @@ def test_no_longitude_intersection_initialization_with_regional_data(
         with pytest.raises(
             ValueError, match="Selected longitude range does not intersect with dataset"
         ):
-
             SurfaceForcing(
                 grid=grid_that_straddles_180_degree_meridian,
                 coarse_grid_mode=coarse_grid_mode,
@@ -411,7 +405,6 @@ def test_nans_filled_in(
     - First with the default fine grid.
     - Then with the coarse grid enabled.
     """
-
     start_time = datetime(2020, 1, 31)
     end_time = datetime(2020, 2, 2)
 
@@ -447,8 +440,8 @@ def test_nans_filled_in(
 )
 def test_time_attr_climatology(bgc_surface_forcing_fixture, request):
     """Test that the 'cycle_length' attribute is present in the time coordinate of the
-    BGC dataset when using climatology data."""
-
+    BGC dataset when using climatology data.
+    """
     bgc_surface_forcing = request.getfixturevalue(bgc_surface_forcing_fixture)
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert hasattr(
@@ -460,7 +453,8 @@ def test_time_attr_climatology(bgc_surface_forcing_fixture, request):
 
 def test_time_attr(bgc_surface_forcing):
     """Test that the 'cycle_length' attribute is not present in the time coordinate of
-    the BGC dataset when not using climatology data."""
+    the BGC dataset when not using climatology data.
+    """
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert not hasattr(
             bgc_surface_forcing.ds[time_coord],
@@ -501,7 +495,6 @@ def test_surface_forcing_creation(
     Ensures that expected variables are present in the dataset and that attributes match
     the given configurations.
     """
-
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     assert sfc_forcing.ds is not None
@@ -532,7 +525,6 @@ def test_surface_forcing_creation(
 )
 def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
     """Test whether pco2_air and pco2_air_alt is the same after processing."""
-
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     xr.testing.assert_allclose(
@@ -546,9 +538,9 @@ def test_computed_missing_optional_fields(bgc_surface_forcing_from_unified_clima
     # Use tight tolerances because 'nox' and 'nhy' can have values order 1e-12
 
     # 'nhy' was missing in the source data and should have been filled with a constant default value
-    assert np.allclose(
-        ds.nhy.std(), 0.0, rtol=1e-13, atol=1e-13
-    ), "NHy should be constant across space and time"
+    assert np.allclose(ds.nhy.std(), 0.0, rtol=1e-13, atol=1e-13), (
+        "NHy should be constant across space and time"
+    )
     # 'nox' was present in the source data and should show spatial or temporal variability
     assert ds.nox.std() > 1e-13, "NOx should vary across space and time"
 
@@ -605,7 +597,6 @@ def test_determine_usage_coarse_grid():
 
 
 def test_apply_wind_correction(surface_forcing):
-
     uwnd = surface_forcing.ds["uwnd"]
     vwnd = surface_forcing.ds["vwnd"]
 
@@ -668,7 +659,6 @@ def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without grouping
             saved_filenames = sfc_forcing.save(filepath, group=False)
             filepath_str = str(Path(filepath).with_suffix(""))
@@ -702,14 +692,12 @@ def test_surface_forcing_bgc_plot(sfc_forcing_fixture, request):
 
 def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
     """Test save method."""
-
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
         for filepath in [
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without grouping
             saved_filenames = bgc_surface_forcing.save(filepath, group=False)
             filepath_str = str(Path(filepath).with_suffix(""))
@@ -736,7 +724,6 @@ def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
 )
 def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, request):
     """Test save method."""
-
     bgc_surface_forcing_from_climatology = request.getfixturevalue(sfc_forcing_fixture)
 
     for file_str in ["test_sf", "test_sf.nc"]:
@@ -745,7 +732,6 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without grouping
             saved_filenames = bgc_surface_forcing_from_climatology.save(
                 filepath, group=False
@@ -781,8 +767,8 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
     """Test that creating an SurfaceForcing object, saving its parameters to yaml file,
-    and re-opening yaml file creates the same object."""
-
+    and re-opening yaml file creates the same object.
+    """
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     # Create a temporary filepath using the tmp_path fixture
@@ -791,7 +777,6 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         sfc_forcing.to_yaml(filepath)
 
         sfc_forcing_from_file = SurfaceForcing.from_yaml(filepath, use_dask)
@@ -813,7 +798,6 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
     ],
 )
 def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
-
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml.yaml"
@@ -849,7 +833,6 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
     ],
 )
 def test_files_have_same_hash_clim(sfc_forcing_fixture, tmp_path, use_dask, request):
-
     bgc_surface_forcing_from_climatology = request.getfixturevalue(sfc_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml"
@@ -903,7 +886,6 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)
@@ -923,8 +905,8 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
 @pytest.mark.stream
 def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
     """One big integration test for cloud-based ERA5 data because the streaming takes a
-    long time."""
-
+    long time.
+    """
     # Test plotting
     surface_forcing_arco.plot(var_name="uwnd", time=0)
 

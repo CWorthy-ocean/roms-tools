@@ -222,7 +222,8 @@ def test_multiple_matching_times(
     global_dataset_with_multiple_times_per_day, tmp_path, use_dask
 ):
     """Test handling when multiple matching times are found when end_time is not
-    specified."""
+    specified.
+    """
     filepath = tmp_path / "test.nc"
     global_dataset_with_multiple_times_per_day.to_netcdf(filepath)
     dataset = Dataset(
@@ -271,7 +272,6 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
 
 def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):
     """Test the from_ds method of the Dataset class."""
-
     start_time = datetime(2022, 1, 1)
 
     filepath = tmp_path / "test.nc"
@@ -300,16 +300,17 @@ def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_p
     # Ensure other attributes are copied correctly
     for attr in vars(dataset):
         if attr != "ds":
-            assert getattr(new_dataset, attr) == getattr(
-                dataset, attr
-            ), f"Attribute {attr} not copied correctly."
+            assert getattr(new_dataset, attr) == getattr(dataset, attr), (
+                f"Attribute {attr} not copied correctly."
+            )
 
 
 def test_reverse_latitude_reverse_depth_choose_subdomain(
     global_dataset, tmp_path, use_dask
 ):
     """Test reversing latitude when it is not ascending, the choose_subdomain method,
-    and the convert_to_negative_depth method of the Dataset class."""
+    and the convert_to_negative_depth method of the Dataset class.
+    """
     start_time = datetime(2022, 1, 1)
 
     filepath = tmp_path / "test.nc"
@@ -368,7 +369,6 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
 
 
 def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask):
-
     filepath = tmp_path / "test.nc"
     global_dataset.to_netcdf(filepath)
     dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
@@ -379,7 +379,6 @@ def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask)
 def test_check_if_global_with_non_global_dataset(
     non_global_dataset, tmp_path, use_dask
 ):
-
     filepath = tmp_path / "test.nc"
     non_global_dataset.to_netcdf(filepath)
     dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
@@ -389,7 +388,6 @@ def test_check_if_global_with_non_global_dataset(
 
 
 def test_check_dataset(global_dataset, tmp_path, use_dask):
-
     ds = global_dataset.copy()
     ds = ds.drop_vars("var")
 
@@ -401,7 +399,6 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
     with pytest.raises(
         ValueError, match="Dataset does not contain all required variables."
     ):
-
         Dataset(
             filename=filepath,
             var_names={"var": "var"},
@@ -421,7 +418,6 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
     with pytest.raises(
         ValueError, match="Dataset does not contain all required dimensions."
     ):
-
         Dataset(
             filename=filepath,
             var_names={"var": "var"},
@@ -432,7 +428,6 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
 
 
 def test_era5_correction_choose_subdomain(use_dask):
-
     data = ERA5Correction(use_dask=use_dask)
     lats = data.ds.latitude[10:20]
     lons = data.ds.longitude[10:20]
@@ -443,7 +438,6 @@ def test_era5_correction_choose_subdomain(use_dask):
 
 
 def test_data_concatenation(use_dask):
-
     fname = download_test_data("GLORYS_NA_2012.nc")
     data = GLORYSDataset(
         filename=fname,
@@ -477,7 +471,6 @@ def test_data_concatenation(use_dask):
 
 
 def test_time_validation(use_dask):
-
     fname = download_test_data("GLORYS_NA_2012.nc")
 
     with pytest.raises(TypeError, match="start_time must be a datetime object"):
@@ -488,7 +481,6 @@ def test_time_validation(use_dask):
             use_dask=use_dask,
         )
     with pytest.raises(TypeError, match="end_time must be a datetime object"):
-
         GLORYSDataset(
             filename=fname,
             start_time=datetime(2012, 1, 1),
@@ -498,7 +490,6 @@ def test_time_validation(use_dask):
 
 
 def test_climatology_error(use_dask):
-
     fname = download_test_data("GLORYS_NA_2012.nc")
 
     with pytest.raises(
@@ -519,7 +510,6 @@ def test_climatology_error(use_dask):
         ValueError,
         match="The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False.",
     ):
-
         CESMBGCDataset(
             filename=fname_bgc,
             start_time=datetime(2012, 1, 1),
@@ -542,7 +532,6 @@ def test_climatology_error(use_dask):
     ],
 )
 def test_horizontal_resolution(data_fixture, expected_resolution, request):
-
     data = request.getfixturevalue(data_fixture)
     assert np.isclose(data.resolution, expected_resolution)
 
@@ -564,7 +553,7 @@ class TestTPXODataset:
 
     @pytest.fixture
     def global_tpxo_dataset(self, use_dask):
-        """TPXO dataset with global coverage and 1 constituent: M2"""
+        """TPXO dataset with global coverage and 1 constituent: M2."""
         fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
         fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
 
@@ -604,7 +593,6 @@ class TestTPXODataset:
         ],
     )
     def test_initialization_and_clean_up(self, tpxo_dataset_fixture, request):
-
         tpxo_dataset = request.getfixturevalue(tpxo_dataset_fixture)
         assert tpxo_dataset.location == "h"
 
@@ -617,14 +605,12 @@ class TestTPXODataset:
         assert "latitude" in tpxo_dataset.ds.variables
 
     def test_select_fewer_constituents(self, regional_tpxo_dataset, omega):
-
         regional_tpxo_dataset.select_constituents(2, omega)
         assert (
             regional_tpxo_dataset.ds["ntides"].values.astype("U3") == ["m2", "s2"]
         ).all()
 
     def test_select_constituents_with_reordering(self, regional_tpxo_dataset, omega):
-
         regional_tpxo_dataset.select_constituents(11, omega)
 
         assert len(regional_tpxo_dataset.ds["ntides"]) == 11
@@ -635,9 +621,8 @@ class TestTPXODataset:
         )
 
     def test_select_constituents_omega_mismatch(self, regional_tpxo_dataset, omega):
-
         omega = OrderedDict(
-            list(omega.items())[:3] + [("fake", 6.495854e-05)] + list(omega.items())[3:]
+            [*list(omega.items())[:3], ("fake", 6.495854e-05), *list(omega.items())[3:]]
         )
         with pytest.raises(ValueError, match="The dataset contains tidal constituents"):
             regional_tpxo_dataset.select_constituents(11, omega)

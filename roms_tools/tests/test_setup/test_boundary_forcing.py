@@ -24,7 +24,6 @@ from roms_tools.download import download_test_data
 )
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
-
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
@@ -63,8 +62,8 @@ def test_boundary_forcing_creation_with_duplicates(
     boundary_forcing: BoundaryForcing, use_dask: bool
 ) -> None:
     """Test the creation of the BoundaryForcing object with duplicates in source data
-    works as expected."""
-
+    works as expected.
+    """
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
@@ -91,7 +90,6 @@ def test_boundary_forcing_creation_with_duplicates(
 )
 def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
-
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
@@ -150,7 +148,6 @@ def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
 
 
 def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -168,7 +165,6 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     with pytest.raises(ValueError, match="consists entirely of NaNs"):
-
         BoundaryForcing(
             grid=grid,
             start_time=datetime(2021, 6, 29),
@@ -181,7 +177,6 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
 
     with pytest.raises(ValueError, match="consists entirely of NaNs"):
-
         BoundaryForcing(
             grid=grid,
             start_time=datetime(2021, 6, 29),
@@ -257,7 +252,6 @@ def test_start_time_end_time_warning(use_dask, caplog):
 
 
 def test_boundary_divided_by_land_warning(caplog, use_dask):
-
     # Iceland intersects the western boundary of the following grid
     grid = Grid(
         nx=5, ny=5, size_x=500, size_y=500, center_lon=-10, center_lat=65, rot=0
@@ -279,7 +273,6 @@ def test_boundary_divided_by_land_warning(caplog, use_dask):
 
 
 def test_info_depth(caplog, use_dask):
-
     grid = Grid(
         nx=3,
         ny=3,
@@ -314,7 +307,6 @@ def test_info_depth(caplog, use_dask):
     caplog.clear()
 
     with caplog.at_level(logging.INFO):
-
         BoundaryForcing(
             grid=grid,
             start_time=datetime(2012, 1, 1),
@@ -331,7 +323,6 @@ def test_info_depth(caplog, use_dask):
 
 
 def test_info_fill(caplog, use_dask):
-
     grid = Grid(
         nx=3,
         ny=3,
@@ -369,7 +360,6 @@ def test_info_fill(caplog, use_dask):
     caplog.clear()
 
     with caplog.at_level(logging.INFO):
-
         BoundaryForcing(
             grid=grid,
             start_time=datetime(2012, 1, 1),
@@ -384,7 +374,6 @@ def test_info_fill(caplog, use_dask):
 
 
 def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -424,7 +413,6 @@ def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
 
 
 def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
-
     # this grid lies entirely over open ocean
     grid = Grid(nx=5, ny=5, size_x=300, size_y=300, center_lon=-5, center_lat=65, rot=0)
 
@@ -460,11 +448,9 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
 def test_correct_depth_coords_adjusted_for_zeta(
     boundary_forcing_fixture, request, use_dask
 ):
-
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for direction in ["south", "east", "north", "west"]:
-
         # Test that uppermost interface coincides with sea surface height
         assert np.allclose(
             boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
@@ -483,11 +469,9 @@ def test_correct_depth_coords_adjusted_for_zeta(
     ],
 )
 def test_correct_depth_coords_zero_zeta(boundary_forcing_fixture, request, use_dask):
-
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for direction in ["south", "east", "north", "west"]:
-
         # Test that uppermost interface coincides with sea surface height
         assert np.allclose(
             boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
@@ -512,9 +496,9 @@ def test_computed_missing_optional_fields(
         ), "DOCr should be constant across space and time"
     # 'DOC' was present in the source data and should show spatial or temporal variability
     for direction in ["south", "east", "north", "west"]:
-        assert (
-            ds[f"DOC_{direction}"].std() > 1e-10
-        ), "DOC should vary across space and time"
+        assert ds[f"DOC_{direction}"].std() > 1e-10, (
+            "DOC should vary across space and time"
+        )
 
 
 @pytest.mark.parametrize(
@@ -570,7 +554,6 @@ def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without grouping
             saved_filenames = boundary_forcing.save(filepath, group=False)
 
@@ -601,7 +584,6 @@ def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):
 )
 def test_bgc_boundary_forcing_plot(boundary_forcing_fixture, request):
     """Test plot method."""
-
     bgc_boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     bgc_boundary_forcing.plot(var_name="ALK_south", layer_contours=True)
@@ -619,7 +601,6 @@ def test_bgc_boundary_forcing_plot(boundary_forcing_fixture, request):
 )
 def test_bgc_boundary_forcing_save(boundary_forcing_fixture, tmp_path, request):
     """Test save method."""
-
     bgc_boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for file_str in ["test_bf", "test_bf.nc"]:
@@ -628,7 +609,6 @@ def test_bgc_boundary_forcing_save(boundary_forcing_fixture, tmp_path, request):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without partitioning and grouping
             saved_filenames = bgc_boundary_forcing.save(filepath, group=False)
 
@@ -658,8 +638,8 @@ def test_bgc_boundary_forcing_save(boundary_forcing_fixture, tmp_path, request):
 )
 def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
     """Test that creating a BoundaryForcing object, saving its parameters to yaml file,
-    and re-opening yaml file creates the same object."""
-
+    and re-opening yaml file creates the same object.
+    """
     bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
 
     # Create a temporary filepath using the tmp_path fixture
@@ -668,7 +648,6 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         bdry_forcing.to_yaml(filepath)
 
         bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
@@ -680,7 +659,6 @@ def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
 
 
 def test_files_have_same_hash(boundary_forcing, tmp_path, use_dask):
-
     yaml_filepath = tmp_path / "test_yaml_.yaml"
     filepath1 = tmp_path / "test1.nc"
     filepath2 = tmp_path / "test2.nc"
@@ -766,7 +744,6 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)

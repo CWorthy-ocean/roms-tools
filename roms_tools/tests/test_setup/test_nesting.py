@@ -89,7 +89,6 @@ class TestInterpolateIndices:
     )
     def test_correct_indices_of_same_grid(self, grid, caplog, request):
         """Verify boundary indices are correctly interpolated for the same grid."""
-
         grid = request.getfixturevalue(grid)
 
         bdry_coords_dict = get_boundary_coords()
@@ -140,7 +139,6 @@ class TestInterpolateIndices:
         self, big_grid_fixture, small_grid_fixture, request
     ):
         """Ensure interpolated indices fall within the parent grid's bounds."""
-
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
@@ -168,7 +166,6 @@ class TestInterpolateIndices:
 class TestMapChildBoundaries:
     def test_update_indices_does_nothing_if_no_parent_land(self, small_grid, baby_grid):
         """Verify no change in indices when parent grid has no land at boundaries."""
-
         ds_without_updated_indices = map_child_boundaries_onto_parent_grid_indices(
             small_grid.ds, baby_grid.ds, update_land_indices=False
         )
@@ -189,7 +186,6 @@ class TestMapChildBoundaries:
         self, big_grid_fixture, small_grid_fixture, request
     ):
         """Check updated indices map to wet points on the parent grid."""
-
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
@@ -223,8 +219,8 @@ class TestMapChildBoundaries:
         self, big_grid_fixture, small_grid_fixture, request
     ):
         """Test that child boundary indices are monotonically increasing or decreasing
-        in both the xi and eta directions, for all boundaries and locations."""
-
+        in both the xi and eta directions, for all boundaries and locations.
+        """
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
@@ -262,7 +258,6 @@ class TestBoundaryDistance:
         self, grid_fixture, request
     ):
         """Ensure boundary distance is zero for grids without land along boundaries."""
-
         grid = request.getfixturevalue(grid_fixture)
         alpha = compute_boundary_distance(grid.ds.mask_rho)
 
@@ -282,7 +277,8 @@ class TestBoundaryDistance:
 
     def test_boundary_distance_for_grid_with_land_along_boundary(self, big_grid):
         """Test that there are 1s along the boundary of alpha if the grid has land along
-        the boundary."""
+        the boundary.
+        """
         alpha = compute_boundary_distance(big_grid.ds.mask_rho)
         assert (alpha.isel(eta_rho=0) == 1).any()
         assert (alpha.isel(eta_rho=-1) == 1).any()
@@ -295,7 +291,6 @@ class TestModifyChid:
         self, small_grid, baby_grid
     ):
         """Confirm child mask remains unchanged if no parent land is at boundaries."""
-
         mask_original = baby_grid.ds.mask_rho.copy()
         modified_baby_grid_ds = modify_child_topography_and_mask(
             small_grid.ds, baby_grid.ds
@@ -312,7 +307,6 @@ class TestModifyChid:
     )
     def test_no_modification_if_parent_and_child_coincide(self, grid_fixture, request):
         """Ensure no changes occur when parent and child grids coincide."""
-
         grid = request.getfixturevalue(grid_fixture)
 
         h_original = grid.ds.h.copy()
@@ -324,8 +318,8 @@ class TestModifyChid:
 
     def test_modification_only_along_boundaries(self, big_grid, small_grid):
         """Test that modifications to the child grid's topography and mask occur only
-        along the boundaries, leaving the interior unchanged."""
-
+        along the boundaries, leaving the interior unchanged.
+        """
         # Make copies of original data for comparison
         h_original = small_grid.ds.h.copy()
         mask_original = small_grid.ds.mask_rho.copy()
@@ -340,15 +334,15 @@ class TestModifyChid:
         # Assert that the center values remain the same
         assert mask_original.isel(
             eta_rho=eta_center, xi_rho=xi_center
-        ) == modified_ds.mask_rho.isel(
-            eta_rho=eta_center, xi_rho=xi_center
-        ), "Mask at the grid center was modified."
+        ) == modified_ds.mask_rho.isel(eta_rho=eta_center, xi_rho=xi_center), (
+            "Mask at the grid center was modified."
+        )
 
         assert h_original.isel(
             eta_rho=eta_center, xi_rho=xi_center
-        ) == modified_ds.h.isel(
-            eta_rho=eta_center, xi_rho=xi_center
-        ), "Topography at the grid center was modified."
+        ) == modified_ds.h.isel(eta_rho=eta_center, xi_rho=xi_center), (
+            "Topography at the grid center was modified."
+        )
 
 
 class TestNesting:
@@ -428,11 +422,9 @@ class TestNesting:
 
     def test_save(self, child_grid, tmp_path):
         """Test save methods."""
-
         for file_str in ["test_grid", "test_grid.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                 saved_filenames = child_grid.save(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
@@ -444,7 +436,6 @@ class TestNesting:
         for file_str in ["test_nesting", "test_nesting.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                 saved_filenames = child_grid.save_nesting(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
@@ -463,15 +454,14 @@ class TestNesting:
 
     def test_roundtrip_yaml(self, child_grid, tmp_path):
         """Test that creating a ChildGrid object, saving its parameters to yaml file,
-        and re-opening yaml file creates the same object."""
-
+        and re-opening yaml file creates the same object.
+        """
         # Create a temporary filepath using the tmp_path fixture
         file_str = "test_yaml"
         for filepath in [
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             child_grid.to_yaml(filepath)
 
             child_grid_from_file = ChildGrid.from_yaml(filepath)
@@ -482,7 +472,6 @@ class TestNesting:
             filepath.unlink()
 
     def test_files_have_same_hash(self, child_grid, tmp_path):
-
         yaml_filepath = tmp_path / "test_yaml.yaml"
         filepath1 = tmp_path / "test1.nc"
         filepath2 = tmp_path / "test2.nc"

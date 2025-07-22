@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -140,7 +139,6 @@ class BoundaryForcing:
     ROMS."""
 
     def __post_init__(self):
-
         self._input_checks()
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
@@ -150,7 +148,6 @@ class BoundaryForcing:
         data = self._get_data()
 
         if self.apply_2d_horizontal_fill:
-
             data.choose_subdomain(
                 target_coords,
                 buffer_points=20,  # lateral fill needs good buffer from data margin
@@ -186,7 +183,6 @@ class BoundaryForcing:
 
         for direction in ["south", "east", "north", "west"]:
             if self.boundaries[direction]:
-
                 bdry_target_coords = {
                     "lat": target_coords["lat"].isel(
                         **self.bdry_coords["vector"][direction]
@@ -268,7 +264,10 @@ class BoundaryForcing:
                     angle = target_coords["angle"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
-                    (processed_fields["u"], processed_fields["v"],) = rotate_velocities(
+                    (
+                        processed_fields["u"],
+                        processed_fields["v"],
+                    ) = rotate_velocities(
                         processed_fields["u"],
                         processed_fields["v"],
                         angle,
@@ -350,13 +349,13 @@ class BoundaryForcing:
                     self._get_depth_coordinates(zeta_u, direction, "u", "interface")
                     self._get_depth_coordinates(zeta_v, direction, "v", "interface")
                     for location in ["u", "v"]:
-                        processed_fields[
-                            f"{location}bar"
-                        ] = compute_barotropic_velocity(
-                            processed_fields[location],
-                            self.ds_depth_coords[
-                                f"interface_depth_{location}_{direction}"
-                            ],
+                        processed_fields[f"{location}bar"] = (
+                            compute_barotropic_velocity(
+                                processed_fields[location],
+                                self.ds_depth_coords[
+                                    f"interface_depth_{location}_{direction}"
+                                ],
+                            )
                         )
 
                 # Reorder dimensions
@@ -427,7 +426,6 @@ class BoundaryForcing:
             )
 
     def _get_data(self):
-
         data_dict = {
             "filename": self.source["path"],
             "start_time": self.start_time,
@@ -446,7 +444,6 @@ class BoundaryForcing:
 
         elif self.type == "bgc":
             if self.source["name"] == "CESM_REGRIDDED":
-
                 data = CESMBGCDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
                 data = UnifiedBGCDataset(**data_dict)
@@ -548,9 +545,9 @@ class BoundaryForcing:
                 np.float32
             )
 
-            ds[f"{var_name}_{direction}"].attrs[
-                "long_name"
-            ] = f"{direction}ern boundary {d_meta[var_name]['long_name']}"
+            ds[f"{var_name}_{direction}"].attrs["long_name"] = (
+                f"{direction}ern boundary {d_meta[var_name]['long_name']}"
+            )
 
             ds[f"{var_name}_{direction}"].attrs["units"] = d_meta[var_name]["units"]
 
@@ -600,7 +597,6 @@ class BoundaryForcing:
               to their corresponding boundary coordinates. The coordinates are specified in terms of
               grid indices for the respective variable types.
         """
-
         bdry_coords = get_boundary_coords()
 
         self.bdry_coords = bdry_coords
@@ -681,7 +677,6 @@ class BoundaryForcing:
             self.ds_depth_coords[key] = depth
 
     def _add_global_metadata(self, data, ds=None):
-
         if ds is None:
             ds = xr.Dataset()
         ds.attrs["title"] = "ROMS boundary forcing file created by ROMS-Tools"
@@ -736,7 +731,6 @@ class BoundaryForcing:
         None
             If a boundary is divided by land, a warning is issued. No return value is provided.
         """
-
         for var_name in processed_fields.keys():
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
@@ -893,7 +887,6 @@ class BoundaryForcing:
         ValueError
             If the specified var_name is not one of the valid options.
         """
-
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
@@ -968,7 +961,7 @@ class BoundaryForcing:
 
     def save(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         group: bool = True,
     ) -> None:
         """Save the boundary forcing fields to one or more netCDF4 files.
@@ -990,7 +983,6 @@ class BoundaryForcing:
         List[Path]
             A list of Path objects for the filenames that were saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -1010,7 +1002,7 @@ class BoundaryForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -1019,14 +1011,13 @@ class BoundaryForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask"])
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "BoundaryForcing":
         """Create an instance of the BoundaryForcing class from a YAML file.
@@ -1071,7 +1062,6 @@ def apply_1d_horizontal_fill(data_array: xr.DataArray) -> xr.DataArray:
     ValueError
         If more than one horizontal dimension is found or none at all.
     """
-
     horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
     selected_horizontal_dim = None
 

@@ -1,9 +1,10 @@
 import importlib.metadata
+from collections.abc import Sequence
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Dict, Sequence, Type, Union
+from typing import Any
 
 import cftime
 import numba as nb
@@ -47,7 +48,6 @@ def nan_check(field, mask, error_message=None) -> None:
         If the field contains NaN values at any of the wet points indicated by the mask.
         The error message will explain the potential cause and suggest ensuring the dataset's coverage.
     """
-
     # Replace values in field with 0 where mask is not 1
     da = xr.where(mask == 1, field, 0)
     if error_message is None:
@@ -78,7 +78,6 @@ def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
     xr.DataArray
         The data array with NaN values replaced by the specified fill value.
     """
-
     return field.fillna(fill_value)
 
 
@@ -139,9 +138,7 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
 def interpolate_cyclic_time(
     data_array: xr.DataArray,
     time_dim_name: str,
-    day_of_year: Union[
-        int, float, np.ndarray, xr.DataArray, Sequence[Union[int, float]]
-    ],
+    day_of_year: int | float | np.ndarray | xr.DataArray | Sequence[int | float],
 ) -> xr.DataArray:
     """Interpolates a DataArray cyclically across the start and end of the year.
 
@@ -173,7 +170,6 @@ def interpolate_cyclic_time(
       represents a repeating annual cycle.
     - The `day_of_year` values should be within the range [1, 365] or [1, 366] for leap years.
     """
-
     # Concatenate across the beginning and end of the year
     time_concat = xr.concat(
         [
@@ -205,10 +201,10 @@ def interpolate_cyclic_time(
 
 
 def interpolate_from_climatology(
-    field: Union[xr.DataArray, xr.Dataset],
+    field: xr.DataArray | xr.Dataset,
     time_dim_name: str,
-    time: Union[xr.DataArray, pd.DatetimeIndex],
-) -> Union[xr.DataArray, xr.Dataset]:
+    time: xr.DataArray | pd.DatetimeIndex,
+) -> xr.DataArray | xr.Dataset:
     """Interpolates a climatological field to specified time points.
 
     This function interpolates the input `field` based on `day_of_year` values
@@ -241,7 +237,6 @@ def interpolate_from_climatology(
     """
 
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
-
         if isinstance(time, xr.DataArray):
             # Extract day of year from xarray.DataArray
             day_of_year = time.dt.dayofyear
@@ -318,7 +313,7 @@ def get_time_type(data_array: xr.DataArray) -> str:
     )
 
     # Check if any of the coordinate values are of cftime, datetime, or integer type
-    if isinstance(data_array.values, (np.ndarray, list)):
+    if isinstance(data_array.values, np.ndarray | list):
         # Check if the data type is numpy datetime64, indicating standard datetime objects
         if data_array.values.dtype == "datetime64[ns]":
             return "datetime"
@@ -385,7 +380,6 @@ def get_variable_metadata():
     dict of str: dict
         Dictionary where keys are variable names and values are dictionaries with "long_name" and "units" keys.
     """
-
     d = {
         "ssh_Re": {"long_name": "Tidal elevation, real part", "units": "m"},
         "ssh_Im": {"long_name": "Tidal elevation, complex part", "units": "m"},
@@ -639,7 +633,6 @@ def compute_missing_bgc_variables(bgc_data):
       dictionary, they are filled with constant values.
     - `CHL` is removed from the dictionary after the necessary calculations.
     """
-
     # Define the relationships for missing variables
     variable_relations = {
         "NH4": (None, 10**-6),  # mmol m-3
@@ -708,7 +701,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
     -----
     - If `nox` and `nhy` are not part of the input dictionary, the are assigned constant values.
     """
-
     # Define the relationships for missing variables
     variable_relations = {
         "pco2_air_alt": ("pco2_air", 1.0),
@@ -947,7 +939,6 @@ def group_dataset(ds, filepath):
     tuple
         A tuple containing the list of grouped datasets and corresponding output filenames.
     """
-
     if hasattr(ds, "climatology"):
         output_filename = f"{filepath}_clim"
         output_filenames = [output_filename]
@@ -1000,7 +991,6 @@ def group_by_month(ds, filepath):
     tuple
         A tuple containing the list of monthly datasets and corresponding output filenames.
     """
-
     dataset_list = []
     output_filenames = []
 
@@ -1037,7 +1027,6 @@ def group_by_year(ds, filepath):
     tuple
         A tuple containing the list of yearly datasets and corresponding output filenames.
     """
-
     dataset_list = []
     output_filenames = []
 
@@ -1151,7 +1140,6 @@ def rotate_velocities(
       - u_rot = u * cos(angle) + v * sin(angle)
       - v_rot = v * cos(angle) - u * sin(angle)
     """
-
     # Rotate velocities to grid orientation
     u_rot = u * np.cos(angle) + v * np.sin(angle)
     v_rot = v * np.cos(angle) - u * np.sin(angle)
@@ -1188,7 +1176,6 @@ def compute_barotropic_velocity(
     Computed as:
       - `vel_bar` = sum(dz * vel) / sum(dz)
     """
-
     # Layer thickness
     dz = -interface_depth.diff(dim="s_w")
     dz = dz.rename({"s_w": "s_rho"})
@@ -1356,7 +1343,6 @@ def min_dist_to_land(
     2-D Array of the same shape as lon and lat, which will be filled with the resulting distance values
     to the nearest non-nan lon2, lat2 point
     """
-
     # get flattened ocean/land indices
     ocean = (mask == 1).ravel()
     land = (mask == 0).ravel()
@@ -1387,8 +1373,8 @@ def min_dist_to_land(
 
 
 def convert_to_relative_days(
-    times: Union[Sequence[datetime], np.ndarray],
-    model_reference_date: Union[datetime, np.datetime64],
+    times: Sequence[datetime] | np.ndarray,
+    model_reference_date: datetime | np.datetime64,
 ) -> np.ndarray:
     """Convert absolute datetimes to model-relative time in days.
 
@@ -1413,7 +1399,7 @@ def convert_to_relative_days(
 
 def add_time_info_to_ds(
     ds: xr.Dataset,
-    model_reference_date: Union[datetime, np.datetime64],
+    model_reference_date: datetime | np.datetime64,
     climatology: bool,
     time_name: str = "time",
 ) -> tuple[xr.Dataset, xr.DataArray]:
@@ -1435,7 +1421,6 @@ def add_time_info_to_ds(
     tuple[xr.Dataset, xr.DataArray]
         Updated dataset with time information and the relative time array.
     """
-
     if climatology:
         ds.attrs["climatology"] = str(True)
         month = xr.DataArray(range(1, 13), dims=time_name)
@@ -1469,7 +1454,7 @@ def add_time_info_to_ds(
     abs_time.attrs["long_name"] = "absolute time"
     ds = ds.assign_coords({"abs_time": abs_time})
 
-    time.attrs["long_name"] = f"relative time: days since {str(model_reference_date)}"
+    time.attrs["long_name"] = f"relative time: days since {model_reference_date!s}"
     time.encoding["units"] = "days"
     time.attrs["units"] = "days"
     ds.encoding["unlimited_dims"] = time_name
@@ -1482,7 +1467,7 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
-def write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
+def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
     This function writes the provided pre-serialized YAML data along with metadata, such as the version
@@ -1501,7 +1486,6 @@ def write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
     None
         This function does not return anything. It writes the provided YAML data directly to the specified file.
     """
-
     # Convert the filepath to a Path object
     filepath = Path(filepath)
 
@@ -1549,7 +1533,6 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     -------
     dict
     """
-
     # Serialize Grid data
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
         grid_data = asdict(forcing_object.grid)
@@ -1585,7 +1568,7 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
 
     if exclude is None:
         exclude = []
-    exclude = ["grid", "parent_grid", "ds"] + exclude
+    exclude = ["grid", "parent_grid", "ds", *exclude]
 
     filtered_field_names = [param for param in field_names if param not in exclude]
 
@@ -1620,7 +1603,7 @@ def pop_grid_data(grid_data):
     return grid_data
 
 
-def from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, Any]:
+def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
     """Extract the configuration data for a given forcing object from a YAML file.
 
     This function reads a YAML file, searches for the configuration data associated
@@ -1707,7 +1690,6 @@ def handle_boundaries(field):
     field : numpy.ndarray or xarray.DataArray
         The input field with adjusted boundary values.
     """
-
     field[0, :] = field[1, :]
     field[-1, :] = field[-2, :]
     field[:, 0] = field[:, 1]
@@ -1734,7 +1716,6 @@ def get_boundary_coords():
           - "v" variables (e.g., `eta_v`)
           - "vector" variables with lists of indices for multiple grid points (e.g., `eta_rho`, `xi_rho`).
     """
-
     bdry_coords = {
         "rho": {
             "south": {"eta_rho": 0},

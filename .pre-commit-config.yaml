@@ -6,14 +6,13 @@ exclude: roms_tools/tests/test_setup/test_data/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-docstring-first
       - id: check-json
       - id: check-yaml
-#      - id: double-quote-string-fixer  # seems to argue with black-jupyter
       - id: debug-statements
       - id: mixed-line-ending
 
@@ -26,23 +25,14 @@ repos:
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: 'v0.1.4'
+    rev: 'v0.12.2'
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: ["--fix"]
-
-  - repo: https://github.com/psf/black
-    rev: 22.8.0
-    hooks:
-      - id: black-jupyter
-
-  - repo: https://github.com/keewis/blackdoc
-    rev: v0.3.6
-    hooks:
-      - id: blackdoc
+      - id: ruff-format
 
   - repo: https://github.com/PyCQA/docformatter
-    rev: v1.7.5
+    rev: v1.7.7
     hooks:
       - id: docformatter
         args: ["--in-place", "--recursive", "--wrap-summaries=88", "--wrap-descriptions=88"]

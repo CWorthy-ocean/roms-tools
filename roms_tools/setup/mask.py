@@ -66,7 +66,6 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
     np.ndarray
         The modified mask with enclosed basins filled with land (1).
     """
-
     # Label connected regions in the mask
     reg, nreg = label(mask)
     # Find the largest region

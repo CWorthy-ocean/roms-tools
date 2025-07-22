@@ -21,7 +21,6 @@ def iceland_test_grid():
 @pytest.fixture
 def river_forcing_climatology(iceland_test_grid):
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
-
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
@@ -36,8 +35,8 @@ def river_forcing_climatology(iceland_test_grid):
 @pytest.fixture
 def river_forcing_for_grid_that_straddles_dateline():
     """Fixture for creating a RiverForcing object from the global Dai river dataset for
-    a grid that straddles the dateline."""
-
+    a grid that straddles the dateline.
+    """
     grid = Grid(
         nx=18,
         ny=18,
@@ -90,8 +89,8 @@ def river_forcing_with_prescribed_single_cell_indices(
 ):
     """Fixture for creating a RiverForcing object based on the global Dai river dataset,
     using manually specified single-cell river indices instead of relying on automatic
-    detection."""
-
+    detection.
+    """
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
@@ -109,8 +108,8 @@ def river_forcing_with_prescribed_multi_cell_indices(
 ):
     """Fixture for creating a RiverForcing object based on the global Dai river dataset,
     using manually specified multi-cell river indices instead of relying on automatic
-    detection."""
-
+    detection.
+    """
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
@@ -249,7 +248,6 @@ class TestRiverForcingGeneral:
 
     def test_river_forcing_plot(self, river_forcing_with_bgc):
         """Test plot method."""
-
         river_forcing_with_bgc.plot_locations()
         river_forcing_with_bgc.plot("river_volume")
         river_forcing_with_bgc.plot("river_temp")
@@ -266,7 +264,6 @@ class TestRiverForcingGeneral:
     )
     def test_river_forcing_save(self, river_forcing_fixture, tmp_path, request):
         """Test save method."""
-
         river_forcing = request.getfixturevalue(river_forcing_fixture)
         for file_str in ["test_rivers", "test_rivers.nc"]:
             # Create a temporary filepath using the tmp_path fixture
@@ -291,8 +288,8 @@ class TestRiverForcingGeneral:
     )
     def test_roundtrip_yaml(self, river_forcing_fixture, request, tmp_path, caplog):
         """Test that creating an RiverForcing object, saving its parameters to yaml
-        file, and re-opening yaml file creates the same object."""
-
+        file, and re-opening yaml file creates the same object.
+        """
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
         # Create a temporary filepath using the tmp_path fixture

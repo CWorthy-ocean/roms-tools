@@ -598,7 +598,6 @@ class BoundaryForcing:
               to their corresponding boundary coordinates. The coordinates are specified in terms of
               grid indices for the respective variable types.
         """
-
         bdry_coords = get_boundary_coords()
 
         self.bdry_coords = bdry_coords
@@ -733,7 +732,6 @@ class BoundaryForcing:
         None
             If a boundary is divided by land, a warning is issued. No return value is provided.
         """
-
         for var_name in processed_fields.keys():
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
@@ -890,7 +888,6 @@ class BoundaryForcing:
         ValueError
             If the specified var_name is not one of the valid options.
         """
-
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
@@ -987,7 +984,6 @@ class BoundaryForcing:
         List[Path]
             A list of Path objects for the filenames that were saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -1016,7 +1012,6 @@ class BoundaryForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask"])
         write_to_yaml(forcing_dict, filepath)
 
@@ -1068,7 +1063,6 @@ def apply_1d_horizontal_fill(data_array: xr.DataArray) -> xr.DataArray:
     ValueError
         If more than one horizontal dimension is found or none at all.
     """
-
     horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
     selected_horizontal_dim = None
 

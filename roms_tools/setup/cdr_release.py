@@ -251,7 +251,6 @@ class Release(BaseModel):
         ValueError
             If times are not strictly increasing, or fall outside the [start_time, end_time] window.
         """
-
         if self.times and len(self.times) > 0:
             if not all(t1 < t2 for t1, t2 in zip(self.times, self.times[1:])):
                 raise ValueError(
@@ -265,7 +264,6 @@ class Release(BaseModel):
         Modifies `self.times` in place by prepending or appending times as needed.
         If `times` is empty, it will be set to [`start_time`, `end_time`].
         """
-
         if not self.times:
             self.times = [start_time, end_time]
         else:
@@ -418,7 +416,6 @@ class VolumeRelease(Release):
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
-
         # pydantic_serializer is a function that runs pydantic's default conversion
         # of a model to a dict. then, we make some custom modifications after that
         with warnings.catch_warnings():
@@ -529,7 +526,6 @@ class TracerPerturbation(Release):
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
-
         # pydantic_serializer is a function that runs pydantic's default conversion
         # of a model to a dict. then, we make some custom modifications after that
         with warnings.catch_warnings():

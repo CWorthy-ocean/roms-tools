@@ -123,7 +123,6 @@ def download_river_data(filename: str) -> str:
     str
         The path to the downloaded test data file.
     """
-
     # Fetch the file using Pooch, downloading if necessary
     fname = river_data.fetch(filename)
 

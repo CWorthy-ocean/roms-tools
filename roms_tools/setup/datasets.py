@@ -110,7 +110,6 @@ class Dataset:
         4. Ensures latitude values and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
-
         # Validate start_time and end_time
         if self.start_time is not None and not isinstance(self.start_time, datetime):
             raise TypeError(
@@ -169,7 +168,6 @@ class Dataset:
         ValueError
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
-
         ds = _load_data(
             self.filename, self.dim_names, self.use_dask, read_zarr=self.read_zarr
         )
@@ -207,7 +205,6 @@ class Dataset:
         ValueError
             If the dataset does not contain the specified variables or dimensions.
         """
-
         _check_dataset(ds, self.dim_names, self.var_names)
 
     def select_relevant_fields(self, ds) -> xr.Dataset:
@@ -224,7 +221,6 @@ class Dataset:
         xr.Dataset
             A dataset containing only the variables specified in `self.var_names`.
         """
-
         for var in ds.data_vars:
             if (
                 var not in self.var_names.values()
@@ -299,7 +295,6 @@ class Dataset:
         - If the dataset uses `cftime` datetime objects, these will be converted to standard
           `np.datetime64` objects before filtering.
         """
-
         time_dim = self.dim_names["time"]
 
         ds = _select_relevant_times(
@@ -393,7 +388,6 @@ class Dataset:
             The smallest horizontal grid spacing derived from the latitude
             and longitude differences, in meters.
         """
-
         lat_dim = self.dim_names["latitude"]
         lon_dim = self.dim_names["longitude"]
 
@@ -464,7 +458,6 @@ class Dataset:
         ds_concatenated : xr.Dataset
             The concatenated dataset.
         """
-
         if verbose:
             start_time = time.time()
 
@@ -595,7 +588,6 @@ class Dataset:
         ValueError
             If the selected latitude or longitude range does not intersect with the dataset.
         """
-
         lat_min = target_coords["lat"].min().values
         lat_max = target_coords["lat"].max().values
         lon_min = target_coords["lon"].min().values
@@ -714,7 +706,6 @@ class Dataset:
         dataset variable is filled only once, even if multiple entries in `self.var_names`
         point to the same variable in the dataset.
         """
-
         if self.needs_lateral_fill:
             logging.info(
                 "Applying 2D horizontal fill to the source data before regridding."
@@ -762,7 +753,6 @@ class Dataset:
         For each variable with a depth dimension, fills missing values at the bottom by
         propagating the deepest available data downward.
         """
-
         if "depth" in self.dim_names:
             for var_name in self.ds.data_vars:
                 if self.dim_names["depth"] in self.ds[var_name].dims:
@@ -873,7 +863,6 @@ class TPXODataset(Dataset):
             ValueError
                 If longitude or latitude values do not match the grid.
         """
-
         ds_grid = _load_data(self.grid_filename, self.dim_names, self.use_dask)
 
         # Define mask and coordinate names based on location
@@ -1003,7 +992,6 @@ class TPXODataset(Dataset):
             selected from the `omega` dictionary, a `ValueError` is raised, indicating the mismatch
             between the expected and present constituents in the dataset.
         """
-
         # Expected constituents based on the first 'ntides' from the omega dictionary
         expected_constituents = list(omega.keys())[:ntides]
 
@@ -1071,7 +1059,6 @@ class GLORYSDataset(Dataset):
         None
             The dataset is modified in-place by applying the mask to each variable.
         """
-
         mask = xr.where(
             self.ds[self.var_names["zeta"]].isel({self.dim_names["time"]: 0}).isnull(),
             0,
@@ -1113,7 +1100,6 @@ class UnifiedDataset(Dataset):
         ds : xr.Dataset
             The xarray Dataset with the correct time dimension assigned or added.
         """
-
         ds = ds.rename({"lon": "longitude", "lat": "latitude", "dep": "depth"})
         ds = ds.assign_coords(
             {
@@ -1254,7 +1240,6 @@ class CESMDataset(Dataset):
         ds : xr.Dataset
             The xarray Dataset with the correct time dimension assigned or added.
         """
-
         if "time" not in self.dim_names:
             if "time" in ds.dims:
                 self.dim_names["time"] = "time"
@@ -1432,7 +1417,6 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
         the variable is removed from the dataset. The modified dataset is then
         reassigned to the `ds` attribute of the object.
         """
-
         if "z_t" in self.ds.variables:
             ds = self.ds.drop_vars("z_t")
             self.ds = ds
@@ -1636,7 +1620,6 @@ class ERA5Correction(Dataset):
         -----
         - The dataset (`self.ds`) is updated in place to reflect the chosen subdomain.
         """
-
         # Select the subdomain in latitude direction (so that we have to concatenate fewer latitudes below if concatenation is performed)
         subdomain = self.ds.sel({self.dim_names["latitude"]: target_coords["lat"]})
 
@@ -1806,7 +1789,6 @@ class RiverDataset:
         ds : xr.Dataset
             The dataset with the decoded 'name' variable.
         """
-
         if ds[self.var_names["name"]].dtype == "object":
             names = []
             for i in range(len(ds[self.dim_names["station"]])):
@@ -1842,7 +1824,6 @@ class RiverDataset:
         ValueError
             If the dataset does not contain the specified variables or dimensions.
         """
-
         _check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
@@ -1893,7 +1874,6 @@ class RiverDataset:
         UserWarning
             If the dataset does not contain any time dimension or the time dimension is incorrectly named.
         """
-
         time_dim = self.dim_names["time"]
 
         ds = _select_relevant_times(ds, time_dim, self.start_time, self.end_time, False)
@@ -1937,7 +1917,6 @@ class RiverDataset:
             The dataset with rivers sorted by their volume in descending order.
             If the volume variable is not available, the original dataset is returned.
         """
-
         if "vol" in self.opt_var_names:
             volume_values = ds[self.opt_var_names["vol"]].values
             if isinstance(volume_values, np.ndarray):
@@ -1993,7 +1972,6 @@ class RiverDataset:
             the target coordinates. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
             a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
-
         # Retrieve longitude and latitude of river mouths
         river_lon = self.ds[self.var_names["longitude"]]
         river_lat = self.ds[self.var_names["latitude"]]
@@ -2049,7 +2027,6 @@ class RiverDataset:
             - If `indices` is not a dictionary.
             - If any of the requested river names are not found in the dataset.
         """
-
         if not isinstance(indices, dict):
             raise ValueError("`indices` must be a dictionary.")
 
@@ -2292,7 +2269,6 @@ class TPXOManager:
 
         The amplitudes and elasticity factors are sourced from the `constit.h` file in the OTPSnc package.
         """
-
         # Amplitudes for 15 tidal constituents (from variable amp_d in constit.h of OTPSnc package)
         A = xr.DataArray(
             data=np.array(
@@ -2414,7 +2390,6 @@ class TPXOManager:
         - Egbert, G.D., and S.Y. Erofeeva. "Efficient inverse modeling of barotropic ocean
           tides." Journal of Atmospheric and Oceanic Technology 19, no. 2 (2002): 183-204.
         """
-
         year = date.year
         month = date.month
         day = date.day
@@ -2567,7 +2542,6 @@ class TPXOManager:
             The dataset is modified in-place with corrected real and imaginary components for ssh, u, v, and the
             potential field ('pot_Re', 'pot_Im').
         """
-
         datasets = self.datasets
         omega = self.datasets["omega"].isel(ntides=slice(None, self.ntides))
 
@@ -2736,7 +2710,6 @@ def _select_relevant_times(
     - If the dataset uses `cftime` datetime objects, these will be converted to standard
       `np.datetime64` objects before filtering.
     """
-
     if time_dim in ds.variables:
         if climatology:
             if len(ds[time_dim]) != 12:
@@ -2874,7 +2847,6 @@ def modified_julian_days(year, month, day, hour=0):
     >>> modified_julian_days(1582, 10, 4)
     -141428.5
     """
-
     if month < 3:
         year -= 1
         month += 12
@@ -2936,7 +2908,8 @@ def _deduplicate_river_names(
     ds: xr.Dataset, name_var: str, station_dim: str
 ) -> xr.Dataset:
     """Ensure river names are unique by appending _1, _2 to duplicates, excluding non-
-    duplicates."""
+    duplicates.
+    """
     original = ds[name_var]
 
     # Force cast to plain Python strings

@@ -213,7 +213,8 @@ def test_compute_depth_coordinates(use_dask):
 
 def test_missing_zeta_gets_raised(use_dask):
     """Test that a ValueError is raised when `zeta` is missing from the dataset and
-    `adjust_depth_for_sea_surface_height` is enabled."""
+    `adjust_depth_for_sea_surface_height` is enabled.
+    """
     # Load the grid
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
@@ -444,7 +445,6 @@ def test_plot_on_lat_lon(roms_output_fixture, lat, lon, request):
 
 def test_plot_errors(roms_output_from_restart_file):
     """Test error conditions for the ROMSOutput.plot() method."""
-
     # Invalid time index
     with pytest.raises(ValueError, match="Invalid time index"):
         roms_output_from_restart_file.plot("temp", time=10, s=-1)

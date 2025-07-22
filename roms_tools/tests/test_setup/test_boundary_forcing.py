@@ -24,7 +24,6 @@ from roms_tools.download import download_test_data
 )
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
-
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
@@ -63,8 +62,8 @@ def test_boundary_forcing_creation_with_duplicates(
     boundary_forcing: BoundaryForcing, use_dask: bool
 ) -> None:
     """Test the creation of the BoundaryForcing object with duplicates in source data
-    works as expected."""
-
+    works as expected.
+    """
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
@@ -91,7 +90,6 @@ def test_boundary_forcing_creation_with_duplicates(
 )
 def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
     """Test the creation of the BoundaryForcing object."""
-
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
@@ -586,7 +584,6 @@ def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):
 )
 def test_bgc_boundary_forcing_plot(boundary_forcing_fixture, request):
     """Test plot method."""
-
     bgc_boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     bgc_boundary_forcing.plot(var_name="ALK_south", layer_contours=True)
@@ -604,7 +601,6 @@ def test_bgc_boundary_forcing_plot(boundary_forcing_fixture, request):
 )
 def test_bgc_boundary_forcing_save(boundary_forcing_fixture, tmp_path, request):
     """Test save method."""
-
     bgc_boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for file_str in ["test_bf", "test_bf.nc"]:
@@ -642,8 +638,8 @@ def test_bgc_boundary_forcing_save(boundary_forcing_fixture, tmp_path, request):
 )
 def test_roundtrip_yaml(bdry_forcing_fixture, request, tmp_path, use_dask):
     """Test that creating a BoundaryForcing object, saving its parameters to yaml file,
-    and re-opening yaml file creates the same object."""
-
+    and re-opening yaml file creates the same object.
+    """
     bdry_forcing = request.getfixturevalue(bdry_forcing_fixture)
 
     # Create a temporary filepath using the tmp_path fixture

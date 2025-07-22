@@ -249,7 +249,6 @@ class ROMSOutput:
         xarray.Dataset
             The regridded dataset.
         """
-
         if var_names is None:
             var_names = list(self.ds.data_vars)
 
@@ -401,7 +400,6 @@ class ROMSOutput:
         - If `adjust_depth_for_sea_surface_height` is `True`, the method accounts for variations
           in sea surface height (`zeta`).
         """
-
         if self.adjust_depth_for_sea_surface_height:
             if "zeta" not in self.ds:
                 raise ValueError(
@@ -420,7 +418,6 @@ class ROMSOutput:
 
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output."""
-
         # Load the dataset
         ds = _load_data(
             self.path,
@@ -521,7 +518,6 @@ class ROMSOutput:
         - `theta_s`, `theta_b`, and `hc` are checked for exact equality using `np.array_equal`.
         - `Cs_r` and `Cs_w` are checked for numerical closeness using `np.allclose`.
         """
-
         # Check exact equality for theta_s, theta_b, and hc
         if not np.array_equal(self.grid.theta_s, ds.attrs["theta_s"]):
             raise ValueError(

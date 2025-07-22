@@ -16,8 +16,8 @@ from roms_tools.regrid import LateralRegridFromROMS
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
 def test_lateral_regrid_with_curvilinear_grid():
     """Test that LateralRegridFromROMS regrids data correctly from a curvilinear ROMS
-    grid."""
-
+    grid.
+    """
     # Define ROMS curvilinear grid dimensions
     eta_rho, xi_rho = 10, 20
 
@@ -57,7 +57,6 @@ def test_lateral_regrid_with_curvilinear_grid():
 @pytest.mark.skipif(xesmf is not None, reason="xesmf has to be missing")
 def test_lateral_regrid_import_error():
     """Test that LateralRegridFromROMS raises ImportError when xesmf is missing."""
-
     # Define mock ROMS curvilinear grid dimensions
     eta_rho, xi_rho = 10, 20
 

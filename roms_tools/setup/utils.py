@@ -47,7 +47,6 @@ def nan_check(field, mask, error_message=None) -> None:
         If the field contains NaN values at any of the wet points indicated by the mask.
         The error message will explain the potential cause and suggest ensuring the dataset's coverage.
     """
-
     # Replace values in field with 0 where mask is not 1
     da = xr.where(mask == 1, field, 0)
     if error_message is None:
@@ -78,7 +77,6 @@ def substitute_nans_by_fillvalue(field, fill_value=0.0) -> xr.DataArray:
     xr.DataArray
         The data array with NaN values replaced by the specified fill value.
     """
-
     return field.fillna(fill_value)
 
 
@@ -173,7 +171,6 @@ def interpolate_cyclic_time(
       represents a repeating annual cycle.
     - The `day_of_year` values should be within the range [1, 365] or [1, 366] for leap years.
     """
-
     # Concatenate across the beginning and end of the year
     time_concat = xr.concat(
         [
@@ -384,7 +381,6 @@ def get_variable_metadata():
     dict of str: dict
         Dictionary where keys are variable names and values are dictionaries with "long_name" and "units" keys.
     """
-
     d = {
         "ssh_Re": {"long_name": "Tidal elevation, real part", "units": "m"},
         "ssh_Im": {"long_name": "Tidal elevation, complex part", "units": "m"},
@@ -638,7 +634,6 @@ def compute_missing_bgc_variables(bgc_data):
       dictionary, they are filled with constant values.
     - `CHL` is removed from the dictionary after the necessary calculations.
     """
-
     # Define the relationships for missing variables
     variable_relations = {
         "NH4": (None, 10**-6),  # mmol m-3
@@ -707,7 +702,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
     -----
     - If `nox` and `nhy` are not part of the input dictionary, the are assigned constant values.
     """
-
     # Define the relationships for missing variables
     variable_relations = {
         "pco2_air_alt": ("pco2_air", 1.0),
@@ -946,7 +940,6 @@ def group_dataset(ds, filepath):
     tuple
         A tuple containing the list of grouped datasets and corresponding output filenames.
     """
-
     if hasattr(ds, "climatology"):
         output_filename = f"{filepath}_clim"
         output_filenames = [output_filename]
@@ -999,7 +992,6 @@ def group_by_month(ds, filepath):
     tuple
         A tuple containing the list of monthly datasets and corresponding output filenames.
     """
-
     dataset_list = []
     output_filenames = []
 
@@ -1036,7 +1028,6 @@ def group_by_year(ds, filepath):
     tuple
         A tuple containing the list of yearly datasets and corresponding output filenames.
     """
-
     dataset_list = []
     output_filenames = []
 
@@ -1150,7 +1141,6 @@ def rotate_velocities(
       - u_rot = u * cos(angle) + v * sin(angle)
       - v_rot = v * cos(angle) - u * sin(angle)
     """
-
     # Rotate velocities to grid orientation
     u_rot = u * np.cos(angle) + v * np.sin(angle)
     v_rot = v * np.cos(angle) - u * np.sin(angle)
@@ -1187,7 +1177,6 @@ def compute_barotropic_velocity(
     Computed as:
       - `vel_bar` = sum(dz * vel) / sum(dz)
     """
-
     # Layer thickness
     dz = -interface_depth.diff(dim="s_w")
     dz = dz.rename({"s_w": "s_rho"})
@@ -1355,7 +1344,6 @@ def min_dist_to_land(
     2-D Array of the same shape as lon and lat, which will be filled with the resulting distance values
     to the nearest non-nan lon2, lat2 point
     """
-
     # get flattened ocean/land indices
     ocean = (mask == 1).ravel()
     land = (mask == 0).ravel()
@@ -1434,7 +1422,6 @@ def add_time_info_to_ds(
     tuple[xr.Dataset, xr.DataArray]
         Updated dataset with time information and the relative time array.
     """
-
     if climatology:
         ds.attrs["climatology"] = str(True)
         month = xr.DataArray(range(1, 13), dims=time_name)
@@ -1500,7 +1487,6 @@ def write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
     None
         This function does not return anything. It writes the provided YAML data directly to the specified file.
     """
-
     # Convert the filepath to a Path object
     filepath = Path(filepath)
 
@@ -1548,7 +1534,6 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     -------
     dict
     """
-
     # Serialize Grid data
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
         grid_data = asdict(forcing_object.grid)
@@ -1706,7 +1691,6 @@ def handle_boundaries(field):
     field : numpy.ndarray or xarray.DataArray
         The input field with adjusted boundary values.
     """
-
     field[0, :] = field[1, :]
     field[-1, :] = field[-2, :]
     field[:, 0] = field[:, 1]
@@ -1733,7 +1717,6 @@ def get_boundary_coords():
           - "v" variables (e.g., `eta_v`)
           - "vector" variables with lists of indices for multiple grid points (e.g., `eta_rho`, `xi_rho`).
     """
-
     bdry_coords = {
         "rho": {
             "south": {"eta_rho": 0},

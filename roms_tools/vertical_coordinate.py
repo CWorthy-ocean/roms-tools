@@ -106,7 +106,6 @@ def compute_depth(zeta, h, hc, cs, sigma):
     z : xr.DataArray
         The depth at different sigma levels.
     """
-
     z = (hc * sigma + h * cs) / (hc + h)
     z = zeta + (zeta + h) * z
 

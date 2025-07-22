@@ -63,7 +63,6 @@ def partition(
     This example partitions the dataset into 2 tiles along the `eta` direction and 3 tiles
     along the `xi` direction, resulting in a total of 6 partitions.
     """
-
     if (
         not isinstance(np_eta, Integral)
         or np_eta < 1
@@ -329,7 +328,6 @@ def partition_netcdf(
     List[Path]
         A list of Path objects for the filenames that were saved.
     """
-
     # Ensure filepath is a Path object
     filepath = Path(filepath)
 

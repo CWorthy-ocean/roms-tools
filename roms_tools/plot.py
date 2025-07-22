@@ -161,7 +161,6 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
         The generated figure displaying the parent and child grid boundaries, mask,
         and additional map features.
     """
-
     parent_lon_deg = parent_grid_ds["lon_rho"]
     parent_lat_deg = parent_grid_ds["lat_rho"]
 
@@ -256,7 +255,6 @@ def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
     -----
     - NaN values at the horizontal ends are dropped before plotting.
     """
-
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
 
@@ -354,7 +352,6 @@ def profile_plot(field, title="", ax=None):
     -----
     - The y-axis is inverted to ensure that depth increases downward.
     """
-
     depths_to_check = [
         "layer_depth",
         "interface_depth",
@@ -411,7 +408,6 @@ def line_plot(field, title="", ax=None):
     -----
     - NaN regions are identified and marked using `axvspan` with a grey shade.
     """
-
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
 
@@ -474,7 +470,6 @@ def _get_edge(
     arr: xr.DataArray, dim_name: str, pos: Literal[EDGE_POS_START, EDGE_POS_END]
 ) -> xr.DataArray:
     """Extract the first ("start") or last ("end") slice along the given dimension."""
-
     if pos == EDGE_POS_START:
         return arr.isel({dim_name: 0})
 
@@ -694,7 +689,6 @@ def _validate_plot_inputs(
         If eta or xi indices are out of bounds.
         If eta or xi lie on the boundary when `include_boundary=False`.
     """
-
     # Check conflicting dimension choices
     if s is not None and depth is not None:
         raise ValueError(
@@ -763,7 +757,6 @@ def _validate_plot_inputs(
 
 def _set_plotting_kwargs(field: xr.DataArray, cmap_name: str) -> dict[str, Any]:
     """Return vmin, vmax, and colormap for plotting."""
-
     if cmap_name == "RdBu_r":
         vmax = max(field.max().values, -field.min().values)
         vmin = -vmax
@@ -886,7 +879,6 @@ def plot(
         - If specified `eta` or `xi` indices are out of bounds.
         - If boundary indices are used when `include_boundary=False`.
     """
-
     # Input checks
     _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
 

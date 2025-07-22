@@ -213,7 +213,6 @@ class Grid:
             This method updates the internal dataset (`self.ds`) in place by adding or overwriting the
             topography variable. It does not return any value.
         """
-
         topography_source = topography_source or self.topography_source
         hmin = hmin or self.hmin
 
@@ -278,7 +277,6 @@ class Grid:
         None
             This method modifies the dataset in place by adding vertical coordinate variables.
         """
-
         N = N or self.N
         theta_s = theta_s or self.theta_s
         theta_b = theta_b or self.theta_b
@@ -358,7 +356,6 @@ class Grid:
         The check is based on whether the longitudinal differences between adjacent
         points exceed 300 degrees, indicating a potential wraparound of longitude.
         """
-
         if (
             np.abs(self.ds.lon_rho.diff("xi_rho")).max() > 300
             or np.abs(self.ds.lon_rho.diff("eta_rho")).max() > 300
@@ -438,7 +435,6 @@ class Grid:
         None
             This method does not return any value. It generates and displays a plot.
         """
-
         field = self.ds["h"]
 
         plot(
@@ -482,7 +478,6 @@ class Grid:
         ValueError
             If not exactly one of s, eta, xi is specified.
         """
-
         if sum(i is not None for i in [s, eta, xi]) != 1:
             raise ValueError("Exactly one of s, eta, or xi must be specified.")
 
@@ -523,7 +518,6 @@ class Grid:
         List[Path]
             A list of Path objects for the filenames that were saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -808,7 +802,6 @@ class Grid:
         Issues a warning if the ROMS-Tools version in the YAML header does not match the
         currently installed version.
         """
-
         filepath = Path(filepath)
         # Read the entire file content
         with filepath.open("r") as file:
@@ -851,7 +844,8 @@ class Grid:
 
     def __repr__(self) -> str:
         """Return a string representation of the object with non-None attributes,
-        excluding 'ds'."""
+        excluding 'ds'.
+        """
         cls = self.__class__
         cls_name = cls.__name__
         # Filter attributes to exclude 'ds' and those with None values
@@ -981,7 +975,6 @@ class Grid:
             - lonv, latv: 2D arrays of longitudes and latitudes at v-points.
             - lonq, latq: 2D arrays of longitudes and latitudes at cell corners.
         """
-
         # initially define the domain to be longer in x-direction (dimension "length")
         # than in y-direction (dimension "width") to keep grid distortion minimal
         if self.size_y > self.size_x:
@@ -1066,7 +1059,6 @@ class Grid:
             Dataset with variables: lon_rho, lat_rho, lon_u, lat_u, lon_v, lat_v,
             angle, f (Coriolis parameter), pm, pn.
         """
-
         ds = xr.Dataset()
 
         lon_rho = xr.Variable(
@@ -1208,7 +1200,6 @@ class Grid:
 
 def _rotate(coords, rot):
     """Rotate grid counterclockwise relative to surface of Earth by rot degrees."""
-
     (coords["lon"], coords["lat"]) = _rot_sphere(coords["lon"], coords["lat"], rot)
     (coords["lonu"], coords["latu"]) = _rot_sphere(coords["lonu"], coords["latu"], rot)
     (coords["lonv"], coords["latv"]) = _rot_sphere(coords["lonv"], coords["latv"], rot)
@@ -1218,8 +1209,7 @@ def _rotate(coords, rot):
 
 
 def _translate(coords, tra_lat, tra_lon):
-    """Translate grid so that the centre lies at the position (tra_lat, tra_lon)"""
-
+    """Translate grid so that the centre lies at the position (tra_lat, tra_lon)."""
     (lon, lat) = _tra_sphere(coords["lon"], coords["lat"], tra_lat)
     (lonu, latu) = _tra_sphere(coords["lonu"], coords["latu"], tra_lat)
     (lonv, latv) = _tra_sphere(coords["lonv"], coords["latv"], tra_lat)
@@ -1318,7 +1308,6 @@ def _tra_sphere(lon, lat, tra):
     tuple
         Translated longitude and latitude arrays (lon, lat) in radians.
     """
-
     # Convert translation angle from degrees to radians
     tra = tra * np.pi / 180
 
@@ -1373,7 +1362,6 @@ def _compute_coordinate_metrics(coords):
     -----
     Boundary values of `pn` and `pm` are copied from adjacent interior values.
     """
-
     # pm = 1/dx
     pmu = gc_dist(
         coords["lonu"][:, :-1],
@@ -1425,7 +1413,6 @@ def _compute_angle(coords):
         An array of angles (in radians) of the local grid's positive x-axis
         relative to east for each grid point.
     """
-
     # Compute differences in latitudes and longitudes
     dellat = coords["latu"][:, 1:] - coords["latu"][:, :-1]
     dellon = coords["lonu"][:, 1:] - coords["lonu"][:, :-1]
@@ -1464,7 +1451,6 @@ def _f2c(f):
     fc : xarray.DataArray
         Output DataArray with modified dimensions and values.
     """
-
     fc = _f2c_xdir(f)
     fc = fc.transpose()
     fc = _f2c_xdir(fc)

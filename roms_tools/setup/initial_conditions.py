@@ -760,7 +760,6 @@ class InitialConditions:
         Path
             A `Path` object representing the location of the saved file.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -786,7 +785,6 @@ class InitialConditions:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask"])
         write_to_yaml(forcing_dict, filepath)
 

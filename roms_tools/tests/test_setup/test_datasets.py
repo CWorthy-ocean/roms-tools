@@ -222,7 +222,8 @@ def test_multiple_matching_times(
     global_dataset_with_multiple_times_per_day, tmp_path, use_dask
 ):
     """Test handling when multiple matching times are found when end_time is not
-    specified."""
+    specified.
+    """
     filepath = tmp_path / "test.nc"
     global_dataset_with_multiple_times_per_day.to_netcdf(filepath)
     dataset = Dataset(
@@ -271,7 +272,6 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
 
 def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):
     """Test the from_ds method of the Dataset class."""
-
     start_time = datetime(2022, 1, 1)
 
     filepath = tmp_path / "test.nc"
@@ -309,7 +309,8 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
     global_dataset, tmp_path, use_dask
 ):
     """Test reversing latitude when it is not ascending, the choose_subdomain method,
-    and the convert_to_negative_depth method of the Dataset class."""
+    and the convert_to_negative_depth method of the Dataset class.
+    """
     start_time = datetime(2022, 1, 1)
 
     filepath = tmp_path / "test.nc"
@@ -552,7 +553,7 @@ class TestTPXODataset:
 
     @pytest.fixture
     def global_tpxo_dataset(self, use_dask):
-        """TPXO dataset with global coverage and 1 constituent: M2"""
+        """TPXO dataset with global coverage and 1 constituent: M2."""
         fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
         fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
 

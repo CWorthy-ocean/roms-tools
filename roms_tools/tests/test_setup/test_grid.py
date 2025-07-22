@@ -274,8 +274,8 @@ def test_grid_straddle_crosses_meridian():
 )
 def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
     """Test that creating a grid, saving it to file, and re-opening it is the same as
-    just creating it."""
-
+    just creating it.
+    """
     grid = request.getfixturevalue(grid_fixture)
 
     for file_str in ["test_grid", "test_grid.nc"]:
@@ -308,8 +308,8 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
 )
 def test_roundtrip_yaml(grid_fixture, tmp_path, request):
     """Test that creating a grid, saving its parameters to yaml file, and re-opening
-    yaml file creates the same grid."""
-
+    yaml file creates the same grid.
+    """
     grid = request.getfixturevalue(grid_fixture)
 
     # Create a temporary filepath using the tmp_path fixture
@@ -339,7 +339,6 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
 )
 def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
     """Test that reading a grid from file and then saving it to yaml works."""
-
     grid = request.getfixturevalue(grid_fixture)
 
     filepath = Path(tmp_path / "test.nc")
@@ -719,7 +718,6 @@ def test_from_file_partial_parameters_raises_error(grid, tmp_path):
 # Topography tests
 def test_enclosed_regions():
     """Test that there are only two connected regions, one dry and one wet."""
-
     grid = Grid(
         nx=100,
         ny=100,
@@ -778,8 +776,8 @@ def test_hmin_criterion():
 
 def test_mask_topography_boundary():
     """Test that the mask and topography along the grid boundaries (north, south, east,
-    west) are identical to the adjacent inland cells."""
-
+    west) are identical to the adjacent inland cells.
+    """
     # Create a grid with some land along the northern boundary
     grid = Grid(
         nx=10, ny=10, size_x=1000, size_y=1000, center_lon=-20, center_lat=60, rot=0

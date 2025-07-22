@@ -268,7 +268,6 @@ class RiverForcing:
             A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
             a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
-
         # Retrieve longitude and latitude of river mouths
         river_lon = data.ds[data.var_names["longitude"]]
         river_lat = data.ds[data.var_names["latitude"]]
@@ -421,7 +420,6 @@ class RiverForcing:
         xr.Dataset
             A new dataset with overlapping rivers resolved and new entries added.
         """
-
         overlapping_rivers = self._get_overlapping_rivers()
 
         if len(overlapping_rivers) > 0:
@@ -469,7 +467,6 @@ class RiverForcing:
             A dictionary mapping grid cell indices (eta_rho, xi_rho) to a list
             of river names that overlap at that grid cell.
         """
-
         index_to_rivers = defaultdict(list)
 
         # Collect all index pairs used by multiple rivers
@@ -516,7 +513,6 @@ class RiverForcing:
             The volume-weighted tracer concentration at the overlapping grid cell,
             as a new 1-entry DataArray with updated coordinates.
         """
-
         new_name = f"overlap_{i}"
         self.indices[new_name] = [idx_pair]
 
@@ -630,7 +626,6 @@ class RiverForcing:
         xarray.Dataset
             The modified dataset with the "river_index" and "river_fraction" variables added.
         """
-
         river_index = xr.zeros_like(self.grid.ds.h, dtype=np.float32)
         river_fraction = xr.zeros_like(self.grid.ds.h, dtype=np.float32)
 
@@ -669,7 +664,6 @@ class RiverForcing:
         Warning
             If NaN values are found in any of the dataset variables, a warning message is logged.
         """
-
         for var_name in ds.data_vars:
             da = ds[var_name]
             if da.isnull().any().values:
@@ -681,7 +675,6 @@ class RiverForcing:
 
     def plot_locations(self):
         """Plots the original and updated river locations on a map projection."""
-
         field = self.grid.ds.mask_rho
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
@@ -860,7 +853,6 @@ class RiverForcing:
         List[Path]
             A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -884,7 +876,6 @@ class RiverForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["climatology"])
 
         # Convert indices format
@@ -958,7 +949,6 @@ def check_river_locations_are_along_coast(mask, indices):
     ValueError
         If any river is not located on the coast.
     """
-
     faces = (
         mask.shift(eta_rho=1)
         + mask.shift(eta_rho=-1)

@@ -509,7 +509,6 @@ class SurfaceForcing:
         vwnd_corrected : xr.DataArray
             Corrected meridional wind component with reduced coastal values.
         """
-
         # calculate the distance from each ocean point to the closest land point
         cdist = min_dist_to_land(
             self.target_coords["lon"].values,
@@ -587,7 +586,6 @@ class SurfaceForcing:
         -----
         This check is applied to the first time step (`time=0`) of each variable in the provided dataset.
         """
-
         for var_name in ds.data_vars:
             if self.variable_info[var_name]["validate"]:
                 # all variables are at rho-points
@@ -667,7 +665,6 @@ class SurfaceForcing:
         --------
         >>> atm_forcing.plot("uwnd", time=0)
         """
-
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
@@ -718,7 +715,6 @@ class SurfaceForcing:
         List[Path]
             A list of `Path` objects representing the filenames of the saved file(s).
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -747,7 +743,6 @@ class SurfaceForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask", "use_coarse_grid"])
         write_to_yaml(forcing_dict, filepath)
 

@@ -195,7 +195,6 @@ class TestReleaseSimulationManager:
 
     def test_invalid_release_longitude(self):
         """Test that error is raised if release location is outside grid."""
-
         # Define release location both outside of Iceland grid and grid that straddles dateline
         lon0 = -30
         lat0 = 60
@@ -219,7 +218,6 @@ class TestReleaseSimulationManager:
 
     def test_invalid_release_location(self):
         """Test that error is raised if release location is outside grid or on land."""
-
         # Release location too close to boundary of Iceland domain; lat_rho[0, 0] = 60.97, lon_rho[0, 0] = 334.17
         params = {"lon": 334.17, "lat": 60.97, "depth": 0.0}
         for release in [
@@ -305,7 +303,6 @@ class TestReleaseCollector:
 
     def test_determine_release_type(self):
         """Test that release type is correctly inferred."""
-
         collector = ReleaseCollector(releases=[self.volume_release])
         assert collector.release_type == ReleaseType.volume
 
@@ -402,7 +399,6 @@ class TestCDRForcingDatasetBuilder:
         self, ds, num_times, num_releases, release_type=VolumeRelease
     ):
         """Assert expected dimensions and coordinates for a CDR dataset."""
-
         # Dimensions
         assert ds.time.size == num_times
         assert ds.ncdr.size == num_releases
@@ -428,7 +424,6 @@ class TestCDRForcingDatasetBuilder:
 
     def check_ds_name_and_location(self, ds, release, ncdr_index):
         """Assert expected release name and location for a CDR dataset."""
-
         # Name
         assert release.name in ds["release_name"].values
 
@@ -855,7 +850,6 @@ class TestCDRForcing:
 
     def test_plot_more_errors(self):
         """Test that error is raised on bad plot args or ambiguous release."""
-
         with pytest.raises(ValueError, match="Invalid release"):
             self.volume_release_cdr_forcing.plot_distribution(release_name="fake")
 
@@ -870,7 +864,6 @@ class TestCDRForcing:
 
     def test_cdr_forcing_save(self, tmp_path):
         """Test save method."""
-
         for cdr_forcing in [
             self.volume_release_cdr_forcing,
             self.tracer_perturbation_cdr_forcing,
@@ -888,8 +881,8 @@ class TestCDRForcing:
 
     def test_roundtrip_yaml(self, tmp_path):
         """Test that creating a CDRVolumePointSource object, saving its parameters to
-        yaml file, and re-opening yaml file creates the same object."""
-
+        yaml file, and re-opening yaml file creates the same object.
+        """
         for cdr_forcing in [
             self.volume_release_cdr_forcing,
             self.tracer_perturbation_cdr_forcing,
@@ -911,8 +904,8 @@ class TestCDRForcing:
 
     def test_files_have_same_hash(self, tmp_path):
         """Test that saving the same CDR forcing configuration to NetCDF twice results
-        in reproducible file hashes."""
-
+        in reproducible file hashes.
+        """
         for cdr_forcing in [
             self.volume_release_cdr_forcing,
             self.tracer_perturbation_cdr_forcing,

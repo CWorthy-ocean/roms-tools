@@ -183,7 +183,6 @@ class TidalForcing:
 
     def _get_data(self):
         """Loads tidal forcing data based on the specified source."""
-
         if self.source["name"] == "TPXO":
             if isinstance(self.source["path"], dict):
                 fname_dict = {
@@ -374,7 +373,6 @@ class TidalForcing:
         >>> tidal_forcing = TidalForcing(grid)
         >>> tidal_forcing.plot("ssh_Re", ntides=0)
         """
-
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
@@ -407,7 +405,6 @@ class TidalForcing:
         Path
             A `Path` object representing the location of the saved file.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -433,7 +430,6 @@ class TidalForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask"])
         write_to_yaml(forcing_dict, filepath)
 

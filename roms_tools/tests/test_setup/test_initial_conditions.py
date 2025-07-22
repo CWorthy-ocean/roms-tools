@@ -27,7 +27,6 @@ from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
 )
 def test_initial_conditions_creation(ic_fixture, request):
     """Test the creation of the InitialConditions object."""
-
     ic = request.getfixturevalue(ic_fixture)
 
     assert ic.ini_time == datetime(2021, 6, 29)
@@ -48,8 +47,8 @@ def test_initial_conditions_creation(ic_fixture, request):
 
 def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
     """Test the creation of the InitialConditions object with duplicates in source data
-    works as expected."""
-
+    works as expected.
+    """
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
 
@@ -94,7 +93,6 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
 )
 def test_initial_condition_creation_with_bgc(ic_fixture, request):
     """Test the creation of the BoundaryForcing object."""
-
     ic = request.getfixturevalue(ic_fixture)
 
     expected_bgc_variables = [
@@ -454,7 +452,6 @@ def test_computed_missing_optional_fields(
 )
 def test_initial_conditions_plot(initial_conditions_fixture, request):
     """Test plot method."""
-
     initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     # horizontal slices plots
@@ -503,7 +500,6 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
 )
 def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
     """Test save method."""
-
     initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     for file_str in ["test_ic", "test_ic.nc"]:
@@ -532,8 +528,8 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
 )
 def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask):
     """Test that creating an InitialConditions object, saving its parameters to yaml
-    file, and re-opening yaml file creates the same object."""
-
+    file, and re-opening yaml file creates the same object.
+    """
     initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     # Create a temporary filepath using the tmp_path fixture

@@ -113,7 +113,8 @@ class TestRelease:
     @pytest.fixture(scope="class", autouse=True)
     def mock_release_type(self):
         """This fixture fills in the release_type field for the base Release object, so
-        we can test Release generally, without subclassing it."""
+        we can test Release generally, without subclassing it.
+        """
         original_fields = Release.model_fields
         modified = original_fields.copy()
         modified["release_type"].default = "testing_only"

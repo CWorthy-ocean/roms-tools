@@ -119,7 +119,7 @@ class ChildGrid(Grid):
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False
     ) -> None:
-        """Update the child grid topography via the following steps:
+        """Update the child grid topography via the following steps.
 
         - Regrids the topography based on the specified source.
         - Applies global and local smoothing.
@@ -150,7 +150,6 @@ class ChildGrid(Grid):
             This method updates the internal dataset (`self.ds`) in place, modifying the
             topography variable. It does not return a value.
         """
-
         super().update_topography(
             topography_source=topography_source, hmin=hmin, verbose=verbose
         )
@@ -166,7 +165,6 @@ class ChildGrid(Grid):
         None
             This method does not return any value. It generates and displays a plot.
         """
-
         plot_nesting(
             self.parent_grid.ds,
             self.ds,
@@ -190,7 +188,6 @@ class ChildGrid(Grid):
         List[Path]
             A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -214,7 +211,6 @@ class ChildGrid(Grid):
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["ds_nesting"])
         forcing_dict["ChildGrid"] = pop_grid_data(forcing_dict["ChildGrid"])
         write_to_yaml(forcing_dict, filepath)
@@ -340,7 +336,6 @@ def map_child_boundaries_onto_parent_grid_indices(
         - For `u` and `v` points: Contains mapped `xi`, `eta`, and angle values.
         - Attributes include long names, output variable names, units, and output period.
     """
-
     bdry_coords_dict = get_boundary_coords()
 
     # add angles at u- and v-points
@@ -518,7 +513,6 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
     i_xi : xarray.DataArray
         Updated i_xi-indices for the child grid.
     """
-
     if grid_location == "rho":
         i_eta_rho = i_eta + 0.5
         i_xi_rho = i_xi + 0.5
@@ -626,7 +620,6 @@ def modify_child_topography_and_mask(
     xarray.Dataset
         The updated child grid dataset with modified topography (`h`) and mask (`mask_rho`).
     """
-
     # regrid parent topography and mask onto child grid
     points = np.column_stack(
         (parent_grid_ds.lon_rho.values.ravel(), parent_grid_ds.lat_rho.values.ravel())

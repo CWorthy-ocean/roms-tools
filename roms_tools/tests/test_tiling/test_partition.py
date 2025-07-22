@@ -236,7 +236,8 @@ class TestPartitionGrid:
 
     def test_skip_coarse_dims(self, grid):
         """Test that coarse dimensions remain unchanged when excluded from
-        partitioning."""
+        partitioning.
+        """
         _, partitioned_datasets = partition(
             grid.ds, np_eta=10, np_xi=10, include_coarse_dims=False
         )

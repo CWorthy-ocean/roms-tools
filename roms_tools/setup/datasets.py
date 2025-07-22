@@ -4,7 +4,6 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -80,23 +79,23 @@ class Dataset:
     ... )
     """
 
-    filename: Union[str, Path, List[Union[str, Path]]]
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    dim_names: Dict[str, str] = field(
+    filename: str | Path | list[str | Path]
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
             "latitude": "latitude",
             "time": "time",
         }
     )
-    var_names: Dict[str, str]
-    opt_var_names: Optional[Dict[str, str]] = field(default_factory=dict)
-    climatology: Optional[bool] = False
-    needs_lateral_fill: Optional[bool] = True
-    use_dask: Optional[bool] = False
-    apply_post_processing: Optional[bool] = True
-    read_zarr: Optional[bool] = False
+    var_names: dict[str, str]
+    opt_var_names: dict[str, str] | None = field(default_factory=dict)
+    climatology: bool | None = False
+    needs_lateral_fill: bool | None = True
+    use_dask: bool | None = False
+    apply_post_processing: bool | None = True
+    read_zarr: bool | None = False
 
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
@@ -827,8 +826,8 @@ class TPXODataset(Dataset):
     filename: str
     grid_filename: str
     location: str
-    var_names: Dict[str, str]
-    dim_names: Dict[str, str] = field(
+    var_names: dict[str, str]
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "nx", "latitude": "ny", "ntides": "nc"}
     )
     tolerate_coord_mismatch: bool = False
@@ -964,7 +963,7 @@ class TPXODataset(Dataset):
 
         return ds
 
-    def select_constituents(self, ntides: int, omega: Dict[str, float]):
+    def select_constituents(self, ntides: int, omega: dict[str, float]):
         """Selects the first `ntides` tidal constituents based on the provided omega
         values.
 
@@ -1024,7 +1023,7 @@ class TPXODataset(Dataset):
 class GLORYSDataset(Dataset):
     """Represents GLORYS data on original grid."""
 
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "temp": "thetao",
             "salt": "so",
@@ -1034,7 +1033,7 @@ class GLORYSDataset(Dataset):
         }
     )
 
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
             "latitude": "latitude",
@@ -1043,7 +1042,7 @@ class GLORYSDataset(Dataset):
         }
     )
 
-    climatology: Optional[bool] = False
+    climatology: bool | None = False
 
     def post_process(self):
         """Apply a mask to the dataset based on the 'zeta' variable, with 0 where 'zeta'
@@ -1087,7 +1086,7 @@ class UnifiedDataset(Dataset):
     attribute is set to `False`.
     """
 
-    needs_lateral_fill: Optional[bool] = False
+    needs_lateral_fill: bool | None = False
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -1151,14 +1150,14 @@ class UnifiedDataset(Dataset):
 
 @dataclass(kw_only=True)
 class UnifiedBGCDataset(UnifiedDataset):
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "lon",
             "latitude": "lat",
             "depth": "dep",
         }
     )
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "PO4": "PO4",
             "NO3": "NO3",
@@ -1169,7 +1168,7 @@ class UnifiedBGCDataset(UnifiedDataset):
             "ALK": "Alk",
         }
     )
-    opt_var_names: Dict[str, str] = field(
+    opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
             "NH4": "NH4",
             "Lig": "Lig",
@@ -1200,21 +1199,21 @@ class UnifiedBGCDataset(UnifiedDataset):
         }
     )
 
-    climatology: Optional[bool] = True
+    climatology: bool | None = True
 
 
 @dataclass(kw_only=True)
 class UnifiedBGCSurfaceDataset(UnifiedDataset):
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "lon",
             "latitude": "lat",
         }
     )
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {"pco2_air": "pco2_air", "dust": "dust", "iron": "iron"}
     )
-    opt_var_names: Dict[str, str] = field(
+    opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
             "pco2_air_alt": "pco2_air_alt",
             "nox": "nox",
@@ -1222,7 +1221,7 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
         }
     )
 
-    climatology: Optional[bool] = True
+    climatology: bool | None = True
 
 
 @dataclass(kw_only=True)
@@ -1292,7 +1291,7 @@ class CESMDataset(Dataset):
 class CESMBGCDataset(CESMDataset):
     """Represents CESM BGC data on original grid."""
 
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "PO4": "PO4",
             "NO3": "NO3",
@@ -1329,7 +1328,7 @@ class CESMBGCDataset(CESMDataset):
         }
     )
 
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "lon",
             "latitude": "lat",
@@ -1337,7 +1336,7 @@ class CESMBGCDataset(CESMDataset):
         }
     )
 
-    climatology: Optional[bool] = False
+    climatology: bool | None = False
 
     def post_process(self):
         """
@@ -1390,7 +1389,7 @@ class CESMBGCDataset(CESMDataset):
 class CESMBGCSurfaceForcingDataset(CESMDataset):
     """Represents CESM BGC surface forcing data on original grid."""
 
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "pco2_air": "pCO2SURF",
             "pco2_air_alt": "pCO2SURF",
@@ -1401,14 +1400,14 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
         }
     )
 
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "lon",
             "latitude": "lat",
         }
     )
 
-    climatology: Optional[bool] = False
+    climatology: bool | None = False
 
     def post_process(self):
         """Perform post-processing on the dataset to remove specific variables.
@@ -1436,7 +1435,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 class ERA5Dataset(Dataset):
     """Represents ERA5 data on original grid."""
 
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "uwnd": "u10",
             "vwnd": "v10",
@@ -1449,7 +1448,7 @@ class ERA5Dataset(Dataset):
         }
     )
 
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
             "latitude": "latitude",
@@ -1457,7 +1456,7 @@ class ERA5Dataset(Dataset):
         }
     )
 
-    climatology: Optional[bool] = False
+    climatology: bool | None = False
 
     def post_process(self):
         """
@@ -1534,7 +1533,7 @@ class ERA5Dataset(Dataset):
 class ERA5ARCODataset(ERA5Dataset):
     # The GCP ARCO version of the dataset has different variable names
 
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "uwnd": "10m_u_component_of_wind",
             "vwnd": "10m_v_component_of_wind",
@@ -1571,19 +1570,19 @@ class ERA5Correction(Dataset):
     filename: str = field(
         default_factory=lambda: download_correction_data("SSR_correction.nc")
     )
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "swr_corr": "ssr_corr",  # multiplicative correction factor for ERA5 shortwave radiation
         }
     )
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "longitude",
             "latitude": "latitude",
             "time": "time",
         }
     )
-    climatology: Optional[bool] = True
+    climatology: bool | None = True
 
     def __post_init__(self):
         if not self.climatology:
@@ -1649,12 +1648,12 @@ class ETOPO5Dataset(Dataset):
     """Represents topography data on the original grid from the ETOPO5 dataset."""
 
     filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "topo": "topo",
         }
     )
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
 
@@ -1684,12 +1683,12 @@ class ETOPO5Dataset(Dataset):
 class SRTM15Dataset(Dataset):
     """Represents topography data on the original grid from the SRTM15 dataset."""
 
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "topo": "z",
         }
     )
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
 
@@ -1726,13 +1725,13 @@ class RiverDataset:
         The xarray Dataset containing the forcing data on its original grid.
     """
 
-    filename: Union[str, Path, List[Union[str, Path]]]
+    filename: str | Path | list[str | Path]
     start_time: datetime
     end_time: datetime
-    dim_names: Dict[str, str]
-    var_names: Dict[str, str]
-    opt_var_names: Optional[Dict[str, str]] = field(default_factory=dict)
-    climatology: Optional[bool] = False
+    dim_names: dict[str, str]
+    var_names: dict[str, str]
+    opt_var_names: dict[str, str] | None = field(default_factory=dict)
+    climatology: bool | None = False
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -2054,16 +2053,16 @@ class RiverDataset:
 class DaiRiverDataset(RiverDataset):
     """Represents river data from the Dai river dataset."""
 
-    filename: Union[str, Path, List[Union[str, Path]]] = field(
+    filename: str | Path | list[str | Path] = field(
         default_factory=lambda: download_river_data("dai_trenberth_may2019.nc")
     )
-    dim_names: Dict[str, str] = field(
+    dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "station": "station",
             "time": "time",
         }
     )
-    var_names: Dict[str, str] = field(
+    var_names: dict[str, str] = field(
         default_factory=lambda: {
             "latitude": "lat_mou",
             "longitude": "lon_mou",
@@ -2072,12 +2071,12 @@ class DaiRiverDataset(RiverDataset):
             "name": "riv_name",
         }
     )
-    opt_var_names: Dict[str, str] = field(
+    opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
             "vol": "vol_stn",
         }
     )
-    climatology: Optional[bool] = False
+    climatology: bool | None = False
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Adds time information to the dataset based on the climatology flag and
@@ -2156,7 +2155,7 @@ class TPXOManager:
     ntides: int
     reference_date: datetime = datetime(1992, 1, 1)
     allan_factor: float = 2.0
-    use_dask: Optional[bool] = False
+    use_dask: bool | None = False
 
     def __post_init__(self):
         fname_sal = download_sal_data("sal_tpxo9.v2a.nc")
@@ -2608,9 +2607,9 @@ class TPXOManager:
 
 def _check_dataset(
     ds: xr.Dataset,
-    dim_names: Dict[str, str],
-    var_names: Dict[str, str],
-    opt_var_names: Optional[Dict[str, str]] = None,
+    dim_names: dict[str, str],
+    var_names: dict[str, str],
+    opt_var_names: dict[str, str] | None = None,
 ) -> None:
     """Check if the dataset contains the specified variables and dimensions.
 

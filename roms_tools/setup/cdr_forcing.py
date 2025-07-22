@@ -1,9 +1,10 @@
 import itertools
 import logging
 from collections import Counter
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Iterator
+from typing import Annotated
 
 import cartopy.crs as ccrs
 import matplotlib.gridspec as gridspec

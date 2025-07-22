@@ -2,7 +2,6 @@ import importlib.metadata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Union
 
 import numpy as np
 import xarray as xr
@@ -81,7 +80,7 @@ class TidalForcing:
 
     grid: Grid
     """Object representing the grid information."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: dict[str, str | Path | list[str | Path]]
     """Dictionary specifying the source of the tidal data."""
     ntides: int = 10
     """Number of constituents to consider."""
@@ -191,7 +190,7 @@ class TidalForcing:
                     "u": self.source["path"]["u"],
                 }
 
-            elif isinstance(self.source["path"], (str, Path)):
+            elif isinstance(self.source["path"], str | Path):
                 fname_dict = {
                     "grid": self.source["path"],
                     "h": self.source["path"],
@@ -391,7 +390,7 @@ class TidalForcing:
             cmap_name="RdBu_r",
         )
 
-    def save(self, filepath: Union[str, Path]) -> None:
+    def save(self, filepath: str | Path) -> None:
         """Save the tidal forcing information to a netCDF4 file.
 
         Parameters
@@ -421,7 +420,7 @@ class TidalForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -436,7 +435,7 @@ class TidalForcing:
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "TidalForcing":
         """Create an instance of the TidalForcing class from a YAML file.

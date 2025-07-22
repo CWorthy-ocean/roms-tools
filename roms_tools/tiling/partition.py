@@ -1,6 +1,5 @@
 from numbers import Integral
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 import xarray as xr
@@ -297,7 +296,7 @@ def partition(
 
 
 def partition_netcdf(
-    filepath: Union[str, Path],
+    filepath: str | Path,
     np_eta: int = 1,
     np_xi: int = 1,
     include_coarse_dims: bool = True,

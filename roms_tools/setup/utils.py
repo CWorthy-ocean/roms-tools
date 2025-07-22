@@ -1,9 +1,10 @@
 import importlib.metadata
+from collections.abc import Sequence
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Dict, Sequence, Type, Union
+from typing import Any
 
 import cftime
 import numba as nb
@@ -137,9 +138,7 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
 def interpolate_cyclic_time(
     data_array: xr.DataArray,
     time_dim_name: str,
-    day_of_year: Union[
-        int, float, np.ndarray, xr.DataArray, Sequence[Union[int, float]]
-    ],
+    day_of_year: int | float | np.ndarray | xr.DataArray | Sequence[int | float],
 ) -> xr.DataArray:
     """Interpolates a DataArray cyclically across the start and end of the year.
 
@@ -202,10 +201,10 @@ def interpolate_cyclic_time(
 
 
 def interpolate_from_climatology(
-    field: Union[xr.DataArray, xr.Dataset],
+    field: xr.DataArray | xr.Dataset,
     time_dim_name: str,
-    time: Union[xr.DataArray, pd.DatetimeIndex],
-) -> Union[xr.DataArray, xr.Dataset]:
+    time: xr.DataArray | pd.DatetimeIndex,
+) -> xr.DataArray | xr.Dataset:
     """Interpolates a climatological field to specified time points.
 
     This function interpolates the input `field` based on `day_of_year` values
@@ -314,7 +313,7 @@ def get_time_type(data_array: xr.DataArray) -> str:
     )
 
     # Check if any of the coordinate values are of cftime, datetime, or integer type
-    if isinstance(data_array.values, (np.ndarray, list)):
+    if isinstance(data_array.values, np.ndarray | list):
         # Check if the data type is numpy datetime64, indicating standard datetime objects
         if data_array.values.dtype == "datetime64[ns]":
             return "datetime"
@@ -1374,8 +1373,8 @@ def min_dist_to_land(
 
 
 def convert_to_relative_days(
-    times: Union[Sequence[datetime], np.ndarray],
-    model_reference_date: Union[datetime, np.datetime64],
+    times: Sequence[datetime] | np.ndarray,
+    model_reference_date: datetime | np.datetime64,
 ) -> np.ndarray:
     """Convert absolute datetimes to model-relative time in days.
 
@@ -1400,7 +1399,7 @@ def convert_to_relative_days(
 
 def add_time_info_to_ds(
     ds: xr.Dataset,
-    model_reference_date: Union[datetime, np.datetime64],
+    model_reference_date: datetime | np.datetime64,
     climatology: bool,
     time_name: str = "time",
 ) -> tuple[xr.Dataset, xr.DataArray]:
@@ -1468,7 +1467,7 @@ class NoAliasDumper(yaml.SafeDumper):
         return True
 
 
-def write_to_yaml(yaml_data, filepath: Union[str, Path]) -> None:
+def write_to_yaml(yaml_data, filepath: str | Path) -> None:
     """Write pre-serialized YAML data and additional metadata to a YAML file.
 
     This function writes the provided pre-serialized YAML data along with metadata, such as the version
@@ -1604,7 +1603,7 @@ def pop_grid_data(grid_data):
     return grid_data
 
 
-def from_yaml(forcing_object: Type, filepath: Union[str, Path]) -> Dict[str, Any]:
+def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
     """Extract the configuration data for a given forcing object from a YAML file.
 
     This function reads a YAML file, searches for the configuration data associated

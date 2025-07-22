@@ -3,7 +3,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import cartopy.crs as ccrs
 import matplotlib.cm as cm
@@ -94,7 +93,7 @@ class RiverForcing:
     """Start time of the desired river forcing data."""
     end_time: datetime
     """End time of the desired river forcing data."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
+    source: dict[str, str | Path | list[str | Path]] = None
     """Dictionary specifying the source of the river forcing data."""
     convert_to_climatology: str = "if_any_missing"
     """Determines when to compute climatology for river forcing."""
@@ -103,7 +102,7 @@ class RiverForcing:
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
-    indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
+    indices: dict[str, dict[str, int | list[int]]] | None = None
     """A dictionary of river indices.
 
     If not provided during initialization, it will be automatically determined based on
@@ -839,7 +838,7 @@ class RiverForcing:
 
     def save(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
     ) -> None:
         """Save the river forcing to netCDF4 file.
 
@@ -867,7 +866,7 @@ class RiverForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -896,7 +895,7 @@ class RiverForcing:
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":
+    def from_yaml(cls, filepath: str | Path) -> "RiverForcing":
         """Create an instance of the RiverForcing class from a YAML file.
 
         Parameters

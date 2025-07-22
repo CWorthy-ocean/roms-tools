@@ -4,7 +4,6 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -48,13 +47,13 @@ class ROMSOutput:
 
     grid: Grid
     """Object representing the grid information."""
-    path: Union[str, Path]
+    path: str | Path
     """Filename, or list of filenames with model output."""
     use_dask: bool = False
     """Whether to use dask for processing."""
-    model_reference_date: Optional[datetime] = None
+    model_reference_date: datetime | None = None
     """Reference date of ROMS simulation."""
-    adjust_depth_for_sea_surface_height: Optional[bool] = False
+    adjust_depth_for_sea_surface_height: bool | None = False
     """Whether to account for sea surface height variations when computing depth
     coordinates."""
 

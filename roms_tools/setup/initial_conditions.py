@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -106,9 +105,9 @@ class InitialConditions:
     """Object representing the grid information."""
     ini_time: datetime
     """The date and time at which the initial conditions are set."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: dict[str, str | Path | list[str | Path]]
     """Dictionary specifying the source of the physical initial condition data."""
-    bgc_source: Optional[Dict[str, Union[str, Path, List[Union[str, Path]]]]] = None
+    bgc_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the biogeochemical (BGC) initial condition
     data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -747,7 +746,7 @@ class InitialConditions:
             cmap_name=cmap_name,
         )
 
-    def save(self, filepath: Union[str, Path]) -> None:
+    def save(self, filepath: str | Path) -> None:
         """Save the initial conditions information to one netCDF4 file.
 
         Parameters
@@ -776,7 +775,7 @@ class InitialConditions:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -791,7 +790,7 @@ class InitialConditions:
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "InitialConditions":
         """Create an instance of the InitialConditions class from a YAML file.

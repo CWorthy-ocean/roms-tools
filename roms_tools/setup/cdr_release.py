@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
-from typing import Literal
+from typing import Annotated, Literal
 
 from annotated_types import Ge, Le
 from pydantic import (
@@ -15,7 +15,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic_core.core_schema import ValidationInfo
-from typing_extensions import Annotated
 
 from roms_tools.setup.utils import get_tracer_defaults, get_tracer_metadata_dict
 

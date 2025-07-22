@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -962,7 +961,7 @@ class BoundaryForcing:
 
     def save(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         group: bool = True,
     ) -> None:
         """Save the boundary forcing fields to one or more netCDF4 files.
@@ -1003,7 +1002,7 @@ class BoundaryForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -1018,7 +1017,7 @@ class BoundaryForcing:
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "BoundaryForcing":
         """Create an instance of the BoundaryForcing class from a YAML file.

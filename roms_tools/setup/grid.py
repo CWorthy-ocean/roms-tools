@@ -4,7 +4,6 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Union
 
 import numpy as np
 import xarray as xr
@@ -107,7 +106,7 @@ class Grid:
     """The bottom control parameter."""
     hc: float = 300.0
     """The critical depth (in meters)."""
-    topography_source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
+    topography_source: dict[str, str | Path | list[str | Path]] = None
     """Dictionary specifying the source of the topography data."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
@@ -505,7 +504,7 @@ class Grid:
             add_colorbar=add_colorbar,
         )
 
-    def save(self, filepath: Union[str, Path]) -> None:
+    def save(self, filepath: str | Path) -> None:
         """Save the grid information to a netCDF4 file.
 
         Parameters
@@ -753,7 +752,7 @@ class Grid:
 
         return grid
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -771,7 +770,7 @@ class Grid:
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         section_name: str = "Grid",
         verbose: bool = False,
     ) -> "Grid":

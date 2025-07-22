@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -113,11 +112,11 @@ class SurfaceForcing:
 
     grid: Grid
     """Object representing the grid information."""
-    start_time: Optional[datetime] = None
+    start_time: datetime | None = None
     """The start time of the desired surface forcing data."""
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
     """The end time of the desired surface forcing data."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: dict[str, str | Path | list[str | Path]]
     """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""
@@ -693,7 +692,7 @@ class SurfaceForcing:
 
     def save(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         group: bool = True,
     ) -> None:
         """Save the surface forcing fields to one or more netCDF4 files.
@@ -734,7 +733,7 @@ class SurfaceForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -749,7 +748,7 @@ class SurfaceForcing:
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "SurfaceForcing":
         """Create an instance of the SurfaceForcing class from a YAML file.

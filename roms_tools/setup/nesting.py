@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Tuple, Union
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -53,7 +53,7 @@ class ChildGrid(Grid):
     parent_grid: Grid
     """The parent grid object, providing the reference for the child topography
     and mask of the child grid."""
-    boundaries: Dict[str, bool] = field(
+    boundaries: dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
             "east": True,
@@ -63,7 +63,7 @@ class ChildGrid(Grid):
     )
     """Specifies which child grid boundaries (south, east, north, west) should be
     adjusted for topography/mask and included in `ds_nesting`."""
-    metadata: Dict[str, Any] = field(
+    metadata: dict[str, Any] = field(
         default_factory=lambda: {"prefix": "child", "period": 3600.0}
     )
     """Dictionary configuring the boundary nesting process."""
@@ -174,7 +174,7 @@ class ChildGrid(Grid):
 
     def save_nesting(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
     ) -> None:
         """Save the nesting information to netCDF4 files.
 
@@ -202,7 +202,7 @@ class ChildGrid(Grid):
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -216,7 +216,7 @@ class ChildGrid(Grid):
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "ChildGrid":
+    def from_yaml(cls, filepath: str | Path) -> "ChildGrid":
         """Create an instance of the ChildGrid class from a YAML file.
 
         Parameters
@@ -236,7 +236,7 @@ class ChildGrid(Grid):
 
         return cls(parent_grid=parent_grid, **params)
 
-    def _prepare_grid_datasets(self) -> Tuple[xr.Dataset, xr.Dataset]:
+    def _prepare_grid_datasets(self) -> tuple[xr.Dataset, xr.Dataset]:
         """Prepare parent and child grid datasets by adjusting longitudes for dateline
         crossing.
 
@@ -275,9 +275,7 @@ class ChildGrid(Grid):
         return parent_grid_ds, child_grid_ds
 
     @classmethod
-    def from_file(
-        cls, filepath: Union[str, Path], verbose: bool = False
-    ) -> "ChildGrid":
+    def from_file(cls, filepath: str | Path, verbose: bool = False) -> "ChildGrid":
         """This method is disabled in this subclass.
 
         .. noindex::

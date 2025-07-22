@@ -80,7 +80,7 @@ def _load_data(
     wildcard_regex = re.compile(r"[\*\?\[\]]")
 
     # Convert Path objects to strings
-    if isinstance(filename, (str, Path)):
+    if isinstance(filename, str | Path):
         filename_str = str(filename)
     elif isinstance(filename, list):
         filename_str = [str(f) for f in filename]

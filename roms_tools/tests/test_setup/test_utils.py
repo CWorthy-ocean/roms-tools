@@ -13,7 +13,6 @@ from roms_tools.setup.utils import (
 
 
 def test_interpolate_from_climatology(use_dask):
-
     fname = download_test_data("ERA5_regional_test_data.nc")
     era5_times = xr.open_dataset(fname).time
 
@@ -65,7 +64,6 @@ def test_roundtrip_yaml(
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         boundary_forcing_from_multiple_source_files.to_yaml(filepath)
 
         bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)

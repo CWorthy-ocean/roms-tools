@@ -19,7 +19,6 @@ except ImportError:
 
 @pytest.fixture
 def roms_output_from_restart_file(use_dask):
-
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
 
@@ -33,7 +32,6 @@ def roms_output_from_restart_file(use_dask):
 
 @pytest.fixture
 def roms_output_from_restart_file_adjusted_for_zeta(use_dask):
-
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
 
@@ -48,7 +46,6 @@ def roms_output_from_restart_file_adjusted_for_zeta(use_dask):
 
 @pytest.fixture
 def roms_output_from_restart_file_with_straddling_grid(use_dask):
-
     # Make fake grid that straddles the dateline and that has consistent sizes with test data below
     grid = Grid(
         nx=8, ny=13, center_lon=0, center_lat=60, rot=32, size_x=244, size_y=365
@@ -296,7 +293,6 @@ def test_plot_on_native_model_grid(roms_output_fixture, request):
 
     for include_boundary in [False, True]:
         for depth_contours in [False, True]:
-
             # 3D fields
             for var_name in ["temp", "u", "v"]:
                 kwargs = {
@@ -379,7 +375,6 @@ def test_plot_on_lat_lon(roms_output_fixture, lat, lon, request):
 
     for include_boundary in [False, True]:
         for depth_contours in [False, True]:
-
             # 3D fields
             for var_name in ["temp", "u", "v"]:
                 kwargs = {
@@ -521,7 +516,6 @@ def test_plot_errors(roms_output_from_restart_file):
 
 
 def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):
-
     filename = tmp_path / "figure.png"
     roms_output_from_restart_file.plot("temp", time=0, depth=1000, save_path=filename)
 

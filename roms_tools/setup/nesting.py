@@ -76,7 +76,6 @@ class ChildGrid(Grid):
     mapped onto parent grid indices."""
 
     def __post_init__(self):
-
         super().__post_init__()
         self._map_child_boundaries_onto_parent_grid_indices()
         self._modify_child_topography_and_mask()
@@ -120,7 +119,6 @@ class ChildGrid(Grid):
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False
     ) -> None:
-
         """Update the child grid topography via the following steps:
 
         - Regrids the topography based on the specified source.
@@ -387,9 +385,9 @@ def map_child_boundaries_onto_parent_grid_indices(
                 var_name = f"{prefix}_{direction}_{suffix}"
                 if grid_location == "rho":
                     ds[var_name] = xr.concat([i_xi, i_eta], dim="two")
-                    ds[var_name].attrs[
-                        "long_name"
-                    ] = f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
+                    ds[var_name].attrs["long_name"] = (
+                        f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
+                    )
                     ds[var_name].attrs["units"] = "non-dimensional"
                     ds[var_name].attrs["output_vars"] = "zeta, temp, salt"
                 else:
@@ -397,9 +395,9 @@ def map_child_boundaries_onto_parent_grid_indices(
                         **bdry_coords[direction]
                     )
                     ds[var_name] = xr.concat([i_xi, i_eta, angle_child], dim="three")
-                    ds[var_name].attrs[
-                        "long_name"
-                    ] = f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
+                    ds[var_name].attrs["long_name"] = (
+                        f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
+                    )
                     ds[var_name].attrs["units"] = "non-dimensional and radian"
 
                     if grid_location == "u":

@@ -307,7 +307,6 @@ def test_nan_detection_initialization_with_regional_data(
 
     for coarse_grid_mode in ["always", "never"]:
         with pytest.raises(ValueError, match="NaN values found"):
-
             SurfaceForcing(
                 grid=grid,
                 coarse_grid_mode=coarse_grid_mode,
@@ -336,7 +335,6 @@ def test_no_longitude_intersection_initialization_with_regional_data(
         with pytest.raises(
             ValueError, match="Selected longitude range does not intersect with dataset"
         ):
-
             SurfaceForcing(
                 grid=grid_that_straddles_180_degree_meridian,
                 coarse_grid_mode=coarse_grid_mode,
@@ -546,9 +544,9 @@ def test_computed_missing_optional_fields(bgc_surface_forcing_from_unified_clima
     # Use tight tolerances because 'nox' and 'nhy' can have values order 1e-12
 
     # 'nhy' was missing in the source data and should have been filled with a constant default value
-    assert np.allclose(
-        ds.nhy.std(), 0.0, rtol=1e-13, atol=1e-13
-    ), "NHy should be constant across space and time"
+    assert np.allclose(ds.nhy.std(), 0.0, rtol=1e-13, atol=1e-13), (
+        "NHy should be constant across space and time"
+    )
     # 'nox' was present in the source data and should show spatial or temporal variability
     assert ds.nox.std() > 1e-13, "NOx should vary across space and time"
 
@@ -605,7 +603,6 @@ def test_determine_usage_coarse_grid():
 
 
 def test_apply_wind_correction(surface_forcing):
-
     uwnd = surface_forcing.ds["uwnd"]
     vwnd = surface_forcing.ds["vwnd"]
 
@@ -668,7 +665,6 @@ def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without grouping
             saved_filenames = sfc_forcing.save(filepath, group=False)
             filepath_str = str(Path(filepath).with_suffix(""))
@@ -709,7 +705,6 @@ def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without grouping
             saved_filenames = bgc_surface_forcing.save(filepath, group=False)
             filepath_str = str(Path(filepath).with_suffix(""))
@@ -745,7 +740,6 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without grouping
             saved_filenames = bgc_surface_forcing_from_climatology.save(
                 filepath, group=False
@@ -791,7 +785,6 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         sfc_forcing.to_yaml(filepath)
 
         sfc_forcing_from_file = SurfaceForcing.from_yaml(filepath, use_dask)
@@ -813,7 +806,6 @@ def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
     ],
 )
 def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
-
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml.yaml"
@@ -849,7 +841,6 @@ def test_files_have_same_hash(sfc_forcing_fixture, request, tmp_path, use_dask):
     ],
 )
 def test_files_have_same_hash_clim(sfc_forcing_fixture, tmp_path, use_dask, request):
-
     bgc_surface_forcing_from_climatology = request.getfixturevalue(sfc_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml"
@@ -903,7 +894,6 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)

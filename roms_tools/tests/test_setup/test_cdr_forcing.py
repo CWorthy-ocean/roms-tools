@@ -83,7 +83,6 @@ class TestReleaseSimulationManager:
         self.end_time = datetime(2022, 12, 31)
 
     def test_volume_release_correctly_extended(self):
-
         # Save copies of mutable fields before they are modified by ReleaseSimulationManager
         times = self.volume_release_with_times.times.copy()  # list
         volume_fluxes = (
@@ -118,7 +117,6 @@ class TestReleaseSimulationManager:
         ].values == 4 * [tracer_concentrations_temp]
 
     def test_tracer_perturbation_correctly_extended(self):
-
         # Save copies of mutable fields before they are modified by ReleaseSimulationManager
         times = self.tracer_perturbation_with_times.times.copy()  # list
         tracer_fluxes_dic = self.tracer_perturbation_with_times.tracer_fluxes[
@@ -146,7 +144,6 @@ class TestReleaseSimulationManager:
         ]
 
     def test_release_starts_too_early(self):
-
         for release in [
             self.volume_release_with_times,
             self.tracer_perturbation_with_times,
@@ -164,7 +161,6 @@ class TestReleaseSimulationManager:
                 )
 
     def test_release_ends_too_late(self):
-
         for release in [
             self.volume_release_with_times,
             self.tracer_perturbation_with_times,
@@ -182,12 +178,10 @@ class TestReleaseSimulationManager:
                 )
 
     def test_warning_no_grid(self, caplog):
-
         for release in [
             self.volume_release_with_times,
             self.tracer_perturbation_with_times,
         ]:
-
             caplog.clear()
             with caplog.at_level(logging.WARNING):
                 ReleaseSimulationManager(
@@ -208,7 +202,6 @@ class TestReleaseSimulationManager:
         depth0 = 0
 
         for lon in [lon0, lon0 - 360, lon0 + 360]:
-
             params = {"lon": lon, "lat": lat0, "depth": depth0}
 
             for grid in [self.grid, self.grid_that_straddles]:
@@ -305,7 +298,6 @@ class TestReleaseCollector:
             )
 
     def test_raises_inconsistent_release_type(self):
-
         with pytest.raises(
             ValidationError, match="Not all releases have the same type"
         ):
@@ -450,7 +442,6 @@ class TestCDRForcingDatasetBuilder:
         # TODO: Check for tracer metadata
 
     def test_build_with_single_volume_release(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_volume_release],
             model_reference_date=datetime(2000, 1, 1),
@@ -488,7 +479,6 @@ class TestCDRForcingDatasetBuilder:
             )
 
     def test_build_with_single_tracer_perturbation(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_tracer_perturbation],
             model_reference_date=datetime(2000, 1, 1),
@@ -520,7 +510,6 @@ class TestCDRForcingDatasetBuilder:
             )
 
     def test_build_with_multiple_volume_releases(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_volume_release, self.second_volume_release],
             model_reference_date=datetime(2000, 1, 1),
@@ -587,7 +576,6 @@ class TestCDRForcingDatasetBuilder:
         )
 
     def test_build_with_multiple_tracer_perturbations(self):
-
         builder = CDRForcingDatasetBuilder(
             releases=[self.first_tracer_perturbation, self.second_tracer_perturbation],
             model_reference_date=datetime(2000, 1, 1),
@@ -779,7 +767,6 @@ class TestCDRForcing:
         )
 
     def test_inconsistent_start_end_time(self):
-
         start_time = datetime(2022, 5, 1)
         end_time = datetime(2022, 5, 1)
         with pytest.raises(ValueError, match="must be earlier"):
@@ -796,12 +783,10 @@ class TestCDRForcing:
             )
 
     def test_empty_release_list(self):
-
         with pytest.raises(ValidationError):
             CDRForcing(start_time=self.start_time, end_time=self.end_time)
 
     def test_ds_attribute(self):
-
         assert isinstance(self.volume_release_cdr_forcing_without_grid.ds, xr.Dataset)
         assert isinstance(
             self.tracer_perturbation_cdr_forcing_without_grid.ds, xr.Dataset
@@ -816,12 +801,10 @@ class TestCDRForcing:
         )
 
     def test_plot_error_when_no_grid(self):
-
         for cdr in [
             self.volume_release_cdr_forcing_without_grid,
             self.tracer_perturbation_cdr_forcing_without_grid,
         ]:
-
             with pytest.raises(
                 ValueError, match="A grid must be provided for plotting"
             ):
@@ -833,7 +816,6 @@ class TestCDRForcing:
                 cdr.plot_distribution("first_release")
 
     def test_plot_volume_release(self):
-
         for cdr in [
             self.volume_release_cdr_forcing_without_grid,
             self.volume_release_cdr_forcing,
@@ -847,7 +829,6 @@ class TestCDRForcing:
         self.volume_release_cdr_forcing.plot_locations(release_names=["first_release"])
 
     def test_plot_tracer_perturbation(self):
-
         for cdr in [
             self.tracer_perturbation_cdr_forcing_without_grid,
             self.tracer_perturbation_cdr_forcing,
@@ -863,7 +844,6 @@ class TestCDRForcing:
 
     @pytest.mark.skipif(xesmf is None, reason="xesmf required")
     def test_plot_distribution(self):
-
         self.volume_release_cdr_forcing.plot_distribution("first_release")
         self.volume_release_cdr_forcing_with_straddling_grid.plot_distribution(
             "first_release"
@@ -898,7 +878,6 @@ class TestCDRForcing:
             for file_str in ["test_cdr_forcing", "test_cdr_forcing.nc"]:
                 # Create a temporary filepath using the tmp_path fixture
                 for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                     saved_filenames = cdr_forcing.save(filepath)
                     # Check if the .nc file was created
                     filepath = Path(filepath).with_suffix(".nc")
@@ -921,7 +900,6 @@ class TestCDRForcing:
                 tmp_path / file_str,
                 str(tmp_path / file_str),
             ]:  # test for Path object and str
-
                 cdr_forcing.to_yaml(filepath)
 
                 cdr_forcing_from_file = CDRForcing.from_yaml(filepath)

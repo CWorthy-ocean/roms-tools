@@ -71,7 +71,6 @@ def use_dask(request):
 
 @pytest.fixture(scope="session")
 def grid():
-
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
 
     return grid
@@ -79,7 +78,6 @@ def grid():
 
 @pytest.fixture(scope="session")
 def grid_that_straddles_dateline():
-
     grid = Grid(
         nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20
     )
@@ -110,7 +108,6 @@ def grid_that_straddles_180_degree_meridian():
 
 @pytest.fixture(scope="session")
 def tidal_forcing(use_dask):
-
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )

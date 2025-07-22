@@ -119,7 +119,6 @@ def vertical_regridder(depth_values, layer_depth_rho_values):
     ],
 )
 def test_vertical_regrid(request, depth_values, layer_depth_rho_values, temp_data):
-
     vertical_regrid = vertical_regridder(
         depth_values=depth_values, layer_depth_rho_values=layer_depth_rho_values
     )

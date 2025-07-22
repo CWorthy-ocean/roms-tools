@@ -241,7 +241,6 @@ def interpolate_from_climatology(
     """
 
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
-
         if isinstance(time, xr.DataArray):
             # Extract day of year from xarray.DataArray
             day_of_year = time.dt.dayofyear

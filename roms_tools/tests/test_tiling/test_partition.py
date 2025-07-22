@@ -9,7 +9,6 @@ from roms_tools.tiling.partition import partition, partition_netcdf
 
 @pytest.fixture
 def grid():
-
     grid = Grid(nx=30, ny=30, size_x=80, size_y=80, center_lon=-20, center_lat=0, rot=0)
 
     return grid

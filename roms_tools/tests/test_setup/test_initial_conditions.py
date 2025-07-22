@@ -138,7 +138,6 @@ def test_initial_condition_creation_with_bgc(ic_fixture, request):
 
 @pytest.fixture
 def example_grid():
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -180,7 +179,6 @@ def test_initial_conditions_missing_physics_path(example_grid, use_dask):
 
 # Test initialization with missing 'name' in bgc_source
 def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
-
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
         ValueError, match="`bgc_source` must include a 'name' if it is provided."
@@ -196,7 +194,6 @@ def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
 
 # Test initialization with missing 'path' in bgc_source
 def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
-
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
         ValueError, match="`bgc_source` must include a 'path' if it is provided."
@@ -212,7 +209,6 @@ def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
 
 # Test initialization with missing ini_time
 def test_initial_conditions_missing_ini_time(example_grid, use_dask):
-
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
         ValueError,
@@ -228,7 +224,6 @@ def test_initial_conditions_missing_ini_time(example_grid, use_dask):
 
 # Test default climatology value
 def test_initial_conditions_default_climatology(example_grid, use_dask):
-
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     initial_conditions = InitialConditions(
@@ -243,7 +238,6 @@ def test_initial_conditions_default_climatology(example_grid, use_dask):
 
 
 def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
-
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     fname_bgc = Path(download_test_data("CESM_regional_test_data_one_time_slice.nc"))
 
@@ -259,7 +253,6 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
 
 
 def test_info_depth(caplog, use_dask):
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -277,7 +270,6 @@ def test_info_depth(caplog, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
     with caplog.at_level(logging.INFO):
-
         InitialConditions(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
@@ -292,7 +284,6 @@ def test_info_depth(caplog, use_dask):
     caplog.clear()
 
     with caplog.at_level(logging.INFO):
-
         InitialConditions(
             grid=grid,
             ini_time=datetime(2021, 6, 29),
@@ -317,7 +308,6 @@ def test_info_depth(caplog, use_dask):
 def test_correct_depth_coords_adjusted_for_zeta(
     initial_conditions_fixture, request, use_dask
 ):
-
     initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     # compute interface depth at rho-points and write it into .ds_depth_coords
@@ -355,7 +345,6 @@ def test_correct_depth_coords_adjusted_for_zeta(
     ],
 )
 def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use_dask):
-
     initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     # compute interface depth at rho-points and write it into .ds_depth_coords
@@ -382,7 +371,6 @@ def test_correct_depth_coords_zero_zeta(initial_conditions_fixture, request, use
 
 
 def test_interpolation_from_climatology(use_dask):
-
     # CESM climatology
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
     ds = xr.open_dataset(fname_bgc)
@@ -449,9 +437,9 @@ def test_computed_missing_optional_fields(
     # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
 
     # 'DOCr' was missing in the source data and should have been filled with a constant default value
-    assert np.allclose(
-        ds.DOCr.std(), 0.0, rtol=1e-10, atol=1e-10
-    ), "DOCr should be constant across space and time"
+    assert np.allclose(ds.DOCr.std(), 0.0, rtol=1e-10, atol=1e-10), (
+        "DOCr should be constant across space and time"
+    )
     # 'DOC' was present in the source data and should show spatial or temporal variability
     assert ds.DOC.std() > 1e-10, "DOC should vary across space and time"
 
@@ -524,7 +512,6 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             saved_filenames = initial_conditions.save(filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
@@ -555,7 +542,6 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         initial_conditions.to_yaml(filepath)
 
         initial_conditions_from_file = InitialConditions.from_yaml(
@@ -578,7 +564,6 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
     ],
 )
 def test_files_have_same_hash(initial_conditions_fixture, request, tmp_path, use_dask):
-
     initial_conditions = request.getfixturevalue(initial_conditions_fixture)
 
     yaml_filepath = tmp_path / "test_yaml.yaml"
@@ -627,7 +612,6 @@ def test_from_yaml_missing_initial_conditions(tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)

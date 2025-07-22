@@ -201,7 +201,6 @@ class TestRiverForcingGeneral:
         )
 
     def test_reproducibility_same_grid(self, river_forcing):
-
         the_same_river_forcing = RiverForcing(
             grid=river_forcing.grid,
             start_time=datetime(1998, 1, 1),
@@ -234,7 +233,7 @@ class TestRiverForcingGeneral:
 
         indices = river_forcing.indices
         for name in indices.keys():
-            for (eta_rho, xi_rho) in indices[name]:
+            for eta_rho, xi_rho in indices[name]:
                 assert coast[eta_rho, xi_rho]
                 assert river_forcing.ds["river_index"][eta_rho, xi_rho] > 0
                 assert river_forcing.ds["river_fraction"][eta_rho, xi_rho] > 0
@@ -272,7 +271,6 @@ class TestRiverForcingGeneral:
         for file_str in ["test_rivers", "test_rivers.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                 saved_filenames = river_forcing.save(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
@@ -303,7 +301,6 @@ class TestRiverForcingGeneral:
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             river_forcing.to_yaml(filepath)
 
             # Clear caplog before running the test
@@ -329,7 +326,6 @@ class TestRiverForcingGeneral:
         ],
     )
     def test_files_have_same_hash(self, river_forcing_fixture, request, tmp_path):
-
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
         yaml_filepath = tmp_path / "test_yaml.yaml"
@@ -376,7 +372,6 @@ class TestRiverForcingGeneral:
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Write YAML content to file
             if isinstance(yaml_filepath, Path):
                 yaml_filepath.write_text(yaml_content)
@@ -399,7 +394,6 @@ class TestRiverForcingWithoutPrescribedIndices:
     end_time = datetime(1998, 3, 1)
 
     def test_logging_message(self, iceland_test_grid, caplog):
-
         with caplog.at_level(logging.INFO):
             RiverForcing(
                 grid=iceland_test_grid,
@@ -424,7 +418,6 @@ class TestRiverForcingWithoutPrescribedIndices:
         compare_dictionaries(river_forcing.indices, river_forcing_climatology.indices)
 
     def test_no_rivers_found(self):
-
         # Create a grid over open ocean
         grid = Grid(
             nx=2, ny=2, size_x=50, size_y=50, center_lon=0, center_lat=55, rot=10, N=3
@@ -439,7 +432,6 @@ class TestRiverForcingWithPrescribedIndices:
     end_time = datetime(1998, 3, 1)
 
     def test_logging_message(self, single_cell_indices, caplog, iceland_test_grid):
-
         with caplog.at_level(logging.INFO):
             RiverForcing(
                 grid=iceland_test_grid,

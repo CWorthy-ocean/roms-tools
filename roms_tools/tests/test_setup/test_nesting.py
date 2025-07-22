@@ -340,15 +340,15 @@ class TestModifyChid:
         # Assert that the center values remain the same
         assert mask_original.isel(
             eta_rho=eta_center, xi_rho=xi_center
-        ) == modified_ds.mask_rho.isel(
-            eta_rho=eta_center, xi_rho=xi_center
-        ), "Mask at the grid center was modified."
+        ) == modified_ds.mask_rho.isel(eta_rho=eta_center, xi_rho=xi_center), (
+            "Mask at the grid center was modified."
+        )
 
         assert h_original.isel(
             eta_rho=eta_center, xi_rho=xi_center
-        ) == modified_ds.h.isel(
-            eta_rho=eta_center, xi_rho=xi_center
-        ), "Topography at the grid center was modified."
+        ) == modified_ds.h.isel(eta_rho=eta_center, xi_rho=xi_center), (
+            "Topography at the grid center was modified."
+        )
 
 
 class TestNesting:
@@ -432,7 +432,6 @@ class TestNesting:
         for file_str in ["test_grid", "test_grid.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                 saved_filenames = child_grid.save(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
@@ -444,7 +443,6 @@ class TestNesting:
         for file_str in ["test_nesting", "test_nesting.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                 saved_filenames = child_grid.save_nesting(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
@@ -471,7 +469,6 @@ class TestNesting:
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             child_grid.to_yaml(filepath)
 
             child_grid_from_file = ChildGrid.from_yaml(filepath)
@@ -482,7 +479,6 @@ class TestNesting:
             filepath.unlink()
 
     def test_files_have_same_hash(self, child_grid, tmp_path):
-
         yaml_filepath = tmp_path / "test_yaml.yaml"
         filepath1 = tmp_path / "test1.nc"
         filepath2 = tmp_path / "test2.nc"

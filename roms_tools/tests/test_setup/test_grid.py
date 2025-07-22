@@ -24,7 +24,6 @@ from roms_tools.setup.topography import _compute_rfactor
 
 @pytest.fixture()
 def counter_clockwise_rotated_grid():
-
     grid = Grid(
         nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=20
     )
@@ -34,7 +33,6 @@ def counter_clockwise_rotated_grid():
 
 @pytest.fixture()
 def clockwise_rotated_grid():
-
     grid = Grid(
         nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=-20
     )
@@ -44,7 +42,6 @@ def clockwise_rotated_grid():
 
 @pytest.fixture()
 def grid_that_straddles_dateline_with_shifted_global_etopo_data():
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -64,7 +61,6 @@ def grid_that_straddles_dateline_with_shifted_global_etopo_data():
 
 @pytest.fixture()
 def grid_that_straddles_dateline_with_global_srtm15_data():
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -84,7 +80,6 @@ def grid_that_straddles_dateline_with_global_srtm15_data():
 
 @pytest.fixture()
 def grid_that_straddles_180_degree_meridian_with_shifted_global_etopo_data():
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -104,7 +99,6 @@ def grid_that_straddles_180_degree_meridian_with_shifted_global_etopo_data():
 
 @pytest.fixture()
 def grid_that_straddles_180_degree_meridian_with_global_srtm15_data():
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -123,7 +117,6 @@ def grid_that_straddles_180_degree_meridian_with_global_srtm15_data():
 
 
 def test_grid_creation(grid):
-
     assert grid.nx == 1
     assert grid.ny == 1
     assert grid.size_x == 100
@@ -180,13 +173,11 @@ def test_coords_relation(grid_fixture, request):
     ],
 )
 def test_successful_initialization_with_topography(grid_fixture, request):
-
     grid = request.getfixturevalue(grid_fixture)
     assert grid is not None
 
 
 def test_plot():
-
     grid = Grid(
         nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
     )
@@ -196,7 +187,6 @@ def test_plot():
 
 
 def test_save(tmp_path):
-
     grid = Grid(
         nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
     )
@@ -207,7 +197,6 @@ def test_save(tmp_path):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             saved_filenames = grid.save(filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
@@ -295,7 +284,6 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             grid.save(filepath)
 
             filepath = Path(filepath)
@@ -330,7 +318,6 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         grid.to_yaml(filepath)
 
         grid_from_file = Grid.from_yaml(filepath)
@@ -368,7 +355,6 @@ def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
 
 
 def test_files_have_same_hash(tmp_path):
-
     # Initialize a Grid object using the initializer
     grid_init = Grid(
         nx=10,
@@ -403,7 +389,6 @@ def test_files_have_same_hash(tmp_path):
 
 
 def test_from_yaml_missing_version(tmp_path):
-
     yaml_content = textwrap.dedent(
         """\
     Grid:
@@ -425,7 +410,6 @@ def test_from_yaml_missing_version(tmp_path):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)
@@ -453,7 +437,6 @@ def test_from_yaml_missing_grid(tmp_path):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)
@@ -496,7 +479,6 @@ def test_from_yaml_version_mismatch(tmp_path, caplog):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)
@@ -517,7 +499,6 @@ def test_from_yaml_version_mismatch(tmp_path, caplog):
 def test_invalid_theta_s_value():
     """Test the validation of the theta_s value."""
     with pytest.raises(ValueError):
-
         Grid(
             nx=2,
             ny=2,
@@ -548,7 +529,6 @@ def test_invalid_theta_b_value():
 
 
 def test_update_vertical_coordinate():
-
     grid = Grid(
         nx=2, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55, rot=10
     )
@@ -623,7 +603,6 @@ def test_plot_vertical_coordinate():
 
 
 def test_compatability_with_matlab_grid(tmp_path):
-
     fname = download_test_data("grid_created_with_matlab.nc")
 
     grid = Grid.from_file(fname)
@@ -662,7 +641,6 @@ def test_compatability_with_matlab_grid(tmp_path):
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Test saving without partitioning
             _ = grid.save(filepath)
 
@@ -679,7 +657,6 @@ def test_compatability_with_matlab_grid(tmp_path):
 
 
 def test_from_file_with_vertical_coords(grid, tmp_path):
-
     theta_s = 6.0
     theta_b = 4.0
     hc = 300.0
@@ -702,7 +679,6 @@ def test_from_file_with_vertical_coords(grid, tmp_path):
 
 
 def test_from_file_with_conflicting_vertical_coords(grid, tmp_path):
-
     theta_s = 6.0
     theta_b = 4.0
     hc = 300.0
@@ -722,7 +698,6 @@ def test_from_file_with_conflicting_vertical_coords(grid, tmp_path):
 
 
 def test_from_file_missing_attributes(grid, tmp_path):
-
     grid_copy = copy.deepcopy(grid)
     del grid_copy.ds.attrs["theta_b"]
 
@@ -734,7 +709,6 @@ def test_from_file_missing_attributes(grid, tmp_path):
 
 
 def test_from_file_partial_parameters_raises_error(grid, tmp_path):
-
     path = tmp_path / "grid.nc"
     grid.save(path)
 

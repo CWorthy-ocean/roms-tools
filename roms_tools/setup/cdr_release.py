@@ -355,7 +355,6 @@ class VolumeRelease(Release):
     @field_validator("tracer_concentrations", mode="after")
     @classmethod
     def _create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
-
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
             if tracer_name in tracer_concentrations:
@@ -390,7 +389,6 @@ class VolumeRelease(Release):
 
     @model_validator(mode="after")
     def _check_lengths(self) -> "VolumeRelease":
-
         num_times = len(self.times)
 
         for tracer_concentrations in self.tracer_concentrations.values():
@@ -486,14 +484,13 @@ class TracerPerturbation(Release):
     )
     """Dictionary of tracer names and their non-negative flux values."""
 
-    release_type: Literal[
+    release_type: Literal[ReleaseType.tracer_perturbation] = (
         ReleaseType.tracer_perturbation
-    ] = ReleaseType.tracer_perturbation
+    )
 
     @field_validator("tracer_fluxes", mode="after")
     @classmethod
     def create_fluxes(cls, tracer_fluxes):
-
         # Fill all tracer fluxes that are not provided with zero
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():

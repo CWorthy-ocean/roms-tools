@@ -121,7 +121,6 @@ class Grid:
     """Whether the grid straddles the dateline."""
 
     def __post_init__(self):
-
         self._input_checks()
 
         # Horizontal grid
@@ -168,7 +167,6 @@ class Grid:
                 )
 
     def _create_mask(self, verbose=False) -> None:
-
         if verbose:
             start_time = time.time()
             logging.info("=== Creating the mask ===")
@@ -315,9 +313,9 @@ class Grid:
         cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
 
         ds["sigma_r"] = sigma_r.astype(np.float32)
-        ds["sigma_r"].attrs[
-            "long_name"
-        ] = "Fractional vertical stretching coordinate at rho-points"
+        ds["sigma_r"].attrs["long_name"] = (
+            "Fractional vertical stretching coordinate at rho-points"
+        )
         ds["sigma_r"].attrs["units"] = "nondimensional"
 
         ds["Cs_r"] = cs_r.astype(np.float32)
@@ -325,9 +323,9 @@ class Grid:
         ds["Cs_r"].attrs["units"] = "nondimensional"
 
         ds["sigma_w"] = sigma_w.astype(np.float32)
-        ds["sigma_w"].attrs[
-            "long_name"
-        ] = "Fractional vertical stretching coordinate at w-points"
+        ds["sigma_w"].attrs["long_name"] = (
+            "Fractional vertical stretching coordinate at w-points"
+        )
         ds["sigma_w"].attrs["units"] = "nondimensional"
 
         ds["Cs_w"] = cs_w.astype(np.float32)

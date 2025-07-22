@@ -538,7 +538,6 @@ def _add_boundary_to_ax(
         ax.plot(lon, lat, transform=proj, c=c, label=label if i == 0 else None)
 
         if with_dim_names:
-
             # Get start and end point
             start_lon = float(lon[0])
             start_lat = float(lat[0])
@@ -652,7 +651,6 @@ def _add_field_to_ax(
 
 
 def get_projection(lon, lat):
-
     return ccrs.NearsidePerspective(
         central_longitude=lon.mean().values, central_latitude=lat.mean().values
     )

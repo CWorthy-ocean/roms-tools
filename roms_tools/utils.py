@@ -141,7 +141,6 @@ def _load_data(
     }
 
     if use_dask:
-
         if "latitude" in dim_names and "longitude" in dim_names:
             # for lat-lon datasets
             chunks = {
@@ -610,7 +609,6 @@ def _remove_edge_nans(
                 nan_mask = field.isnull()
 
         elif len(other_dims) == 1:
-
             depth_dim = other_dims[0]
 
             if layer_depth is not None:

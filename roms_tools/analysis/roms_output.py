@@ -62,7 +62,6 @@ class ROMSOutput:
     """An xarray Dataset containing the ROMS output."""
 
     def __post_init__(self):
-
         ds = self._load_model_output()
         self._infer_model_reference_date_from_metadata(ds)
         self._check_vertical_coordinate(ds)

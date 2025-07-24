@@ -1,8 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "eta_rho",
-        "xi_u"
-    ],
-    "long_name": "latitude of u-points",
-    "units": "degrees North"
-}

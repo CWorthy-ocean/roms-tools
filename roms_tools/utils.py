@@ -10,6 +10,66 @@ import numpy as np
 import xarray as xr
 
 
+def _check_dask(use_dask: bool) -> None:
+    """Verify that dask is available.
+
+    Parameters
+    ----------
+    use_dask: bool
+        Indicates whether dask is required.
+
+    Raises
+    ------
+    RuntimeError
+        - If dask is requested but not unavailable for use.
+    """
+    if use_dask and not _has_dask():
+        msg = (
+            "Dask is required but not installed. Install it with:\n"
+            "  • `pip install roms-tools[dask]` or\n"
+            "  • `conda install dask`\n"
+            "Alternatively, install `roms-tools` with conda to include all "
+            "dependencies."
+        )
+        raise RuntimeError(msg)
+
+
+def _check_load_zarr(
+    filename,
+    use_dask,
+    read_zarr: bool = False,
+) -> None:
+    """Load dataset from the specified file.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
+        or a list of strings or Path objects containing multiple files.
+    use_dask: bool
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    read_zarr: bool, optional
+        If True, use the zarr engine to read the dataset, and don't use mfdataset.
+        Defaults to False.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified file does not exist.
+    ValueError
+        - If dask is not used for reading a zarr file
+        - If multiple paths are provided when reading a zarr file.
+    """
+    if read_zarr:
+        if isinstance(filename, list) and len(filename) > 1:
+            msg = "read_zarr requires a single path, not a list of paths"
+            raise ValueError(msg)
+
+        if not use_dask:
+            msg = "read_zarr must be used with use_dask"
+            raise ValueError(msg)
+
+
 def _load_data(
     filename,
     dim_names,
@@ -58,22 +118,10 @@ def _load_data(
     ValueError
         If a list of files is provided but dim_names["time"] is not available or use_dask=False.
     """
-    if dim_names is None:
-        dim_names = {}
+    dim_names: dict[str, str] = dim_names or {}
 
-    if use_dask:
-        if not _has_dask():
-            raise RuntimeError(
-                "Dask is required but not installed. Install it with:\n"
-                "  • `pip install roms-tools[dask]` or\n"
-                "  • `conda install dask`\n"
-                "Alternatively, install `roms-tools` with conda to include all dependencies."
-            )
-    if read_zarr:
-        if isinstance(filename, list):
-            raise ValueError("read_zarr requires a single path, not a list of paths")
-        if not use_dask:
-            raise ValueError("read_zarr must be used with use_dask")
+    _check_dask(use_dask)
+    _check_load_zarr(filename, use_dask, read_zarr)
 
     # Precompile the regex for matching wildcard characters
     wildcard_regex = re.compile(r"[\*\?\[\]]")

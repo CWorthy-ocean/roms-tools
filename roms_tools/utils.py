@@ -171,14 +171,14 @@ def _load_data(
                 # store_path = Path("/Users/chris/Downloads/data/roms/srtm15_plus/_dl")
                 for zarr_format in [3, 2]:
                     try:
-                ds = xr.open_zarr(
-                    matching_files[0],
-                    decode_times=decode_times,
-                    chunks=chunks,
-                    consolidated=None,
-                                    # storage_options=dict(token="anon"),
-                                    zarr_format=zarr_format,
-                )
+                        ds = xr.open_zarr(
+                            matching_files[0],
+                            decode_times=decode_times,
+                            chunks=chunks,
+                            consolidated=None,
+                            # storage_options=dict(token="anon"),
+                            zarr_format=zarr_format,
+                        )
                         break
                     except Exception:
                         # swallow format errors that may appear as 403 access denied.
@@ -613,7 +613,6 @@ def _remove_edge_nans(
                 nan_mask = field.isnull()
 
         elif len(other_dims) == 1:
-
             depth_dim = other_dims[0]
 
             if layer_depth is not None:

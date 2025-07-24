@@ -2,6 +2,7 @@ import logging
 import textwrap
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -10,6 +11,9 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.download import download_test_data
+
+from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
+from roms_tools.utils import _has_gcsfs
 
 
 @pytest.fixture
@@ -932,3 +936,59 @@ def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
     yaml_filepath.unlink()
     Path(expected_filepath1).unlink()
     Path(expected_filepath2).unlink()
+
+
+@pytest.mark.skipif(
+    not _has_gcsfs(),
+    reason="Executed only if GCFS package is installed",
+)
+def test_default_era5_dataset_loading_without_dask(
+    surface_forcing: SurfaceForcing,
+) -> None:
+    """Verify that loading the default ERA5 dataset fails if use_dask is not True."""
+    with pytest.raises(ValueError):
+        _ = SurfaceForcing(
+            grid=surface_forcing.grid,
+            source={"name": "ERA5"},
+            type="physics",
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 1, 2),
+            # user is required to know they must set `use_dask=True` to
+            # make use of the default dataset. this should break.
+            use_dask=False,
+        )
+
+
+@pytest.mark.skipif(
+    not _has_gcsfs(),
+    reason="Executed only if GCFS package is installed",
+)
+def test_default_era5_dataset_loading(era5_data: xr.Dataset) -> None:
+    """Verify the default ERA5 dataset is loaded when a path is not provided."""
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=5,
+        size_y=5,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with mock.patch(
+        "roms_tools.utils.xr.open_zarr",
+        new_callable=mock.MagicMock,
+        return_value=era5_data.ds,
+    ) as mock_load_data:
+        _ = SurfaceForcing(
+            grid=grid,
+            source={"name": "ERA5"},
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=True,
+        )
+
+        assert DEFAULT_ERA5_ARCO_PATH in mock_load_data.call_args.args

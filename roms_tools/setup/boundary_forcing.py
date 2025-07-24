@@ -1,3 +1,4 @@
+from collections import defaultdict
 import importlib.metadata
 import logging
 from dataclasses import dataclass, field
@@ -12,7 +13,13 @@ from scipy.ndimage import label
 from roms_tools import Grid
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
+from roms_tools.setup.datasets import (
+    Dataset,
+    CESMBGCDataset,
+    GLORYSDataset,
+    GLORYSDefaultDataset,
+    UnifiedBGCDataset,
+)
 from roms_tools.setup.utils import (
     add_time_info_to_ds,
     compute_barotropic_velocity,
@@ -425,34 +432,45 @@ class BoundaryForcing:
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
-    def _get_data(self):
-        data_dict = {
-            "filename": self.source["path"],
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-            "use_dask": self.use_dask,
+
+    def _get_data(self) -> Dataset:
+        """Determine the correct `Dataset` type and return an instance.
+
+        Returns
+        -------
+        Dataset
+            The `Dataset` instance
+
+        """
+        dataset_map: dict[str, dict[str, dict[str, type[Dataset]]]] = {
+            "physics": {
+                "GLORYS": {
+                    "external": GLORYSDataset,
+                    "default": GLORYSDefaultDataset,
+                },
+            },
+            "bgc": {
+                "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
+                "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+            },
         }
 
-        if self.type == "physics":
-            if self.source["name"] == "GLORYS":
-                data = GLORYSDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "GLORYS" is a valid option for source["name"] when type is "physics".'
-                )
+        source_name = str(self.source["name"])
+        if source_name not in dataset_map[self.type]:
+            tpl = 'Valid options for source["name"] for type {} include: {}'
+            msg = tpl.format(self.type, " and ".join(dataset_map[self.type].keys()))
+            raise ValueError(msg)
 
-        elif self.type == "bgc":
-            if self.source["name"] == "CESM_REGRIDDED":
-                data = CESMBGCDataset(**data_dict)
-            elif self.source["name"] == "UNIFIED":
-                data = UnifiedBGCDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
-                )
+        variant = "default" if "path" not in self.source else "external"
+        data_type = dataset_map[self.type][source_name][variant]
 
-        return data
+        return data_type(
+            filename=self.source["path"],
+            start_time=self.start_time,
+            end_time=self.end_time,
+            climatology=self.source["climatology"],
+            use_dask=self.use_dask,
+        )  # type: ignore
 
     def _set_variable_info(self, data):
         """Sets up a dictionary with metadata for variables based on the type of data

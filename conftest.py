@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -937,3 +938,24 @@ def calculate_data_hash(filepath):
 
         # Return the computed hash
         return hash_obj.hexdigest()
+
+
+@pytest.fixture
+def get_test_data_path() -> Callable[[str], Path]:
+    """Given a data source name, find the local path to the test data."""
+
+    def _get_test_data_path(dataset_name: str) -> Path:
+        data_dir = Path(__file__).parent / "roms_tools/tests/test_setup/test_data"
+
+        path = data_dir / dataset_name
+        if path.exists():
+            return path
+
+        path = data_dir / f"{dataset_name}.zarr"
+        if path.exists():
+            return path
+
+        msg = f"Dataset `{dataset_name}` not found in data directory `{data_dir}`"
+        raise FileNotFoundError(msg)
+
+    return _get_test_data_path

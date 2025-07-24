@@ -143,9 +143,8 @@ def _load_data(
         if contains_wildcard:
             matching_files = glob.glob(filename_str)
             if not matching_files:
-                raise FileNotFoundError(
-                    f"No files found matching the pattern '{filename_str}'."
-                )
+                msg = f"No files found matching the pattern '{filename_str}'."
+                raise FileNotFoundError(msg)
         else:
             matching_files = [filename_str]
 
@@ -157,9 +156,9 @@ def _load_data(
             for f in filename_str:
                 files = glob.glob(f)
                 if not files:
-                    raise FileNotFoundError(
-                        f"No files found matching the pattern '{f}'."
-                    )
+                msg = f"No files found matching the pattern '{f}'."
+                raise FileNotFoundError(msg)
+
                 matching_files.extend(files)
         else:
             matching_files = filename_str

@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import ClassVar, Dict, List, Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -166,14 +166,12 @@ class Dataset:
         FileNotFoundError
             If the specified file does not exist.
         ValueError
-            If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
+            If a list of files is provided but `self.dim_names["time"]` is not
+            available or `use_dask=False`.
         """
-
-        ds = _load_data(
+        return _load_data(
             self.filename, self.dim_names, self.use_dask, read_zarr=self.read_zarr
         )
-
-        return ds
 
     def clean_up(self, ds: xr.Dataset, **kwargs) -> xr.Dataset:
         """Dummy method to be overridden by child classes to clean up the dataset.
@@ -1086,6 +1084,21 @@ class GLORYSDataset(Dataset):
 
         self.ds["mask"] = mask
         self.ds["mask_vel"] = mask_vel
+
+
+@dataclass(kw_only=True)
+class GLORYSDefaultDataset(GLORYSDataset):
+    """A dataset that is loaded from a well-known GLORYS datasource."""
+
+    GLORYS_URI: ClassVar[str] = (
+        "https://s3.waw3-1.cloudferro.com/mdl-arco-time-025/arco/GLOBAL_MULTIYEAR_PHY_001_030/cmems_mod_glo_phy_my_0.083deg_P1D-m_202311/timeChunked.zarr"
+    )
+
+    def __post_init__(self):
+        """Set the `read_zarr` property ensure use of the correct upstream data."""
+        self.read_zarr = True
+        self.filename = GLORYSDefaultDataset.GLORYS_URI
+        super().__post_init__()
 
 
 @dataclass(kw_only=True)

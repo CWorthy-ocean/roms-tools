@@ -139,22 +139,19 @@ def _load_data(
     }
 
     if use_dask:
+        chunks: dict[str, int] = {}
 
         if "latitude" in dim_names and "longitude" in dim_names:
             # for lat-lon datasets
-            chunks = {
-                dim_names["latitude"]: -1,
-                dim_names["longitude"]: -1,
-            }
+            chunks[dim_names["latitude"]] = -1
+            chunks[dim_names["longitude"]] = -1
         else:
             # For ROMS datasets
-            chunks = {
-                "eta_rho": -1,
-                "eta_v": -1,
-                "xi_rho": -1,
-                "xi_u": -1,
-                "s_rho": -1,
-            }
+            chunks["eta_rho"] = -1
+            chunks["eta_v"] = -1
+            chunks["xi_rho"] = -1
+            chunks["xi_u"] = -1
+            chunks["s_rho"] = -1
 
         if "depth" in dim_names:
             chunks[dim_names["depth"]] = -1
@@ -171,13 +168,21 @@ def _load_data(
             )
 
             if read_zarr:
+                # store_path = Path("/Users/chris/Downloads/data/roms/srtm15_plus/_dl")
+                for zarr_format in [3, 2]:
+                    try:
                 ds = xr.open_zarr(
                     matching_files[0],
                     decode_times=decode_times,
                     chunks=chunks,
                     consolidated=None,
-                    storage_options=dict(token="anon"),
+                                    # storage_options=dict(token="anon"),
+                                    zarr_format=zarr_format,
                 )
+                        break
+                    except Exception:
+                        # swallow format errors that may appear as 403 access denied.
+                        ...
             else:
                 ds = xr.open_mfdataset(
                     matching_files,
@@ -641,10 +646,24 @@ def _remove_edge_nans(
 
 
 def _has_dask() -> bool:
+    """Determine if Dask is available for use.
+
+    Returns
+    -------
+    bool
+        `True` when Dask is found, `False` otherwise
+    """
     return find_spec("dask") is not None
 
 
 def _has_gcsfs() -> bool:
+    """Determine if GCFS is available for use.
+
+    Returns
+    -------
+    bool
+        `True` when GCFS is found, `False` otherwise
+    """
     return find_spec("gcsfs") is not None
 
 

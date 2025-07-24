@@ -13,7 +13,6 @@ from roms_tools.setup.utils import (
 
 
 def test_interpolate_from_climatology(use_dask):
-
     fname = download_test_data("ERA5_regional_test_data.nc")
     era5_times = xr.open_dataset(fname).time
 
@@ -29,7 +28,6 @@ def test_interpolate_from_climatology(use_dask):
 @pytest.fixture()
 def boundary_forcing_from_multiple_source_files(request, use_dask):
     """Fixture for creating a BoundaryForcing object."""
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -57,15 +55,14 @@ def test_roundtrip_yaml(
     boundary_forcing_from_multiple_source_files, request, tmp_path, use_dask
 ):
     """Test that creating a BoundaryForcing object, saving its parameters to yaml file,
-    and re-opening yaml file creates the same object."""
-
+    and re-opening yaml file creates the same object.
+    """
     # Create a temporary filepath using the tmp_path fixture
     file_str = "test_yaml"
     for filepath in [
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         boundary_forcing_from_multiple_source_files.to_yaml(filepath)
 
         bdry_forcing_from_file = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)

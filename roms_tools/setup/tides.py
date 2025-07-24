@@ -2,7 +2,6 @@ import importlib.metadata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Union
 
 import numpy as np
 import xarray as xr
@@ -81,7 +80,7 @@ class TidalForcing:
 
     grid: Grid
     """Object representing the grid information."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: dict[str, str | Path | list[str | Path]]
     """Dictionary specifying the source of the tidal data."""
     ntides: int = 10
     """Number of constituents to consider."""
@@ -97,7 +96,6 @@ class TidalForcing:
     ROMS."""
 
     def __post_init__(self):
-
         self._input_checks()
         target_coords = get_target_coords(self.grid)
 
@@ -175,7 +173,6 @@ class TidalForcing:
         self.ds = ds
 
     def _input_checks(self):
-
         if "name" not in self.source.keys():
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source.keys():
@@ -185,7 +182,6 @@ class TidalForcing:
 
     def _get_data(self):
         """Loads tidal forcing data based on the specified source."""
-
         if self.source["name"] == "TPXO":
             if isinstance(self.source["path"], dict):
                 fname_dict = {
@@ -194,7 +190,7 @@ class TidalForcing:
                     "u": self.source["path"]["u"],
                 }
 
-            elif isinstance(self.source["path"], (str, Path)):
+            elif isinstance(self.source["path"], str | Path):
                 fname_dict = {
                     "grid": self.source["path"],
                     "h": self.source["path"],
@@ -270,7 +266,6 @@ class TidalForcing:
         self.variable_info = variable_info
 
     def _write_into_dataset(self, processed_fields, d_meta):
-
         # save in new dataset
         ds = xr.Dataset()
 
@@ -284,7 +279,6 @@ class TidalForcing:
         return ds
 
     def _add_global_metadata(self, ds):
-
         ds.attrs["title"] = "ROMS tidal forcing created by ROMS-Tools"
         # Include the version of roms-tools
         try:
@@ -378,7 +372,6 @@ class TidalForcing:
         >>> tidal_forcing = TidalForcing(grid)
         >>> tidal_forcing.plot("ssh_Re", ntides=0)
         """
-
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
@@ -397,7 +390,7 @@ class TidalForcing:
             cmap_name="RdBu_r",
         )
 
-    def save(self, filepath: Union[str, Path]) -> None:
+    def save(self, filepath: str | Path) -> None:
         """Save the tidal forcing information to a netCDF4 file.
 
         Parameters
@@ -411,7 +404,6 @@ class TidalForcing:
         Path
             A `Path` object representing the location of the saved file.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -428,7 +420,7 @@ class TidalForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -437,14 +429,13 @@ class TidalForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask"])
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "TidalForcing":
         """Create an instance of the TidalForcing class from a YAML file.

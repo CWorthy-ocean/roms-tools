@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Tuple, Union
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -31,15 +31,15 @@ class ChildGrid(Grid):
     It generates two datasets:
 
     1. `ds`: Contains child grid variables, ensuring compatibility with the parent grid.
-       The child grid’s topography and mask are adjusted to match the parent grid at the boundaries.
+       The child grid topography and mask are adjusted to match the parent grid at the boundaries.
 
-    2. `ds_nesting`: Contains boundary mappings, linking the child grid’s boundaries
+    2. `ds_nesting`: Contains boundary mappings, linking the boundaries of the child grid
        to the corresponding parent grid indices.
 
     Parameters
     ----------
     parent_grid : Grid
-        The parent grid object, providing the reference for the child grid's topography and mask.
+        The parent grid object, providing the reference for the topography and mask of the child grid.
     boundaries : Dict[str, bool]
         Specifies which child grid boundaries (south, east, north, west) should be adjusted for topography/mask
         and included in `ds_nesting`. Defaults to all `True`.
@@ -51,9 +51,9 @@ class ChildGrid(Grid):
     """
 
     parent_grid: Grid
-    """The parent grid object, providing the reference for the child grid's topography
-    and mask."""
-    boundaries: Dict[str, bool] = field(
+    """The parent grid object, providing the reference for the child topography
+    and mask of the child grid."""
+    boundaries: dict[str, bool] = field(
         default_factory=lambda: {
             "south": True,
             "east": True,
@@ -63,20 +63,19 @@ class ChildGrid(Grid):
     )
     """Specifies which child grid boundaries (south, east, north, west) should be
     adjusted for topography/mask and included in `ds_nesting`."""
-    metadata: Dict[str, Any] = field(
+    metadata: dict[str, Any] = field(
         default_factory=lambda: {"prefix": "child", "period": 3600.0}
     )
     """Dictionary configuring the boundary nesting process."""
 
     ds: xr.Dataset = field(init=False, repr=False)
-    """An xarray Dataset containing child grid variables aligned with the parent grid’s
-    topography and mask at the boundaries."""
+    """An xarray Dataset containing child grid variables aligned with the
+    topography and mask of the parent grid at the boundaries."""
     ds_nesting: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing boundary mappings, where child grid boundaries are
     mapped onto parent grid indices."""
 
     def __post_init__(self):
-
         super().__post_init__()
         self._map_child_boundaries_onto_parent_grid_indices()
         self._modify_child_topography_and_mask()
@@ -98,7 +97,7 @@ class ChildGrid(Grid):
         self.ds_nesting = ds_nesting
 
     def _modify_child_topography_and_mask(self):
-        """Adjust the child grid's topography and mask to align with the parent grid.
+        """Adjust the topography and mask of the child grid to align with the parent grid.
 
         Uses a weighted sum based on boundary distance and clips depth values to a
         minimum.
@@ -120,8 +119,7 @@ class ChildGrid(Grid):
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False
     ) -> None:
-
-        """Update the child grid topography via the following steps:
+        """Update the child grid topography via the following steps.
 
         - Regrids the topography based on the specified source.
         - Applies global and local smoothing.
@@ -152,7 +150,6 @@ class ChildGrid(Grid):
             This method updates the internal dataset (`self.ds`) in place, modifying the
             topography variable. It does not return a value.
         """
-
         super().update_topography(
             topography_source=topography_source, hmin=hmin, verbose=verbose
         )
@@ -168,7 +165,6 @@ class ChildGrid(Grid):
         None
             This method does not return any value. It generates and displays a plot.
         """
-
         plot_nesting(
             self.parent_grid.ds,
             self.ds,
@@ -178,7 +174,7 @@ class ChildGrid(Grid):
 
     def save_nesting(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
     ) -> None:
         """Save the nesting information to netCDF4 files.
 
@@ -192,7 +188,6 @@ class ChildGrid(Grid):
         List[Path]
             A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -207,7 +202,7 @@ class ChildGrid(Grid):
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -216,13 +211,12 @@ class ChildGrid(Grid):
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["ds_nesting"])
         forcing_dict["ChildGrid"] = pop_grid_data(forcing_dict["ChildGrid"])
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "ChildGrid":
+    def from_yaml(cls, filepath: str | Path) -> "ChildGrid":
         """Create an instance of the ChildGrid class from a YAML file.
 
         Parameters
@@ -242,7 +236,7 @@ class ChildGrid(Grid):
 
         return cls(parent_grid=parent_grid, **params)
 
-    def _prepare_grid_datasets(self) -> Tuple[xr.Dataset, xr.Dataset]:
+    def _prepare_grid_datasets(self) -> tuple[xr.Dataset, xr.Dataset]:
         """Prepare parent and child grid datasets by adjusting longitudes for dateline
         crossing.
 
@@ -281,9 +275,7 @@ class ChildGrid(Grid):
         return parent_grid_ds, child_grid_ds
 
     @classmethod
-    def from_file(
-        cls, filepath: Union[str, Path], verbose: bool = False
-    ) -> "ChildGrid":
+    def from_file(cls, filepath: str | Path, verbose: bool = False) -> "ChildGrid":
         """This method is disabled in this subclass.
 
         .. noindex::
@@ -342,7 +334,6 @@ def map_child_boundaries_onto_parent_grid_indices(
         - For `u` and `v` points: Contains mapped `xi`, `eta`, and angle values.
         - Attributes include long names, output variable names, units, and output period.
     """
-
     bdry_coords_dict = get_boundary_coords()
 
     # add angles at u- and v-points
@@ -387,9 +378,9 @@ def map_child_boundaries_onto_parent_grid_indices(
                 var_name = f"{prefix}_{direction}_{suffix}"
                 if grid_location == "rho":
                     ds[var_name] = xr.concat([i_xi, i_eta], dim="two")
-                    ds[var_name].attrs[
-                        "long_name"
-                    ] = f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
+                    ds[var_name].attrs["long_name"] = (
+                        f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
+                    )
                     ds[var_name].attrs["units"] = "non-dimensional"
                     ds[var_name].attrs["output_vars"] = "zeta, temp, salt"
                 else:
@@ -397,9 +388,9 @@ def map_child_boundaries_onto_parent_grid_indices(
                         **bdry_coords[direction]
                     )
                     ds[var_name] = xr.concat([i_xi, i_eta, angle_child], dim="three")
-                    ds[var_name].attrs[
-                        "long_name"
-                    ] = f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
+                    ds[var_name].attrs["long_name"] = (
+                        f"{grid_location}-points  of {direction}ern child boundary mapped onto parent grid (absolute) indices and angle"
+                    )
                     ds[var_name].attrs["units"] = "non-dimensional and radian"
 
                     if grid_location == "u":
@@ -520,7 +511,6 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
     i_xi : xarray.DataArray
         Updated i_xi-indices for the child grid.
     """
-
     if grid_location == "rho":
         i_eta_rho = i_eta + 0.5
         i_xi_rho = i_xi + 0.5
@@ -599,7 +589,7 @@ def modify_child_topography_and_mask(
 ):
     """Adjust the child grid topography and mask to align with the parent grid.
 
-    The child grid's topography is adjusted using a weighted sum based on the boundary distance,
+    The topography of the child grid is adjusted using a weighted sum based on the boundary distance,
     and the depth values are clipped to enforce a minimum depth constraint.
 
     Parameters
@@ -628,7 +618,6 @@ def modify_child_topography_and_mask(
     xarray.Dataset
         The updated child grid dataset with modified topography (`h`) and mask (`mask_rho`).
     """
-
     # regrid parent topography and mask onto child grid
     points = np.column_stack(
         (parent_grid_ds.lon_rho.values.ravel(), parent_grid_ds.lat_rho.values.ravel())

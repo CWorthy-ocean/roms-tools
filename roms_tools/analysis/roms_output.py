@@ -4,7 +4,6 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -48,13 +47,13 @@ class ROMSOutput:
 
     grid: Grid
     """Object representing the grid information."""
-    path: Union[str, Path]
+    path: str | Path
     """Filename, or list of filenames with model output."""
     use_dask: bool = False
     """Whether to use dask for processing."""
-    model_reference_date: Optional[datetime] = None
+    model_reference_date: datetime | None = None
     """Reference date of ROMS simulation."""
-    adjust_depth_for_sea_surface_height: Optional[bool] = False
+    adjust_depth_for_sea_surface_height: bool | None = False
     """Whether to account for sea surface height variations when computing depth
     coordinates."""
 
@@ -62,7 +61,6 @@ class ROMSOutput:
     """An xarray Dataset containing the ROMS output."""
 
     def __post_init__(self):
-
         ds = self._load_model_output()
         self._infer_model_reference_date_from_metadata(ds)
         self._check_vertical_coordinate(ds)
@@ -250,7 +248,6 @@ class ROMSOutput:
         xarray.Dataset
             The regridded dataset.
         """
-
         if var_names is None:
             var_names = list(self.ds.data_vars)
 
@@ -402,7 +399,6 @@ class ROMSOutput:
         - If `adjust_depth_for_sea_surface_height` is `True`, the method accounts for variations
           in sea surface height (`zeta`).
         """
-
         if self.adjust_depth_for_sea_surface_height:
             if "zeta" not in self.ds:
                 raise ValueError(
@@ -421,7 +417,6 @@ class ROMSOutput:
 
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output."""
-
         # Load the dataset
         ds = _load_data(
             self.path,
@@ -522,7 +517,6 @@ class ROMSOutput:
         - `theta_s`, `theta_b`, and `hc` are checked for exact equality using `np.array_equal`.
         - `Cs_r` and `Cs_w` are checked for numerical closeness using `np.allclose`.
         """
-
         # Check exact equality for theta_s, theta_b, and hc
         if not np.array_equal(self.grid.theta_s, ds.attrs["theta_s"]):
             raise ValueError(

@@ -21,7 +21,6 @@ def iceland_test_grid():
 @pytest.fixture
 def river_forcing_climatology(iceland_test_grid):
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
-
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
@@ -36,8 +35,8 @@ def river_forcing_climatology(iceland_test_grid):
 @pytest.fixture
 def river_forcing_for_grid_that_straddles_dateline():
     """Fixture for creating a RiverForcing object from the global Dai river dataset for
-    a grid that straddles the dateline."""
-
+    a grid that straddles the dateline.
+    """
     grid = Grid(
         nx=18,
         ny=18,
@@ -90,8 +89,8 @@ def river_forcing_with_prescribed_single_cell_indices(
 ):
     """Fixture for creating a RiverForcing object based on the global Dai river dataset,
     using manually specified single-cell river indices instead of relying on automatic
-    detection."""
-
+    detection.
+    """
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
@@ -109,8 +108,8 @@ def river_forcing_with_prescribed_multi_cell_indices(
 ):
     """Fixture for creating a RiverForcing object based on the global Dai river dataset,
     using manually specified multi-cell river indices instead of relying on automatic
-    detection."""
-
+    detection.
+    """
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
 
@@ -201,7 +200,6 @@ class TestRiverForcingGeneral:
         )
 
     def test_reproducibility_same_grid(self, river_forcing):
-
         the_same_river_forcing = RiverForcing(
             grid=river_forcing.grid,
             start_time=datetime(1998, 1, 1),
@@ -234,7 +232,7 @@ class TestRiverForcingGeneral:
 
         indices = river_forcing.indices
         for name in indices.keys():
-            for (eta_rho, xi_rho) in indices[name]:
+            for eta_rho, xi_rho in indices[name]:
                 assert coast[eta_rho, xi_rho]
                 assert river_forcing.ds["river_index"][eta_rho, xi_rho] > 0
                 assert river_forcing.ds["river_fraction"][eta_rho, xi_rho] > 0
@@ -250,7 +248,6 @@ class TestRiverForcingGeneral:
 
     def test_river_forcing_plot(self, river_forcing_with_bgc):
         """Test plot method."""
-
         river_forcing_with_bgc.plot_locations()
         river_forcing_with_bgc.plot("river_volume")
         river_forcing_with_bgc.plot("river_temp")
@@ -267,12 +264,10 @@ class TestRiverForcingGeneral:
     )
     def test_river_forcing_save(self, river_forcing_fixture, tmp_path, request):
         """Test save method."""
-
         river_forcing = request.getfixturevalue(river_forcing_fixture)
         for file_str in ["test_rivers", "test_rivers.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-
                 saved_filenames = river_forcing.save(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
@@ -293,8 +288,8 @@ class TestRiverForcingGeneral:
     )
     def test_roundtrip_yaml(self, river_forcing_fixture, request, tmp_path, caplog):
         """Test that creating an RiverForcing object, saving its parameters to yaml
-        file, and re-opening yaml file creates the same object."""
-
+        file, and re-opening yaml file creates the same object.
+        """
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
         # Create a temporary filepath using the tmp_path fixture
@@ -303,7 +298,6 @@ class TestRiverForcingGeneral:
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             river_forcing.to_yaml(filepath)
 
             # Clear caplog before running the test
@@ -329,7 +323,6 @@ class TestRiverForcingGeneral:
         ],
     )
     def test_files_have_same_hash(self, river_forcing_fixture, request, tmp_path):
-
         river_forcing = request.getfixturevalue(river_forcing_fixture)
 
         yaml_filepath = tmp_path / "test_yaml.yaml"
@@ -376,7 +369,6 @@ class TestRiverForcingGeneral:
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             # Write YAML content to file
             if isinstance(yaml_filepath, Path):
                 yaml_filepath.write_text(yaml_content)
@@ -399,7 +391,6 @@ class TestRiverForcingWithoutPrescribedIndices:
     end_time = datetime(1998, 3, 1)
 
     def test_logging_message(self, iceland_test_grid, caplog):
-
         with caplog.at_level(logging.INFO):
             RiverForcing(
                 grid=iceland_test_grid,
@@ -424,7 +415,6 @@ class TestRiverForcingWithoutPrescribedIndices:
         compare_dictionaries(river_forcing.indices, river_forcing_climatology.indices)
 
     def test_no_rivers_found(self):
-
         # Create a grid over open ocean
         grid = Grid(
             nx=2, ny=2, size_x=50, size_y=50, center_lon=0, center_lat=55, rot=10, N=3
@@ -439,7 +429,6 @@ class TestRiverForcingWithPrescribedIndices:
     end_time = datetime(1998, 3, 1)
 
     def test_logging_message(self, single_cell_indices, caplog, iceland_test_grid):
-
         with caplog.at_level(logging.INFO):
             RiverForcing(
                 grid=iceland_test_grid,

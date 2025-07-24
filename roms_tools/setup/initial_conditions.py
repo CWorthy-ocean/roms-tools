@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -106,9 +105,9 @@ class InitialConditions:
     """Object representing the grid information."""
     ini_time: datetime
     """The date and time at which the initial conditions are set."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: dict[str, str | Path | list[str | Path]]
     """Dictionary specifying the source of the physical initial condition data."""
-    bgc_source: Optional[Dict[str, Union[str, Path, List[Union[str, Path]]]]] = None
+    bgc_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the biogeochemical (BGC) initial condition
     data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -129,7 +128,6 @@ class InitialConditions:
     ROMS."""
 
     def __post_init__(self):
-
         self._input_checks()
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
@@ -161,7 +159,6 @@ class InitialConditions:
         self.ds = ds
 
     def _process_data(self, processed_fields, type="physics"):
-
         target_coords = get_target_coords(self.grid)
 
         if type == "physics":
@@ -311,7 +308,6 @@ class InitialConditions:
             )
 
     def _get_data(self):
-
         if self.source["name"] == "GLORYS":
             data = GLORYSDataset(
                 filename=self.source["path"],
@@ -324,9 +320,7 @@ class InitialConditions:
         return data
 
     def _get_bgc_data(self):
-
         if self.bgc_source["name"] == "CESM_REGRIDDED":
-
             data = CESMBGCDataset(
                 filename=self.bgc_source["path"],
                 start_time=self.ini_time,
@@ -498,13 +492,11 @@ class InitialConditions:
             self.ds_depth_coords[key] = depth
 
     def _write_into_dataset(self, processed_fields, d_meta):
-
         # save in new dataset
         ds = xr.Dataset()
 
         for var_name in processed_fields:
             if var_name in d_meta:
-
                 # drop auxiliary variables
                 ds[var_name] = processed_fields[var_name].astype(np.float32)
                 ds[var_name].attrs["long_name"] = d_meta[var_name]["long_name"]
@@ -554,9 +546,9 @@ class InitialConditions:
         # Convert the time coordinate to the format expected by ROMS (seconds since model reference date)
         ocean_time = (ds["time"] - model_reference_date).astype("float64") * 1e-9
         ds = ds.assign_coords(ocean_time=("time", ocean_time.data.astype("float64")))
-        ds["ocean_time"].attrs[
-            "long_name"
-        ] = f"relative time: seconds since {str(self.model_reference_date)}"
+        ds["ocean_time"].attrs["long_name"] = (
+            f"relative time: seconds since {self.model_reference_date!s}"
+        )
         ds["ocean_time"].attrs["units"] = "seconds"
         ds = ds.swap_dims({"time": "ocean_time"})
         ds = ds.drop_vars("time")
@@ -599,7 +591,6 @@ class InitialConditions:
                 nan_check(ds[var_name].squeeze(), mask)
 
     def _add_global_metadata(self, ds):
-
         ds.attrs["title"] = "ROMS initial conditions file created by ROMS-Tools"
         # Include the version of roms-tools
         try:
@@ -755,7 +746,7 @@ class InitialConditions:
             cmap_name=cmap_name,
         )
 
-    def save(self, filepath: Union[str, Path]) -> None:
+    def save(self, filepath: str | Path) -> None:
         """Save the initial conditions information to one netCDF4 file.
 
         Parameters
@@ -768,7 +759,6 @@ class InitialConditions:
         Path
             A `Path` object representing the location of the saved file.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -785,7 +775,7 @@ class InitialConditions:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -794,14 +784,13 @@ class InitialConditions:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask"])
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "InitialConditions":
         """Create an instance of the InitialConditions class from a YAML file.

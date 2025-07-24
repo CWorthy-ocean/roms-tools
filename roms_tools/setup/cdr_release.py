@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
-from typing import Literal
+from typing import Annotated, Literal
 
 from annotated_types import Ge, Le
 from pydantic import (
@@ -15,7 +15,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic_core.core_schema import ValidationInfo
-from typing_extensions import Annotated
 
 from roms_tools.setup.utils import get_tracer_defaults, get_tracer_metadata_dict
 
@@ -251,7 +250,6 @@ class Release(BaseModel):
         ValueError
             If times are not strictly increasing, or fall outside the [start_time, end_time] window.
         """
-
         if self.times and len(self.times) > 0:
             if not all(t1 < t2 for t1, t2 in zip(self.times, self.times[1:])):
                 raise ValueError(
@@ -265,7 +263,6 @@ class Release(BaseModel):
         Modifies `self.times` in place by prepending or appending times as needed.
         If `times` is empty, it will be set to [`start_time`, `end_time`].
         """
-
         if not self.times:
             self.times = [start_time, end_time]
         else:
@@ -355,7 +352,6 @@ class VolumeRelease(Release):
     @field_validator("tracer_concentrations", mode="after")
     @classmethod
     def _create_concentrations(cls, tracer_concentrations, info: ValidationInfo):
-
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
             if tracer_name in tracer_concentrations:
@@ -390,7 +386,6 @@ class VolumeRelease(Release):
 
     @model_validator(mode="after")
     def _check_lengths(self) -> "VolumeRelease":
-
         num_times = len(self.times)
 
         for tracer_concentrations in self.tracer_concentrations.values():
@@ -420,7 +415,6 @@ class VolumeRelease(Release):
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
-
         # pydantic_serializer is a function that runs pydantic's default conversion
         # of a model to a dict. then, we make some custom modifications after that
         with warnings.catch_warnings():
@@ -486,14 +480,13 @@ class TracerPerturbation(Release):
     )
     """Dictionary of tracer names and their non-negative flux values."""
 
-    release_type: Literal[
+    release_type: Literal[ReleaseType.tracer_perturbation] = (
         ReleaseType.tracer_perturbation
-    ] = ReleaseType.tracer_perturbation
+    )
 
     @field_validator("tracer_fluxes", mode="after")
     @classmethod
     def create_fluxes(cls, tracer_fluxes):
-
         # Fill all tracer fluxes that are not provided with zero
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
@@ -532,7 +525,6 @@ class TracerPerturbation(Release):
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:
         """Return a simplified dict representation with flattened values."""
-
         # pydantic_serializer is a function that runs pydantic's default conversion
         # of a model to a dict. then, we make some custom modifications after that
         with warnings.catch_warnings():

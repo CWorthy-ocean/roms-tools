@@ -9,7 +9,6 @@ from roms_tools.tiling.partition import partition, partition_netcdf
 
 @pytest.fixture
 def grid():
-
     grid = Grid(nx=30, ny=30, size_x=80, size_y=80, center_lon=-20, center_lat=0, rot=0)
 
     return grid
@@ -237,7 +236,8 @@ class TestPartitionGrid:
 
     def test_skip_coarse_dims(self, grid):
         """Test that coarse dimensions remain unchanged when excluded from
-        partitioning."""
+        partitioning.
+        """
         _, partitioned_datasets = partition(
             grid.ds, np_eta=10, np_xi=10, include_coarse_dims=False
         )

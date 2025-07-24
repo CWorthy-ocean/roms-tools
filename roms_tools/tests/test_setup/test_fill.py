@@ -38,7 +38,6 @@ def test_lateral_fill_no_nans(data_fixture, request):
 
 
 def test_lateral_fill_correct_order_of_magnitude(coarsened_cesm_bgc_data):
-
     lateral_fill = LateralFill(
         coarsened_cesm_bgc_data.ds["mask"],
         [
@@ -76,7 +75,6 @@ def test_lateral_fill_correct_order_of_magnitude(coarsened_cesm_bgc_data):
     ],
 )
 def test_lateral_fill_reproducibility(data_fixture, request):
-
     data = request.getfixturevalue(data_fixture)
     lateral_fill0 = LateralFill(
         data.ds["mask"],

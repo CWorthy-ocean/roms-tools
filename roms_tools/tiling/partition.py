@@ -1,6 +1,5 @@
 from numbers import Integral
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 import xarray as xr
@@ -63,7 +62,6 @@ def partition(
     This example partitions the dataset into 2 tiles along the `eta` direction and 3 tiles
     along the `xi` direction, resulting in a total of 6 partitions.
     """
-
     if (
         not isinstance(np_eta, Integral)
         or np_eta < 1
@@ -298,7 +296,7 @@ def partition(
 
 
 def partition_netcdf(
-    filepath: Union[str, Path],
+    filepath: str | Path,
     np_eta: int = 1,
     np_xi: int = 1,
     include_coarse_dims: bool = True,
@@ -329,7 +327,6 @@ def partition_netcdf(
     List[Path]
         A list of Path objects for the filenames that were saved.
     """
-
     # Ensure filepath is a Path object
     filepath = Path(filepath)
 

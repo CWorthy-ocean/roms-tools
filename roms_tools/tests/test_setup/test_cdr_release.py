@@ -35,7 +35,6 @@ class TestValueArray:
             conc.check_length(num_times=3)
 
     def test_flux_extend_scalar(self):
-
         # without times
         flux = Flux(name="flux", values=5.0)
         flux.extend_to_endpoints([], datetime(2020, 1, 1), datetime(2020, 1, 2))
@@ -54,7 +53,6 @@ class TestValueArray:
         assert flux.values == [5.0, 5.0, 5.0, 5.0]
 
     def test_concentration_extend_scalar(self):
-
         # without times
         conc = Concentration(name="DIC", values=0.5)
         conc.extend_to_endpoints([], datetime(2020, 1, 1), datetime(2020, 1, 2))
@@ -115,7 +113,8 @@ class TestRelease:
     @pytest.fixture(scope="class", autouse=True)
     def mock_release_type(self):
         """This fixture fills in the release_type field for the base Release object, so
-        we can test Release generally, without subclassing it."""
+        we can test Release generally, without subclassing it.
+        """
         original_fields = Release.model_fields
         modified = original_fields.copy()
         modified["release_type"].default = "testing_only"
@@ -234,7 +233,6 @@ class TestVolumeRelease:
             VolumeRelease(**self.params, tracer_concentrations={"ALK": [-1, 15]})
 
     def test_auto_fill_strategy(self):
-
         alk_value = 100.0
         vr = VolumeRelease(**self.params, tracer_concentrations={"ALK": alk_value})
         defaults = get_tracer_defaults()
@@ -247,7 +245,6 @@ class TestVolumeRelease:
                 assert vr.tracer_concentrations[tracer].values == defaults[tracer]
 
     def test_zero_fill_strategy(self):
-
         alk_value = 100.0
         vr = VolumeRelease(
             **self.params, tracer_concentrations={"ALK": alk_value}, fill_values="zero"
@@ -264,7 +261,6 @@ class TestVolumeRelease:
                 assert vr.tracer_concentrations[tracer].values == 0.0
 
     def test_invalid_fill_strategy(self):
-
         with pytest.raises(ValidationError):
             VolumeRelease(**self.params, fill_values="zero_fill")
 
@@ -294,7 +290,6 @@ class TestVolumeRelease:
         assert vr.tracer_concentrations["ALK"].values == [2000.0, 2000.0, 2000.0]
 
     def test_mismatch_list_length(self):
-
         times = [datetime(2022, 1, 1), datetime(2022, 1, 2)]
 
         # Test mismatch between times and volume fluxes length
@@ -310,7 +305,6 @@ class TestVolumeRelease:
             )
 
     def test_get_tracer_metadata(self):
-
         d = VolumeRelease.get_tracer_metadata()
         assert len(d) == NUM_TRACERS
 
@@ -340,7 +334,6 @@ class TestTracerPerturbation:
             TracerPerturbation(**self.params, tracer_fluxes={"ALK": [-1, 15]})
 
     def test_zero_fill_strategy(self):
-
         alk_value = 100.0
         tp = TracerPerturbation(
             **self.params,
@@ -374,7 +367,6 @@ class TestTracerPerturbation:
         assert tp.tracer_fluxes["ALK"].values == [0.0, 2000.0, 0.0]
 
     def test_mismatch_list_length(self):
-
         times = [datetime(2022, 1, 1), datetime(2022, 1, 2)]
 
         # Test mismatch between times and tracer_fluxes length
@@ -383,6 +375,5 @@ class TestTracerPerturbation:
             TracerPerturbation(**self.params, times=times, tracer_fluxes=tracer_fluxes)
 
     def test_get_tracer_metadata(self):
-
         d = VolumeRelease.get_tracer_metadata()
         assert len(d) == NUM_TRACERS

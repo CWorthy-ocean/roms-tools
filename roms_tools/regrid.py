@@ -25,7 +25,6 @@ class LateralRegridToROMS:
             Maps the dimension names to the corresponding latitude and longitude
             DataArrays, providing easy access to target grid coordinates.
         """
-
         self.coords = {
             source_dim_names["latitude"]: target_coords["lat"],
             source_dim_names["longitude"]: target_coords["lon"],
@@ -97,7 +96,6 @@ class LateralRegridFromROMS:
         ImportError
             If xESMF is not installed.
         """
-
         try:
             import xesmf as xe
 
@@ -130,7 +128,6 @@ class LateralRegridFromROMS:
         xarray.DataArray
             The regridded data array.
         """
-
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
             regridded = self.regridder(da, keep_attrs=True)
@@ -167,7 +164,6 @@ class VerticalRegridToROMS:
             - `upper_mask`, `lower_mask` : Masks for valid interpolation bounds.
             - `factor` : Weight for blending values between levels.
         """
-
         self.depth_dim = source_depth_coords.dims[0]
         source_depth = source_depth_coords
         dims = {"dim": self.depth_dim}
@@ -215,7 +211,6 @@ class VerticalRegridToROMS:
             are replaced if `fill_nans=True`, with extrapolation allowed at the surface
             and bottom layers to minimize gaps.
         """
-
         dims = {"dim": self.depth_dim}
 
         da_below = da.where(self.coeff["is_below"]).sum(**dims)
@@ -284,7 +279,6 @@ class VerticalRegridFromROMS:
         xarray.DataArray
             A new `xarray.DataArray` containing the regridded data at the specified target depth levels.
         """
-
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
             transformed = self.grid.transform(

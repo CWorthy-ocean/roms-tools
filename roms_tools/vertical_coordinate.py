@@ -106,7 +106,6 @@ def compute_depth(zeta, h, hc, cs, sigma):
     z : xr.DataArray
         The depth at different sigma levels.
     """
-
     z = (hc * sigma + h * cs) / (hc + h)
     z = zeta + (zeta + h) * z
 
@@ -120,8 +119,8 @@ def compute_depth_coordinates(
     zeta: xr.DataArray | float = 0,
     depth_type: str = "layer",
     location: str = "rho",
-    eta: int = None,
-    xi: int = None,
+    eta: int | None = None,
+    xi: int | None = None,
 ) -> "xr.DataArray":
     """Compute vertical depth coordinates for a given ROMS grid location.
 

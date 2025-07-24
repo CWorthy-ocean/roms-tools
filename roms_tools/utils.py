@@ -1,3 +1,4 @@
+import functools
 import glob
 import logging
 import re
@@ -194,15 +195,13 @@ def _load_data(
                 )
 
     else:
-        ds_list = []
-        for file in matching_files:
-            ds = xr.open_dataset(
-                file,
-                decode_times=decode_times,
-                decode_timedelta=decode_times,
-                chunks=None,
-            )
-            ds_list.append(ds)
+        open_dataset_fn = functools.partial(
+            xr.open_dataset,
+            decode_times=decode_times,
+            decode_timedelta=decode_times,
+            chunks=None,
+        )
+        ds_list = [open_dataset_fn(match) for match in matching_files]
 
         if kwargs["combine"] == "by_coords":
             ds = xr.combine_by_coords(ds_list, **combine_kwargs)

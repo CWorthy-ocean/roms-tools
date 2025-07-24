@@ -997,7 +997,6 @@ class Grid:
         dlon_cen = dlon / nl
 
         for _ in range(100):
-
             # Compute Mercator y-limits
             y1 = np.log(np.tan(np.pi / 4 - dlat / 4))
             y2 = np.log(np.tan(np.pi / 4 + dlat / 4))
@@ -1007,7 +1006,7 @@ class Grid:
             lat_array_1d_in_degrees = np.arctan(np.sinh(y))  # Inverse Mercator
 
             # Central latitude spacing (in radians)
-            i_mid = int(round(nw / 2))
+            i_mid = round(nw / 2)
             dlat_cen = 0.5 * (
                 lat_array_1d_in_degrees[i_mid + 1] - lat_array_1d_in_degrees[i_mid - 1]
             )

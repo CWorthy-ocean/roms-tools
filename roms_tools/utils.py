@@ -156,8 +156,8 @@ def _load_data(
             for f in filename_str:
                 files = glob.glob(f)
                 if not files:
-                msg = f"No files found matching the pattern '{f}'."
-                raise FileNotFoundError(msg)
+                    msg = f"No files found matching the pattern '{f}'."
+                    raise FileNotFoundError(msg)
 
                 matching_files.extend(files)
         else:

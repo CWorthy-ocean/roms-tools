@@ -136,6 +136,8 @@ def _load_data(
 
     # Handle the case when filename is a string
     contains_wildcard = False
+    matching_files = []
+
     if isinstance(filename_str, str):
         contains_wildcard = bool(wildcard_regex.search(filename_str))
         if contains_wildcard:

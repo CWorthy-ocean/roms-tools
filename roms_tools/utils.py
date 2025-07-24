@@ -39,7 +39,7 @@ def _check_load_zarr(
     use_dask,
     read_zarr: bool = False,
 ) -> None:
-    """Load dataset from the specified file.
+    """Check if zarr loading is supported.
 
     Parameters
     ----------

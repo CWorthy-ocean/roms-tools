@@ -1033,9 +1033,6 @@ class Grid:
             np.sinh((y2 - y1) * np.arange(-1, nw + 2) / nw + y1)
         )
 
-        # Rescale
-        latq_array_1d_in_degrees = latq_array_1d_in_degrees / mul
-
         # 2D grids for cell centers and corners
         lon, lat = np.meshgrid(lon_array_1d_in_degrees, lat_array_1d_in_degrees)
         lonq, latq = np.meshgrid(lonq_array_1d_in_degrees, latq_array_1d_in_degrees)

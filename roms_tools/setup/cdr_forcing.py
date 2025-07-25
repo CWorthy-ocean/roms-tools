@@ -634,10 +634,12 @@ class CDRForcing(BaseModel):
 
         # Plot blue background on map
         field = self.grid.ds.mask_rho
+        field = field.where(field)
         field = field.assign_coords({"lon": lon_deg, "lat": lat_deg})
         vmax = 6
         vmin = 0
         cmap = plt.colormaps.get_cmap("Blues")
+        cmap.set_bad(color="gray")
         kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
         plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 

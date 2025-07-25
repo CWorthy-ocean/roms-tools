@@ -132,7 +132,7 @@ def test_load_data_dask_not_found() -> None:
         _load_data("foo.zarr", ["a"], use_dask=True)
 
 
-def test_load_data_zarr_without_dask() -> None:
+def test_load_data_open_zarr_without_dask() -> None:
     """Verify that load data raises an exception when zarr is requested without dask."""
     with (
         mock.patch("roms_tools.utils._has_dask", return_value=False),
@@ -143,7 +143,7 @@ def test_load_data_zarr_without_dask() -> None:
 
 
 @pytest.mark.skipif(not _has_dask(), reason="Run only when Dask is installed")
-def test_load_data_zarr(surface_forcing_dataset_path: Path) -> None:
+def test_load_data_open_zarr(surface_forcing_dataset_path: Path) -> None:
     """Verify that a zarr file is correctly loaded."""
     ds = _load_data(
         surface_forcing_dataset_path,
@@ -152,5 +152,28 @@ def test_load_data_zarr(surface_forcing_dataset_path: Path) -> None:
         read_zarr=True,
     )
 
-    ds.info()
+    assert "time" in ds.dims
+
+
+@pytest.mark.parametrize(
+    "dataset_name",
+    [
+        "surface_forcing",
+        "bgc_surface_forcing",
+        "tidal_forcing",
+    ],
+)
+def test_load_data_open_dataset(
+    dataset_name: str,
+    get_test_data_path: Callable[[str], Path],
+) -> None:
+    """Verify that a zarr file is correctly loaded when not using Dask."""
+    ds_path = get_test_data_path(dataset_name)
+
+    ds = _load_data(
+        ds_path,
+        ["latitude"],
+        use_dask=False,
+    )
+
     assert "time" in ds.dims

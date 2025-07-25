@@ -786,7 +786,7 @@ class Dataset:
         Raises
         ------
         TypeError
-            When start_time or end_time is not a datetime instance.
+            When `start_time` or `end_time` is not a `datetime` instance.
 
         """
         if self.start_time is not None and not isinstance(self.start_time, datetime):
@@ -803,6 +803,17 @@ class Dataset:
         This method will:
         1. add time information
         2. rename the input dimension for time to the internal naming convention
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset to transform
+
+        Returns
+        -------
+        xr.Dataset
+            The transformed dataset
+
         """
         if "time" in self.dim_names and self.start_time is not None:
             ds = self.add_time_info(ds)
@@ -814,7 +825,19 @@ class Dataset:
         return ds
 
     def _reorder_data(self, ds: xr.Dataset) -> xr.Dataset:
-        """Reorder data that is required to be in ascending order."""
+        """Reorder data that is required to be in ascending order.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset to transform
+
+        Returns
+        -------
+        xr.Dataset
+            The transformed dataset
+
+        """
         ascending_dims = ["latitude", "longitude"]
         if "depth" in self.dim_names:
             ascending_dims.append("depth")

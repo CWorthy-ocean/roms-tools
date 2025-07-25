@@ -1097,3 +1097,47 @@ def plot(
 
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
+
+
+def assign_category_colors(names: list[str]) -> dict[str, tuple]:
+    """
+    Assign a distinct color to each name using a Matplotlib categorical colormap.
+
+    Parameters
+    ----------
+    names : list[str]
+        List of category names (e.g., releases, rivers, etc.) to assign colors to.
+
+    Returns
+    -------
+    dict[str, tuple]
+        Dictionary mapping each name to a unique RGBA color.
+
+    Raises
+    ------
+    ValueError
+        If the number of names exceeds the selected colormap's capacity.
+
+    Notes
+    -----
+    Colormap selection is based on the number of items:
+    - <= 10: 'tab10'
+    - <= 20: 'tab20'
+    - > 20 : 'tab20b'
+    """
+    n = len(names)
+
+    if n <= 10:
+        cmap = plt.get_cmap("tab10")
+    elif n <= 20:
+        cmap = plt.get_cmap("tab20")
+    else:
+        cmap = plt.get_cmap("tab20b")
+
+    if n > cmap.N:
+        raise ValueError(
+            f"Too many categories ({n}) for selected colormap ({cmap.name}) "
+            f"which supports only {cmap.N} distinct entries."
+        )
+
+    return {name: cmap(i) for i, name in enumerate(names)}

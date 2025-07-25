@@ -22,7 +22,12 @@ from pydantic import (
 )
 
 from roms_tools import Grid
-from roms_tools.plot import get_projection, plot, plot_2d_horizontal_field
+from roms_tools.plot import (
+    assign_category_colors,
+    get_projection,
+    plot,
+    plot_2d_horizontal_field,
+)
 from roms_tools.setup.cdr_release import (
     Release,
     ReleaseType,
@@ -576,7 +581,7 @@ class CDRForcing(BaseModel):
     def _plot_line(self, data, release_names, start, end, title="", ylabel=""):
         """Plots a line graph for the specified releases and time range."""
         valid_release_names = [r.name for r in self.releases]
-        colors = _get_release_colors(valid_release_names)
+        colors = assign_category_colors(valid_release_names)
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
         for name in release_names:
@@ -644,7 +649,7 @@ class CDRForcing(BaseModel):
         plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         # Plot release locations
-        colors = _get_release_colors(valid_release_names)
+        colors = assign_category_colors(valid_release_names)
         _plot_location(
             grid=self.grid,
             releases=[self.releases[name] for name in release_names],
@@ -879,54 +884,6 @@ def _validate_release_input(releases, valid_releases, list_allowed=True):
     ]
     if invalid_releases:
         raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
-
-
-def _get_release_colors(valid_releases: list[str]) -> dict[str, tuple]:
-    """Returns a dictionary of colors for the valid releases, based on a consistent
-    colormap.
-
-    Parameters
-    ----------
-    valid_releases : List[str]
-        List of release names to assign colors to.
-
-    Returns
-    -------
-    Dict[str, tuple]
-        A dictionary where the keys are release names and the values are their corresponding colors,
-        assigned based on the order of releases in the valid releases list.
-
-    Raises
-    ------
-    ValueError
-        If the number of valid releases exceeds the available colormap capacity.
-
-    Notes
-    -----
-    The colormap is chosen dynamically based on the number of valid releases:
-
-    - If there are 10 or fewer releases, the "tab10" colormap is used.
-    - If there are more than 10 but fewer than or equal to 20 releases, the "tab20" colormap is used.
-    - For more than 20 releases, the "tab20b" colormap is used.
-    """
-    # Determine the colormap based on the number of releases
-    if len(valid_releases) <= 10:
-        color_map = plt.get_cmap("tab10")
-    elif len(valid_releases) <= 20:
-        color_map = plt.get_cmap("tab20")
-    else:
-        color_map = plt.get_cmap("tab20b")
-
-    # Ensure the number of releases doesn't exceed the available colormap capacity
-    if len(valid_releases) > color_map.N:
-        raise ValueError(
-            f"Too many releases. The selected colormap supports up to {color_map.N} releases."
-        )
-
-    # Create a dictionary of colors based on the release indices
-    colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
-
-    return colors
 
 
 def _validate_release_location(grid, release: Release):

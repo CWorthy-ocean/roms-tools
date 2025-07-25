@@ -187,19 +187,21 @@ def _load_data(
     }
 
     if use_dask:
-        chunks: dict[str, int] = {}
-
         if "latitude" in dim_names and "longitude" in dim_names:
             # for lat-lon datasets
-            chunks[dim_names["latitude"]] = -1
-            chunks[dim_names["longitude"]] = -1
+            chunks = {
+                dim_names["latitude"]: -1,
+                dim_names["longitude"]: -1,
+            }
         else:
             # For ROMS datasets
-            chunks["eta_rho"] = -1
-            chunks["eta_v"] = -1
-            chunks["xi_rho"] = -1
-            chunks["xi_u"] = -1
-            chunks["s_rho"] = -1
+            chunks = {
+                "eta_rho": -1,
+                "eta_v": -1,
+                "xi_rho": -1,
+                "xi_u": -1,
+                "s_rho": -1,
+            }
 
         if "depth" in dim_names:
             chunks[dim_names["depth"]] = -1

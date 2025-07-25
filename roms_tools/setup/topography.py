@@ -17,7 +17,7 @@ def _add_topography(
     target_coords,
     topography_source,
     hmin,
-    smooth_factor=8.0,
+    smooth_factor=6.0,
     rmax=0.2,
     verbose=False,
 ) -> xr.Dataset:
@@ -39,7 +39,7 @@ def _add_topography(
     smooth_factor : float, optional
         The smoothing factor used in the domain-wide Gaussian smoothing of the
         topography. Smaller values result in less smoothing, while larger
-        values produce more smoothing. The default is 8.0.
+        values produce more smoothing. The default is 6.0.
     rmax : float, optional
         The maximum allowable steepness ratio for the topography smoothing.
         This parameter controls the local smoothing of the topography. Smaller values result in
@@ -67,7 +67,8 @@ def _add_topography(
     # smooth topography domain-wide with Gaussian kernel to avoid grid scale instabilities
     if verbose:
         start_time = time.time()
-    hraw = _smooth_topography_globally(hraw, smooth_factor)
+    area = 1 / ds["pm"] / ds["pn"]
+    hraw = _smooth_topography_globally(hraw, smooth_factor, area)
     if verbose:
         logging.info(
             f"Domain-wide topography smoothing: {time.time() - start_time:.3f} seconds"
@@ -164,7 +165,7 @@ def _make_raw_topography(
     return hraw
 
 
-def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
+def _smooth_topography_globally(hraw, factor, area) -> xr.DataArray:
     """Apply global smoothing to the topography using a Gaussian filter.
 
     Parameters
@@ -186,6 +187,10 @@ def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
     margin_mask = xr.concat(
         [margin_mask, 0 * margin_mask.isel(xi_rho=-1)], dim="xi_rho"
     )
+    area_extended = xr.concat([area, area.isel(eta_rho=-1)], dim="eta_rho")
+    area_extended = xr.concat(
+        [area_extended, area_extended.isel(xi_rho=-1)], dim="xi_rho"
+    )
 
     # we choose a Gaussian filter kernel corresponding to a Gaussian with standard deviation factor/sqrt(12);
     # this standard deviation matches the standard deviation of a boxcar kernel with total width equal to factor.
@@ -193,8 +198,8 @@ def _smooth_topography_globally(hraw, factor) -> xr.DataArray:
         filter_scale=factor,
         dx_min=1,
         filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-        grid_type=gcm_filters.GridType.REGULAR_WITH_LAND,
-        grid_vars={"wet_mask": margin_mask},
+        grid_type=gcm_filters.GridType.REGULAR_WITH_LAND_AREA_WEIGHTED,
+        grid_vars={"wet_mask": margin_mask, "area": area_extended},
     )
     hraw_extended = xr.concat([hraw, hraw.isel(eta_rho=-1)], dim="eta_rho")
     hraw_extended = xr.concat(

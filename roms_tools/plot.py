@@ -1141,3 +1141,69 @@ def assign_category_colors(names: list[str]) -> dict[str, tuple]:
         )
 
     return {name: cmap(i) for i, name in enumerate(names)}
+
+
+def plot_location(
+    grid_ds: xr.Dataset,
+    points: dict[str, dict],
+    ax: Axes,
+    include_legend: bool = True,
+) -> None:
+    """Plot named geographic points on a top-down map view.
+
+    Each point is represented as a marker on the map, optionally colored.
+    This function is generic and can be used for releases, rivers, etc.
+
+    Parameters
+    ----------
+    grid_ds : xr.Dataset
+        The grid dataset containing 'lon_rho' and 'lat_rho', and a 'straddle' attribute.
+
+    points : dict[str, dict]
+        Dictionary of points to plot. Keys are point names. Each value is a dict with:
+        - "lat": float, latitude in degrees
+        - "lon": float, longitude in degrees
+        - Optional "color": tuple or str, matplotlib color
+
+    ax : matplotlib.axes.Axes
+        The axis object to plot on.
+
+    include_legend : bool, default True
+        Whether to include a legend showing point names.
+
+    Returns
+    -------
+    None
+    """
+    lon_deg = grid_ds.lon_rho
+    lat_deg = grid_ds.lat_rho
+
+    if "straddle" not in grid_ds.attrs:
+        raise AttributeError("Grid dataset must have a 'straddle' attribute.")
+
+    straddle = grid_ds.attrs["straddle"] == "True"
+    if straddle:
+        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+
+    trans = get_projection(lon_deg, lat_deg)
+    proj = ccrs.PlateCarree()
+
+    for name, info in points.items():
+        lon = info["lon"]
+        lat = info["lat"]
+        color = info.get("color", "k")  # Default to black if no color specified
+
+        x, y = trans.transform_point(lon, lat, proj)
+
+        ax.plot(
+            x,
+            y,
+            marker="x",
+            markersize=8,
+            markeredgewidth=2,
+            label=name,
+            color=color,
+        )
+
+    if include_legend:
+        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))

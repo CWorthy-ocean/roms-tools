@@ -6,12 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-import cartopy.crs as ccrs
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from matplotlib.axes import Axes
 from pydantic import (
     BaseModel,
     Field,
@@ -27,6 +25,7 @@ from roms_tools.plot import (
     get_projection,
     plot,
     plot_2d_horizontal_field,
+    plot_location,
 )
 from roms_tools.setup.cdr_release import (
     Release,
@@ -650,11 +649,17 @@ class CDRForcing(BaseModel):
 
         # Plot release locations
         colors = assign_category_colors(valid_release_names)
-        _plot_location(
-            grid=self.grid,
-            releases=[self.releases[name] for name in release_names],
+        plot_location(
+            grid_ds=self.grid.ds,
+            points={
+                name: {
+                    "lat": self.releases[name].lat,
+                    "lon": self.releases[name].lon,
+                    "color": colors.get(name, "k"),
+                }
+                for name in release_names
+            },
             ax=ax,
-            colors=colors,
         )
 
     def plot_distribution(self, release_name: str, mark_release_center: bool = True):
@@ -717,8 +722,16 @@ class CDRForcing(BaseModel):
             title="Depth-integrated distribution",
         )
         if mark_release_center:
-            _plot_location(
-                grid=self.grid, releases=[release], ax=ax0, include_legend=False
+            plot_location(
+                grid_ds=self.grid.ds,
+                points={
+                    release.name: {
+                        "lat": release.lat,
+                        "lon": release.lon,
+                    }
+                },
+                ax=ax0,
+                include_legend=False,
             )
 
         # Spread horizontal Gaussian field into the vertical
@@ -1062,73 +1075,3 @@ def _map_3d_gaussian(
         distribution_3d /= distribution_3d.sum()
 
     return distribution_3d
-
-
-def _plot_location(
-    grid: Grid,
-    releases: ReleaseCollector,
-    ax: Axes,
-    colors: dict[str, tuple] | None = None,
-    include_legend: bool = True,
-) -> None:
-    """Plot the center location of each release on a top-down map view.
-
-    Each release is represented as a point on the map, with its color
-    determined by the `colors` dictionary.
-
-    Parameters
-    ----------
-    grid : Grid
-        The grid object defining the spatial extent and coordinate system for the plot.
-
-    releases : ReleaseCollector
-        Collection of `Release` objects to plot. Each `Release` must have `.lat`, `.lon`,
-        and `.name` attributes.
-
-    ax : matplotlib.axes.Axes
-        The Matplotlib axis object to plot on.
-
-    colors : dict of str to tuple, optional
-        Optional dictionary mapping release names to RGBA color tuples. If not provided,
-        all releases are plotted in a default color (`"#dd1c77"`).
-
-    include_legend : bool, default True
-        Whether to include a legend showing release names.
-
-    Returns
-    -------
-    None
-    """
-    lon_deg = grid.ds.lon_rho
-    lat_deg = grid.ds.lat_rho
-    if grid.straddle:
-        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-    trans = get_projection(lon_deg, lat_deg)
-
-    proj = ccrs.PlateCarree()
-
-    for release in releases:
-        # transform coordinates to projected space
-        transformed_lon, transformed_lat = trans.transform_point(
-            release.lon,
-            release.lat,
-            proj,
-        )
-
-        if colors is not None:
-            color = colors[release.name]
-        else:
-            color = "k"
-
-        ax.plot(
-            transformed_lon,
-            transformed_lat,
-            marker="x",
-            markersize=8,
-            markeredgewidth=2,
-            label=release.name,
-            color=color,
-        )
-
-    if include_legend:
-        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))

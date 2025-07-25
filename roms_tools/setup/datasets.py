@@ -1138,8 +1138,8 @@ class GLORYSDefaultDataset(GLORYSDataset):
         "https://s3.waw3-1.cloudferro.com/mdl-arco-time-025/arco/GLOBAL_MULTIYEAR_PHY_001_030/cmems_mod_glo_phy_my_0.083deg_P1D-m_202311/timeChunked.zarr"
     )
 
-    def __post_init__(self):
-        """Set the `read_zarr` property ensure use of the correct upstream data."""
+    def __post_init__(self) -> None:
+        """Configure attributes to ensure use of the correct upstream data-source."""
         self.read_zarr = True
         self.filename = GLORYSDefaultDataset.GLORYS_URI
         super().__post_init__()

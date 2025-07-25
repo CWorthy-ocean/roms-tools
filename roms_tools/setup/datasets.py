@@ -100,25 +100,16 @@ class Dataset:
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
-    def __post_init__(self):
-        """
-        Post-initialization processing:
+    def __post_init__(self) -> None:
+        """Perform post-initialization processing.
+
         1. Loads the dataset from the specified filename.
-        2. Applies time filtering based on start_time and end_time if provided.
-        3. Selects relevant fields as specified by var_names.
-        4. Ensures latitude values and depth values are in ascending order.
+        2. Applies time filtering based on start_time and end_time (if provided).
+        3. Selects relevant fields as specified by `var_names`.
+        4. Ensures latitude, longitude, and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
-
-        # Validate start_time and end_time
-        if self.start_time is not None and not isinstance(self.start_time, datetime):
-            raise TypeError(
-                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
-            )
-        if self.end_time is not None and not isinstance(self.end_time, datetime):
-            raise TypeError(
-                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
-            )
+        self._check_dates()
 
         ds = self.load_data()
         ds = self.clean_up(ds)

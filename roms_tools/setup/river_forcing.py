@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -14,6 +13,7 @@ from roms_tools.plot import (
     assign_category_colors,
     get_projection,
     plot_2d_horizontal_field,
+    plot_location,
 )
 from roms_tools.setup.datasets import (
     DaiRiverDataset,
@@ -698,45 +698,33 @@ class RiverForcing:
         for ax in axs:
             plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
-        proj = ccrs.PlateCarree()
-
         river_names = self.indices.keys()
         colors = assign_category_colors(river_names)
 
-        for ax, indices in zip(axs, [self.original_indices, self.indices]):
-            added_labels = set()
-            for name in river_names:
-                for tuple in indices[name]:
-                    eta_index = tuple[0]
-                    xi_index = tuple[1]
+        points = {}
+        for j, (ax, indices) in enumerate(
+            [(ax, ind) for ax, ind in zip(axs, [self.original_indices, self.indices])]
+        ):
+            for name in indices:
+                for i, (eta_index, xi_index) in enumerate(indices[name]):
+                    lon = self.grid.ds.lon_rho[eta_index, xi_index].item()
+                    lat = self.grid.ds.lat_rho[eta_index, xi_index].item()
+                    key = name if i == 0 else f"_{name}_{i}"
+                    points[key] = {
+                        "lon": lon,
+                        "lat": lat,
+                        "color": colors[name],
+                    }
 
-                    # transform coordinates to projected space
-                    transformed_lon, transformed_lat = trans.transform_point(
-                        self.grid.ds.lon_rho[eta_index, xi_index],
-                        self.grid.ds.lat_rho[eta_index, xi_index],
-                        proj,
-                    )
-
-                    if name not in added_labels:
-                        added_labels.add(name)
-                        label = name
-                    else:
-                        label = "_None"
-
-                    ax.plot(
-                        transformed_lon,
-                        transformed_lat,
-                        marker="x",
-                        markersize=8,
-                        markeredgewidth=2,
-                        label=label,
-                        color=colors[name],
-                    )
+            plot_location(
+                grid_ds=self.grid.ds,
+                points=points,
+                ax=ax,
+                include_legend=(j == 1),
+            )
 
         axs[0].set_title("Original river locations")
         axs[1].set_title("Updated river locations")
-
-        axs[1].legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
 
     def plot(self, var_name="river_volume"):
         """Plots the river flux (e.g., volume, temperature, or salinity) over time for

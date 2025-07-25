@@ -49,6 +49,7 @@ from roms_tools.utils import (
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 INCLUDE_ALL_RELEASE_NAMES = "all"
+MAX_RELEASES_TO_PLOT = 20  # must be 20 or smaller because of colormap restriction
 
 
 class ReleaseSimulationManager(BaseModel):
@@ -422,12 +423,7 @@ class CDRForcing(BaseModel):
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == INCLUDE_ALL_RELEASE_NAMES:
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         data = self.ds["cdr_volume"]
 
@@ -479,12 +475,7 @@ class CDRForcing(BaseModel):
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == INCLUDE_ALL_RELEASE_NAMES:
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         tracer_names = list(self.ds["tracer_name"].values)
         if tracer_name not in tracer_names:
@@ -550,12 +541,7 @@ class CDRForcing(BaseModel):
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == INCLUDE_ALL_RELEASE_NAMES:
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         tracer_names = list(self.ds["tracer_name"].values)
         if tracer_name not in tracer_names:
@@ -579,8 +565,7 @@ class CDRForcing(BaseModel):
 
     def _plot_line(self, data, release_names, start, end, title="", ylabel=""):
         """Plots a line graph for the specified releases and time range."""
-        valid_release_names = [r.name for r in self.releases]
-        colors = assign_category_colors(valid_release_names)
+        colors = assign_category_colors([r.name for r in self.releases])
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
         for name in release_names:
@@ -599,7 +584,7 @@ class CDRForcing(BaseModel):
         ax.set(title=title, ylabel=ylabel, xlabel="time")
         ax.set_xlim([start, end])
 
-    def plot_locations(self, release_names="all"):
+    def plot_locations(self, release_names=INCLUDE_ALL_RELEASE_NAMES):
         """Plot centers of release locations in top-down view.
 
         Parameters
@@ -622,12 +607,7 @@ class CDRForcing(BaseModel):
                 "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == "all":
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
@@ -648,7 +628,7 @@ class CDRForcing(BaseModel):
         plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         # Plot release locations
-        colors = assign_category_colors(valid_release_names)
+        colors = assign_category_colors([r.name for r in self.releases])
         plot_location(
             grid_ds=self.grid.ds,
             points={
@@ -689,8 +669,13 @@ class CDRForcing(BaseModel):
                 "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
-        valid_release_names = [r.name for r in self.releases]
-        _validate_release_input(release_name, valid_release_names, list_allowed=False)
+        if not isinstance(release_name, str):
+            raise ValueError(
+                f"Only a single release name (string) is allowed. Got: {release_name!r}"
+            )
+
+        release_name = _validate_release_names([release_name], self.releases)[0]
+
         release = self.releases[release_name]
 
         # Prepare grid coordinates
@@ -845,58 +830,55 @@ class CDRForcing(BaseModel):
         return cls(grid=grid, **params)
 
 
-def _validate_release_input(releases, valid_releases, list_allowed=True):
-    """Validates the input for release names in plotting methods to ensure they are in
-    an acceptable format and exist within the set of valid releases.
+def _validate_release_names(
+    release_names: list[str] | str, releases: ReleaseCollector
+) -> list[str]:
+    """
+    Validate and filter a list of release names.
 
-    This method ensures that the `releases` parameter is either a single release name (string) or a list
-    of release names (strings), and checks that each release exists in the set of valid releases.
+    Ensures that each release name exists in `releases` and limits the list
+    to `MAX_RELEASES_TO_PLOT` entries with a warning if truncated.
 
     Parameters
     ----------
-    releases : str or list of str
-        A single release name as a string, or a list of release names (strings) to validate.
+    release_names : list of str or INCLUDE_ALL_RELEASE_NAMES
+        Names of releases to plot, or sentinel to include all.
+    releases : ReleaseCollector
+        Object containing valid release names.
 
-    list_allowed : bool, optional
-        If `True`, a list of release names is allowed. If `False`, only a single release name (string)
-        is allowed. Default is `True`.
+    Returns
+    -------
+    list of str
+        Validated and truncated list of release names.
 
     Raises
     ------
     ValueError
-        If `releases` is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
-
-    Notes
-    -----
-    This method checks that the `releases` input is in a valid format (either a string or a list of strings),
-    and ensures each release is present in the set of valid releases defined in `self.releases`. Invalid releases
-    are reported in the error message.
-
-    If `list_allowed` is set to `False`, only a single release name (string) will be accepted. Otherwise, a
-    list of release names is also acceptable.
+        If any names are invalid.
     """
-    # Ensure that a list of releases is only allowed if `list_allowed` is True
-    if not list_allowed and not isinstance(releases, str):
-        raise ValueError(
-            f"Only a single release name (string) is allowed. Got: {releases}"
-        )
+    valid_release_names = [r.name for r in releases]
 
-    if isinstance(releases, str):
-        releases = [releases]  # Convert to list if a single string is provided
-    elif isinstance(releases, list):
-        if not all(isinstance(r, str) for r in releases):
-            raise ValueError("All elements in `releases` list must be strings.")
+    if release_names == INCLUDE_ALL_RELEASE_NAMES:
+        release_names = valid_release_names
+
+    if isinstance(release_names, list):
+        if not all(isinstance(r, str) for r in release_names):
+            raise ValueError("All elements in `release_names` list must be strings.")
     else:
-        raise ValueError(
-            "`releases` should be a string (single release name) or a list of strings (release names)."
-        )
+        raise ValueError("`release_names` should be a list of strings.")
 
-    # Validate that the specified releases exist in self.releases
-    invalid_releases = [
-        release for release in releases if release not in valid_releases
-    ]
-    if invalid_releases:
-        raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
+    invalid = [r for r in release_names if r not in valid_release_names]
+    if invalid:
+        raise ValueError(f"Invalid releases: {', '.join(invalid)}")
+
+    if len(release_names) > MAX_RELEASES_TO_PLOT:
+        logging.warning(
+            f"Only the first {MAX_RELEASES_TO_PLOT} releases will be plotted "
+            f"(received {len(release_names)})."
+        )
+        release_names = release_names[:MAX_RELEASES_TO_PLOT]
+
+    return release_names
 
 
 def _validate_release_location(grid, release: Release):

@@ -118,22 +118,8 @@ class Dataset:
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
 
-        # Select relevant times
-        if "time" in self.dim_names and self.start_time is not None:
-            ds = self.add_time_info(ds)
-            ds = self.select_relevant_times(ds)
-
-            if self.dim_names["time"] != "time":
-                ds = ds.rename({self.dim_names["time"]: "time"})
-
-        # Make sure that latitude is ascending
-        ds = self.ensure_dimension_is_ascending(ds, dim="latitude")
-        # Make sure there are no 360 degree jumps in longitude
-        ds = self.ensure_dimension_is_ascending(ds, dim="longitude")
-
-        if "depth" in self.dim_names:
-            # Make sure that depth is ascending
-            ds = self.ensure_dimension_is_ascending(ds, dim="depth")
+        ds = self._transform_time(ds)
+        ds = self._reorder_data(ds)
 
         self.infer_horizontal_resolution(ds)
 
@@ -811,7 +797,7 @@ class Dataset:
             msg = "end_time must be a datetime object, but got {}."
             raise TypeError(msg.format(type(self.end_time).__name__))
 
-    def _transform_time(self, ds: xr.Dataset) -> None:
+    def _transform_time(self, ds: xr.Dataset) -> xr.Dataset:
         """Transform time data in the dataset.
 
         This method will:
@@ -825,7 +811,9 @@ class Dataset:
             if self.dim_names["time"] != "time":
                 ds = ds.rename({self.dim_names["time"]: "time"})
 
-    def _reorder_data(self, ds: xr.Dataset) -> None:
+        return ds
+
+    def _reorder_data(self, ds: xr.Dataset) -> xr.Dataset:
         """Reorder data that is required to be in ascending order."""
         ascending_dims = ["latitude", "longitude"]
         if "depth" in self.dim_names:
@@ -833,6 +821,8 @@ class Dataset:
 
         for dim in ascending_dims:
             ds = self.ensure_dimension_is_ascending(ds, dim=dim)
+
+        return ds
 
 
 @dataclass(kw_only=True)
@@ -1645,7 +1635,6 @@ class ERA5Correction(Dataset):
     climatology: Optional[bool] = True
 
     def __post_init__(self):
-
         if not self.climatology:
             raise NotImplementedError(
                 "Correction data must be a climatology. Set climatology to True."
@@ -1797,7 +1786,6 @@ class RiverDataset:
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
-
         # Validate start_time and end_time
         if not isinstance(self.start_time, datetime):
             raise TypeError(
@@ -2240,7 +2228,6 @@ class TPXOManager:
     use_dask: Optional[bool] = False
 
     def __post_init__(self):
-
         fname_sal = download_sal_data("sal_tpxo9.v2a.nc")
 
         # Initialize the data_dict with TPXODataset instances
@@ -2879,7 +2866,6 @@ def _select_relevant_times(
 
 
 def decode_string(byte_array):
-
     # Decode each byte and handle errors with 'ignore'
     decoded_string = "".join(
         [

@@ -1,9 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "eta_coarse",
-        "xi_coarse"
-    ],
-    "coordinates": "lat_coarse lon_coarse",
-    "long_name": "Angle between xi axis and east on coarsened grid",
-    "units": "radians"
-}

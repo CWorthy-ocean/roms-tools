@@ -54,8 +54,6 @@ def _check_load_zarr(
 
     Raises
     ------
-    FileNotFoundError
-        If the specified file does not exist.
     ValueError
         - If dask is not used for reading a zarr file
         - If multiple paths are provided when reading a zarr file.

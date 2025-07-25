@@ -156,15 +156,17 @@ def test_load_data_open_zarr(surface_forcing_dataset_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "dataset_name",
+    ("dataset_name", "expected_dim"),
     [
-        "surface_forcing",
-        "bgc_surface_forcing",
-        "tidal_forcing",
+        ("surface_forcing", "time"),
+        ("bgc_surface_forcing", "time"),
+        ("tidal_forcing", "eta_rho"),
+        ("coarse_surface_forcing", "eta_rho"),
     ],
 )
 def test_load_data_open_dataset(
     dataset_name: str,
+    expected_dim: str,
     get_test_data_path: Callable[[str], Path],
 ) -> None:
     """Verify that a zarr file is correctly loaded when not using Dask."""
@@ -176,4 +178,4 @@ def test_load_data_open_dataset(
         use_dask=False,
     )
 
-    assert "time" in ds.dims
+    assert expected_dim in ds.dims

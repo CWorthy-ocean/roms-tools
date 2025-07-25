@@ -794,6 +794,46 @@ class Dataset:
 
         return dataset
 
+    def _check_dates(self) -> None:
+        """Perform validation of start & end date members.
+
+        Raises
+        ------
+        TypeError
+            When start_time or end_time is not a datetime instance.
+
+        """
+        if self.start_time is not None and not isinstance(self.start_time, datetime):
+            msg = "start_time must be a datetime object, but got {}."
+            raise TypeError(msg.format(type(self.start_time).__name__))
+
+        if self.end_time is not None and not isinstance(self.end_time, datetime):
+            msg = "end_time must be a datetime object, but got {}."
+            raise TypeError(msg.format(type(self.end_time).__name__))
+
+    def _transform_time(self, ds: xr.Dataset) -> None:
+        """Transform time data in the dataset.
+
+        This method will:
+        1. add time information
+        2. rename the input dimension for time to the internal naming convention
+        """
+        if "time" in self.dim_names and self.start_time is not None:
+            ds = self.add_time_info(ds)
+            ds = self.select_relevant_times(ds)
+
+            if self.dim_names["time"] != "time":
+                ds = ds.rename({self.dim_names["time"]: "time"})
+
+    def _reorder_data(self, ds: xr.Dataset) -> None:
+        """Reorder data that is required to be in ascending order."""
+        ascending_dims = ["latitude", "longitude"]
+        if "depth" in self.dim_names:
+            ascending_dims.append("depth")
+
+        for dim in ascending_dims:
+            ds = self.ensure_dimension_is_ascending(ds, dim=dim)
+
 
 @dataclass(kw_only=True)
 class TPXODataset(Dataset):

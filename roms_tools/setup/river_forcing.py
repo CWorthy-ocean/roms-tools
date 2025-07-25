@@ -5,13 +5,16 @@ from datetime import datetime
 from pathlib import Path
 
 import cartopy.crs as ccrs
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.plot import get_projection, plot_2d_horizontal_field
+from roms_tools.plot import (
+    assign_category_colors,
+    get_projection,
+    plot_2d_horizontal_field,
+)
 from roms_tools.setup.datasets import (
     DaiRiverDataset,
     get_indices_of_nearest_grid_cell_for_rivers,
@@ -697,18 +700,12 @@ class RiverForcing:
 
         proj = ccrs.PlateCarree()
 
-        if len(self.indices) <= 10:
-            color_map = cm.get_cmap("tab10")
-        elif len(self.indices) <= 20:
-            color_map = cm.get_cmap("tab20")
-        else:
-            color_map = cm.get_cmap("tab20b")
-        # Create a dictionary of colors
-        colors = {name: color_map(i) for i, name in enumerate(self.indices.keys())}
+        river_names = self.indices.keys()
+        colors = assign_category_colors(river_names)
 
         for ax, indices in zip(axs, [self.original_indices, self.indices]):
             added_labels = set()
-            for name in indices.keys():
+            for name in river_names:
                 for tuple in indices[name]:
                     eta_index = tuple[0]
                     xi_index = tuple[1]
@@ -792,8 +789,6 @@ class RiverForcing:
 
             The default is 'river_volume'.
         """
-        fig, ax = plt.subplots(1, 1, figsize=(9, 5))
-
         if self.climatology:
             xticks = self.ds.month.values
             xlabel = "month"
@@ -814,15 +809,22 @@ class RiverForcing:
             units = d[var_name_wo_river]["units"]
             long_name = f"River {d[var_name_wo_river]['long_name']}"
 
-        for i in range(len(self.ds.nriver)):
+        river_names = self.indices.keys()
+        colors = assign_category_colors(river_names)
+
+        fig, ax = plt.subplots(1, 1, figsize=(9, 5))
+        for name in river_names:
+            nriver = np.where(self.ds["river_name"].values == name)[0].item()
+
             ax.plot(
                 xticks,
-                field.isel(nriver=i),
+                field.isel(nriver=nriver),
                 marker="x",
                 markersize=8,
                 markeredgewidth=2,
                 lw=2,
-                label=self.ds.isel(nriver=i).river_name.values,
+                label=name,
+                color=colors[name],
             )
 
         ax.set_xticks(xticks)

@@ -144,15 +144,21 @@ def test_load_data_open_zarr_without_dask() -> None:
 
 @pytest.mark.skipif(not _has_dask(), reason="Run only when Dask is installed")
 def test_load_data_open_zarr(surface_forcing_dataset_path: Path) -> None:
-    """Verify that a zarr file is correctly loaded."""
-    ds = _load_data(
-        surface_forcing_dataset_path,
-        ["latitude"],
-        use_dask=True,
-        read_zarr=True,
-    )
+    """Verify that a zarr file is correctly loaded when using xr.open_zarr."""
 
-    assert "time" in ds.dims
+    with mock.patch("roms_tools.utils.xr.open_zarr", wraps=xr.open_zarr) as fn_oz:
+        ds = _load_data(
+            surface_forcing_dataset_path,
+            ["latitude"],
+            use_dask=True,
+            read_zarr=True,
+        )
+
+        assert "time" in ds.dims
+        assert fn_oz.called
+
+
+import xarray as xr
 
 
 @pytest.mark.parametrize(
@@ -169,13 +175,21 @@ def test_load_data_open_dataset(
     expected_dim: str,
     get_test_data_path: Callable[[str], Path],
 ) -> None:
-    """Verify that a zarr file is correctly loaded when not using Dask."""
+    """Verify that a zarr file is correctly loaded when not using Dask.
+
+    This must use xr.open_dataset
+    """
     ds_path = get_test_data_path(dataset_name)
 
-    ds = _load_data(
-        ds_path,
-        ["latitude"],
-        use_dask=False,
-    )
+    with mock.patch(
+        "roms_tools.utils.xr.open_dataset",
+        wraps=xr.open_dataset,
+    ) as fn_od:
+        ds = _load_data(
+            ds_path,
+            ["latitude"],
+            use_dask=False,
+        )
+        assert fn_od.called
 
     assert expected_dim in ds.dims

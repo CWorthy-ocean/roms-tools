@@ -35,7 +35,6 @@ def _get_fname(name):
 # to run it and overwrite the test data, invoke pytest as follows
 # pytest --overwrite=tidal_forcing --overwrite=boundary_forcing
 def test_save_results(forcing_fixture, request):
-
     overwrite = request.config.getoption("--overwrite")
 
     # Skip the test if the fixture isn't marked for overwriting, unless 'all' is specified
@@ -74,7 +73,6 @@ def test_save_results(forcing_fixture, request):
     ],
 )
 def test_check_results(forcing_fixture, request):
-
     fname = _get_fname(forcing_fixture)
     expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)
     forcing = request.getfixturevalue(forcing_fixture)
@@ -101,7 +99,6 @@ def test_check_results(forcing_fixture, request):
 )
 def test_dask_vs_no_dask(forcing_fixture, request, tmp_path, use_dask):
     """Test comparing the forcing created with and without Dask on same platform."""
-
     if not use_dask:
         pytest.skip("Test only runs when --use_dask is specified")
 

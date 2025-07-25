@@ -11,7 +11,6 @@ from roms_tools.download import download_test_data
 
 @pytest.fixture(scope="session")
 def tidal_forcing_9v5a(use_dask):
-
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
@@ -30,7 +29,6 @@ def tidal_forcing_9v5a(use_dask):
 
 @pytest.fixture(scope="session")
 def tidal_forcing_10v2a(use_dask):
-
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
@@ -49,7 +47,6 @@ def tidal_forcing_10v2a(use_dask):
 
 @pytest.fixture(scope="session")
 def tidal_forcing_from_global_data(use_dask):
-
     grid = Grid(
         nx=3, ny=3, size_x=1800, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
@@ -115,7 +112,6 @@ def grid_that_straddles_dateline():
 @pytest.fixture
 def grid_that_straddles_180_degree_meridian():
     """Fixture for creating a domain that straddles 180 degree meridian."""
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -138,7 +134,6 @@ def grid_that_straddles_180_degree_meridian():
     ],
 )
 def test_successful_initialization_with_global_data(grid_fixture, request, use_dask):
-
     fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
     fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
     fname_u = Path(download_test_data("global_u_tpxo10.v2.nc"))
@@ -170,7 +165,6 @@ def test_successful_initialization_with_global_data(grid_fixture, request, use_d
 def test_unsuccessful_initialization_with_regional_data_due_to_nans(
     grid_that_is_out_of_bounds_of_regional_tpxo_data, use_dask
 ):
-
     fname_grid = Path(download_test_data("regional_grid_tpxo10v2.nc"))
     fname_h = Path(download_test_data("regional_h_tpxo10v2.nc"))
     fname_u = Path(download_test_data("regional_u_tpxo10v2.nc"))
@@ -192,7 +186,6 @@ def test_unsuccessful_initialization_with_regional_data_due_to_nans(
 def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
     grid_fixture, request, use_dask
 ):
-
     fname_grid = Path(download_test_data("regional_grid_tpxo10v2.nc"))
     fname_h = Path(download_test_data("regional_h_tpxo10v2.nc"))
     fname_u = Path(download_test_data("regional_u_tpxo10v2.nc"))
@@ -212,7 +205,6 @@ def test_unsuccessful_initialization_with_regional_data_due_to_no_overlap(
 
 
 def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_dask):
-
     fname_grid = Path(download_test_data("global_grid_tpxo10.v2.nc"))
     fname_h = Path(download_test_data("global_h_tpxo10.v2.nc"))
     fname_u = Path(download_test_data("global_u_tpxo10.v2.nc"))
@@ -229,20 +221,17 @@ def test_insufficient_number_of_consituents(grid_that_straddles_dateline, use_da
 
 def test_tidal_forcing_plot(tidal_forcing):
     """Test plot method."""
-
     tidal_forcing.plot(var_name="ssh_Re", ntides=0)
 
 
 def test_tidal_forcing_save(tidal_forcing, tmp_path):
     """Test save method."""
-
     for file_str in ["test_tides", "test_tides.nc"]:
         # Create a temporary filepath using the tmp_path fixture
         for filepath in [
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-
             saved_filenames = tidal_forcing.save(filepath)
             # Check if the .nc file was created
             filepath = Path(filepath).with_suffix(".nc")
@@ -258,8 +247,8 @@ def test_tidal_forcing_save(tidal_forcing, tmp_path):
 )
 def test_roundtrip_yaml(tidal_forcing_fixture, tmp_path, use_dask, request):
     """Test that creating a TidalForcing object, saving its parameters to yaml file, and
-    re-opening yaml file creates the same object."""
-
+    re-opening yaml file creates the same object.
+    """
     tidal_forcing = request.getfixturevalue(tidal_forcing_fixture)
 
     # Create a temporary filepath using the tmp_path fixture
@@ -268,7 +257,6 @@ def test_roundtrip_yaml(tidal_forcing_fixture, tmp_path, use_dask, request):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         tidal_forcing.to_yaml(filepath)
 
         tidal_forcing_from_file = TidalForcing.from_yaml(filepath, use_dask=use_dask)
@@ -284,7 +272,6 @@ def test_roundtrip_yaml(tidal_forcing_fixture, tmp_path, use_dask, request):
     ["tidal_forcing", "tidal_forcing_from_global_data"],
 )
 def test_files_have_same_hash(tidal_forcing_fixture, tmp_path, use_dask, request):
-
     tidal_forcing = request.getfixturevalue(tidal_forcing_fixture)
 
     yaml_filepath = tmp_path / "test_yaml.yaml"
@@ -333,7 +320,6 @@ def test_from_yaml_missing_tidal_forcing(tmp_path, use_dask):
         tmp_path / file_str,
         str(tmp_path / file_str),
     ]:  # test for Path object and str
-
         # Write YAML content to file
         if isinstance(yaml_filepath, Path):
             yaml_filepath.write_text(yaml_content)

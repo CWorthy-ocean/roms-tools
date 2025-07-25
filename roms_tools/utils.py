@@ -80,7 +80,7 @@ def _load_data(
     wildcard_regex = re.compile(r"[\*\?\[\]]")
 
     # Convert Path objects to strings
-    if isinstance(filename, (str, Path)):
+    if isinstance(filename, str | Path):
         filename_str = str(filename)
     elif isinstance(filename, list):
         filename_str = [str(f) for f in filename]
@@ -141,7 +141,6 @@ def _load_data(
     }
 
     if use_dask:
-
         if "latitude" in dim_names and "longitude" in dim_names:
             # for lat-lon datasets
             chunks = {
@@ -243,7 +242,6 @@ def interpolate_from_rho_to_u(field, method="additive"):
     field_interpolated : xr.DataArray
         The interpolated data array on the u grid with the dimension "xi_u".
     """
-
     if method == "additive":
         field_interpolated = 0.5 * (field + field.shift(xi_rho=1)).isel(
             xi_rho=slice(1, None)
@@ -289,7 +287,6 @@ def interpolate_from_rho_to_v(field, method="additive"):
     field_interpolated : xr.DataArray
         The interpolated data array on the v grid with the dimension "eta_v".
     """
-
     if method == "additive":
         field_interpolated = 0.5 * (field + field.shift(eta_rho=1)).isel(
             eta_rho=slice(1, None)
@@ -327,7 +324,6 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
         The DataArray with dimensions reordered so that 'time', 's_*', 'eta_*',
         and 'xi_*' are first, in that order, if they exist.
     """
-
     # List of preferred dimension patterns
     preferred_order = ["time", "s_", "eta_", "xi_"]
 
@@ -370,7 +366,6 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     List[Path]
         A list of Path objects for the filenames that were saved.
     """
-
     saved_filenames = []
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
@@ -443,7 +438,6 @@ def _generate_coordinate_range(min_val: float, max_val: float, resolution: float
         An array of target coordinates generated from the specified range, with the resolution
         rounded to a suitable fraction (e.g., `1/n`) or integer, depending on the input resolution.
     """
-
     # Find the closest fraction of the form 1/n or integer to match the resolution
     resolution_rounded = None
     min_diff = float("inf")  # Initialize the minimum difference as infinity
@@ -524,7 +518,6 @@ def _generate_focused_coordinate_range(
     - Remaining faces are split evenly in the coarse resolution regions
     - Faces and centers are returned sorted and unique.
     """
-
     # Define the bounds of the high-res region
     if sc == 0.0:
         sc = 1
@@ -610,7 +603,6 @@ def _remove_edge_nans(
                 nan_mask = field.isnull()
 
         elif len(other_dims) == 1:
-
             depth_dim = other_dims[0]
 
             if layer_depth is not None:

@@ -52,7 +52,6 @@ def _add_topography(
     xr.Dataset
         Updated dataset with added topography and metadata.
     """
-
     if verbose:
         start_time = time.time()
     data = _get_topography_data(topography_source)

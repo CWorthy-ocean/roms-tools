@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 import xarray as xr
@@ -113,11 +112,11 @@ class SurfaceForcing:
 
     grid: Grid
     """Object representing the grid information."""
-    start_time: Optional[datetime] = None
+    start_time: datetime | None = None
     """The start time of the desired surface forcing data."""
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
     """The end time of the desired surface forcing data."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]]
+    source: dict[str, str | Path | list[str | Path]]
     """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""
@@ -142,7 +141,6 @@ class SurfaceForcing:
     """Whether data is interpolated onto grid coarsened by factor 2."""
 
     def __post_init__(self):
-
         self._input_checks()
         data = self._get_data()
 
@@ -307,7 +305,6 @@ class SurfaceForcing:
         return use_coarse_grid
 
     def _get_data(self):
-
         data_dict = {
             "filename": self.source["path"],
             "start_time": self.start_time,
@@ -346,7 +343,6 @@ class SurfaceForcing:
         return data
 
     def _get_correction_data(self):
-
         if self.source["name"] == "ERA5":
             correction_data = ERA5Correction(use_dask=self.use_dask)
         else:
@@ -512,7 +508,6 @@ class SurfaceForcing:
         vwnd_corrected : xr.DataArray
             Corrected meridional wind component with reduced coastal values.
         """
-
         # calculate the distance from each ocean point to the closest land point
         cdist = min_dist_to_land(
             self.target_coords["lon"].values,
@@ -533,7 +528,6 @@ class SurfaceForcing:
         return uwnd_corrected, vwnd_corrected
 
     def _write_into_dataset(self, processed_fields, data, d_meta):
-
         # save in new dataset
         ds = xr.Dataset()
 
@@ -591,7 +585,6 @@ class SurfaceForcing:
         -----
         This check is applied to the first time step (`time=0`) of each variable in the provided dataset.
         """
-
         for var_name in ds.data_vars:
             if self.variable_info[var_name]["validate"]:
                 # all variables are at rho-points
@@ -599,7 +592,6 @@ class SurfaceForcing:
                 nan_check(ds[var_name].isel(time=0), mask)
 
     def _add_global_metadata(self, ds=None):
-
         if ds is None:
             ds = xr.Dataset()
         ds.attrs["title"] = "ROMS surface forcing file created by ROMS-Tools"
@@ -672,7 +664,6 @@ class SurfaceForcing:
         --------
         >>> atm_forcing.plot("uwnd", time=0)
         """
-
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
@@ -701,7 +692,7 @@ class SurfaceForcing:
 
     def save(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         group: bool = True,
     ) -> None:
         """Save the surface forcing fields to one or more netCDF4 files.
@@ -723,7 +714,6 @@ class SurfaceForcing:
         List[Path]
             A list of `Path` objects representing the filenames of the saved file(s).
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -743,7 +733,7 @@ class SurfaceForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -752,14 +742,13 @@ class SurfaceForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["use_dask", "use_coarse_grid"])
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
     def from_yaml(
         cls,
-        filepath: Union[str, Path],
+        filepath: str | Path,
         use_dask: bool = False,
     ) -> "SurfaceForcing":
         """Create an instance of the SurfaceForcing class from a YAML file.

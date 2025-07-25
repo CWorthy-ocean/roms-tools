@@ -71,7 +71,6 @@ def use_dask(request):
 
 @pytest.fixture(scope="session")
 def grid():
-
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
 
     return grid
@@ -79,7 +78,6 @@ def grid():
 
 @pytest.fixture(scope="session")
 def grid_that_straddles_dateline():
-
     grid = Grid(
         nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20
     )
@@ -94,7 +92,6 @@ def grid_that_straddles_180_degree_meridian():
     This is a good test grid for the global ERA5 data, which comes on an [-180, 180]
     longitude grid.
     """
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -110,7 +107,6 @@ def grid_that_straddles_180_degree_meridian():
 
 @pytest.fixture(scope="session")
 def tidal_forcing(use_dask):
-
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
@@ -130,7 +126,6 @@ def tidal_forcing(use_dask):
 @pytest.fixture(scope="session")
 def initial_conditions(use_dask):
     """Fixture for creating an InitialConditions object."""
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -158,7 +153,6 @@ def initial_conditions(use_dask):
 @pytest.fixture(scope="session")
 def initial_conditions_adjusted_for_zeta(use_dask):
     """Fixture for creating an InitialConditions object."""
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -187,7 +181,6 @@ def initial_conditions_adjusted_for_zeta(use_dask):
 @pytest.fixture(scope="session")
 def initial_conditions_with_bgc(use_dask):
     """Fixture for creating an InitialConditions object."""
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -217,7 +210,6 @@ def initial_conditions_with_bgc(use_dask):
 @pytest.fixture(scope="session")
 def initial_conditions_with_bgc_adjusted_for_zeta(use_dask):
     """Fixture for creating an InitialConditions object."""
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -248,7 +240,6 @@ def initial_conditions_with_bgc_adjusted_for_zeta(use_dask):
 @pytest.fixture(scope="session")
 def initial_conditions_with_bgc_from_climatology(use_dask):
     """Fixture for creating an InitialConditions object."""
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -428,7 +419,6 @@ def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask):
 @pytest.fixture(scope="session")
 def bgc_boundary_forcing_from_climatology(use_dask):
     """Fixture for creating a BoundaryForcing object."""
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -461,7 +451,6 @@ def bgc_boundary_forcing_from_climatology(use_dask):
 @pytest.fixture(scope="session")
 def bgc_boundary_forcing_from_unified_climatology(use_dask):
     """Fixture for creating a BoundaryForcing object."""
-
     grid = Grid(
         nx=2,
         ny=2,
@@ -492,7 +481,6 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask):
 @pytest.fixture(scope="session")
 def surface_forcing(use_dask):
     """Fixture for creating a SurfaceForcing object."""
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -523,7 +511,6 @@ def surface_forcing(use_dask):
 @pytest.fixture(scope="session")
 def surface_forcing_arco(use_dask):
     """Fixture for creating a SurfaceForcing object with ERA5 ARCO data."""
-
     if not use_dask:
         pytest.skip("surface_forcing_arco requires use_dask=True")
 
@@ -554,7 +541,6 @@ def surface_forcing_arco(use_dask):
 @pytest.fixture(scope="session")
 def coarse_surface_forcing(use_dask):
     """Fixture for creating a SurfaceForcing object."""
-
     grid = Grid(
         nx=5,
         ny=5,
@@ -584,8 +570,8 @@ def coarse_surface_forcing(use_dask):
 @pytest.fixture(scope="session")
 def corrected_surface_forcing(use_dask):
     """Fixture for creating a SurfaceForcing object with shortwave radiation
-    correction."""
-
+    correction.
+    """
     grid = Grid(
         nx=5,
         ny=5,
@@ -615,7 +601,6 @@ def corrected_surface_forcing(use_dask):
 @pytest.fixture(scope="session")
 def surface_forcing_with_wind_dropoff(use_dask):
     """Fixture for creating a SurfaceForcing object with wind dropoff correction."""
-
     grid = Grid(
         nx=5,
         ny=5,

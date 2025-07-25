@@ -1,7 +1,0 @@
-{
-    "_ARRAY_DIMENSIONS": [
-        "s_rho"
-    ],
-    "long_name": "Fractional vertical stretching coordinate at rho-points",
-    "units": "nondimensional"
-}

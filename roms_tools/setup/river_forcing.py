@@ -3,7 +3,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import cartopy.crs as ccrs
 import matplotlib.cm as cm
@@ -94,7 +93,7 @@ class RiverForcing:
     """Start time of the desired river forcing data."""
     end_time: datetime
     """End time of the desired river forcing data."""
-    source: Dict[str, Union[str, Path, List[Union[str, Path]]]] = None
+    source: dict[str, str | Path | list[str | Path]] = None
     """Dictionary specifying the source of the river forcing data."""
     convert_to_climatology: str = "if_any_missing"
     """Determines when to compute climatology for river forcing."""
@@ -103,7 +102,7 @@ class RiverForcing:
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
-    indices: Optional[Dict[str, Dict[str, Union[int, List[int]]]]] = None
+    indices: dict[str, dict[str, int | list[int]]] | None = None
     """A dictionary of river indices.
 
     If not provided during initialization, it will be automatically determined based on
@@ -212,11 +211,11 @@ class RiverForcing:
                     # Check that eta_rho and xi_rho are within the valid range
                     if not (0 <= eta_rho < len(self.grid.ds.eta_rho)):
                         raise ValueError(
-                            f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho)-1}]."
+                            f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho) - 1}]."
                         )
                     if not (0 <= xi_rho < len(self.grid.ds.xi_rho)):
                         raise ValueError(
-                            f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho)-1}]."
+                            f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho) - 1}]."
                         )
 
                     # Check for duplicate tuples for a single river
@@ -227,7 +226,6 @@ class RiverForcing:
                     seen_tuples.add(idx_pair)
 
     def _get_data(self):
-
         data_dict = {
             "start_time": self.start_time,
             "end_time": self.end_time,
@@ -269,7 +267,6 @@ class RiverForcing:
             A dictionary consisting of river names as keys, and each value is a list of tuples. Each tuple represents
             a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
         """
-
         # Retrieve longitude and latitude of river mouths
         river_lon = data.ds[data.var_names["longitude"]]
         river_lat = data.ds[data.var_names["latitude"]]
@@ -422,7 +419,6 @@ class RiverForcing:
         xr.Dataset
             A new dataset with overlapping rivers resolved and new entries added.
         """
-
         overlapping_rivers = self._get_overlapping_rivers()
 
         if len(overlapping_rivers) > 0:
@@ -435,7 +431,6 @@ class RiverForcing:
             combined_river_tracers = []
 
             for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
-
                 (
                     combined_river_volume,
                     combined_river_tracer,
@@ -445,10 +440,10 @@ class RiverForcing:
 
             ds_updated = xr.Dataset()
             ds_updated["river_volume"] = xr.concat(
-                [ds["river_volume"]] + combined_river_volumes, dim="nriver"
+                [ds["river_volume"], *combined_river_volumes], dim="nriver"
             )
             ds_updated["river_tracer"] = xr.concat(
-                [ds["river_tracer"]] + combined_river_tracers, dim="nriver"
+                [ds["river_tracer"], *combined_river_tracers], dim="nriver"
             )
             ds_updated.attrs = ds.attrs
         else:
@@ -471,7 +466,6 @@ class RiverForcing:
             A dictionary mapping grid cell indices (eta_rho, xi_rho) to a list
             of river names that overlap at that grid cell.
         """
-
         index_to_rivers = defaultdict(list)
 
         # Collect all index pairs used by multiple rivers
@@ -518,7 +512,6 @@ class RiverForcing:
             The volume-weighted tracer concentration at the overlapping grid cell,
             as a new 1-entry DataArray with updated coordinates.
         """
-
         new_name = f"overlap_{i}"
         self.indices[new_name] = [idx_pair]
 
@@ -559,9 +552,9 @@ class RiverForcing:
         for ntracer in range(combined_river_tracer.sizes["ntracers"]):
             tracer_name = combined_river_tracer.tracer_name[ntracer].item()
             default = defaults[tracer_name]
-            combined_river_tracer.loc[
-                {"ntracers": ntracer}
-            ] = combined_river_tracer.loc[{"ntracers": ntracer}].fillna(default)
+            combined_river_tracer.loc[{"ntracers": ntracer}] = (
+                combined_river_tracer.loc[{"ntracers": ntracer}].fillna(default)
+            )
 
         # Expand, assign coordinates, and name for both volume and tracer
         new_nriver = ds.sizes["nriver"] + i
@@ -632,7 +625,6 @@ class RiverForcing:
         xarray.Dataset
             The modified dataset with the "river_index" and "river_fraction" variables added.
         """
-
         river_index = xr.zeros_like(self.grid.ds.h, dtype=np.float32)
         river_fraction = xr.zeros_like(self.grid.ds.h, dtype=np.float32)
 
@@ -641,7 +633,6 @@ class RiverForcing:
             indices = self.indices[river_name]
             fraction = 1.0 / len(indices)
             for eta_index, xi_index in indices:
-
                 # Assign unique nriver ID (Fortran-based indexing)
                 river_index[eta_index, xi_index] = nriver
                 # Fractional contribution for multiple grid points
@@ -672,7 +663,6 @@ class RiverForcing:
         Warning
             If NaN values are found in any of the dataset variables, a warning message is logged.
         """
-
         for var_name in ds.data_vars:
             da = ds[var_name]
             if da.isnull().any().values:
@@ -684,7 +674,6 @@ class RiverForcing:
 
     def plot_locations(self):
         """Plots the original and updated river locations on a map projection."""
-
         field = self.grid.ds.mask_rho
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
@@ -826,7 +815,6 @@ class RiverForcing:
             long_name = f"River {d[var_name_wo_river]['long_name']}"
 
         for i in range(len(self.ds.nriver)):
-
             ax.plot(
                 xticks,
                 field.isel(nriver=i),
@@ -850,7 +838,7 @@ class RiverForcing:
 
     def save(
         self,
-        filepath: Union[str, Path],
+        filepath: str | Path,
     ) -> None:
         """Save the river forcing to netCDF4 file.
 
@@ -864,7 +852,6 @@ class RiverForcing:
         List[Path]
             A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
         """
-
         # Ensure filepath is a Path object
         filepath = Path(filepath)
 
@@ -879,7 +866,7 @@ class RiverForcing:
 
         return saved_filenames
 
-    def to_yaml(self, filepath: Union[str, Path]) -> None:
+    def to_yaml(self, filepath: str | Path) -> None:
         """Export the parameters of the class to a YAML file, including the version of
         roms-tools.
 
@@ -888,7 +875,6 @@ class RiverForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-
         forcing_dict = to_dict(self, exclude=["climatology"])
 
         # Convert indices format
@@ -909,7 +895,7 @@ class RiverForcing:
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: Union[str, Path]) -> "RiverForcing":
+    def from_yaml(cls, filepath: str | Path) -> "RiverForcing":
         """Create an instance of the RiverForcing class from a YAML file.
 
         Parameters
@@ -962,7 +948,6 @@ def check_river_locations_are_along_coast(mask, indices):
     ValueError
         If any river is not located on the coast.
     """
-
     faces = (
         mask.shift(eta_rho=1)
         + mask.shift(eta_rho=-1)

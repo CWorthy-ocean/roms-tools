@@ -13,6 +13,7 @@ plot(field, grid.ds)
 * Section plots now include gray topography shading ([#379](https://github.com/CWorthy-ocean/roms-tools/pull/379))
 * Grid latitude/longitude generation is updated to match UCLA MATLAB tools ([#381](https://github.com/CWorthy-ocean/roms-tools/pull/381))
 * Bathymetry smoothing is modified by reducing the smoothing scale and applying an area-weighted scheme ([#381](https://github.com/CWorthy-ocean/roms-tools/pull/381))
+* Remove cartopy coastlines from plots for the sake of clarity ([#387](https://github.com/CWorthy-ocean/roms-tools/pull/387))
 
 ### Breaking Changes
 

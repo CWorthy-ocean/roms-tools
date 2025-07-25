@@ -1006,6 +1006,7 @@ class Grid:
         # Central longitude spacing (in radians)
         dlon_cen = dlon / nl
 
+        # Iteratively adjust latitude to make grid cells square using aspect ratio correction
         for _ in range(100):
 
             # Compute Mercator y-limits

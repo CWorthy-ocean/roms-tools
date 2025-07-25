@@ -84,5 +84,5 @@ Utilities
 .. autosummary::
    :toctree: generated/
 
-   roms_tools.tiling.partition
+   roms_tools.tiling.partition.partition_netcdf
    roms_tools.plot.plot

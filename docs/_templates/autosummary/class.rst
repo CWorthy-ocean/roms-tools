@@ -9,12 +9,19 @@
    .. rubric:: Methods
    .. autosummary::
       :toctree:
+
    {% for item in all_methods %}
-      {%- if not item.startswith('_') or item in ['__call__',
-                                                  ] %}
-        {%- if not (objname == 'ChildGrid' and item == 'from_file') %}
-        {{ name }}.{{ item }}
-       . {% endif %}
+      {% if item not in [
+          'copy', 'dict', 'json', 'schema', 'schema_json',
+          'validate', 'from_orm', 'from_json', 'construct',
+          'update_forward_refs', 'parse_obj', 'parse_file',
+          'model_construct', 'model_parametrized_name', 'parse_raw',
+          'model_dump', 'model_dump_json', 'model_validate',
+          'model_validate_json', 'model_validate_strings',
+          'model_post_init', 'model_copy', 'model_json_schema',
+          'model_rebuild', 'model_fields_set', 'model_computed_fields'
+      ] and not item.startswith('_') %}
+         {{ name }}.{{ item }}
       {% endif %}
    {% endfor %}
    {% endif %}
@@ -25,7 +32,12 @@
    .. rubric:: Attributes
    .. autosummary::
    {% for item in attributes %}
-      {{ name }}.{{ item }}
+      {% if item not in [
+          'model_computed_fields', 'model_fields', 'model_config',
+          'model_extra', 'model_fields_set', '__private_attributes__'
+      ] and not item.startswith('_') %}
+         {{ name }}.{{ item }}
+      {% endif %}
    {% endfor %}
    {% endif %}
    {% endblock %}

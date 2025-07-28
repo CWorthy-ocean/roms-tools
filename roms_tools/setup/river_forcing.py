@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
+from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.plot import (
     assign_category_colors,
     get_projection,
@@ -29,9 +30,13 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     substitute_nans_by_fillvalue,
     to_dict,
+    validate_names,
     write_to_yaml,
 )
 from roms_tools.utils import save_datasets
+
+INCLUDE_ALL_RIVER_NAMES = "all"
+MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 
 
 @dataclass(kw_only=True)
@@ -675,8 +680,15 @@ class RiverForcing:
                     "`convert_to_climatology = 'if_any_missing'` to automatically fill missing values with climatological data."
                 )
 
-    def plot_locations(self):
+    def plot_locations(self, river_names=INCLUDE_ALL_RIVER_NAMES):
         """Plots the original and updated river locations on a map projection."""
+        valid_river_names = list(self.indices.keys())
+        river_names = _validate_river_names(river_names, valid_river_names)
+        if len(valid_river_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(river_names)
+        else:
+            colors = assign_category_colors(valid_river_names)
+
         field = self.grid.ds.mask_rho
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
@@ -698,23 +710,21 @@ class RiverForcing:
         for ax in axs:
             plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
-        river_names = self.indices.keys()
-        colors = assign_category_colors(river_names)
-
         points = {}
         for j, (ax, indices) in enumerate(
             [(ax, ind) for ax, ind in zip(axs, [self.original_indices, self.indices])]
         ):
-            for name in indices:
-                for i, (eta_index, xi_index) in enumerate(indices[name]):
-                    lon = self.grid.ds.lon_rho[eta_index, xi_index].item()
-                    lat = self.grid.ds.lat_rho[eta_index, xi_index].item()
-                    key = name if i == 0 else f"_{name}_{i}"
-                    points[key] = {
-                        "lon": lon,
-                        "lat": lat,
-                        "color": colors[name],
-                    }
+            for name in river_names:
+                if name in indices:
+                    for i, (eta_index, xi_index) in enumerate(indices[name]):
+                        lon = self.grid.ds.lon_rho[eta_index, xi_index].item()
+                        lat = self.grid.ds.lat_rho[eta_index, xi_index].item()
+                        key = name if i == 0 else f"_{name}_{i}"
+                        points[key] = {
+                            "lon": lon,
+                            "lat": lat,
+                            "color": colors[name],
+                        }
 
             plot_location(
                 grid_ds=self.grid.ds,
@@ -726,7 +736,7 @@ class RiverForcing:
         axs[0].set_title("Original river locations")
         axs[1].set_title("Updated river locations")
 
-    def plot(self, var_name="river_volume"):
+    def plot(self, var_name="river_volume", river_names=INCLUDE_ALL_RIVER_NAMES):
         """Plots the river flux (e.g., volume, temperature, or salinity) over time for
         all rivers.
 
@@ -777,6 +787,13 @@ class RiverForcing:
 
             The default is 'river_volume'.
         """
+        valid_river_names = list(self.indices.keys())
+        river_names = _validate_river_names(river_names, valid_river_names)
+        if len(valid_river_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(river_names)
+        else:
+            colors = assign_category_colors(valid_river_names)
+
         if self.climatology:
             xticks = self.ds.month.values
             xlabel = "month"
@@ -796,9 +813,6 @@ class RiverForcing:
             )
             units = d[var_name_wo_river]["units"]
             long_name = f"River {d[var_name_wo_river]['long_name']}"
-
-        river_names = self.indices.keys()
-        colors = assign_category_colors(river_names)
 
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
         for name in river_names:
@@ -955,3 +969,38 @@ def check_river_locations_are_along_coast(mask, indices):
                 raise ValueError(
                     f"River `{key}` is not located on the coast at grid cell ({eta_rho}, {xi_rho})."
                 )
+
+
+def _validate_river_names(
+    river_names: list[str] | str, valid_river_names: list[str]
+) -> list[str]:
+    """
+    Validate and filter a list of river names.
+
+    Ensures that each river name exists in `valid_river_names` and limits the list
+    to `MAX_RIVERS_TO_PLOT` entries with a warning if truncated.
+
+    Parameters
+    ----------
+    river_names : list of str or INCLUDE_ALL_RIVER_NAMES
+        Names of rivers to plot, or sentinel to include all.
+    valid_river_names : list of str
+        List of valid river names.
+
+    Returns
+    -------
+    list of str
+        Validated and truncated list of river names.
+
+    Raises
+    ------
+    ValueError
+        If any names are invalid.
+    """
+    return validate_names(
+        river_names,
+        valid_river_names,
+        INCLUDE_ALL_RIVER_NAMES,
+        MAX_RIVERS_TO_PLOT,
+        label="river",
+    )

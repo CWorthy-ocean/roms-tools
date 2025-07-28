@@ -1,4 +1,5 @@
 import importlib.metadata
+import logging
 from collections.abc import Sequence
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -1794,3 +1795,59 @@ def to_float(val):
     if isinstance(val, list):
         return [float(v) for v in val]
     return float(val)
+
+
+def validate_names(
+    names: list[str] | str,
+    valid_names: list[str],
+    include_all_sentinel: str,
+    max_to_plot: int,
+    label: str = "item",
+) -> list[str]:
+    """
+    Generic validation and filtering for a list of names.
+
+    Parameters
+    ----------
+    names : list of str or sentinel
+        Names to validate, or sentinel value to include all valid names.
+    valid_names : list of str
+        List of valid names to check against.
+    include_all_sentinel : str
+        Sentinel value to indicate all names should be included.
+    max_to_plot : int
+        Maximum number of names to return.
+    label : str, default "item"
+        Label to use in error and warning messages.
+
+    Returns
+    -------
+    list of str
+        Validated and possibly truncated list of names.
+
+    Raises
+    ------
+    ValueError
+        If any names are invalid or input is not a list of strings.
+    """
+    if names == include_all_sentinel:
+        names = valid_names
+
+    if isinstance(names, list):
+        if not all(isinstance(n, str) for n in names):
+            raise ValueError(f"All elements in `{label}_names` must be strings.")
+    else:
+        raise ValueError(f"`{label}_names` should be a list of strings.")
+
+    invalid = [n for n in names if n not in valid_names]
+    if invalid:
+        raise ValueError(f"Invalid {label}s: {', '.join(invalid)}")
+
+    if len(names) > max_to_plot:
+        logging.warning(
+            f"Only the first {max_to_plot} {label}s will be plotted "
+            f"(received {len(names)})."
+        )
+        names = names[:max_to_plot]
+
+    return names

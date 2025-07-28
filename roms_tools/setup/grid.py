@@ -29,8 +29,7 @@ from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stre
 
 @dataclass(kw_only=True)
 class BaseGrid:
-    """A single ROMS grid, used for creating, plotting, and then saving a new ROMS
-    domain grid.
+    """Base class for grid.
 
     The grid generation consists of four steps:
 

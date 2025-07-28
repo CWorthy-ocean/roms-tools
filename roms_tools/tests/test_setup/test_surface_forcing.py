@@ -10,6 +10,8 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.download import download_test_data
+from roms_tools.setup.datasets import ERA5ARCODataset
+from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
 from roms_tools.utils import _has_gcsfs
 
 
@@ -963,27 +965,16 @@ def test_default_era5_dataset_loading_without_dask(
 )
 def test_default_era5_dataset_loading() -> None:
     """Verify the default ERA5 dataset is loaded when a path is not provided."""
-    grid = Grid(
-        nx=5,
-        ny=5,
-        size_x=5,
-        size_y=5,
-        center_lon=180,
-        center_lat=61,
-        rot=20,
-    )
-
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 2)
 
-    sf = SurfaceForcing(
-        grid=grid,
-        source={"name": "ERA5"},
+    ds = ERA5ARCODataset(
+        filename=DEFAULT_ERA5_ARCO_PATH,
         start_time=start_time,
         end_time=end_time,
         use_dask=True,
+        # climatology=True,
     )
 
     expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
-    assert set(sf.ds.data_vars).issuperset(expected_vars)
-
+    assert set(ds.var_names).issuperset(expected_vars)

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -7,9 +8,7 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import ERA5Correction
-from roms_tools.setup.utils import (
-    interpolate_from_climatology,
-)
+from roms_tools.setup.utils import interpolate_from_climatology, validate_names
 
 
 def test_interpolate_from_climatology(use_dask):
@@ -71,3 +70,53 @@ def test_roundtrip_yaml(
 
         filepath = Path(filepath)
         filepath.unlink()
+
+
+# test validate_names function
+
+VALID_NAMES = ["a", "b", "c", "d"]
+SENTINEL = "ALL"
+MAX_TO_PLOT = 3
+
+
+def test_valid_names_no_truncation():
+    names = ["a", "b"]
+    result = validate_names(names, VALID_NAMES, SENTINEL, MAX_TO_PLOT, label="test")
+    assert result == names
+
+
+def test_valid_names_with_truncation(caplog):
+    names = ["a", "b", "c", "d"]
+    with caplog.at_level(logging.WARNING):
+        result = validate_names(
+            names, VALID_NAMES, SENTINEL, max_to_plot=2, label="test"
+        )
+        assert result == ["a", "b"]
+        assert "Only the first 2 tests will be plotted" in caplog.text
+
+
+def test_include_all_sentinel():
+    result = validate_names(SENTINEL, VALID_NAMES, SENTINEL, MAX_TO_PLOT, label="test")
+    assert result == VALID_NAMES[:MAX_TO_PLOT]
+
+
+def test_invalid_name_raises():
+    with pytest.raises(ValueError, match="Invalid tests: z"):
+        validate_names(["a", "z"], VALID_NAMES, SENTINEL, MAX_TO_PLOT, label="test")
+
+
+def test_non_list_input_raises():
+    with pytest.raises(ValueError, match="`test_names` should be a list of strings."):
+        validate_names("a", VALID_NAMES, SENTINEL, MAX_TO_PLOT, label="test")
+
+
+def test_non_string_elements_in_list_raises():
+    with pytest.raises(
+        ValueError, match="All elements in `test_names` must be strings."
+    ):
+        validate_names(["a", 2], VALID_NAMES, SENTINEL, MAX_TO_PLOT, label="test")
+
+
+def test_custom_label_in_errors():
+    with pytest.raises(ValueError, match="Invalid foozs: z"):
+        validate_names(["z"], VALID_NAMES, SENTINEL, MAX_TO_PLOT, label="fooz")

@@ -166,7 +166,7 @@ import xarray as xr
     [
         ("surface_forcing", "time"),
         ("bgc_surface_forcing", "time"),
-        ("tidal_forcing", "eta_rho"),
+        # ("tidal_forcing", "eta_rho"),
         ("coarse_surface_forcing", "eta_rho"),
     ],
 )

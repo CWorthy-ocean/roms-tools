@@ -9,6 +9,7 @@ import xarray as xr
 
 from conftest import calculate_file_hash
 from roms_tools import Grid, RiverForcing
+from roms_tools.constants import MAX_DISTINCT_COLORS
 
 
 @pytest.fixture
@@ -49,6 +50,29 @@ def river_forcing_for_grid_that_straddles_dateline():
     )
     start_time = datetime(1998, 1, 1)
     end_time = datetime(1998, 3, 1)
+
+    return RiverForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+
+@pytest.fixture
+def river_forcing_for_gulf_of_mexico():
+    """Fixture for creating a RiverForcing object for the Gulf of Mexico with 45 rivers."""
+    grid = Grid(
+        nx=20,
+        ny=15,
+        size_x=2000,
+        size_y=1500,
+        center_lon=-89,
+        center_lat=24,
+        rot=0,
+        N=3,
+    )
+    start_time = datetime(2012, 1, 1)
+    end_time = datetime(2012, 1, 31)
 
     return RiverForcing(
         grid=grid,
@@ -247,13 +271,46 @@ class TestRiverForcingGeneral:
             )
 
     def test_river_forcing_plot(self, river_forcing_with_bgc):
-        """Test plot method."""
+        """Test plot methods with and without specifying river_names."""
+        river_names = list(river_forcing_with_bgc.indices.keys())[0:2]
+
+        # Test plot_locations
         river_forcing_with_bgc.plot_locations()
-        river_forcing_with_bgc.plot("river_volume")
-        river_forcing_with_bgc.plot("river_temp")
-        river_forcing_with_bgc.plot("river_salt")
-        river_forcing_with_bgc.plot("river_ALK")
-        river_forcing_with_bgc.plot("river_PO4")
+        river_forcing_with_bgc.plot_locations(river_names=river_names)
+
+        # Fields to test
+        variables = [
+            "river_volume",
+            "river_temp",
+            "river_salt",
+            "river_ALK",
+            "river_PO4",
+        ]
+
+        for var in variables:
+            river_forcing_with_bgc.plot(var)
+            river_forcing_with_bgc.plot(var, river_names=river_names)
+
+    def test_plot_max_releases(self, caplog, river_forcing_for_gulf_of_mexico):
+        river_names = list(river_forcing_for_gulf_of_mexico.indices.keys())
+
+        caplog.clear()
+        with caplog.at_level("WARNING"):
+            river_forcing_for_gulf_of_mexico.plot_locations()
+        assert any(
+            f"Only the first {MAX_DISTINCT_COLORS} rivers will be plotted" in message
+            for message in caplog.messages
+        )
+
+        with caplog.at_level("WARNING"):
+            river_forcing_for_gulf_of_mexico.plot(
+                "river_volume", river_names=river_names
+            )
+
+        assert any(
+            f"Only the first {MAX_DISTINCT_COLORS} rivers will be plotted" in message
+            for message in caplog.messages
+        )
 
     @pytest.mark.parametrize(
         "river_forcing_fixture",

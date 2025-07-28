@@ -680,8 +680,17 @@ class RiverForcing:
                     "`convert_to_climatology = 'if_any_missing'` to automatically fill missing values with climatological data."
                 )
 
-    def plot_locations(self, river_names=INCLUDE_ALL_RIVER_NAMES):
-        """Plots the original and updated river locations on a map projection."""
+    def plot_locations(self, river_names: list[str] | str = INCLUDE_ALL_RIVER_NAMES):
+        """Plots the original and updated river locations on a map projection.
+
+        Parameters
+        ----------
+        river_names : list[str], or str, optional
+            A list of release names to plot.
+            If a string equal to "all", all rivers will be plotted.
+            Defaults to "all".
+
+        """
         valid_river_names = list(self.indices.keys())
         river_names = _validate_river_names(river_names, valid_river_names)
         if len(valid_river_names) > MAX_DISTINCT_COLORS:
@@ -736,7 +745,11 @@ class RiverForcing:
         axs[0].set_title("Original river locations")
         axs[1].set_title("Updated river locations")
 
-    def plot(self, var_name="river_volume", river_names=INCLUDE_ALL_RIVER_NAMES):
+    def plot(
+        self,
+        var_name: str = "river_volume",
+        river_names: list[str] | str = INCLUDE_ALL_RIVER_NAMES,
+    ):
         """Plots the river flux (e.g., volume, temperature, or salinity) over time for
         all rivers.
 
@@ -786,6 +799,12 @@ class RiverForcing:
             - 'river_diazFe' : river diazFe (from river_tracer).
 
             The default is 'river_volume'.
+
+        river_names : list[str], or str, optional
+            A list of release names to plot.
+            If a string equal to "all", all rivers will be plotted.
+            Defaults to "all".
+
         """
         valid_river_names = list(self.indices.keys())
         river_names = _validate_river_names(river_names, valid_river_names)

@@ -395,7 +395,10 @@ class CDRForcing(BaseModel):
         return self._ds
 
     def plot_volume_flux(
-        self, start=None, end=None, release_names=INCLUDE_ALL_RELEASE_NAMES
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the volume flux for each specified release within the given time range.
 
@@ -441,9 +444,9 @@ class CDRForcing(BaseModel):
     def plot_tracer_concentration(
         self,
         tracer_name: str,
-        start=None,
-        end=None,
-        release_names=INCLUDE_ALL_RELEASE_NAMES,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the concentration of a given tracer for each specified release within
         the given time range.
@@ -507,9 +510,9 @@ class CDRForcing(BaseModel):
     def plot_tracer_flux(
         self,
         tracer_name: str,
-        start=None,
-        end=None,
-        release_names=INCLUDE_ALL_RELEASE_NAMES,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the flux of a given tracer for each specified release within the given
         time range.
@@ -590,7 +593,9 @@ class CDRForcing(BaseModel):
         ax.set(title=title, ylabel=ylabel, xlabel="time")
         ax.set_xlim([start, end])
 
-    def plot_locations(self, release_names=INCLUDE_ALL_RELEASE_NAMES):
+    def plot_locations(
+        self, release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES
+    ):
         """Plot centers of release locations in top-down view.
 
         Parameters

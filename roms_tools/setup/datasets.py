@@ -143,12 +143,13 @@ class Dataset:
         FileNotFoundError
             If the specified file does not exist.
         ValueError
-            If a list of files is provided but `self.dim_names["time"]` is not
-            available or `use_dask=False`.
+            If a list of files is provided but `self.dim_names["time"]` is not available or `use_dask=False`.
         """
-        return _load_data(
+        ds = _load_data(
             self.filename, self.dim_names, self.use_dask, read_zarr=self.read_zarr
         )
+
+        return ds
 
     def clean_up(self, ds: xr.Dataset, **kwargs) -> xr.Dataset:
         """Dummy method to be overridden by child classes to clean up the dataset.

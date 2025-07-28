@@ -34,8 +34,7 @@ napolean_google_docstring = False
 napolean_numpy_docstring = True
 
 templates_path = ["_templates"]
-exclude_patterns = []
-# exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 napoleon_custom_sections = [
     ("Returns", "params_style"),
@@ -45,9 +44,11 @@ napoleon_custom_sections = [
     ("Example Config YAML File", "example"),
 ]
 
-autodoc_default_options = {
-    "inherited-members": False,
-}
+# autodoc_default_options = {
+#     "inherited-members": "BaseModel, pydantic.BaseModel, pydantic.main.BaseModel"
+# }
+
+autosummary_generate = True
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

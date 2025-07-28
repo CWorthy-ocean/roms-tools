@@ -274,16 +274,6 @@ class ChildGrid(Grid):
         child_grid_ds = wrap_longitudes(child_grid_ds, straddle=False)
         return parent_grid_ds, child_grid_ds
 
-    @classmethod
-    def from_file(cls, filepath: str | Path, verbose: bool = False) -> "ChildGrid":
-        """This method is disabled in this subclass.
-
-        .. noindex::
-        """
-        raise NotImplementedError(
-            "The 'from_file' method is disabled in this subclass."
-        )
-
 
 def map_child_boundaries_onto_parent_grid_indices(
     parent_grid_ds,

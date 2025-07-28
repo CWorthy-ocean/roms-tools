@@ -764,7 +764,7 @@ def test_glorys_default_dataset(
     boundary_forcing: BoundaryForcing,
 ) -> None:
     """Verify the default GLORYS dataset is loaded when a path is not provided."""
-    ff = BoundaryForcing(
+    bf = BoundaryForcing(
         grid=boundary_forcing.grid,
         source={
             "name": "GLORYS",
@@ -775,3 +775,4 @@ def test_glorys_default_dataset(
         end_time=datetime(2000, 1, 2),
         use_dask=True,
     )
+    assert bf

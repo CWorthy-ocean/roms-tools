@@ -380,6 +380,7 @@ class CDRForcing(BaseModel):
 
     @property
     def release_type(self) -> ReleaseType:
+        """Type of the release."""
         return self.releases.release_type
 
     @property

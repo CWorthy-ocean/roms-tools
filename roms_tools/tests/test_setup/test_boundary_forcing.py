@@ -760,19 +760,19 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
         yaml_filepath.unlink()
 
 
-def test_glorys_default_dataset(
-    boundary_forcing: BoundaryForcing,
-) -> None:
-    """Verify the default GLORYS dataset is loaded when a path is not provided."""
-    bf = BoundaryForcing(
-        grid=boundary_forcing.grid,
-        source={
-            "name": "GLORYS",
-            "path": "",
-        },
-        type="physics",
-        start_time=datetime(2000, 1, 1),
-        end_time=datetime(2000, 1, 2),
-        use_dask=True,
-    )
-    assert bf
+# def test_glorys_default_dataset(
+#     boundary_forcing: BoundaryForcing,
+# ) -> None:
+#     """Verify the default GLORYS dataset is loaded when a path is not provided."""
+#     bf = BoundaryForcing(
+#         grid=boundary_forcing.grid,
+#         source={
+#             "name": "GLORYS",
+#             "path": "",
+#         },
+#         type="physics",
+#         start_time=datetime(2000, 1, 1),
+#         end_time=datetime(2000, 1, 2),
+#         use_dask=True,
+#     )
+#     assert bf

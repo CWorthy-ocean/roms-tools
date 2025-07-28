@@ -1,5 +1,5 @@
-from collections.abc import Callable
 import hashlib
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 

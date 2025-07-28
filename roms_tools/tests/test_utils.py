@@ -1,18 +1,19 @@
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
+from unittest import mock
+
 import numpy as np
 import pytest
+import xarray as xr
 
-from roms_tools.utils import _generate_focused_coordinate_range
 from roms_tools.utils import (
+    _check_dask,
+    _check_load_zarr,
+    _generate_focused_coordinate_range,
     _has_dask,
     _has_gcsfs,
-    _check_load_zarr,
-    _check_dask,
     _load_data,
 )
-
-from unittest import mock
 
 
 @pytest.fixture
@@ -145,7 +146,6 @@ def test_load_data_open_zarr_without_dask() -> None:
 @pytest.mark.skipif(not _has_dask(), reason="Run only when Dask is installed")
 def test_load_data_open_zarr(surface_forcing_dataset_path: Path) -> None:
     """Verify that a zarr file is correctly loaded when using xr.open_zarr."""
-
     with mock.patch("roms_tools.utils.xr.open_zarr", wraps=xr.open_zarr) as fn_oz:
         ds = _load_data(
             surface_forcing_dataset_path,
@@ -156,9 +156,6 @@ def test_load_data_open_zarr(surface_forcing_dataset_path: Path) -> None:
 
         assert "time" in ds.dims
         assert fn_oz.called
-
-
-import xarray as xr
 
 
 @pytest.mark.parametrize(

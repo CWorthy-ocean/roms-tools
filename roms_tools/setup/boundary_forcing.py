@@ -1,6 +1,6 @@
-from collections import defaultdict
 import importlib.metadata
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -14,8 +14,8 @@ from roms_tools import Grid
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.datasets import (
-    Dataset,
     CESMBGCDataset,
+    Dataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     UnifiedBGCDataset,
@@ -431,7 +431,6 @@ class BoundaryForcing:
             logging.info(
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
-
 
     def _get_data(self) -> Dataset:
         """Determine the correct `Dataset` type and return an instance.

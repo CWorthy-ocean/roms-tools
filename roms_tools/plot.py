@@ -1131,8 +1131,6 @@ def assign_category_colors(names: list[str]) -> dict[str, tuple]:
         cmap = plt.get_cmap("tab10")
     elif n <= 20:
         cmap = plt.get_cmap("tab20")
-    else:
-        cmap = plt.get_cmap("tab20b")
 
     if n > cmap.N:
         raise ValueError(

@@ -508,7 +508,6 @@ def surface_forcing(use_dask):
     )
 
 
-@pytest.mark.stream
 @pytest.fixture(scope="session")
 def surface_forcing_arco(use_dask):
     """Fixture for creating a SurfaceForcing object with ERA5 ARCO data."""

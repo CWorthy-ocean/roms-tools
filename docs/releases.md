@@ -4,7 +4,9 @@
 
 ### New Features
 
-* A unified `plot` function is now available, enabling users to create custom plots more easily. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
+* Allow plotting of a selected subset of river locations or time series, using the `river_names` argument ([#389](https://github.com/CWorthy-ocean/roms-tools/pull/389))
+* Limit plotting to a maximum of 20 rivers/CDR forcings to match colormap constraints, with a warning if more are provided ([#389](https://github.com/CWorthy-ocean/roms-tools/pull/389))
+* A unified `plot` function is now available, enabling users to create custom plots more easily ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 ```python
 from roms_tools.plot import plot
 plot(field, grid.ds)
@@ -28,6 +30,7 @@ plot(field, grid.ds)
 
 ### Bugfixes
 
+* Prevent plotting errors when more than 20 CDR or river forcings are present ([#389](https://github.com/CWorthy-ocean/roms-tools/pull/389))
 * Fix bug incorrectly identifying CDR releases as outside the domain ([#377](https://github.com/CWorthy-ocean/roms-tools/pull/377))
 * Add a de-duplication step that ensures that river names are unique ([#378](https://github.com/CWorthy-ocean/roms-tools/pull/378))
 * Grid boundary plotting now provides a more accurate and consistent visual representation, with a default edge color of black. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))

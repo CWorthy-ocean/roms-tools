@@ -20,6 +20,7 @@ from pydantic import (
 )
 
 from roms_tools import Grid
+from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.plot import (
     assign_category_colors,
     get_projection,
@@ -40,6 +41,7 @@ from roms_tools.setup.utils import (
     gc_dist,
     get_target_coords,
     to_dict,
+    validate_names,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -49,7 +51,7 @@ from roms_tools.utils import (
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 INCLUDE_ALL_RELEASE_NAMES = "all"
-MAX_RELEASES_TO_PLOT = 20  # must be 20 or smaller because of colormap restriction
+MAX_RELEASES_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 
 
 class ReleaseSimulationManager(BaseModel):
@@ -565,7 +567,11 @@ class CDRForcing(BaseModel):
 
     def _plot_line(self, data, release_names, start, end, title="", ylabel=""):
         """Plots a line graph for the specified releases and time range."""
-        colors = assign_category_colors([r.name for r in self.releases])
+        valid_release_names = [r.name for r in self.releases]
+        if len(valid_release_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(release_names)
+        else:
+            colors = assign_category_colors(valid_release_names)
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
         for name in release_names:
@@ -628,7 +634,11 @@ class CDRForcing(BaseModel):
         plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         # Plot release locations
-        colors = assign_category_colors([r.name for r in self.releases])
+        valid_release_names = [r.name for r in self.releases]
+        if len(valid_release_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(release_names)
+        else:
+            colors = assign_category_colors(valid_release_names)
         plot_location(
             grid_ds=self.grid.ds,
             points={
@@ -856,29 +866,13 @@ def _validate_release_names(
     ValueError
         If any names are invalid.
     """
-    valid_release_names = [r.name for r in releases]
-
-    if release_names == INCLUDE_ALL_RELEASE_NAMES:
-        release_names = valid_release_names
-
-    if isinstance(release_names, list):
-        if not all(isinstance(r, str) for r in release_names):
-            raise ValueError("All elements in `release_names` list must be strings.")
-    else:
-        raise ValueError("`release_names` should be a list of strings.")
-
-    invalid = [r for r in release_names if r not in valid_release_names]
-    if invalid:
-        raise ValueError(f"Invalid releases: {', '.join(invalid)}")
-
-    if len(release_names) > MAX_RELEASES_TO_PLOT:
-        logging.warning(
-            f"Only the first {MAX_RELEASES_TO_PLOT} releases will be plotted "
-            f"(received {len(release_names)})."
-        )
-        release_names = release_names[:MAX_RELEASES_TO_PLOT]
-
-    return release_names
+    return validate_names(
+        release_names,
+        [r.name for r in releases],
+        INCLUDE_ALL_RELEASE_NAMES,
+        MAX_RELEASES_TO_PLOT,
+        label="release",
+    )
 
 
 def _validate_release_location(grid, release: Release):

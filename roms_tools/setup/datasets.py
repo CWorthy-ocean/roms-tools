@@ -143,7 +143,7 @@ class Dataset:
         FileNotFoundError
             If the specified file does not exist.
         ValueError
-            If a list of files is provided but `self.dim_names["time"]` is not available or `use_dask=False`.
+            If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
         ds = _load_data(
             self.filename, self.dim_names, self.use_dask, read_zarr=self.read_zarr

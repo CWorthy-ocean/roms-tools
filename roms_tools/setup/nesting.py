@@ -7,8 +7,8 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import griddata, interp1d
 
-from roms_tools import BaseGrid, Grid
 from roms_tools.plot import plot_nesting
+from roms_tools.setup.grid import BaseGrid, Grid
 from roms_tools.setup.topography import _clip_depth
 from roms_tools.setup.utils import (
     from_yaml,

@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from conftest import calculate_file_hash
 from roms_tools import CDRForcing, Grid, TracerPerturbation, VolumeRelease
-from roms_tools.constants import NUM_TRACERS
+from roms_tools.constants import MAX_DISTINCT_COLORS, NUM_TRACERS
 from roms_tools.setup.cdr_forcing import (
     CDRForcingDatasetBuilder,
     ReleaseCollector,
@@ -725,6 +725,8 @@ class TestCDRForcing:
             rot=0,
             N=3,
         )
+        self.grid = grid
+
         grid_that_straddles = Grid(
             nx=18,
             ny=18,
@@ -817,8 +819,13 @@ class TestCDRForcing:
             self.volume_release_cdr_forcing_with_straddling_grid,
         ]:
             cdr.plot_volume_flux()
+            cdr.plot_volume_flux(release_names=["first_release"])
+
             cdr.plot_tracer_concentration("ALK")
+            cdr.plot_tracer_concentration("ALK", release_names=["first_release"])
+
             cdr.plot_tracer_concentration("DIC")
+            cdr.plot_tracer_concentration("DIC", release_names=["first_release"])
 
         self.volume_release_cdr_forcing.plot_locations()
         self.volume_release_cdr_forcing.plot_locations(release_names=["first_release"])
@@ -830,11 +837,54 @@ class TestCDRForcing:
             self.tracer_perturbation_cdr_forcing_with_straddling_grid,
         ]:
             cdr.plot_tracer_flux("ALK")
+            cdr.plot_tracer_flux("ALK", release_names=["first_release"])
+
             cdr.plot_tracer_flux("DIC")
+            cdr.plot_tracer_flux("DIC", release_names=["first_release"])
 
         self.tracer_perturbation_cdr_forcing.plot_locations()
         self.tracer_perturbation_cdr_forcing.plot_locations(
             release_names=["first_release"]
+        )
+
+    def test_plot_max_releases(self, caplog):
+        # Prepare releases with more than MAX_DISTINCT_COLORS unique names
+        releases = []
+        for i in range(MAX_DISTINCT_COLORS + 1):
+            release = self.first_volume_release.__replace__(name=f"release_{i}")
+            releases.append(release)
+
+        # Construct a CDRForcing object with too many releases to plot
+        cdr_forcing = CDRForcing(
+            grid=self.grid,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            releases=releases,
+        )
+
+        release_names = [r.name for r in releases]
+
+        plot_methods_with_release_names = [
+            cdr_forcing.plot_locations,
+            cdr_forcing.plot_volume_flux,
+        ]
+
+        for plot_func in plot_methods_with_release_names:
+            caplog.clear()
+            with caplog.at_level("WARNING"):
+                plot_func(release_names=release_names)
+            assert any(
+                f"Only the first {MAX_DISTINCT_COLORS} releases will be plotted"
+                in message
+                for message in caplog.messages
+            ), f"Warning not raised by {plot_func.__name__}"
+
+        with caplog.at_level("WARNING"):
+            cdr_forcing.plot_locations(release_names=release_names)
+
+        assert any(
+            f"Only the first {MAX_DISTINCT_COLORS} releases will be plotted" in message
+            for message in caplog.messages
         )
 
     @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -856,10 +906,10 @@ class TestCDRForcing:
         with pytest.raises(ValueError, match="Invalid releases"):
             self.volume_release_cdr_forcing.plot_locations(release_names=["fake"])
 
-        with pytest.raises(ValueError, match="should be a string"):
+        with pytest.raises(ValueError, match="should be a list"):
             self.volume_release_cdr_forcing.plot_locations(release_names=4)
 
-        with pytest.raises(ValueError, match="list must be strings"):
+        with pytest.raises(ValueError, match="must be strings"):
             self.volume_release_cdr_forcing.plot_locations(release_names=[4])
 
     def test_cdr_forcing_save(self, tmp_path):

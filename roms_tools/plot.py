@@ -1097,3 +1097,111 @@ def plot(
 
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
+
+
+def assign_category_colors(names: list[str]) -> dict[str, tuple]:
+    """
+    Assign a distinct color to each name using a Matplotlib categorical colormap.
+
+    Parameters
+    ----------
+    names : list[str]
+        List of category names (e.g., releases, rivers, etc.) to assign colors to.
+
+    Returns
+    -------
+    dict[str, tuple]
+        Dictionary mapping each name to a unique RGBA color.
+
+    Raises
+    ------
+    ValueError
+        If the number of names exceeds the selected colormap's capacity.
+
+    Notes
+    -----
+    Colormap selection is based on the number of items:
+    - <= 10: 'tab10'
+    - <= 20: 'tab20'
+    - > 20 : 'tab20b'
+    """
+    n = len(names)
+
+    if n <= 10:
+        cmap = plt.get_cmap("tab10")
+    elif n <= 20:
+        cmap = plt.get_cmap("tab20")
+
+    if n > cmap.N:
+        raise ValueError(
+            f"Too many categories ({n}) for selected colormap ({cmap.name}) "
+            f"which supports only {cmap.N} distinct entries."
+        )
+
+    return {name: cmap(i) for i, name in enumerate(names)}
+
+
+def plot_location(
+    grid_ds: xr.Dataset,
+    points: dict[str, dict],
+    ax: Axes,
+    include_legend: bool = True,
+) -> None:
+    """Plot named geographic points on a top-down map view.
+
+    Each point is represented as a marker on the map, optionally colored.
+    This function is generic and can be used for releases, rivers, etc.
+
+    Parameters
+    ----------
+    grid_ds : xr.Dataset
+        The grid dataset containing 'lon_rho' and 'lat_rho', and a 'straddle' attribute.
+
+    points : dict[str, dict]
+        Dictionary of points to plot. Keys are point names. Each value is a dict with:
+        - "lat": float, latitude in degrees
+        - "lon": float, longitude in degrees
+        - Optional "color": tuple or str, matplotlib color
+
+    ax : matplotlib.axes.Axes
+        The axis object to plot on.
+
+    include_legend : bool, default True
+        Whether to include a legend showing point names.
+
+    Returns
+    -------
+    None
+    """
+    lon_deg = grid_ds.lon_rho
+    lat_deg = grid_ds.lat_rho
+
+    if "straddle" not in grid_ds.attrs:
+        raise AttributeError("Grid dataset must have a 'straddle' attribute.")
+
+    straddle = grid_ds.attrs["straddle"] == "True"
+    if straddle:
+        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
+
+    trans = get_projection(lon_deg, lat_deg)
+    proj = ccrs.PlateCarree()
+
+    for name, info in points.items():
+        lon = info["lon"]
+        lat = info["lat"]
+        color = info.get("color", "k")  # Default to black if no color specified
+
+        x, y = trans.transform_point(lon, lat, proj)
+
+        ax.plot(
+            x,
+            y,
+            marker="x",
+            markersize=8,
+            markeredgewidth=2,
+            label=name,
+            color=color,
+        )
+
+    if include_legend:
+        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))

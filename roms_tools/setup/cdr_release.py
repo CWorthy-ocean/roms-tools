@@ -486,7 +486,7 @@ class TracerPerturbation(Release):
 
     @field_validator("tracer_fluxes", mode="after")
     @classmethod
-    def create_fluxes(cls, tracer_fluxes):
+    def _create_fluxes(cls, tracer_fluxes):
         # Fill all tracer fluxes that are not provided with zero
         defaults = get_tracer_defaults()
         for tracer_name in defaults.keys():
@@ -500,7 +500,7 @@ class TracerPerturbation(Release):
         return tracer_fluxes
 
     @model_validator(mode="after")
-    def check_tracer_flux_lengths(self):
+    def _check_tracer_flux_lengths(self):
         num_times = len(self.times)
         for flux in self.tracer_fluxes.values():
             flux.check_length(num_times)

@@ -6,12 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-import cartopy.crs as ccrs
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from matplotlib.axes import Axes
 from pydantic import (
     BaseModel,
     Field,
@@ -22,7 +20,14 @@ from pydantic import (
 )
 
 from roms_tools import Grid
-from roms_tools.plot import get_projection, plot, plot_2d_horizontal_field
+from roms_tools.constants import MAX_DISTINCT_COLORS
+from roms_tools.plot import (
+    assign_category_colors,
+    get_projection,
+    plot,
+    plot_2d_horizontal_field,
+    plot_location,
+)
 from roms_tools.setup.cdr_release import (
     Release,
     ReleaseType,
@@ -36,6 +41,7 @@ from roms_tools.setup.utils import (
     gc_dist,
     get_target_coords,
     to_dict,
+    validate_names,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -45,6 +51,7 @@ from roms_tools.utils import (
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 INCLUDE_ALL_RELEASE_NAMES = "all"
+MAX_RELEASES_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 
 
 class ReleaseSimulationManager(BaseModel):
@@ -380,6 +387,7 @@ class CDRForcing(BaseModel):
 
     @property
     def release_type(self) -> ReleaseType:
+        """Type of the release."""
         return self.releases.release_type
 
     @property
@@ -388,7 +396,10 @@ class CDRForcing(BaseModel):
         return self._ds
 
     def plot_volume_flux(
-        self, start=None, end=None, release_names=INCLUDE_ALL_RELEASE_NAMES
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the volume flux for each specified release within the given time range.
 
@@ -418,12 +429,7 @@ class CDRForcing(BaseModel):
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == INCLUDE_ALL_RELEASE_NAMES:
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         data = self.ds["cdr_volume"]
 
@@ -439,9 +445,9 @@ class CDRForcing(BaseModel):
     def plot_tracer_concentration(
         self,
         tracer_name: str,
-        start=None,
-        end=None,
-        release_names=INCLUDE_ALL_RELEASE_NAMES,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the concentration of a given tracer for each specified release within
         the given time range.
@@ -475,12 +481,7 @@ class CDRForcing(BaseModel):
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == INCLUDE_ALL_RELEASE_NAMES:
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         tracer_names = list(self.ds["tracer_name"].values)
         if tracer_name not in tracer_names:
@@ -510,9 +511,9 @@ class CDRForcing(BaseModel):
     def plot_tracer_flux(
         self,
         tracer_name: str,
-        start=None,
-        end=None,
-        release_names=INCLUDE_ALL_RELEASE_NAMES,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES,
     ):
         """Plot the flux of a given tracer for each specified release within the given
         time range.
@@ -546,12 +547,7 @@ class CDRForcing(BaseModel):
         start = start or self.start_time
         end = end or self.end_time
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == INCLUDE_ALL_RELEASE_NAMES:
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         tracer_names = list(self.ds["tracer_name"].values)
         if tracer_name not in tracer_names:
@@ -576,7 +572,10 @@ class CDRForcing(BaseModel):
     def _plot_line(self, data, release_names, start, end, title="", ylabel=""):
         """Plots a line graph for the specified releases and time range."""
         valid_release_names = [r.name for r in self.releases]
-        colors = _get_release_colors(valid_release_names)
+        if len(valid_release_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(release_names)
+        else:
+            colors = assign_category_colors(valid_release_names)
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
         for name in release_names:
@@ -595,7 +594,9 @@ class CDRForcing(BaseModel):
         ax.set(title=title, ylabel=ylabel, xlabel="time")
         ax.set_xlim([start, end])
 
-    def plot_locations(self, release_names="all"):
+    def plot_locations(
+        self, release_names: list[str] | str = INCLUDE_ALL_RELEASE_NAMES
+    ):
         """Plot centers of release locations in top-down view.
 
         Parameters
@@ -618,12 +619,7 @@ class CDRForcing(BaseModel):
                 "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
-        valid_release_names = [r.name for r in self.releases]
-
-        if release_names == "all":
-            release_names = valid_release_names
-
-        _validate_release_input(release_names, valid_release_names)
+        release_names = _validate_release_names(release_names, self.releases)
 
         lon_deg = self.grid.ds.lon_rho
         lat_deg = self.grid.ds.lat_rho
@@ -644,12 +640,22 @@ class CDRForcing(BaseModel):
         plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
         # Plot release locations
-        colors = _get_release_colors(valid_release_names)
-        _plot_location(
-            grid=self.grid,
-            releases=[self.releases[name] for name in release_names],
+        valid_release_names = [r.name for r in self.releases]
+        if len(valid_release_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(release_names)
+        else:
+            colors = assign_category_colors(valid_release_names)
+        plot_location(
+            grid_ds=self.grid.ds,
+            points={
+                name: {
+                    "lat": self.releases[name].lat,
+                    "lon": self.releases[name].lon,
+                    "color": colors.get(name, "k"),
+                }
+                for name in release_names
+            },
             ax=ax,
-            colors=colors,
         )
 
     def plot_distribution(self, release_name: str, mark_release_center: bool = True):
@@ -679,8 +685,13 @@ class CDRForcing(BaseModel):
                 "A grid must be provided for plotting. Please pass a valid `Grid` object."
             )
 
-        valid_release_names = [r.name for r in self.releases]
-        _validate_release_input(release_name, valid_release_names, list_allowed=False)
+        if not isinstance(release_name, str):
+            raise ValueError(
+                f"Only a single release name (string) is allowed. Got: {release_name!r}"
+            )
+
+        release_name = _validate_release_names([release_name], self.releases)[0]
+
         release = self.releases[release_name]
 
         # Prepare grid coordinates
@@ -712,8 +723,16 @@ class CDRForcing(BaseModel):
             title="Depth-integrated distribution",
         )
         if mark_release_center:
-            _plot_location(
-                grid=self.grid, releases=[release], ax=ax0, include_legend=False
+            plot_location(
+                grid_ds=self.grid.ds,
+                points={
+                    release.name: {
+                        "lat": release.lat,
+                        "lon": release.lon,
+                    }
+                },
+                ax=ax0,
+                include_legend=False,
             )
 
         # Spread horizontal Gaussian field into the vertical
@@ -827,106 +846,39 @@ class CDRForcing(BaseModel):
         return cls(grid=grid, **params)
 
 
-def _validate_release_input(releases, valid_releases, list_allowed=True):
-    """Validates the input for release names in plotting methods to ensure they are in
-    an acceptable format and exist within the set of valid releases.
-
-    This method ensures that the `releases` parameter is either a single release name (string) or a list
-    of release names (strings), and checks that each release exists in the set of valid releases.
-
-    Parameters
-    ----------
-    releases : str or list of str
-        A single release name as a string, or a list of release names (strings) to validate.
-
-    list_allowed : bool, optional
-        If `True`, a list of release names is allowed. If `False`, only a single release name (string)
-        is allowed. Default is `True`.
-
-    Raises
-    ------
-    ValueError
-        If `releases` is not a string or list of strings, or if any release name is invalid (not in `self.releases`).
-
-    Notes
-    -----
-    This method checks that the `releases` input is in a valid format (either a string or a list of strings),
-    and ensures each release is present in the set of valid releases defined in `self.releases`. Invalid releases
-    are reported in the error message.
-
-    If `list_allowed` is set to `False`, only a single release name (string) will be accepted. Otherwise, a
-    list of release names is also acceptable.
+def _validate_release_names(
+    release_names: list[str] | str, releases: ReleaseCollector
+) -> list[str]:
     """
-    # Ensure that a list of releases is only allowed if `list_allowed` is True
-    if not list_allowed and not isinstance(releases, str):
-        raise ValueError(
-            f"Only a single release name (string) is allowed. Got: {releases}"
-        )
+    Validate and filter a list of release names.
 
-    if isinstance(releases, str):
-        releases = [releases]  # Convert to list if a single string is provided
-    elif isinstance(releases, list):
-        if not all(isinstance(r, str) for r in releases):
-            raise ValueError("All elements in `releases` list must be strings.")
-    else:
-        raise ValueError(
-            "`releases` should be a string (single release name) or a list of strings (release names)."
-        )
-
-    # Validate that the specified releases exist in self.releases
-    invalid_releases = [
-        release for release in releases if release not in valid_releases
-    ]
-    if invalid_releases:
-        raise ValueError(f"Invalid releases: {', '.join(invalid_releases)}")
-
-
-def _get_release_colors(valid_releases: list[str]) -> dict[str, tuple]:
-    """Returns a dictionary of colors for the valid releases, based on a consistent
-    colormap.
+    Ensures that each release name exists in `releases` and limits the list
+    to `MAX_RELEASES_TO_PLOT` entries with a warning if truncated.
 
     Parameters
     ----------
-    valid_releases : List[str]
-        List of release names to assign colors to.
+    release_names : list of str or INCLUDE_ALL_RELEASE_NAMES
+        Names of releases to plot, or sentinel to include all.
+    releases : ReleaseCollector
+        Object containing valid release names.
 
     Returns
     -------
-    Dict[str, tuple]
-        A dictionary where the keys are release names and the values are their corresponding colors,
-        assigned based on the order of releases in the valid releases list.
+    list of str
+        Validated and truncated list of release names.
 
     Raises
     ------
     ValueError
-        If the number of valid releases exceeds the available colormap capacity.
-
-    Notes
-    -----
-    The colormap is chosen dynamically based on the number of valid releases:
-
-    - If there are 10 or fewer releases, the "tab10" colormap is used.
-    - If there are more than 10 but fewer than or equal to 20 releases, the "tab20" colormap is used.
-    - For more than 20 releases, the "tab20b" colormap is used.
+        If any names are invalid.
     """
-    # Determine the colormap based on the number of releases
-    if len(valid_releases) <= 10:
-        color_map = plt.get_cmap("tab10")
-    elif len(valid_releases) <= 20:
-        color_map = plt.get_cmap("tab20")
-    else:
-        color_map = plt.get_cmap("tab20b")
-
-    # Ensure the number of releases doesn't exceed the available colormap capacity
-    if len(valid_releases) > color_map.N:
-        raise ValueError(
-            f"Too many releases. The selected colormap supports up to {color_map.N} releases."
-        )
-
-    # Create a dictionary of colors based on the release indices
-    colors = {name: color_map(i) for i, name in enumerate(valid_releases)}
-
-    return colors
+    return validate_names(
+        release_names,
+        [r.name for r in releases],
+        INCLUDE_ALL_RELEASE_NAMES,
+        MAX_RELEASES_TO_PLOT,
+        label="release",
+    )
 
 
 def _validate_release_location(grid, release: Release):
@@ -1105,73 +1057,3 @@ def _map_3d_gaussian(
         distribution_3d /= distribution_3d.sum()
 
     return distribution_3d
-
-
-def _plot_location(
-    grid: Grid,
-    releases: ReleaseCollector,
-    ax: Axes,
-    colors: dict[str, tuple] | None = None,
-    include_legend: bool = True,
-) -> None:
-    """Plot the center location of each release on a top-down map view.
-
-    Each release is represented as a point on the map, with its color
-    determined by the `colors` dictionary.
-
-    Parameters
-    ----------
-    grid : Grid
-        The grid object defining the spatial extent and coordinate system for the plot.
-
-    releases : ReleaseCollector
-        Collection of `Release` objects to plot. Each `Release` must have `.lat`, `.lon`,
-        and `.name` attributes.
-
-    ax : matplotlib.axes.Axes
-        The Matplotlib axis object to plot on.
-
-    colors : dict of str to tuple, optional
-        Optional dictionary mapping release names to RGBA color tuples. If not provided,
-        all releases are plotted in a default color (`"#dd1c77"`).
-
-    include_legend : bool, default True
-        Whether to include a legend showing release names.
-
-    Returns
-    -------
-    None
-    """
-    lon_deg = grid.ds.lon_rho
-    lat_deg = grid.ds.lat_rho
-    if grid.straddle:
-        lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-    trans = get_projection(lon_deg, lat_deg)
-
-    proj = ccrs.PlateCarree()
-
-    for release in releases:
-        # transform coordinates to projected space
-        transformed_lon, transformed_lat = trans.transform_point(
-            release.lon,
-            release.lat,
-            proj,
-        )
-
-        if colors is not None:
-            color = colors[release.name]
-        else:
-            color = "k"
-
-        ax.plot(
-            transformed_lon,
-            transformed_lat,
-            marker="x",
-            markersize=8,
-            markeredgewidth=2,
-            label=release.name,
-            color=color,
-        )
-
-    if include_legend:
-        ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))

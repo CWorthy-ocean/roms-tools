@@ -44,6 +44,8 @@ from roms_tools.utils import (
 )
 from roms_tools.vertical_coordinate import compute_depth
 
+DEFAULT_GLORYS_PATH = "https://s3.waw3-1.cloudferro.com/mdl-arco-time-025/arco/GLOBAL_MULTIYEAR_PHY_001_030/cmems_mod_glo_phy_my_0.083deg_P1D-m_202311/timeChunked.zarr"
+
 
 @dataclass(kw_only=True)
 class BoundaryForcing:
@@ -410,7 +412,10 @@ class BoundaryForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] != "GLORYS":
+                raise ValueError("`source` must include a 'path'.")
+
+            self.source["path"] = DEFAULT_GLORYS_PATH
 
         # Set 'climatology' to False if not provided in 'source'
         self.source = {
@@ -460,7 +465,12 @@ class BoundaryForcing:
             msg = tpl.format(self.type, " and ".join(dataset_map[self.type].keys()))
             raise ValueError(msg)
 
-        variant = "default" if "path" not in self.source else "external"
+        has_no_path = "path" not in self.source
+        has_default_path = self.source.get("path") == DEFAULT_GLORYS_PATH
+        use_default = has_no_path or has_default_path
+
+        variant = "default" if use_default else "external"
+
         data_type = dataset_map[self.type][source_name][variant]
 
         return data_type(

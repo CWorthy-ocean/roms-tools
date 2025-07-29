@@ -107,6 +107,24 @@ def grid_that_straddles_180_degree_meridian():
 
 
 @pytest.fixture(scope="session")
+def small_grid() -> Grid:
+    """Create a grid that covers a small surface area."""
+    return Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+
+@pytest.fixture(scope="session")
 def tidal_forcing(use_dask):
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
@@ -300,26 +318,12 @@ def initial_conditions_with_unified_bgc_from_climatology(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing(use_dask):
+def boundary_forcing(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -329,26 +333,12 @@ def boundary_forcing(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_adjusted_for_zeta(use_dask):
+def boundary_forcing_adjusted_for_zeta(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -359,26 +349,12 @@ def boundary_forcing_adjusted_for_zeta(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill(use_dask):
+def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -388,26 +364,12 @@ def boundary_forcing_with_2d_fill(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask):
+def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},

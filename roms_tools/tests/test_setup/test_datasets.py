@@ -8,6 +8,7 @@ import pytest
 import xarray as xr
 
 from roms_tools.download import download_test_data
+from roms_tools.setup.boundary_forcing import DEFAULT_GLORYS_PATH
 from roms_tools.setup.datasets import (
     CESMBGCDataset,
     Dataset,
@@ -18,7 +19,7 @@ from roms_tools.setup.datasets import (
     RiverDataset,
     TPXODataset,
 )
-from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH, DEFAULT_GLORYS_PATH
+from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
 from roms_tools.utils import _has_dask, _has_gcsfs
 
 
@@ -459,7 +460,7 @@ def test_default_era5_dataset_loading_without_dask() -> None:
         )
 
 
-# @pytest.mark.stream
+@pytest.mark.stream
 @pytest.mark.skipif(
     not _has_gcsfs() or not _has_dask(),
     reason="Executed only if GCFS & Dask packages are installed",
@@ -474,7 +475,6 @@ def test_default_era5_dataset_loading() -> None:
         start_time=start_time,
         end_time=end_time,
         use_dask=True,
-        # climatology=True,
     )
 
     expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
@@ -482,8 +482,8 @@ def test_default_era5_dataset_loading() -> None:
 
 
 @pytest.mark.skipif(
-    not _has_gcsfs(),
-    reason="Executed only if GCFS package is installed",
+    not _has_dask(),
+    reason="Executed only if Dask package is installed",
 )
 def test_default_glorys_dataset_loading_without_dask() -> None:
     """Verify that loading the default GLORYS dataset fails if use_dask is not True."""
@@ -499,10 +499,9 @@ def test_default_glorys_dataset_loading_without_dask() -> None:
         )
 
 
-# @pytest.mark.stream
 @pytest.mark.skipif(
-    not _has_gcsfs() or not _has_dask(),
-    reason="Executed only if GCFS & Dask packages are installed",
+    not _has_dask(),
+    reason="Executed only if Dask package is installed",
 )
 def test_default_glorys_dataset_loading() -> None:
     """Verify the default GLORYS dataset is loaded correctly."""
@@ -514,10 +513,9 @@ def test_default_glorys_dataset_loading() -> None:
         start_time=start_time,
         end_time=end_time,
         use_dask=True,
-        # climatology=True,
     )
 
-    expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
+    expected_vars = {"temp", "salt", "u", "v", "zeta"}
     assert set(ds.var_names).issuperset(expected_vars)
 
 

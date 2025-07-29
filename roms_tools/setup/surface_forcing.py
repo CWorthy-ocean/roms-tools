@@ -38,7 +38,6 @@ from roms_tools.utils import save_datasets, transpose_dimensions
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
-DEFAULT_GLORYS_PATH = "https://s3.waw3-1.cloudferro.com/mdl-arco-time-025/arco/GLOBAL_MULTIYEAR_PHY_001_030/cmems_mod_glo_phy_my_0.083deg_P1D-m_202311/timeChunked.zarr"
 
 
 @dataclass(kw_only=True)
@@ -255,8 +254,6 @@ class SurfaceForcing:
                     "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
                 )
                 self.source["path"] = DEFAULT_ERA5_ARCO_PATH
-            elif self.source["name"] == "GLORYS":
-                self.source["path"] = DEFAULT_GLORYS_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 

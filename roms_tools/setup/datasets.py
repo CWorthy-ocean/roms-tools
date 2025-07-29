@@ -1124,9 +1124,29 @@ class GLORYSDataset(Dataset):
 class GLORYSDefaultDataset(GLORYSDataset):
     """A dataset that is loaded from a well-known GLORYS datasource."""
 
+    # var_names: dict[str, str] = field(
+    #     default_factory=lambda: {
+    #         "temp": "thetao",
+    #         "salt": "so",
+    #         "u": "uo",
+    #         "v": "vo",
+    #         "zeta": "zos",
+    #     }
+    # )
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "depth": "elevation",
+            "time": "time",
+        },
+    )
+
     def __post_init__(self) -> None:
         """Configure attributes to ensure use of the correct upstream data-source."""
         self.read_zarr = True
+        # self.needs_lateral_fill = False
         super().__post_init__()
 
 

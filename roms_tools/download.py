@@ -1,5 +1,3 @@
-from functools import lru_cache
-
 import pooch
 
 # Create a Pooch object to manage the global topography data
@@ -171,7 +169,6 @@ def download_sal_data(filename: str) -> str:
     return fname
 
 
-@lru_cache
 def download_test_data(filename: str) -> str:
     """Download the test data file.
 

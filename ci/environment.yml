@@ -6,6 +6,7 @@ dependencies:
   - python>=3.11
   - numpy>2,<2.3
   # testing
+  - zarr
   - pytest
   - pytest-xdist
   - h5py

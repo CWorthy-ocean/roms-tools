@@ -319,3 +319,26 @@ class TestPartitionNetcdf:
         for f in expected_filenames:
             assert f.exists()
             f.unlink()
+
+    def test_partition_netcdf_multiple_files(self, grid, tmp_path):
+        # Create two test input files
+        file1 = tmp_path / "grid1.nc"
+        file2 = tmp_path / "grid2.nc"
+        grid.save(file1)
+        grid.save(file2)
+
+        # Run partitioning with 2x2 tiles on both files
+        saved_filenames = partition_netcdf([file1, file2], np_eta=3, np_xi=5)
+
+        # Expect 4 tiles per file → 8 total output files
+        expected_filepaths = []
+        for file in [file1, file2]:
+            base = file.with_suffix("")
+            expected_filepaths += [Path(f"{base}.{i:02d}.nc") for i in range(15)]
+
+        assert len(saved_filenames) == 30
+        assert saved_filenames == expected_filepaths
+
+        for path in expected_filepaths:
+            assert path.exists()
+            path.unlink()

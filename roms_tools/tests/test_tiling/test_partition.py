@@ -297,3 +297,25 @@ class TestPartitionNetcdf:
         for expected_filepath in expected_filepath_list:
             assert expected_filepath.exists()
             expected_filepath.unlink()
+
+    def test_partition_netcdf_with_output_dir(self, grid, tmp_path):
+        # Save the input file
+        input_file = tmp_path / "input_grid.nc"
+        grid.save(input_file)
+
+        # Create a custom output directory
+        output_dir = tmp_path / "custom_output"
+        output_dir.mkdir()
+
+        saved_filenames = partition_netcdf(
+            input_file, np_eta=3, np_xi=5, output_dir=output_dir
+        )
+
+        base_name = input_file.stem  # "input_grid"
+        expected_filenames = [output_dir / f"{base_name}.{i:02d}.nc" for i in range(15)]
+
+        assert saved_filenames == expected_filenames
+
+        for f in expected_filenames:
+            assert f.exists()
+            f.unlink()

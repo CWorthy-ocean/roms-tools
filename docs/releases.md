@@ -1,6 +1,24 @@
 # Release notes
 
-## v3.1.0 (unreleased)
+## v3.2.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v3.1.1
+
+### Internal Changes
+
+* Add zarr as optional dependency ([#393](https://github.com/CWorthy-ocean/roms-tools/pull/393))
+
+## v3.1.0
 
 ### New Features
 

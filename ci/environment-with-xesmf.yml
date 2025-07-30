@@ -7,7 +7,6 @@ dependencies:
   - numpy>2,<2.3
   - xesmf
   # testing
-  - zarr
   - pytest
   - pytest-xdist
   - h5py

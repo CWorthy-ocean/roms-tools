@@ -1,5 +1,6 @@
 import importlib.metadata
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,13 @@ from scipy.ndimage import label
 from roms_tools import Grid
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
+from roms_tools.setup.datasets import (
+    CESMBGCDataset,
+    Dataset,
+    GLORYSDataset,
+    GLORYSDefaultDataset,
+    UnifiedBGCDataset,
+)
 from roms_tools.setup.utils import (
     add_time_info_to_ds,
     compute_barotropic_velocity,
@@ -36,6 +43,8 @@ from roms_tools.utils import (
     transpose_dimensions,
 )
 from roms_tools.vertical_coordinate import compute_depth
+
+DEFAULT_GLORYS_PATH = "https://s3.waw3-1.cloudferro.com/mdl-arco-time-025/arco/GLOBAL_MULTIYEAR_PHY_001_030/cmems_mod_glo_phy_my_0.083deg_P1D-m_202311/timeChunked.zarr"
 
 
 @dataclass(kw_only=True)
@@ -403,7 +412,10 @@ class BoundaryForcing:
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source:
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] != "GLORYS":
+                raise ValueError("`source` must include a 'path'.")
+
+            self.source["path"] = DEFAULT_GLORYS_PATH
 
         # Set 'climatology' to False if not provided in 'source'
         self.source = {
@@ -425,34 +437,49 @@ class BoundaryForcing:
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
-    def _get_data(self):
-        data_dict = {
-            "filename": self.source["path"],
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-            "use_dask": self.use_dask,
+    def _get_data(self) -> Dataset:
+        """Determine the correct `Dataset` type and return an instance.
+
+        Returns
+        -------
+        Dataset
+            The `Dataset` instance
+
+        """
+        dataset_map: dict[str, dict[str, dict[str, type[Dataset]]]] = {
+            "physics": {
+                "GLORYS": {
+                    "external": GLORYSDataset,
+                    "default": GLORYSDefaultDataset,
+                },
+            },
+            "bgc": {
+                "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
+                "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+            },
         }
 
-        if self.type == "physics":
-            if self.source["name"] == "GLORYS":
-                data = GLORYSDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "GLORYS" is a valid option for source["name"] when type is "physics".'
-                )
+        source_name = str(self.source["name"])
+        if source_name not in dataset_map[self.type]:
+            tpl = 'Valid options for source["name"] for type {} include: {}'
+            msg = tpl.format(self.type, " and ".join(dataset_map[self.type].keys()))
+            raise ValueError(msg)
 
-        elif self.type == "bgc":
-            if self.source["name"] == "CESM_REGRIDDED":
-                data = CESMBGCDataset(**data_dict)
-            elif self.source["name"] == "UNIFIED":
-                data = UnifiedBGCDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
-                )
+        has_no_path = "path" not in self.source
+        has_default_path = self.source.get("path") == DEFAULT_GLORYS_PATH
+        use_default = has_no_path or has_default_path
 
-        return data
+        variant = "default" if use_default else "external"
+
+        data_type = dataset_map[self.type][source_name][variant]
+
+        return data_type(
+            filename=self.source["path"],
+            start_time=self.start_time,
+            end_time=self.end_time,
+            climatology=self.source["climatology"],
+            use_dask=self.use_dask,
+        )  # type: ignore
 
     def _set_variable_info(self, data):
         """Sets up a dictionary with metadata for variables based on the type of data

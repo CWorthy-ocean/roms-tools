@@ -11,6 +11,7 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
+from roms_tools.utils import _has_dask
 
 
 @pytest.mark.parametrize(
@@ -758,3 +759,49 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
+
+
+@pytest.mark.skipif(
+    not _has_dask(),
+    reason="Executed only if Dask package is installed",
+)
+def test_default_glorys_dataset_loading(small_grid: Grid) -> None:
+    """Verify the default ERA5 dataset is loaded when a path is not provided."""
+    start_time = datetime(2010, 2, 1)
+    end_time = datetime(2010, 2, 2)
+
+    sf = BoundaryForcing(
+        grid=small_grid,
+        source={"name": "GLORYS"},
+        type="physics",
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=True,
+        # apply_2d_horizontal_fill=True,
+    )
+
+    expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
+    assert set(sf.ds.var_names).issuperset(expected_vars)
+
+
+# @pytest.mark.skipif(
+#     not _has_dask(),
+#     reason="Executed only if Dask package is installed",
+# )
+# def test_glorys_dataset_loading(small_grid: Grid) -> None:
+#     """Verify the default ERA5 dataset is loaded when a path is not provided."""
+#     start_time = datetime(2020, 2, 1)
+#     end_time = datetime(2020, 2, 2)
+
+#     sf = BoundaryForcing(
+#         grid=small_grid,
+#         source={"name": "GLORYS", "path": "non-zarr"},
+#         type="physics",
+#         start_time=start_time,
+#         end_time=end_time,
+#         use_dask=True,
+#         # apply_2d_horizontal_fill=True,
+#     )
+
+#     expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
+#     assert set(sf.ds.var_names).issuperset(expected_vars)

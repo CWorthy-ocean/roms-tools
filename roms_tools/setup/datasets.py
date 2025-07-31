@@ -100,24 +100,16 @@ class Dataset:
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
-    def __post_init__(self):
-        """
-        Post-initialization processing:
+    def __post_init__(self) -> None:
+        """Perform post-initialization processing.
+
         1. Loads the dataset from the specified filename.
-        2. Applies time filtering based on start_time and end_time if provided.
-        3. Selects relevant fields as specified by var_names.
-        4. Ensures latitude values and depth values are in ascending order.
+        2. Applies time filtering based on start_time and end_time (if provided).
+        3. Selects relevant fields as specified by `var_names`.
+        4. Ensures latitude, longitude, and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
-        # Validate start_time and end_time
-        if self.start_time is not None and not isinstance(self.start_time, datetime):
-            raise TypeError(
-                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
-            )
-        if self.end_time is not None and not isinstance(self.end_time, datetime):
-            raise TypeError(
-                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
-            )
+        self._check_dates()
 
         ds = self.load_data()
         ds = self.clean_up(ds)
@@ -126,22 +118,8 @@ class Dataset:
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
 
-        # Select relevant times
-        if "time" in self.dim_names and self.start_time is not None:
-            ds = self.add_time_info(ds)
-            ds = self.select_relevant_times(ds)
-
-            if self.dim_names["time"] != "time":
-                ds = ds.rename({self.dim_names["time"]: "time"})
-
-        # Make sure that latitude is ascending
-        ds = self.ensure_dimension_is_ascending(ds, dim="latitude")
-        # Make sure there are no 360 degree jumps in longitude
-        ds = self.ensure_dimension_is_ascending(ds, dim="longitude")
-
-        if "depth" in self.dim_names:
-            # Make sure that depth is ascending
-            ds = self.ensure_dimension_is_ascending(ds, dim="depth")
+        ds = self._transform_time(ds)
+        ds = self._reorder_data(ds)
 
         self.infer_horizontal_resolution(ds)
 
@@ -795,6 +773,73 @@ class Dataset:
 
         return dataset
 
+    def _check_dates(self) -> None:
+        """Perform validation of start & end date members.
+
+        Raises
+        ------
+        TypeError
+            When `start_time` or `end_time` is not a `datetime` instance.
+
+        """
+        if self.start_time is not None and not isinstance(self.start_time, datetime):
+            msg = "start_time must be a datetime object, but got {}."
+            raise TypeError(msg.format(type(self.start_time).__name__))
+
+        if self.end_time is not None and not isinstance(self.end_time, datetime):
+            msg = "end_time must be a datetime object, but got {}."
+            raise TypeError(msg.format(type(self.end_time).__name__))
+
+    def _transform_time(self, ds: xr.Dataset) -> xr.Dataset:
+        """Transform time data in the dataset.
+
+        This method will:
+        1. add time information
+        2. rename the input dimension for time to the internal naming convention
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset to transform
+
+        Returns
+        -------
+        xr.Dataset
+            The transformed dataset
+
+        """
+        if "time" in self.dim_names and self.start_time is not None:
+            ds = self.add_time_info(ds)
+            ds = self.select_relevant_times(ds)
+
+            if self.dim_names["time"] != "time":
+                ds = ds.rename({self.dim_names["time"]: "time"})
+
+        return ds
+
+    def _reorder_data(self, ds: xr.Dataset) -> xr.Dataset:
+        """Reorder data that is required to be in ascending order.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset to transform
+
+        Returns
+        -------
+        xr.Dataset
+            The transformed dataset
+
+        """
+        ascending_dims = ["latitude", "longitude"]
+        if "depth" in self.dim_names:
+            ascending_dims.append("depth")
+
+        for dim in ascending_dims:
+            ds = self.ensure_dimension_is_ascending(ds, dim=dim)
+
+        return ds
+
 
 @dataclass(kw_only=True)
 class TPXODataset(Dataset):
@@ -1073,6 +1118,26 @@ class GLORYSDataset(Dataset):
 
         self.ds["mask"] = mask
         self.ds["mask_vel"] = mask_vel
+
+
+@dataclass(kw_only=True)
+class GLORYSDefaultDataset(GLORYSDataset):
+    """A dataset that is loaded from a well-known GLORYS datasource."""
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "depth": "elevation",
+            "time": "time",
+        },
+    )
+
+    def __post_init__(self) -> None:
+        """Configure attributes to ensure use of the correct upstream data-source."""
+        self.read_zarr = True
+        # self.needs_lateral_fill = False
+        super().__post_init__()
 
 
 @dataclass(kw_only=True)

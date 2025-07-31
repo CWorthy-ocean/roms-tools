@@ -10,6 +10,8 @@
 
 ### Documentation
 
+* Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))
+
 ### Bugfixes
 
 ## v3.1.1

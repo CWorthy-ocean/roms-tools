@@ -361,7 +361,7 @@ def profile_plot(field, title="", ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(4, 7))
     kwargs = {"y": depth_label, "yincrease": False}
-    field.plot(**kwargs, linewidth=2)
+    field.plot(ax=ax, linewidth=2, **kwargs)
     ax.set_title(title)
     ax.set_ylabel("Depth [m]")
     ax.grid()

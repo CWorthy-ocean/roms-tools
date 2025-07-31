@@ -212,7 +212,9 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
     return fig
 
 
-def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
+def section_plot(
+    field, interface_depth=None, title="", yincrease=False, kwargs={}, ax=None
+):
     """Plots a vertical section of a field with optional interface depths.
 
     Parameters
@@ -224,6 +226,10 @@ def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         Defaults to None.
     title : str, optional
         Title of the plot. Defaults to an empty string.
+    yincrease : bool, optional
+        If True, the y-axis values increase upward (standard orientation).
+        If False, the y-axis values decrease upward (inverted axis).
+        Default is False.
     kwargs : dict, optional
         Additional keyword arguments to pass to `xarray.plot`. Defaults to an empty dictionary.
     ax : matplotlib.axes.Axes, optional
@@ -279,7 +285,7 @@ def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
     # Handle NaNs on either horizontal end
     field = field.where(~field[depth_label].isnull(), drop=True)
 
-    more_kwargs = {"x": xdim, "y": depth_label, "yincrease": False}
+    more_kwargs = {"x": xdim, "y": depth_label, "yincrease": yincrease}
 
     field.plot(**kwargs, **more_kwargs, ax=ax)
 
@@ -313,7 +319,7 @@ def section_plot(field, interface_depth=None, title="", kwargs={}, ax=None):
         return fig
 
 
-def profile_plot(field, title="", ax=None):
+def profile_plot(field, title="", yincrease=False, ax=None):
     """Plots a vertical profile of the given field against depth.
 
     This function generates a profile plot by plotting the field values against
@@ -326,6 +332,10 @@ def profile_plot(field, title="", ax=None):
         The field to plot, typically representing vertical profile data.
     title : str, optional
         Title of the plot. Defaults to an empty string.
+    yincrease : bool, optional
+        If True, the y-axis values increase upward (standard orientation).
+        If False, the y-axis values decrease upward (inverted axis).
+        Default is False.
     ax : matplotlib.axes.Axes, optional
         Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
 
@@ -360,7 +370,7 @@ def profile_plot(field, title="", ax=None):
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(4, 7))
-    kwargs = {"y": depth_label, "yincrease": False}
+    kwargs = {"y": depth_label, "yincrease": yincrease}
     field.plot(ax=ax, linewidth=2, **kwargs)
     ax.set_title(title)
     ax.set_ylabel("Depth [m]")
@@ -775,6 +785,7 @@ def plot(
     depth_contours: bool = False,
     layer_contours: bool = False,
     max_nr_layer_contours: int | None = 10,
+    yincrease: bool = False,
     use_coarse_grid: bool = False,
     with_dim_names: bool = False,
     ax: Axes | None = None,
@@ -837,6 +848,12 @@ def plot(
 
     max_nr_layer_contours : int, optional
         Maximum number of vertical layer contours to draw. Default is 10.
+
+    yincrease: bool, optional
+        If True, the y-axis values increase upward (standard orientation).
+        If False, the y-axis values decrease upward (inverted axis).
+        This option is only relevant for vertical sections and is ignored for horizontal plots.
+        Default is False.
 
     use_coarse_grid : bool, optional
         Use precomputed coarse-resolution grid. Default is False.
@@ -1086,12 +1103,13 @@ def plot(
                 field,
                 interface_depth=interface_depth,
                 title=title,
+                yincrease=yincrease,
                 kwargs={**kwargs, "add_colorbar": add_colorbar},
                 ax=ax,
             )
         else:
             if "s_rho" in field.dims:
-                fig = profile_plot(field, title=title, ax=ax)
+                fig = profile_plot(field, title=title, yincrease=yincrease, ax=ax)
             else:
                 fig = line_plot(field, title=title, ax=ax)
 

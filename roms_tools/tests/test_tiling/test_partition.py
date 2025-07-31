@@ -297,3 +297,48 @@ class TestPartitionNetcdf:
         for expected_filepath in expected_filepath_list:
             assert expected_filepath.exists()
             expected_filepath.unlink()
+
+    def test_partition_netcdf_with_output_dir(self, grid, tmp_path):
+        # Save the input file
+        input_file = tmp_path / "input_grid.nc"
+        grid.save(input_file)
+
+        # Create a custom output directory
+        output_dir = tmp_path / "custom_output"
+        output_dir.mkdir()
+
+        saved_filenames = partition_netcdf(
+            input_file, np_eta=3, np_xi=5, output_dir=output_dir
+        )
+
+        base_name = input_file.stem  # "input_grid"
+        expected_filenames = [output_dir / f"{base_name}.{i:02d}.nc" for i in range(15)]
+
+        assert saved_filenames == expected_filenames
+
+        for f in expected_filenames:
+            assert f.exists()
+            f.unlink()
+
+    def test_partition_netcdf_multiple_files(self, grid, tmp_path):
+        # Create two test input files
+        file1 = tmp_path / "grid1.nc"
+        file2 = tmp_path / "grid2.nc"
+        grid.save(file1)
+        grid.save(file2)
+
+        # Run partitioning with 2x2 tiles on both files
+        saved_filenames = partition_netcdf([file1, file2], np_eta=3, np_xi=5)
+
+        # Expect 4 tiles per file → 8 total output files
+        expected_filepaths = []
+        for file in [file1, file2]:
+            base = file.with_suffix("")
+            expected_filepaths += [Path(f"{base}.{i:02d}.nc") for i in range(15)]
+
+        assert len(saved_filenames) == 30
+        assert saved_filenames == expected_filepaths
+
+        for path in expected_filepaths:
+            assert path.exists()
+            path.unlink()

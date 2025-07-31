@@ -4,6 +4,8 @@
 
 ### New Features
 
+* Enhance `partition_netcdf` flexibility: now supports partitioning multiple input files and allows specifying a custom output directory for saved tiles ([#394](https://github.com/CWorthy-ocean/roms-tools/pull/394))
+
 ### Breaking Changes
 
 ### Internal Changes

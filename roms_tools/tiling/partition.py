@@ -302,7 +302,7 @@ def partition_netcdf(
     np_xi: int = 1,
     output_dir: str | Path | None = None,
     include_coarse_dims: bool = True,
-) -> None:
+) -> list[Path]:
     """Partition one or more ROMS NetCDF files into smaller spatial tiles and save them to disk.
 
     This function divides each dataset into `np_eta` by `np_xi` tiles.

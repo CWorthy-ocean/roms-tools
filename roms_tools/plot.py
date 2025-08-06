@@ -213,7 +213,12 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
 
 
 def section_plot(
-    field, interface_depth=None, title="", yincrease=False, kwargs={}, ax=None
+    field: xr.DataArray,
+    interface_depth: xr.DataArray | None = None,
+    title: str = "",
+    yincrease: bool | None = False,
+    kwargs: dict = {},
+    ax: Axes | None = None,
 ):
     """Plots a vertical section of a field with optional interface depths.
 
@@ -226,10 +231,11 @@ def section_plot(
         Defaults to None.
     title : str, optional
         Title of the plot. Defaults to an empty string.
-    yincrease : bool, optional
-        If True, the y-axis values increase upward (standard orientation).
-        If False, the y-axis values decrease upward (inverted axis).
-        Default is False.
+    yincrease : bool or None, optional
+        Whether to orient the y-axis with increasing values upward.
+        If True, y-values increase upward (standard).
+        If False, y-values decrease upward (inverted).
+        If None (default), behavior is equivalent to False (inverted axis).
     kwargs : dict, optional
         Additional keyword arguments to pass to `xarray.plot`. Defaults to an empty dictionary.
     ax : matplotlib.axes.Axes, optional
@@ -254,6 +260,8 @@ def section_plot(
     """
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(9, 5))
+    if yincrease is None:
+        yincrease = False
 
     dims_to_check = ["eta_rho", "eta_v", "xi_rho", "xi_u", "lat", "lon"]
     try:
@@ -319,7 +327,12 @@ def section_plot(
         return fig
 
 
-def profile_plot(field, title="", yincrease=False, ax=None):
+def profile_plot(
+    field: xr.DataArray,
+    title: str = "",
+    yincrease: bool | None = False,
+    ax: Axes | None = None,
+):
     """Plots a vertical profile of the given field against depth.
 
     This function generates a profile plot by plotting the field values against
@@ -332,10 +345,11 @@ def profile_plot(field, title="", yincrease=False, ax=None):
         The field to plot, typically representing vertical profile data.
     title : str, optional
         Title of the plot. Defaults to an empty string.
-    yincrease : bool, optional
-        If True, the y-axis values increase upward (standard orientation).
-        If False, the y-axis values decrease upward (inverted axis).
-        Default is False.
+    yincrease : bool or None, optional
+        Whether to orient the y-axis with increasing values upward.
+        If True, y-values increase upward (standard).
+        If False, y-values decrease upward (inverted).
+        If None (default), behavior is equivalent to False (inverted axis).
     ax : matplotlib.axes.Axes, optional
         Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
 
@@ -353,6 +367,9 @@ def profile_plot(field, title="", yincrease=False, ax=None):
     -----
     - The y-axis is inverted to ensure that depth increases downward.
     """
+    if yincrease is None:
+        yincrease = False
+
     depths_to_check = [
         "layer_depth",
         "interface_depth",
@@ -380,7 +397,12 @@ def profile_plot(field, title="", yincrease=False, ax=None):
         return fig
 
 
-def line_plot(field, title="", ax=None):
+def line_plot(
+    field: xr.DataArray,
+    title: str = "",
+    ax: Axes | None = None,
+    yincrease: bool | None = False,
+):
     """Plots a line graph of the given field with grey vertical bars indicating NaN
     regions.
 
@@ -392,6 +414,11 @@ def line_plot(field, title="", ax=None):
         Title of the plot. Defaults to an empty string.
     ax : matplotlib.axes.Axes, optional
         Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
+    yincrease : bool, optional
+        Whether to orient the y-axis with increasing values upward.
+        If True, y-values increase upward (standard).
+        If False, y-values decrease upward (inverted).
+        If None (default), behavior is equivalent to True (standard axis).
 
     Returns
     -------
@@ -409,10 +436,12 @@ def line_plot(field, title="", ax=None):
     -----
     - NaN regions are identified and marked using `axvspan` with a grey shade.
     """
+    if yincrease is None:
+        yincrease = True
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
 
-    field.plot(ax=ax, linewidth=2)
+    field.plot(ax=ax, linewidth=2, yincrease=yincrease)
 
     # Loop through the NaNs in the field and add grey vertical bars
     dims_to_check = ["eta_rho", "eta_v", "xi_rho", "xi_u", "lat", "lon"]
@@ -785,7 +814,7 @@ def plot(
     depth_contours: bool = False,
     layer_contours: bool = False,
     max_nr_layer_contours: int | None = 10,
-    yincrease: bool = False,
+    yincrease: bool | None = None,
     use_coarse_grid: bool = False,
     with_dim_names: bool = False,
     ax: Axes | None = None,
@@ -852,8 +881,8 @@ def plot(
     yincrease: bool, optional
         If True, the y-axis values increase upward (standard orientation).
         If False, the y-axis values decrease upward (inverted axis).
-        This option is only relevant for vertical sections and is ignored for horizontal plots.
-        Default is False.
+        If None (default), the orientation is determined by the default behavior
+        of the underlying plotting function.
 
     use_coarse_grid : bool, optional
         Use precomputed coarse-resolution grid. Default is False.
@@ -1111,7 +1140,7 @@ def plot(
             if "s_rho" in field.dims:
                 fig = profile_plot(field, title=title, yincrease=yincrease, ax=ax)
             else:
-                fig = line_plot(field, title=title, ax=ax)
+                fig = line_plot(field, title=title, ax=ax, yincrease=yincrease)
 
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")

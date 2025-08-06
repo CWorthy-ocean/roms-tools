@@ -10,6 +10,7 @@
 
 ### Documentation
 
+* Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))
 * Include recommendation about `interp_frc` in INFO message ([#352](https://github.com/CWorthy-ocean/roms-tools/issues/352))
 
 ### Bugfixes

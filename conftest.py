@@ -130,14 +130,14 @@ def tiny_grid() -> Grid:
     return Grid(
         nx=3,
         ny=3,
-        # size_x=200,
-        # size_y=200,
-        # center_lon=-17,
-        # center_lat=60,
         size_x=10,
         size_y=10,
-        center_lon=155,
-        center_lat=40,
+        # size_x=200,
+        # size_y=200,
+        center_lon=-17,
+        center_lat=60,
+        # center_lon=155,
+        # center_lat=40,
         rot=0,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter

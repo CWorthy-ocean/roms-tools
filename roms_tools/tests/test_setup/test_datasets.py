@@ -492,7 +492,7 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
         mock.patch("roms_tools.utils._has_dask", return_value=False),
     ):
         _ = GLORYSDefaultDataset(
-            filename=GLORYSDefaultDataset.default_path(),
+            filename=GLORYSDefaultDataset.dataset_name,
             start_time=start_time,
             end_time=end_time,
             use_dask=True,
@@ -517,7 +517,7 @@ def test_default_glorys_dataset_loading_without_dask() -> None:
         ),
     ):
         _ = GLORYSDefaultDataset(
-            filename=GLORYSDefaultDataset.default_path(),
+            filename=GLORYSDefaultDataset.dataset_name,
             start_time=start_time,
             end_time=end_time,
             use_dask=False,
@@ -539,7 +539,7 @@ def test_default_glorys_dataset_loading() -> None:
         clear=True,
     ):
         ds = GLORYSDefaultDataset(
-            filename=GLORYSDefaultDataset.default_path(),
+            filename=GLORYSDefaultDataset.dataset_name,
             start_time=start_time,
             end_time=end_time,
             use_dask=True,

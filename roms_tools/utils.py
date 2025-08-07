@@ -1,9 +1,8 @@
 import glob
 import logging
 import re
-from typing import Callable
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from importlib.util import find_spec
 from pathlib import Path
 

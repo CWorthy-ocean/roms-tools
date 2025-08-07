@@ -4,11 +4,16 @@
 
 ### New Features
 
+* Enhance `partition_netcdf` flexibility: now supports partitioning multiple input files and allows specifying a custom output directory for saved tiles ([#394](https://github.com/CWorthy-ocean/roms-tools/pull/394))
+
 ### Breaking Changes
 
 ### Internal Changes
 
 ### Documentation
+
+* Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))
+* Include recommendation about `interp_frc` in INFO message ([#352](https://github.com/CWorthy-ocean/roms-tools/issues/352))
 
 ### Bugfixes
 

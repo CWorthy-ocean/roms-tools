@@ -187,12 +187,12 @@ def _test_successful_initialization(
         if coarse_grid_mode == "always":
             assert sfc_forcing.use_coarse_grid
             assert (
-                "Data will be interpolated onto grid coarsened by factor 2."
+                "Data will be interpolated onto the grid coarsened by factor 2."
                 in caplog.text
             )
         elif coarse_grid_mode == "never":
             assert not sfc_forcing.use_coarse_grid
-            assert "Data will be interpolated onto fine grid." in caplog.text
+            assert "Data will be interpolated onto the fine grid." in caplog.text
 
         assert isinstance(sfc_forcing.ds, xr.Dataset)
         assert "uwnd" in sfc_forcing.ds

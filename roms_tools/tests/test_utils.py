@@ -67,7 +67,7 @@ def test_load_data_dask_not_found() -> None:
         mock.patch("roms_tools.utils._has_dask", return_value=False),
         pytest.raises(RuntimeError),
     ):
-        _load_data("foo.zarr", ["a"], use_dask=True)
+        _load_data("foo.zarr", {"a": "a"}, use_dask=True)
 
 
 def test_load_data_open_zarr_without_dask() -> None:
@@ -77,7 +77,7 @@ def test_load_data_open_zarr_without_dask() -> None:
         pytest.raises(ValueError),
     ):
         # read_zarr should require use_dask to be True
-        _load_data("foo.zarr", ["a"], use_dask=False, read_zarr=True)
+        _load_data("foo.zarr", {"a": ""}, use_dask=False, read_zarr=True)
 
 
 @pytest.mark.skipif(not _has_dask(), reason="Run only when Dask is installed")
@@ -86,7 +86,7 @@ def test_load_data_open_zarr(surface_forcing_dataset_path: Path) -> None:
     with mock.patch("roms_tools.utils.xr.open_zarr", wraps=xr.open_zarr) as fn_oz:
         ds = _load_data(
             surface_forcing_dataset_path,
-            ["latitude"],
+            {"latitude": "latitude"},
             use_dask=True,
             read_zarr=True,
         )
@@ -121,7 +121,7 @@ def test_load_data_open_dataset(
     ) as fn_od:
         ds = _load_data(
             ds_path,
-            ["latitude"],
+            {"latitude": "latitude"},
             use_dask=False,
         )
         assert fn_od.called

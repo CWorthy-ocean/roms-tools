@@ -774,12 +774,7 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
     end_time = datetime(2010, 2, 2)
 
     with mock.patch.dict(
-        os.environ,
-        {
-            "COPERNICUSMARINE_SERVICE_USERNAME": "cmcbride",
-            "PYDEVD_WARN_EVALUATION_TIMEOUT": "90",
-        },
-        clear=True,
+        os.environ, {"PYDEVD_WARN_EVALUATION_TIMEOUT": "90"}, clear=True
     ):
         sf = BoundaryForcing(
             grid=tiny_grid,
@@ -806,12 +801,7 @@ def test_nondefault_glorys_dataset_loading(small_grid: Grid) -> None:
     local_path = Path(download_test_data("GLORYS_NA_20120101.nc"))
 
     with mock.patch.dict(
-        os.environ,
-        {
-            "COPERNICUSMARINE_SERVICE_USERNAME": "cmcbride",
-            "PYDEVD_WARN_EVALUATION_TIMEOUT": "90",
-        },
-        clear=True,
+        os.environ, {"PYDEVD_WARN_EVALUATION_TIMEOUT": "90"}, clear=True
     ):
         bf = BoundaryForcing(
             grid=small_grid,

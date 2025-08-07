@@ -413,7 +413,7 @@ class BoundaryForcing:
             if self.source["name"] != "GLORYS":
                 raise ValueError("`source` must include a 'path'.")
 
-            self.source["path"] = GLORYSDefaultDataset.default_path()
+            self.source["path"] = GLORYSDefaultDataset.dataset_name
 
         # Set 'climatology' to False if not provided in 'source'
         self.source = {
@@ -464,9 +464,7 @@ class BoundaryForcing:
             raise ValueError(msg)
 
         has_no_path = "path" not in self.source
-        has_default_path = (
-            self.source.get("path") == GLORYSDefaultDataset.default_path()
-        )
+        has_default_path = self.source.get("path") == GLORYSDefaultDataset.dataset_name
         use_default = has_no_path or has_default_path
 
         variant = "default" if use_default else "external"

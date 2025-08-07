@@ -1,5 +1,4 @@
 import logging
-import os
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path

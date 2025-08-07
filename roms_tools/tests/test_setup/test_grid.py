@@ -21,6 +21,11 @@ from roms_tools.constants import (
 from roms_tools.download import download_test_data
 from roms_tools.setup.topography import _compute_rfactor
 
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
+
 
 @pytest.fixture()
 def counter_clockwise_rotated_grid():
@@ -177,18 +182,18 @@ def test_successful_initialization_with_topography(grid_fixture, request):
     assert grid is not None
 
 
-def test_plot():
-    grid = Grid(
-        nx=20, ny=20, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0
-    )
+def test_plot(grid_that_straddles_180_degree_meridian):
+    grid_that_straddles_180_degree_meridian.plot(with_dim_names=False)
+    grid_that_straddles_180_degree_meridian.plot(with_dim_names=True)
 
-    grid.plot(with_dim_names=False)
-    grid.plot(with_dim_names=True)
-    grid.plot(lat=0)
-    grid.plot(lon=-20)
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_plot_along_lat_lon(grid_that_straddles_180_degree_meridian):
+    grid_that_straddles_180_degree_meridian.plot(lat=61)
+    grid_that_straddles_180_degree_meridian.plot(lon=180)
 
     with pytest.raises(ValueError, match="Specify either `lat` or `lon`, not both"):
-        grid.plot(lat=0, lon=-20)
+        grid_that_straddles_180_degree_meridian.plot(lat=61, lon=180)
 
 
 def test_save(tmp_path):

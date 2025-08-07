@@ -7,8 +7,6 @@ import pytest
 import xarray as xr
 
 from roms_tools.utils import (
-    _check_dask,
-    _check_load_zarr,
     _generate_focused_coordinate_range,
     _has_dask,
     _has_gcsfs,
@@ -61,67 +59,6 @@ def test_has_gcfs_error_when_missing() -> None:
     """Verify that GCFS existence is correctly reported when not found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=None):
         assert not _has_gcsfs()
-
-
-@pytest.mark.parametrize(
-    ("filename", "use_dask"),
-    [
-        pytest.param("foo.zarr", False, id="Do not use dask"),
-        pytest.param(["foo.zarr", "bar.zarr"], True, id="Multi-item list of filenames"),
-    ],
-)
-def test_check_load_zarr(filename: str | list[str], use_dask: bool) -> None:
-    """Verify that `filename` and `use_dask` are ignored when `read_zarr` is `False`."""
-    # passing False should ignore invalid inputs
-    _check_load_zarr(filename, use_dask, read_zarr=False)
-
-
-@pytest.mark.parametrize(
-    ("filename", "use_dask"),
-    [
-        pytest.param("foo.zarr", False, id="Do not use dask"),
-        pytest.param(["foo.zarr", "bar.zarr"], True, id="Multi-item list of filenames"),
-    ],
-)
-def test_check_load_zarr_errors(filename: str | list[str], use_dask: bool) -> None:
-    """Verify that `filename` and `use_dask` are checked when `read_zarr` is `True`."""
-    with pytest.raises(ValueError):
-        _check_load_zarr(filename, use_dask, read_zarr=True)
-
-
-@pytest.mark.parametrize(
-    ("filename", "use_dask"),
-    [
-        pytest.param("", True, id="Empty filename"),
-        pytest.param("   ", True, id="Whitespace-only filename"),
-        pytest.param(["foo.zarr"], True, id="1-item list of filenames"),
-    ],
-)
-def test_check_load_zarr_enabled(filename: str | list[str], use_dask: bool) -> None:
-    """Verify that no exceptions are raised with inputs considered acceptable."""
-    _check_load_zarr(filename, use_dask, read_zarr=True)
-
-
-def test_check_dask_error_when_missing() -> None:
-    """Verify that dask existence is correctly reported when not found."""
-    with (
-        mock.patch("roms_tools.utils.find_spec", return_value=None),
-        pytest.raises(RuntimeError),
-    ):
-        assert _check_dask(use_dask=True)
-
-
-def test_check_dask() -> None:
-    """Verify that dask existence is correctly reported when found."""
-    with mock.patch("roms_tools.utils.find_spec", return_value=mock.MagicMock):
-        _check_dask(use_dask=True)
-
-
-def test_check_dask_allow_missing_when_unused() -> None:
-    """Verify that dask existence is correctly ignored when not requested."""
-    with mock.patch("roms_tools.utils.find_spec", return_value=None):
-        # passing False should ignore the missing dask package
-        _check_dask(use_dask=False)
 
 
 def test_load_data_dask_not_found() -> None:

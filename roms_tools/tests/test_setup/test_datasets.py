@@ -502,24 +502,6 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
     not _has_dask(),
     reason="Executed only if Dask package is installed",
 )
-def test_default_glorys_dataset_loading_without_dask() -> None:
-    """Verify that loading the default GLORYS dataset fails if use_dask is not True."""
-    start_time = datetime(2020, 2, 1)
-    end_time = datetime(2020, 2, 2)
-
-    with pytest.raises(ValueError):
-        _ = GLORYSDefaultDataset(
-            filename=GLORYSDefaultDataset.dataset_name,
-            start_time=start_time,
-            end_time=end_time,
-            use_dask=False,
-        )
-
-
-@pytest.mark.skipif(
-    not _has_dask(),
-    reason="Executed only if Dask package is installed",
-)
 def test_default_glorys_dataset_loading() -> None:
     """Verify the default GLORYS dataset is loaded correctly."""
     start_time = datetime(2020, 2, 1)

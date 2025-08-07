@@ -1094,6 +1094,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
     def __post_init__(self) -> None:
         """Configure attributes to ensure use of the correct upstream data-source."""
         self.read_zarr = True
+        self.use_dask = True
         self.filename = self.dataset_name
         self.ds_loader_fn = lambda: copernicusmarine.open_dataset(self.dataset_name)
 

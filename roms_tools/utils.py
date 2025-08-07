@@ -127,7 +127,6 @@ def _get_ds_combine_base_params() -> dict[str, str]:
 
 
 def _load_data_dask(
-    # filename: str | Path | list[str | Path],
     filenames: list[str],
     dim_names: dict[str, str],
     time_chunking: bool = True,

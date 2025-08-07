@@ -216,13 +216,19 @@ class ChildGrid(Grid):
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: str | Path) -> "ChildGrid":
+    def from_yaml(
+        cls,
+        filepath: str | Path,
+        verbose: bool = False,
+    ) -> "ChildGrid":
         """Create an instance of the ChildGrid class from a YAML file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        verbose : bool, optional
+            Indicates whether to print grid generation steps with timing. Defaults to False.
 
         Returns
         -------

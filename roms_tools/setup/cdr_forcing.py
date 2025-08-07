@@ -103,14 +103,14 @@ class ReleaseSimulationManager(BaseModel):
 class ReleaseCollector(RootModel):
     """Collects and validates multiple releases against each other."""
 
-    root: conlist(
+    root: conlist[
         Annotated[
             VolumeRelease | TracerPerturbation, Field(discriminator="release_type")
         ],
-        min_length=1,
-    ) = Field(alias="releases")
+        1,
+    ] = Field(alias="releases")
 
-    _release_type: ReleaseType = None
+    _release_type: ReleaseType | None = None
 
     def __iter__(self) -> Iterator[Release]:
         return iter(self.root)

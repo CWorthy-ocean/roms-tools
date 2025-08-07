@@ -560,6 +560,11 @@ class ROMSOutput:
         xarray.Dataset
             Dataset with "abs_time" added and "time" removed.
         """
+        if self.model_reference_date is None:
+            raise ValueError(
+                "`model_reference_date` must be set before computing absolute time."
+            )
+
         ocean_time_seconds = ds["ocean_time"].values
 
         abs_time = np.array(

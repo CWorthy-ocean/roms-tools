@@ -75,7 +75,7 @@ class RiverForcing:
         Whether to include BGC tracers. Defaults to `False`.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
-    indices : dict[str, list[tuple]], optional
+    indices : dict[str, list[tuple[int, int]]], optional
         A dictionary specifying the river indices for each river to be included in the river forcing. This parameter is optional. If not provided,
         the river indices will be automatically determined based on the grid and the source dataset. If provided, it allows for explicit specification
         of river locations. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
@@ -101,7 +101,7 @@ class RiverForcing:
     """Start time of the desired river forcing data."""
     end_time: datetime
     """End time of the desired river forcing data."""
-    source: dict[str, str | Path | list[str | Path]] = None
+    source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the river forcing data."""
     convert_to_climatology: str = "if_any_missing"
     """Determines when to compute climatology for river forcing."""
@@ -110,7 +110,7 @@ class RiverForcing:
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
-    indices: dict[str, dict[str, int | list[int]]] | None = None
+    indices: dict[str, list[tuple[int, int]]] | None = None
     """A dictionary of river indices.
 
     If not provided during initialization, it will be automatically determined based on
@@ -474,7 +474,10 @@ class RiverForcing:
             A dictionary mapping grid cell indices (eta_rho, xi_rho) to a list
             of river names that overlap at that grid cell.
         """
-        index_to_rivers = defaultdict(list)
+        if self.indices is None:
+            return {}
+
+        index_to_rivers: dict[tuple[int, int], list[str]] = defaultdict(list)
 
         # Collect all index pairs used by multiple rivers
         for river_name, index_list in self.indices.items():
@@ -520,6 +523,9 @@ class RiverForcing:
             The volume-weighted tracer concentration at the overlapping grid cell,
             as a new 1-entry DataArray with updated coordinates.
         """
+        if self.indices is None:
+            self.indices = {}
+
         new_name = f"overlap_{i}"
         self.indices[new_name] = [idx_pair]
 
@@ -595,8 +601,14 @@ class RiverForcing:
         ds : xr.Dataset
             Updated dataset with reduced river volumes.
         """
+        if self.indices is None:
+            raise ValueError(
+                "`self.indices` must be set before calling _reduce_river_volumes"
+            )
+
         # Count number of overlaps for each river
-        river_overlap_count = defaultdict(int)
+        river_overlap_count: dict[str, int] = defaultdict(int)
+
         for rivers in overlapping_rivers.values():
             for name in rivers:
                 river_overlap_count[name] += 1
@@ -691,7 +703,11 @@ class RiverForcing:
             Defaults to "all".
 
         """
-        valid_river_names = list(self.indices.keys())
+        if self.indices is None:
+            valid_river_names = []
+        else:
+            valid_river_names = list(self.indices.keys())
+
         river_names = _validate_river_names(river_names, valid_river_names)
         if len(valid_river_names) > MAX_DISTINCT_COLORS:
             colors = assign_category_colors(river_names)
@@ -806,7 +822,11 @@ class RiverForcing:
             Defaults to "all".
 
         """
-        valid_river_names = list(self.indices.keys())
+        if self.indices is None:
+            valid_river_names = []
+        else:
+            valid_river_names = list(self.indices.keys())
+
         river_names = _validate_river_names(river_names, valid_river_names)
         if len(valid_river_names) > MAX_DISTINCT_COLORS:
             colors = assign_category_colors(river_names)
@@ -900,11 +920,17 @@ class RiverForcing:
         """
         forcing_dict = to_dict(self, exclude=["climatology"])
 
-        # Convert indices format
-        indices_data = forcing_dict["RiverForcing"]["indices"]
-        serialized_indices = {"_convention": "eta_rho, xi_rho"}
+        indices_data = forcing_dict.get("RiverForcing", {}).get("indices")
+        if not indices_data:
+            # If no indices, just write the dict as is
+            write_to_yaml(forcing_dict, filepath)
+            return
+
+        # Convert tuple indices to string format for YAML
+        serialized_indices = {}
         for key, value in indices_data.items():
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
+        serialized_indices["_convention"] = "eta_rho, xi_rho"
 
         # Remove keys starting with "overlap_"
         filtered_indices = {

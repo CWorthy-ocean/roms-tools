@@ -184,6 +184,11 @@ def test_plot():
 
     grid.plot(with_dim_names=False)
     grid.plot(with_dim_names=True)
+    grid.plot(lat=0)
+    grid.plot(lon=-20)
+
+    with pytest.raises(ValueError, match="Specify either `lat` or `lon`, not both"):
+        grid.plot(lat=0, lon=-20)
 
 
 def test_save(tmp_path):

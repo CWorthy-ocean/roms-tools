@@ -508,14 +508,7 @@ def test_default_glorys_dataset_loading_without_dask() -> None:
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 2)
 
-    with (
-        pytest.raises(ValueError),
-        mock.patch.dict(
-            os.environ,
-            {"COPERNICUSMARINE_SERVICE_USERNAME": "cmcbride"},
-            clear=True,
-        ),
-    ):
+    with pytest.raises(ValueError):
         _ = GLORYSDefaultDataset(
             filename=GLORYSDefaultDataset.dataset_name,
             start_time=start_time,
@@ -533,11 +526,6 @@ def test_default_glorys_dataset_loading() -> None:
     start_time = datetime(2020, 2, 1)
     end_time = datetime(2020, 2, 2)
 
-    with mock.patch.dict(
-        os.environ,
-        {"COPERNICUSMARINE_SERVICE_USERNAME": "cmcbride"},
-        clear=True,
-    ):
         ds = GLORYSDefaultDataset(
             filename=GLORYSDefaultDataset.dataset_name,
             start_time=start_time,

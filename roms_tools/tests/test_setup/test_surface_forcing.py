@@ -955,4 +955,4 @@ def test_default_era5_dataset_loading(small_grid: Grid) -> None:
     )
 
     expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
-    assert set(sf.ds.var_names).issuperset(expected_vars)
+    assert set(sf.ds.data_vars).issuperset(expected_vars)

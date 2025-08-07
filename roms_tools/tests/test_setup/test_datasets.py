@@ -1,7 +1,9 @@
 import logging
+import os
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -11,11 +13,15 @@ from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import (
     CESMBGCDataset,
     Dataset,
+    ERA5ARCODataset,
     ERA5Correction,
     GLORYSDataset,
+    GLORYSDefaultDataset,
     RiverDataset,
     TPXODataset,
 )
+from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
+from roms_tools.utils import _has_dask, _has_gcsfs
 
 
 @pytest.fixture
@@ -435,6 +441,112 @@ def test_era5_correction_choose_subdomain(use_dask):
     data.choose_subdomain(target_coords, straddle=False)
     assert (data.ds["latitude"] == lats).all()
     assert (data.ds["longitude"] == lons).all()
+
+
+@pytest.mark.skipif(
+    not _has_gcsfs(),
+    reason="Executed only if GCFS package is installed",
+)
+def test_default_era5_dataset_loading_without_dask() -> None:
+    """Verify that loading the default ERA5 dataset fails if use_dask is not True."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with pytest.raises(ValueError):
+        _ = ERA5ARCODataset(
+            filename=DEFAULT_ERA5_ARCO_PATH,
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=False,
+        )
+
+
+@pytest.mark.stream
+@pytest.mark.skipif(
+    not _has_gcsfs() or not _has_dask(),
+    reason="Executed only if GCFS & Dask packages are installed",
+)
+def test_default_era5_dataset_loading() -> None:
+    """Verify the default ERA5 dataset is loaded correctly."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    ds = ERA5ARCODataset(
+        filename=DEFAULT_ERA5_ARCO_PATH,
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=True,
+    )
+
+    expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
+    assert set(ds.var_names).issuperset(expected_vars)
+
+
+def test_default_glorys_dataset_loading_dask_not_installed() -> None:
+    """Verify that loading the default GLORYS dataset fails if dask is not available."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with (
+        pytest.raises(RuntimeError),
+        mock.patch("roms_tools.utils._has_dask", return_value=False),
+    ):
+        _ = GLORYSDefaultDataset(
+            filename=GLORYSDefaultDataset.default_path(),
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=True,
+        )
+
+
+@pytest.mark.skipif(
+    not _has_dask(),
+    reason="Executed only if Dask package is installed",
+)
+def test_default_glorys_dataset_loading_without_dask() -> None:
+    """Verify that loading the default GLORYS dataset fails if use_dask is not True."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with (
+        pytest.raises(ValueError),
+        mock.patch.dict(
+            os.environ,
+            {"COPERNICUSMARINE_SERVICE_USERNAME": "cmcbride"},
+            clear=True,
+        ),
+    ):
+        _ = GLORYSDefaultDataset(
+            filename=GLORYSDefaultDataset.default_path(),
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=False,
+        )
+
+
+@pytest.mark.skipif(
+    not _has_dask(),
+    reason="Executed only if Dask package is installed",
+)
+def test_default_glorys_dataset_loading() -> None:
+    """Verify the default GLORYS dataset is loaded correctly."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with mock.patch.dict(
+        os.environ,
+        {"COPERNICUSMARINE_SERVICE_USERNAME": "cmcbride"},
+        clear=True,
+    ):
+        ds = GLORYSDefaultDataset(
+            filename=GLORYSDefaultDataset.default_path(),
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=True,
+        )
+
+        expected_vars = {"temp", "salt", "u", "v", "zeta"}
+        assert set(ds.var_names).issuperset(expected_vars)
 
 
 def test_data_concatenation(use_dask):

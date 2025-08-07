@@ -1,10 +1,15 @@
 import logging
 import time
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import (
+    ClassVar,
+)
 
+import copernicusmarine
 import numpy as np
 import xarray as xr
 
@@ -96,17 +101,18 @@ class Dataset:
     use_dask: bool | None = False
     apply_post_processing: bool | None = True
     read_zarr: bool | None = False
+    ds_loader_fn: Callable[[], xr.Dataset] | None = None
 
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
-    def __post_init__(self):
-        """
-        Post-initialization processing:
+    def __post_init__(self) -> None:
+        """Perform post-initialization processing.
+
         1. Loads the dataset from the specified filename.
-        2. Applies time filtering based on start_time and end_time if provided.
-        3. Selects relevant fields as specified by var_names.
-        4. Ensures latitude values and depth values are in ascending order.
+        2. Applies time filtering based on start_time and end_time (if provided).
+        3. Selects relevant fields as specified by `var_names`.
+        4. Ensures latitude, longitude, and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
         # Validate start_time and end_time
@@ -168,7 +174,11 @@ class Dataset:
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
         ds = _load_data(
-            self.filename, self.dim_names, self.use_dask, read_zarr=self.read_zarr
+            self.filename,
+            self.dim_names,
+            self.use_dask,
+            read_zarr=self.read_zarr or False,
+            ds_loader_fn=self.ds_loader_fn,
         )
 
         return ds
@@ -1073,6 +1083,37 @@ class GLORYSDataset(Dataset):
 
         self.ds["mask"] = mask
         self.ds["mask_vel"] = mask_vel
+
+
+@dataclass(kw_only=True)
+class GLORYSDefaultDataset(GLORYSDataset):
+    """A dataset that is loaded from a well-known GLORYS datasource."""
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "depth": "elevation",
+            "time": "time",
+        },
+    )
+
+    dataset_name: ClassVar[str] = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+
+    def __post_init__(self) -> None:
+        """Configure attributes to ensure use of the correct upstream data-source."""
+        self.read_zarr = True
+        self.use_dask = True
+        # self.needs_lateral_fill = False
+
+        # self.filename = f"{self.endpoint}/{self.bucket}/{self.root_path}"
+        # _check_dask(self.use_dask if self.use_dask is not None else True)
+        # _check_load_zarr(self.filename, self.use_dask, self.read_zarr)
+        # _check_copernicus()
+
+        self.ds_loader_fn = lambda: copernicusmarine.open_dataset(self.dataset_name)
+
+        super().__post_init__()
 
 
 @dataclass(kw_only=True)

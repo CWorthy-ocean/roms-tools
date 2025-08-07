@@ -10,6 +10,7 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.download import download_test_data
+from roms_tools.utils import _has_dask, _has_gcsfs
 
 
 @pytest.fixture
@@ -932,3 +933,26 @@ def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
     yaml_filepath.unlink()
     Path(expected_filepath1).unlink()
     Path(expected_filepath2).unlink()
+
+
+@pytest.mark.stream
+@pytest.mark.skipif(
+    not _has_gcsfs() or not _has_dask(),
+    reason="Executed only if GCFS & Dask packages are installed",
+)
+def test_default_era5_dataset_loading(small_grid: Grid) -> None:
+    """Verify the default ERA5 dataset is loaded when a path is not provided."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    sf = SurfaceForcing(
+        grid=small_grid,
+        source={"name": "ERA5"},
+        type="physics",
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=True,
+    )
+
+    expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
+    assert set(sf.ds.var_names).issuperset(expected_vars)

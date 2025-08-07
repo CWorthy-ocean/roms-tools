@@ -12,8 +12,8 @@ from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import plot
-from roms_tools.setup.mask import _add_mask, _add_velocity_masks
-from roms_tools.setup.topography import _add_topography
+from roms_tools.setup.mask import add_mask, add_velocity_masks
+from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     extract_single_value,
     gc_dist,
@@ -169,7 +169,7 @@ class Grid:
         if verbose:
             start_time = time.time()
             logging.info("=== Creating the mask ===")
-        ds = _add_mask(self.ds)
+        ds = add_mask(self.ds)
 
         if verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
@@ -226,7 +226,7 @@ class Grid:
             )
 
         # Add topography to the dataset
-        ds = _add_topography(
+        ds = add_topography(
             ds=self.ds,
             target_coords=target_coords,
             topography_source=topography_source,
@@ -576,7 +576,7 @@ class Grid:
         ds = xr.open_dataset(filepath)
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
-            ds = _add_velocity_masks(ds)
+            ds = add_velocity_masks(ds)
 
         # Create a new Grid instance without calling __init__ and __post_init__
         grid = cls.__new__(cls)

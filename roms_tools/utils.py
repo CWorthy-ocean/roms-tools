@@ -11,7 +11,7 @@ import xarray as xr
 from roms_tools.constants import R_EARTH
 
 
-def _load_data(
+def load_data(
     filename,
     dim_names,
     use_dask,
@@ -63,7 +63,7 @@ def _load_data(
         dim_names = {}
 
     if use_dask:
-        if not _has_dask():
+        if not has_dask():
             raise RuntimeError(
                 "Dask is required but not installed. Install it with:\n"
                 "  • `pip install roms-tools[dask]` or\n"
@@ -410,7 +410,7 @@ def get_dask_chunks(location, chunk_size):
     return chunk_mapping.get(location, {})
 
 
-def _generate_coordinate_range(min_val: float, max_val: float, resolution: float):
+def generate_coordinate_range(min_val: float, max_val: float, resolution: float):
     """Generate an array of target coordinates (e.g., latitude or longitude) within a
     specified range, with a resolution that is rounded to the nearest value of the form
     `1/n` (or integer).
@@ -472,7 +472,7 @@ def _generate_coordinate_range(min_val: float, max_val: float, resolution: float
     return target.astype(np.float32)
 
 
-def _generate_focused_coordinate_range(
+def generate_focused_coordinate_range(
     center: float,
     sc: float,
     min_val: float,
@@ -558,7 +558,7 @@ def _generate_focused_coordinate_range(
     return centers, faces
 
 
-def _remove_edge_nans(
+def remove_edge_nans(
     field: xr.DataArray, xdim: str, layer_depth: xr.DataArray | None = None
 ) -> tuple[xr.DataArray, xr.DataArray | None]:
     """Remove NaN-only slices at the edges of a specified dimension.
@@ -634,11 +634,11 @@ def _remove_edge_nans(
     return field, layer_depth
 
 
-def _has_dask() -> bool:
+def has_dask() -> bool:
     return find_spec("dask") is not None
 
 
-def _has_gcsfs() -> bool:
+def has_gcsfs() -> bool:
     return find_spec("gcsfs") is not None
 
 

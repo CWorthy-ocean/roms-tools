@@ -9,7 +9,7 @@ from scipy.interpolate import griddata, interp1d
 
 from roms_tools import Grid
 from roms_tools.plot import plot_nesting
-from roms_tools.setup.topography import _clip_depth
+from roms_tools.setup.topography import clip_depth
 from roms_tools.setup.utils import (
     from_yaml,
     get_boundary_coords,
@@ -649,7 +649,7 @@ def modify_child_topography_and_mask(
         alpha * child_grid_ds["h"] + (1 - alpha) * h_parent_interpolated
     )
     # Clip depth on modified child topography
-    child_grid_ds["h"] = _clip_depth(child_grid_ds["h"], hmin)
+    child_grid_ds["h"] = clip_depth(child_grid_ds["h"], hmin)
 
     child_mask = (
         alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated

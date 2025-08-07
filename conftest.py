@@ -1,4 +1,5 @@
 import hashlib
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -103,6 +104,46 @@ def grid_that_straddles_180_degree_meridian():
     )
 
     return grid
+
+
+@pytest.fixture(scope="session")
+def small_grid() -> Grid:
+    """Create a grid that covers a small surface area."""
+    return Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+
+@pytest.fixture(scope="session")
+def tiny_grid() -> Grid:
+    """Create a grid that covers a small surface area."""
+    return Grid(
+        nx=3,
+        ny=3,
+        # size_x=200,
+        # size_y=200,
+        # center_lon=-17,
+        # center_lat=60,
+        size_x=10,
+        size_y=10,
+        center_lon=155,
+        center_lat=40,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
 
 
 @pytest.fixture(scope="session")
@@ -299,26 +340,12 @@ def initial_conditions_with_unified_bgc_from_climatology(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing(use_dask):
+def boundary_forcing(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -328,26 +355,12 @@ def boundary_forcing(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_adjusted_for_zeta(use_dask):
+def boundary_forcing_adjusted_for_zeta(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -358,26 +371,12 @@ def boundary_forcing_adjusted_for_zeta(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill(use_dask):
+def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -387,26 +386,12 @@ def boundary_forcing_with_2d_fill(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask):
+def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask: bool, small_grid: Grid):
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -507,7 +492,6 @@ def surface_forcing(use_dask):
     )
 
 
-@pytest.mark.stream
 @pytest.fixture(scope="session")
 def surface_forcing_arco(use_dask):
     """Fixture for creating a SurfaceForcing object with ERA5 ARCO data."""
@@ -937,3 +921,24 @@ def calculate_data_hash(filepath):
 
         # Return the computed hash
         return hash_obj.hexdigest()
+
+
+@pytest.fixture
+def get_test_data_path() -> Callable[[str], Path]:
+    """Given a data source name, find the local path to the test data."""
+
+    def _get_test_data_path(dataset_name: str) -> Path:
+        data_dir = Path(__file__).parent / "roms_tools/tests/test_setup/test_data"
+
+        path = data_dir / dataset_name
+        if path.exists():
+            return path
+
+        path = data_dir / f"{dataset_name}.zarr"
+        if path.exists():
+            return path
+
+        msg = f"Dataset `{dataset_name}` not found in data directory `{data_dir}`"
+        raise FileNotFoundError(msg)
+
+    return _get_test_data_path

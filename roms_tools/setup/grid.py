@@ -106,7 +106,7 @@ class Grid:
     """The bottom control parameter."""
     hc: float = 300.0
     """The critical depth (in meters)."""
-    topography_source: dict[str, str | Path | list[str | Path]] = None
+    topography_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the topography data."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
@@ -731,24 +731,24 @@ class Grid:
             "hmin",
         ]:
             if attr in ds.attrs:
-                a = float(ds.attrs[attr])
+                value = float(ds.attrs[attr])
             else:
-                a = None
+                value = None
 
-            object.__setattr__(grid, attr, a)
+            object.__setattr__(grid, attr, value)
 
         if "topography_source_name" in ds.attrs:
             if "topography_source_path" in ds.attrs:
-                a = {
+                topo_source = {
                     "name": ds.attrs["topography_source_name"],
                     "path": ds.attrs["topography_source_path"],
                 }
             else:
-                a = {"name": ds.attrs["topography_source_name"]}
+                topo_source = {"name": ds.attrs["topography_source_name"]}
         else:
-            a = None
+            topo_source = None
 
-        object.__setattr__(grid, "topography_source", a)
+        object.__setattr__(grid, "topography_source", topo_source)
 
         return grid
 
@@ -854,7 +854,7 @@ class Grid:
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
-    def _create_horizontal_grid(self) -> xr.Dataset():
+    def _create_horizontal_grid(self) -> xr.Dataset:
         """Create the horizontal grid based on a Mercator projection and store it in the
         'ds' attribute.
 

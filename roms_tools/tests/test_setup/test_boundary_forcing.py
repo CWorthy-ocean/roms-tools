@@ -769,7 +769,7 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
     reason="Executed only if Dask and Copernicus Marine packages are installed",
 )
 def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
-    """Verify the default ERA5 dataset is loaded when a path is not provided."""
+    """Verify the default GLORYS dataset is loaded when a path is not provided."""
     start_time = datetime(2010, 2, 1)
     end_time = datetime(2010, 3, 1)
 
@@ -795,7 +795,7 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
     reason="Executed only if Dask package is installed",
 )
 def test_nondefault_glorys_dataset_loading(small_grid: Grid) -> None:
-    """Verify the default ERA5 dataset is loaded when a path is not provided."""
+    """Verify a non-default GLORYS dataset is loaded when a path is provided."""
     start_time = datetime(2012, 1, 1)
     end_time = datetime(2012, 12, 31)
 

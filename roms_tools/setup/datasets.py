@@ -1116,8 +1116,11 @@ class GLORYSDefaultDataset(GLORYSDataset):
         spec = importlib.util.find_spec(package_name)
         if not spec:
             msg = (
-                f"Package '{package_name}' not found. Please install it, "
-                f"e.g., using 'pip install {package_name}'."
+                f"To use cloud-based GLORYS data, {package_name} is required but not installed. Install it with:\n"
+                "  • `pip install roms-tools[stream]` or\n"
+                f"  • `pip install {package_name}` or\n"
+                f"  • `conda install {package_name}`\n"
+                "Alternatively, install `roms-tools` with conda to include all dependencies."
             )
             raise RuntimeError(msg)
 

@@ -507,15 +507,15 @@ def test_default_glorys_dataset_loading() -> None:
     start_time = datetime(2012, 1, 1)
     end_time = datetime(2013, 1, 1)
 
-        ds = GLORYSDefaultDataset(
-            filename=GLORYSDefaultDataset.dataset_name,
-            start_time=start_time,
-            end_time=end_time,
-            use_dask=True,
-        )
+    ds = GLORYSDefaultDataset(
+        filename=GLORYSDefaultDataset.dataset_name,
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=True,
+    )
 
-        expected_vars = {"temp", "salt", "u", "v", "zeta"}
-        assert set(ds.var_names).issuperset(expected_vars)
+    expected_vars = {"temp", "salt", "u", "v", "zeta"}
+    assert set(ds.var_names).issuperset(expected_vars)
 
 
 def test_data_concatenation(use_dask):

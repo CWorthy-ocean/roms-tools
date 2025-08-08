@@ -29,7 +29,7 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     one_dim_fill,
 )
-from roms_tools.utils import _has_gcsfs, _load_data
+from roms_tools.utils import _get_pkg_error_msg, _has_gcsfs, _load_data
 
 # lat-lon datasets
 
@@ -1115,13 +1115,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
 
         spec = importlib.util.find_spec(package_name)
         if not spec:
-            msg = (
-                f"To use cloud-based GLORYS data, {package_name} is required but not installed. Install it with:\n"
-                "  • `pip install roms-tools[stream]` or\n"
-                f"  • `pip install {package_name}` or\n"
-                f"  • `conda install {package_name}`\n"
-                "Alternatively, install `roms-tools` with conda to include all dependencies."
-            )
+            msg = _get_pkg_error_msg("cloud-based GLORYS data", package_name, "stream")
             raise RuntimeError(msg)
 
         try:
@@ -1625,12 +1619,8 @@ class ERA5ARCODataset(ERA5Dataset):
     def __post_init__(self):
         self.read_zarr = True
         if not _has_gcsfs():
-            raise RuntimeError(
-                "To use cloud-based ERA5 data, GCSFS is required but not installed. Install it with:\n"
-                "  • `pip install roms-tools[stream]` or\n"
-                "  • `conda install gcsfs`\n"
-                "Alternatively, install `roms-tools` with conda to include all dependencies."
-            )
+            msg = _get_pkg_error_msg("cloud-based ERA5 data", "gcsfs", "stream")
+            raise RuntimeError(msg)
 
         super().__post_init__()
 

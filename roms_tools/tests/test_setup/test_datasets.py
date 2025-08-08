@@ -20,7 +20,7 @@ from roms_tools.setup.datasets import (
     TPXODataset,
 )
 from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
-from roms_tools.utils import _has_dask, _has_gcsfs
+from roms_tools.utils import _has_copernicus, _has_dask, _has_gcsfs
 
 
 @pytest.fixture
@@ -501,8 +501,8 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
 
 @pytest.mark.stream
 @pytest.mark.skipif(
-    not _has_dask(),
-    reason="Executed only if Dask package is installed",
+    not _has_dask() or not _has_copernicus(),
+    reason="Executed only if Dask and Copernicus Marine packages are installed",
 )
 def test_default_glorys_dataset_loading() -> None:
     """Verify the default GLORYS dataset is loaded correctly."""

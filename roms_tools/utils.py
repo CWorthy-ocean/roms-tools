@@ -842,11 +842,39 @@ def _remove_edge_nans(
 
 
 def _has_dask() -> bool:
+    """Determine if the Dask package is installed.
+
+    Returns
+    -------
+    bool
+        `True` if package is found, `False` otherwise.
+
+    """
     return find_spec("dask") is not None
 
 
 def _has_gcsfs() -> bool:
+    """Determine if the GCSFS package is installed.
+
+    Returns
+    -------
+    bool
+        `True` if package is found, `False` otherwise.
+
+    """
     return find_spec("gcsfs") is not None
+
+
+def _has_copernicus() -> bool:
+    """Determine if the Copernicus Marine Toolkit package is installed.
+
+    Returns
+    -------
+    bool
+        `True` if package is found, `False` otherwise.
+
+    """
+    return find_spec("copernicusmarine") is not None
 
 
 def normalize_longitude(lon: float, straddle: bool) -> float:

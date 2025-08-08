@@ -13,7 +13,7 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
-from roms_tools.utils import _has_dask
+from roms_tools.utils import _has_copernicus, _has_dask
 
 
 @pytest.mark.parametrize(
@@ -765,8 +765,8 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
 
 @pytest.mark.stream
 @pytest.mark.skipif(
-    not _has_dask(),
-    reason="Executed only if Dask package is installed",
+    not _has_dask() or not _has_copernicus(),
+    reason="Executed only if Dask and Copernicus Marine packages are installed",
 )
 def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
     """Verify the default ERA5 dataset is loaded when a path is not provided."""

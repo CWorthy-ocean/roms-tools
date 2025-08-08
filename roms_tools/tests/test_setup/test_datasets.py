@@ -481,6 +481,7 @@ def test_default_era5_dataset_loading() -> None:
     assert set(ds.var_names).issuperset(expected_vars)
 
 
+@pytest.mark.stream
 def test_default_glorys_dataset_loading_dask_not_installed() -> None:
     """Verify that loading the default GLORYS dataset fails if dask is not available."""
     start_time = datetime(2020, 2, 1)
@@ -498,6 +499,7 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
         )
 
 
+@pytest.mark.stream
 @pytest.mark.skipif(
     not _has_dask(),
     reason="Executed only if Dask package is installed",

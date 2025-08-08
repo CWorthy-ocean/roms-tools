@@ -1,3 +1,4 @@
+import importlib.util
 import logging
 import time
 from collections import Counter, defaultdict
@@ -5,11 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import (
-    ClassVar,
-)
+from types import ModuleType
+from typing import ClassVar
 
-import copernicusmarine
 import numpy as np
 import xarray as xr
 
@@ -1090,6 +1089,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
     """A dataset that is loaded from a well-known GLORYS datasource."""
 
     dataset_name: ClassVar[str] = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+    _copm_module: ModuleType | None = None
 
     def __post_init__(self) -> None:
         """Configure attributes to ensure use of the correct upstream data-source."""
@@ -1100,6 +1100,27 @@ class GLORYSDefaultDataset(GLORYSDataset):
 
         super().__post_init__()
 
+    def _load_copernicus(self) -> ModuleType:
+        package_name = "copernicusmarine"
+        if self._copm_module:
+            return self._copm_module
+
+        spec = importlib.util.find_spec(package_name)
+        if not spec:
+            msg = (
+                f"Package '{package_name}' not found. Please install it, "
+                f"e.g., using 'pip install {package_name}'."
+            )
+            raise RuntimeError(msg)
+
+        try:
+            self._copm_module = importlib.import_module(package_name)
+        except ImportError as e:
+            msg = f"Package '{package_name} was found but could not be loaded."
+            raise RuntimeError(msg) from e
+
+        return self._copm_module
+
     def _load_from_copernicus(self) -> xr.Dataset:
         """Load a GLORYS dataset supporting streaming.
 
@@ -1108,6 +1129,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
         xr.Dataset
             The streaming dataset
         """
+        copernicusmarine = self._load_copernicus()
         return copernicusmarine.open_dataset(
             self.dataset_name,
             start_datetime=self.start_time,

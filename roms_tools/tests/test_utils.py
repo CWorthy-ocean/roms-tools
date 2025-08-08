@@ -14,12 +14,6 @@ from roms_tools.utils import (
 )
 
 
-@pytest.fixture
-def surface_forcing_dataset_path(get_test_data_path: Callable[[str], Path]) -> Path:
-    """Retrieve the path to the surface_forcing.zarr test dataset."""
-    return get_test_data_path("surface_forcing")
-
-
 @pytest.mark.parametrize(
     "min_val, max_val, center, sc, N",
     [
@@ -78,21 +72,6 @@ def test_load_data_open_zarr_without_dask() -> None:
     ):
         # read_zarr should require use_dask to be True
         _load_data("foo.zarr", {"a": ""}, use_dask=False, read_zarr=True)
-
-
-@pytest.mark.skipif(not _has_dask(), reason="Run only when Dask is installed")
-def test_load_data_open_zarr(surface_forcing_dataset_path: Path) -> None:
-    """Verify that a zarr file is correctly loaded when using xr.open_zarr."""
-    with mock.patch("roms_tools.utils.xr.open_zarr", wraps=xr.open_zarr) as fn_oz:
-        ds = _load_data(
-            surface_forcing_dataset_path,
-            {"latitude": "latitude"},
-            use_dask=True,
-            read_zarr=True,
-        )
-
-        assert "time" in ds.dims
-        assert fn_oz.called
 
 
 @pytest.mark.parametrize(

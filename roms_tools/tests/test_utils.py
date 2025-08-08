@@ -8,6 +8,7 @@ import xarray as xr
 
 from roms_tools.utils import (
     _generate_focused_coordinate_range,
+    _has_copernicus,
     _has_dask,
     _has_gcsfs,
     _load_data,
@@ -53,6 +54,18 @@ def test_has_gcfs_error_when_missing() -> None:
     """Verify that GCFS existence is correctly reported when not found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=None):
         assert not _has_gcsfs()
+
+
+def test_has_copernicus() -> None:
+    """Verify that copernicus existence is correctly reported when found."""
+    with mock.patch("roms_tools.utils.find_spec", return_value=mock.MagicMock):
+        assert _has_copernicus()
+
+
+def test_has_copernicus_error_when_missing() -> None:
+    """Verify that copernicus existence is correctly reported when not found."""
+    with mock.patch("roms_tools.utils.find_spec", return_value=None):
+        assert not _has_copernicus()
 
 
 def test_load_data_dask_not_found() -> None:

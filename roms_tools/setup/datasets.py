@@ -1086,7 +1086,7 @@ class GLORYSDataset(Dataset):
 
 @dataclass(kw_only=True)
 class GLORYSDefaultDataset(GLORYSDataset):
-    """A dataset that is loaded from a well-known GLORYS datasource."""
+    """A GLORYS dataset that is loaded from the Copernicus Marine Data Store."""
 
     dataset_name: ClassVar[str] = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
     _copm_module: ModuleType | None = None

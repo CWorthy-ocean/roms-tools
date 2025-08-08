@@ -75,9 +75,6 @@ def _get_file_matches(
             matching_files = filename_str
 
     # Sort the matching files
-    matching_files = sorted(matching_files)
-
-    # Sort the matching files
     return FileMatchResult(
         contains_wildcard=contains_wildcard,
         matches=sorted(matching_files),

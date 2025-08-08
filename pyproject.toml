@@ -49,6 +49,7 @@ dask = [
 stream = [
     "dask[diagnostics]",
     "gcsfs",
+    "zarr",
     "copernicusmarine",
 ]
 

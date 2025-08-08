@@ -1101,6 +1101,14 @@ class GLORYSDefaultDataset(GLORYSDataset):
         super().__post_init__()
 
     def _load_copernicus(self) -> ModuleType:
+        """Dynamically load the optional Copernicus Marine Toolkit dependency.
+
+        Raises
+        ------
+        RuntimeError
+            If the toolkit module is not available or cannot be imported.
+
+        """
         package_name = "copernicusmarine"
         if self._copm_module:
             return self._copm_module

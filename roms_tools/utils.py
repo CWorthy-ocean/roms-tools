@@ -15,16 +15,24 @@ from roms_tools.constants import R_EARTH
 
 @dataclass
 class FileMatchResult:
-    """The result of using an optional wildcard search of a list."""
+    """The result of performing a wildcard search."""
 
     contains_wildcard: bool
+    """Return `True` if the search contained a wildcard."""
     matches: list[str]
+    """The items matching the wildcard search."""
 
 
 def _get_file_matches(
     filename: str | Path | list[str | Path],
 ) -> FileMatchResult:
-    """Filter the filename using an optional wildcard search in the filename."""
+    """Filter the filename using an optional wildcard search in the filename.
+
+    Parameters
+    ----------
+    filename : str or Path or list of str or Path
+        An item to search for matches.
+    """
     # Precompile the regex for matching wildcard characters
     wildcard_regex = re.compile(r"[\*\?\[\]]")
 

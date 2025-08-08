@@ -1,6 +1,7 @@
 import glob
 import logging
 import re
+import textwrap
 import warnings
 from collections.abc import Callable, Iterable
 from importlib.util import find_spec
@@ -939,3 +940,28 @@ def infer_nominal_horizontal_resolution(
     resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
 
     return float(resolution_in_degrees)
+
+
+def _get_pkg_error_msg(purpose: str, package_name: str, option_name: str) -> str:
+    """Generate an error message indicating how to install an optional dependency.
+
+    Parameters
+    ----------
+    purpose : str
+        Description of the feature the package enables.
+    package_name : str
+        The package name
+    option_name : str
+        The optional dependency containing the package
+
+    Returns
+    -------
+    str
+        The formatted error message
+    """
+    return textwrap.dedent(f"""\
+        To use {purpose}, {package_name} is required but not installed. Install it with:
+          • `pip install roms-tools[{option_name}]` or
+          • `pip install {package_name}` or
+          • `conda install {package_name}`
+        Alternatively, install `roms-tools` with conda to include all dependencies.""")

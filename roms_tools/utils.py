@@ -352,6 +352,8 @@ def _load_data(
         If the specified file does not exist.
     ValueError
         If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+    RuntimeError
+        If loading the dataset fails
     """
     dim_names = dim_names or {}
 

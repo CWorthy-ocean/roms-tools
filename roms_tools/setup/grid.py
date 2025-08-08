@@ -4,6 +4,7 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -12,8 +13,8 @@ from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import plot
-from roms_tools.setup.mask import _add_mask, _add_velocity_masks
-from roms_tools.setup.topography import _add_topography
+from roms_tools.setup.mask import add_mask, add_velocity_masks
+from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     extract_single_value,
     gc_dist,
@@ -106,7 +107,7 @@ class Grid:
     """The bottom control parameter."""
     hc: float = 300.0
     """The critical depth (in meters)."""
-    topography_source: dict[str, str | Path | list[str | Path]] = None
+    topography_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the topography data."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
@@ -169,7 +170,7 @@ class Grid:
         if verbose:
             start_time = time.time()
             logging.info("=== Creating the mask ===")
-        ds = _add_mask(self.ds)
+        ds = add_mask(self.ds)
 
         if verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
@@ -226,7 +227,7 @@ class Grid:
             )
 
         # Add topography to the dataset
-        ds = _add_topography(
+        ds = add_topography(
             ds=self.ds,
             target_coords=target_coords,
             topography_source=topography_source,
@@ -576,7 +577,7 @@ class Grid:
         ds = xr.open_dataset(filepath)
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
-            ds = _add_velocity_masks(ds)
+            ds = add_velocity_masks(ds)
 
         # Create a new Grid instance without calling __init__ and __post_init__
         grid = cls.__new__(cls)
@@ -731,24 +732,24 @@ class Grid:
             "hmin",
         ]:
             if attr in ds.attrs:
-                a = float(ds.attrs[attr])
+                value = float(ds.attrs[attr])
             else:
-                a = None
+                value = None
 
-            object.__setattr__(grid, attr, a)
+            object.__setattr__(grid, attr, value)
 
         if "topography_source_name" in ds.attrs:
             if "topography_source_path" in ds.attrs:
-                a = {
+                topo_source = {
                     "name": ds.attrs["topography_source_name"],
                     "path": ds.attrs["topography_source_path"],
                 }
             else:
-                a = {"name": ds.attrs["topography_source_name"]}
+                topo_source = {"name": ds.attrs["topography_source_name"]}
         else:
-            a = None
+            topo_source = None
 
-        object.__setattr__(grid, "topography_source", a)
+        object.__setattr__(grid, "topography_source", topo_source)
 
         return grid
 
@@ -769,10 +770,7 @@ class Grid:
 
     @classmethod
     def from_yaml(
-        cls,
-        filepath: str | Path,
-        section_name: str = "Grid",
-        verbose: bool = False,
+        cls, filepath: str | Path, verbose: bool = False, **kwargs: Any
     ) -> "Grid":
         """Create an instance of the class from a YAML file.
 
@@ -780,15 +778,19 @@ class Grid:
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
-        section_name : str, optional
-            The name of the YAML section containing the grid configuration. Defaults to "Grid".
         verbose : bool, optional
             Indicates whether to print grid generation steps with timing. Defaults to False.
+        **kwargs : Any
 
         Returns
         -------
         Grid
             An instance of the Grid class initialized with the parameters from the YAML file.
+        **kwargs : Any
+            Additional keyword arguments:
+
+            - section_name : str, optional (default: "Grid")
+              The name of the YAML section containing the grid configuration.
 
         Raises
         ------
@@ -801,6 +803,8 @@ class Grid:
         Issues a warning if the ROMS-Tools version in the YAML header does not match the
         currently installed version.
         """
+        section_name: str = kwargs.pop("section_name", "Grid")
+
         filepath = Path(filepath)
         # Read the entire file content
         with filepath.open("r") as file:
@@ -854,7 +858,7 @@ class Grid:
         attr_str = ", ".join(f"{k}={v!r}" for k, v in attr_dict.items())
         return f"{cls_name}({attr_str})"
 
-    def _create_horizontal_grid(self) -> xr.Dataset():
+    def _create_horizontal_grid(self) -> xr.Dataset:
         """Create the horizontal grid based on a Mercator projection and store it in the
         'ds' attribute.
 
@@ -862,7 +866,7 @@ class Grid:
         ----------
         None
 
-        Returns
+        Returns:
         -------
         xr.Dataset
             The created horizontal grid dataset, including coordinates, grid metrics, angles, and metadata.

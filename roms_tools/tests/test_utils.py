@@ -79,7 +79,7 @@ def test_load_data_open_zarr_without_dask() -> None:
     [
         ("surface_forcing", "time"),
         ("bgc_surface_forcing", "time"),
-        # ("tidal_forcing", "eta_rho"),
+        ("tidal_forcing", "eta_rho"),
         ("coarse_surface_forcing", "eta_rho"),
     ],
 )

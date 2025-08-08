@@ -4,6 +4,7 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -769,10 +770,7 @@ class Grid:
 
     @classmethod
     def from_yaml(
-        cls,
-        filepath: str | Path,
-        section_name: str = "Grid",
-        verbose: bool = False,
+        cls, filepath: str | Path, verbose: bool = False, **kwargs: Any
     ) -> "Grid":
         """Create an instance of the class from a YAML file.
 
@@ -780,15 +778,19 @@ class Grid:
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
-        section_name : str, optional
-            The name of the YAML section containing the grid configuration. Defaults to "Grid".
         verbose : bool, optional
             Indicates whether to print grid generation steps with timing. Defaults to False.
+        **kwargs : Any
 
         Returns
         -------
         Grid
             An instance of the Grid class initialized with the parameters from the YAML file.
+        **kwargs : Any
+            Additional keyword arguments:
+
+            - section_name : str, optional (default: "Grid")
+              The name of the YAML section containing the grid configuration.
 
         Raises
         ------
@@ -801,6 +803,8 @@ class Grid:
         Issues a warning if the ROMS-Tools version in the YAML header does not match the
         currently installed version.
         """
+        section_name: str = kwargs.pop("section_name", "Grid")
+
         filepath = Path(filepath)
         # Read the entire file content
         with filepath.open("r") as file:
@@ -862,7 +866,7 @@ class Grid:
         ----------
         None
 
-        Returns
+        Returns:
         -------
         xr.Dataset
             The created horizontal grid dataset, including coordinates, grid metrics, angles, and metadata.

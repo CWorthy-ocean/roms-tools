@@ -1096,9 +1096,26 @@ class GLORYSDefaultDataset(GLORYSDataset):
         self.read_zarr = True
         self.use_dask = True
         self.filename = self.dataset_name
-        self.ds_loader_fn = lambda: copernicusmarine.open_dataset(self.dataset_name)
+        self.ds_loader_fn = self._load_from_copernicus
 
         super().__post_init__()
+
+    def _load_from_copernicus(self) -> xr.Dataset:
+        """Load a GLORYS dataset supporting streaming.
+
+        Returns
+        -------
+        xr.Dataset
+            The streaming dataset
+        """
+        return copernicusmarine.open_dataset(
+            self.dataset_name,
+            start_datetime=self.start_time,
+            end_datetime=self.end_time,
+            service="arco-geo-series",
+            coordinates_selection_method="inside",
+            chunk_size_limit=2,
+        )
 
 
 @dataclass(kw_only=True)

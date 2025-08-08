@@ -504,8 +504,8 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
 )
 def test_default_glorys_dataset_loading() -> None:
     """Verify the default GLORYS dataset is loaded correctly."""
-    start_time = datetime(2020, 2, 1)
-    end_time = datetime(2020, 2, 2)
+    start_time = datetime(2012, 1, 1)
+    end_time = datetime(2013, 1, 1)
 
         ds = GLORYSDefaultDataset(
             filename=GLORYSDefaultDataset.dataset_name,

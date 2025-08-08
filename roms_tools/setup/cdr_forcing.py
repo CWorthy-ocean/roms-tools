@@ -14,7 +14,6 @@ from pydantic import (
     BaseModel,
     Field,
     RootModel,
-    conlist,
     model_serializer,
     model_validator,
 )
@@ -103,12 +102,14 @@ class ReleaseSimulationManager(BaseModel):
 class ReleaseCollector(RootModel):
     """Collects and validates multiple releases against each other."""
 
-    root: conlist[
-        Annotated[
-            VolumeRelease | TracerPerturbation, Field(discriminator="release_type")
+    root: Annotated[
+        list[
+            Annotated[
+                VolumeRelease | TracerPerturbation, Field(discriminator="release_type")
+            ]
         ],
-        1,
-    ] = Field(alias="releases")
+        Field(alias="releases", min_length=1),
+    ]
 
     _release_type: ReleaseType | None = None
 

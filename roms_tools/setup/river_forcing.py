@@ -927,7 +927,7 @@ class RiverForcing:
             return
 
         # Convert tuple indices to string format for YAML
-        serialized_indices = {}
+        serialized_indices: dict[str, str | list[str]] = {}
         for key, value in indices_data.items():
             serialized_indices[key] = [f"{tup[0]}, {tup[1]}" for tup in value]
         serialized_indices["_convention"] = "eta_rho, xi_rho"

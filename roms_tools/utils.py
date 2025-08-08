@@ -12,22 +12,22 @@ from roms_tools.constants import R_EARTH
 
 
 def load_data(
-    filename,
-    dim_names,
-    use_dask,
-    time_chunking=True,
-    decode_times=True,
-    force_combine_nested=False,
+    filename: str | Path | list[str | Path],
+    dim_names: dict[str, str] | None = None,
+    use_dask: bool = False,
+    time_chunking: bool = True,
+    decode_times: bool = True,
+    force_combine_nested: bool = False,
     read_zarr: bool = False,
 ):
     """Load dataset from the specified file.
 
     Parameters
     ----------
-    filename : Union[str, Path, List[Union[str, Path]]]
+    filename : str | Path | list[str | Path]
         The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
         or a list of strings or Path objects containing multiple files.
-    dim_names : Dict[str, str], optional
+    dim_names : dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
         Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
         For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
@@ -80,6 +80,7 @@ def load_data(
     wildcard_regex = re.compile(r"[\*\?\[\]]")
 
     # Convert Path objects to strings
+    filename_str: str | list[str]
     if isinstance(filename, str | Path):
         filename_str = str(filename)
     elif isinstance(filename, list):

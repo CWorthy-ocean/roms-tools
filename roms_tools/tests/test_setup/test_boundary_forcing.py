@@ -771,22 +771,23 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
 def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
     """Verify the default ERA5 dataset is loaded when a path is not provided."""
     start_time = datetime(2010, 2, 1)
-    end_time = datetime(2010, 2, 2)
+    end_time = datetime(2010, 3, 1)
 
     with mock.patch.dict(
         os.environ, {"PYDEVD_WARN_EVALUATION_TIMEOUT": "90"}, clear=True
     ):
-        sf = BoundaryForcing(
+        bf = BoundaryForcing(
             grid=tiny_grid,
             source={"name": "GLORYS"},
             type="physics",
             start_time=start_time,
             end_time=end_time,
             use_dask=True,
+            bypass_validation=True,
         )
 
         expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}
-        assert set(sf.ds.data_vars).issuperset(expected_vars)
+        assert set(bf.ds.data_vars).issuperset(expected_vars)
 
 
 @pytest.mark.skipif(

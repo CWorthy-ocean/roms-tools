@@ -115,19 +115,19 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def use_dask(request):
+def use_dask(request: pytest.FixtureRequest) -> bool:
     return request.config.getoption("--use_dask")
 
 
 @pytest.fixture(scope="session")
-def grid():
+def grid() -> Grid:
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
 
     return grid
 
 
 @pytest.fixture(scope="session")
-def grid_that_straddles_dateline():
+def grid_that_straddles_dateline() -> Grid:
     grid = Grid(
         nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20
     )
@@ -136,7 +136,7 @@ def grid_that_straddles_dateline():
 
 
 @pytest.fixture(scope="session")
-def grid_that_straddles_180_degree_meridian():
+def grid_that_straddles_180_degree_meridian() -> Grid:
     """Fixture for creating a domain that straddles 180 degree meridian.
 
     This is a good test grid for the global ERA5 data, which comes on an [-180, 180]
@@ -976,9 +976,30 @@ def calculate_data_hash(filepath: str) -> str:
 
 @pytest.fixture
 def get_test_data_path() -> Callable[[str], Path]:
-    """Given a data source name, find the local path to the test data."""
+    """Given a data source name, find the local path to the test data.
+
+    Returns
+    -------
+    Callable[[str], Path] : A function that takes the dataset name and returns a Path
+    """
 
     def _get_test_data_path(dataset_name: str) -> Path:
+        """Retrieve the path to a dataset.
+
+        Parameters
+        ----------
+        dataset_name : str
+            The name of the test dataset to return a path to
+
+        Returns
+        -------
+        Path : The path to the dataset
+
+        Raises
+        ------
+        FileNotFoundError :
+            If the dataset cannot be located
+        """
         data_dir = Path(__file__).parent / "roms_tools/tests/test_setup/test_data"
 
         path = data_dir / dataset_name

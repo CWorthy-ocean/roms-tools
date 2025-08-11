@@ -20,7 +20,6 @@ from roms_tools.setup.datasets import (
     TPXODataset,
 )
 from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
-from roms_tools.utils import _has_gcsfs
 
 
 @pytest.fixture

@@ -24,9 +24,6 @@ ESCAPED_BODY="${ESCAPED_BODY} --- [View the original GitHub issue|$GITHUB_ISSUE_
 # Trim and set GITHUB_ASSIGNEE_USERNAME if needed
 GITHUB_ASSIGNEE_USERNAME=$(echo "$GITHUB_ASSIGNEE_USERNAME" | xargs)
 
-# Map GitHub username to Jira account ID
-JIRA_ASSIGNEE_ID=$(echo "$JIRA_USERID_MAP" | jq ".$GITHUB_ASSIGNEE_USERNAME" | tr -d '"')
-
 
 # Get the current active sprint for our board
 RESPONSE=$(curl -s -w "%{http_code}" -o sprint_response.json -u "$JIRA_EMAIL_MENDOCINO:$JIRA_API_TOKEN_MENDOCINO" \
@@ -47,7 +44,9 @@ ACTIVE_SPRINT_ID=$(jq ".values.[0].id" < sprint_response.json)
 # one could figure that out again someday by searching through the results of their GET issue fields endpoint
 
 # Create the JSON payload, adding assignee if there is one
-if [[ -n "$JIRA_ASSIGNEE_ID" ]]; then
+if [[ -n "$GITHUB_ASSIGNEE_USERNAME" ]]; then
+  # Map GitHub username to Jira account ID
+  JIRA_ASSIGNEE_ID=$(echo "$JIRA_USERID_MAP" | jq ".$GITHUB_ASSIGNEE_USERNAME" | tr -d '"')
   cat > payload.json <<EOF
 {
   "fields": {

@@ -1,3 +1,4 @@
+import enum
 import hashlib
 from collections.abc import Callable
 from datetime import datetime
@@ -27,7 +28,18 @@ from roms_tools.setup.datasets import (
 )
 
 
-def pytest_addoption(parser):
+class SkippableOptions(enum.StrEnum):
+    STREAM = "stream"
+    """mark tests that streams data from external sources"""
+    USE_COPERNICUS = "use_copernicus"
+    """marks tests that require the Copernicus Marine Toolkit to execute"""
+    USE_DASK = "use_dask"
+    """marks tests that require Dask to execute"""
+    USE_GCSFS = "use_gcsfs"
+    """marks tests that require GCSFS to execute"""
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--overwrite",
         action="append",
@@ -35,35 +47,71 @@ def pytest_addoption(parser):
         help="Specify which fixtures to overwrite. Use 'all' to overwrite all fixtures.",
     )
     parser.addoption(
-        "--use_dask", action="store_true", default=False, help="Run tests with Dask"
-    )
-    parser.addoption(
-        "--stream",
+        f"--{SkippableOptions.STREAM}",
         action="store_true",
         default=False,
         help="Run tests that stream data (can be slow)",
     )
+    parser.addoption(
+        f"--{SkippableOptions.USE_COPERNICUS}",
+        action="store_true",
+        default=False,
+        help="Run tests that stream data using Copernicus Marine (can be slow)",
+    )
+    parser.addoption(
+        f"--{SkippableOptions.USE_DASK}",
+        action="store_true",
+        default=False,
+        help="Run tests that require Dask",
+    )
+    parser.addoption(
+        f"--{SkippableOptions.USE_GCSFS}",
+        action="store_true",
+        default=False,
+        help="Run tests that require GCSFS",
+    )
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     if "all" in config.getoption("--overwrite"):
         # If 'all' is specified, overwrite everything
         config.option.overwrite = ["all"]
 
-    config.addinivalue_line(
-        "markers", "stream: mark test that streams data from external sources"
-    )
+    for marker in [
+        "stream: mark tests that streams data from external sources",
+        "use_copernicus: marks tests that require the Copernicus Marine Toolkit to execute",
+        "use_dask: marks tests that require Dask to execute",
+        "use_gcsfs: marks tests that require GCSFS to execute",
+    ]:
+        config.addinivalue_line("markers", marker)
 
 
-def pytest_collection_modifyitems(config, items):
-    if config.getoption("--stream"):
-        # --stream given in cli: do not skip streaming tests
-        return
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    # identify any skippable marks that were not supplied
+    to_skip = [
+        mark.value
+        for mark in SkippableOptions
+        if not config.getoption(f"--{mark.value}")
+    ]
 
-    skip_stream = pytest.mark.skip(reason="need --stream option to run")
-    for item in items:
-        if "stream" in item.keywords:
-            item.add_marker(skip_stream)
+    # find the tests with unsatisfied marks
+    skippables = [
+        (item, {mark.name for mark in item.iter_markers()}.intersection(to_skip))
+        for item in items
+        if {mark.name for mark in item.iter_markers()}.intersection(to_skip)
+    ]
+
+    # apply the skip mark
+    for item, marks in skippables:
+        if len(marks) > 1:
+            missing = " ".join(f"--{mark}" for mark in marks)
+        else:
+            missing = f"--{marks.pop()}"
+
+        item.add_marker(pytest.mark.skip(reason=f"need `{missing}` option(s) to run"))
 
 
 @pytest.fixture(scope="session")

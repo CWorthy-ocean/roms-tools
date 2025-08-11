@@ -83,6 +83,7 @@ def test_check_results(forcing_fixture, request):
     )
 
 
+@pytest.mark.use_dask
 @pytest.mark.parametrize(
     "forcing_fixture",
     [
@@ -99,9 +100,6 @@ def test_check_results(forcing_fixture, request):
 )
 def test_dask_vs_no_dask(forcing_fixture, request, tmp_path, use_dask):
     """Test comparing the forcing created with and without Dask on same platform."""
-    if not use_dask:
-        pytest.skip("Test only runs when --use_dask is specified")
-
     # Get the forcing with Dask
     forcing_with_dask = request.getfixturevalue(forcing_fixture)
 

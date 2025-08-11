@@ -10,7 +10,6 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.download import download_test_data
-from roms_tools.utils import _has_dask, _has_gcsfs
 
 
 @pytest.fixture
@@ -904,6 +903,7 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
 
 
 @pytest.mark.stream
+@pytest.mark.use_dask
 def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
     """One big integration test for cloud-based ERA5 data because the streaming takes a
     long time.
@@ -936,10 +936,8 @@ def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
 
 
 @pytest.mark.stream
-@pytest.mark.skipif(
-    not _has_gcsfs() or not _has_dask(),
-    reason="Executed only if GCFS & Dask packages are installed",
-)
+@pytest.mark.use_dask
+@pytest.mark.use_gcsdf
 def test_default_era5_dataset_loading(small_grid: Grid) -> None:
     """Verify the default ERA5 dataset is loaded when a path is not provided."""
     start_time = datetime(2020, 2, 1)

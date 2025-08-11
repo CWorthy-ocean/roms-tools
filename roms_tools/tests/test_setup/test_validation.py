@@ -1,6 +1,6 @@
+import shutil
 from collections.abc import Callable
 from pathlib import Path
-import shutil
 
 import pytest
 import xarray as xr

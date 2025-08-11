@@ -20,7 +20,7 @@ from roms_tools.setup.datasets import (
     TPXODataset,
 )
 from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
-from roms_tools.utils import _has_copernicus, _has_dask, _has_gcsfs
+from roms_tools.utils import _has_gcsfs
 
 
 @pytest.fixture
@@ -461,10 +461,8 @@ def test_default_era5_dataset_loading_without_dask() -> None:
 
 
 @pytest.mark.stream
-@pytest.mark.skipif(
-    not _has_gcsfs() or not _has_dask(),
-    reason="Executed only if GCFS & Dask packages are installed",
-)
+@pytest.mark.use_dask
+@pytest.mark.use_gcsfs
 def test_default_era5_dataset_loading() -> None:
     """Verify the default ERA5 dataset is loaded correctly."""
     start_time = datetime(2020, 2, 1)
@@ -481,7 +479,7 @@ def test_default_era5_dataset_loading() -> None:
     assert set(ds.var_names).issuperset(expected_vars)
 
 
-@pytest.mark.stream
+@pytest.mark.use_copernicus
 def test_default_glorys_dataset_loading_dask_not_installed() -> None:
     """Verify that loading the default GLORYS dataset fails if dask is not available."""
     start_time = datetime(2020, 2, 1)
@@ -500,10 +498,8 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
 
 
 @pytest.mark.stream
-@pytest.mark.skipif(
-    not _has_dask() or not _has_copernicus(),
-    reason="Executed only if Dask and Copernicus Marine packages are installed",
-)
+@pytest.mark.use_copernicus
+@pytest.mark.use_dask
 def test_default_glorys_dataset_loading() -> None:
     """Verify the default GLORYS dataset is loaded correctly."""
     start_time = datetime(2012, 1, 1)

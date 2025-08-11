@@ -98,7 +98,7 @@ def test_check_results(forcing_fixture, request):
         "bgc_boundary_forcing_from_climatology",
     ],
 )
-def test_dask_vs_no_dask(forcing_fixture, request, tmp_path, use_dask):
+def test_dask_vs_no_dask(forcing_fixture, request, tmp_path):
     """Test comparing the forcing created with and without Dask on same platform."""
     # Get the forcing with Dask
     forcing_with_dask = request.getfixturevalue(forcing_fixture)

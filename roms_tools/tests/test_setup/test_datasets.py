@@ -442,10 +442,7 @@ def test_era5_correction_choose_subdomain(use_dask):
     assert (data.ds["longitude"] == lons).all()
 
 
-@pytest.mark.skipif(
-    not _has_gcsfs(),
-    reason="Executed only if GCFS package is installed",
-)
+@pytest.mark.use_gcsfs
 def test_default_era5_dataset_loading_without_dask() -> None:
     """Verify that loading the default ERA5 dataset fails if use_dask is not True."""
     start_time = datetime(2020, 2, 1)

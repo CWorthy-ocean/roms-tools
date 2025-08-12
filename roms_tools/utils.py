@@ -366,7 +366,44 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     List[Path]
         A list of Path objects for the filenames that were saved.
     """
+
+    def _patch_1d_encodings(dataset_list: list[xr.Dataset]) -> None:
+        """Replaces problematic encodings in 1D variables.
+
+        ROMS' Fortran-based tools fail with certain encoding types that are common
+        in roms-tools' exported 1D vars (e.g. `abs_time`, `river_name`). This function
+        replaces int64 -> int32 (for true integers), int64 -> float64
+        (for non-integer vars encoded as int64 on disk), and NC_STRING -> char.
+
+        Parameters
+        ----------
+        dataset_list: list[xr.Dataset]
+            List of datasets to be saved
+
+        """
+        for ds in dataset_list:
+            for name in ds.variables:
+                da = ds[name]
+                if da.ndim != 1:
+                    continue
+
+                enc_var = xr.conventions.encode_cf_variable(da.variable, name=name)
+                enc_dtype = enc_var.dtype
+
+                # NC_STRING → fixed-width char
+                if enc_dtype.kind in ("O", "U", "S"):
+                    da.encoding["dtype"] = "S1"
+                    continue
+
+                # NC_INT64 → int32 for true integers; float64 otherwise
+                if enc_dtype == np.int64:
+                    if da.dtype.kind in ("i", "u"):
+                        da.encoding["dtype"] = "int32"
+                    else:
+                        da.encoding["dtype"] = "float64"
+
     saved_filenames = []
+    _patch_1d_encodings(dataset_list)
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
     if verbose:

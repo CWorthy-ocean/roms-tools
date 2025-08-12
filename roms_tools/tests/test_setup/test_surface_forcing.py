@@ -937,7 +937,7 @@ def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
 
 @pytest.mark.stream
 @pytest.mark.use_dask
-@pytest.mark.use_gcsdf
+@pytest.mark.use_gcsfs
 def test_default_era5_dataset_loading(small_grid: Grid) -> None:
     """Verify the default ERA5 dataset is loaded when a path is not provided."""
     start_time = datetime(2020, 2, 1)

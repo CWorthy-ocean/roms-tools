@@ -178,6 +178,7 @@ class TestJoinROMSData:
             assert (grid.ds[v].values == joined_grid[v].values).all(), (
                 f"{v} does not match in joined dataset"
             )
+        assert grid.ds.attrs == joined_grid.attrs
 
     def test_join_grid_netcdf(self, partitioned_grid_factory):
         grid, partitions = partitioned_grid_factory(np_xi=3, np_eta=4)
@@ -191,6 +192,7 @@ class TestJoinROMSData:
             assert (grid.ds[v].values == joined_grid[v].values).all(), (
                 f"{v} does not match in joined dataset"
             )
+        assert grid.ds.attrs == joined_grid.attrs
 
     @pytest.mark.parametrize(
         "np_xi, np_eta",
@@ -217,6 +219,7 @@ class TestJoinROMSData:
             assert (whole_ics[v].values == joined_ics[v].values).all(), (
                 f"{v} does not match in joined dataset: {joined_ics[v].values} vs {whole_ics[v].values}"
             )
+        assert whole_ics.attrs == joined_ics.attrs
 
     def test_join_initial_condition_netcdf(self, tmp_path, partitioned_ic_factory):
         whole_file, partitioned_files = partitioned_ic_factory(np_xi=3, np_eta=4)
@@ -232,3 +235,4 @@ class TestJoinROMSData:
             assert (whole_ics[v].values == joined_ics[v].values).all(), (
                 f"{v} does not match in joined dataset: {joined_ics[v].values} vs {whole_ics[v].values}"
             )
+        assert whole_ics.attrs == joined_ics.attrs

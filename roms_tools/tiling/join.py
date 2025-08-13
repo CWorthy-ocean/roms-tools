@@ -182,5 +182,7 @@ def join_datasets(datasets: Sequence[xr.Dataset]) -> xr.Dataset:
             final_dataset[varname] = xr.concat(
                 var_slices, dim=eta_dim, combine_attrs="override"
             )
+    # Copy attributes from first dataset
+    final_dataset.attrs = datasets[0].attrs
 
     return final_dataset

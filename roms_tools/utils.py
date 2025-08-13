@@ -4,11 +4,46 @@ import re
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
+
+FilePaths: TypeAlias = str | Path | list[Path | str]
+
+
+def _path_list_from_input(files: FilePaths) -> list[Path]:
+    """Converts a generic user input to a list of Paths.
+
+    Takes a list of strings or paths, or wildcard pattern, and
+    returns a list of pathlib.Path objects
+
+    Parameters
+    ----------
+    files: FilePaths
+        A list of files (str, Path), single path as a str or Path, or a wildcard string
+
+    Returns
+    -------
+    List[Path]
+        A list of pathlib.Paths
+    """
+    if isinstance(files, str):
+        filepaths = sorted(Path(files).parent.glob(Path(files).name))
+        if not filepaths:
+            raise FileNotFoundError(f"No files matched: {files}")
+    elif isinstance(files, Path):
+        filepaths = [
+            files,
+        ]
+    elif isinstance(files, list):
+        filepaths = [Path(f) for f in files]
+    else:
+        raise TypeError("'files' should be str, Path, or List[Path | str]")
+
+    return filepaths
 
 
 def _load_data(

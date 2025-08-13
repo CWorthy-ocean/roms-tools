@@ -77,6 +77,24 @@ def grid():
 
 
 @pytest.fixture(scope="session")
+def large_grid():
+    grid = Grid(
+        nx=24,
+        ny=48,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    return grid
+
+
+@pytest.fixture(scope="session")
 def grid_that_straddles_dateline():
     grid = Grid(
         nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20
@@ -144,6 +162,19 @@ def initial_conditions(use_dask):
 
     return InitialConditions(
         grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def initial_conditions_on_large_grid(large_grid, use_dask):
+    """Fixture for creating an InitialConditions object."""
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+
+    return InitialConditions(
+        grid=large_grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         use_dask=use_dask,

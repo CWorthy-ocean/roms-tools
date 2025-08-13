@@ -3,8 +3,10 @@ from pathlib import Path
 
 import xarray as xr
 
+from roms_tools.utils import FilePaths, _path_list_from_input
 
-def open_partitions(pattern: str) -> xr.Dataset:
+
+def open_partitions(files: FilePaths) -> xr.Dataset:
     """
     Open partitioned ROMS netCDF files as a single dataset.
 
@@ -18,11 +20,9 @@ def open_partitions(pattern: str) -> xr.Dataset:
     xarray.Dataset
         Dataset containing unified partitioned datasets
     """
-    filepaths = sorted(Path(".").glob(pattern))
-    if not filepaths:
-        raise FileNotFoundError(f"No files matched pattern: {pattern}")
-
-    joined = join_datasets(filepaths)
+    filepaths = _path_list_from_input(files)
+    datasets = [xr.open_dataset(p, decode_times=True) for p in sorted(filepaths)]
+    joined = join_datasets(datasets)
     return joined
 
 
@@ -45,10 +45,8 @@ def join_netcdf(pattern: str, output_path: Path | None = None) -> Path:
     Path
         The path of the saved file
     """
-    filepaths = sorted(Path(".").glob(pattern))
-    if not filepaths:
-        raise FileNotFoundError(f"No files matched pattern: {pattern}")
-        # Determine output path if not provided
+    filepaths = _path_list_from_input(pattern)
+    # Determine output path if not provided
     if output_path is None:
         # e.g. roms_rst.20120101120000.023.nc -> roms_rst.20120101120000.nc
         output_path = filepaths[0].with_suffix("").with_suffix(".nc")
@@ -60,11 +58,11 @@ def join_netcdf(pattern: str, output_path: Path | None = None) -> Path:
     return output_path
 
 
-def _count_transitions(dim_sizes: list[int]) -> int:
-    """Counts the number of transitions in a list of dimension sizes.
+def _find_transitions(dim_sizes: list[int]) -> list[int]:
+    """Finds the indices of all transitions in a list of dimension sizes.
 
     A transition is a point where the dimension size changes from the previous one.
-    This is used to determine the number of partitions (e.g., np_eta or np_xi).
+    This function is used to determine the number of partitions (e.g., np_eta or np_xi).
 
     Parameters
     ----------
@@ -73,27 +71,21 @@ def _count_transitions(dim_sizes: list[int]) -> int:
 
     Returns
     -------
-    int
-        The number of transitions detected.
-
-    >>> # Example for np_xi = 3, np_eta = 2
-    >>> # Datasets are ordered first by eta, then by xi: (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
-    >>> # The 'eta' dimension size will be consistent for a row (np_xi=3), but change at the next row.
-    >>> eta_dim_sizes = [50, 50, 50, 51, 51, 51]
-    >>> _count_transitions(eta_dim_sizes) # transition from 50 to 51
-    1
+    List[int]
+        A list of indices where a transition was detected.
     """
-    if not dim_sizes:
-        return 0
-    transitions = 0
+    transitions = []
+    if len(dim_sizes) < 2:
+        return transitions
+
     for i in range(1, len(dim_sizes)):
         if dim_sizes[i] != dim_sizes[i - 1]:
-            transitions += 1
+            transitions.append(i)
     return transitions
 
 
-def find_common_dim(direction: str, datasets: Sequence[xr.Dataset]) -> str:
-    """Finds a common dimension along the xi or eta direction amongst a list of Datasets.
+def _find_common_dims(direction: str, datasets: Sequence[xr.Dataset]) -> str:
+    """Finds all common dimensions along the xi or eta direction amongst a list of Datasets.
 
     Parameters
     ----------
@@ -109,53 +101,47 @@ def find_common_dim(direction: str, datasets: Sequence[xr.Dataset]) -> str:
     """
     if direction not in ["xi", "eta"]:
         raise ValueError("'direction' must be 'xi' or 'eta'")
+    dims = []
     for point in ["rho", "u", "v"]:
         if all(f"{direction}_{point}" in d.dims for d in datasets):
-            return f"{direction}_{point}"
-    raise ValueError(f"No common point found along direction {direction}")
+            dims.append(f"{direction}_{point}")
+    if not dims:
+        raise ValueError(f"No common point found along direction {direction}")
+    return dims
 
 
-def infer_partition_layout_from_datasets(
+def _infer_partition_layout_from_datasets(
     datasets: Sequence[xr.Dataset],
 ) -> tuple[int, int]:
     """Infer np_eta, np_xi from datasets."""
-    dims_list = [
-        {
-            "eta_rho": ds.sizes.get("eta_rho", 0),
-            "xi_rho": ds.sizes.get("xi_rho", 0),
-            "eta_v": ds.sizes.get("eta_v", 0),
-            "xi_u": ds.sizes.get("xi_u", 0),
-        }
-        for ds in datasets
-    ]
-    eta_dim = find_common_dim("eta", datasets)
-    eta_sizes = [d[eta_dim] for d in dims_list]
-    eta_transitions = _count_transitions(eta_sizes)
-
-    xi_dim = find_common_dim("xi", datasets)
-    xi_sizes = [d[xi_dim] for d in dims_list]
-    xi_transitions = _count_transitions(xi_sizes)
-
     nd = len(datasets)
-    if eta_transitions == 0:
-        if xi_transitions == nd - 1:
-            np_xi, np_eta = 1, nd
-        else:
-            np_xi = xi_transitions + 1
-            np_eta = nd // np_xi
-    elif xi_transitions == 0:
-        if eta_transitions == nd - 1:
-            np_xi, np_eta = nd, 1
-        else:
-            np_eta = eta_transitions + 1
-            np_xi = nd // np_eta
-    return np_xi, np_eta
+    if nd == 1:
+        return 1, 1
+
+    eta_dims = _find_common_dims("eta", datasets)
+    first_eta_transition = nd
+
+    for eta_dim in eta_dims:
+        # print(eta_dim)
+        dim_sizes = [ds.sizes.get(eta_dim, 0) for ds in datasets]
+        eta_transitions = _find_transitions(dim_sizes)
+        # print(f"dim sizes:{dim_sizes}")
+        # print(f"eta_transitions: {eta_transitions}")
+        if eta_transitions and (min(eta_transitions) < first_eta_transition):
+            first_eta_transition = min(eta_transitions)
+    # print(f"first_eta_transition {first_eta_transition}")
+    if first_eta_transition < nd:
+        np_xi = first_eta_transition
+        np_eta = nd // np_xi
+        return np_xi, np_eta
+    # If we did not successfully find np_xi,np_eta using eta points
+    # then we have a single-column grid:
+
+    return nd, 1
 
 
-def join_datasets(filepaths: Sequence[Path]) -> xr.Dataset:
-    datasets = [xr.open_dataset(p, decode_timedelta=False) for p in sorted(filepaths)]
-
-    np_xi, np_eta = infer_partition_layout_from_datasets(datasets)
+def join_datasets(datasets: Sequence[xr.Dataset]) -> xr.Dataset:
+    np_xi, np_eta = _infer_partition_layout_from_datasets(datasets)
     # info = get_dims_from_datasets(datasets, np_xi=np_xi, np_eta=np_eta)
 
     # Arrange into grid

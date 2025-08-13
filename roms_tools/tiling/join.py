@@ -12,8 +12,9 @@ def open_partitions(files: FilePaths) -> xr.Dataset:
 
     Parameters
     ----------
-    pattern: str
-        Glob pattern for partitioned files, e.g. "roms_rst.20121209133435.*.nc"
+    files: str | List[str | Path]
+        List or wildcard pattern describing files to join,
+        e.g. "roms_rst.20121209133435.*.nc"
 
     Returns
     -------
@@ -26,14 +27,15 @@ def open_partitions(files: FilePaths) -> xr.Dataset:
     return joined
 
 
-def join_netcdf(pattern: str, output_path: Path | None = None) -> Path:
+def join_netcdf(files: FilePaths, output_path: Path | None = None) -> Path:
     """
     Join partitioned NetCDFs into a single dataset.
 
     Parameters
     ----------
-    pattern : str
-        Glob pattern for partitioned files, e.g. "roms_rst.20121209133435.*.nc"
+    files : str | List[str | Path]
+        List or wildcard pattern describing files to join,
+        e.g. "roms_rst.20121209133435.*.nc"
 
     output_path : Path, optional
         If provided, the joined dataset will be saved to this path.
@@ -45,13 +47,13 @@ def join_netcdf(pattern: str, output_path: Path | None = None) -> Path:
     Path
         The path of the saved file
     """
-    filepaths = _path_list_from_input(pattern)
+    filepaths = _path_list_from_input(files)
     # Determine output path if not provided
     if output_path is None:
         # e.g. roms_rst.20120101120000.023.nc -> roms_rst.20120101120000.nc
         output_path = filepaths[0].with_suffix("").with_suffix(".nc")
 
-    joined = open_partitions(pattern)
+    joined = open_partitions(filepaths)
     joined.to_netcdf(output_path)
     print(f"Saved joined dataset to: {output_path}")
 
@@ -141,6 +143,7 @@ def _infer_partition_layout_from_datasets(
 
 
 def join_datasets(datasets: Sequence[xr.Dataset]) -> xr.Dataset:
+    """Take a sequence of partitioned Datasets and return a joined Dataset."""
     np_xi, np_eta = _infer_partition_layout_from_datasets(datasets)
     # info = get_dims_from_datasets(datasets, np_xi=np_xi, np_eta=np_eta)
 

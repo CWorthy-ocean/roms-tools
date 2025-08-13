@@ -21,7 +21,7 @@ def open_partitions(files: FilePaths) -> xr.Dataset:
         Dataset containing unified partitioned datasets
     """
     filepaths = _path_list_from_input(files)
-    datasets = [xr.open_dataset(p, decode_times=True) for p in sorted(filepaths)]
+    datasets = [xr.open_dataset(p, decode_timedelta=True) for p in sorted(filepaths)]
     joined = join_datasets(datasets)
     return joined
 

@@ -211,7 +211,7 @@ class TestJoinROMSData:
             np_xi=np_xi, np_eta=np_eta
         )
         joined_ics = open_partitions(partitioned_files)
-        whole_ics = xr.open_dataset(whole_file, decode_times=True)
+        whole_ics = xr.open_dataset(whole_file, decode_timedelta=True)
 
         for v in whole_ics.variables:
             assert (whole_ics[v].values == joined_ics[v].values).all(), (
@@ -220,13 +220,13 @@ class TestJoinROMSData:
 
     def test_join_initial_condition_netcdf(self, tmp_path, partitioned_ic_factory):
         whole_file, partitioned_files = partitioned_ic_factory(np_xi=3, np_eta=4)
-        whole_ics = xr.open_dataset(whole_file, decode_times=True)
+        whole_ics = xr.open_dataset(whole_file, decode_timedelta=True)
 
         joined_netcdf = join_netcdf(
             partitioned_files, output_path=partitioned_files[0].parent / "joined_ics.nc"
         )
         assert joined_netcdf.exists()
-        joined_ics = xr.open_dataset(joined_netcdf, decode_times=True)
+        joined_ics = xr.open_dataset(joined_netcdf, decode_timedelta=True)
 
         for v in whole_ics.variables:  #
             assert (whole_ics[v].values == joined_ics[v].values).all(), (

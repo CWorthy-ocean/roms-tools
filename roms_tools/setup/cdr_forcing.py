@@ -1050,7 +1050,7 @@ def _map_3d_gaussian(
         vertical_profile = np.exp(exponent)
 
         # Apply vertical Gaussian scaling
-        distribution_3d = distribution_2d * vertical_profile * dz
+        distribution_3d = distribution_2d * vertical_profile
 
         # Normalize
         distribution_3d /= release.vsc * np.sqrt(np.pi)

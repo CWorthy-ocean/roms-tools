@@ -415,30 +415,57 @@ class Grid:
 
     def plot(
         self,
+        lat: float | None = None,
+        lon: float | None = None,
         with_dim_names: bool = False,
         save_path: str | None = None,
     ) -> None:
-        """Plot the grid.
+        """Plot the grid with bathymetry.
+
+        Depending on the arguments, this will either:
+          * Plot the full horizontal grid (if both `lat` and `lon` are None),
+          * Plot a zonal (east-west) vertical section at a given latitude (`lat`),
+          * Plot a meridional (south-north) vertical section at a given longitude (`lon`).
 
         Parameters
         ----------
+        lat : float, optional
+            Latitude in degrees at which to plot a vertical (zonal) section. Cannot be
+            provided together with `lon`. Default is None.
+
+        lon : float, optional
+            Longitude in degrees at which to plot a vertical (meridional) section. Cannot be
+            provided together with `lat`. Default is None.
+
         with_dim_names : bool, optional
-            Whether or not to plot the dimension names. Default is False.
+            If True and no section is requested (i.e., both `lat` and `lon` are None), annotate
+            the plot with the underlying dimension names. Default is False.
 
         save_path : str, optional
             Path to save the generated plot. If None, the plot is shown interactively.
             Default is None.
+
+        Raises
+        ------
+        ValueError
+            If both `lat` and `lon` are specified simultaneously.
 
         Returns
         -------
         None
             This method does not return any value. It generates and displays a plot.
         """
+        if lat is not None and lon is not None:
+            raise ValueError("Specify either `lat` or `lon`, not both.")
+
         field = self.ds["h"]
 
         plot(
             field=field,
             grid_ds=self.ds,
+            lat=lat,
+            lon=lon,
+            yincrease=False,
             with_dim_names=with_dim_names,
             save_path=save_path,
             cmap_name="YlGnBu",

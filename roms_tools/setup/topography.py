@@ -12,7 +12,7 @@ from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
 from roms_tools.setup.utils import handle_boundaries
 
 
-def _add_topography(
+def add_topography(
     ds,
     target_coords,
     topography_source,
@@ -241,7 +241,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         rmax_log = 0.0
 
     # Apply hmin threshold
-    h = _clip_depth(h, hmin)
+    h = clip_depth(h, hmin)
 
     # Perform logarithmic transformation of the height field
     h_log = np.log(h / hmin)
@@ -324,7 +324,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
         h = hmin * np.exp(h_log)
 
         # Apply hmin threshold again
-        h = _clip_depth(h, hmin)
+        h = clip_depth(h, hmin)
 
         # Compute maximum slope parameter r
         r_eta, r_xi = _compute_rfactor(h)
@@ -335,7 +335,7 @@ def _smooth_topography_locally(h, hmin=5, rmax=0.2):
     return h
 
 
-def _clip_depth(h: xr.DataArray, hmin: float) -> xr.DataArray:
+def clip_depth(h: xr.DataArray, hmin: float) -> xr.DataArray:
     """Ensures that depth values do not fall below a minimum threshold.
 
     This function replaces all depth values in `h` that are less than `hmin` with `hmin`,

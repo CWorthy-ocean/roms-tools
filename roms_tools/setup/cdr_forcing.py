@@ -1039,12 +1039,6 @@ def _map_3d_gaussian(
         # Stack 2D distribution at that vertical level
         distribution_3d[{"s_rho": vertical_idx}] = distribution_2d
     else:
-        # Compute layer thickness
-        depth_interface = compute_depth_coordinates(
-            grid.ds, zeta=0, depth_type="interface", location="rho"
-        )
-        dz = depth_interface.diff("s_w").rename({"s_w": "s_rho"})
-
         # Compute vertical Gaussian shape
         exponent = -(((depth - release.depth) / release.vsc) ** 2)
         vertical_profile = np.exp(exponent)

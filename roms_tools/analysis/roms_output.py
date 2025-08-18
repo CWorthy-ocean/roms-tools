@@ -422,6 +422,8 @@ class ROMSOutput:
             self.path,
             dim_names={"time": "time"},
             use_dask=self.use_dask,
+            decode_times=False,
+            decode_timedelta=False,
             time_chunking=True,
             force_combine_nested=True,
         )

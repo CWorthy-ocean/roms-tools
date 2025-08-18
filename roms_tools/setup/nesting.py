@@ -265,7 +265,7 @@ class ChildGrid(Grid):
         filepath = Path(filepath)
 
         parent_grid = Grid.from_yaml(
-            filepath, verbose=verbose, kwargs={"section_name": "ParentGrid"}
+            filepath, verbose=verbose, section_name="ParentGrid"
         )
         params = from_yaml(cls, filepath)
 

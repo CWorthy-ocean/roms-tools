@@ -19,7 +19,7 @@ from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
 from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
 from roms_tools.setup.tides import TidalForcing  # noqa: F401
 from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
-from roms_tools.tiling.join import open_partitions, join_netcdf  # noqa: F401#
+from roms_tools.tiling.join import open_partitions, join_netcdf  # noqa: F401
 
 # Configure logging when the package is imported
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")

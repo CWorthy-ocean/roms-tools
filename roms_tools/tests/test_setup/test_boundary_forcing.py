@@ -787,8 +787,11 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
         assert set(bf.ds.data_vars).issuperset(expected_vars)
 
 
-@pytest.mark.use_dask
-def test_nondefault_glorys_dataset_loading(small_grid: Grid) -> None:
+@pytest.mark.parametrize(
+    "use_dask",
+    [pytest.param(True, marks=pytest.mark.use_dask), False],
+)
+def test_nondefault_glorys_dataset_loading(small_grid: Grid, use_dask: bool) -> None:
     """Verify a non-default GLORYS dataset is loaded when a path is provided."""
     start_time = datetime(2012, 1, 1)
     end_time = datetime(2012, 12, 31)
@@ -807,7 +810,7 @@ def test_nondefault_glorys_dataset_loading(small_grid: Grid) -> None:
             type="physics",
             start_time=start_time,
             end_time=end_time,
-            use_dask=True,
+            use_dask=use_dask,
         )
 
         expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}

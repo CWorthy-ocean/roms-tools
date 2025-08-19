@@ -1125,6 +1125,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
         """
         package_name = "copernicusmarine"
         if self._tk_module:
+            self._check_auth(package_name)
             return self._tk_module
 
         spec = importlib.util.find_spec(package_name)

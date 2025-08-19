@@ -10,6 +10,10 @@ import xarray as xr
 from matplotlib.axes import Axes
 
 from roms_tools import Grid
+from roms_tools.analysis.cdr_analysis import (
+    compute_uptake_efficiency,
+    validate_uptake_efficiency,
+)
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
@@ -70,6 +74,13 @@ class ROMSOutput:
 
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
+
+    def compute_uptake_efficiency(self):
+        uptake_efficiency_flux, uptake_efficiency_diff = compute_uptake_efficiency(
+            self.ds, self.grid.ds
+        )
+        validate_uptake_efficiency(uptake_efficiency_flux, uptake_efficiency_diff)
+        self.ds["cdr_efficiency"] = uptake_efficiency_flux
 
     def plot(
         self,

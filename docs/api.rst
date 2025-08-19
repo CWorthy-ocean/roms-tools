@@ -85,4 +85,5 @@ Utilities
    :toctree: generated/
 
    roms_tools.tiling.partition.partition_netcdf
+   roms_tools.tiling.join.join_netcdf
    roms_tools.plot.plot

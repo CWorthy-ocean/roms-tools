@@ -127,14 +127,10 @@ def _infer_partition_layout_from_datasets(
     first_eta_transition = nd
 
     for eta_dim in eta_dims:
-        # print(eta_dim)
         dim_sizes = [ds.sizes.get(eta_dim, 0) for ds in datasets]
         eta_transitions = _find_transitions(dim_sizes)
-        # print(f"dim sizes:{dim_sizes}")
-        # print(f"eta_transitions: {eta_transitions}")
         if eta_transitions and (min(eta_transitions) < first_eta_transition):
             first_eta_transition = min(eta_transitions)
-    # print(f"first_eta_transition {first_eta_transition}")
     if first_eta_transition < nd:
         np_xi = first_eta_transition
         np_eta = nd // np_xi
@@ -148,7 +144,6 @@ def _infer_partition_layout_from_datasets(
 def join_datasets(datasets: Sequence[xr.Dataset]) -> xr.Dataset:
     """Take a sequence of partitioned Datasets and return a joined Dataset."""
     np_xi, np_eta = _infer_partition_layout_from_datasets(datasets)
-    # info = get_dims_from_datasets(datasets, np_xi=np_xi, np_eta=np_eta)
 
     # Arrange into grid
     grid = [[datasets[j + i * np_xi] for j in range(np_xi)] for i in range(np_eta)]

@@ -1089,7 +1089,9 @@ class GLORYSDefaultDataset(GLORYSDataset):
     """A GLORYS dataset that is loaded from the Copernicus Marine Data Store."""
 
     dataset_name: ClassVar[str] = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
-    _copm_module: ModuleType | None = None
+    """The GLORYS dataset-id for requests to the Copernicus Marine Toolkit"""
+    _tk_module: ModuleType | None = None
+    """The dynamically imported Copernicus Marine module."""
 
     def __post_init__(self) -> None:
         """Configure attributes to ensure use of the correct upstream data-source."""
@@ -1100,18 +1102,30 @@ class GLORYSDefaultDataset(GLORYSDataset):
 
         super().__post_init__()
 
+    def _check_auth(self, package_name: str) -> None:
+        """Check the local credential hierarchy for auth credentials.
+
+        Raises
+        ------
+        RuntimeError
+            If auth credentials cannot be found.
+        """
+        if self._tk_module and not self._tk_module.login(check_credentials_valid=True):
+            msg = f"Authenticate with `{package_name} login` to retrieve GLORYS data."
+            raise RuntimeError(msg)
+
     def _load_copernicus(self) -> ModuleType:
         """Dynamically load the optional Copernicus Marine Toolkit dependency.
 
         Raises
         ------
         RuntimeError
-            If the toolkit module is not available or cannot be imported.
-
+            - If the toolkit module is not available or cannot be imported.
+            - If auth credentials cannot be found.
         """
         package_name = "copernicusmarine"
-        if self._copm_module:
-            return self._copm_module
+        if self._tk_module:
+            return self._tk_module
 
         spec = importlib.util.find_spec(package_name)
         if not spec:
@@ -1119,12 +1133,13 @@ class GLORYSDefaultDataset(GLORYSDataset):
             raise RuntimeError(msg)
 
         try:
-            self._copm_module = importlib.import_module(package_name)
+            self._tk_module = importlib.import_module(package_name)
         except ImportError as e:
-            msg = f"Package '{package_name} was found but could not be loaded."
+            msg = f"Package `{package_name}` was found but could not be loaded."
             raise RuntimeError(msg) from e
 
-        return self._copm_module
+        self._check_auth(package_name)
+        return self._tk_module
 
     def _load_from_copernicus(self) -> xr.Dataset:
         """Load a GLORYS dataset supporting streaming.

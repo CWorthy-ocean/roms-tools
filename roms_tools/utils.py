@@ -17,6 +17,7 @@ def _load_data(
     use_dask,
     time_chunking=True,
     decode_times=True,
+    decode_timedelta=True,
     force_combine_nested=False,
     read_zarr: bool = False,
 ):
@@ -38,7 +39,10 @@ def _load_data(
         If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
         Defaults to True.
     decode_times: bool, optional
-        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+    decode_timedelta: bool, optional
+        If True, decode timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
     force_combine_nested: bool, optional
         If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
@@ -175,6 +179,7 @@ def _load_data(
                 ds = xr.open_zarr(
                     matching_files[0],
                     decode_times=decode_times,
+                    decode_timedelta=decode_timedelta,
                     chunks=chunks,
                     consolidated=None,
                     storage_options=dict(token="anon"),
@@ -183,7 +188,7 @@ def _load_data(
                 ds = xr.open_mfdataset(
                     matching_files,
                     decode_times=decode_times,
-                    decode_timedelta=decode_times,
+                    decode_timedelta=decode_timedelta,
                     chunks=chunks,
                     **combine_kwargs,
                     **kwargs,
@@ -195,7 +200,7 @@ def _load_data(
             ds = xr.open_dataset(
                 file,
                 decode_times=decode_times,
-                decode_timedelta=decode_times,
+                decode_timedelta=decode_timedelta,
                 chunks=None,
             )
             ds_list.append(ds)

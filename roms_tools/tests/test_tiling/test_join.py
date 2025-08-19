@@ -231,7 +231,7 @@ class TestJoinROMSData:
         assert joined_netcdf.exists()
         joined_ics = xr.open_dataset(joined_netcdf, decode_timedelta=True)
 
-        for v in whole_ics.variables:  #
+        for v in whole_ics.variables:
             assert (whole_ics[v].values == joined_ics[v].values).all(), (
                 f"{v} does not match in joined dataset: {joined_ics[v].values} vs {whole_ics[v].values}"
             )

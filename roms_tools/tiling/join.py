@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 import xarray as xr
 
@@ -86,7 +87,9 @@ def _find_transitions(dim_sizes: list[int]) -> list[int]:
     return transitions
 
 
-def _find_common_dims(direction: Literal["xi", "eta"], datasets: Sequence[xr.Dataset]) -> str:
+def _find_common_dims(
+    direction: Literal["xi", "eta"], datasets: Sequence[xr.Dataset]
+) -> str:
     """Finds all common dimensions along the xi or eta direction amongst a list of Datasets.
 
     Parameters

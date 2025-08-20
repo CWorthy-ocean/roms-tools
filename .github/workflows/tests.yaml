@@ -116,8 +116,58 @@ jobs:
         run: |
            python -V
            copernicusmarine login
-           coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose roms_tools/tests/*
+           coverage run --rcfile=coverage.toml -m pytest -m "stream and not womp" --stream --use_dask --use_copernicus --verbose roms_tools/tests/*
 
+  test-with-sf-arco-streaming:
+    name: 3.13-build-with-sf-arco-streaming
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: ci/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+
+      - name: Conda info
+        run: conda info
+
+      - name: Install roms-tools
+        shell: micromamba-shell {0}
+        run: |
+           python -V
+           python -m pip install -e .[stream]  --force-reinstall
+      - name: Check pre-test resource usage
+        run: |
+          echo "CPU Info:"
+          lscpu
+          echo "Memory Info:"
+          free -h
+          echo "Disk Usage:"
+          df -h
+      - name: Running Tests with ARCO Streaming
+        shell: bash -l {0}
+        run: |
+           python -V
+           copernicusmarine login
+           coverage run --rcfile=coverage.toml -m pytest -m womp --stream --use_dask --verbose roms_tools/tests/*
+      - name: Check post-test resource usage
+        run: |
+          echo "CPU Info:"
+          lscpu
+          echo "Memory Info:"
+          free -h
+          echo "Disk Usage:"
+          df -h
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
     runs-on: ubuntu-latest

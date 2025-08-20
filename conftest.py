@@ -543,7 +543,7 @@ def surface_forcing(use_dask: bool) -> SurfaceForcing:
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def surface_forcing_arco(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with ERA5 ARCO data."""
     if not use_dask:

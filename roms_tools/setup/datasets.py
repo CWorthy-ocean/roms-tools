@@ -1,9 +1,13 @@
+import importlib.util
 import logging
 import time
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import ModuleType
+from typing import ClassVar
 
 import numpy as np
 import xarray as xr
@@ -25,7 +29,7 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     one_dim_fill,
 )
-from roms_tools.utils import _has_gcsfs, _load_data
+from roms_tools.utils import _get_pkg_error_msg, _has_gcsfs, _load_data
 
 # lat-lon datasets
 
@@ -96,17 +100,18 @@ class Dataset:
     use_dask: bool | None = False
     apply_post_processing: bool | None = True
     read_zarr: bool | None = False
+    ds_loader_fn: Callable[[], xr.Dataset] | None = None
 
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
-    def __post_init__(self):
-        """
-        Post-initialization processing:
+    def __post_init__(self) -> None:
+        """Perform post-initialization processing.
+
         1. Loads the dataset from the specified filename.
-        2. Applies time filtering based on start_time and end_time if provided.
-        3. Selects relevant fields as specified by var_names.
-        4. Ensures latitude values and depth values are in ascending order.
+        2. Applies time filtering based on start_time and end_time (if provided).
+        3. Selects relevant fields as specified by `var_names`.
+        4. Ensures latitude, longitude, and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
         # Validate start_time and end_time
@@ -168,7 +173,11 @@ class Dataset:
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
         ds = _load_data(
-            self.filename, self.dim_names, self.use_dask, read_zarr=self.read_zarr
+            self.filename,
+            self.dim_names,
+            self.use_dask or False,
+            read_zarr=self.read_zarr or False,
+            ds_loader_fn=self.ds_loader_fn,
         )
 
         return ds
@@ -1076,6 +1085,83 @@ class GLORYSDataset(Dataset):
 
 
 @dataclass(kw_only=True)
+class GLORYSDefaultDataset(GLORYSDataset):
+    """A GLORYS dataset that is loaded from the Copernicus Marine Data Store."""
+
+    dataset_name: ClassVar[str] = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+    """The GLORYS dataset-id for requests to the Copernicus Marine Toolkit"""
+    _tk_module: ModuleType | None = None
+    """The dynamically imported Copernicus Marine module."""
+
+    def __post_init__(self) -> None:
+        """Configure attributes to ensure use of the correct upstream data-source."""
+        self.read_zarr = True
+        self.use_dask = True
+        self.filename = self.dataset_name
+        self.ds_loader_fn = self._load_from_copernicus
+
+        super().__post_init__()
+
+    def _check_auth(self, package_name: str) -> None:
+        """Check the local credential hierarchy for auth credentials.
+
+        Raises
+        ------
+        RuntimeError
+            If auth credentials cannot be found.
+        """
+        if self._tk_module and not self._tk_module.login(check_credentials_valid=True):
+            msg = f"Authenticate with `{package_name} login` to retrieve GLORYS data."
+            raise RuntimeError(msg)
+
+    def _load_copernicus(self) -> ModuleType:
+        """Dynamically load the optional Copernicus Marine Toolkit dependency.
+
+        Raises
+        ------
+        RuntimeError
+            - If the toolkit module is not available or cannot be imported.
+            - If auth credentials cannot be found.
+        """
+        package_name = "copernicusmarine"
+        if self._tk_module:
+            self._check_auth(package_name)
+            return self._tk_module
+
+        spec = importlib.util.find_spec(package_name)
+        if not spec:
+            msg = _get_pkg_error_msg("cloud-based GLORYS data", package_name, "stream")
+            raise RuntimeError(msg)
+
+        try:
+            self._tk_module = importlib.import_module(package_name)
+        except ImportError as e:
+            msg = f"Package `{package_name}` was found but could not be loaded."
+            raise RuntimeError(msg) from e
+
+        self._check_auth(package_name)
+        return self._tk_module
+
+    def _load_from_copernicus(self) -> xr.Dataset:
+        """Load a GLORYS dataset supporting streaming.
+
+        Returns
+        -------
+        xr.Dataset
+            The streaming dataset
+        """
+        copernicusmarine = self._load_copernicus()
+        return copernicusmarine.open_dataset(
+            self.dataset_name,
+            start_datetime=self.start_time,
+            end_datetime=self.end_time,
+            service="arco-geo-series",
+            coordinates_selection_method="inside",
+            chunk_size_limit=2,
+        )
+
+
+@dataclass(kw_only=True)
 class UnifiedDataset(Dataset):
     """Represents unified BGC data on original grid.
 
@@ -1549,12 +1635,8 @@ class ERA5ARCODataset(ERA5Dataset):
     def __post_init__(self):
         self.read_zarr = True
         if not _has_gcsfs():
-            raise RuntimeError(
-                "To use cloud-based ERA5 data, GCSFS is required but not installed. Install it with:\n"
-                "  • `pip install roms-tools[stream]` or\n"
-                "  • `conda install gcsfs`\n"
-                "Alternatively, install `roms-tools` with conda to include all dependencies."
-            )
+            msg = _get_pkg_error_msg("cloud-based ERA5 data", "gcsfs", "stream")
+            raise RuntimeError(msg)
 
         super().__post_init__()
 

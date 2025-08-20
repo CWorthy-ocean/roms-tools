@@ -49,6 +49,7 @@ plot(field, grid.ds)
 
 * Most classes now delegate their `.plot()` methods to the centralized plot function, reducing code duplication and simplifying maintenance. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 * Implement ruff rules ([#382](https://github.com/CWorthy-ocean/roms-tools/pull/382))
+* Implement streamable default datasources for GLORYS ([#386](https://github.com/CWorthy-ocean/roms-tools/pull/386))
 
 ### Documentation
 

@@ -27,7 +27,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: romstools-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -62,7 +62,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: romstools-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -97,7 +97,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: romstools-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -136,7 +136,7 @@ jobs:
           environment-file: ci/environment-with-xesmf.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-environment-key: romstools-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info

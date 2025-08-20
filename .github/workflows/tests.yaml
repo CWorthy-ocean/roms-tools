@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -27,7 +27,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -62,7 +62,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -97,7 +97,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -128,7 +128,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -136,7 +136,7 @@ jobs:
           environment-file: ci/environment-with-xesmf.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info

@@ -146,9 +146,6 @@ jobs:
         run: |
            python -V
            python -m pip install -e .[stream]  --force-reinstall
-      - name: Monitor resource usage
-        run: |
-
 
       - name: Running Tests with ARCO Streaming
         shell: bash -l {0}

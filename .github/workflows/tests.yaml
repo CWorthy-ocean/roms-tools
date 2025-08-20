@@ -146,27 +146,35 @@ jobs:
         run: |
            python -V
            python -m pip install -e .[stream]  --force-reinstall
-      - name: Check pre-test resource usage
+      - name: Monitor resource usage
         run: |
-          echo "CPU Info:"
-          lscpu
-          echo "Memory Info:"
-          free -h
-          echo "Disk Usage:"
-          df -h
+
+
       - name: Running Tests with ARCO Streaming
         shell: bash -l {0}
         run: |
-           python -V
-           coverage run --rcfile=coverage.toml -m pytest -m womp --stream --use_dask --verbose roms_tools/tests/*
-      - name: Check post-test resource usage
-        run: |
-          echo "CPU Info:"
-          lscpu
-          echo "Memory Info:"
-          free -h
-          echo "Disk Usage:"
-          df -h
+            while true; do
+              echo "--- $(date) ---" >> resource_usage.log
+              free -m >> resource_usage.log
+              echo "---" >> resource_usage.log
+              top -b -n 1 | head -n 20 >> resource_usage.log
+              sleep 2
+            done &
+            MONITOR_PID=$!
+            echo "Started resource monitor with PID $MONITOR_PID"
+
+            set +e
+            python -V
+            coverage run --rcfile=coverage.toml -m pytest -m womp --stream --use_dask --verbose roms_tools/tests/*
+            TEST_EXIT_CODE=$?
+            set -e
+
+            kill $MONITOR_PID
+            echo "===================== Resource Usage Log ====================="
+            cat resource_usage.log
+            echo "=============================================================="
+            exit $TEST_EXIT_CODE
+
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
     runs-on: ubuntu-latest

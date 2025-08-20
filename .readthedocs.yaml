@@ -10,9 +10,11 @@ build:
   os: ubuntu-22.04
   tools:
     python: "mambaforge-22.9"
-  environment:
-    OMP_DISPLAY_ENV: "FALSE"
-    OMP_DISPLAY_AFFINITY: "FALSE"
+
+# Global environment variables for the build
+environment:
+  OMP_DISPLAY_ENV: "FALSE"
+  OMP_DISPLAY_AFFINITY: "FALSE"
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:

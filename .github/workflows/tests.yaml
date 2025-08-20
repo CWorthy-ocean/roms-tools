@@ -110,9 +110,13 @@ jobs:
 
       - name: Running Tests with Streaming
         shell: bash -l {0}
+        env:
+          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --verbose roms_tools/tests/*
+           copernicusmarine login
+           coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose roms_tools/tests/*
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf

@@ -10,11 +10,10 @@ build:
   os: ubuntu-22.04
   tools:
     python: "mambaforge-22.9"
-
-# Global environment variables for the build
-environment:
-  OMP_DISPLAY_ENV: "FALSE"
-  OMP_DISPLAY_AFFINITY: "FALSE"
+  jobs:
+    pre_build:
+      - echo "OMP_DISPLAY_ENV=FALSE" >> $READTHEDOCS_ENV
+      - echo "OMP_DISPLAY_AFFINITY=FALSE" >> $READTHEDOCS_ENV
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:

@@ -14,6 +14,25 @@ from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
 
 
+@pytest.fixture
+def example_grid():
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+    return grid
+
+
 @pytest.mark.parametrize(
     "ic_fixture",
     [
@@ -25,7 +44,9 @@ from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
         "initial_conditions_with_unified_bgc_from_climatology",
     ],
 )
-def test_initial_conditions_creation(ic_fixture, request):
+def test_initial_conditions_creation_with_nondefault_glorys_dataset(
+    ic_fixture, request
+):
     """Test the creation of the InitialConditions object."""
     ic = request.getfixturevalue(ic_fixture)
 
@@ -37,12 +58,21 @@ def test_initial_conditions_creation(ic_fixture, request):
     }
     assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
     assert isinstance(ic.ds, xr.Dataset)
-    assert "temp" in ic.ds
-    assert "salt" in ic.ds
-    assert "u" in ic.ds
-    assert "v" in ic.ds
-    assert "zeta" in ic.ds
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
+    expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
+    assert set(ic.ds.data_vars).issuperset(expected_vars)
+
+
+def test_initial_conditions_creation_with_default_glorys_dataset(example_grid: Grid):
+    """Verify the default GLORYS dataset is loaded when a path is not provided."""
+    ic = InitialConditions(
+        grid=example_grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"name": "GLORYS"},
+        use_dask=True,
+    )
+    expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
+    assert set(ic.ds.data_vars).issuperset(expected_vars)
 
 
 def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
@@ -134,28 +164,9 @@ def test_initial_condition_creation_with_bgc(ic_fixture, request):
         assert var in ic.ds
 
 
-@pytest.fixture
-def example_grid():
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    return grid
-
-
 # Test initialization with missing 'name' in source
 def test_initial_conditions_missing_physics_name(example_grid, use_dask):
-    with pytest.raises(ValueError, match="`source` must include a 'name'."):
+    with pytest.raises(ValueError, match="`source` must include a 'name'"):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
@@ -164,23 +175,10 @@ def test_initial_conditions_missing_physics_name(example_grid, use_dask):
         )
 
 
-# Test initialization with missing 'path' in source
-def test_initial_conditions_missing_physics_path(example_grid, use_dask):
-    with pytest.raises(ValueError, match="`source` must include a 'path'."):
-        InitialConditions(
-            grid=example_grid,
-            ini_time=datetime(2021, 6, 29),
-            source={"name": "GLORYS"},
-            use_dask=use_dask,
-        )
-
-
 # Test initialization with missing 'name' in bgc_source
 def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    with pytest.raises(
-        ValueError, match="`bgc_source` must include a 'name' if it is provided."
-    ):
+    with pytest.raises(ValueError, match="`bgc_source` must include a 'name'"):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),

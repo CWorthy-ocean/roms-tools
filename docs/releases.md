@@ -11,6 +11,8 @@
 
 ### Internal Changes
 
+* Require xgcm version >= 0.9.0 ([#425](https://github.com/CWorthy-ocean/roms-tools/pull/425))
+
 ### Documentation
 
 * Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))

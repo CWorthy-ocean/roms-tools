@@ -33,7 +33,6 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
-    get_dask_chunks,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     save_datasets,
@@ -261,7 +260,7 @@ class InitialConditions:
                         field = processed_fields[var_name]
                         if self.use_dask:
                             field = field.chunk(
-                                get_dask_chunks(location, self.horizontal_chunk_size)
+                                _set_dask_chunks(location, self.horizontal_chunk_size)
                             )
                         processed_fields[var_name] = vertical_regrid.apply(field)
 
@@ -509,10 +508,10 @@ class InitialConditions:
                     zeta = interpolate_from_rho_to_v(zeta)
 
             if self.use_dask:
-                h = h.chunk(get_dask_chunks(location, self.horizontal_chunk_size))
+                h = h.chunk(_set_dask_chunks(location, self.horizontal_chunk_size))
                 if self.adjust_depth_for_sea_surface_height:
                     zeta = zeta.chunk(
-                        get_dask_chunks(location, self.horizontal_chunk_size)
+                        _set_dask_chunks(location, self.horizontal_chunk_size)
                     )
             depth = compute_depth(zeta, h, self.grid.ds.attrs["hc"], Cs, sigma)
             self.ds_depth_coords[key] = depth
@@ -842,3 +841,26 @@ class InitialConditions:
             **initial_conditions_params,
             use_dask=use_dask,
         )
+
+
+def _set_dask_chunks(location: Literal["rho", "u", "v"], chunk_size: int):
+    """Returns the appropriate Dask chunking dictionary based on grid location.
+
+    Parameters
+    ----------
+    location : str
+        The grid location, one of "rho", "u", or "v".
+    chunk_size : int
+        The chunk size to apply.
+
+    Returns
+    -------
+    dict
+        Dictionary specifying the chunking strategy.
+    """
+    chunk_mapping = {
+        "rho": {"eta_rho": chunk_size, "xi_rho": chunk_size},
+        "u": {"eta_rho": chunk_size, "xi_u": chunk_size},
+        "v": {"eta_v": chunk_size, "xi_rho": chunk_size},
+    }
+    return chunk_mapping.get(location, {})

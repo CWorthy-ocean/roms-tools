@@ -29,7 +29,7 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     one_dim_fill,
 )
-from roms_tools.utils import _get_pkg_error_msg, _has_gcsfs, _load_data
+from roms_tools.utils import _get_pkg_error_msg, _has_gcsfs, _load_data, get_dask_chunks
 
 # lat-lon datasets
 
@@ -1151,14 +1151,19 @@ class GLORYSDefaultDataset(GLORYSDataset):
             The streaming dataset
         """
         copernicusmarine = self._load_copernicus()
-        return copernicusmarine.open_dataset(
+        ds = copernicusmarine.open_dataset(
             self.dataset_name,
             start_datetime=self.start_time,
             end_datetime=self.end_time,
             service="arco-geo-series",
-            coordinates_selection_method="inside",
-            chunk_size_limit=2,
+            coordinates_selection_method="outside",
+            chunk_size_limit=-1,
         )
+
+        chunks = get_dask_chunks(self.dim_names)
+
+        ds = ds.rechunk(chunks)
+        return ds
 
 
 @dataclass(kw_only=True)
@@ -2848,7 +2853,7 @@ def _select_relevant_times(
                 # Look in time range [start_time, start_time + 24h]
                 end_time = start_time + timedelta(days=1)
                 times = (np.datetime64(start_time) <= ds[time_dim]) & (
-                    ds[time_dim] < np.datetime64(end_time)
+                    ds[time_dim] <= np.datetime64(end_time)
                 )
                 if np.all(~times):
                     raise ValueError(

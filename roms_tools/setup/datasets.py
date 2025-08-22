@@ -33,6 +33,8 @@ from roms_tools.setup.utils import (
 )
 from roms_tools.utils import get_pkg_error_msg, has_gcsfs, load_data
 
+TConcatEndTypes = Literal["lower", "upper", "both"]
+
 # lat-lon datasets
 
 
@@ -448,7 +450,7 @@ class Dataset:
     def concatenate_longitudes(
         self,
         ds: xr.Dataset,
-        end: Literal["lower", "upper", "both"] = "upper",
+        end: TConcatEndTypes = "upper",
         verbose: bool = False,
     ) -> xr.Dataset:
         """Concatenates fields in dataset twice along the longitude dimension.
@@ -644,7 +646,7 @@ class Dataset:
 
             if concats:
                 end = "both" if len(concats) == 2 else concats[0]
-                end = cast(Literal["lower", "upper", "both"], end)
+                end = cast(TConcatEndTypes, end)
                 subdomain = self.concatenate_longitudes(
                     subdomain, end=end, verbose=False
                 )

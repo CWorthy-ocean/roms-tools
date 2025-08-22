@@ -1,7 +1,10 @@
 import glob
 import logging
 import re
+import textwrap
 import warnings
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -9,6 +12,285 @@ import numpy as np
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
+
+
+@dataclass
+class FileMatchResult:
+    """The result of performing a wildcard search."""
+
+    contains_wildcard: bool
+    """Return `True` if the search contained a wildcard."""
+    matches: list[str]
+    """The items matching the wildcard search."""
+
+
+def _get_file_matches(
+    filename: str | Path | Sequence[str | Path],
+) -> FileMatchResult:
+    """Filter the filename using an optional wildcard search in the filename.
+
+    Parameters
+    ----------
+    filename : str | Path | Sequence[str | Path]
+        An item to search for matches.
+    """
+    # Precompile the regex for matching wildcard characters
+    wildcard_regex = re.compile(r"[\*\?\[\]]")
+
+    # Normalize input into a list of strings
+    if isinstance(filename, (str | Path)):
+        filenames: list[str] = [str(filename)]
+    elif isinstance(filename, Sequence):
+        filenames = [str(f) for f in filename]
+    else:
+        msg = "filename must be a string, Path, or a sequence of strings/Paths."
+        raise ValueError(msg)
+
+    contains_wildcard = any(wildcard_regex.search(f) for f in filenames)
+    matching_files: list[str] = []
+
+    for f in filenames:
+        if wildcard_regex.search(f):
+            files = glob.glob(f)
+            if not files:
+                raise FileNotFoundError(f"No files found matching the pattern '{f}'.")
+            matching_files.extend(files)
+        else:
+            matching_files.append(f)
+
+    return FileMatchResult(
+        contains_wildcard=contains_wildcard,
+        matches=sorted(matching_files),
+    )
+
+
+def _get_ds_combination_params(
+    force_combine_nested: bool,
+    dim_names: dict[str, str],
+    match_result: FileMatchResult,
+) -> dict[str, str]:
+    """Determine the non-base parameters for combining datasets.
+
+    Parameters
+    ----------
+    force_combine_nested: bool, optional
+        If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
+        Defaults to False.
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+        Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
+        For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
+    match_result : FileMatchResult
+        The result of an optional wildcard search of dataset filename(s).
+
+    Returns
+    -------
+    dict[str, str]
+        The default dataset combination parameters
+
+    """
+    if force_combine_nested:
+        load_kwargs = {"combine": "nested", "concat_dim": dim_names["time"]}
+    elif match_result.contains_wildcard or len(match_result.matches) == 1:
+        load_kwargs = {"combine": "by_coords"}
+    else:
+        load_kwargs = {"combine": "nested", "concat_dim": dim_names["time"]}
+
+    return load_kwargs
+
+
+def _get_ds_combine_base_params() -> dict[str, str]:
+    """Return the base parameters used when combining an xr.Dataset.
+
+    Returns
+    -------
+    dict[str, str]
+        The default dataset combination parameters
+
+    """
+    return {
+        "coords": "minimal",
+        "compat": "override",
+        "combine_attrs": "override",
+    }
+
+
+def _load_data_dask(
+    filenames: list[str],
+    dim_names: dict[str, str],
+    time_chunking: bool = True,
+    decode_times: bool = True,
+    read_zarr: bool = True,
+    load_kwargs: dict[str, str] | None = None,
+) -> xr.Dataset:
+    """Load dataset from the specified file using Dask.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
+        or a list of strings or Path objects containing multiple files.
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+        Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
+        For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
+    time_chunking : bool, optional
+        If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
+        If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
+        Defaults to True.
+    decode_times: bool, optional
+        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+    read_zarr: bool, optional
+        If True, use the zarr engine to read the dataset, and don't use mfdataset.
+        Defaults to False.
+
+    Returns
+    -------
+    ds : xr.Dataset
+        The loaded xarray Dataset containing the forcing data.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified file does not exist.
+    ValueError
+        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+
+    """
+    if "latitude" in dim_names and "longitude" in dim_names:
+        # for lat-lon datasets
+        chunks = {
+            dim_names["latitude"]: -1,
+            dim_names["longitude"]: -1,
+        }
+    else:
+        # For ROMS datasets
+        chunks = {
+            "eta_rho": -1,
+            "eta_v": -1,
+            "xi_rho": -1,
+            "xi_u": -1,
+            "s_rho": -1,
+        }
+
+    if "depth" in dim_names:
+        chunks[dim_names["depth"]] = -1
+    if "time" in dim_names and time_chunking:
+        chunks[dim_names["time"]] = 1
+    if "ntides" in dim_names:
+        chunks[dim_names["ntides"]] = 1
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message=r"^The specified chunks separate.*",
+        )
+
+        if read_zarr:
+            return xr.open_zarr(
+                filenames[0],
+                decode_times=decode_times,
+                chunks=chunks,
+                consolidated=None,
+                storage_options={"token": "anon"},
+            )
+
+        kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
+        return xr.open_mfdataset(
+            filenames,
+            decode_times=decode_times,
+            decode_timedelta=decode_times,
+            chunks=chunks,
+            **kwargs,
+        )
+
+
+def _check_load_data_dask(use_dask: bool) -> None:
+    """Determine if dask is installed.
+
+    Parameters
+    ----------
+    use_dask: bool
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+
+    Raises
+    ------
+    RuntimeError
+        If dask is requested but not installed.
+    """
+    if use_dask and not has_dask():
+        msg = (
+            "Dask is required but not installed. Install it with:\n"
+            "  • `pip install roms-tools[dask]` or\n"
+            "  • `conda install dask`\n"
+            "Alternatively, install `roms-tools` with conda to include all dependencies."
+        )
+        raise RuntimeError(msg)
+
+
+def _check_load_data_zarr(
+    use_dask: bool, read_zarr: bool, filename: str | Path | list[str | Path]
+) -> None:
+    """Determine if zarr streaming will conflict with the current request configuration.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
+        or a list of strings or Path objects containing multiple files.
+    use_dask: bool
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    read_zarr: bool, optional
+        If True, use the zarr engine to read the dataset, and don't use mfdataset.
+        Defaults to False.
+
+    Raises
+    ------
+    RuntimeError
+        If read_zarr is requested, but:
+        - the request doesn't specify a dependency on dask
+        - the request includes a list of filenames
+
+    """
+    if read_zarr:
+        if isinstance(filename, list):
+            msg = "read_zarr requires a single path, not a list of paths"
+            raise ValueError(msg)
+
+        if not use_dask:
+            msg = "read_zarr must be used with use_dask"
+            raise ValueError(msg)
+
+
+def _check_load_data_filename(
+    filename: str | Path | list[str | Path], dim_names: Iterable[str]
+) -> None:
+    """Determine if time dimension is available when multiple files are provided.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
+        or a list of strings or Path objects containing multiple files.
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+        Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
+        For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
+
+    Raises
+    ------
+    ValueError
+        If time dimension is not found and a list of files is provided.
+
+    """
+    if isinstance(filename, list) and "time" not in dim_names:
+        msg = (
+            "A list of files is provided, but time dimension is not available. "
+            "A time dimension must be available to concatenate the files."
+        )
+        raise ValueError(msg)
 
 
 def load_data(
@@ -19,6 +301,7 @@ def load_data(
     decode_times: bool = True,
     force_combine_nested: bool = False,
     read_zarr: bool = False,
+    ds_loader_fn: Callable[[], xr.Dataset] | None = None,
 ):
     """Load dataset from the specified file.
 
@@ -31,7 +314,7 @@ def load_data(
         Dictionary specifying the names of dimensions in the dataset.
         Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
         For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
-    use_dask: bool
+    use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
     time_chunking : bool, optional
         If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
@@ -58,141 +341,39 @@ def load_data(
         If the specified file does not exist.
     ValueError
         If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+    RuntimeError
+        If loading the dataset fails
     """
-    if dim_names is None:
-        dim_names = {}
+    dim_names = dim_names or {}
 
-    if use_dask:
-        if not has_dask():
-            raise RuntimeError(
-                "Dask is required but not installed. Install it with:\n"
-                "  • `pip install roms-tools[dask]` or\n"
-                "  • `conda install dask`\n"
-                "Alternatively, install `roms-tools` with conda to include all dependencies."
-            )
-    if read_zarr:
-        if isinstance(filename, list):
-            raise ValueError("read_zarr requires a single path, not a list of paths")
-        if not use_dask:
-            raise ValueError("read_zarr must be used with use_dask")
+    _check_load_data_dask(use_dask)
+    _check_load_data_zarr(use_dask, read_zarr, filename)
+    _check_load_data_filename(filename, dim_names.keys())
 
-    # Precompile the regex for matching wildcard characters
-    wildcard_regex = re.compile(r"[\*\?\[\]]")
+    match_result = _get_file_matches(filename)
 
-    # Convert Path objects to strings
-    filename_str: str | list[str]
-    if isinstance(filename, str | Path):
-        filename_str = str(filename)
-    elif isinstance(filename, list):
-        filename_str = [str(f) for f in filename]
-    else:
-        raise ValueError("filename must be a string, Path, or a list of strings/Paths.")
+    load_kwargs = _get_ds_combination_params(
+        force_combine_nested,
+        dim_names,
+        match_result,
+    )
 
-    # Handle the case when filename is a string
-    contains_wildcard = False
-    if isinstance(filename_str, str):
-        contains_wildcard = bool(wildcard_regex.search(filename_str))
-        if contains_wildcard:
-            matching_files = glob.glob(filename_str)
-            if not matching_files:
-                raise FileNotFoundError(
-                    f"No files found matching the pattern '{filename_str}'."
-                )
-        else:
-            matching_files = [filename_str]
+    ds: xr.Dataset | xr.DataArray | None = None
 
-    # Handle the case when filename is a list
-    elif isinstance(filename_str, list):
-        contains_wildcard = any(wildcard_regex.search(f) for f in filename_str)
-        if contains_wildcard:
-            matching_files = []
-            for f in filename_str:
-                files = glob.glob(f)
-                if not files:
-                    raise FileNotFoundError(
-                        f"No files found matching the pattern '{f}'."
-                    )
-                matching_files.extend(files)
-        else:
-            matching_files = filename_str
-
-    # Sort the matching files
-    matching_files = sorted(matching_files)
-
-    # Check if time dimension is available when multiple files are provided
-    if isinstance(filename_str, list) and "time" not in dim_names:
-        raise ValueError(
-            "A list of files is provided, but time dimension is not available. "
-            "A time dimension must be available to concatenate the files."
+    if ds_loader_fn is not None:
+        ds = ds_loader_fn()
+    elif use_dask:
+        ds = _load_data_dask(
+            match_result.matches,
+            dim_names,
+            time_chunking,
+            decode_times,
+            read_zarr,
+            load_kwargs,
         )
-
-    # Determine the kwargs for combining datasets
-    if force_combine_nested:
-        kwargs = {"combine": "nested", "concat_dim": dim_names["time"]}
-    elif contains_wildcard or len(matching_files) == 1:
-        kwargs = {"combine": "by_coords"}
-    else:
-        kwargs = {"combine": "nested", "concat_dim": dim_names["time"]}
-
-    # Base kwargs used for dataset combination
-    combine_kwargs = {
-        "coords": "minimal",
-        "compat": "override",
-        "combine_attrs": "override",
-    }
-
-    if use_dask:
-        if "latitude" in dim_names and "longitude" in dim_names:
-            # for lat-lon datasets
-            chunks = {
-                dim_names["latitude"]: -1,
-                dim_names["longitude"]: -1,
-            }
-        else:
-            # For ROMS datasets
-            chunks = {
-                "eta_rho": -1,
-                "eta_v": -1,
-                "xi_rho": -1,
-                "xi_u": -1,
-                "s_rho": -1,
-            }
-
-        if "depth" in dim_names:
-            chunks[dim_names["depth"]] = -1
-        if "time" in dim_names and time_chunking:
-            chunks[dim_names["time"]] = 1
-        if "ntides" in dim_names:
-            chunks[dim_names["ntides"]] = 1
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                category=UserWarning,
-                message=r"^The specified chunks separate.*",
-            )
-
-            if read_zarr:
-                ds = xr.open_zarr(
-                    matching_files[0],
-                    decode_times=decode_times,
-                    chunks=chunks,
-                    consolidated=None,
-                    storage_options=dict(token="anon"),
-                )
-            else:
-                ds = xr.open_mfdataset(
-                    matching_files,
-                    decode_times=decode_times,
-                    decode_timedelta=decode_times,
-                    chunks=chunks,
-                    **combine_kwargs,
-                    **kwargs,
-                )
-
     else:
         ds_list = []
-        for file in matching_files:
+        for file in match_result.matches:
             ds = xr.open_dataset(
                 file,
                 decode_times=decode_times,
@@ -201,12 +382,18 @@ def load_data(
             )
             ds_list.append(ds)
 
-        if kwargs["combine"] == "by_coords":
+        combine_kwargs = _get_ds_combine_base_params()
+
+        if load_kwargs["combine"] == "by_coords":
             ds = xr.combine_by_coords(ds_list, **combine_kwargs)
-        elif kwargs["combine"] == "nested":
+        elif load_kwargs["combine"] == "nested":
             ds = xr.combine_nested(
-                ds_list, concat_dim=kwargs["concat_dim"], **combine_kwargs
+                ds_list, concat_dim=load_kwargs["concat_dim"], **combine_kwargs
             )
+
+    if ds is None:
+        msg = "A dataset was not loaded."
+        raise RuntimeError(msg)
 
     if "time" in dim_names and dim_names["time"] not in ds.dims:
         ds = ds.expand_dims(dim_names["time"])
@@ -367,7 +554,44 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     List[Path]
         A list of Path objects for the filenames that were saved.
     """
+
+    def _patch_1d_encodings(dataset_list: list[xr.Dataset]) -> None:
+        """Replaces problematic encodings in 1D variables.
+
+        ROMS' Fortran-based tools fail with certain encoding types that are common
+        in roms-tools' exported 1D vars (e.g. `abs_time`, `river_name`). This function
+        replaces int64 -> int32 (for true integers), int64 -> float64
+        (for non-integer vars encoded as int64 on disk), and NC_STRING -> char.
+
+        Parameters
+        ----------
+        dataset_list: list[xr.Dataset]
+            List of datasets to be saved
+
+        """
+        for ds in dataset_list:
+            for name in ds.variables:
+                da = ds[name]
+                if da.ndim != 1:
+                    continue
+
+                enc_var = xr.conventions.encode_cf_variable(da.variable, name=name)
+                enc_dtype = enc_var.dtype
+
+                # NC_STRING → fixed-width char
+                if enc_dtype.kind in ("O", "U", "S"):
+                    da.encoding["dtype"] = "S1"
+                    continue
+
+                # NC_INT64 → int32 for true integers; float64 otherwise
+                if enc_dtype == np.int64:
+                    if da.dtype.kind in ("i", "u"):
+                        da.encoding["dtype"] = "int32"
+                    else:
+                        da.encoding["dtype"] = "float64"
+
     saved_filenames = []
+    _patch_1d_encodings(dataset_list)
 
     output_filenames = [f"{filename}.nc" for filename in output_filenames]
     if verbose:
@@ -636,11 +860,39 @@ def remove_edge_nans(
 
 
 def has_dask() -> bool:
+    """Determine if the Dask package is installed.
+
+    Returns
+    -------
+    bool
+        `True` if package is found, `False` otherwise.
+
+    """
     return find_spec("dask") is not None
 
 
 def has_gcsfs() -> bool:
+    """Determine if the GCSFS package is installed.
+
+    Returns
+    -------
+    bool
+        `True` if package is found, `False` otherwise.
+
+    """
     return find_spec("gcsfs") is not None
+
+
+def has_copernicus() -> bool:
+    """Determine if the Copernicus Marine Toolkit package is installed.
+
+    Returns
+    -------
+    bool
+        `True` if package is found, `False` otherwise.
+
+    """
+    return find_spec("copernicusmarine") is not None
 
 
 def normalize_longitude(lon: float, straddle: bool) -> float:
@@ -705,3 +957,28 @@ def infer_nominal_horizontal_resolution(
     resolution_in_degrees = resolution_in_m / (meters_per_degree * np.cos(lat_rad))
 
     return float(resolution_in_degrees)
+
+
+def get_pkg_error_msg(purpose: str, package_name: str, option_name: str) -> str:
+    """Generate an error message indicating how to install an optional dependency.
+
+    Parameters
+    ----------
+    purpose : str
+        Description of the feature the package enables.
+    package_name : str
+        The package name
+    option_name : str
+        The optional dependency containing the package
+
+    Returns
+    -------
+    str
+        The formatted error message
+    """
+    return textwrap.dedent(f"""\
+        To use {purpose}, {package_name} is required but not installed. Install it with:
+          • `pip install roms-tools[{option_name}]` or
+          • `pip install {package_name}` or
+          • `conda install {package_name}`
+        Alternatively, install `roms-tools` with conda to include all dependencies.""")

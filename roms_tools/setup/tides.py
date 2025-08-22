@@ -80,7 +80,7 @@ class TidalForcing:
 
     grid: Grid
     """Object representing the grid information."""
-    source: dict[str, str | Path | list[str | Path]]
+    source: dict[str, str | Path | dict[str, str | Path]]
     """Dictionary specifying the source of the tidal data."""
     ntides: int = 10
     """Number of constituents to consider."""

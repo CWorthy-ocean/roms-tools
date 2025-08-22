@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -27,7 +27,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -62,7 +62,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -97,7 +97,7 @@ jobs:
           environment-file: ci/environment.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info
@@ -110,9 +110,13 @@ jobs:
 
       - name: Running Tests with Streaming
         shell: bash -l {0}
+        env:
+          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --verbose roms_tools/tests/*
+           copernicusmarine login
+           coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose roms_tools/tests/*
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
@@ -124,7 +128,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create conda environment
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           cache-downloads: true
           cache-environment: true
@@ -132,7 +136,7 @@ jobs:
           environment-file: ci/environment-with-xesmf.yml
           create-args: |
             python=${{ matrix.python-version }}
-          cache-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
 
       - name: Conda info
         run: conda info

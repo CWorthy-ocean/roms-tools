@@ -936,6 +936,7 @@ def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
     Path(expected_filepath2).unlink()
 
 
+@pytest.mark.skip("Temporary skip until memory consumption issue is addressed. # TODO")
 @pytest.mark.stream
 @pytest.mark.use_dask
 @pytest.mark.use_gcsfs

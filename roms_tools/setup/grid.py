@@ -21,6 +21,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    log_the_separator,
     pop_grid_data,
     write_to_yaml,
 )
@@ -174,9 +175,7 @@ class Grid:
 
         if verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            logging.info(
-                "========================================================================================================"
-            )
+            log_the_separator()
 
         self.ds = ds
 
@@ -238,9 +237,7 @@ class Grid:
         # If verbose is enabled, print elapsed time and a separator
         if verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            logging.info(
-                "========================================================================================================"
-            )
+            log_the_separator()
 
         # Update the grid's dataset and related attributes
         self.ds = ds
@@ -336,9 +333,7 @@ class Grid:
 
         if verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            logging.info(
-                "========================================================================================================"
-            )
+            log_the_separator()
 
         self.ds = ds
         self.theta_s = theta_s
@@ -932,9 +927,7 @@ class Grid:
 
         if self.verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            logging.info(
-                "========================================================================================================"
-            )
+            log_the_separator()
 
         self.ds = ds
 

@@ -23,6 +23,14 @@ yaml.SafeDumper.add_multi_representer(
     yaml.representer.SafeRepresenter.represent_str,
 )
 
+HEADER_SZ = 96
+HEADER_CHAR = "="
+
+
+def log_the_separator() -> None:
+    """Log a separator line using HEADER_CHAR repeated HEADER_SZ times."""
+    logging.info(HEADER_CHAR * HEADER_SZ)
+
 
 def nan_check(field, mask, error_message=None) -> None:
     """Checks for NaN values at wet points in the field.

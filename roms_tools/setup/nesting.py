@@ -16,6 +16,7 @@ from roms_tools.setup.utils import (
     get_boundary_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    log_the_separator,
     pop_grid_data,
     to_dict,
     wrap_longitudes,
@@ -107,9 +108,7 @@ class ChildGrid(Grid):
 
         if verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            logging.info(
-                "========================================================================================================"
-            )
+            log_the_separator()
 
         self.ds_nesting = ds_nesting
 
@@ -137,9 +136,7 @@ class ChildGrid(Grid):
 
         if verbose:
             logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            logging.info(
-                "========================================================================================================"
-            )
+            log_the_separator()
 
         self.ds = child_grid_ds
 

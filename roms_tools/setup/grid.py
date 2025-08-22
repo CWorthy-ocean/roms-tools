@@ -808,16 +808,15 @@ class Grid:
         verbose : bool, optional
             Indicates whether to print grid generation steps with timing. Defaults to False.
         **kwargs : Any
+            Additional keyword arguments:
+
+            - section_name : str, optional (default: "Grid")
+              The name of the YAML section containing the grid configuration.
 
         Returns
         -------
         Grid
             An instance of the Grid class initialized with the parameters from the YAML file.
-        **kwargs : Any
-            Additional keyword arguments:
-
-            - section_name : str, optional (default: "Grid")
-              The name of the YAML section containing the grid configuration.
 
         Raises
         ------

@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -37,6 +38,8 @@ from roms_tools.utils import save_datasets
 
 INCLUDE_ALL_RIVER_NAMES = "all"
 MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
+
+TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
 
 @dataclass(kw_only=True)
@@ -462,7 +465,7 @@ class RiverForcing:
 
         return ds_updated
 
-    def _get_overlapping_rivers(self) -> dict[tuple[int, int], list[str]]:
+    def _get_overlapping_rivers(self) -> TRiverIndex:
         """Identify grid cells shared by multiple rivers.
 
         Scans through the river indices and finds all grid cell indices
@@ -477,7 +480,7 @@ class RiverForcing:
         if self.indices is None:
             return {}
 
-        index_to_rivers: dict[tuple[int, int], list[str]] = defaultdict(list)
+        index_to_rivers: TRiverIndex = defaultdict(list)
 
         # Collect all index pairs used by multiple rivers
         for river_name, index_list in self.indices.items():
@@ -584,7 +587,7 @@ class RiverForcing:
         return combined_river_volume, combined_river_tracer
 
     def _reduce_river_volumes(
-        self, ds: xr.Dataset, overlapping_rivers: dict[tuple[int, int], list[str]]
+        self, ds: xr.Dataset, overlapping_rivers: TRiverIndex
     ) -> xr.Dataset:
         """Reduce river volumes for rivers contributing to overlapping grid cells.
 

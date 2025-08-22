@@ -706,10 +706,7 @@ class RiverForcing:
             Defaults to "all".
 
         """
-        if self.indices is None:
-            valid_river_names = []
-        else:
-            valid_river_names = list(self.indices)
+        valid_river_names = list(self.indices or [])
 
         river_names = _validate_river_names(river_names, valid_river_names)
         if len(valid_river_names) > MAX_DISTINCT_COLORS:
@@ -825,10 +822,7 @@ class RiverForcing:
             Defaults to "all".
 
         """
-        if self.indices is None:
-            valid_river_names = []
-        else:
-            valid_river_names = list(self.indices)
+        valid_river_names = list(self.indices or [])
 
         river_names = _validate_river_names(river_names, valid_river_names)
         if len(valid_river_names) > MAX_DISTINCT_COLORS:

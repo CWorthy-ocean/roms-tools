@@ -892,7 +892,7 @@ class Grid:
         ----------
         None
 
-        Returns:
+        Returns
         -------
         xr.Dataset
             The created horizontal grid dataset, including coordinates, grid metrics, angles, and metadata.

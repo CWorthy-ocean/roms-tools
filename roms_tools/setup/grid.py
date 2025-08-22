@@ -776,7 +776,7 @@ class Grid:
         else:
             topo_source = None
 
-        object.__setattr__(grid, "topography_source", topo_source)
+        grid.topography_source = topo_source
 
         return grid
 

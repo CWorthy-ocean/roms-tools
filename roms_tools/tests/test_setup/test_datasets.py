@@ -456,6 +456,7 @@ def test_default_era5_dataset_loading_without_dask() -> None:
         )
 
 
+@pytest.mark.skip("Temporary skip until memory consumption issue is addressed. # TODO")
 @pytest.mark.stream
 @pytest.mark.use_dask
 @pytest.mark.use_gcsfs

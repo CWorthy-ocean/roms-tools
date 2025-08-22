@@ -1,7 +1,6 @@
 import importlib.metadata
 import logging
 import re
-import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,12 +15,12 @@ from roms_tools.plot import plot
 from roms_tools.setup.mask import add_mask, add_velocity_masks
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
+    Timed,
     extract_single_value,
     gc_dist,
     get_target_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    log_the_separator,
     pop_grid_data,
     write_to_yaml,
 )
@@ -168,16 +167,9 @@ class Grid:
                 )
 
     def _create_mask(self, verbose=False) -> None:
-        if verbose:
-            start_time = time.time()
-            logging.info("=== Creating the mask ===")
-        ds = add_mask(self.ds)
-
-        if verbose:
-            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            log_the_separator()
-
-        self.ds = ds
+        with Timed("=== Modifying child topography and mask ===", verbose=verbose):
+            ds = add_mask(self.ds)
+            self.ds = ds
 
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False
@@ -218,31 +210,22 @@ class Grid:
         # Extract target coordinates for processing
         target_coords = get_target_coords(self)
 
-        # If verbose is enabled, start the timer and print the start message
-        if verbose:
-            start_time = time.time()
-            logging.info(
-                f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ==="
+        with Timed(
+            f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ===",
+            verbose=verbose,
+        ):
+            ds = add_topography(
+                ds=self.ds,
+                target_coords=target_coords,
+                topography_source=topography_source,
+                hmin=hmin,
+                verbose=verbose,
             )
 
-        # Add topography to the dataset
-        ds = add_topography(
-            ds=self.ds,
-            target_coords=target_coords,
-            topography_source=topography_source,
-            hmin=hmin,
-            verbose=verbose,
-        )
-
-        # If verbose is enabled, print elapsed time and a separator
-        if verbose:
-            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            log_the_separator()
-
-        # Update the grid's dataset and related attributes
-        self.ds = ds
-        self.topography_source = topography_source
-        self.hmin = hmin
+            # Update the grid's dataset and related attributes
+            self.ds = ds
+            self.topography_source = topography_source
+            self.hmin = hmin
 
     def update_vertical_coordinate(
         self, N=None, theta_s=None, theta_b=None, hc=None, verbose=False
@@ -279,67 +262,61 @@ class Grid:
         theta_b = theta_b or self.theta_b
         hc = hc or self.hc
 
-        if verbose:
-            start_time = time.time()
-            logging.info(
-                f"=== Preparing the vertical coordinate system using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ==="
+        with Timed(
+            f"=== Preparing the vertical coordinate system using N = {N}, theta_s = {theta_s}, theta_b = {theta_b}, hc = {hc} ===",
+            verbose=verbose,
+        ):
+            ds = self.ds
+            # need to drop vertical coordinates because they could cause conflict if N changed
+            vars_to_drop = [
+                "layer_depth_rho",
+                "layer_depth_u",
+                "layer_depth_v",
+                "interface_depth_rho",
+                "interface_depth_u",
+                "interface_depth_v",
+                "sigma_r",
+                "sigma_w",
+                "Cs_w",
+                "Cs_r",
+            ]
+
+            for var in vars_to_drop:
+                if var in ds.variables:
+                    ds = ds.drop_vars(var)
+
+            cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
+            cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
+
+            ds["sigma_r"] = sigma_r.astype(np.float32)
+            ds["sigma_r"].attrs["long_name"] = (
+                "Fractional vertical stretching coordinate at rho-points"
             )
+            ds["sigma_r"].attrs["units"] = "nondimensional"
 
-        ds = self.ds
-        # need to drop vertical coordinates because they could cause conflict if N changed
-        vars_to_drop = [
-            "layer_depth_rho",
-            "layer_depth_u",
-            "layer_depth_v",
-            "interface_depth_rho",
-            "interface_depth_u",
-            "interface_depth_v",
-            "sigma_r",
-            "sigma_w",
-            "Cs_w",
-            "Cs_r",
-        ]
+            ds["Cs_r"] = cs_r.astype(np.float32)
+            ds["Cs_r"].attrs["long_name"] = "Vertical stretching function at rho-points"
+            ds["Cs_r"].attrs["units"] = "nondimensional"
 
-        for var in vars_to_drop:
-            if var in ds.variables:
-                ds = ds.drop_vars(var)
+            ds["sigma_w"] = sigma_w.astype(np.float32)
+            ds["sigma_w"].attrs["long_name"] = (
+                "Fractional vertical stretching coordinate at w-points"
+            )
+            ds["sigma_w"].attrs["units"] = "nondimensional"
 
-        cs_r, sigma_r = sigma_stretch(theta_s, theta_b, N, "r")
-        cs_w, sigma_w = sigma_stretch(theta_s, theta_b, N, "w")
+            ds["Cs_w"] = cs_w.astype(np.float32)
+            ds["Cs_w"].attrs["long_name"] = "Vertical stretching function at w-points"
+            ds["Cs_w"].attrs["units"] = "nondimensional"
 
-        ds["sigma_r"] = sigma_r.astype(np.float32)
-        ds["sigma_r"].attrs["long_name"] = (
-            "Fractional vertical stretching coordinate at rho-points"
-        )
-        ds["sigma_r"].attrs["units"] = "nondimensional"
+            ds.attrs["theta_s"] = np.float32(theta_s)
+            ds.attrs["theta_b"] = np.float32(theta_b)
+            ds.attrs["hc"] = np.float32(hc)
 
-        ds["Cs_r"] = cs_r.astype(np.float32)
-        ds["Cs_r"].attrs["long_name"] = "Vertical stretching function at rho-points"
-        ds["Cs_r"].attrs["units"] = "nondimensional"
-
-        ds["sigma_w"] = sigma_w.astype(np.float32)
-        ds["sigma_w"].attrs["long_name"] = (
-            "Fractional vertical stretching coordinate at w-points"
-        )
-        ds["sigma_w"].attrs["units"] = "nondimensional"
-
-        ds["Cs_w"] = cs_w.astype(np.float32)
-        ds["Cs_w"].attrs["long_name"] = "Vertical stretching function at w-points"
-        ds["Cs_w"].attrs["units"] = "nondimensional"
-
-        ds.attrs["theta_s"] = np.float32(theta_s)
-        ds.attrs["theta_b"] = np.float32(theta_b)
-        ds.attrs["hc"] = np.float32(hc)
-
-        if verbose:
-            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            log_the_separator()
-
-        self.ds = ds
-        self.theta_s = theta_s
-        self.theta_b = theta_b
-        self.hc = hc
-        self.N = N
+            self.ds = ds
+            self.theta_s = theta_s
+            self.theta_b = theta_b
+            self.hc = hc
+            self.N = N
 
     def _straddle(self) -> None:
         """Check if the Greenwich meridian goes through the domain.
@@ -897,39 +874,32 @@ class Grid:
         - Longitude values are adjusted to fall within the range [0, 360].
         - Grid rotation and translation are applied based on the specified parameters.
         """
-        if self.verbose:
-            start_time = time.time()
-            logging.info("=== Creating the horizontal grid ===")
+        with Timed("=== Creating the horizontal grid ===", verbose=self.verbose):
+            self._raise_if_domain_size_too_large()
 
-        self._raise_if_domain_size_too_large()
+            coords = self._make_initial_lon_lat_ds()
 
-        coords = self._make_initial_lon_lat_ds()
+            # rotate coordinate system
+            coords = _rotate(coords, self.rot)
 
-        # rotate coordinate system
-        coords = _rotate(coords, self.rot)
+            # translate coordinate system
+            coords = _translate(coords, self.center_lat, self.center_lon)
 
-        # translate coordinate system
-        coords = _translate(coords, self.center_lat, self.center_lon)
+            # compute 1/dx and 1/dy
+            coords["pm"], coords["pn"] = _compute_coordinate_metrics(coords)
 
-        # compute 1/dx and 1/dy
-        coords["pm"], coords["pn"] = _compute_coordinate_metrics(coords)
+            # compute angle of local grid positive x-axis relative to east
+            coords["angle"] = _compute_angle(coords)
 
-        # compute angle of local grid positive x-axis relative to east
-        coords["angle"] = _compute_angle(coords)
+            # make sure lons are in [0, 360] range
+            for lon in ["lon", "lonu", "lonv", "lonq"]:
+                coords[lon][coords[lon] < 0] = coords[lon][coords[lon] < 0] + 2 * np.pi
 
-        # make sure lons are in [0, 360] range
-        for lon in ["lon", "lonu", "lonv", "lonq"]:
-            coords[lon][coords[lon] < 0] = coords[lon][coords[lon] < 0] + 2 * np.pi
+            ds = self._create_grid_ds(coords)
 
-        ds = self._create_grid_ds(coords)
+            ds = self._add_global_metadata(ds)
 
-        ds = self._add_global_metadata(ds)
-
-        if self.verbose:
-            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            log_the_separator()
-
-        self.ds = ds
+            self.ds = ds
 
     def _add_global_metadata(self, ds):
         """Add global metadata and attributes to the dataset.

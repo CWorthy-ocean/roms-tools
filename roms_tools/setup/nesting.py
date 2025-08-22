@@ -1,5 +1,4 @@
 import logging
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,11 +11,11 @@ from roms_tools import Grid
 from roms_tools.plot import plot_nesting
 from roms_tools.setup.topography import clip_depth
 from roms_tools.setup.utils import (
+    Timed,
     from_yaml,
     get_boundary_coords,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    log_the_separator,
     pop_grid_data,
     to_dict,
     wrap_longitudes,
@@ -88,29 +87,23 @@ class ChildGrid(Grid):
 
     def _map_child_boundaries_onto_parent_grid_indices(self, verbose: bool = False):
         """Maps child grid boundary points onto absolute indices of the parent grid."""
-        if verbose:
-            start_time = time.time()
-            logging.info(
-                "=== Mapping the child grid boundary points onto the indices of the parent grid ==="
+        with Timed(
+            "=== Mapping the child grid boundary points onto the indices of the parent grid ===",
+            verbose=verbose,
+        ):
+            # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
+            parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
+
+            # Map child boundaries onto parent grid indices
+            ds_nesting = map_child_boundaries_onto_parent_grid_indices(
+                parent_grid_ds,
+                child_grid_ds,
+                self.boundaries,
+                self.metadata["prefix"],
+                self.metadata["period"],
             )
 
-        # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
-        parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
-
-        # Map child boundaries onto parent grid indices
-        ds_nesting = map_child_boundaries_onto_parent_grid_indices(
-            parent_grid_ds,
-            child_grid_ds,
-            self.boundaries,
-            self.metadata["prefix"],
-            self.metadata["period"],
-        )
-
-        if verbose:
-            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            log_the_separator()
-
-        self.ds_nesting = ds_nesting
+            self.ds_nesting = ds_nesting
 
     def _modify_child_topography_and_mask(self, verbose: bool = False):
         """Adjust the topography and mask of the child grid to align with the parent grid.
@@ -118,27 +111,19 @@ class ChildGrid(Grid):
         Uses a weighted sum based on boundary distance and clips depth values to a
         minimum.
         """
-        if verbose:
-            start_time = time.time()
-            logging.info("=== Modifying child topography and mask ===")
+        with Timed("=== Modifying child topography and mask ===", verbose=verbose):
+            # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
+            parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
+            child_grid_ds = modify_child_topography_and_mask(
+                parent_grid_ds, child_grid_ds, self.boundaries, self.hmin
+            )
 
-        # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
-        parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
+            # Finalize grid datasets by adjusting longitudes back to [0, 360] range
+            parent_grid_ds, child_grid_ds = self._finalize_grid_datasets(
+                parent_grid_ds, child_grid_ds
+            )
 
-        child_grid_ds = modify_child_topography_and_mask(
-            parent_grid_ds, child_grid_ds, self.boundaries, self.hmin
-        )
-
-        # Finalize grid datasets by adjusting longitudes back to [0, 360] range
-        parent_grid_ds, child_grid_ds = self._finalize_grid_datasets(
-            parent_grid_ds, child_grid_ds
-        )
-
-        if verbose:
-            logging.info(f"Total time: {time.time() - start_time:.3f} seconds")
-            log_the_separator()
-
-        self.ds = child_grid_ds
+            self.ds = child_grid_ds
 
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False

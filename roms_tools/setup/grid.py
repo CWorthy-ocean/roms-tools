@@ -801,13 +801,7 @@ class Grid:
         Issues a warning if the ROMS-Tools version in the YAML header does not match the
         currently installed version.
         """
-        key = next((k for k in ("section_name", "Grid") if k in kwargs), None)
-        if key is None:
-            raise RuntimeError(
-                "Neither 'section_name' nor fallback 'Grid' found in kwargs"
-            )
-
-        section_name: str = kwargs.pop(key)
+        section_name: str = kwargs.pop("section_name", None) or "Grid"
 
         filepath = Path(filepath)
         # Read the entire file content

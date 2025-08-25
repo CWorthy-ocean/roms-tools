@@ -15,7 +15,6 @@ from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.datasets import (
     CESMBGCDataset,
-    Dataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     UnifiedBGCDataset,
@@ -435,7 +434,9 @@ class BoundaryForcing:
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
-    def _get_data(self) -> Dataset:
+    def _get_data(
+        self,
+    ) -> GLORYSDataset | GLORYSDefaultDataset | CESMBGCDataset | UnifiedBGCDataset:
         """Determine the correct `Dataset` type and return an instance.
 
         Returns
@@ -444,7 +445,21 @@ class BoundaryForcing:
             The `Dataset` instance
 
         """
-        dataset_map: dict[str, dict[str, dict[str, type[Dataset]]]] = {
+        dataset_map: dict[
+            str,
+            dict[
+                str,
+                dict[
+                    str,
+                    type[
+                        GLORYSDataset
+                        | GLORYSDefaultDataset
+                        | CESMBGCDataset
+                        | UnifiedBGCDataset
+                    ],
+                ],
+            ],
+        ] = {
             "physics": {
                 "GLORYS": {
                     "external": GLORYSDataset,
@@ -475,9 +490,9 @@ class BoundaryForcing:
             filename=self.source["path"],
             start_time=self.start_time,
             end_time=self.end_time,
-            climatology=self.source["climatology"],
+            climatology=self.source["climatology"],  # type: ignore[arg-type]
             use_dask=self.use_dask,
-        )  # type: ignore
+        )
 
     def _set_variable_info(self, data):
         """Sets up a dictionary with metadata for variables based on the type of data

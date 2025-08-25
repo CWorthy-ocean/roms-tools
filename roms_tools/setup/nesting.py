@@ -9,8 +9,9 @@ from scipy.interpolate import griddata, interp1d
 
 from roms_tools import Grid
 from roms_tools.plot import plot_nesting
-from roms_tools.setup.topography import _clip_depth
+from roms_tools.setup.topography import clip_depth
 from roms_tools.setup.utils import (
+    Timed,
     from_yaml,
     get_boundary_coords,
     interpolate_from_rho_to_u,
@@ -48,6 +49,8 @@ class ChildGrid(Grid):
 
         - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
         - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
+    verbose: bool, optional
+        Indicates whether to print grid generation steps with timing. Defaults to False.
     """
 
     parent_grid: Grid
@@ -67,6 +70,8 @@ class ChildGrid(Grid):
         default_factory=lambda: {"prefix": "child", "period": 3600.0}
     )
     """Dictionary configuring the boundary nesting process."""
+    verbose: bool = False
+    """Whether to print grid generation steps with timing."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing child grid variables aligned with the
@@ -77,44 +82,48 @@ class ChildGrid(Grid):
 
     def __post_init__(self):
         super().__post_init__()
-        self._map_child_boundaries_onto_parent_grid_indices()
-        self._modify_child_topography_and_mask()
+        self._map_child_boundaries_onto_parent_grid_indices(verbose=self.verbose)
+        self._modify_child_topography_and_mask(verbose=self.verbose)
 
-    def _map_child_boundaries_onto_parent_grid_indices(self):
+    def _map_child_boundaries_onto_parent_grid_indices(self, verbose: bool = False):
         """Maps child grid boundary points onto absolute indices of the parent grid."""
-        # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
-        parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
+        with Timed(
+            "=== Mapping the child grid boundary points onto the indices of the parent grid ===",
+            verbose=verbose,
+        ):
+            # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
+            parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
 
-        # Map child boundaries onto parent grid indices
-        ds_nesting = map_child_boundaries_onto_parent_grid_indices(
-            parent_grid_ds,
-            child_grid_ds,
-            self.boundaries,
-            self.metadata["prefix"],
-            self.metadata["period"],
-        )
+            # Map child boundaries onto parent grid indices
+            ds_nesting = map_child_boundaries_onto_parent_grid_indices(
+                parent_grid_ds,
+                child_grid_ds,
+                self.boundaries,
+                self.metadata["prefix"],
+                self.metadata["period"],
+            )
 
-        self.ds_nesting = ds_nesting
+            self.ds_nesting = ds_nesting
 
-    def _modify_child_topography_and_mask(self):
+    def _modify_child_topography_and_mask(self, verbose: bool = False):
         """Adjust the topography and mask of the child grid to align with the parent grid.
 
         Uses a weighted sum based on boundary distance and clips depth values to a
         minimum.
         """
-        # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
-        parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
+        with Timed("=== Modifying child topography and mask ===", verbose=verbose):
+            # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
+            parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
+            child_grid_ds = modify_child_topography_and_mask(
+                parent_grid_ds, child_grid_ds, self.boundaries, self.hmin
+            )
 
-        child_grid_ds = modify_child_topography_and_mask(
-            parent_grid_ds, child_grid_ds, self.boundaries, self.hmin
-        )
+            # Finalize grid datasets by adjusting longitudes back to [0, 360] range
+            parent_grid_ds, child_grid_ds = self._finalize_grid_datasets(
+                parent_grid_ds, child_grid_ds
+            )
 
-        # Finalize grid datasets by adjusting longitudes back to [0, 360] range
-        parent_grid_ds, child_grid_ds = self._finalize_grid_datasets(
-            parent_grid_ds, child_grid_ds
-        )
-
-        self.ds = child_grid_ds
+            self.ds = child_grid_ds
 
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False
@@ -155,7 +164,7 @@ class ChildGrid(Grid):
         )
 
         # Modify child topography and mask to match the parent grid
-        self._modify_child_topography_and_mask()
+        self._modify_child_topography_and_mask(verbose=verbose)
 
     def plot_nesting(self, with_dim_names=False) -> None:
         """Plot the parent and child grids in a single figure.
@@ -216,13 +225,19 @@ class ChildGrid(Grid):
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
-    def from_yaml(cls, filepath: str | Path) -> "ChildGrid":
+    def from_yaml(
+        cls, filepath: str | Path, verbose: bool = False, **kwargs: Any
+    ) -> "ChildGrid":
         """Create an instance of the ChildGrid class from a YAML file.
 
         Parameters
         ----------
         filepath : Union[str, Path]
             The path to the YAML file from which the parameters will be read.
+        verbose : bool, optional
+            Indicates whether to print grid generation steps with timing. Defaults to False.
+        **kwargs : Any
+            Additional keyword arguments passed to Grid.from_yaml.
 
         Returns
         -------
@@ -231,10 +246,12 @@ class ChildGrid(Grid):
         """
         filepath = Path(filepath)
 
-        parent_grid = Grid.from_yaml(filepath, "ParentGrid")
+        parent_grid = Grid.from_yaml(
+            filepath, verbose=verbose, section_name="ParentGrid"
+        )
         params = from_yaml(cls, filepath)
 
-        return cls(parent_grid=parent_grid, **params)
+        return cls(parent_grid=parent_grid, **params, verbose=verbose)
 
     def _prepare_grid_datasets(self) -> tuple[xr.Dataset, xr.Dataset]:
         """Prepare parent and child grid datasets by adjusting longitudes for dateline
@@ -258,7 +275,7 @@ class ChildGrid(Grid):
 
     def _finalize_grid_datasets(
         self, parent_grid_ds: xr.Dataset, child_grid_ds: xr.Dataset
-    ) -> None:
+    ) -> tuple[xr.Dataset, xr.Dataset]:
         """Finalize the grid datasets by converting longitudes back to the [0, 360]
         range.
 
@@ -269,13 +286,28 @@ class ChildGrid(Grid):
 
         child_grid_ds : xr.Dataset
             The child grid dataset after modifications.
+
+        Returns
+        -------
+        tuple[xr.Dataset, xr.Dataset]
+            The finalized parent and child grid datasets with longitudes wrapped to [0, 360].
+
         """
         parent_grid_ds = wrap_longitudes(parent_grid_ds, straddle=False)
         child_grid_ds = wrap_longitudes(child_grid_ds, straddle=False)
+
         return parent_grid_ds, child_grid_ds
 
     @classmethod
-    def from_file(cls, filepath: str | Path, verbose: bool = False) -> "ChildGrid":
+    def from_file(
+        cls,
+        filepath: str | Path,
+        theta_s: float | None = None,
+        theta_b: float | None = None,
+        hc: float | None = None,
+        N: int | None = None,
+        verbose: bool = False,
+    ) -> "ChildGrid":
         """This method is disabled in this subclass.
 
         .. noindex::
@@ -643,7 +675,7 @@ def modify_child_topography_and_mask(
         alpha * child_grid_ds["h"] + (1 - alpha) * h_parent_interpolated
     )
     # Clip depth on modified child topography
-    child_grid_ds["h"] = _clip_depth(child_grid_ds["h"], hmin)
+    child_grid_ds["h"] = clip_depth(child_grid_ds["h"], hmin)
 
     child_mask = (
         alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated

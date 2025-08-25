@@ -7,11 +7,11 @@ import pytest
 import xarray as xr
 
 from roms_tools.utils import (
-    _generate_focused_coordinate_range,
-    _has_copernicus,
-    _has_dask,
-    _has_gcsfs,
-    _load_data,
+    generate_focused_coordinate_range,
+    has_copernicus,
+    has_dask,
+    has_gcsfs,
+    load_data,
 )
 
 
@@ -25,7 +25,7 @@ from roms_tools.utils import (
     ],
 )
 def test_coordinate_range_monotonicity(min_val, max_val, center, sc, N):
-    centers, faces = _generate_focused_coordinate_range(
+    centers, faces = generate_focused_coordinate_range(
         min_val=min_val, max_val=max_val, center=center, sc=sc, N=N
     )
     assert np.all(np.diff(faces) > 0), "faces is not strictly increasing"
@@ -35,56 +35,56 @@ def test_coordinate_range_monotonicity(min_val, max_val, center, sc, N):
 def test_has_dask() -> None:
     """Verify that dask existence is correctly reported when found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=mock.MagicMock):
-        assert _has_dask()
+        assert has_dask()
 
 
 def test_has_dask_error_when_missing() -> None:
     """Verify that dask existence is correctly reported when not found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=None):
-        assert not _has_dask()
+        assert not has_dask()
 
 
 def test_has_gcfs() -> None:
     """Verify that GCFS existence is correctly reported when found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=mock.MagicMock):
-        assert _has_gcsfs()
+        assert has_gcsfs()
 
 
 def test_has_gcfs_error_when_missing() -> None:
     """Verify that GCFS existence is correctly reported when not found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=None):
-        assert not _has_gcsfs()
+        assert not has_gcsfs()
 
 
 def test_has_copernicus() -> None:
     """Verify that copernicus existence is correctly reported when found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=mock.MagicMock):
-        assert _has_copernicus()
+        assert has_copernicus()
 
 
 def test_has_copernicus_error_when_missing() -> None:
     """Verify that copernicus existence is correctly reported when not found."""
     with mock.patch("roms_tools.utils.find_spec", return_value=None):
-        assert not _has_copernicus()
+        assert not has_copernicus()
 
 
 def test_load_data_dask_not_found() -> None:
     """Verify that load data raises an exception when dask is requested and missing."""
     with (
-        mock.patch("roms_tools.utils._has_dask", return_value=False),
+        mock.patch("roms_tools.utils.has_dask", return_value=False),
         pytest.raises(RuntimeError),
     ):
-        _load_data("foo.zarr", {"a": "a"}, use_dask=True)
+        load_data("foo.zarr", {"a": "a"}, use_dask=True)
 
 
 def test_load_data_open_zarr_without_dask() -> None:
     """Verify that load data raises an exception when zarr is requested without dask."""
     with (
-        mock.patch("roms_tools.utils._has_dask", return_value=False),
+        mock.patch("roms_tools.utils.has_dask", return_value=False),
         pytest.raises(ValueError),
     ):
         # read_zarr should require use_dask to be True
-        _load_data("foo.zarr", {"a": ""}, use_dask=False, read_zarr=True)
+        load_data("foo.zarr", {"a": ""}, use_dask=False, read_zarr=True)
 
 
 @pytest.mark.parametrize(
@@ -111,7 +111,7 @@ def test_load_data_open_dataset(
         "roms_tools.utils.xr.open_dataset",
         wraps=xr.open_dataset,
     ) as fn_od:
-        ds = _load_data(
+        ds = load_data(
             ds_path,
             {"latitude": "latitude"},
             use_dask=False,

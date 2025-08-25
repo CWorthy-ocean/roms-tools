@@ -50,39 +50,37 @@ def compute_uptake_efficiency(
     if missing_grid:
         raise KeyError(f"Missing required variables in grid_ds: {missing_grid}")
 
-    # Compute the duration of each averaging window
+    # Duration of each averaging window
     window_length = ds["avg_end_time"] - ds["avg_begin_time"]
 
-    # Compute grid cell area (assuming pm and pn are reciprocal grid spacing)
+    # Grid cell area
     area = 1 / (grid_ds["pm"] * grid_ds["pn"])
 
-    _validate_alk_source(ds)
+    _validate_source(ds)
 
-    # Compute cumulative alkalinity source over time
+    # Cumulative alkalinity source
     source = (
-        ds["ALK_source"].sum(dim=["s_rho", "eta_rho", "xi_rho"]) * window_length
+        (ds["ALK_source"] - ds["DIC_source"]).sum(dim=["s_rho", "eta_rho", "xi_rho"])
+        * window_length
     ).cumsum(dim="time")
 
-    # Check that source is not zero anywhere
-    if (source == 0).any():
-        raise ValueError(
-            "Cumulative ALK_source is zero at some time steps; cannot normalize uptake."
-        )
-
-    # Compute cumulative flux-based uptake
+    # Cumulative flux-based uptake (Method 1)
     flux = (
         ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * area).sum(dim=["eta_rho", "xi_rho"])
         * window_length
     ).cumsum(dim="time")
 
-    # Compute cumulative DIC difference-based uptake
+    # DIC difference-based uptake (Method 2)
     diff_DIC = ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * area).sum(
         dim=["s_rho", "eta_rho", "xi_rho"]
     )
 
-    # Normalize by cumulative source to get uptake fractions
-    uptake_efficiency_flux = flux / source
-    uptake_efficiency_diff = diff_DIC / source
+    # Normalize by cumulative source with safe division (NaN where source=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        uptake_efficiency_flux = (flux / source).where(np.isfinite(flux / source))
+        uptake_efficiency_diff = (diff_DIC / source).where(
+            np.isfinite(diff_DIC / source)
+        )
 
     return uptake_efficiency_flux, uptake_efficiency_diff
 
@@ -122,25 +120,35 @@ def validate_uptake_efficiency(
     return True
 
 
-def _validate_alk_source(ds: xr.Dataset):
+def _validate_source(ds: xr.Dataset):
     """
-    Validate that ALK_source is non-negative in the dataset.
+    Validate that ALK_source and DIC_source in a ROMS dataset respect release constraints.
+
+    - 'ALK_source' must be non-negative (≥ 0).
+    - 'DIC_source' must be non-positive (≤ 0).
 
     Parameters
     ----------
     ds : xr.Dataset
-        Dataset expected to contain 'ALK_source'.
+        Dataset expected to contain 'ALK_source' and 'DIC_source'.
 
     Raises
     ------
     KeyError
-        If 'ALK_source' is missing.
+        If 'ALK_source' or 'DIC_source' are missing from the dataset.
     ValueError
-        If 'ALK_source' contains negative values.
+        If 'ALK_source' or 'DIC_source' violate the release constraints.
     """
-    if "ALK_source" not in ds:
-        raise KeyError("Dataset is missing 'ALK_source'.")
-    if (ds["ALK_source"] < 0).any():
-        raise ValueError(
-            "ALK_source contains negative values, which are physically invalid."
-        )
+    constraints = {
+        "ALK_source": lambda x: x >= 0,
+        "DIC_source": lambda x: x <= 0,
+    }
+
+    for var, check in constraints.items():
+        if var not in ds.data_vars:
+            raise KeyError(f"Dataset is missing required variable '{var}'.")
+        if not check(ds[var]).all():
+            sign = "negative" if var == "ALK_source" else "positive"
+            raise ValueError(
+                f"'{var}' contains {sign} values, which violates release constraints."
+            )

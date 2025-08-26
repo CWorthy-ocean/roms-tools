@@ -447,9 +447,7 @@ class SurfaceForcing:
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
-        correction_data.choose_subdomain(
-            coords_correction, straddle=self.target_coords["straddle"]
-        )
+        correction_data.match_subdomain(coords_correction)
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 

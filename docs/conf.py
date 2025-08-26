@@ -10,6 +10,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath("../"))
+os.environ["OMP_DISPLAY_ENV"] = "FALSE"
+os.environ["OMP_DISPLAY_AFFINITY"] = "FALSE"
 
 project = "ROMS-Tools"
 copyright = "2024, ROMS-Tools developers"

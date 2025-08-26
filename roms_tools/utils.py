@@ -3,13 +3,13 @@ import logging
 import re
 import textwrap
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
-from attr import dataclass
 
 from roms_tools.constants import R_EARTH
 
@@ -25,56 +25,39 @@ class FileMatchResult:
 
 
 def _get_file_matches(
-    filename: str | Path | list[str | Path],
+    filename: str | Path | Sequence[str | Path],
 ) -> FileMatchResult:
     """Filter the filename using an optional wildcard search in the filename.
 
     Parameters
     ----------
-    filename : str or Path or list of str or Path
+    filename : str | Path | Sequence[str | Path]
         An item to search for matches.
     """
     # Precompile the regex for matching wildcard characters
     wildcard_regex = re.compile(r"[\*\?\[\]]")
 
-    # Convert Path objects to strings
-    if isinstance(filename, str | Path):
-        filename_str = str(filename)
-    elif isinstance(filename, list):
-        filename_str = [str(f) for f in filename]
+    # Normalize input into a list of strings
+    if isinstance(filename, (str | Path)):
+        filenames: list[str] = [str(filename)]
+    elif isinstance(filename, Sequence):
+        filenames = [str(f) for f in filename]
     else:
-        msg = "filename must be a string, Path, or a list of strings/Paths."
+        msg = "filename must be a string, Path, or a sequence of strings/Paths."
         raise ValueError(msg)
 
-    # Handle the case when filename is a string
-    contains_wildcard = False
-    matching_files = []
+    contains_wildcard = any(wildcard_regex.search(f) for f in filenames)
+    matching_files: list[str] = []
 
-    if isinstance(filename_str, str):
-        contains_wildcard = bool(wildcard_regex.search(filename_str))
-        if contains_wildcard:
-            matching_files = glob.glob(filename_str)
-            if not matching_files:
-                msg = f"No files found matching the pattern '{filename_str}'."
-                raise FileNotFoundError(msg)
+    for f in filenames:
+        if wildcard_regex.search(f):
+            files = glob.glob(f)
+            if not files:
+                raise FileNotFoundError(f"No files found matching the pattern '{f}'.")
+            matching_files.extend(files)
         else:
-            matching_files = [filename_str]
+            matching_files.append(f)
 
-    # Handle the case when filename is a list
-    elif isinstance(filename_str, list):
-        # contains_wildcard = any(wildcard_regex.search(f) for f in filename_str)
-        if contains_wildcard := any(wildcard_regex.search(f) for f in filename_str):
-            matching_files = []
-            for f in filename_str:
-                files = glob.glob(f)
-                if not files:
-                    msg = f"No files found matching the pattern '{f}'."
-                    raise FileNotFoundError(msg)
-                matching_files.extend(files)
-        else:
-            matching_files = filename_str
-
-    # Sort the matching files
     return FileMatchResult(
         contains_wildcard=contains_wildcard,
         matches=sorted(matching_files),
@@ -264,7 +247,7 @@ def _check_load_data_dask(use_dask: bool) -> None:
     RuntimeError
         If dask is requested but not installed.
     """
-    if use_dask and not _has_dask():
+    if use_dask and not has_dask():
         msg = (
             "Dask is required but not installed. Install it with:\n"
             "  • `pip install roms-tools[dask]` or\n"
@@ -337,10 +320,10 @@ def _check_load_data_filename(
         raise ValueError(msg)
 
 
-def _load_data(
+def load_data(
     filename: str | Path | list[str | Path],
-    dim_names: dict[str, str],
-    use_dask: bool,
+    dim_names: dict[str, str] | None = None,
+    use_dask: bool = False,
     time_chunking: bool = True,
     decode_times: bool = True,
     force_combine_nested: bool = False,
@@ -351,14 +334,14 @@ def _load_data(
 
     Parameters
     ----------
-    filename : Union[str, Path, List[Union[str, Path]]]
+    filename : str | Path | list[str | Path]
         The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
         or a list of strings or Path objects containing multiple files.
-    dim_names : Dict[str, str], optional
+    dim_names : dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
         Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
         For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
-    use_dask: bool
+    use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
     time_chunking : bool, optional
         If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
@@ -656,7 +639,7 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     return saved_filenames
 
 
-def _generate_coordinate_range(min_val: float, max_val: float, resolution: float):
+def generate_coordinate_range(min_val: float, max_val: float, resolution: float):
     """Generate an array of target coordinates (e.g., latitude or longitude) within a
     specified range, with a resolution that is rounded to the nearest value of the form
     `1/n` (or integer).
@@ -718,7 +701,7 @@ def _generate_coordinate_range(min_val: float, max_val: float, resolution: float
     return target.astype(np.float32)
 
 
-def _generate_focused_coordinate_range(
+def generate_focused_coordinate_range(
     center: float,
     sc: float,
     min_val: float,
@@ -804,7 +787,7 @@ def _generate_focused_coordinate_range(
     return centers, faces
 
 
-def _remove_edge_nans(
+def remove_edge_nans(
     field: xr.DataArray, xdim: str, layer_depth: xr.DataArray | None = None
 ) -> tuple[xr.DataArray, xr.DataArray | None]:
     """Remove NaN-only slices at the edges of a specified dimension.
@@ -880,7 +863,7 @@ def _remove_edge_nans(
     return field, layer_depth
 
 
-def _has_dask() -> bool:
+def has_dask() -> bool:
     """Determine if the Dask package is installed.
 
     Returns
@@ -892,7 +875,7 @@ def _has_dask() -> bool:
     return find_spec("dask") is not None
 
 
-def _has_gcsfs() -> bool:
+def has_gcsfs() -> bool:
     """Determine if the GCSFS package is installed.
 
     Returns
@@ -904,7 +887,7 @@ def _has_gcsfs() -> bool:
     return find_spec("gcsfs") is not None
 
 
-def _has_copernicus() -> bool:
+def has_copernicus() -> bool:
     """Determine if the Copernicus Marine Toolkit package is installed.
 
     Returns
@@ -980,7 +963,7 @@ def infer_nominal_horizontal_resolution(
     return float(resolution_in_degrees)
 
 
-def _get_pkg_error_msg(purpose: str, package_name: str, option_name: str) -> str:
+def get_pkg_error_msg(purpose: str, package_name: str, option_name: str) -> str:
     """Generate an error message indicating how to install an optional dependency.
 
     Parameters

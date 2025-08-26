@@ -344,6 +344,9 @@ class InitialConditions:
 
         source_dict = self.source if forcing_type == "physics" else self.bgc_source
 
+        if source_dict is None:
+            raise ValueError(f"{forcing_type} source is not set")
+
         source_name = str(source_dict["name"])
         if source_name not in dataset_map[forcing_type]:
             tpl = 'Valid options for source["name"] for type {} include: {}'
@@ -363,9 +366,9 @@ class InitialConditions:
         return data_type(
             filename=source_dict["path"],
             start_time=self.ini_time,
-            climatology=source_dict["climatology"],
+            climatology=source_dict["climatology"],  # type: ignore
             use_dask=self.use_dask,
-        )  # type: ignore
+        )
 
     def _set_variable_info(self, data, type="physics"):
         """Sets up a dictionary with metadata for variables based on the type.
@@ -509,7 +512,7 @@ class InitialConditions:
 
             if self.use_dask:
                 h = h.chunk(_set_dask_chunks(location, self.horizontal_chunk_size))
-                if self.adjust_depth_for_sea_surface_height:
+                if isinstance(zeta, xr.DataArray):
                     zeta = zeta.chunk(
                         _set_dask_chunks(location, self.horizontal_chunk_size)
                     )
@@ -843,7 +846,7 @@ class InitialConditions:
         )
 
 
-def _set_dask_chunks(location: Literal["rho", "u", "v"], chunk_size: int):
+def _set_dask_chunks(location: str, chunk_size: int):
     """Returns the appropriate Dask chunking dictionary based on grid location.
 
     Parameters

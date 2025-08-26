@@ -82,6 +82,7 @@ jobs:
   test-with-streaming:
     name: 3.13-build-with-streaming
     runs-on: ubuntu-latest
+    if: github.repository == github.repository_owner # Only run on the main repo, skip forks
     strategy:
       matrix:
         python-version: ["3.13"]

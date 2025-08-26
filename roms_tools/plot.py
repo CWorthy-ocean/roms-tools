@@ -1,6 +1,7 @@
 from typing import Any, Literal
 
 import cartopy.crs as ccrs
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -1205,3 +1206,58 @@ def plot_location(
 
     if include_legend:
         ax.legend(loc="center left", bbox_to_anchor=(1.1, 0.5))
+
+
+def plot_uptake_efficiency(ds: xr.Dataset) -> None:
+    """
+    Plot Carbon Dioxide Removal (CDR) uptake efficiency over time.
+
+    This function plots two estimates of uptake efficiency stored in the dataset:
+    1. `cdr_efficiency`, computed from CO2 flux differences.
+    2. `cdr_efficiency_from_delta_diff`, computed from DIC differences.
+
+    The x-axis shows absolute time, formatted as YYYY-MM-DD, and the y-axis shows
+    the uptake efficiency values. The plot includes a legend and grid for clarity.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset containing the following variables:
+        - "abs_time": array of timestamps (datetime-like)
+        - "cdr_efficiency": uptake efficiency from flux differences
+        - "cdr_efficiency_from_delta_diff": uptake efficiency from DIC differences
+
+    Raises
+    ------
+    ValueError
+        If required variables are missing or empty.
+
+    Returns
+    -------
+    None
+    """
+    required_vars = ["abs_time", "cdr_efficiency", "cdr_efficiency_from_delta_diff"]
+    for var in required_vars:
+        if var not in ds or ds[var].size == 0:
+            raise ValueError(f"Dataset must contain non-empty variable '{var}'.")
+
+    times = ds["abs_time"]
+
+    # Check for monotonically increasing times
+    if not np.all(np.diff(times) > np.timedelta64(0, "s")):
+        raise ValueError("abs_time must be strictly increasing.")
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+
+    ax.plot(times, ds["cdr_efficiency"], label="from CO2 flux differences", lw=2)
+    ax.plot(
+        times, ds["cdr_efficiency_from_delta_diff"], label="from DIC differences", lw=2
+    )
+    ax.grid()
+    ax.set_title("CDR uptake efficiency")
+    ax.legend()
+
+    # Format x-axis as YYYY-MM-DD
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    fig.autofmt_xdate()
+    plt.show()

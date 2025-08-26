@@ -159,7 +159,7 @@ def _test_successful_initialization(
     grid: Grid,
     start_time: datetime,
     end_time: datetime,
-    source: dict[str, str],
+    source: dict[str, str | Path | list[str | Path]],
     coarse_grid_mode: str,
     use_dask: bool,
     caplog,

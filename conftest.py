@@ -203,7 +203,7 @@ def tidal_forcing(use_dask: bool) -> TidalForcing:
 
     return TidalForcing(
         grid=grid,
-        source={"name": "TPXO", "path": fname_dict},
+        source={"name": "TPXO", "path": fname_dict},  # type: ignore[dict-item]
         ntides=1,
         use_dask=use_dask,
     )
@@ -350,7 +350,7 @@ def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialCondi
         bgc_source={
             "path": fname_bgc,
             "name": "CESM_REGRIDDED",
-            "climatology": True,
+            "climatology": True,  # type: ignore[dict-item]
         },
         use_dask=use_dask,
     )
@@ -381,7 +381,7 @@ def initial_conditions_with_unified_bgc_from_climatology(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
-        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         use_dask=use_dask,
     )
 
@@ -477,7 +477,7 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
@@ -507,7 +507,7 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
@@ -713,7 +713,7 @@ def bgc_surface_forcing_from_climatology(use_dask: bool) -> SurfaceForcing:
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
+        source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
         use_dask=use_dask,
@@ -742,7 +742,7 @@ def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForci
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},
+        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
         use_dask=use_dask,

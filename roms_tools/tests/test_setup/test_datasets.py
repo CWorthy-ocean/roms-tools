@@ -431,12 +431,12 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
         )
 
 
-def test_era5_correction_choose_subdomain(use_dask):
+def test_era5_correction_match_subdomain(use_dask):
     data = ERA5Correction(use_dask=use_dask)
     lats = data.ds.latitude[10:20]
     lons = data.ds.longitude[10:20]
     target_coords = {"lat": lats, "lon": lons}
-    data.choose_subdomain(target_coords, straddle=False)
+    data.match_subdomain(target_coords)
     assert (data.ds["latitude"] == lats).all()
     assert (data.ds["longitude"] == lons).all()
 

@@ -9,18 +9,16 @@ from matplotlib.figure import Figure
 
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
-    _generate_coordinate_range,
-    _remove_edge_nans,
+    generate_coordinate_range,
     infer_nominal_horizontal_resolution,
     normalize_longitude,
+    remove_edge_nans,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates
 
 LABEL_COLOR = "k"
 LABEL_SZ = 10
 FONT_SZ = 10
-EDGE_POS_START = "start"
-EDGE_POS_END = "end"
 
 
 def _add_gridlines(ax: Axes) -> None:
@@ -497,16 +495,16 @@ def line_plot(
 
 
 def _get_edge(
-    arr: xr.DataArray, dim_name: str, pos: Literal[EDGE_POS_START, EDGE_POS_END]
+    arr: xr.DataArray, dim_name: str, pos: Literal["start", "end"]
 ) -> xr.DataArray:
     """Extract the first ("start") or last ("end") slice along the given dimension."""
-    if pos == EDGE_POS_START:
+    if pos == "start":
         return arr.isel({dim_name: 0})
 
-    if pos == EDGE_POS_END:
+    if pos == "end":
         return arr.isel({dim_name: -1})
 
-    raise ValueError(f"pos must be {EDGE_POS_START} or {EDGE_POS_END}")
+    raise ValueError("pos must be `start` or `end`")
 
 
 def _add_boundary_to_ax(
@@ -538,23 +536,23 @@ def _add_boundary_to_ax(
 
     edges = [
         (
-            _get_edge(lon_deg, xi_dim, EDGE_POS_START),
-            _get_edge(lat_deg, xi_dim, EDGE_POS_START),
+            _get_edge(lon_deg, xi_dim, "start"),
+            _get_edge(lat_deg, xi_dim, "start"),
             r"$\eta$",
         ),  # left
         (
-            _get_edge(lon_deg, xi_dim, EDGE_POS_END),
-            _get_edge(lat_deg, xi_dim, EDGE_POS_END),
+            _get_edge(lon_deg, xi_dim, "end"),
+            _get_edge(lat_deg, xi_dim, "end"),
             r"$\eta$",
         ),  # right
         (
-            _get_edge(lon_deg, eta_dim, EDGE_POS_START),
-            _get_edge(lat_deg, eta_dim, EDGE_POS_START),
+            _get_edge(lon_deg, eta_dim, "start"),
+            _get_edge(lat_deg, eta_dim, "start"),
             r"$\xi$",
         ),  # bottom
         (
-            _get_edge(lon_deg, eta_dim, EDGE_POS_END),
-            _get_edge(lat_deg, eta_dim, EDGE_POS_END),
+            _get_edge(lon_deg, eta_dim, "end"),
+            _get_edge(lat_deg, eta_dim, "end"),
             r"$\xi$",
         ),  # top
     ]
@@ -819,7 +817,7 @@ def plot(
     with_dim_names: bool = False,
     ax: Axes | None = None,
     save_path: str | None = None,
-    cmap_name: str | None = "YlOrRd",
+    cmap_name: str = "YlOrRd",
     add_colorbar: bool = True,
 ) -> None:
     """Generate a plot of a 2D or 3D ROMS field for a horizontal or vertical slice.
@@ -1052,7 +1050,7 @@ def plot(
             title = title + f", lat = {lat}°N"
         else:
             resolution = infer_nominal_horizontal_resolution(grid_ds)
-            lats = _generate_coordinate_range(
+            lats = generate_coordinate_range(
                 field.lat.min().values, field.lat.max().values, resolution
             )
         lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
@@ -1062,7 +1060,7 @@ def plot(
             title = title + f", lon = {lon}°E"
         else:
             resolution = infer_nominal_horizontal_resolution(grid_ds, lat)
-            lons = _generate_coordinate_range(
+            lons = generate_coordinate_range(
                 field.lon.min().values, field.lon.max().values, resolution
             )
         lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
@@ -1079,11 +1077,11 @@ def plot(
         field = field.assign_coords({"layer_depth": layer_depth})
 
     if lat is not None:
-        field, layer_depth = _remove_edge_nans(
+        field, layer_depth = remove_edge_nans(
             field, "lon", layer_depth if "layer_depth" in locals() else None
         )
     if lon is not None:
-        field, layer_depth = _remove_edge_nans(
+        field, layer_depth = remove_edge_nans(
             field, "lat", layer_depth if "layer_depth" in locals() else None
         )
 

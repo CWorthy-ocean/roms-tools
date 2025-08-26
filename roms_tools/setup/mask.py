@@ -12,7 +12,7 @@ from roms_tools.setup.utils import (
 )
 
 
-def _add_mask(ds):
+def add_mask(ds):
     """Adds a land/water mask to the dataset at rho-points.
 
     Parameters
@@ -45,7 +45,7 @@ def _add_mask(ds):
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
     }
-    ds = _add_velocity_masks(ds)
+    ds = add_velocity_masks(ds)
 
     return ds
 
@@ -85,7 +85,7 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
     return mask
 
 
-def _add_velocity_masks(ds):
+def add_velocity_masks(ds):
     """Adds velocity masks for u- and v-points based on the rho-point mask.
 
     This function generates masks for u- and v-points by interpolating the rho-point land/water mask.

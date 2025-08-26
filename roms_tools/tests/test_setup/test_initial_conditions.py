@@ -63,6 +63,9 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
     assert set(ic.ds.data_vars).issuperset(expected_vars)
 
 
+@pytest.mark.stream
+@pytest.mark.use_copernicus
+@pytest.mark.use_dask
 def test_initial_conditions_creation_with_default_glorys_dataset(example_grid: Grid):
     """Verify the default GLORYS dataset is loaded when a path is not provided."""
     ic = InitialConditions(

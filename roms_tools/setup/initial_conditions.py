@@ -484,7 +484,7 @@ class InitialConditions:
 
             if self.use_dask:
                 h = h.chunk(get_dask_chunks(location, self.horizontal_chunk_size))
-                if self.adjust_depth_for_sea_surface_height:
+                if isinstance(zeta, xr.DataArray):
                     zeta = zeta.chunk(
                         get_dask_chunks(location, self.horizontal_chunk_size)
                     )

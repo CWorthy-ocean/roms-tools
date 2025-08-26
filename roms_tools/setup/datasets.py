@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib.util
 import logging
 import time
@@ -7,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import ClassVar
+from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
 import xarray as xr
@@ -29,7 +31,9 @@ from roms_tools.setup.utils import (
     interpolate_from_climatology,
     one_dim_fill,
 )
-from roms_tools.utils import _get_pkg_error_msg, _has_gcsfs, _load_data
+from roms_tools.utils import get_pkg_error_msg, has_gcsfs, load_data
+
+TConcatEndTypes = Literal["lower", "upper", "both"]
 
 # lat-lon datasets
 
@@ -62,7 +66,7 @@ class Dataset:
         Indicates whether land values require lateral filling. If `True`, ocean values will be extended into land areas
         to replace NaNs or non-ocean values (such as atmospheric values in ERA5 data). If `False`, it is assumed that
         land values are already correctly assigned, and lateral filling will be skipped. Defaults to `True`.
-    use_dask: bool
+    use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
     apply_post_processing: bool
         Indicates whether to post-process the dataset for futher use. Defaults to True.
@@ -94,12 +98,12 @@ class Dataset:
         }
     )
     var_names: dict[str, str]
-    opt_var_names: dict[str, str] | None = field(default_factory=dict)
+    opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool | None = False
     needs_lateral_fill: bool | None = True
-    use_dask: bool | None = False
+    use_dask: bool = False
     apply_post_processing: bool | None = True
-    read_zarr: bool | None = False
+    read_zarr: bool = False
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
 
     is_global: bool = field(init=False, repr=False)
@@ -172,17 +176,17 @@ class Dataset:
         ValueError
             If a list of files is provided but self.dim_names["time"] is not available or use_dask=False.
         """
-        ds = _load_data(
-            self.filename,
-            self.dim_names,
-            self.use_dask or False,
-            read_zarr=self.read_zarr or False,
+        ds = load_data(
+            filename=self.filename,
+            dim_names=self.dim_names,
+            use_dask=self.use_dask,
+            read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
         )
 
         return ds
 
-    def clean_up(self, ds: xr.Dataset, **kwargs) -> xr.Dataset:
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Dummy method to be overridden by child classes to clean up the dataset.
 
         This method is intended as a placeholder and should be implemented in subclasses
@@ -215,7 +219,7 @@ class Dataset:
         """
         _check_dataset(ds, self.dim_names, self.var_names)
 
-    def select_relevant_fields(self, ds) -> xr.Dataset:
+    def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
         """Selects and returns a subset of the dataset containing only the variables
         specified in `self.var_names`.
 
@@ -258,7 +262,7 @@ class Dataset:
         """
         return ds
 
-    def select_relevant_times(self, ds) -> xr.Dataset:
+    def select_relevant_times(self, ds: xr.Dataset) -> xr.Dataset:
         """Select a subset of the dataset based on the specified time range.
 
         This method filters the dataset to include all records between `start_time` and `end_time`.
@@ -353,7 +357,7 @@ class Dataset:
 
         return ds
 
-    def infer_horizontal_resolution(self, ds: xr.Dataset):
+    def infer_horizontal_resolution(self, ds: xr.Dataset) -> None:
         """Estimate and set the average horizontal resolution of a dataset based on
         latitude and longitude spacing.
 
@@ -381,7 +385,7 @@ class Dataset:
         # Set the computed resolution as an attribute
         self.resolution = resolution
 
-    def compute_minimal_grid_spacing(self, ds: xr.Dataset):
+    def compute_minimal_grid_spacing(self, ds: xr.Dataset) -> float:
         """Compute the minimal grid spacing in a dataset based on latitude and longitude
         spacing, considering Earth's radius.
 
@@ -443,7 +447,12 @@ class Dataset:
 
         return is_global
 
-    def concatenate_longitudes(self, ds, end="upper", verbose=False):
+    def concatenate_longitudes(
+        self,
+        ds: xr.Dataset,
+        end: TConcatEndTypes = "upper",
+        verbose: bool = False,
+    ) -> xr.Dataset:
         """Concatenates fields in dataset twice along the longitude dimension.
 
         Parameters
@@ -552,14 +561,16 @@ class Dataset:
         ds = self.ds.astype({var: "float64" for var in self.ds.data_vars})
         self.ds = ds
 
+        return None
+
     def choose_subdomain(
         self,
-        target_coords,
-        buffer_points=20,
-        return_copy=False,
-        return_coords_only=False,
-        verbose=False,
-    ):
+        target_coords: dict[str, Any],
+        buffer_points: float = 20,
+        return_copy: bool = False,
+        return_coords_only: bool = False,
+        verbose: bool = False,
+    ) -> xr.Dataset | Dataset | None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
         ranges as necessary to accommodate the dataset's expected range and handles
@@ -635,6 +646,7 @@ class Dataset:
 
             if concats:
                 end = "both" if len(concats) == 2 else concats[0]
+                end = cast(TConcatEndTypes, end)
                 subdomain = self.concatenate_longitudes(
                     subdomain, end=end, verbose=False
                 )
@@ -696,6 +708,7 @@ class Dataset:
             return Dataset.from_ds(self, subdomain)
         else:
             self.ds = subdomain
+            return None
 
     def apply_lateral_fill(self):
         """Apply lateral fill to variables using the dataset's mask and grid dimensions.
@@ -769,7 +782,7 @@ class Dataset:
                     )
 
     @classmethod
-    def from_ds(cls, original_dataset: "Dataset", ds: xr.Dataset) -> "Dataset":
+    def from_ds(cls, original_dataset: Dataset, ds: xr.Dataset) -> Dataset:
         """Substitute the internal dataset of a Dataset object with a new xarray
         Dataset.
 
@@ -871,7 +884,7 @@ class TPXODataset(Dataset):
             ValueError
                 If longitude or latitude values do not match the grid.
         """
-        ds_grid = _load_data(self.grid_filename, self.dim_names, self.use_dask)
+        ds_grid = load_data(self.grid_filename, self.dim_names, self.use_dask)
 
         # Define mask and coordinate names based on location
         if self.location == "h":
@@ -902,19 +915,11 @@ class TPXODataset(Dataset):
 
         # Drop all dimensions except 'longitude' and 'latitude'
         dims_to_keep = {"longitude", "latitude"}
-        dims_to_drop = [dim for dim in ds_grid.dims if dim not in dims_to_keep]
+        dims_to_drop: set[str] = set(ds_grid.dims) - dims_to_keep
         if dims_to_drop:
             ds_grid = ds_grid.isel({dim: 0 for dim in dims_to_drop})
 
         # Ensure correct dimension order
-        ds_grid = ds_grid.transpose("latitude", "longitude")
-
-        dims_to_keep = {"longitude", "latitude"}
-        dims_to_drop = set(ds_grid.dims) - dims_to_keep
-        ds_grid = (
-            ds_grid.isel({dim: 0 for dim in dims_to_drop}) if dims_to_drop else ds_grid
-        )
-        # Bring dimensions in correct order
         ds_grid = ds_grid.transpose("latitude", "longitude")
 
         ds = ds.rename({"con": "nc"})
@@ -1130,7 +1135,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
 
         spec = importlib.util.find_spec(package_name)
         if not spec:
-            msg = _get_pkg_error_msg("cloud-based GLORYS data", package_name, "stream")
+            msg = get_pkg_error_msg("cloud-based GLORYS data", package_name, "stream")
             raise RuntimeError(msg)
 
         try:
@@ -1424,7 +1429,7 @@ class CESMBGCDataset(CESMDataset):
 
     climatology: bool | None = False
 
-    def post_process(self):
+    def post_process(self) -> None:
         """
         Processes and converts CESM data values as follows:
         - Convert depth values from cm to m.
@@ -1495,7 +1500,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
     climatology: bool | None = False
 
-    def post_process(self):
+    def post_process(self) -> None:
         """Perform post-processing on the dataset to remove specific variables.
 
         This method checks if the variable "z_t" exists in the dataset. If it does,
@@ -1544,7 +1549,7 @@ class ERA5Dataset(Dataset):
 
     climatology: bool | None = False
 
-    def post_process(self):
+    def post_process(self) -> None:
         """
         Processes and converts ERA5 data values as follows:
         - Convert radiation values from J/m^2 to W/m^2.
@@ -1632,10 +1637,10 @@ class ERA5ARCODataset(ERA5Dataset):
         }
     )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.read_zarr = True
-        if not _has_gcsfs():
-            msg = _get_pkg_error_msg("cloud-based ERA5 data", "gcsfs", "stream")
+        if not has_gcsfs():
+            msg = get_pkg_error_msg("cloud-based ERA5 data", "gcsfs", "stream")
             raise RuntimeError(msg)
 
         super().__post_init__()
@@ -1666,7 +1671,7 @@ class ERA5Correction(Dataset):
     )
     climatology: bool | None = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.climatology:
             raise NotImplementedError(
                 "Correction data must be a climatology. Set climatology to True."
@@ -1674,32 +1679,31 @@ class ERA5Correction(Dataset):
 
         super().__post_init__()
 
-    def choose_subdomain(self, target_coords, straddle: bool):
-        """Converts longitude values in the dataset if necessary and selects a subdomain
-        based on the specified coordinates.
+    def match_subdomain(self, target_coords: dict[str, Any]) -> None:
+        """
+        Selects a subdomain from the dataset matching the specified coordinates.
 
-        This method converts longitude values between different ranges if required and then extracts a subset of the
-        dataset according to the given coordinates. It updates the dataset in place to reflect the selected subdomain.
+        This method extracts a subset of the dataset (`self.ds`) based on given latitude
+        and longitude values. If the dataset spans the globe, it concatenates longitudes
+        to ensure seamless wrapping.
 
         Parameters
         ----------
-        target_coords : dict
-            A dictionary specifying the target coordinates for selecting the subdomain. Keys should correspond to the
-            dimension names of the dataset (e.g., latitude and longitude), and values should be the desired ranges or
-            specific coordinate values.
-        straddle : bool
-            If True, assumes that target longitudes are in the range [-180, 180]. If False, assumes longitudes are in the
-            range [0, 360]. This parameter determines how longitude values are converted if necessary.
+        target_coords : dict[str, Any]
+            A dictionary containing the target latitude and longitude values to select.
+            Expected keys: "lat" and "lon", each mapped to a DataArray of coordinates.
 
         Raises
         ------
         ValueError
-            If the specified subdomain does not fully contain the specified latitude or longitude values. This can occur
-            if the dataset does not cover the full range of provided coordinates.
+            If the selected subdomain does not contain all specified latitude or
+            longitude values.
 
         Notes
         -----
-        - The dataset (`self.ds`) is updated in place to reflect the chosen subdomain.
+        - The dataset (`self.ds`) is updated in place.
+        - Assumes latitude values in `target_coords["lat"]` are within dataset bounds.
+        - For global datasets, longitude concatenation is applied unconditionally.
         """
         # Select the subdomain in latitude direction (so that we have to concatenate fewer latitudes below if concatenation is performed)
         subdomain = self.ds.sel({self.dim_names["latitude"]: target_coords["lat"]})
@@ -1846,7 +1850,7 @@ class RiverDataset:
         ds : xr.Dataset
             The loaded xarray Dataset containing the forcing data.
         """
-        ds = _load_data(
+        ds = load_data(
             self.filename, self.dim_names, use_dask=False, decode_times=False
         )
 
@@ -1998,7 +2002,7 @@ class RiverDataset:
             The dataset with rivers sorted by their volume in descending order.
             If the volume variable is not available, the original dataset is returned.
         """
-        if "vol" in self.opt_var_names:
+        if self.opt_var_names is not None and "vol" in self.opt_var_names:
             volume_values = ds[self.opt_var_names["vol"]].values
             if isinstance(volume_values, np.ndarray):
                 # Check if all volume values are the same
@@ -2998,7 +3002,7 @@ def _deduplicate_river_names(
 
     # Count all names
     name_counts = Counter(names)
-    seen = defaultdict(int)
+    seen: defaultdict[str, int] = defaultdict(int)
 
     unique_names = []
     for name in names:

@@ -14,11 +14,11 @@ from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
 from roms_tools.plot import plot, plot_uptake_efficiency
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
-    _generate_coordinate_range,
-    _load_data,
+    generate_coordinate_range,
     infer_nominal_horizontal_resolution,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    load_data,
 )
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
@@ -295,11 +295,11 @@ class ROMSOutput:
 
         if horizontal_resolution is None:
             horizontal_resolution = infer_nominal_horizontal_resolution(self.grid.ds)
-        lons = _generate_coordinate_range(
+        lons = generate_coordinate_range(
             lon_deg.min().values, lon_deg.max().values, horizontal_resolution
         )
         lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
-        lats = _generate_coordinate_range(
+        lats = generate_coordinate_range(
             lat_deg.min().values, lat_deg.max().values, horizontal_resolution
         )
         lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
@@ -444,7 +444,7 @@ class ROMSOutput:
     def _load_model_output(self) -> xr.Dataset:
         """Load the model output."""
         # Load the dataset
-        ds = _load_data(
+        ds = load_data(
             self.path,
             dim_names={"time": "time"},
             use_dask=self.use_dask,
@@ -588,6 +588,11 @@ class ROMSOutput:
         xarray.Dataset
             Dataset with "abs_time" added and "time" removed.
         """
+        if self.model_reference_date is None:
+            raise ValueError(
+                "`model_reference_date` must be set before computing absolute time."
+            )
+
         ocean_time_seconds = ds["ocean_time"].values
 
         abs_time = np.array(

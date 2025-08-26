@@ -149,7 +149,10 @@ def _validate_uptake_efficiency(
     abs_diff = np.abs(uptake_efficiency_flux - uptake_efficiency_diff)
     max_abs_diff = float(abs_diff.max())
 
-    logging.info("Max absolute difference in uptake efficiency: %.3e", max_abs_diff)
+    logging.info(
+        "Max absolute difference between flux-based and DIC-based uptake efficiency: %.3e",
+        max_abs_diff,
+    )
 
     return max_abs_diff
 

@@ -1,33 +1,42 @@
+import logging
+
 import numpy as np
 import xarray as xr
 
 
-def compute_uptake_efficiency(
-    ds: xr.Dataset, grid_ds: xr.Dataset
-) -> tuple[xr.DataArray, xr.DataArray]:
+def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
     """
-    Compute CO2 uptake efficiency based on fluxes and DIC differences.
+    Compute Carbon Dioxide Removal (CDR) metrics from model output.
+
+    Calculates CDR uptake efficiency using two methods:
+      1. Flux-based: from area-integrated CO2 flux differences.
+      2. DIC difference-based: from volume-integrated DIC differences.
+
+    Copies selected tracer and flux variables and computes grid cell areas
+    and averaging window durations.
 
     Parameters
     ----------
     ds : xr.Dataset
-        Dataset containing model outputs, expected to include:
-        - 'avg_begin_time', 'avg_end_time': Time bounds of averaging windows.
-        - 'ALK_source': Alkalinity source term.
-        - 'FG_CO2', 'FG_ALT_CO2': CO2 fluxes.
-        - 'hDIC', 'hDIC_ALT_CO2': DIC (dissolved inorganic carbon) concentrations.
+        Model output with required variables:
+        'avg_begin_time', 'avg_end_time', 'ALK_source', 'DIC_source',
+        'FG_CO2', 'FG_ALT_CO2', 'hDIC', 'hDIC_ALT_CO2'.
 
     grid_ds : xr.Dataset
-        Grid dataset containing grid metrics:
-        - 'pm', 'pn': Reciprocal grid spacing in xi and eta directions.
+        Grid dataset with 'pm', 'pn' (inverse grid spacing).
 
     Returns
     -------
-    uptake_flux : xr.DataArray
-        Cumulative CO2 uptake efficiency computed from fluxes, normalized by cumulative source.
+    ds_cdr : xr.Dataset
+        Dataset containing:
+        - 'area', 'window_length'
+        - copied flux/tracer variables
+        - 'cdr_efficiency' and 'cdr_efficiency_from_delta_diff' (dimensionless)
 
-    uptake_diff : xr.DataArray
-        Cumulative CO2 uptake efficiency computed from DIC differences, normalized by cumulative source.
+    Raises
+    ------
+    KeyError
+        If required variables are missing from `ds` or `grid_ds`.
     """
     # Define required variables
     ds_vars = [
@@ -50,28 +59,45 @@ def compute_uptake_efficiency(
     if missing_grid:
         raise KeyError(f"Missing required variables in grid_ds: {missing_grid}")
 
-    # Duration of each averaging window
-    window_length = ds["avg_end_time"] - ds["avg_begin_time"]
+    ds_cdr = xr.Dataset()
+
+    # Copy relevant variables
+    vars_to_copy = ["FG_CO2", "FG_ALT_CO2", "hDIC", "hDIC_ALT_CO2"]
+    for var_name in vars_to_copy:
+        ds_cdr[var_name] = ds[var_name]
 
     # Grid cell area
-    area = 1 / (grid_ds["pm"] * grid_ds["pn"])
+    ds_cdr["area"] = 1 / (grid_ds["pm"] * grid_ds["pn"])
+    ds_cdr["area"].attrs.update(
+        long_name="Grid cell area",
+        units="m^2",
+    )
+
+    # Duration of each averaging window
+    ds_cdr["window_length"] = ds["avg_end_time"] - ds["avg_begin_time"]
+    ds_cdr["window_length"].attrs.update(
+        long_name="Duration of each averaging window",
+        units="s",
+    )
 
     _validate_source(ds)
 
     # Cumulative alkalinity source
     source = (
         (ds["ALK_source"] - ds["DIC_source"]).sum(dim=["s_rho", "eta_rho", "xi_rho"])
-        * window_length
+        * ds_cdr["window_length"]
     ).cumsum(dim="time")
 
     # Cumulative flux-based uptake (Method 1)
     flux = (
-        ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * area).sum(dim=["eta_rho", "xi_rho"])
-        * window_length
+        ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * ds_cdr["area"]).sum(
+            dim=["eta_rho", "xi_rho"]
+        )
+        * ds_cdr["window_length"]
     ).cumsum(dim="time")
 
     # DIC difference-based uptake (Method 2)
-    diff_DIC = ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * area).sum(
+    diff_DIC = ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * ds_cdr["area"]).sum(
         dim=["s_rho", "eta_rho", "xi_rho"]
     )
 
@@ -82,16 +108,31 @@ def compute_uptake_efficiency(
             np.isfinite(diff_DIC / source)
         )
 
-    return uptake_efficiency_flux, uptake_efficiency_diff
+    _validate_uptake_efficiency(uptake_efficiency_flux, uptake_efficiency_diff)
+
+    # Store results with metadata
+    ds_cdr["cdr_efficiency"] = uptake_efficiency_flux
+    ds_cdr["cdr_efficiency"].attrs.update(
+        long_name="CDR uptake efficiency (from flux differences)",
+        units="nondimensional",
+        description="Carbon Dioxide Removal efficiency computed using area-integrated CO2 flux differences",
+    )
+    ds_cdr["cdr_efficiency_from_delta_diff"] = uptake_efficiency_diff
+    ds_cdr["cdr_efficiency_from_delta_diff"].attrs.update(
+        long_name="CDR uptake efficiency (from DIC differences)",
+        units="nondimensional",
+        description="Carbon Dioxide Removal efficiency computed using volume-integrated DIC differences",
+    )
+
+    return ds_cdr
 
 
-def validate_uptake_efficiency(
+def _validate_uptake_efficiency(
     uptake_efficiency_flux: xr.DataArray,
     uptake_efficiency_diff: xr.DataArray,
-    tol: float = 1e-2,
-) -> bool:
+) -> float:
     """
-    Validate that two uptake efficiency estimates are sufficiently close.
+    Compute and log the maximum absolute difference between two uptake efficiency estimates.
 
     Parameters
     ----------
@@ -99,25 +140,18 @@ def validate_uptake_efficiency(
         Uptake computed from fluxes.
     uptake_efficiency_diff : xr.DataArray
         Uptake computed from DIC differences.
-    tol : float
-        Relative tolerance for agreement (default 1%).
 
     Returns
     -------
-    valid : bool
-        True if uptake_flux and uptake_diff agree within the specified tolerance.
+    max_abs_diff : float
+        Maximum absolute difference between uptake_flux and uptake_diff.
     """
-    # Compute relative difference
-    relative_diff = np.abs(
-        uptake_efficiency_flux - uptake_efficiency_diff
-    ) / np.maximum(np.abs(uptake_efficiency_flux), 1e-10)
+    abs_diff = np.abs(uptake_efficiency_flux - uptake_efficiency_diff)
+    max_abs_diff = float(abs_diff.max())
 
-    # Check if maximum difference is below tolerance
-    max_diff = float(relative_diff.max())
-    if max_diff > tol:
-        print(f"Validation failed: maximum relative difference = {max_diff:.3e}")
-        return False
-    return True
+    logging.info("Max absolute difference in uptake efficiency: %.3e", max_abs_diff)
+
+    return max_abs_diff
 
 
 def _validate_source(ds: xr.Dataset):

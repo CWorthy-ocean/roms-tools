@@ -10,11 +10,8 @@ import xarray as xr
 from matplotlib.axes import Axes
 
 from roms_tools import Grid
-from roms_tools.analysis.cdr_analysis import (
-    compute_uptake_efficiency,
-    validate_uptake_efficiency,
-)
-from roms_tools.plot import plot
+from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
+from roms_tools.plot import plot, plot_uptake_efficiency
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
     _generate_coordinate_range,
@@ -75,12 +72,26 @@ class ROMSOutput:
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
 
-    def compute_uptake_efficiency(self):
-        uptake_efficiency_flux, uptake_efficiency_diff = compute_uptake_efficiency(
-            self.ds, self.grid.ds
-        )
-        validate_uptake_efficiency(uptake_efficiency_flux, uptake_efficiency_diff)
-        self.ds["cdr_efficiency"] = uptake_efficiency_flux
+    def cdr_metrics(self) -> None:
+        """
+        Compute and plot Carbon Dioxide Removal (CDR) metrics.
+
+        If the CDR metrics dataset (`self.ds_cdr`) does not already exist,
+        it computes the metrics using model output and grid information.
+        Afterwards, it generates a plot of the computed metrics.
+
+        Notes
+        -----
+        Metrics include:
+          - Grid cell area
+          - Selected tracer and flux variables
+          - Uptake efficiency computed from flux differences and DIC differences
+        """
+        if not hasattr(self, "ds_cdr"):
+            # Compute metrics and store
+            self.ds_cdr = compute_cdr_metrics(self.ds, self.grid.ds)
+
+        plot_uptake_efficiency(self.ds_cdr)
 
     def plot(
         self,
@@ -179,12 +190,16 @@ class ROMSOutput:
             - If `eta` or `xi` indices are out of bounds.
             - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
         """
-        # Check if variable exists
-        if var_name not in self.ds:
-            raise ValueError(f"Variable '{var_name}' is not found in the dataset.")
+        ds_cdr = getattr(self, "ds_cdr", None)
 
-        # Pick the variable
-        field = self.ds[var_name]
+        # Check if variable exists
+        if var_name not in self.ds and (ds_cdr is None or var_name not in ds_cdr):
+            raise ValueError(
+                f"Variable '{var_name}' is not found in self.ds or self.ds_cdr."
+            )
+
+        # Pick the variable, prefer ds_cdr if it exists
+        field = ds_cdr[var_name] if ds_cdr and var_name in ds_cdr else self.ds[var_name]
 
         # Check and pick time
         if "time" in field.dims:

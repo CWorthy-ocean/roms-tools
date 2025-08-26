@@ -4,12 +4,23 @@
 
 ### New Features
 
-* Enhance `partition_netcdf` flexibility: now supports partitioning multiple input files and allows specifying a custom output directory for saved tiles ([#394](https://github.com/CWorthy-ocean/roms-tools/pull/394))
-
-* Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
-* Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
+* Allow performing CDR analysis, including plotting CDR uptake curves ([#417](https://github.com/CWorthy-ocean/roms-tools/pull/417))
 
 ### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+## v3.1.2
+
+### New Features
+
+* Enhance `partition_netcdf` flexibility: now supports partitioning multiple input files and allows specifying a custom output directory for saved tiles ([#394](https://github.com/CWorthy-ocean/roms-tools/pull/394))
+* Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
+* Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
 
 ### Internal Changes
 
@@ -19,8 +30,6 @@
 
 * Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))
 * Include recommendation about `interp_frc` in INFO message ([#352](https://github.com/CWorthy-ocean/roms-tools/issues/352))
-
-### Bugfixes
 
 ## v3.1.1
 

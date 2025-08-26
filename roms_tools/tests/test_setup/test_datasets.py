@@ -2,6 +2,7 @@ import logging
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -11,11 +12,14 @@ from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import (
     CESMBGCDataset,
     Dataset,
+    ERA5ARCODataset,
     ERA5Correction,
     GLORYSDataset,
+    GLORYSDefaultDataset,
     RiverDataset,
     TPXODataset,
 )
+from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
 
 
 @pytest.fixture
@@ -435,6 +439,78 @@ def test_era5_correction_choose_subdomain(use_dask):
     data.choose_subdomain(target_coords, straddle=False)
     assert (data.ds["latitude"] == lats).all()
     assert (data.ds["longitude"] == lons).all()
+
+
+@pytest.mark.use_gcsfs
+def test_default_era5_dataset_loading_without_dask() -> None:
+    """Verify that loading the default ERA5 dataset fails if use_dask is not True."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with pytest.raises(ValueError):
+        _ = ERA5ARCODataset(
+            filename=DEFAULT_ERA5_ARCO_PATH,
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=False,
+        )
+
+
+@pytest.mark.skip("Temporary skip until memory consumption issue is addressed. # TODO")
+@pytest.mark.stream
+@pytest.mark.use_dask
+@pytest.mark.use_gcsfs
+def test_default_era5_dataset_loading() -> None:
+    """Verify the default ERA5 dataset is loaded correctly."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    ds = ERA5ARCODataset(
+        filename=DEFAULT_ERA5_ARCO_PATH,
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=True,
+    )
+
+    expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
+    assert set(ds.var_names).issuperset(expected_vars)
+
+
+@pytest.mark.use_copernicus
+def test_default_glorys_dataset_loading_dask_not_installed() -> None:
+    """Verify that loading the default GLORYS dataset fails if dask is not available."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    with (
+        pytest.raises(RuntimeError),
+        mock.patch("roms_tools.utils._has_dask", return_value=False),
+    ):
+        _ = GLORYSDefaultDataset(
+            filename=GLORYSDefaultDataset.dataset_name,
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=True,
+        )
+
+
+@pytest.mark.stream
+@pytest.mark.use_copernicus
+@pytest.mark.use_dask
+def test_default_glorys_dataset_loading() -> None:
+    """Verify the default GLORYS dataset is loaded correctly."""
+    start_time = datetime(2012, 1, 1)
+    end_time = datetime(2013, 1, 1)
+
+    ds = GLORYSDefaultDataset(
+        filename=GLORYSDefaultDataset.dataset_name,
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=True,
+    )
+
+    expected_vars = {"temp", "salt", "u", "v", "zeta"}
+    assert set(ds.var_names).issuperset(expected_vars)
 
 
 def test_data_concatenation(use_dask):

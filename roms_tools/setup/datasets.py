@@ -1167,7 +1167,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
 
         chunks = get_dask_chunks(self.dim_names)
 
-        ds = ds.rechunk(chunks)
+        ds = ds.chunk(chunks)
         return ds
 
 

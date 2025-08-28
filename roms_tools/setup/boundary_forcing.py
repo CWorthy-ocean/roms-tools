@@ -300,11 +300,12 @@ class BoundaryForcing:
                     logging.info(
                         f"Applying 1D horizontal fill to {direction}ern boundary."
                     )
-                    self._validate_1d_fill(
-                        processed_fields,
-                        direction,
-                        bdry_data.dim_names["depth"],
-                    )
+                    if not self.bypass_validation:
+                        self._validate_1d_fill(
+                            processed_fields,
+                            direction,
+                            bdry_data.dim_names["depth"],
+                        )
                     for var_name in processed_fields:
                         processed_fields[var_name] = apply_1d_horizontal_fill(
                             processed_fields[var_name]

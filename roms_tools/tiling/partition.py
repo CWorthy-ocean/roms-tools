@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from numbers import Integral
 from pathlib import Path
 
@@ -296,26 +297,31 @@ def partition(
 
 
 def partition_netcdf(
-    filepath: str | Path,
+    filepath: str | Path | Sequence[str | Path],
     np_eta: int = 1,
     np_xi: int = 1,
+    output_dir: str | Path | None = None,
     include_coarse_dims: bool = True,
-) -> None:
-    """Partition a ROMS NetCDF file into smaller spatial tiles and save them to disk.
+) -> list[Path]:
+    """Partition one or more ROMS NetCDF files into smaller spatial tiles and save them to disk.
 
-    This function divides the dataset in the specified NetCDF file into `np_eta` by `np_xi` tiles.
+    This function divides each dataset into `np_eta` by `np_xi` tiles.
     Each tile is saved as a separate NetCDF file.
 
     Parameters
     ----------
-    filepath : Union[str, Path]
-        The path to the input NetCDF file.
+    filepath : str | Path | Sequence[str | Path]
+        A path or list of paths to input NetCDF files.
 
     np_eta : int, optional
         The number of partitions along the `eta` direction. Must be a positive integer. Default is 1.
 
     np_xi : int, optional
         The number of partitions along the `xi` direction. Must be a positive integer. Default is 1.
+
+    output_dir : str | Path | None, optional
+        Directory or base path to save partitioned files.
+        If None, files are saved alongside the input file.
 
     include_coarse_dims : bool, optional
         Whether to include coarse grid dimensions (`eta_coarse`, `xi_coarse`) in the partitioning.
@@ -324,31 +330,39 @@ def partition_netcdf(
 
     Returns
     -------
-    List[Path]
+    list[Path]
         A list of Path objects for the filenames that were saved.
     """
-    # Ensure filepath is a Path object
-    filepath = Path(filepath)
+    if isinstance(filepath, str | Path):
+        filepaths = [Path(filepath)]
+    else:
+        filepaths = [Path(fp) for fp in filepath]
 
-    # Open the dataset
-    ds = xr.open_dataset(filepath.with_suffix(".nc"), decode_timedelta=False)
+    all_saved_filenames = []
 
-    # Partition the dataset
-    file_numbers, partitioned_datasets = partition(
-        ds, np_eta=np_eta, np_xi=np_xi, include_coarse_dims=include_coarse_dims
-    )
+    for fp in filepaths:
+        input_file = fp.with_suffix(".nc")
+        ds = xr.open_dataset(input_file, decode_timedelta=False)
 
-    # Generate paths to the partitioned files
-    base_filepath = filepath.with_suffix("")
-    ndigits = len(str(max(np.array(file_numbers))))
-    paths_to_partitioned_files = [
-        Path(f"{base_filepath}.{file_number:0{ndigits}d}")
-        for file_number in file_numbers
-    ]
+        file_numbers, partitioned_datasets = partition(
+            ds, np_eta=np_eta, np_xi=np_xi, include_coarse_dims=include_coarse_dims
+        )
 
-    # Save the partitioned datasets to files
-    saved_filenames = save_datasets(
-        partitioned_datasets, paths_to_partitioned_files, verbose=False
-    )
+        if output_dir:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            base_filepath = output_dir / fp.stem
+        else:
+            base_filepath = fp.with_suffix("")
 
-    return saved_filenames
+        ndigits = len(str(max(file_numbers)))
+        paths_to_partitioned_files = [
+            Path(f"{base_filepath}.{num:0{ndigits}d}") for num in file_numbers
+        ]
+
+        saved = save_datasets(
+            partitioned_datasets, paths_to_partitioned_files, verbose=False
+        )
+        all_saved_filenames.extend(saved)
+
+    return all_saved_filenames

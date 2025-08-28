@@ -150,11 +150,19 @@ class SurfaceForcing:
             use_coarse_grid = False
         elif self.coarse_grid_mode == "auto":
             use_coarse_grid = self._determine_coarse_grid_usage(data)
-        if use_coarse_grid:
-            logging.info("Data will be interpolated onto grid coarsened by factor 2.")
-        else:
-            logging.info("Data will be interpolated onto fine grid.")
         self.use_coarse_grid = use_coarse_grid
+
+        opt_file = "bulk_frc.opt" if self.type == "physics" else "bgc.opt"
+        grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
+        interp_flag = 1 if use_coarse_grid else 0
+
+        logging.info(
+            "Data will be interpolated onto the %s. "
+            "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
+            grid_desc,
+            interp_flag,
+            opt_file,
+        )
 
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords
@@ -439,9 +447,7 @@ class SurfaceForcing:
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
-        correction_data.choose_subdomain(
-            coords_correction, straddle=self.target_coords["straddle"]
-        )
+        correction_data.match_subdomain(coords_correction)
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 

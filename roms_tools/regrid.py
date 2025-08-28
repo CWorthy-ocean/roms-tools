@@ -251,7 +251,12 @@ class VerticalRegridFromROMS:
         ds : xarray.Dataset
             The dataset containing the ROMS output data, which must include the vertical coordinate `s_rho`.
         """
-        self.grid = xgcm.Grid(ds, coords={"s_rho": {"center": "s_rho"}}, periodic=False)
+        self.grid = xgcm.Grid(
+            ds,
+            coords={"s_rho": {"center": "s_rho"}},
+            periodic=False,
+            autoparse_metadata=False,
+        )
 
     def apply(self, da, depth_coords, target_depth_levels, mask_edges=True):
         """Applies vertical regridding from ROMS to the specified target depth levels.

@@ -1,0 +1,39 @@
+name: Create Jira Ticket on Label
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  create_jira_ticket:
+    if: contains(github.event.label.name, 'jira-story')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Run Jira Ticket Creation Script
+        env:
+          JIRA_EMAIL_MENDOCINO: ${{ secrets.JIRA_EMAIL_MENDOCINO }}
+          JIRA_API_TOKEN_MENDOCINO: ${{ secrets.JIRA_API_TOKEN_MENDOCINO }}
+          JIRA_BOARD_ID: ${{ vars.JIRA_BOARD_ID }}
+          JIRA_BOARD_KEY: ${{ vars.JIRA_BOARD_KEY }}
+          JIRA_USERID_MAP: ${{ vars.JIRA_USERID_MAP }}
+          JIRA_SPRINT_FIELD_ID: ${{ vars.JIRA_SPRINT_FIELD_ID }}
+          JIRA_SUBTASK_ISSUETYPE_ID: ${{ vars.JIRA_SUBTASK_ISSUETYPE_ID }}
+          ISSUE_TITLE: "${{ github.event.issue.title }}"
+          ISSUE_BODY: "${{ github.event.issue.body }}"
+          GITHUB_ISSUE_URL: "https://github.com/${{ github.repository }}/issues/${{ github.event.issue.number }}"
+          GITHUB_ASSIGNEE_USERNAME: "${{ github.event.issue.assignee.login }}"
+        run: |
+          .github/workflows/create_jira_tickets.sh
+          STORY_KEY=$(jq -r '.key' response.json)
+          echo "STORY_KEY=$STORY_KEY" >> $GITHUB_ENV
+      - name: Comment on GitHub Issue
+        run: |
+          # Comment on the GitHub issue with the Jira story key
+          COMMENT_BODY="This issue has been linked to Jira story [$STORY_KEY](https://cworthy.atlassian.net/browse/$STORY_KEY)."
+          curl -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          -d "{\"body\": \"$COMMENT_BODY\"}" \
+          "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments"

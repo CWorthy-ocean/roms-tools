@@ -2,7 +2,7 @@ import itertools
 import logging
 from collections import Counter
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -250,7 +250,7 @@ class CDRForcingDatasetBuilder:
         """
         ds = xr.Dataset()
         ds["time"] = ("time", unique_times)
-        ds["cdr_time"] = ("time", unique_rel_times)
+        ds["cdr_time"] = ("time", unique_rel_times), timedelta
         ds["cdr_lon"] = ("ncdr", [r.lon for r in self.releases])
         ds["cdr_lat"] = ("ncdr", [r.lat for r in self.releases])
         ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
@@ -775,6 +775,9 @@ class CDRForcing(BaseModel):
         fig.subplots_adjust(hspace=0.45)
         fig.suptitle(f"Release distribution for: {release_name}")
 
+    def do_accounting(self, dt: float):
+        _ = _reconstruct_roms_time_stamps(self.start_time, self.end_time, dt)
+
     def save(
         self,
         filepath: str | Path,
@@ -1052,3 +1055,43 @@ def _map_3d_gaussian(
         distribution_3d /= distribution_3d.sum()
 
     return distribution_3d
+
+
+def _reconstruct_roms_time_stamps(start_time: datetime, end_time: datetime, dt: float):
+    """
+    Reconstruct ROMS time stamps between start_time and end_time with step dt.
+
+    Parameters
+    ----------
+    start_time : datetime
+        Beginning of the time series.
+    end_time : datetime
+        End of the time series (inclusive if it falls exactly on a step).
+    dt : float
+        Time step in seconds (can be fractional if needed).
+
+    Returns
+    -------
+    list of datetime
+        Sequence of datetimes from start_time to end_time.
+    numpy.ndarray
+        Array of elapsed times in days (ROMS convention).
+    """
+    if end_time <= start_time:
+        raise ValueError("end_time must be after start_time")
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+
+    delta = timedelta(seconds=dt)
+    times = []
+    t = start_time
+    while t <= end_time:
+        times.append(t)
+        t += delta
+
+    # ROMS uses "days since start_time"
+    days_since_start = np.array(
+        [(t - start_time).total_seconds() / 86400.0 for t in times]
+    )
+
+    return times, days_since_start

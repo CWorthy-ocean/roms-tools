@@ -66,6 +66,7 @@ class InitialConditions:
             - A single Path object.
             - A list of strings or Path objects.
             If omitted, the data will be streamed via the Copernicus Marine Toolkit.
+            Note: streaming is currently not recommended due to performance limitations.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     bgc_source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]

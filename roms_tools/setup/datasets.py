@@ -1156,14 +1156,38 @@ class GLORYSDefaultDataset(GLORYSDataset):
             The streaming dataset
         """
         copernicusmarine = self._load_copernicus()
-        return copernicusmarine.open_dataset(
-            self.dataset_name,
-            start_datetime=self.start_time,
-            end_datetime=self.end_time,
-            service="arco-geo-series",
-            coordinates_selection_method="inside",
-            chunk_size_limit=2,
+
+        ds = copernicusmarine.download_functions.download_zarr.open_dataset_from_arco_series(
+            username="nloose",
+            password="tNSwmKLRRgDw5C!",
+            dataset_url="https://s3.waw3-1.cloudferro.com/mdl-arco-geo-025/arco/GLOBAL_MULTIYEAR_PHY_001_030/cmems_mod_glo_phy_my_0.083deg_P1D-m_202311/geoChunked.zarr",
+            variables=["thetao", "so", "uo", "vo", "zos"],
+            geographical_parameters=copernicusmarine.download_functions.subset_parameters.GeographicalParameters(),
+            temporal_parameters=copernicusmarine.download_functions.subset_parameters.TemporalParameters(
+                start_datetime=self.start_time, end_datetime=self.end_time
+            ),
+            depth_parameters=copernicusmarine.download_functions.subset_parameters.DepthParameters(),
+            coordinates_selection_method="outside",
+            optimum_dask_chunking={
+                "time": 1,
+                "depth": -1,
+                "latitude": -1,
+                "longitude": -1,
+            },
         )
+
+        # ds = copernicusmarine.open_dataset(
+        #    self.dataset_name,
+        #    start_datetime=self.start_time,
+        #    end_datetime=self.end_time,
+        #    service="arco-geo-series",
+        #    coordinates_selection_method="outside",
+        #    chunk_size_limit=-1,
+        # )
+        # chunks = get_dask_chunks(self.dim_names)
+        # ds = ds.chunk(chunks)
+
+        return ds
 
 
 @dataclass(kw_only=True)
@@ -2852,7 +2876,7 @@ def _select_relevant_times(
                 # Look in time range [start_time, start_time + 24h]
                 end_time = start_time + timedelta(days=1)
                 times = (np.datetime64(start_time) <= ds[time_dim]) & (
-                    ds[time_dim] < np.datetime64(end_time)
+                    ds[time_dim] <= np.datetime64(end_time)
                 )
                 if np.all(~times):
                     raise ValueError(

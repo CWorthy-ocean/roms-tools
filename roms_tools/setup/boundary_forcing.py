@@ -70,7 +70,8 @@ class BoundaryForcing:
 
             - A single string (with or without wildcards).
             - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+            - A list of strings or Path objects.
+            If omitted, the data will be streamed via the Copernicus Marine Toolkit.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str

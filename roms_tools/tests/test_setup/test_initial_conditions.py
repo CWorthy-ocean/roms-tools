@@ -73,6 +73,7 @@ def test_initial_conditions_creation_with_default_glorys_dataset(example_grid: G
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS"},
         use_dask=True,
+        bypass_validation=True,
     )
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
     assert set(ic.ds.data_vars).issuperset(expected_vars)

@@ -776,7 +776,9 @@ class CDRForcing(BaseModel):
         fig.suptitle(f"Release distribution for: {release_name}")
 
     def do_accounting(self, dt: float):
-        _ = _reconstruct_roms_time_stamps(self.start_time, self.end_time, dt)
+        _, rel_days = _reconstruct_roms_time_stamps(
+            self.start_time, self.end_time, dt, self.model_reference_date
+        )
 
     def save(
         self,
@@ -1057,9 +1059,17 @@ def _map_3d_gaussian(
     return distribution_3d
 
 
-def _reconstruct_roms_time_stamps(start_time: datetime, end_time: datetime, dt: float):
+def _reconstruct_roms_time_stamps(
+    start_time: datetime,
+    end_time: datetime,
+    dt: float,
+    model_reference_date: datetime,
+) -> tuple[list[datetime], np.ndarray]:
     """
-    Reconstruct ROMS time stamps between start_time and end_time with step dt.
+    Reconstruct ROMS time stamps between `start_time` and `end_time` with step `dt`.
+
+    Uses `convert_to_relative_days` to express times relative to the
+    model reference date in ROMS convention (days since reference date).
 
     Parameters
     ----------
@@ -1069,29 +1079,35 @@ def _reconstruct_roms_time_stamps(start_time: datetime, end_time: datetime, dt: 
         End of the time series (inclusive if it falls exactly on a step).
     dt : float
         Time step in seconds (can be fractional if needed).
+    model_reference_date : datetime
+        The reference date for ROMS time (elapsed time will be relative to this).
 
     Returns
     -------
-    list of datetime
-        Sequence of datetimes from start_time to end_time.
-    numpy.ndarray
-        Array of elapsed times in days (ROMS convention).
+    times : list of datetime
+        Sequence of datetimes from `start_time` to `end_time`.
+    rel_days : np.ndarray
+        Array of elapsed times in **days** relative to `model_reference_date`.
+
+    Raises
+    ------
+    ValueError
+        If `end_time` is not after `start_time` or if `dt` is not positive.
     """
     if end_time <= start_time:
         raise ValueError("end_time must be after start_time")
     if dt <= 0:
         raise ValueError("dt must be positive")
 
+    # Generate absolute times
     delta = timedelta(seconds=dt)
-    times = []
+    times: list[datetime] = []
     t = start_time
     while t <= end_time:
         times.append(t)
         t += delta
 
-    # ROMS uses "days since start_time"
-    days_since_start = np.array(
-        [(t - start_time).total_seconds() / 86400.0 for t in times]
-    )
+    # Convert to relative ROMS time (days since model_reference_date)
+    rel_days = convert_to_relative_days(times, model_reference_date)
 
-    return times, days_since_start
+    return times, rel_days

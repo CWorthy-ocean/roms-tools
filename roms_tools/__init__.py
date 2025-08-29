@@ -21,5 +21,9 @@ from roms_tools.setup.tides import TidalForcing  # noqa: F401
 from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
 from roms_tools.tiling.join import open_partitions, join_netcdf  # noqa: F401
 
+
 # Configure logging when the package is imported
-logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt=DATE_FORMAT)

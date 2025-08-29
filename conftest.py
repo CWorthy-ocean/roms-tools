@@ -1,4 +1,6 @@
+import enum
 import hashlib
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import (
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
+    Dataset,
     ERA5Dataset,
     GLORYSDataset,
     TPXODataset,
@@ -25,7 +28,18 @@ from roms_tools.setup.datasets import (
 )
 
 
-def pytest_addoption(parser):
+class SkippableOptions(enum.StrEnum):
+    STREAM = "stream"
+    """mark tests that streams data from external sources"""
+    USE_COPERNICUS = "use_copernicus"
+    """marks tests that require the Copernicus Marine Toolkit to execute"""
+    USE_DASK = "use_dask"
+    """marks tests that require Dask to execute"""
+    USE_GCSFS = "use_gcsfs"
+    """marks tests that require GCSFS to execute"""
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--overwrite",
         action="append",
@@ -33,44 +47,80 @@ def pytest_addoption(parser):
         help="Specify which fixtures to overwrite. Use 'all' to overwrite all fixtures.",
     )
     parser.addoption(
-        "--use_dask", action="store_true", default=False, help="Run tests with Dask"
-    )
-    parser.addoption(
-        "--stream",
+        f"--{SkippableOptions.STREAM}",
         action="store_true",
         default=False,
         help="Run tests that stream data (can be slow)",
     )
+    parser.addoption(
+        f"--{SkippableOptions.USE_COPERNICUS}",
+        action="store_true",
+        default=False,
+        help="Run tests that stream data using Copernicus Marine (can be slow)",
+    )
+    parser.addoption(
+        f"--{SkippableOptions.USE_DASK}",
+        action="store_true",
+        default=False,
+        help="Run tests that require Dask",
+    )
+    parser.addoption(
+        f"--{SkippableOptions.USE_GCSFS}",
+        action="store_true",
+        default=False,
+        help="Run tests that require GCSFS",
+    )
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     if "all" in config.getoption("--overwrite"):
         # If 'all' is specified, overwrite everything
         config.option.overwrite = ["all"]
 
-    config.addinivalue_line(
-        "markers", "stream: mark test that streams data from external sources"
-    )
+    for marker in [
+        "stream: mark tests that streams data from external sources",
+        "use_copernicus: marks tests that require the Copernicus Marine Toolkit to execute",
+        "use_dask: marks tests that require Dask to execute",
+        "use_gcsfs: marks tests that require GCSFS to execute",
+    ]:
+        config.addinivalue_line("markers", marker)
 
 
-def pytest_collection_modifyitems(config, items):
-    if config.getoption("--stream"):
-        # --stream given in cli: do not skip streaming tests
-        return
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    # identify any skippable marks that were not supplied
+    to_skip = [
+        mark.value
+        for mark in SkippableOptions
+        if not config.getoption(f"--{mark.value}")
+    ]
 
-    skip_stream = pytest.mark.skip(reason="need --stream option to run")
-    for item in items:
-        if "stream" in item.keywords:
-            item.add_marker(skip_stream)
+    # find the tests with unsatisfied marks
+    skippables = [
+        (item, {mark.name for mark in item.iter_markers()}.intersection(to_skip))
+        for item in items
+        if {mark.name for mark in item.iter_markers()}.intersection(to_skip)
+    ]
+
+    # apply the skip mark
+    for item, marks in skippables:
+        if len(marks) > 1:
+            missing = " ".join(f"--{mark}" for mark in marks)
+        else:
+            missing = f"--{marks.pop()}"
+
+        item.add_marker(pytest.mark.skip(reason=f"need `{missing}` option(s) to run"))
 
 
 @pytest.fixture(scope="session")
-def use_dask(request):
+def use_dask(request: pytest.FixtureRequest) -> bool:
     return request.config.getoption("--use_dask")
 
 
 @pytest.fixture(scope="session")
-def grid():
+def grid() -> Grid:
     grid = Grid(nx=1, ny=1, size_x=100, size_y=100, center_lon=-20, center_lat=0, rot=0)
 
     return grid
@@ -95,7 +145,7 @@ def large_grid():
 
 
 @pytest.fixture(scope="session")
-def grid_that_straddles_dateline():
+def grid_that_straddles_dateline() -> Grid:
     grid = Grid(
         nx=1, ny=1, size_x=1000, size_y=1000, center_lon=0.5, center_lat=0, rot=20
     )
@@ -104,7 +154,7 @@ def grid_that_straddles_dateline():
 
 
 @pytest.fixture(scope="session")
-def grid_that_straddles_180_degree_meridian():
+def grid_that_straddles_180_degree_meridian() -> Grid:
     """Fixture for creating a domain that straddles 180 degree meridian.
 
     This is a good test grid for the global ERA5 data, which comes on an [-180, 180]
@@ -124,7 +174,43 @@ def grid_that_straddles_180_degree_meridian():
 
 
 @pytest.fixture(scope="session")
-def tidal_forcing(use_dask):
+def small_grid() -> Grid:
+    """Create a grid that covers a small surface area."""
+    return Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+
+@pytest.fixture(scope="session")
+def tiny_grid() -> Grid:
+    """Create a grid that covers a small surface area."""
+    return Grid(
+        nx=3,
+        ny=3,
+        size_x=10,
+        size_y=10,
+        center_lon=-17,
+        center_lat=60,
+        rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+
+@pytest.fixture(scope="session")
+def tidal_forcing(use_dask: bool) -> TidalForcing:
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20
     )
@@ -135,14 +221,14 @@ def tidal_forcing(use_dask):
 
     return TidalForcing(
         grid=grid,
-        source={"name": "TPXO", "path": fname_dict},
+        source={"name": "TPXO", "path": fname_dict},  # type: ignore[dict-item]
         ntides=1,
         use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions(use_dask):
+def initial_conditions(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
         nx=2,
@@ -182,7 +268,7 @@ def initial_conditions_on_large_grid(large_grid, use_dask):
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_adjusted_for_zeta(use_dask):
+def initial_conditions_adjusted_for_zeta(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
         nx=2,
@@ -210,7 +296,7 @@ def initial_conditions_adjusted_for_zeta(use_dask):
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc(use_dask):
+def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
         nx=2,
@@ -239,7 +325,7 @@ def initial_conditions_with_bgc(use_dask):
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc_adjusted_for_zeta(use_dask):
+def initial_conditions_with_bgc_adjusted_for_zeta(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
         nx=2,
@@ -269,7 +355,7 @@ def initial_conditions_with_bgc_adjusted_for_zeta(use_dask):
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_bgc_from_climatology(use_dask):
+def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialConditions:
     """Fixture for creating an InitialConditions object."""
     grid = Grid(
         nx=2,
@@ -295,14 +381,16 @@ def initial_conditions_with_bgc_from_climatology(use_dask):
         bgc_source={
             "path": fname_bgc,
             "name": "CESM_REGRIDDED",
-            "climatology": True,
+            "climatology": True,  # type: ignore[dict-item]
         },
         use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def initial_conditions_with_unified_bgc_from_climatology(use_dask):
+def initial_conditions_with_unified_bgc_from_climatology(
+    use_dask: bool,
+) -> InitialConditions:
     grid = Grid(
         nx=2,
         ny=2,
@@ -324,32 +412,18 @@ def initial_conditions_with_unified_bgc_from_climatology(use_dask):
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
-        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         use_dask=use_dask,
     )
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing(use_dask):
+def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -359,26 +433,14 @@ def boundary_forcing(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_adjusted_for_zeta(use_dask):
+def boundary_forcing_adjusted_for_zeta(
+    use_dask: bool, small_grid: Grid
+) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -389,26 +451,12 @@ def boundary_forcing_adjusted_for_zeta(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill(use_dask):
+def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -418,26 +466,14 @@ def boundary_forcing_with_2d_fill(use_dask):
 
 
 @pytest.fixture(scope="session")
-def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask):
+def boundary_forcing_with_2d_fill_adjusted_for_zeta(
+    use_dask: bool, small_grid: Grid
+) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
     fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
     return BoundaryForcing(
-        grid=grid,
+        grid=small_grid,
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
@@ -448,7 +484,7 @@ def boundary_forcing_with_2d_fill_adjusted_for_zeta(use_dask):
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_climatology(use_dask):
+def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
     grid = Grid(
         nx=2,
@@ -472,7 +508,7 @@ def bgc_boundary_forcing_from_climatology(use_dask):
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
@@ -480,7 +516,7 @@ def bgc_boundary_forcing_from_climatology(use_dask):
 
 
 @pytest.fixture(scope="session")
-def bgc_boundary_forcing_from_unified_climatology(use_dask):
+def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
     grid = Grid(
         nx=2,
@@ -502,7 +538,7 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask):
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
@@ -510,7 +546,7 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask):
 
 
 @pytest.fixture(scope="session")
-def surface_forcing(use_dask):
+def surface_forcing(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object."""
     grid = Grid(
         nx=5,
@@ -538,9 +574,8 @@ def surface_forcing(use_dask):
     )
 
 
-@pytest.mark.stream
 @pytest.fixture(scope="session")
-def surface_forcing_arco(use_dask):
+def surface_forcing_arco(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with ERA5 ARCO data."""
     if not use_dask:
         pytest.skip("surface_forcing_arco requires use_dask=True")
@@ -570,7 +605,7 @@ def surface_forcing_arco(use_dask):
 
 
 @pytest.fixture(scope="session")
-def coarse_surface_forcing(use_dask):
+def coarse_surface_forcing(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object."""
     grid = Grid(
         nx=5,
@@ -599,7 +634,7 @@ def coarse_surface_forcing(use_dask):
 
 
 @pytest.fixture(scope="session")
-def corrected_surface_forcing(use_dask):
+def corrected_surface_forcing(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with shortwave radiation
     correction.
     """
@@ -630,7 +665,7 @@ def corrected_surface_forcing(use_dask):
 
 
 @pytest.fixture(scope="session")
-def surface_forcing_with_wind_dropoff(use_dask):
+def surface_forcing_with_wind_dropoff(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with wind dropoff correction."""
     grid = Grid(
         nx=5,
@@ -659,7 +694,7 @@ def surface_forcing_with_wind_dropoff(use_dask):
 
 
 @pytest.fixture(scope="session")
-def bgc_surface_forcing(use_dask):
+def bgc_surface_forcing(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with BGC."""
     grid = Grid(
         nx=5,
@@ -688,7 +723,7 @@ def bgc_surface_forcing(use_dask):
 
 
 @pytest.fixture(scope="session")
-def bgc_surface_forcing_from_climatology(use_dask):
+def bgc_surface_forcing_from_climatology(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with BGC from climatology."""
     grid = Grid(
         nx=5,
@@ -709,7 +744,7 @@ def bgc_surface_forcing_from_climatology(use_dask):
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},
+        source={"name": "CESM_REGRIDDED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
         use_dask=use_dask,
@@ -717,7 +752,7 @@ def bgc_surface_forcing_from_climatology(use_dask):
 
 
 @pytest.fixture(scope="session")
-def bgc_surface_forcing_from_unified_climatology(use_dask):
+def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForcing:
     """Fixture for creating a SurfaceForcing object with BGC from climatology."""
     grid = Grid(
         nx=5,
@@ -738,7 +773,7 @@ def bgc_surface_forcing_from_unified_climatology(use_dask):
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},
+        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
         use_dask=use_dask,
@@ -746,7 +781,7 @@ def bgc_surface_forcing_from_unified_climatology(use_dask):
 
 
 @pytest.fixture(scope="session")
-def river_forcing():
+def river_forcing() -> RiverForcing:
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
     grid = Grid(
         nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
@@ -763,7 +798,7 @@ def river_forcing():
 
 
 @pytest.fixture(scope="session")
-def river_forcing_no_climatology():
+def river_forcing_no_climatology() -> RiverForcing:
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
     grid = Grid(
         nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
@@ -780,8 +815,8 @@ def river_forcing_no_climatology():
     )
 
 
-@pytest.fixture
-def river_forcing_with_bgc(scope="session"):
+@pytest.fixture(scope="session")
+def river_forcing_with_bgc() -> RiverForcing:
     """Fixture for creating a RiverForcing object with BGC tracers."""
     grid = Grid(
         nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
@@ -796,7 +831,7 @@ def river_forcing_with_bgc(scope="session"):
 
 
 @pytest.fixture(scope="session")
-def era5_data(use_dask):
+def era5_data(use_dask: bool) -> Dataset:
     fname = download_test_data("ERA5_regional_test_data.nc")
     data = ERA5Dataset(
         filename=fname,
@@ -809,7 +844,7 @@ def era5_data(use_dask):
 
 
 @pytest.fixture(scope="session")
-def glorys_data(use_dask):
+def glorys_data(use_dask: bool) -> Dataset:
     # the following GLORYS data has a wide enough domain
     # to have different masks for tracers vs. velocities
     fname = download_test_data("GLORYS_test_data.nc")
@@ -830,7 +865,7 @@ def glorys_data(use_dask):
 
 
 @pytest.fixture(scope="session")
-def tpxo_data(use_dask):
+def tpxo_data(use_dask: bool) -> Dataset:
     fname = download_test_data("regional_h_tpxo10v2a.nc")
     fname_grid = download_test_data("regional_grid_tpxo10v2a.nc")
 
@@ -846,7 +881,7 @@ def tpxo_data(use_dask):
 
 
 @pytest.fixture(scope="session")
-def cesm_bgc_data(use_dask):
+def cesm_bgc_data(use_dask: bool) -> Dataset:
     fname = download_test_data("CESM_regional_test_data_one_time_slice.nc")
 
     data = CESMBGCDataset(
@@ -861,7 +896,7 @@ def cesm_bgc_data(use_dask):
 
 
 @pytest.fixture(scope="session")
-def coarsened_cesm_bgc_data(use_dask):
+def coarsened_cesm_bgc_data(use_dask: bool) -> Dataset:
     fname = download_test_data("CESM_BGC_2012.nc")
 
     data = CESMBGCDataset(
@@ -878,7 +913,7 @@ def coarsened_cesm_bgc_data(use_dask):
 
 
 @pytest.fixture(scope="session")
-def cesm_surface_bgc_data(use_dask):
+def cesm_surface_bgc_data(use_dask: bool) -> Dataset:
     fname = download_test_data("CESM_BGC_SURFACE_2012.nc")
 
     data = CESMBGCSurfaceForcingDataset(
@@ -894,7 +929,7 @@ def cesm_surface_bgc_data(use_dask):
 
 
 @pytest.fixture(scope="session")
-def unified_bgc_data(use_dask):
+def unified_bgc_data(use_dask: bool) -> Dataset:
     fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
 
     data = UnifiedBGCDataset(
@@ -910,7 +945,7 @@ def unified_bgc_data(use_dask):
 
 
 @pytest.fixture(scope="session")
-def unified_surface_bgc_data(use_dask):
+def unified_surface_bgc_data(use_dask: bool) -> Dataset:
     fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
 
     data = UnifiedBGCSurfaceDataset(
@@ -925,7 +960,7 @@ def unified_surface_bgc_data(use_dask):
     return data
 
 
-def calculate_file_hash(filepath, hash_algorithm="sha256"):
+def calculate_file_hash(filepath: str, hash_algorithm: str = "sha256") -> str:
     """Calculate the hash of a file using the specified hash algorithm."""
     hash_func = hashlib.new(hash_algorithm)
     with open(filepath, "rb") as f:
@@ -934,7 +969,7 @@ def calculate_file_hash(filepath, hash_algorithm="sha256"):
     return hash_func.hexdigest()
 
 
-def calculate_data_hash(filepath):
+def calculate_data_hash(filepath: str) -> str:
     """Calculate the hash of an HDF5 file's datasets, ignoring certain metadata.
 
     This function computes a SHA-256 hash based on the actual data stored in the
@@ -968,3 +1003,45 @@ def calculate_data_hash(filepath):
 
         # Return the computed hash
         return hash_obj.hexdigest()
+
+
+@pytest.fixture
+def get_test_data_path() -> Callable[[str], Path]:
+    """Given a data source name, find the local path to the test data.
+
+    Returns
+    -------
+    Callable[[str], Path] : A function that takes the dataset name and returns a Path
+    """
+
+    def _get_test_data_path(dataset_name: str) -> Path:
+        """Retrieve the path to a dataset.
+
+        Parameters
+        ----------
+        dataset_name : str
+            The name of the test dataset to return a path to
+
+        Returns
+        -------
+        Path : The path to the dataset
+
+        Raises
+        ------
+        FileNotFoundError :
+            If the dataset cannot be located
+        """
+        data_dir = Path(__file__).parent / "roms_tools/tests/test_setup/test_data"
+
+        path = data_dir / dataset_name
+        if path.exists():
+            return path
+
+        path = data_dir / f"{dataset_name}.zarr"
+        if path.exists():
+            return path
+
+        msg = f"Dataset `{dataset_name}` not found in data directory `{data_dir}`"
+        raise FileNotFoundError(msg)
+
+    return _get_test_data_path

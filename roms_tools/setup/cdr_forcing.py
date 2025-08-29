@@ -14,7 +14,6 @@ from pydantic import (
     BaseModel,
     Field,
     RootModel,
-    conlist,
     model_serializer,
     model_validator,
 )
@@ -103,14 +102,16 @@ class ReleaseSimulationManager(BaseModel):
 class ReleaseCollector(RootModel):
     """Collects and validates multiple releases against each other."""
 
-    root: conlist(
-        Annotated[
-            VolumeRelease | TracerPerturbation, Field(discriminator="release_type")
+    root: Annotated[
+        list[
+            Annotated[
+                VolumeRelease | TracerPerturbation, Field(discriminator="release_type")
+            ]
         ],
-        min_length=1,
-    ) = Field(alias="releases")
+        Field(alias="releases", min_length=1),
+    ]
 
-    _release_type: ReleaseType = None
+    _release_type: ReleaseType | None = None
 
     def __iter__(self) -> Iterator[Release]:
         return iter(self.root)
@@ -1039,18 +1040,12 @@ def _map_3d_gaussian(
         # Stack 2D distribution at that vertical level
         distribution_3d[{"s_rho": vertical_idx}] = distribution_2d
     else:
-        # Compute layer thickness
-        depth_interface = compute_depth_coordinates(
-            grid.ds, zeta=0, depth_type="interface", location="rho"
-        )
-        dz = depth_interface.diff("s_w").rename({"s_w": "s_rho"})
-
         # Compute vertical Gaussian shape
         exponent = -(((depth - release.depth) / release.vsc) ** 2)
         vertical_profile = np.exp(exponent)
 
         # Apply vertical Gaussian scaling
-        distribution_3d = distribution_2d * vertical_profile * dz
+        distribution_3d = distribution_2d * vertical_profile
 
         # Normalize
         distribution_3d /= release.vsc * np.sqrt(np.pi)

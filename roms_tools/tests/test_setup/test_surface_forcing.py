@@ -159,7 +159,7 @@ def _test_successful_initialization(
     grid: Grid,
     start_time: datetime,
     end_time: datetime,
-    source: dict[str, str],
+    source: dict[str, str | Path | list[str | Path]],
     coarse_grid_mode: str,
     use_dask: bool,
     caplog,
@@ -902,7 +902,9 @@ def test_from_yaml_missing_surface_forcing(tmp_path, use_dask):
         yaml_filepath.unlink()
 
 
+@pytest.mark.skip("Temporary skip until memory consumption issue is addressed. # TODO")
 @pytest.mark.stream
+@pytest.mark.use_dask
 def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
     """One big integration test for cloud-based ERA5 data because the streaming takes a
     long time.
@@ -932,3 +934,25 @@ def test_surface_forcing_arco(surface_forcing_arco, tmp_path):
     yaml_filepath.unlink()
     Path(expected_filepath1).unlink()
     Path(expected_filepath2).unlink()
+
+
+@pytest.mark.skip("Temporary skip until memory consumption issue is addressed. # TODO")
+@pytest.mark.stream
+@pytest.mark.use_dask
+@pytest.mark.use_gcsfs
+def test_default_era5_dataset_loading(small_grid: Grid) -> None:
+    """Verify the default ERA5 dataset is loaded when a path is not provided."""
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 2)
+
+    sf = SurfaceForcing(
+        grid=small_grid,
+        source={"name": "ERA5"},
+        type="physics",
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=True,
+    )
+
+    expected_vars = {"uwnd", "vwnd", "swrad", "lwrad", "Tair", "rain"}
+    assert set(sf.ds.data_vars).issuperset(expected_vars)

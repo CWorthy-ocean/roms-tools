@@ -52,7 +52,14 @@ stream = [
     "zarr",
     "copernicusmarine",
 ]
-
+notebooks = [
+    "dask[diagnostics]",
+    "gcsfs",
+    "zarr",
+    "copernicusmarine",
+    "gdown",
+    "ipykernel"
+]
 
 [project.urls]
 Home = "https://github.com/CWorthy-ocean/roms-tools"

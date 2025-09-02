@@ -26,6 +26,7 @@ from roms_tools.setup.utils import (
     assign_dates_to_climatology,
     convert_cftime_to_datetime,
     gc_dist,
+    get_target_coords,
     get_time_type,
     interpolate_cyclic_time,
     interpolate_from_climatology,
@@ -3104,3 +3105,68 @@ def choose_subdomain(
         subdomain[dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
 
     return subdomain
+
+
+def get_glorys_bounds(
+    grid_ds: xr.Dataset,
+    glorys_grid_path: Path | str | None = None,
+) -> dict[str, float]:
+    """
+    Compute the latitude/longitude bounds of a GLORYS spatial subset
+    that fully covers the given ROMS grid (with margin for regridding).
+
+    Parameters
+    ----------
+    grid_ds : xr.Dataset
+        ROMS grid dataset.
+    glorys_grid_path : str, optional
+        Path to the GLORYS global grid file. If None, defaults to
+        "<repo_root>/data/grids/GLORYS_global_grid.nc".
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary containing the bounding box values:
+
+        - `"minimum_latitude"` : float
+        - `"maximum_latitude"` : float
+        - `"minimum_longitude"` : float
+        - `"maximum_longitude"` : float
+
+    Notes
+    -----
+    - The resolution is estimated as the mean of latitude and longitude spacing.
+    """
+    # Determine repo root relative to this file
+    repo_root = Path(__file__).resolve().parents[2]
+    if glorys_grid_path is None:
+        glorys_grid_path = (
+            repo_root / "roms_tools" / "data" / "grids" / "GLORYS_global_grid.nc"
+        )
+
+    ds = xr.open_dataset(glorys_grid_path)
+
+    # Estimate grid resolution (mean spacing in degrees)
+    res_lat = ds.latitude.diff("latitude").mean()
+    res_lon = ds.longitude.diff("longitude").mean()
+    resolution = (res_lat + res_lon) / 2
+
+    # Extract target grid coordinates
+    target_coords = get_target_coords(grid_ds, grid_ds.attrs.get("straddle", False))
+
+    # Select subdomain with margin
+    ds_subset = choose_subdomain(
+        ds=ds,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=resolution,
+        is_global=True,
+        target_coords=target_coords,
+    )
+
+    # Compute bounds
+    return {
+        "minimum_latitude": float(ds_subset.latitude.min()),
+        "maximum_latitude": float(ds_subset.latitude.max()),
+        "minimum_longitude": float(ds_subset.longitude.min()),
+        "maximum_longitude": float(ds_subset.longitude.max()),
+    }

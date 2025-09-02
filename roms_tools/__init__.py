@@ -19,6 +19,7 @@ from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
 from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
 from roms_tools.setup.tides import TidalForcing  # noqa: F401
 from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
+from roms_tools.setup.datasets import get_glorys_bounds  # noqa: F401
 
 
 # Configure logging when the package is imported

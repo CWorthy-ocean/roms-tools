@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest import mock
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -12,7 +13,7 @@ from roms_tools.setup.cdr_release import (
     TracerPerturbation,
     VolumeRelease,
 )
-from roms_tools.setup.utils import get_tracer_defaults
+from roms_tools.setup.utils import convert_to_relative_days, get_tracer_defaults
 
 
 class TestValueArray:
@@ -377,3 +378,105 @@ class TestTracerPerturbation:
     def test_get_tracer_metadata(self):
         d = VolumeRelease.get_tracer_metadata()
         assert len(d) == NUM_TRACERS
+
+
+class TestReleaseAccounting:
+    def setup_method(self):
+        self.start = datetime(2020, 1, 1)
+        self.end = datetime(2020, 1, 11)  # 10 days later
+
+    def make_release(self, release_type, fluxes=None, concentrations=None, times=None):
+        times = times or [self.start, self.end]
+
+        if release_type == "volume":
+            return VolumeRelease(
+                name="test",
+                lat=0.0,
+                lon=0.0,
+                depth=100.0,
+                times=times,
+                volume_fluxes=Flux("volume", fluxes),
+                tracer_concentrations={"DIC": Concentration("DIC", concentrations)},
+            )
+        elif release_type == "tracer":
+            return TracerPerturbation(
+                name="test",
+                lat=0.0,
+                lon=0.0,
+                depth=100.0,
+                times=times,
+                tracer_fluxes={"DIC": Flux("DIC", fluxes)},
+            )
+        else:
+            raise ValueError(f"Unknown release type {release_type}")
+
+    def left_hold_integral(self, release, roms_stamps):
+        """Compute left-hold integral for both VolumeRelease and TracerPerturbation."""
+        dt = np.diff(roms_stamps)
+
+        if isinstance(release, VolumeRelease):
+            volume_array = np.array(release.volume_fluxes.values)
+            tracer_array = np.array(release.tracer_concentrations["DIC"].values)
+            series = volume_array * tracer_array
+        elif isinstance(release, TracerPerturbation):
+            series = np.array(release.tracer_fluxes["DIC"].values)
+
+        interp = np.interp(
+            roms_stamps, convert_to_relative_days(release.times, self.start), series
+        )
+        return np.sum(interp[:-1] * dt)
+
+    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    def test_constant_flux(self, release_type):
+        flux = 2.0
+        conc = 3.0  # only used for VolumeRelease
+        vr = self.make_release(release_type, fluxes=flux, concentrations=conc)
+        vr._extend_to_endpoints(self.start, self.end)
+        roms_stamps = np.array([0.0, 5.0, 10.0])
+        result = vr._do_accounting(roms_stamps, self.start)
+
+        expected = flux * (roms_stamps[-1] - roms_stamps[0])
+        if release_type == "volume":
+            expected *= conc
+
+        assert result["DIC"] == pytest.approx(expected)
+
+    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize(
+        "release_days, fluxes, concs",
+        [
+            # Regular dt = 2.5, aligned with ROMS stamps
+            (
+                np.array([0, 2.5, 5, 7.5, 10]),
+                [1.0, 2.0, 3.0, 4.0, 5.0],
+                [1.0, 1.5, 2.0, 2.5, 3.0],
+            ),
+            # Varying dt, not aligned with ROMS stamps
+            (
+                np.array([0, 1.0, 3.0, 6.0, 10.0]),
+                [2.0, 1.0, 3.0, 4.0, 2.0],
+                [1.0, 2.0, 1.5, 3.0, 2.5],
+            ),
+        ],
+    )
+    def test_time_varying(self, release_type, release_days, fluxes, concs):
+        roms_stamps = np.array([0.0, 2.5, 5.0, 7.5, 10.0])
+        times = [self.start + timedelta(days=d) for d in release_days]
+
+        if release_type == "volume":
+            vr = self.make_release(
+                release_type, fluxes=fluxes, concentrations=concs, times=times
+            )
+        elif release_type == "tracer":
+            vr = self.make_release(release_type, fluxes=fluxes, times=times)
+
+        result = vr._do_accounting(roms_stamps, self.start)
+        expected = self.left_hold_integral(vr, roms_stamps)
+        assert result["DIC"] == pytest.approx(expected)
+
+    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    def test_raises_with_single_roms_timestamp(self, release_type):
+        vr = self.make_release(release_type, fluxes=1.0, concentrations=1.0)
+        roms_stamps = np.array([0.0])
+        with pytest.raises(ValueError, match="at least two ROMS time stamps"):
+            vr._do_accounting(roms_stamps, self.start)

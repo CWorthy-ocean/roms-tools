@@ -1159,8 +1159,6 @@ class GLORYSDefaultDataset(GLORYSDataset):
         copernicusmarine = self._load_copernicus()
 
         ds = copernicusmarine.download_functions.download_zarr.open_dataset_from_arco_series(
-            username="nloose",
-            password="tNSwmKLRRgDw5C!",
             dataset_url="https://s3.waw3-1.cloudferro.com/mdl-arco-geo-025/arco/GLOBAL_MULTIYEAR_PHY_001_030/cmems_mod_glo_phy_my_0.083deg_P1D-m_202311/geoChunked.zarr",
             variables=["thetao", "so", "uo", "vo", "zos"],
             geographical_parameters=copernicusmarine.download_functions.subset_parameters.GeographicalParameters(),

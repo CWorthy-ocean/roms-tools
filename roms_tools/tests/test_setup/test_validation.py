@@ -1,13 +1,9 @@
-import os
 import shutil
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 import xarray as xr
-
-
-def _get_fname(name):
-    dirname = os.path.dirname(__file__)
-    return os.path.join(dirname, "test_data", f"{name}.zarr")
 
 
 @pytest.mark.parametrize(
@@ -34,7 +30,11 @@ def _get_fname(name):
 # this test will not be run by default
 # to run it and overwrite the test data, invoke pytest as follows
 # pytest --overwrite=tidal_forcing --overwrite=boundary_forcing
-def test_save_results(forcing_fixture, request):
+def test_save_results(
+    forcing_fixture,
+    request: pytest.FixtureRequest,
+    get_test_data_path: Callable[[str], Path],
+) -> None:
     overwrite = request.config.getoption("--overwrite")
 
     # Skip the test if the fixture isn't marked for overwriting, unless 'all' is specified
@@ -42,10 +42,10 @@ def test_save_results(forcing_fixture, request):
         pytest.skip(f"Skipping overwrite for {forcing_fixture}")
 
     forcing = request.getfixturevalue(forcing_fixture)
-    fname = _get_fname(forcing_fixture)
+    fname = get_test_data_path(forcing_fixture)
 
     # Check if the Zarr directory exists and delete it if it does
-    if os.path.exists(fname):
+    if fname.exists():
         shutil.rmtree(fname)
 
     forcing.ds.to_zarr(fname)
@@ -72,8 +72,12 @@ def test_save_results(forcing_fixture, request):
         "river_forcing_no_climatology",
     ],
 )
-def test_check_results(forcing_fixture, request):
-    fname = _get_fname(forcing_fixture)
+def test_check_results(
+    forcing_fixture,
+    request: pytest.FixtureRequest,
+    get_test_data_path: Callable[[str], Path],
+) -> None:
+    fname = get_test_data_path(forcing_fixture)
     expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)
     forcing = request.getfixturevalue(forcing_fixture)
 
@@ -83,6 +87,7 @@ def test_check_results(forcing_fixture, request):
     )
 
 
+@pytest.mark.use_dask
 @pytest.mark.parametrize(
     "forcing_fixture",
     [
@@ -97,11 +102,12 @@ def test_check_results(forcing_fixture, request):
         "bgc_boundary_forcing_from_climatology",
     ],
 )
-def test_dask_vs_no_dask(forcing_fixture, request, tmp_path, use_dask):
+def test_dask_vs_no_dask(
+    forcing_fixture: str,
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
     """Test comparing the forcing created with and without Dask on same platform."""
-    if not use_dask:
-        pytest.skip("Test only runs when --use_dask is specified")
-
     # Get the forcing with Dask
     forcing_with_dask = request.getfixturevalue(forcing_fixture)
 

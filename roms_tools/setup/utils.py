@@ -1,5 +1,6 @@
 import importlib.metadata
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -22,6 +23,45 @@ yaml.SafeDumper.add_multi_representer(
     StrEnum,
     yaml.representer.SafeRepresenter.represent_str,
 )
+
+HEADER_SZ = 96
+HEADER_CHAR = "="
+
+
+def log_the_separator() -> None:
+    """Log a separator line using HEADER_CHAR repeated HEADER_SZ times."""
+    logging.info(HEADER_CHAR * HEADER_SZ)
+
+
+class Timed:
+    """Context manager to time a block and log messages."""
+
+    def __init__(self, message: str = "", verbose: bool = True) -> None:
+        """
+        Initialize the context manager.
+
+        Parameters
+        ----------
+        message : str, optional
+            A log message printed at the start of the block (default: "").
+        verbose : bool, optional
+            Whether to log timing information (default: True).
+        """
+        self.message = message
+        self.verbose = verbose
+        self.start: float | None = None
+
+    def __enter__(self) -> "Timed":
+        if self.verbose:
+            self.start = time.time()
+            if self.message:
+                logging.info(self.message)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if self.verbose and self.start is not None:
+            logging.info(f"Total time: {time.time() - self.start:.3f} seconds")
+            log_the_separator()
 
 
 def nan_check(field, mask, error_message=None) -> None:

@@ -389,9 +389,11 @@ class VolumeRelease(Release):
         num_times = len(self.times)
 
         for tracer_concentrations in self.tracer_concentrations.values():
-            tracer_concentrations.check_length(num_times)
+            if isinstance(tracer_concentrations, Concentration):
+                tracer_concentrations.check_length(num_times)
 
-        self.volume_fluxes.check_length(num_times)
+        if isinstance(self.volume_fluxes, Flux):
+            self.volume_fluxes.check_length(num_times)
 
         return self
 
@@ -503,7 +505,8 @@ class TracerPerturbation(Release):
     def _check_tracer_flux_lengths(self):
         num_times = len(self.times)
         for flux in self.tracer_fluxes.values():
-            flux.check_length(num_times)
+            if isinstance(flux, Flux):
+                flux.check_length(num_times)
         return self
 
     def _extend_to_endpoints(self, start_time, end_time):

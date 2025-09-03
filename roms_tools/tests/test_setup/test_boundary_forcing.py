@@ -1,7 +1,9 @@
 import logging
+import os
 import textwrap
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -758,3 +760,58 @@ def test_from_yaml_missing_boundary_forcing(tmp_path, use_dask):
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
+
+
+@pytest.mark.stream
+@pytest.mark.use_dask
+@pytest.mark.use_copernicus
+def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
+    """Verify the default GLORYS dataset is loaded when a path is not provided."""
+    start_time = datetime(2010, 2, 1)
+    end_time = datetime(2010, 3, 1)
+
+    with mock.patch.dict(
+        os.environ, {"PYDEVD_WARN_EVALUATION_TIMEOUT": "90"}, clear=True
+    ):
+        bf = BoundaryForcing(
+            grid=tiny_grid,
+            source={"name": "GLORYS"},
+            type="physics",
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=True,
+            bypass_validation=True,
+        )
+
+        expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}
+        assert set(bf.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.parametrize(
+    "use_dask",
+    [pytest.param(True, marks=pytest.mark.use_dask), False],
+)
+def test_nondefault_glorys_dataset_loading(small_grid: Grid, use_dask: bool) -> None:
+    """Verify a non-default GLORYS dataset is loaded when a path is provided."""
+    start_time = datetime(2012, 1, 1)
+    end_time = datetime(2012, 12, 31)
+
+    local_path = Path(download_test_data("GLORYS_NA_20120101.nc"))
+
+    with mock.patch.dict(
+        os.environ, {"PYDEVD_WARN_EVALUATION_TIMEOUT": "90"}, clear=True
+    ):
+        bf = BoundaryForcing(
+            grid=small_grid,
+            source={
+                "name": "GLORYS",
+                "path": local_path,
+            },
+            type="physics",
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=use_dask,
+        )
+
+        expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}
+        assert set(bf.ds.data_vars).issuperset(expected_vars)

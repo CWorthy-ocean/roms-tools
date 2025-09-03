@@ -1,0 +1,56 @@
+name: Close Jira Ticket on Issue Close
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  close-jira-ticket:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'jira-story')
+    steps:
+      - name: Extract Jira Story Key from Issue Comment
+        id: extract_story_key
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Fetch all comments on the closed issue
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            // Find the comment containing the Jira link
+            const jiraComment = comments.find(comment => comment.body.includes('This issue has been linked to Jira story'));
+            if (!jiraComment) {
+              core.setFailed("No Jira comment found with story key.");
+              return;
+            }
+
+            // Extract the Jira story key from the comment
+            const match = jiraComment.body.match(/\[(.*?)\]\(https:\/\/cworthy\.atlassian\.net\/browse\/.*?\)/);
+            if (!match || match.length < 2) {
+              core.setFailed("Jira story key not found in the comment.");
+              return;
+            }
+            const storyKey = match[1];
+
+            // Print the extracted story key
+            console.log("Extracted STORY_KEY:", storyKey);
+
+            core.setOutput("story_key", storyKey);
+
+      - name: Close Jira Ticket
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN_MENDOCINO }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL_MENDOCINO }}
+          STORY_KEY: ${{ steps.extract_story_key.outputs.story_key }}
+        run: |
+          story_key="${{ steps.extract_story_key.outputs.story_key }}"
+          jira_domain="https://cworthy.atlassian.net"
+
+          curl -s -w "%{http_code}" -o response.json -X POST -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"transition": {"id": "31"}}' \
+            "$jira_domain/rest/api/3/issue/$story_key/transitions"

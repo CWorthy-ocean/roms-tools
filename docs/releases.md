@@ -8,9 +8,14 @@
 * Add `join_netcdf` function: users can now re-join ROMS output and partitioned files
 ([#412](https://github.com/CWorthy-ocean/roms-tools/pull/412))
 
+* Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
+* Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
+
 ### Breaking Changes
 
 ### Internal Changes
+
+* Require xgcm version >= 0.9.0 ([#425](https://github.com/CWorthy-ocean/roms-tools/pull/425))
 
 ### Documentation
 
@@ -50,6 +55,7 @@ plot(field, grid.ds)
 
 * Most classes now delegate their `.plot()` methods to the centralized plot function, reducing code duplication and simplifying maintenance. ([#375](https://github.com/CWorthy-ocean/roms-tools/pull/375))
 * Implement ruff rules ([#382](https://github.com/CWorthy-ocean/roms-tools/pull/382))
+* Implement streamable default datasources for GLORYS ([#386](https://github.com/CWorthy-ocean/roms-tools/pull/386))
 
 ### Documentation
 

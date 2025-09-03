@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import xarray as xr
 
@@ -54,7 +54,7 @@ def join_netcdf(files: FilePaths, output_path: Path | None = None) -> Path:
         # e.g. roms_rst.20120101120000.023.nc -> roms_rst.20120101120000.nc
         output_path = filepaths[0].with_suffix("").with_suffix(".nc")
 
-    joined = open_partitions(filepaths)
+    joined = open_partitions(cast(FilePaths, filepaths))
     joined.to_netcdf(output_path)
     print(f"Saved joined dataset to: {output_path}")
 
@@ -77,7 +77,7 @@ def _find_transitions(dim_sizes: list[int]) -> list[int]:
     List[int]
         A list of indices where a transition was detected.
     """
-    transitions = []
+    transitions: list[int] = []
     if len(dim_sizes) < 2:
         return transitions
 
@@ -89,7 +89,7 @@ def _find_transitions(dim_sizes: list[int]) -> list[int]:
 
 def _find_common_dims(
     direction: Literal["xi", "eta"], datasets: Sequence[xr.Dataset]
-) -> str:
+) -> list[str]:
     """Finds all common dimensions along the xi or eta direction amongst a list of Datasets.
 
     Parameters
@@ -101,8 +101,8 @@ def _find_common_dims(
 
     Returns
     -------
-    common_dim: str
-        The dimension common to all specified datasets along 'direction'
+    common_dim: list[str]
+        The dimensions common to all specified datasets along 'direction'
     """
     if direction not in ["xi", "eta"]:
         raise ValueError("'direction' must be 'xi' or 'eta'")

@@ -9,6 +9,7 @@ from typing import Annotated
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 from pydantic import (
     BaseModel,
@@ -775,10 +776,36 @@ class CDRForcing(BaseModel):
         fig.subplots_adjust(hspace=0.45)
         fig.suptitle(f"Release distribution for: {release_name}")
 
-    def do_accounting(self, dt: float):
-        _, rel_days = _reconstruct_roms_time_stamps(
+    def do_accounting(self, dt: float) -> pd.DataFrame:
+        """
+        Compute integrated tracer quantities for all releases and return a DataFrame.
+
+        Parameters
+        ----------
+        dt : float
+            Time step in days for reconstructing ROMS time stamps.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with one row per release and one column per tracer.
+        """
+        # Reconstruct ROMS time stamps
+        roms_time_stamps, rel_days = _reconstruct_roms_time_stamps(
             self.start_time, self.end_time, dt, self.model_reference_date
         )
+
+        # Collect accounting results for all releases
+        records = []
+        release_names = []
+        for release in self.releases:
+            result = release._do_accounting(roms_time_stamps, self.model_reference_date)
+            records.append(result)
+            release_names.append(getattr(release, "name", f"release_{len(records)}"))
+
+        # Build DataFrame: rows=release, columns=tracer
+        df = pd.DataFrame(records, index=release_names)
+        return df
 
     def save(
         self,

@@ -3091,10 +3091,16 @@ def choose_subdomain(
     )
 
     # Check if the selected subdomain has zero dimensions in latitude or longitude
-    if subdomain[dim_names["latitude"]].size == 0:
+    if (
+        dim_names["latitude"] not in subdomain
+        or subdomain[dim_names["latitude"]].size == 0
+    ):
         raise ValueError("Selected latitude range does not intersect with dataset.")
 
-    if subdomain[dim_names["longitude"]].size == 0:
+    if (
+        dim_names["longitude"] not in subdomain
+        or subdomain[dim_names["longitude"]].size == 0
+    ):
         raise ValueError("Selected longitude range does not intersect with dataset.")
 
     # Adjust longitudes to expected range if needed
@@ -3152,7 +3158,9 @@ def get_glorys_bounds(
     resolution = (res_lat + res_lon) / 2
 
     # Extract target grid coordinates
-    target_coords = get_target_coords(grid_ds, grid_ds.attrs.get("straddle", False))
+    target_coords = get_target_coords(
+        grid_ds=grid_ds, grid_straddle=grid_ds.attrs["straddle"]
+    )
 
     # Select subdomain with margin
     ds_subset = choose_subdomain(

@@ -389,7 +389,7 @@ class TestReleaseAccounting:
         times = times or [self.start, self.end]
 
         if release_type == "volume":
-            return VolumeRelease(
+            vr = VolumeRelease(
                 name="test",
                 lat=0.0,
                 lon=0.0,
@@ -398,8 +398,11 @@ class TestReleaseAccounting:
                 volume_fluxes=Flux("volume", fluxes),
                 tracer_concentrations={"DIC": Concentration("DIC", concentrations)},
             )
+            vr._extend_to_endpoints(self.start, self.end)
+            return vr
+
         elif release_type == "tracer":
-            return TracerPerturbation(
+            tp = TracerPerturbation(
                 name="test",
                 lat=0.0,
                 lon=0.0,
@@ -407,6 +410,8 @@ class TestReleaseAccounting:
                 times=times,
                 tracer_fluxes={"DIC": Flux("DIC", fluxes)},
             )
+            tp._extend_to_endpoints(self.start, self.end)
+            return tp
         else:
             raise ValueError(f"Unknown release type {release_type}")
 
@@ -431,7 +436,6 @@ class TestReleaseAccounting:
         flux = 2.0
         conc = 3.0  # only used for VolumeRelease
         vr = self.make_release(release_type, fluxes=flux, concentrations=conc)
-        vr._extend_to_endpoints(self.start, self.end)
         roms_stamps = np.array([0.0, 5.0, 10.0])
         result = vr._do_accounting(roms_stamps, self.start)
 

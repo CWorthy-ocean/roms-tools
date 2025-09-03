@@ -40,6 +40,7 @@ from roms_tools.setup.utils import (
     from_yaml,
     gc_dist,
     get_target_coords,
+    get_tracer_metadata_dict,
     to_dict,
     validate_names,
     write_to_yaml,
@@ -127,6 +128,9 @@ class ReleaseCollector(RootModel):
             raise KeyError(f"Release named '{item}' not found.")
         else:
             raise TypeError(f"Invalid key type: {type(item)}. Must be int or str.")
+
+    def __len__(self):
+        return len(self.root)
 
     @model_validator(mode="before")
     @classmethod
@@ -251,7 +255,7 @@ class CDRForcingDatasetBuilder:
         """
         ds = xr.Dataset()
         ds["time"] = ("time", unique_times)
-        ds["cdr_time"] = ("time", unique_rel_times), timedelta
+        ds["cdr_time"] = ("time", unique_rel_times)
         ds["cdr_lon"] = ("ncdr", [r.lon for r in self.releases])
         ds["cdr_lat"] = ("ncdr", [r.lat for r in self.releases])
         ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
@@ -776,14 +780,14 @@ class CDRForcing(BaseModel):
         fig.subplots_adjust(hspace=0.45)
         fig.suptitle(f"Release distribution for: {release_name}")
 
-    def do_accounting(self, dt: float) -> pd.DataFrame:
+    def compute_total_releases(self, dt: float) -> pd.DataFrame:
         """
         Compute integrated tracer quantities for all releases and return a DataFrame.
 
         Parameters
         ----------
         dt : float
-            Time step in days for reconstructing ROMS time stamps.
+            Time step in seconds for reconstructing ROMS time stamps.
 
         Returns
         -------
@@ -791,7 +795,7 @@ class CDRForcing(BaseModel):
             DataFrame with one row per release and one column per tracer.
         """
         # Reconstruct ROMS time stamps
-        roms_time_stamps, rel_days = _reconstruct_roms_time_stamps(
+        _, rel_days = _reconstruct_roms_time_stamps(
             self.start_time, self.end_time, dt, self.model_reference_date
         )
 
@@ -799,12 +803,26 @@ class CDRForcing(BaseModel):
         records = []
         release_names = []
         for release in self.releases:
-            result = release._do_accounting(roms_time_stamps, self.model_reference_date)
+            result = release._do_accounting(rel_days, self.model_reference_date)
             records.append(result)
             release_names.append(getattr(release, "name", f"release_{len(records)}"))
 
         # Build DataFrame: rows=release, columns=tracer
         df = pd.DataFrame(records, index=release_names)
+
+        # Add integrated units to column captions if available
+        new_columns = []
+        for col in df.columns:
+            tracer_meta = get_tracer_metadata_dict(
+                include_bgc=True, unit_type="integrated"
+            )
+            unit = tracer_meta.get("integrated_units", None)
+            if unit:
+                new_columns.append(f"{col} ({unit})")
+            else:
+                new_columns.append(col)
+        df.columns = new_columns
+
         return df
 
     def save(

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 from pydantic import ValidationError
@@ -977,3 +978,35 @@ class TestCDRForcing:
             yaml_filepath.unlink()
             filepath1.unlink()
             filepath2.unlink()
+
+    @pytest.mark.parametrize(
+        "cdr_forcing, tracer_attr",
+        [
+            ("volume_release_cdr_forcing_without_grid", "tracer_concentrations"),
+            ("tracer_perturbation_cdr_forcing_without_grid", "tracer_fluxes"),
+        ],
+    )
+    def test_do_accounting(self, cdr_forcing, tracer_attr, request):
+        dt = 30.0
+        cdr_instance = getattr(self, cdr_forcing)
+
+        df = cdr_instance.do_accounting(dt)
+
+        # Check type
+        assert isinstance(df, pd.DataFrame)
+
+        # Check rows = number of releases
+        assert df.shape[0] == len(cdr_instance.releases)
+
+        # Columns = tracer names
+        all_tracers = set()
+        for r in cdr_instance.releases:
+            all_tracers.update(getattr(r, tracer_attr).keys())
+        assert set(df.columns) == all_tracers
+
+        # Check index = release names
+        expected_names = [r.name for r in cdr_instance.releases]
+        assert list(df.index) == expected_names
+
+        # All values finite
+        assert np.all(np.isfinite(df.values))

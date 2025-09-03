@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
 import xarray as xr
@@ -34,6 +34,7 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import get_pkg_error_msg, has_gcsfs, load_data
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
+RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
 # lat-lon datasets
 

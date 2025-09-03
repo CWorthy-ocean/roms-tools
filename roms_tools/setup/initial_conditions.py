@@ -18,6 +18,7 @@ from roms_tools.setup.datasets import (
     Dataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
+    RawDataSource,
     UnifiedBGCDataset,
 )
 from roms_tools.setup.utils import (
@@ -55,7 +56,7 @@ class InitialConditions:
     ini_time : datetime
         The date and time at which the initial conditions are set.
         If no exact match is found, the closest time entry to `ini_time` within the time range [ini_time, ini_time + 24 hours] is selected.
-    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+    source : RawDataSource
 
         Dictionary specifying the source of the physical initial condition data. Keys include:
 
@@ -69,7 +70,7 @@ class InitialConditions:
             Note: streaming is currently not recommended due to performance limitations.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
-    bgc_source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+    bgc_source : RawDataSource, optional
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data. Keys include:
 
           - "name" (str): Name of the data source (e.g., "CESM_REGRIDDED").
@@ -114,9 +115,9 @@ class InitialConditions:
     """Object representing the grid information."""
     ini_time: datetime
     """The date and time at which the initial conditions are set."""
-    source: dict[str, str | Path | list[str | Path]]
+    source: RawDataSource
     """Dictionary specifying the source of the physical initial condition data."""
-    bgc_source: dict[str, str | Path | list[str | Path]] | None = None
+    bgc_source: RawDataSource | None = None
     """Dictionary specifying the source of the biogeochemical (BGC) initial condition
     data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -363,6 +364,9 @@ class InitialConditions:
         variant = "default" if use_default else "external"
 
         data_type = dataset_map[forcing_type][source_name][variant]
+
+        if isinstance(source_dict["path"], bool):
+            raise ValueError('source["path"] cannot be a boolean here')
 
         return data_type(
             filename=source_dict["path"],

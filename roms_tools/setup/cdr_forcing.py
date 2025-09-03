@@ -792,7 +792,8 @@ class CDRForcing(BaseModel):
         Returns
         -------
         pd.DataFrame
-            DataFrame with one row per release and one column per tracer.
+            DataFrame with one row per release and one row of units at the top.
+            Columns 'temp' and 'salt' are excluded from integrated totals.
         """
         # Reconstruct ROMS time stamps
         _, rel_days = _reconstruct_roms_time_stamps(
@@ -807,23 +808,27 @@ class CDRForcing(BaseModel):
             records.append(result)
             release_names.append(getattr(release, "name", f"release_{len(records)}"))
 
-        # Build DataFrame: rows=release, columns=tracer
+        # Build DataFrame: rows = releases, columns = tracer names
         df = pd.DataFrame(records, index=release_names)
 
-        # Add integrated units to column captions if available
-        new_columns = []
-        for col in df.columns:
-            tracer_meta = get_tracer_metadata_dict(
-                include_bgc=True, unit_type="integrated"
-            )
-            unit = tracer_meta.get("integrated_units", None)
-            if unit:
-                new_columns.append(f"{col} ({unit})")
-            else:
-                new_columns.append(col)
-        df.columns = new_columns
+        # Exclude temp and salt from units row and integrated totals
+        integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
 
-        return df
+        # Add a row of units only for integrated tracers
+        tracer_meta = get_tracer_metadata_dict(include_bgc=True, unit_type="integrated")
+        units_row = {
+            col: tracer_meta.get(col, {}).get("units", "") for col in integrated_tracers
+        }
+
+        df_units = pd.DataFrame([units_row], index=["units"])
+
+        # Keep only integrated_tracers columns in df, drop temp and salt
+        df_integrated = df[integrated_tracers]
+
+        # Concatenate units row on top
+        df_final = pd.concat([df_units, df_integrated])
+
+        return df_final
 
     def save(
         self,

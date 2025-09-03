@@ -438,7 +438,7 @@ class VolumeRelease(Release):
     @staticmethod
     def get_tracer_metadata():
         """Returns long names and expected units for the tracer concentrations."""
-        return get_tracer_metadata_dict(include_bgc=True, with_flux_units=False)
+        return get_tracer_metadata_dict(include_bgc=True, unit_type="concentration")
 
     def _do_accounting(
         self,
@@ -594,7 +594,7 @@ class TracerPerturbation(Release):
     @staticmethod
     def get_tracer_metadata():
         """Returns long names and expected units for the tracer fluxes."""
-        return get_tracer_metadata_dict(include_bgc=True, with_flux_units=True)
+        return get_tracer_metadata_dict(include_bgc=True, unit_type="flux")
 
     def _do_accounting(
         self,

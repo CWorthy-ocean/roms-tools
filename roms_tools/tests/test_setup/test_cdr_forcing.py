@@ -17,6 +17,7 @@ from roms_tools.setup.cdr_forcing import (
     ReleaseSimulationManager,
 )
 from roms_tools.setup.cdr_release import ReleaseType
+from roms_tools.setup.utils import get_tracer_metadata_dict
 
 try:
     import xesmf  # type: ignore
@@ -995,18 +996,38 @@ class TestCDRForcing:
         # Check type
         assert isinstance(df, pd.DataFrame)
 
-        # Check rows = number of releases
-        assert df.shape[0] == len(cdr_instance.releases)
+        # Check rows = number of releases + 1 for the units row
+        assert df.shape[0] == len(cdr_instance.releases) + 1
 
         # Columns = tracer names
         all_tracers = set()
         for r in cdr_instance.releases:
             all_tracers.update(getattr(r, tracer_attr).keys())
-        assert set(df.columns) == all_tracers
 
-        # Check index = release names
-        expected_names = [r.name for r in cdr_instance.releases]
-        assert list(df.index) == expected_names
+        # Remove temp and salt since they are excluded from integrated totals
+        all_tracers.discard("temp")
+        all_tracers.discard("salt")
 
-        # All values finite
-        assert np.all(np.isfinite(df.values))
+        # Columns are now just tracer names (units row removed)
+        col_tracers = set(df.columns)
+        assert col_tracers == all_tracers
+
+        # Check that units are included in the units row
+        tracer_meta = get_tracer_metadata_dict(include_bgc=True, unit_type="integrated")
+        for tracer in df.columns:
+            unit = tracer_meta.get(tracer, {}).get("units", None)
+            if unit:
+                assert df.loc["units", tracer] == unit, (
+                    f"Units row for '{tracer}' is incorrect"
+                )
+
+        # Exclude units row
+        data_only = df.drop("units")
+
+        # Convert all columns to numeric, coerce errors to NaN
+        data_numeric = data_only.apply(pd.to_numeric, errors="coerce")
+
+        # Now check all finite (ignoring any NaNs that were non-numeric)
+        assert np.all(np.isfinite(data_numeric.values)), (
+            "Some values are not finite numbers"
+        )

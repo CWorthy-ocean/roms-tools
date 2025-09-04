@@ -828,6 +828,12 @@ class CDRForcing(BaseModel):
         # Concatenate units row on top
         df_final = pd.concat([df_units, df_integrated])
 
+        # Store dt as metadata
+        df_final.attrs["time_step"] = dt
+        df_final.attrs["start_time"] = self.start_time
+        df_final.attrs["end_time"] = self.end_time
+        df_final.attrs["title"] = "Integrated tracer releases"
+
         return df_final
 
     def save(

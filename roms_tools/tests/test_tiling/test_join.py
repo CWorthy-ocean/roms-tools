@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -15,13 +16,15 @@ from roms_tools.tiling.partition import partition_netcdf
 
 
 @pytest.fixture
-def partitioned_grid_factory(tmp_path, large_grid) -> tuple[Grid, list[Path]]:
+def partitioned_grid_factory(
+    tmp_path, large_grid
+) -> Callable[[int, int], tuple[Grid, list[Path]]]:
     """
     A fixture factory that returns a function to generate partitioned files
     with a configurable layout.
     """
 
-    def _partitioned_files(np_xi: int, np_eta: int):
+    def _partitioned_files(np_xi: int, np_eta: int) -> tuple[Grid, list[Path]]:
         partable_grid = large_grid
         partable_grid.save(tmp_path / "test_grid.nc")
         parted_files = partition_netcdf(
@@ -35,8 +38,8 @@ def partitioned_grid_factory(tmp_path, large_grid) -> tuple[Grid, list[Path]]:
 @pytest.fixture
 def partitioned_ic_factory(
     tmp_path, initial_conditions_on_large_grid
-) -> tuple[Path, list[Path]]:
-    def _partitioned_files(np_xi: int, np_eta: int):
+) -> Callable[[int, int], tuple[Path, list[Path]]]:
+    def _partitioned_files(np_xi: int, np_eta: int) -> tuple[Path, list[Path]]:
         whole_ics = initial_conditions_on_large_grid
         whole_path = whole_ics.save(tmp_path / "test_ic.nc")[0]
         parted_paths = partition_netcdf(whole_path, np_xi=np_xi, np_eta=np_eta)

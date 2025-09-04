@@ -10,6 +10,7 @@ import xarray as xr
 
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import (
+    GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
     Dataset,
     ERA5ARCODataset,
@@ -865,6 +866,31 @@ def test_choose_subdomain_respects_buffer(global_dataset, use_dask):
     assert out.longitude.max() >= 60
 
 
+@pytest.fixture
+def glorys_grid_0_360(tmp_path):
+    lats = np.linspace(-90, 90, 181)
+    lons = np.linspace(0, 360, 361)
+    ds = xr.Dataset(coords={"latitude": lats, "longitude": lons})
+    path = tmp_path / "GLORYS_0_360.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+@pytest.fixture
+def glorys_grid_neg180_180(tmp_path):
+    lats = np.linspace(-90, 90, 181)
+    lons = np.linspace(-180, 180, 361)
+    ds = xr.Dataset(coords={"latitude": lats, "longitude": lons})
+    path = tmp_path / "GLORYS_neg180_180.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+@pytest.fixture
+def glorys_grid_real():
+    return GLORYS_GLOBAL_GRID_PATH
+
+
 @pytest.mark.parametrize(
     "grid_fixture",
     [
@@ -875,26 +901,15 @@ def test_choose_subdomain_respects_buffer(global_dataset, use_dask):
         "tiny_grid",
     ],
 )
-@pytest.mark.parametrize("lon_range", ["0_360", "-180_180"])
-def test_get_glorys_bounds(tmp_path, grid_fixture, lon_range, request):
+@pytest.mark.parametrize(
+    "glorys_grid_fixture",
+    ["glorys_grid_0_360", "glorys_grid_neg180_180", "glorys_grid_real"],
+)
+def test_get_glorys_bounds(tmp_path, grid_fixture, glorys_grid_fixture, request):
     grid = request.getfixturevalue(grid_fixture)
+    glorys_grid_path = request.getfixturevalue(glorys_grid_fixture)
 
-    # Create a fake GLORYS grid file with different longitude conventions
-    lats = np.linspace(-90, 90, 181)
-    if lon_range == "0_360":
-        lons = np.linspace(0, 360, 361)
-    elif lon_range == "-180_180":
-        lons = np.linspace(-180, 180, 361)
-    else:
-        raise ValueError(f"Unsupported lon_range: {lon_range}")
-
-    # Create a fake GLORYS grid file
-    lats = np.linspace(-90, 90, 181)
-    ds_glorys = xr.Dataset(coords={"latitude": lats, "longitude": lons})
-    glorys_file = tmp_path / "GLORYS_fake.nc"
-    ds_glorys.to_netcdf(glorys_file)
-
-    bounds = get_glorys_bounds(grid_ds=grid.ds, glorys_grid_path=glorys_file)
+    bounds = get_glorys_bounds(grid_ds=grid.ds, glorys_grid_path=glorys_grid_path)
     assert set(bounds) == {
         "minimum_latitude",
         "maximum_latitude",

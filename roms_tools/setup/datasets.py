@@ -35,6 +35,10 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import get_pkg_error_msg, has_gcsfs, load_data
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
+REPO_ROOT = Path(__file__).resolve().parents[2]
+GLORYS_GLOBAL_GRID_PATH = (
+    REPO_ROOT / "roms_tools" / "data" / "grids" / "GLORYS_global_grid.nc"
+)
 
 # lat-lon datasets
 
@@ -3143,12 +3147,8 @@ def get_glorys_bounds(
     -----
     - The resolution is estimated as the mean of latitude and longitude spacing.
     """
-    # Determine repo root relative to this file
-    repo_root = Path(__file__).resolve().parents[2]
     if glorys_grid_path is None:
-        glorys_grid_path = (
-            repo_root / "roms_tools" / "data" / "grids" / "GLORYS_global_grid.nc"
-        )
+        glorys_grid_path = GLORYS_GLOBAL_GRID_PATH
 
     ds = xr.open_dataset(glorys_grid_path)
 
@@ -3158,9 +3158,9 @@ def get_glorys_bounds(
     resolution = (res_lat + res_lon) / 2
 
     # Extract target grid coordinates
-    target_coords = get_target_coords(
-        grid_ds=grid_ds, grid_straddle=grid_ds.attrs["straddle"]
-    )
+    straddle = grid_ds.attrs["straddle"] == "True"  # convert string to bool
+    target_coords = get_target_coords(grid_ds=grid_ds, grid_straddle=straddle)
+    print(target_coords["lon"])
 
     # Select subdomain with margin
     ds_subset = choose_subdomain(

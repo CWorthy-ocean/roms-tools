@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GLORYS_GLOBAL_GRID_PATH = (
     REPO_ROOT / "roms_tools" / "data" / "grids" / "GLORYS_global_grid.nc"
 )
+DEFAULT_NR_BUFFER_POINTS = 20
 
 # lat-lon datasets
 
@@ -525,7 +526,7 @@ class Dataset:
     def choose_subdomain(
         self,
         target_coords: dict[str, Any],
-        buffer_points: int = 20,
+        buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
@@ -3160,7 +3161,6 @@ def get_glorys_bounds(
     # Extract target grid coordinates
     straddle = grid_ds.attrs["straddle"] == "True"  # convert string to bool
     target_coords = get_target_coords(grid_ds=grid_ds, grid_straddle=straddle)
-    print(target_coords["lon"])
 
     # Select subdomain with margin
     ds_subset = choose_subdomain(
@@ -3169,6 +3169,7 @@ def get_glorys_bounds(
         resolution=resolution,
         is_global=True,
         target_coords=target_coords,
+        buffer_points=DEFAULT_NR_BUFFER_POINTS + 1,
     )
 
     # Compute bounds

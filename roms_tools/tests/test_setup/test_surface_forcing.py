@@ -10,6 +10,7 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, SurfaceForcing
 from roms_tools.download import download_test_data
+from roms_tools.setup.datasets import RawDataSource
 
 
 @pytest.fixture
@@ -159,7 +160,7 @@ def _test_successful_initialization(
     grid: Grid,
     start_time: datetime,
     end_time: datetime,
-    source: dict[str, str | Path | list[str | Path]],
+    source: RawDataSource,
     coarse_grid_mode: str,
     use_dask: bool,
     caplog,

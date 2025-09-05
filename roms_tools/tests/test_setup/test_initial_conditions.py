@@ -11,7 +11,16 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, InitialConditions
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
+from roms_tools.setup.datasets import (
+    CESMBGCDataset,
+    UnifiedBGCDataset,
+    get_glorys_bounds,
+)
+
+try:
+    import copernicusmarine  # type: ignore
+except ImportError:
+    copernicusmarine = None
 
 
 @pytest.fixture
@@ -77,6 +86,53 @@ def test_initial_conditions_creation_with_default_glorys_dataset(example_grid: G
     )
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
     assert set(ic.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.use_copernicus
+@pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid",
+        "grid_that_straddles_dateline",
+        "grid_that_straddles_180_degree_meridian",
+        "small_grid",
+        "tiny_grid",
+    ],
+)
+def test_invariance_to_get_glorys_bounds(
+    tmp_path, grid_fixture, global_glorys_file, use_dask, request
+):
+    grid = request.getfixturevalue(grid_fixture)
+    ini_time = datetime(2012, 1, 1)
+
+    # Regional subset
+    bounds = get_glorys_bounds(grid_ds=grid.ds)
+    regional_file = tmp_path / "regional_GLORYS.nc"
+    copernicusmarine.subset(
+        dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
+        variables=["thetao", "so", "uo", "vo", "zos"],
+        **bounds,
+        start_datetime=ini_time,
+        end_datetime=ini_time,
+        coordinates_selection_method="outside",
+        output_filename=str(regional_file),
+    )
+
+    ic_from_global = InitialConditions(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(global_glorys_file)},
+        ini_time=ini_time,
+        use_dask=use_dask,
+    )
+    ic_from_regional = InitialConditions(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(regional_file)},
+        ini_time=ini_time,
+        use_dask=use_dask,
+    )
+
+    xr.testing.assert_allclose(ic_from_global.ds, ic_from_regional.ds)
 
 
 def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:

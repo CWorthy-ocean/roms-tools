@@ -10,6 +10,7 @@ import xarray as xr
 
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import (
+    GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
     Dataset,
     ERA5ARCODataset,
@@ -18,6 +19,8 @@ from roms_tools.setup.datasets import (
     GLORYSDefaultDataset,
     RiverDataset,
     TPXODataset,
+    choose_subdomain,
+    get_glorys_bounds,
 )
 from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
 
@@ -748,3 +751,168 @@ class TestRiverDataset:
         assert "Amazon_2" in names
         assert "Nile" in names
         assert len(set(names)) == len(names)  # all names must be unique
+
+
+def test_choose_subdomain_basic(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([0, 10]),
+        "lon": xr.DataArray([30, 40]),
+        "straddle": False,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=2,
+        use_dask=use_dask,
+    )
+    assert out.latitude.min() <= 0
+    assert out.latitude.max() >= 10
+    assert out.longitude.min() <= 30
+    assert out.longitude.max() >= 40
+
+
+def test_choose_subdomain_raises_on_empty_lon(non_global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([-10, 10]),
+        "lon": xr.DataArray([210, 215]),  # outside 0-180
+        "straddle": False,
+    }
+    with pytest.raises(ValueError, match="longitude range"):
+        choose_subdomain(
+            non_global_dataset,
+            dim_names={"latitude": "latitude", "longitude": "longitude"},
+            resolution=1.0,
+            is_global=False,
+            target_coords=target_coords,
+            use_dask=use_dask,
+        )
+
+
+def test_choose_subdomain_raises_on_empty_lat(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([1000, 1010]),  # outside dataset range
+        "lon": xr.DataArray([30, 40]),
+        "straddle": False,
+    }
+    with pytest.raises(ValueError, match="latitude range"):
+        choose_subdomain(
+            global_dataset,
+            dim_names={"latitude": "latitude", "longitude": "longitude"},
+            resolution=1.0,
+            is_global=True,
+            target_coords=target_coords,
+            use_dask=use_dask,
+        )
+
+
+def test_choose_subdomain_straddle(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([-10, 10]),
+        "lon": xr.DataArray([-170, 170]),  # cross the dateline
+        "straddle": True,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=5,
+        use_dask=use_dask,
+    )
+    # Ensure output includes both sides of the dateline, mapped into -180 - 180
+    assert (out.longitude.min() < 0) and (out.longitude.max() > 0)
+
+
+def test_choose_subdomain_wraps_negative_lon(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([0, 20]),
+        "lon": xr.DataArray([-20, -10]),  # negative longitudes
+        "straddle": False,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=2,
+        use_dask=use_dask,
+    )
+    # Output longitudes should be shifted into [0, 360]
+    assert (out.longitude >= 0).all()
+
+
+def test_choose_subdomain_respects_buffer(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([0, 0]),
+        "lon": xr.DataArray([50, 50]),
+        "straddle": False,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=10,
+        use_dask=use_dask,
+    )
+    # Buffer should extend at least 10 degrees beyond target lon
+    assert out.longitude.min() <= 40
+    assert out.longitude.max() >= 60
+
+
+@pytest.fixture
+def glorys_grid_0_360(tmp_path):
+    lats = np.linspace(-90, 90, 181)
+    lons = np.linspace(0, 360, 361)
+    ds = xr.Dataset(coords={"latitude": lats, "longitude": lons})
+    path = tmp_path / "GLORYS_0_360.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+@pytest.fixture
+def glorys_grid_neg180_180(tmp_path):
+    lats = np.linspace(-90, 90, 181)
+    lons = np.linspace(-180, 180, 361)
+    ds = xr.Dataset(coords={"latitude": lats, "longitude": lons})
+    path = tmp_path / "GLORYS_neg180_180.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+@pytest.fixture
+def glorys_grid_real():
+    return GLORYS_GLOBAL_GRID_PATH
+
+
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid",
+        "grid_that_straddles_dateline",
+        "grid_that_straddles_180_degree_meridian",
+        "small_grid",
+        "tiny_grid",
+    ],
+)
+@pytest.mark.parametrize(
+    "glorys_grid_fixture",
+    ["glorys_grid_0_360", "glorys_grid_neg180_180", "glorys_grid_real"],
+)
+def test_get_glorys_bounds(tmp_path, grid_fixture, glorys_grid_fixture, request):
+    grid = request.getfixturevalue(grid_fixture)
+    glorys_grid_path = request.getfixturevalue(glorys_grid_fixture)
+
+    bounds = get_glorys_bounds(grid_ds=grid.ds, glorys_grid_path=glorys_grid_path)
+    assert set(bounds) == {
+        "minimum_latitude",
+        "maximum_latitude",
+        "minimum_longitude",
+        "maximum_longitude",
+    }

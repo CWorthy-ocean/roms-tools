@@ -1085,48 +1085,75 @@ def group_by_year(ds, filepath):
     return dataset_list, output_filenames
 
 
-def get_target_coords(grid, use_coarse_grid=False):
-    """Retrieves longitude and latitude coordinates from the grid, adjusting them based
-    on longitude range.
+def get_target_coords(
+    grid_ds: xr.Dataset, grid_straddle: bool, use_coarse_grid: bool = False
+) -> dict[str, xr.DataArray | bool | None]:
+    """
+    Retrieve longitude, latitude, and auxiliary grid coordinates, adjusting for
+    longitude ranges and coarse grid usage.
 
     Parameters
     ----------
-    grid : Grid
-        Object representing the grid information used for the model.
+    grid_ds : xr.Dataset
+        Dataset containing the model grid information.
+    grid_straddle : bool
+        Indicates whether the ROMS grid crosses the Greenwich meridian.
     use_coarse_grid : bool, optional
-        Use coarse grid data if True. Defaults to False.
+        If True, use the coarse grid variables (`lat_coarse`, `lon_coarse`, etc.)
+        instead of the native grid. Defaults to False.
 
     Returns
     -------
-    dict
-        Dictionary containing the longitude, latitude, angle and mask arrays, along with a boolean indicating
-        if the grid straddles the meridian.
+    dict[str, xr.DataArray | bool | None]
+        Dictionary containing the following keys:
+
+        - `"lat"` : xr.DataArray
+            Latitude at rho points.
+        - `"lon"` : xr.DataArray
+            Longitude at rho points, adjusted to -180 to 180 or 0 to 360 range.
+        - `"lat_psi"` : xr.DataArray | None
+            Latitude at psi points, if available.
+        - `"lon_psi"` : xr.DataArray | None
+            Longitude at psi points, if available.
+        - `"angle"` : xr.DataArray
+            Grid rotation angle.
+        - `"mask"` : xr.DataArray | None
+            Land/sea mask at rho points.
+        - `"straddle"` : bool
+            True if the grid crosses the Greenwich meridian, False otherwise.
+
+    Notes
+    -----
+    - If `grid_straddle` is False and the ROMS domain lies more than 5° from
+      the Greenwich meridian, longitudes are adjusted to 0-360 range.
+    - Renaming of coarse grid dimensions is applied to match the rho-point
+      naming convention (`eta_rho`, `xi_rho`) for compatibility with ROMS-Tools.
     """
     # Select grid variables based on whether the coarse grid is used
     if use_coarse_grid:
-        lat = grid.ds.lat_coarse.rename(
+        lat = grid_ds.lat_coarse.rename(
             {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
-        lon = grid.ds.lon_coarse.rename(
+        lon = grid_ds.lon_coarse.rename(
             {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
-        angle = grid.ds.angle_coarse.rename(
+        angle = grid_ds.angle_coarse.rename(
             {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
-        mask = grid.ds.get("mask_coarse")
+        mask = grid_ds.get("mask_coarse")
         if mask is not None:
             mask = mask.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
-        lat_psi = grid.ds.get("lat_psi_coarse")
-        lon_psi = grid.ds.get("lon_psi_coarse")
+        lat_psi = grid_ds.get("lat_psi_coarse")
+        lon_psi = grid_ds.get("lon_psi_coarse")
 
     else:
-        lat = grid.ds.lat_rho
-        lon = grid.ds.lon_rho
-        angle = grid.ds.angle
-        mask = grid.ds.get("mask_rho")
-        lat_psi = grid.ds.get("lat_psi")
-        lon_psi = grid.ds.get("lon_psi")
+        lat = grid_ds.lat_rho
+        lon = grid_ds.lon_rho
+        angle = grid_ds.angle
+        mask = grid_ds.get("mask_rho")
+        lat_psi = grid_ds.get("lat_psi")
+        lon_psi = grid_ds.get("lon_psi")
 
     # Operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
     lon = xr.where(lon > 180, lon - 360, lon)
@@ -1134,7 +1161,7 @@ def get_target_coords(grid, use_coarse_grid=False):
         lon_psi = xr.where(lon_psi > 180, lon_psi - 360, lon_psi)
 
     straddle = True
-    if not grid.straddle and abs(lon).min() > 5:
+    if not grid_straddle and abs(lon).min() > 5:
         lon = xr.where(lon < 0, lon + 360, lon)
         if lon_psi is not None:
             lon_psi = xr.where(lon_psi < 0, lon_psi + 360, lon_psi)

@@ -169,7 +169,7 @@ class InitialConditions:
         self.ds = ds
 
     def _process_data(self, processed_fields, type="physics"):
-        target_coords = get_target_coords(self.grid)
+        target_coords = get_target_coords(self.grid.ds, self.grid.straddle)
 
         data = self._get_data(forcing_type=type)
 

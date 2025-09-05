@@ -793,26 +793,6 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
         assert set(bf.ds.data_vars).issuperset(expected_vars)
 
 
-@pytest.fixture(scope="session")
-def global_glorys_file(tmp_path_factory):
-    output_dir = tmp_path_factory.mktemp("copernicus-data")
-    output_file = output_dir / "global_GLORYS.nc"
-    if not output_file.exists():
-        copernicusmarine.subset(
-            dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
-            variables=["thetao", "so", "uo", "vo", "zos"],
-            minimum_longitude=None,
-            maximum_longitude=None,
-            minimum_latitude=None,
-            maximum_latitude=None,
-            start_datetime=datetime(2012, 1, 1),
-            end_datetime=datetime(2012, 1, 1),
-            coordinates_selection_method="outside",
-            output_filename=str(output_file),
-        )
-    return output_file
-
-
 @pytest.mark.use_copernicus
 @pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
 @pytest.mark.parametrize(

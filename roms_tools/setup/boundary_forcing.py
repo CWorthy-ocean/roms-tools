@@ -17,6 +17,7 @@ from roms_tools.setup.datasets import (
     CESMBGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
+    RawDataSource,
     UnifiedBGCDataset,
 )
 from roms_tools.setup.utils import (
@@ -62,7 +63,7 @@ class BoundaryForcing:
         If no time filtering is desired, set it to None. Default is None.
     boundaries : Dict[str, bool], optional
         Dictionary specifying which boundaries are forced (south, east, north, west). Default is all True.
-    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+    source : RawDataSource
         Dictionary specifying the source of the boundary forcing data. Keys include:
 
           - "name" (str): Name of the data source (e.g., "GLORYS").
@@ -70,7 +71,9 @@ class BoundaryForcing:
 
             - A single string (with or without wildcards).
             - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+            - A list of strings or Path objects.
+            If omitted, the data will be streamed via the Copernicus Marine Toolkit.
+            Note: streaming is currently not recommended due to performance limitations.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
     type : str
@@ -123,7 +126,7 @@ class BoundaryForcing:
         }
     )
     """Dictionary specifying which boundaries are forced (south, east, north, west)."""
-    source: dict[str, str | Path | list[str | Path]]
+    source: RawDataSource
     """Dictionary specifying the source of the boundary forcing data."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""
@@ -299,11 +302,12 @@ class BoundaryForcing:
                     logging.info(
                         f"Applying 1D horizontal fill to {direction}ern boundary."
                     )
-                    self._validate_1d_fill(
-                        processed_fields,
-                        direction,
-                        bdry_data.dim_names["depth"],
-                    )
+                    if not self.bypass_validation:
+                        self._validate_1d_fill(
+                            processed_fields,
+                            direction,
+                            bdry_data.dim_names["depth"],
+                        )
                     for var_name in processed_fields:
                         processed_fields[var_name] = apply_1d_horizontal_fill(
                             processed_fields[var_name]
@@ -485,6 +489,9 @@ class BoundaryForcing:
         variant = "default" if use_default else "external"
 
         data_type = dataset_map[self.type][source_name][variant]
+
+        if isinstance(self.source["path"], bool):
+            raise ValueError('source["path"] cannot be a boolean here')
 
         return data_type(
             filename=self.source["path"],

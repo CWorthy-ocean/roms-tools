@@ -9,6 +9,7 @@ import xarray as xr
 from roms_tools.utils import (
     _path_list_from_input,
     generate_focused_coordinate_range,
+    get_dask_chunks,
     has_copernicus,
     has_dask,
     has_gcsfs,
@@ -186,3 +187,57 @@ def test_load_data_open_dataset(
         assert fn_od.called
 
     assert expected_dim in ds.dims
+
+
+# test get_dask_chunks
+
+
+def test_latlon_default_chunks():
+    dim_names = {"latitude": "lat", "longitude": "lon"}
+    expected = {"lat": -1, "lon": -1}
+    result = get_dask_chunks(dim_names)
+    assert result == expected
+
+
+def test_latlon_with_depth_and_time():
+    dim_names = {"latitude": "lat", "longitude": "lon", "depth": "z", "time": "t"}
+    expected = {"lat": -1, "lon": -1, "z": -1, "t": 1}
+    result = get_dask_chunks(dim_names)
+    assert result == expected
+
+
+def test_latlon_with_time_chunking_false():
+    dim_names = {"latitude": "lat", "longitude": "lon", "time": "t"}
+    expected = {"lat": -1, "lon": -1}
+    result = get_dask_chunks(dim_names, time_chunking=False)
+    assert result == expected
+
+
+def test_roms_default_chunks():
+    dim_names = {}
+    expected_keys = {"eta_rho", "eta_v", "xi_rho", "xi_u", "s_rho"}
+    result = get_dask_chunks(dim_names)
+    assert set(result.keys()) == expected_keys
+    assert all(v == -1 for v in result.values())
+
+
+def test_roms_with_depth_and_time():
+    dim_names = {"depth": "s_rho", "time": "ocean_time"}
+    result = get_dask_chunks(dim_names)
+    # ROMS default keys + depth + time
+    expected_keys = {"eta_rho", "eta_v", "xi_rho", "xi_u", "s_rho", "ocean_time"}
+    assert set(result.keys()) == expected_keys
+    assert result["ocean_time"] == 1
+    assert result["s_rho"] == -1
+
+
+def test_roms_with_ntides():
+    dim_names = {"ntides": "nt"}
+    result = get_dask_chunks(dim_names)
+    assert result["nt"] == 1
+
+
+def test_time_chunking_false_roms():
+    dim_names = {"time": "ocean_time"}
+    result = get_dask_chunks(dim_names, time_chunking=False)
+    assert "ocean_time" not in result

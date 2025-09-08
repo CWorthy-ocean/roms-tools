@@ -16,6 +16,7 @@ from roms_tools.setup.datasets import (
     ERA5ARCODataset,
     ERA5Correction,
     ERA5Dataset,
+    RawDataSource,
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
@@ -56,7 +57,7 @@ class SurfaceForcing:
         The end time of the desired surface forcing data. This time is used to filter the dataset
         to include only records on or before this time, with a single record at or after this time.
         If no time filtering is desired, set it to None. Default is None.
-    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+    source : RawDataSource
         Dictionary specifying the source of the surface forcing data. Keys include:
 
           - "name" (str): Name of the data source. Currently supported: "ERA5"
@@ -116,7 +117,7 @@ class SurfaceForcing:
     """The start time of the desired surface forcing data."""
     end_time: datetime | None = None
     """The end time of the desired surface forcing data."""
-    source: dict[str, str | Path | list[str | Path]]
+    source: RawDataSource
     """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""
@@ -164,7 +165,9 @@ class SurfaceForcing:
             opt_file,
         )
 
-        target_coords = get_target_coords(self.grid, self.use_coarse_grid)
+        target_coords = get_target_coords(
+            self.grid.ds, self.grid.straddle, self.use_coarse_grid
+        )
         self.target_coords = target_coords
 
         data.choose_subdomain(
@@ -293,7 +296,9 @@ class SurfaceForcing:
             Whether to use the coarse grid or not.
         """
         # Get the target coordinates and select the subdomain of the data
-        target_coords = get_target_coords(self.grid, use_coarse_grid=False)
+        target_coords = get_target_coords(
+            self.grid.ds, self.grid.straddle, use_coarse_grid=False
+        )
         data_coords = data.choose_subdomain(
             target_coords, buffer_points=1, return_coords_only=True
         )

@@ -972,7 +972,7 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
         Normalized 2D tracer distribution on the ROMS grid (zero over land).
     """
     # Find closest grid cell center
-    target_coords = get_target_coords(grid)
+    target_coords = get_target_coords(grid.ds, grid.straddle)
     lon = release.lon
     if target_coords["straddle"]:
         lon = xr.where(lon > 180, lon - 360, lon)

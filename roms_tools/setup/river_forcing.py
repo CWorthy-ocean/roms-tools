@@ -19,6 +19,7 @@ from roms_tools.plot import (
 )
 from roms_tools.setup.datasets import (
     DaiRiverDataset,
+    RawDataSource,
     get_indices_of_nearest_grid_cell_for_rivers,
 )
 from roms_tools.setup.utils import (
@@ -54,7 +55,7 @@ class RiverForcing:
         Start time of the desired river forcing data.
     end_time : datetime
         End time of the desired river forcing data.
-    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool], optional
+    source : RawDataSource, optional
         Dictionary specifying the source of the river forcing data. Keys include:
 
           - "name" (str): Name of the data source (e.g., "DAI").
@@ -104,7 +105,7 @@ class RiverForcing:
     """Start time of the desired river forcing data."""
     end_time: datetime
     """End time of the desired river forcing data."""
-    source: dict[str, str | Path | list[str | Path]] | None = None
+    source: RawDataSource | None = None
     """Dictionary specifying the source of the river forcing data."""
     convert_to_climatology: str = "if_any_missing"
     """Determines when to compute climatology for river forcing."""
@@ -133,7 +134,7 @@ class RiverForcing:
             logging.info(
                 "No river indices provided. Identify all rivers within the ROMS domain and assign each of them to the nearest coastal point."
             )
-            target_coords = get_target_coords(self.grid)
+            target_coords = get_target_coords(self.grid.ds, self.grid.straddle)
             # maximum dx in grid
             dx = (
                 np.sqrt((1 / self.grid.ds.pm) ** 2 + (1 / self.grid.ds.pn) ** 2) / 2

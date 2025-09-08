@@ -150,6 +150,54 @@ def _get_ds_combine_base_params() -> dict[str, str]:
     }
 
 
+def get_dask_chunks(
+    dim_names: dict[str, str], time_chunking: bool = True
+) -> dict[str, int]:
+    """Return the default dask chunks for ROMS datasets.
+
+    Parameters
+    ----------
+    dim_names : dict[str, str]
+        Dictionary specifying the names of dimensions in the dataset.
+        - For lat-lon datasets, provide keys "latitude" and "longitude" (and optionally "depth" and "time").
+        - For ROMS datasets, the default ROMS dimensions are assumed ("eta_rho", "xi_rho", "s_rho", etc.).
+    time_chunking : bool, optional
+        Whether to chunk along the time dimension.
+        - True: chunk time dimension with size 1 (useful for processing large time-series data with Dask).
+        - False: do not explicitly chunk time; Dask will use default auto-chunking.
+        Defaults to True.
+
+    Returns
+    -------
+    dict[str, int]
+        The default dask chunks for ROMS datasets.
+    """
+    if "latitude" in dim_names and "longitude" in dim_names:
+        # for lat-lon datasets
+        chunks = {
+            dim_names["latitude"]: -1,
+            dim_names["longitude"]: -1,
+        }
+    else:
+        # For ROMS datasets
+        chunks = {
+            "eta_rho": -1,
+            "eta_v": -1,
+            "xi_rho": -1,
+            "xi_u": -1,
+            "s_rho": -1,
+        }
+
+    if "depth" in dim_names:
+        chunks[dim_names["depth"]] = -1
+    if "time" in dim_names and time_chunking:
+        chunks[dim_names["time"]] = 1
+    if "ntides" in dim_names:
+        chunks[dim_names["ntides"]] = 1
+
+    return chunks
+
+
 def _load_data_dask(
     filenames: list[str],
     dim_names: dict[str, str],
@@ -193,28 +241,7 @@ def _load_data_dask(
         If a list of files is provided but dim_names["time"] is not available or use_dask=False.
 
     """
-    if "latitude" in dim_names and "longitude" in dim_names:
-        # for lat-lon datasets
-        chunks = {
-            dim_names["latitude"]: -1,
-            dim_names["longitude"]: -1,
-        }
-    else:
-        # For ROMS datasets
-        chunks = {
-            "eta_rho": -1,
-            "eta_v": -1,
-            "xi_rho": -1,
-            "xi_u": -1,
-            "s_rho": -1,
-        }
-
-    if "depth" in dim_names:
-        chunks[dim_names["depth"]] = -1
-    if "time" in dim_names and time_chunking:
-        chunks[dim_names["time"]] = 1
-    if "ntides" in dim_names:
-        chunks[dim_names["ntides"]] = 1
+    chunks = get_dask_chunks(dim_names, time_chunking)
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -645,29 +672,6 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     saved_filenames.extend(Path(f) for f in output_filenames)
 
     return saved_filenames
-
-
-def get_dask_chunks(location, chunk_size):
-    """Returns the appropriate Dask chunking dictionary based on grid location.
-
-    Parameters
-    ----------
-    location : str
-        The grid location, one of "rho", "u", or "v".
-    chunk_size : int
-        The chunk size to apply.
-
-    Returns
-    -------
-    dict
-        Dictionary specifying the chunking strategy.
-    """
-    chunk_mapping = {
-        "rho": {"eta_rho": chunk_size, "xi_rho": chunk_size},
-        "u": {"eta_rho": chunk_size, "xi_u": chunk_size},
-        "v": {"eta_v": chunk_size, "xi_rho": chunk_size},
-    }
-    return chunk_mapping.get(location, {})
 
 
 def generate_coordinate_range(min_val: float, max_val: float, resolution: float):

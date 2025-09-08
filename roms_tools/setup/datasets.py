@@ -2963,43 +2963,41 @@ def _concatenate_longitudes(
     Only data variables containing the longitude dimension are concatenated;
     others are left unchanged.
     """
-    ds_concatenated = xr.Dataset()
-    lon = ds[dim_names["longitude"]]
+    ds_concat = xr.Dataset()
+
+    lon_name = dim_names["longitude"]
+    lon = ds[lon_name]
 
     match end:
         case "lower":
-            lon_concatenated = xr.concat([lon - 360, lon], dim=dim_names["longitude"])
+            lon_concat = xr.concat([lon - 360, lon], dim=lon_name)
             n_copies = 2
         case "upper":
-            lon_concatenated = xr.concat([lon, lon + 360], dim=dim_names["longitude"])
+            lon_concat = xr.concat([lon, lon + 360], dim=lon_name)
             n_copies = 2
         case "both":
-            lon_concatenated = xr.concat(
-                [lon - 360, lon, lon + 360], dim=dim_names["longitude"]
-            )
+            lon_concat = xr.concat([lon - 360, lon, lon + 360], dim=lon_name)
             n_copies = 3
         case _:
-            raise ValueError(
-                f"Invalid `end` value: {end}. Must be 'lower', 'upper', or 'both'."
-            )
+            raise ValueError(f"Invalid `end` value: {end}")
 
-    for var in ds.data_vars:
-        field = ds[var]
-        if dim_names["longitude"] in field.dims:
-            field_concatenated = xr.concat(
-                [field] * n_copies, dim=dim_names["longitude"]
-            )
+    for var in ds.variables:
+        if lon_name in ds[var].dims:
+            field = ds[var]
+            field_concat = xr.concat([field] * n_copies, dim=lon_name)
+
             if use_dask:
-                field_concatenated = field_concatenated.chunk(
-                    {dim_names["longitude"]: -1}
-                )
-            field_concatenated[dim_names["longitude"]] = lon_concatenated
-            ds_concatenated[var] = field_concatenated
-        else:
-            ds_concatenated[var] = field
+                field_concat = field_concat.chunk({lon_name: -1})
 
-    ds_concatenated[dim_names["longitude"]] = lon_concatenated
-    return ds_concatenated
+            # replace longitude coord
+            field_concat = field_concat[lon_name] = lon_concat
+            ds_concat[var] = field_concat
+        else:
+            ds_concat[var] = ds[var]
+
+    ds_concat[lon_name] = lon_concat
+
+    return ds_concat
 
 
 def choose_subdomain(
@@ -3111,13 +3109,11 @@ def choose_subdomain(
                     lon_min += 360
                     lon_max += 360
     # Select the subdomain in longitude direction
-
     subdomain = subdomain.sel(
         **{
             dim_names["longitude"]: slice(lon_min - margin, lon_max + margin),
         }
     )
-
     # Check if the selected subdomain has zero dimensions in latitude or longitude
     if (
         dim_names["latitude"] not in subdomain

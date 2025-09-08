@@ -10,6 +10,7 @@
 * Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
 * Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
 * Introduce GLORYS streaming support for `InitialConditions` using copernicusmarine — not recommended yet; performance remains a blocker ([#424](https://github.com/CWorthy-ocean/roms-tools/pull/424))
+* Add utility function `get_glorys_bounds` to return the min/max latitude and longitude required for GLORYS downloads for a fixed domain ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
 
 ### Breaking Changes
 
@@ -21,6 +22,7 @@
 
 * Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))
 * Include recommendation about `interp_frc` in INFO message ([#352](https://github.com/CWorthy-ocean/roms-tools/issues/352))
+* Document downloading of external datasets ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
 
 ### Bugfixes
 

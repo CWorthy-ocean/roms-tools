@@ -1289,7 +1289,7 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     times = ds["abs_time"]
 
     # Check for monotonically increasing times
-    if not np.all(np.diff(times) > np.timedelta64(0, "s")):
+    if not np.all(times[1:] >= times[:-1]):
         raise ValueError("abs_time must be strictly increasing.")
 
     fig, ax = plt.subplots(figsize=(10, 4))

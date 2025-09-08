@@ -190,16 +190,12 @@ class ROMSOutput:
             - If `eta` or `xi` indices are out of bounds.
             - If `eta` or `xi` lie on the boundary when `include_boundary=False`.
         """
-        ds_cdr = getattr(self, "ds_cdr", None)
-
         # Check if variable exists
-        if var_name not in self.ds and (ds_cdr is None or var_name not in ds_cdr):
-            raise ValueError(
-                f"Variable '{var_name}' is not found in self.ds or self.ds_cdr."
-            )
+        if var_name not in self.ds:
+            raise ValueError(f"Variable '{var_name}' is not found in self.ds.")
 
-        # Pick the variable, prefer ds_cdr if it exists
-        field = ds_cdr[var_name] if ds_cdr and var_name in ds_cdr else self.ds[var_name]
+        # Pick the variable
+        field = self.ds[var_name]
 
         # Check and pick time
         if "time" in field.dims:

@@ -19,6 +19,7 @@ from roms_tools.setup.datasets import (
     GLORYSDefaultDataset,
     RiverDataset,
     TPXODataset,
+    _concatenate_longitudes,
     choose_subdomain,
     get_glorys_bounds,
 )
@@ -753,6 +754,66 @@ class TestRiverDataset:
         assert len(set(names)) == len(names)  # all names must be unique
 
 
+# test _concatenate_longitudes
+
+
+@pytest.fixture
+def sample_ds():
+    lon = xr.DataArray(np.array([0, 90, 180]), dims="lon", name="lon")
+    lat = xr.DataArray(np.array([-30, 0, 30]), dims="lat", name="lat")
+
+    var_with_lon = xr.DataArray(
+        np.arange(9).reshape(3, 3),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
+        name="var_with_lon",
+    )
+
+    var_no_lon = xr.DataArray(
+        np.array([1, 2, 3]),
+        dims="lat",
+        coords={"lat": lat},
+        name="var_no_lon",
+    )
+
+    return xr.Dataset({"var_with_lon": var_with_lon, "var_no_lon": var_no_lon})
+
+
+@pytest.mark.parametrize(
+    "end,expected_lons",
+    [
+        ("lower", [-360, -270, -180, 0, 90, 180]),
+        ("upper", [0, 90, 180, 360, 450, 540]),
+        ("both", [-360, -270, -180, 0, 90, 180, 360, 450, 540]),
+    ],
+)
+def test_concatenate_longitudes(sample_ds, end, expected_lons):
+    dim_names = {"longitude": "lon"}
+
+    ds_concat = _concatenate_longitudes(sample_ds, dim_names, end=end)
+
+    # longitude should be extended as expected
+    np.testing.assert_array_equal(ds_concat.lon.values, expected_lons)
+
+    # variable with longitude should be extended in size
+    assert ds_concat.var_with_lon.shape[-1] == len(expected_lons)
+
+    # variable without longitude should remain untouched
+    np.testing.assert_array_equal(
+        ds_concat.var_no_lon.values,
+        sample_ds.var_no_lon.values,
+    )
+
+
+def test_invalid_end_raises(sample_ds):
+    dim_names = {"longitude": "lon"}
+    with pytest.raises(ValueError):
+        _concatenate_longitudes(sample_ds, dim_names, end="invalid")
+
+
+# test choose_subdomain
+
+
 def test_choose_subdomain_basic(global_dataset, use_dask):
     target_coords = {
         "lat": xr.DataArray([0, 10]),
@@ -864,6 +925,9 @@ def test_choose_subdomain_respects_buffer(global_dataset, use_dask):
     # Buffer should extend at least 10 degrees beyond target lon
     assert out.longitude.min() <= 40
     assert out.longitude.max() >= 60
+
+
+# test get_glorys_bounds
 
 
 @pytest.fixture

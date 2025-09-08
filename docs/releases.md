@@ -4,6 +4,12 @@
 
 ### New Features
 
+* Enhance `partition_netcdf` flexibility: now supports partitioning multiple input files and allows specifying a custom output directory for saved tiles ([#394](https://github.com/CWorthy-ocean/roms-tools/pull/394))
+* Add `join_netcdf` function: users can now re-join ROMS output and partitioned files
+([#412](https://github.com/CWorthy-ocean/roms-tools/pull/412))
+* Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
+* Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
+* Introduce GLORYS streaming support for `InitialConditions` using copernicusmarine — not recommended yet; performance remains a blocker ([#424](https://github.com/CWorthy-ocean/roms-tools/pull/424))
 * Allow performing CDR analysis, including plotting CDR uptake curves ([#417](https://github.com/CWorthy-ocean/roms-tools/pull/417))
 
 ### Breaking Changes

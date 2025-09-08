@@ -175,7 +175,6 @@ class InitialConditions:
 
         data.choose_subdomain(
             target_coords,
-            buffer_points=20,  # lateral fill needs good buffer from data margin
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()

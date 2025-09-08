@@ -105,7 +105,6 @@ class TidalForcing:
             if key != "omega":
                 data.choose_subdomain(
                     target_coords,
-                    buffer_points=20,
                 )
                 # Enforce double precision to ensure reproducibility
                 data.convert_to_float64()

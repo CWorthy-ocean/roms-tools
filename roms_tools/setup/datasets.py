@@ -39,7 +39,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GLORYS_GLOBAL_GRID_PATH = (
     REPO_ROOT / "roms_tools" / "data" / "grids" / "GLORYS_global_grid.nc"
 )
-DEFAULT_NR_BUFFER_POINTS = 20
+DEFAULT_NR_BUFFER_POINTS = (
+    20  # Default number of buffer points for subdomain selection.
+)
+# Balances performance and accuracy:
+# - Too many points → more expensive computations
+# - Too few points → potential boundary artifacts when lateral refill is performed
+# See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
+# This default will be applied consistently across all datasets requiring lateral refill.
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
 # lat-lon datasets

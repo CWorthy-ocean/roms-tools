@@ -2989,13 +2989,11 @@ def _concatenate_longitudes(
             if use_dask:
                 field_concat = field_concat.chunk({lon_name: -1})
 
-            # replace longitude coord
-            field_concat = field_concat[lon_name] = lon_concat
             ds_concat[var] = field_concat
         else:
             ds_concat[var] = ds[var]
 
-    ds_concat[lon_name] = lon_concat
+    ds_concat = ds_concat.assign_coords({lon_name: lon_concat.values})
 
     return ds_concat
 

@@ -488,7 +488,7 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
 
     with (
         pytest.raises(RuntimeError),
-        mock.patch("roms_tools.utils._has_dask", return_value=False),
+        mock.patch("roms_tools.utils.has_dask", return_value=False),
     ):
         _ = GLORYSDefaultDataset(
             filename=GLORYSDefaultDataset.dataset_name,

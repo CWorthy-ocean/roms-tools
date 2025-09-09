@@ -46,7 +46,7 @@ DEFAULT_NR_BUFFER_POINTS = (
 # - Too many points → more expensive computations
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
-# This default will be applied consistently across all datasets requiring lateral refill.
+# This default will be applied consistently across all datasets requiring lateral fill.
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
 # lat-lon datasets
@@ -576,12 +576,13 @@ class Dataset:
             If the selected latitude or longitude range does not intersect with the dataset.
         """
         subdomain = choose_subdomain(
-            self.ds,
-            self.dim_names,
-            self.resolution,
-            self.is_global,
-            target_coords,
-            buffer_points,
+            ds=self.ds,
+            dim_names=self.dim_names,
+            resolution=self.resolution,
+            is_global=self.is_global,
+            target_coords=target_coords,
+            buffer_points=buffer_points,
+            use_dask=self.use_dask,
         )
 
         if return_coords_only:

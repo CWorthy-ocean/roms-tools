@@ -758,7 +758,7 @@ class TestRiverDataset:
 
 
 @pytest.fixture
-def sample_ds():
+def sample_ds(use_dask):
     lon = xr.DataArray(np.array([0, 90, 180]), dims="lon", name="lon")
     lat = xr.DataArray(np.array([-30, 0, 30]), dims="lat", name="lat")
 
@@ -776,7 +776,12 @@ def sample_ds():
         name="var_no_lon",
     )
 
-    return xr.Dataset({"var_with_lon": var_with_lon, "var_no_lon": var_no_lon})
+    ds = xr.Dataset({"var_with_lon": var_with_lon, "var_no_lon": var_no_lon})
+
+    if use_dask:
+        ds = ds.chunk({"lat": -1, "lon": -1})
+
+    return ds
 
 
 @pytest.mark.parametrize(
@@ -787,10 +792,12 @@ def sample_ds():
         ("both", [-360, -270, -180, 0, 90, 180, 360, 450, 540]),
     ],
 )
-def test_concatenate_longitudes(sample_ds, end, expected_lons):
+def test_concatenate_longitudes(sample_ds, end, expected_lons, use_dask):
     dim_names = {"longitude": "lon"}
 
-    ds_concat = _concatenate_longitudes(sample_ds, dim_names, end=end)
+    ds_concat = _concatenate_longitudes(
+        sample_ds, dim_names, end=end, use_dask=use_dask
+    )
 
     # longitude should be extended as expected
     np.testing.assert_array_equal(ds_concat.lon.values, expected_lons)
@@ -803,6 +810,17 @@ def test_concatenate_longitudes(sample_ds, end, expected_lons):
         ds_concat.var_no_lon.values,
         sample_ds.var_no_lon.values,
     )
+
+    if use_dask:
+        import dask
+
+        # Ensure dask array backing the data
+        assert isinstance(ds_concat.var_with_lon.data, dask.array.Array)
+        # Longitude dimension should be chunked (-1 → one chunk spanning the whole dim)
+        assert ds_concat.var_with_lon.chunks[-1] == (len(expected_lons),)
+    else:
+        # With use_dask=False, data should be a numpy array
+        assert isinstance(ds_concat.var_with_lon.data, np.ndarray)
 
 
 def test_invalid_end_raises(sample_ds):

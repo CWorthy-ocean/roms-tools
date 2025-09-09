@@ -44,6 +44,19 @@ jobs:
            python -V
            coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/*
 
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: without-dask
+
   test-without-dask-with-copernicus:
     name: ${{ matrix.python-version }}-build-without-dask-with-copernicus
     runs-on: ubuntu-latest
@@ -80,6 +93,19 @@ jobs:
            python -V
            coverage run --rcfile=coverage.toml -m pytest --use_copernicus --verbose roms_tools/tests/*
 
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: without-dask-with-copernicus
+
   test-with-dask:
     name: 3.13-build-with-dask
     runs-on: ubuntu-latest
@@ -114,6 +140,19 @@ jobs:
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: with-dask
 
   test-with-dask-and-copernicus:
     name: 3.13-build-with-dask-and-copernicus
@@ -150,6 +189,19 @@ jobs:
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --use_dask --use_copernicus --verbose roms_tools/tests/*
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: with-dask-and-copernicus
 
   test-with-streaming:
     name: 3.13-build-with-streaming
@@ -190,6 +242,19 @@ jobs:
            python -V
            copernicusmarine login
            coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose roms_tools/tests/*
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: with-streaming
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
@@ -237,4 +302,4 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
-          flags: unittests # optional
+          flags: with-dask-and-xesmf

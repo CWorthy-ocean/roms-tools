@@ -203,6 +203,7 @@ def _load_data_dask(
     dim_names: dict[str, str],
     time_chunking: bool = True,
     decode_times: bool = True,
+    decode_timedelta: bool = True,
     read_zarr: bool = True,
     load_kwargs: dict[str, str] | None = None,
 ) -> xr.Dataset:
@@ -223,6 +224,9 @@ def _load_data_dask(
         Defaults to True.
     decode_times: bool, optional
         If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+    decode_timedelta: bool, optional
+        If True, decode timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
     read_zarr: bool, optional
         If True, use the zarr engine to read the dataset, and don't use mfdataset.
@@ -254,6 +258,7 @@ def _load_data_dask(
             return xr.open_zarr(
                 filenames[0],
                 decode_times=decode_times,
+                decode_timedelta=decode_timedelta,
                 chunks=chunks,
                 consolidated=None,
                 storage_options={"token": "anon"},
@@ -263,7 +268,7 @@ def _load_data_dask(
         return xr.open_mfdataset(
             filenames,
             decode_times=decode_times,
-            decode_timedelta=decode_times,
+            decode_timedelta=decode_timedelta,
             chunks=chunks,
             **kwargs,
         )
@@ -361,6 +366,7 @@ def load_data(
     use_dask: bool = False,
     time_chunking: bool = True,
     decode_times: bool = True,
+    decode_timedelta: bool = True,
     force_combine_nested: bool = False,
     read_zarr: bool = False,
     ds_loader_fn: Callable[[], xr.Dataset] | None = None,
@@ -383,7 +389,10 @@ def load_data(
         If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
         Defaults to True.
     decode_times: bool, optional
-        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+    decode_timedelta: bool, optional
+        If True, decode timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
     force_combine_nested: bool, optional
         If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
@@ -430,6 +439,7 @@ def load_data(
             dim_names,
             time_chunking,
             decode_times,
+            decode_timedelta,
             read_zarr,
             load_kwargs,
         )
@@ -439,7 +449,7 @@ def load_data(
             ds = xr.open_dataset(
                 file,
                 decode_times=decode_times,
-                decode_timedelta=decode_times,
+                decode_timedelta=decode_timedelta,
                 chunks=None,
             )
             ds_list.append(ds)

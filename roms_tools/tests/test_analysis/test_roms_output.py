@@ -72,15 +72,19 @@ def test_load_model_output_file(roms_output_fixture, request):
     assert isinstance(roms_output.ds, xr.Dataset)
 
 
-def test_load_model_output_file_list(use_dask):
+@pytest.fixture
+def roms_output_from_two_restart_files(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
 
     # List of files
     file1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     file2 = Path(download_test_data("eastpac25km_rst.19980126000000.nc"))
-    output = ROMSOutput(grid=grid, path=[file1, file2], use_dask=use_dask)
-    assert isinstance(output.ds, xr.Dataset)
+    return ROMSOutput(grid=grid, path=[file1, file2], use_dask=use_dask)
+
+
+def test_load_model_output_file_list(roms_output_from_two_restart_files):
+    assert isinstance(roms_output_from_two_restart_files.ds, xr.Dataset)
 
 
 def test_load_model_output_with_wildcard(use_dask):
@@ -618,3 +622,57 @@ def test_regrid_with_custom_depth_levels(roms_output_fixture, request):
     assert isinstance(ds_regridded, xr.Dataset)
     assert "depth" in ds_regridded.coords
     np.allclose(ds_regridded.depth, depth_levels, atol=0.0)
+
+
+@pytest.fixture
+def roms_output_with_cdr_vars(roms_output_from_two_restart_files):
+    """Adds minimal CDR variables to the ROMSOutput dataset."""
+    ds = roms_output_from_two_restart_files.ds.copy()
+
+    # Dimensions
+    time = ds.sizes["time"]
+    eta_rho = ds.sizes["eta_rho"]
+    xi_rho = ds.sizes["xi_rho"]
+    s_rho = ds.sizes["s_rho"]
+
+    # Add required variables for CDR metrics
+    ds["ALK_source"] = xr.DataArray(
+        np.abs(np.random.randn(time, s_rho, eta_rho, xi_rho)),
+        dims=("time", "s_rho", "eta_rho", "xi_rho"),
+    )
+    ds["DIC_source"] = xr.DataArray(
+        -np.abs(np.random.randn(time, s_rho, eta_rho, xi_rho)),
+        dims=("time", "s_rho", "eta_rho", "xi_rho"),
+    )
+    ds["FG_CO2"] = xr.DataArray(
+        np.random.randn(time, eta_rho, xi_rho), dims=("time", "eta_rho", "xi_rho")
+    )
+    ds["FG_ALT_CO2"] = xr.DataArray(
+        np.random.randn(time, eta_rho, xi_rho), dims=("time", "eta_rho", "xi_rho")
+    )
+    ds["hDIC"] = xr.DataArray(
+        np.random.randn(time, s_rho, eta_rho, xi_rho),
+        dims=("time", "s_rho", "eta_rho", "xi_rho"),
+    )
+    ds["hDIC_ALT_CO2"] = xr.DataArray(
+        np.random.randn(time, s_rho, eta_rho, xi_rho),
+        dims=("time", "s_rho", "eta_rho", "xi_rho"),
+    )
+
+    # Add average begin/end times (simulate seconds)
+    ds["avg_begin_time"] = xr.DataArray(np.arange(time) * 3600, dims=("time",))
+    ds["avg_end_time"] = xr.DataArray((np.arange(time) + 1) * 3600, dims=("time",))
+
+    roms_output_from_two_restart_files.ds = ds
+    return roms_output_from_two_restart_files
+
+
+def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
+    roms_output_with_cdr_vars.cdr_metrics()
+    assert hasattr(roms_output_with_cdr_vars, "ds_cdr")
+
+    ds_cdr = roms_output_with_cdr_vars.ds_cdr
+
+    # Check presence of both efficiency variables
+    assert "cdr_efficiency" in ds_cdr
+    assert "cdr_efficiency_from_delta_diff" in ds_cdr

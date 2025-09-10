@@ -1073,19 +1073,29 @@ class GLORYSDataset(Dataset):
         None
             The dataset is modified in-place by applying the mask to each variable.
         """
-        mask = xr.where(
-            self.ds[self.var_names["zeta"]].isel({self.dim_names["time"]: 0}).isnull(),
-            0,
-            1,
-        )
-        mask_vel = xr.where(
-            self.ds[self.var_names["u"]]
-            .isel({self.dim_names["time"]: 0, self.dim_names["depth"]: 0})
-            .isnull(),
-            0,
-            1,
-        )
+        zeta = self.ds[self.var_names["zeta"]]
+        u = self.ds[self.var_names["u"]]
 
+        # Select time=0 if time dimension exists, otherwise use data as-is
+        if self.dim_names["time"] in zeta.dims:
+            zeta_ref = zeta.isel({self.dim_names["time"]: 0})
+        else:
+            zeta_ref = zeta
+
+        if self.dim_names["time"] in u.dims:
+            u_ref = u.isel({self.dim_names["time"]: 0})
+        else:
+            u_ref = u
+
+        # Also handle depth for velocity
+        if self.dim_names["depth"] in u_ref.dims:
+            u_ref = u_ref.isel({self.dim_names["depth"]: 0})
+
+        # Create masks
+        mask = xr.where(zeta_ref.isnull(), 0, 1)
+        mask_vel = xr.where(u_ref.isnull(), 0, 1)
+
+        # Save to dataset
         self.ds["mask"] = mask
         self.ds["mask_vel"] = mask_vel
 

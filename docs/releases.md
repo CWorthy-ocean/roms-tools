@@ -20,6 +20,8 @@
 
 ### Bugfixes
 
+* Safe mask selection for GLORYS dataset in response to change of GLORYS data format ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
+
 ## v3.1.2
 
 ### New Features

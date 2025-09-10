@@ -94,7 +94,7 @@ jobs:
           COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
-           copernicusmarine login --username "$COPERNICUSMARINE_SERVICE_USERNAME" --password "$COPERNICUSMARINE_SERVICE_PASSWORD"
+           copernicusmarine login
            coverage run --rcfile=coverage.toml -m pytest --use_copernicus --verbose roms_tools/tests/*
 
       - name: Get coverage report
@@ -195,7 +195,7 @@ jobs:
           COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
-           copernicusmarine login --username "$COPERNICUSMARINE_SERVICE_USERNAME" --password "$COPERNICUSMARINE_SERVICE_PASSWORD"
+           copernicusmarine login
            coverage run --rcfile=coverage.toml -m pytest --use_dask --use_copernicus --verbose roms_tools/tests/*
 
       - name: Get coverage report

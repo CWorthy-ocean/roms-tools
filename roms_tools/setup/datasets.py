@@ -52,7 +52,7 @@ class Dataset:
         Start time for selecting relevant data. If not provided, no time-based filtering is applied.
     end_time : Optional[datetime], optional
         End time for selecting relevant data. If not provided, the dataset selects the time entry
-        closest to `start_time` within the range `[start_time, start_time + 24 hours]`.
+        closest to `start_time` within the range `[start_time, start_time + 24 hours)`.
         If `start_time` is also not provided, no time-based filtering is applied.
     dim_names: Dict[str, str], optional
         Dictionary specifying the names of dimensions in the dataset.
@@ -69,6 +69,17 @@ class Dataset:
         land values are already correctly assigned, and lateral filling will be skipped. Defaults to `True`.
     use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    read_zarr: bool, optional
+        If True, use the zarr engine to read the dataset, and don't use mfdataset.
+        Defaults to False.
+    allow_flex_time: bool, optional
+        Controls how strictly the dataset selects a time entry when `end_time` is not provided (relevant for initial conditions):
+
+        - If False (default): requires an exact match to `start_time`. Raises a ValueError if no match exists.
+        - If True: allows a +24h search window after `start_time` and selects the closest available
+          time entry within that window. Raises a ValueError if none are found.
+
+        Only used when `end_time` is None. Has no effect otherwise.
     apply_post_processing: bool
         Indicates whether to post-process the dataset for futher use. Defaults to True.
 
@@ -100,13 +111,14 @@ class Dataset:
     )
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
-    climatology: bool | None = False
+    climatology: bool = False
     needs_lateral_fill: bool | None = True
     use_dask: bool = False
-    apply_post_processing: bool | None = True
     read_zarr: bool = False
-    ds_loader_fn: Callable[[], xr.Dataset] | None = None
+    allow_flex_time: bool = False
+    apply_post_processing: bool | None = True
 
+    ds_loader_fn: Callable[[], xr.Dataset] | None = None
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -271,7 +283,7 @@ class Dataset:
         after `end_time` are included, even if they fall outside the strict time range.
 
         If no `end_time` is specified, the method will select the time range of
-        [start_time, start_time + 24 hours] and return the closest time entry to `start_time` within that range.
+        [start_time, start_time + 24 hours) and return the closest time entry to `start_time` within that range.
 
         Parameters
         ----------
@@ -309,6 +321,10 @@ class Dataset:
           `np.datetime64` objects before filtering.
         """
         time_dim = self.dim_names["time"]
+
+        # Ensure start_time is not None for type safety
+        if self.start_time is None:
+            raise ValueError("select_relevant_times called but start_time is None.")
 
         ds = _select_relevant_times(
             ds, time_dim, self.start_time, self.end_time, self.climatology
@@ -1057,7 +1073,7 @@ class GLORYSDataset(Dataset):
         }
     )
 
-    climatology: bool | None = False
+    climatology: bool = False
 
     def post_process(self):
         """Apply a mask to the dataset based on the 'zeta' variable, with 0 where 'zeta'
@@ -1323,7 +1339,7 @@ class UnifiedBGCDataset(UnifiedDataset):
         }
     )
 
-    climatology: bool | None = True
+    climatology: bool = True
 
 
 @dataclass(kw_only=True)
@@ -1345,7 +1361,7 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
         }
     )
 
-    climatology: bool | None = True
+    climatology: bool = True
 
 
 @dataclass(kw_only=True)
@@ -1460,7 +1476,7 @@ class CESMBGCDataset(CESMDataset):
         }
     )
 
-    climatology: bool | None = False
+    climatology: bool = False
 
     def post_process(self) -> None:
         """
@@ -1531,7 +1547,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
         }
     )
 
-    climatology: bool | None = False
+    climatology: bool = False
 
     def post_process(self) -> None:
         """Perform post-processing on the dataset to remove specific variables.
@@ -1580,7 +1596,7 @@ class ERA5Dataset(Dataset):
         }
     )
 
-    climatology: bool | None = False
+    climatology: bool = False
 
     def post_process(self) -> None:
         """
@@ -1702,7 +1718,7 @@ class ERA5Correction(Dataset):
             "time": "time",
         }
     )
-    climatology: bool | None = True
+    climatology: bool = True
 
     def __post_init__(self) -> None:
         if not self.climatology:
@@ -1850,7 +1866,7 @@ class RiverDataset:
     dim_names: dict[str, str]
     var_names: dict[str, str]
     opt_var_names: dict[str, str] | None = field(default_factory=dict)
-    climatology: bool | None = False
+    climatology: bool = False
     ds: xr.Dataset = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -2195,7 +2211,7 @@ class DaiRiverDataset(RiverDataset):
             "vol": "vol_stn",
         }
     )
-    climatology: bool | None = False
+    climatology: bool = False
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Adds time information to the dataset based on the climatology flag and
@@ -2774,140 +2790,203 @@ def _check_dataset(
 
 
 def _select_relevant_times(
-    ds, time_dim, start_time, end_time=None, climatology=False
+    ds: xr.Dataset,
+    time_dim: str,
+    start_time: datetime,
+    end_time: datetime | None = None,
+    climatology: bool = False,
+    allow_flex_time: bool = False,
 ) -> xr.Dataset:
-    """Select a subset of the dataset based on the specified time range.
+    """
+    Select a subset of the dataset based on time constraints.
 
-    This method filters the dataset to include all records between `start_time` and `end_time`.
-    Additionally, it ensures that one record at or before `start_time` and one record at or
-    after `end_time` are included, even if they fall outside the strict time range.
+    This function supports two main use cases:
 
-    If no `end_time` is specified, the method will select the time range of
-    [start_time, start_time + 24 hours] and return the closest time entry to `start_time` within that range.
+    1. **Time range selection (start_time + end_time provided):**
+       - Returns all records strictly between `start_time` and `end_time`.
+       - Ensures at least one record at or before `start_time` and one record at or
+         after `end_time` are included, even if they fall outside the strict range.
+
+    2. **Initial condition selection (start_time provided, end_time=None):**
+       - Delegates to `_select_initial_time`, which reduces the dataset to exactly one
+         time entry.
+       - If `allow_flex_time=True`, a +24-hour buffer around `start_time` is allowed,
+         and the closest timestamp is chosen.
+       - If `allow_flex_time=False`, requires an exact timestamp match.
+
+    Additional behavior:
+    - If `climatology=True`, the dataset must contain exactly 12 time steps. If valid,
+      the climatology dataset is returned without further filtering.
+    - If the dataset uses `cftime` datetime objects, these are converted to
+      `np.datetime64` before filtering.
 
     Parameters
     ----------
     ds : xr.Dataset
-        The input dataset to be filtered. Must contain a time dimension.
-    time_dim: str
-        Name of time dimension.
+        The dataset to filter. Must contain a valid time dimension.
+    time_dim : str
+        Name of the time dimension in `ds`.
     start_time : datetime
-        The start time for selecting relevant data.
-    end_time : Optional[datetime], optional
-        The end time for selecting relevant data. If not provided, only data at the start_time is selected if start_time is provided.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
+        Start time for filtering.
+    end_time : datetime or None
+        End time for filtering. If `None`, the function assumes an initial condition
+        use case and selects exactly one timestamp.
+    climatology : bool, optional
+        If True, requires exactly 12 time steps and bypasses normal filtering.
+        Defaults to False.
+    allow_flex_time : bool, optional
+        Whether to allow a +24h search window after `start_time` when `end_time`
+        is None. If False (default), requires an exact match.
 
     Returns
     -------
     xr.Dataset
-        A dataset filtered to the specified time range, including the closest entries
-        at or before `start_time` and at or after `end_time` if applicable.
+        A filtered dataset containing only the selected time entries.
 
     Raises
     ------
     ValueError
-        If no matching times are found between `start_time` and `start_time + 24 hours`.
+        - If `climatology=True` but the dataset does not contain exactly 12 time steps.
+        - If `climatology=False` and the dataset contains integer time values.
+        - If no valid records are found within the requested range or window.
 
     Warns
     -----
     UserWarning
-        If the dataset contains exactly 12 time steps but the climatology flag is not set.
-        This may indicate that the dataset represents climatology data.
-
-    UserWarning
-        If no records at or before `start_time` or no records at or after `end_time` are found.
-
-    UserWarning
-        If the dataset does not contain any time dimension or the time dimension is incorrectly named.
+        - If no records exist at or before `start_time` or at or after `end_time`.
+        - If the specified time dimension does not exist in the dataset.
 
     Notes
     -----
-    - If the `climatology` flag is set and `end_time` is not provided, the method will
-      interpolate initial conditions from climatology data.
-    - If the dataset uses `cftime` datetime objects, these will be converted to standard
-      `np.datetime64` objects before filtering.
+    - For initial conditions (end_time=None), see `_select_initial_time` for details
+      on strict vs. flexible selection behavior.
+    - Logs warnings instead of failing hard when boundary records are missing, and
+      defaults to using the earliest or latest available time in such cases.
     """
-    if time_dim in ds.variables:
-        if climatology:
-            if len(ds[time_dim]) != 12:
-                raise ValueError(
-                    f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
-                )
-            if not end_time:
-                # Convert from timedelta64[ns] to fractional days
-                ds["time"] = ds["time"] / np.timedelta64(1, "D")
-                # Interpolate from climatology for initial conditions
-                ds = interpolate_from_climatology(ds, time_dim, start_time)
-        else:
-            time_type = get_time_type(ds[time_dim])
-            if time_type == "int":
-                raise ValueError(
-                    "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
-                )
-            if time_type == "cftime":
-                ds = ds.assign_coords(
-                    {time_dim: convert_cftime_to_datetime(ds[time_dim])}
-                )
-            if end_time:
-                end_time = end_time
-
-                # Identify records before or at start_time
-                before_start = ds[time_dim] <= np.datetime64(start_time)
-                if before_start.any():
-                    closest_before_start = (
-                        ds[time_dim].where(before_start, drop=True).max()
-                    )
-                else:
-                    logging.warning("No records found at or before the start_time.")
-                    closest_before_start = ds[time_dim].min()
-
-                # Identify records after or at end_time
-                after_end = ds[time_dim] >= np.datetime64(end_time)
-                if after_end.any():
-                    closest_after_end = ds[time_dim].where(after_end, drop=True).min()
-                else:
-                    logging.warning("No records found at or after the end_time.")
-                    closest_after_end = ds[time_dim].max()
-
-                # Select records within the time range and add the closest before/after
-                within_range = (ds[time_dim] > np.datetime64(start_time)) & (
-                    ds[time_dim] < np.datetime64(end_time)
-                )
-                selected_times = ds[time_dim].where(
-                    within_range
-                    | (ds[time_dim] == closest_before_start)
-                    | (ds[time_dim] == closest_after_end),
-                    drop=True,
-                )
-                ds = ds.sel({time_dim: selected_times})
-            else:
-                # Look in time range [start_time, start_time + 24h]
-                end_time = start_time + timedelta(days=1)
-                times = (np.datetime64(start_time) <= ds[time_dim]) & (
-                    ds[time_dim] <= np.datetime64(end_time)
-                )
-                if np.all(~times):
-                    raise ValueError(
-                        f"The dataset does not contain any time entries between the specified start_time: {start_time} "
-                        f"and {start_time + timedelta(hours=24)}. "
-                        "Please ensure the dataset includes time entries for that range."
-                    )
-
-                ds = ds.where(times, drop=True)
-                if ds.sizes[time_dim] > 1:
-                    # Pick the time closest to start_time
-                    ds = ds.isel({time_dim: 0})
-                logging.info(
-                    f"Selected time entry closest to the specified start_time ({start_time}) within the range [{start_time}, {start_time + timedelta(hours=24)}]: {ds[time_dim].values}"
-                )
-    else:
+    if time_dim not in ds.variables:
         logging.warning(
-            "Dataset does not contain any time information. Please check if the time dimension "
-            "is correctly named or if the dataset includes time data."
+            f"Dataset does not contain time dimension '{time_dim}'. "
+            "Please check variable naming or dataset structure."
+        )
+        return ds
+
+    if climatology:
+        if len(ds[time_dim]) != 12:
+            raise ValueError(
+                f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
+            )
+        return ds
+
+    time_type = get_time_type(ds[time_dim])
+    if time_type == "int":
+        raise ValueError(
+            "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
+        )
+    if time_type == "cftime":
+        ds = ds.assign_coords({time_dim: convert_cftime_to_datetime(ds[time_dim])})
+
+    if end_time:
+        # Identify records before or at start_time
+        before_start = ds[time_dim] <= np.datetime64(start_time)
+        if before_start.any():
+            closest_before_start = ds[time_dim].where(before_start, drop=True).max()
+        else:
+            logging.warning(
+                f"No records found at or before the start_time: {start_time}."
+            )
+            closest_before_start = ds[time_dim].min()
+
+        # Identify records after or at end_time
+        after_end = ds[time_dim] >= np.datetime64(end_time)
+        if after_end.any():
+            closest_after_end = ds[time_dim].where(after_end, drop=True).min()
+        else:
+            logging.warning(f"No records found at or after the end_time: {end_time}.")
+            closest_after_end = ds[time_dim].max()
+
+        # Select records within the time range and add the closest before/after
+        within_range = (ds[time_dim] > np.datetime64(start_time)) & (
+            ds[time_dim] < np.datetime64(end_time)
+        )
+        selected_times = ds[time_dim].where(
+            within_range
+            | (ds[time_dim] == closest_before_start)
+            | (ds[time_dim] == closest_after_end),
+            drop=True,
+        )
+        ds = ds.sel({time_dim: selected_times})
+
+    else:
+        # Assume we are looking for exactly one time record for initial conditions
+        ds = _select_initial_time(
+            ds, time_dim, start_time, climatology, allow_flex_time
+        )
+    return ds
+
+
+def _select_initial_time(
+    ds: xr.Dataset,
+    time_dim: str,
+    ini_time: datetime,
+    climatology: bool,
+    allow_flex_time: bool = False,
+) -> xr.Dataset:
+    """Select exactly one initial time from dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The input dataset with a time dimension.
+    time_dim : str
+        Name of the time dimension.
+    ini_time : datetime
+        The desired initial time.
+    allow_flex_time : bool
+        - If True: allow a +24h window and pick the closest available timestamp.
+        - If False (default): require an exact match, otherwise raise ValueError.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset reduced to exactly one timestamp.
+
+    Raises
+    ------
+    ValueError
+        If no matching time is found (when `allow_flex_time=False`), or no entries are
+        available within the +24h window (when `allow_flex_time=True`).
+    """
+    if climatology:
+        # Convert from timedelta64[ns] to fractional days
+        ds["time"] = ds["time"] / np.timedelta64(1, "D")
+        # Interpolate from climatology for initial conditions
+        return interpolate_from_climatology(ds, time_dim, ini_time)
+
+    if allow_flex_time:
+        # Look in time range [ini_time, ini_time + 24h)
+        end_time = ini_time + timedelta(days=1)
+        times = (np.datetime64(ini_time) <= ds[time_dim]) & (
+            ds[time_dim] < np.datetime64(end_time)
         )
 
-    return ds
+        if np.all(~times):
+            raise ValueError(
+                f"No time entries found between {ini_time} and {end_time} "
+                "when allow_flex_time=True."
+            )
+
+        subset = ds.where(times, drop=True)
+        # Pick closest timestamp if multiple
+        idx = int(np.argmin(np.abs(subset[time_dim] - np.datetime64(ini_time))))
+        return subset.isel({time_dim: idx})
+    else:
+        # Strict match required
+        matches = ds.sel({time_dim: np.datetime64(ini_time)}, drop=True)
+        if matches.sizes.get(time_dim, 0) == 0:
+            raise ValueError(
+                f"No exact match found for initial time {ini_time} when allow_flex_time=False."
+            )
+        return matches
 
 
 def decode_string(byte_array):

@@ -525,21 +525,25 @@ def test_default_glorys_dataset_loading() -> None:
 
 
 @pytest.mark.parametrize(
-    "fname",
+    "fname,start_time",
     [
-        download_test_data("GLORYS_NA_2012.nc"),
-        download_test_data("GLORYS_NA_20121231.nc"),
+        (download_test_data("GLORYS_NA_2012.nc"), datetime(2012, 1, 1, 12)),
+        (download_test_data("GLORYS_NA_20121231.nc"), datetime(2012, 12, 31, 12)),
+        (download_test_data("GLORYS_coarse_test_data.nc"), datetime(2021, 6, 29)),
     ],
 )
-def test_non_default_glorys_dataset_loading(fname, use_dask) -> None:
+@pytest.mark.parametrize("allow_flex_time", [True, False])
+def test_non_default_glorys_dataset_loading(
+    fname, start_time, allow_flex_time, use_dask
+) -> None:
     """Verify the default GLORYS dataset is loaded correctly."""
-    start_time = datetime(2012, 12, 31)
-    for end_time in [start_time, start_time + timedelta(days=0.5)]:
+    for end_time in [None, start_time, start_time]:
         data = GLORYSDataset(
             filename=fname,
             start_time=start_time,
             end_time=end_time,
             use_dask=use_dask,
+            allow_flex_time=allow_flex_time,
         )
 
         expected_vars = {"temp", "salt", "u", "v", "zeta"}

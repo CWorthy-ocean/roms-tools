@@ -169,7 +169,7 @@ def test_select_times(data_fixture, expected_time_values, request, tmp_path, use
     ],
 )
 def test_select_times_valid_start_no_end_time(
-    data_fixture, expected_time_values, start_time, request, tmp_path, use_dask
+    data_fixture, expected_time_values, request, tmp_path, use_dask
 ):
     """Test selecting times with only start_time specified."""
     start_time = datetime(2022, 1, 2)
@@ -186,6 +186,7 @@ def test_select_times_valid_start_no_end_time(
         var_names={"var": "var"},
         start_time=start_time,
         use_dask=use_dask,
+        allow_flex_time=True,
     )
 
     assert dataset.ds is not None
@@ -238,6 +239,7 @@ def test_multiple_matching_times(
         var_names={"var": "var"},
         start_time=datetime(2021, 12, 31, 22, 0),
         use_dask=use_dask,
+        allow_flex_time=True,
     )
 
     assert dataset.ds["time"].values == np.datetime64(datetime(2022, 1, 1, 0, 0))

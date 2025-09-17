@@ -101,6 +101,7 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
         grid=grid,
         ini_time=datetime(2012, 1, 1),
         source={"path": [fname1, fname2], "name": "GLORYS"},
+        allow_flex_time=True,
         use_dask=use_dask,
     )
 
@@ -108,6 +109,7 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
         grid=grid,
         ini_time=datetime(2012, 1, 1),
         source={"path": [fname1, fname1, fname2], "name": "GLORYS"},
+        allow_flex_time=True,
         use_dask=use_dask,
     )
 

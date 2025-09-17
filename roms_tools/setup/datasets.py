@@ -327,7 +327,12 @@ class Dataset:
             raise ValueError("select_relevant_times called but start_time is None.")
 
         ds = _select_relevant_times(
-            ds, time_dim, self.start_time, self.end_time, self.climatology
+            ds,
+            time_dim,
+            self.start_time,
+            self.end_time,
+            self.climatology,
+            self.allow_flex_time,
         )
 
         return ds
@@ -2981,12 +2986,11 @@ def _select_initial_time(
         return subset.isel({time_dim: idx})
     else:
         # Strict match required
-        matches = ds.sel({time_dim: np.datetime64(ini_time)}, drop=True)
-        if matches.sizes.get(time_dim, 0) == 0:
+        if np.datetime64(ini_time) not in ds[time_dim].values:
             raise ValueError(
                 f"No exact match found for initial time {ini_time} when allow_flex_time=False."
             )
-        return matches
+        return ds.sel({time_dim: np.datetime64(ini_time)}, drop=True)
 
 
 def decode_string(byte_array):

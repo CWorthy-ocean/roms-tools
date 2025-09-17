@@ -2875,22 +2875,25 @@ def _select_relevant_times(
         )
         return ds
 
+    time_type = get_time_type(ds[time_dim])
+
     if climatology:
         if len(ds[time_dim]) != 12:
             raise ValueError(
                 f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
             )
-        return ds
-
-    time_type = get_time_type(ds[time_dim])
-    if time_type == "int":
-        raise ValueError(
-            "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
-        )
+    else:
+        if time_type == "int":
+            raise ValueError(
+                "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
+            )
     if time_type == "cftime":
         ds = ds.assign_coords({time_dim: convert_cftime_to_datetime(ds[time_dim])})
 
     if end_time:
+        if climatology:
+            return ds
+
         # Identify records before or at start_time
         before_start = ds[time_dim] <= np.datetime64(start_time)
         if before_start.any():
@@ -2976,21 +2979,27 @@ def _select_initial_time(
 
         if np.all(~times):
             raise ValueError(
-                f"No time entries found between {ini_time} and {end_time} "
-                "when allow_flex_time=True."
+                f"No time entries found between {ini_time} and {end_time}."
             )
 
-        subset = ds.where(times, drop=True)
-        # Pick closest timestamp if multiple
-        idx = int(np.argmin(np.abs(subset[time_dim] - np.datetime64(ini_time))))
-        return subset.isel({time_dim: idx})
+        ds = ds.where(times, drop=True)
+        if ds.sizes[time_dim] > 1:
+            # Pick the time closest to start_time
+            ds = ds.isel({time_dim: 0})
+
     else:
         # Strict match required
-        if np.datetime64(ini_time) not in ds[time_dim].values:
+        if not (ds[time_dim].values == np.datetime64(ini_time)).any():
             raise ValueError(
-                f"No exact match found for initial time {ini_time} when allow_flex_time=False."
+                f"No exact match found for initial time {ini_time}. Consider setting allow_flex_time to True."
             )
-        return ds.sel({time_dim: np.datetime64(ini_time)}, drop=True)
+
+        ds = ds.sel({time_dim: np.datetime64(ini_time)})
+
+    if time_dim not in ds.dims:
+        ds = ds.expand_dims(time_dim)
+
+    return ds
 
 
 def decode_string(byte_array):

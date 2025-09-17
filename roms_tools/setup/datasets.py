@@ -2897,12 +2897,12 @@ def _select_relevant_times(
         # Identify records before or at start_time
         before_start = ds[time_dim] <= np.datetime64(start_time)
         if before_start.any():
-            closest_before_start = ds[time_dim].where(before_start, drop=True).max()
+            closest_before_start = ds[time_dim].where(before_start, drop=True)[-1]
         else:
             logging.warning(
                 f"No records found at or before the start_time: {start_time}."
             )
-            closest_before_start = ds[time_dim].min()
+            closest_before_start = ds[time_dim][0]
 
         # Identify records after or at end_time
         after_end = ds[time_dim] >= np.datetime64(end_time)

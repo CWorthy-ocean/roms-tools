@@ -281,6 +281,27 @@ class Release(BaseModel):
     def get_tracer_metadata():
         return {}
 
+    def _compute_integrated_tracers(
+        self,
+        roms_time_stamps: np.ndarray,
+        model_reference_date: datetime,
+        tracer_series_dict: dict[str, np.ndarray],
+    ) -> dict[str, float]:
+        """Generic left-hold integration over ROMS time steps."""
+        if len(roms_time_stamps) < 2:
+            raise ValueError("Need at least two ROMS time stamps to define intervals.")
+
+        dt = np.diff(roms_time_stamps)
+        results = {}
+        for tracer, series in tracer_series_dict.items():
+            interp_values = np.interp(
+                roms_time_stamps,
+                convert_to_relative_days(self.times, model_reference_date),
+                series,
+            )
+            results[tracer] = np.sum(interp_values[:-1] * dt)
+        return results
+
 
 class VolumeRelease(Release):
     """Represents a CDR release with volume flux and tracer concentrations.
@@ -417,7 +438,7 @@ class VolumeRelease(Release):
     @staticmethod
     def get_tracer_metadata():
         """Returns long names and expected units for the tracer concentrations."""
-        return get_tracer_metadata_dict(include_bgc=True, with_flux_units=False)
+        return get_tracer_metadata_dict(include_bgc=True, unit_type="concentration")
 
     def _do_accounting(
         self,
@@ -447,43 +468,22 @@ class VolumeRelease(Release):
             the entire ROMS time period. Each value is the sum of the interpolated
             tracer fluxes multiplied by the corresponding ROMS time step durations.
         """
-        if len(roms_time_stamps) < 2:
-            raise ValueError("Need at least two ROMS time stamps to define intervals.")
-
-        # Convert CDR times to relative days
-        cdr_times_days = convert_to_relative_days(self.times, model_reference_date)
-
-        # Time deltas between ROMS stamps (in days)
-        dt = np.diff(roms_time_stamps)
-
-        results: dict[str, np.ndarray] = {}
-
-        # Loop over tracers and compute integrated values
+        tracer_series_dict = {}
+        volume_array = (
+            np.asarray(self.volume_fluxes.values)
+            if isinstance(self.volume_fluxes, Flux)
+            else np.asarray(self.volume_fluxes)
+        )
         for tracer, conc in self.tracer_concentrations.items():
-            volume_array = (
-                np.asarray(self.volume_fluxes.values)
-                if isinstance(self.volume_fluxes, Flux)
-                else np.asarray(self.volume_fluxes)
-            )
-
             tracer_array = (
                 np.asarray(conc.values)
                 if isinstance(conc, Concentration)
                 else np.asarray(conc)
             )
-
-            tracer_series = volume_array * tracer_array
-
-            # Interpolate flux*time series onto ROMS stamps
-            interp_values = np.interp(roms_time_stamps, cdr_times_days, tracer_series)
-
-            # Apply left-hold rule: use value at t₀ across [t₀, t₁)
-            interval_values = interp_values[:-1] * dt
-
-            # Sum over full simulation period
-            results[tracer] = np.sum(interval_values)
-
-        return results
+            tracer_series_dict[tracer] = volume_array * tracer_array
+        return self._compute_integrated_tracers(
+            roms_time_stamps, model_reference_date, tracer_series_dict
+        )
 
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:
@@ -594,7 +594,45 @@ class TracerPerturbation(Release):
     @staticmethod
     def get_tracer_metadata():
         """Returns long names and expected units for the tracer fluxes."""
-        return get_tracer_metadata_dict(include_bgc=True, with_flux_units=True)
+        return get_tracer_metadata_dict(include_bgc=True, unit_type="flux")
+
+    def _do_accounting(
+        self,
+        roms_time_stamps: np.ndarray,
+        model_reference_date: datetime,
+    ) -> dict[str, float]:
+        """
+        Compute time-integrated tracer quantities over ROMS time steps.
+
+        This method interpolates tracer flux time series from the CDR schedule
+        onto the provided ROMS time stamps (in days since model reference date),
+        then applies a "left-hold" rule: the interpolated value at t₀ is applied
+        across the full interval [t₀, t₁).
+
+        Parameters
+        ----------
+        roms_time_stamps : np.ndarray
+            1D array of ROMS time stamps (days since `model_reference_date`).
+            Must be strictly increasing.
+        model_reference_date : datetime
+            Reference date of the ROMS model calendar.
+
+        Returns
+        -------
+        dict[str, float]
+            Dictionary mapping tracer names to the total integrated quantity over
+            the entire ROMS time period. Each value is the sum of the interpolated
+            tracer fluxes multiplied by the corresponding ROMS time step durations.
+        """
+        tracer_series_dict = {
+            tracer: np.asarray(flux.values)
+            if isinstance(flux, Flux)
+            else np.asarray(flux)
+            for tracer, flux in self.tracer_fluxes.items()
+        }
+        return self._compute_integrated_tracers(
+            roms_time_stamps, model_reference_date, tracer_series_dict
+        )
 
     @model_serializer(mode="wrap")
     def _simplified_dump(self, pydantic_serializer) -> dict:

@@ -9,6 +9,7 @@ from typing import Annotated
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 from pydantic import (
     BaseModel,
@@ -39,6 +40,7 @@ from roms_tools.setup.utils import (
     from_yaml,
     gc_dist,
     get_target_coords,
+    get_tracer_metadata_dict,
     to_dict,
     validate_names,
     write_to_yaml,
@@ -126,6 +128,9 @@ class ReleaseCollector(RootModel):
             raise KeyError(f"Release named '{item}' not found.")
         else:
             raise TypeError(f"Invalid key type: {type(item)}. Must be int or str.")
+
+    def __len__(self):
+        return len(self.root)
 
     @model_validator(mode="before")
     @classmethod
@@ -250,7 +255,7 @@ class CDRForcingDatasetBuilder:
         """
         ds = xr.Dataset()
         ds["time"] = ("time", unique_times)
-        ds["cdr_time"] = ("time", unique_rel_times), timedelta
+        ds["cdr_time"] = ("time", unique_rel_times)
         ds["cdr_lon"] = ("ncdr", [r.lon for r in self.releases])
         ds["cdr_lat"] = ("ncdr", [r.lat for r in self.releases])
         ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
@@ -775,10 +780,61 @@ class CDRForcing(BaseModel):
         fig.subplots_adjust(hspace=0.45)
         fig.suptitle(f"Release distribution for: {release_name}")
 
-    def do_accounting(self, dt: float):
+    def compute_total_releases(self, dt: float) -> pd.DataFrame:
+        """
+        Compute integrated tracer quantities for all releases and return a DataFrame.
+
+        Parameters
+        ----------
+        dt : float
+            Time step in seconds for reconstructing ROMS time stamps.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with one row per release and one row of units at the top.
+            Columns 'temp' and 'salt' are excluded from integrated totals.
+        """
+        # Reconstruct ROMS time stamps
         _, rel_days = _reconstruct_roms_time_stamps(
             self.start_time, self.end_time, dt, self.model_reference_date
         )
+
+        # Collect accounting results for all releases
+        records = []
+        release_names = []
+        for release in self.releases:
+            result = release._do_accounting(rel_days, self.model_reference_date)
+            records.append(result)
+            release_names.append(getattr(release, "name", f"release_{len(records)}"))
+
+        # Build DataFrame: rows = releases, columns = tracer names
+        df = pd.DataFrame(records, index=release_names)
+
+        # Exclude temp and salt from units row and integrated totals
+        integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
+
+        # Add a row of units only for integrated tracers
+        tracer_meta = get_tracer_metadata_dict(include_bgc=True, unit_type="integrated")
+        units_row = {
+            col: tracer_meta.get(col, {}).get("units", "") for col in integrated_tracers
+        }
+
+        df_units = pd.DataFrame([units_row], index=["units"])
+
+        # Keep only integrated_tracers columns in df, drop temp and salt
+        df_integrated = df[integrated_tracers]
+
+        # Concatenate units row on top
+        df_final = pd.concat([df_units, df_integrated])
+
+        # Store dt as metadata
+        df_final.attrs["time_step"] = dt
+        df_final.attrs["start_time"] = self.start_time
+        df_final.attrs["end_time"] = self.end_time
+        df_final.attrs["title"] = "Integrated tracer releases"
+
+        return df_final
 
     def save(
         self,

@@ -82,7 +82,7 @@ jobs:
   test-with-streaming:
     name: 3.13-build-with-streaming
     runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.owner.login == 'CWorthy-ocean'
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
     strategy:
       matrix:
         python-version: ["3.13"]

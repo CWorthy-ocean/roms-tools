@@ -97,7 +97,7 @@ class TidalForcing:
 
     def __post_init__(self):
         self._input_checks()
-        target_coords = get_target_coords(self.grid)
+        target_coords = get_target_coords(self.grid.ds, self.grid.straddle)
 
         tidal_data = self._get_data()
 
@@ -105,7 +105,6 @@ class TidalForcing:
             if key != "omega":
                 data.choose_subdomain(
                     target_coords,
-                    buffer_points=20,
                 )
                 # Enforce double precision to ensure reproducibility
                 data.convert_to_float64()

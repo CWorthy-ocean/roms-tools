@@ -13,6 +13,12 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
+from roms_tools.setup.datasets import get_glorys_bounds
+
+try:
+    import copernicusmarine  # type: ignore
+except ImportError:
+    copernicusmarine = None
 
 
 @pytest.mark.parametrize(
@@ -785,6 +791,58 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
 
         expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}
         assert set(bf.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.use_copernicus
+@pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid",
+        "grid_that_straddles_dateline",
+        "grid_that_straddles_180_degree_meridian",
+        "small_grid",
+        "tiny_grid",
+    ],
+)
+def test_invariance_to_get_glorys_bounds(
+    tmp_path, grid_fixture, global_glorys_file, use_dask, request
+):
+    grid = request.getfixturevalue(grid_fixture)
+    start_time = datetime(2012, 1, 1)
+    end_time = datetime(2012, 1, 1)
+
+    # Regional subset
+    bounds = get_glorys_bounds(grid_ds=grid.ds)
+    regional_file = tmp_path / "regional_GLORYS.nc"
+    copernicusmarine.subset(
+        dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
+        variables=["thetao", "so", "uo", "vo", "zos"],
+        **bounds,
+        start_datetime=start_time,
+        end_datetime=end_time,
+        coordinates_selection_method="outside",
+        output_filename=str(regional_file),
+    )
+
+    bf_from_global = BoundaryForcing(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(global_glorys_file)},
+        type="physics",
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=use_dask,
+    )
+    bf_from_regional = BoundaryForcing(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(regional_file)},
+        type="physics",
+        start_time=start_time,
+        end_time=end_time,
+        use_dask=use_dask,
+    )
+
+    xr.testing.assert_allclose(bf_from_global.ds, bf_from_regional.ds)
 
 
 @pytest.mark.parametrize(

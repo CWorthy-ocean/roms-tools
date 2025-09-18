@@ -152,14 +152,13 @@ class BoundaryForcing:
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
 
-        target_coords = get_target_coords(self.grid)
+        target_coords = get_target_coords(self.grid.ds, self.grid.straddle)
 
         data = self._get_data()
 
         if self.apply_2d_horizontal_fill:
             data.choose_subdomain(
                 target_coords,
-                buffer_points=20,  # lateral fill needs good buffer from data margin
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()

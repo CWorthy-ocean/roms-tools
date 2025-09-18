@@ -178,13 +178,12 @@ class InitialConditions:
         self.ds = ds
 
     def _process_data(self, processed_fields, type="physics"):
-        target_coords = get_target_coords(self.grid)
+        target_coords = get_target_coords(self.grid.ds, self.grid.straddle)
 
         data = self._get_data(forcing_type=type)
 
         data.choose_subdomain(
             target_coords,
-            buffer_points=20,  # lateral fill needs good buffer from data margin
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()

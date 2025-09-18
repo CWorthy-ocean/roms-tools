@@ -1,6 +1,6 @@
 import logging
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -33,9 +33,9 @@ def global_dataset():
     depth = np.linspace(0, 2000, 10)
     time = [
         np.datetime64("2022-01-01T00:00:00"),
-        np.datetime64("2022-02-01T00:00:00"),
-        np.datetime64("2022-03-01T00:00:00"),
-        np.datetime64("2022-04-01T00:00:00"),
+        np.datetime64("2022-01-02T00:00:00"),
+        np.datetime64("2022-01-03T00:00:00"),
+        np.datetime64("2022-01-04T00:00:00"),
     ]
     data = np.random.rand(4, 10, 180, 360)
     ds = xr.Dataset(
@@ -56,9 +56,9 @@ def global_dataset_with_noon_times():
     lat = np.linspace(-90, 90, 180)
     time = [
         np.datetime64("2022-01-01T12:00:00"),
-        np.datetime64("2022-02-01T12:00:00"),
-        np.datetime64("2022-03-01T12:00:00"),
-        np.datetime64("2022-04-01T12:00:00"),
+        np.datetime64("2022-01-02T12:00:00"),
+        np.datetime64("2022-01-03T12:00:00"),
+        np.datetime64("2022-01-04T12:00:00"),
     ]
     data = np.random.rand(4, 180, 360)
     ds = xr.Dataset(
@@ -79,12 +79,12 @@ def global_dataset_with_multiple_times_per_day():
     time = [
         np.datetime64("2022-01-01T00:00:00"),
         np.datetime64("2022-01-01T12:00:00"),
-        np.datetime64("2022-02-01T00:00:00"),
-        np.datetime64("2022-02-01T12:00:00"),
-        np.datetime64("2022-03-01T00:00:00"),
-        np.datetime64("2022-03-01T12:00:00"),
-        np.datetime64("2022-04-01T00:00:00"),
-        np.datetime64("2022-04-01T12:00:00"),
+        np.datetime64("2022-01-02T00:00:00"),
+        np.datetime64("2022-01-02T12:00:00"),
+        np.datetime64("2022-01-03T00:00:00"),
+        np.datetime64("2022-01-03T12:00:00"),
+        np.datetime64("2022-01-04T00:00:00"),
+        np.datetime64("2022-01-04T12:00:00"),
     ]
     data = np.random.rand(8, 180, 360)
     ds = xr.Dataset(
@@ -116,34 +116,37 @@ def non_global_dataset():
         (
             "global_dataset",
             [
-                np.datetime64("2022-02-01T00:00:00"),
-                np.datetime64("2022-03-01T00:00:00"),
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+                np.datetime64("2022-01-04T00:00:00"),
             ],
         ),
         (
             "global_dataset_with_noon_times",
             [
                 np.datetime64("2022-01-01T12:00:00"),
-                np.datetime64("2022-02-01T12:00:00"),
-                np.datetime64("2022-03-01T12:00:00"),
+                np.datetime64("2022-01-02T12:00:00"),
+                np.datetime64("2022-01-03T12:00:00"),
+                np.datetime64("2022-01-04T12:00:00"),
             ],
         ),
         (
             "global_dataset_with_multiple_times_per_day",
             [
-                np.datetime64("2022-02-01T00:00:00"),
-                np.datetime64("2022-02-01T12:00:00"),
-                np.datetime64("2022-03-01T00:00:00"),
+                np.datetime64("2022-01-02T00:00:00"),
+                np.datetime64("2022-01-02T12:00:00"),
+                np.datetime64("2022-01-03T00:00:00"),
+                np.datetime64("2022-01-03T12:00:00"),
+                np.datetime64("2022-01-04T00:00:00"),
             ],
         ),
     ],
 )
 def test_select_times(data_fixture, expected_time_values, request, tmp_path, use_dask):
     """Test selecting times with different datasets."""
-    start_time = datetime(2022, 2, 1)
-    end_time = datetime(2022, 3, 1)
+    start_time = datetime(2022, 1, 2)
+    end_time = datetime(2022, 1, 4)
 
-    # Get the fixture dynamically based on the parameter
     dataset = request.getfixturevalue(data_fixture)
 
     filepath = tmp_path / "test.nc"
@@ -165,16 +168,15 @@ def test_select_times(data_fixture, expected_time_values, request, tmp_path, use
 @pytest.mark.parametrize(
     "data_fixture, expected_time_values",
     [
-        ("global_dataset", [np.datetime64("2022-02-01T00:00:00")]),
-        ("global_dataset_with_noon_times", [np.datetime64("2022-02-01T12:00:00")]),
+        ("global_dataset", [np.datetime64("2022-01-02T00:00:00")]),
+        ("global_dataset_with_noon_times", [np.datetime64("2022-01-02T12:00:00")]),
     ],
 )
 def test_select_times_valid_start_no_end_time(
     data_fixture, expected_time_values, request, tmp_path, use_dask
 ):
     """Test selecting times with only start_time specified."""
-    start_time = datetime(2022, 2, 1)
-
+    start_time = datetime(2022, 1, 2)
     # Get the fixture dynamically based on the parameter
     dataset = request.getfixturevalue(data_fixture)
 
@@ -188,9 +190,11 @@ def test_select_times_valid_start_no_end_time(
         var_names={"var": "var"},
         start_time=start_time,
         use_dask=use_dask,
+        allow_flex_time=True,
     )
 
     assert dataset.ds is not None
+    assert "time" in dataset.ds.dims
     assert len(dataset.ds.time) == len(expected_time_values)
     for expected_time in expected_time_values:
         assert expected_time in dataset.ds.time.values
@@ -216,7 +220,7 @@ def test_select_times_invalid_start_no_end_time(
 
     with pytest.raises(
         ValueError,
-        match="The dataset does not contain any time entries between the specified start_time",
+        match="No exact match found ",
     ):
         dataset = Dataset(
             filename=filepath,
@@ -237,11 +241,12 @@ def test_multiple_matching_times(
     dataset = Dataset(
         filename=filepath,
         var_names={"var": "var"},
-        start_time=datetime(2022, 1, 31, 22, 0),
+        start_time=datetime(2021, 12, 31, 22, 0),
         use_dask=use_dask,
+        allow_flex_time=True,
     )
 
-    assert dataset.ds["time"].values == np.datetime64(datetime(2022, 2, 1, 0, 0))
+    assert dataset.ds["time"].values == np.datetime64(datetime(2022, 1, 1, 0, 0))
 
 
 def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
@@ -261,7 +266,7 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert "No records found at or before the start_time." in caplog.text
+    assert "No records found at or before the start_time" in caplog.text
 
     with caplog.at_level(logging.WARNING):
         start_time = datetime(2024, 1, 1)
@@ -275,7 +280,7 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert "No records found at or after the end_time." in caplog.text
+    assert "No records found at or after the end_time" in caplog.text
 
 
 def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):
@@ -296,6 +301,7 @@ def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_p
         },
         start_time=start_time,
         use_dask=use_dask,
+        allow_flex_time=True,
     )
 
     new_dataset = Dataset.from_ds(dataset, global_dataset_with_noon_times)
@@ -337,6 +343,7 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
         },
         start_time=start_time,
         use_dask=use_dask,
+        allow_flex_time=True,
     )
 
     assert np.all(np.diff(dataset.ds["latitude"]) > 0)
@@ -504,17 +511,51 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
 def test_default_glorys_dataset_loading() -> None:
     """Verify the default GLORYS dataset is loaded correctly."""
     start_time = datetime(2012, 1, 1)
-    end_time = datetime(2013, 1, 1)
 
-    ds = GLORYSDefaultDataset(
-        filename=GLORYSDefaultDataset.dataset_name,
-        start_time=start_time,
-        end_time=end_time,
-        use_dask=True,
-    )
+    for end_time in [start_time, start_time + timedelta(days=0.5)]:
+        data = GLORYSDefaultDataset(
+            filename=GLORYSDefaultDataset.dataset_name,
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=True,
+        )
 
-    expected_vars = {"temp", "salt", "u", "v", "zeta"}
-    assert set(ds.var_names).issuperset(expected_vars)
+        expected_vars = {"temp", "salt", "u", "v", "zeta"}
+        assert set(data.var_names).issuperset(expected_vars)
+
+        expected_vars = {"thetao", "so", "uo", "vo", "zos"}
+        assert "time" in data.ds.dims
+        assert set(data.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.parametrize(
+    "fname,start_time",
+    [
+        (download_test_data("GLORYS_NA_2012.nc"), datetime(2012, 1, 1, 12)),
+        (download_test_data("GLORYS_NA_20121231.nc"), datetime(2012, 12, 31, 12)),
+        (download_test_data("GLORYS_coarse_test_data.nc"), datetime(2021, 6, 29)),
+    ],
+)
+@pytest.mark.parametrize("allow_flex_time", [True, False])
+def test_non_default_glorys_dataset_loading(
+    fname, start_time, allow_flex_time, use_dask
+) -> None:
+    """Verify the default GLORYS dataset is loaded correctly."""
+    for end_time in [None, start_time, start_time]:
+        data = GLORYSDataset(
+            filename=fname,
+            start_time=start_time,
+            end_time=end_time,
+            use_dask=use_dask,
+            allow_flex_time=allow_flex_time,
+        )
+
+        expected_vars = {"temp", "salt", "u", "v", "zeta"}
+        assert set(data.var_names).issuperset(expected_vars)
+
+        expected_vars = {"thetao", "so", "uo", "vo", "zos"}
+        assert "time" in data.ds.dims
+        assert set(data.ds.data_vars).issuperset(expected_vars)
 
 
 def test_data_concatenation(use_dask):

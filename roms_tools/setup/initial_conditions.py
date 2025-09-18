@@ -88,6 +88,13 @@ class InitialConditions:
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    allow_flex_time: bool, optional
+        Controls how strictly `ini_time` is handled:
+
+        - If False (default): requires an exact match to `ini_time`. Raises a ValueError if no match exists.
+        - If True: allows a +24h search window after `ini_time` and selects the closest available
+          time entry within that window. Raises a ValueError if none are found.
+
     horizontal_chunk_size : int, optional
         The chunk size used for horizontal partitioning for the vertical regridding when `use_dask = True`. Defaults to 50.
         A larger number results in a bigger memory footprint but faster computations.
@@ -125,6 +132,8 @@ class InitialConditions:
     adjust_depth_for_sea_surface_height: bool = False
     """Whether to account for sea surface height variations when computing depth
     coordinates."""
+    allow_flex_time: bool = False
+    """Whether to handle ini_time flexibly."""
     use_dask: bool = False
     """Whether to use dask for processing."""
     horizontal_chunk_size: int = 50
@@ -371,6 +380,7 @@ class InitialConditions:
             filename=source_dict["path"],
             start_time=self.ini_time,
             climatology=source_dict["climatology"],  # type: ignore
+            allow_flex_time=self.allow_flex_time,
             use_dask=self.use_dask,
         )
 

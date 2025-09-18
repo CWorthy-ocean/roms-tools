@@ -11,15 +11,20 @@
 * Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
 * Introduce GLORYS streaming support for `InitialConditions` using copernicusmarine — not recommended yet; performance remains a blocker ([#424](https://github.com/CWorthy-ocean/roms-tools/pull/424))
 * Allow performing CDR analysis, including plotting CDR uptake curves ([#417](https://github.com/CWorthy-ocean/roms-tools/pull/417))
+* Introduce parameter `allow_flex_time` for `InitialConditions` controlling how strictly `ini_time` is handled ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
 * Add utility function `get_glorys_bounds` to return the min/max latitude and longitude required for GLORYS downloads for a fixed domain ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
 
 ### Breaking Changes
+
+* Default of new `allow_flex_time` parameter for `InitialConditions` is set to `False`. Old behaviour was `allow_flex_time = True`. ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
 
 ### Internal Changes
 
 ### Documentation
 
 ### Bugfixes
+
+* Fix bug in creation of `InitialConditions` ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
 
 ## v3.1.2
 

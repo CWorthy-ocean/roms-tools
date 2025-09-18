@@ -89,8 +89,12 @@ jobs:
 
       - name: Running Tests without Dask
         shell: bash -l {0}
+        env:
+          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
+           copernicusmarine login
            coverage run --rcfile=coverage.toml -m pytest --use_copernicus --verbose roms_tools/tests/*
 
       - name: Get coverage report
@@ -186,8 +190,12 @@ jobs:
 
       - name: Running Tests with Dask
         shell: bash -l {0}
+        env:
+          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
         run: |
            python -V
+           copernicusmarine login
            coverage run --rcfile=coverage.toml -m pytest --use_dask --use_copernicus --verbose roms_tools/tests/*
 
       - name: Get coverage report

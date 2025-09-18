@@ -83,9 +83,11 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    :maxdepth: 1
    :caption: Analyzing a ROMS Simulation
 
+   Joining ROMS output files <join>
    Reading ROMS Output <reading_roms_output>
    Visualizing ROMS Output <plotting_roms_output>
    Regridding ROMS Output <regridding_roms_output>
+   Analyzing Carbon Dioxide Removal (CDR) Metrics <cdr_analysis>
 
 .. toctree::
    :maxdepth: 1

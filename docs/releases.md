@@ -5,11 +5,33 @@
 ### New Features
 
 * Enhance `partition_netcdf` flexibility: now supports partitioning multiple input files and allows specifying a custom output directory for saved tiles ([#394](https://github.com/CWorthy-ocean/roms-tools/pull/394))
-
+* Add `join_netcdf` function: users can now re-join ROMS output and partitioned files
+([#412](https://github.com/CWorthy-ocean/roms-tools/pull/412))
 * Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
 * Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
+* Introduce GLORYS streaming support for `InitialConditions` using copernicusmarine — not recommended yet; performance remains a blocker ([#424](https://github.com/CWorthy-ocean/roms-tools/pull/424))
+* Allow performing CDR analysis, including plotting CDR uptake curves ([#417](https://github.com/CWorthy-ocean/roms-tools/pull/417))
+* Introduce parameter `allow_flex_time` for `InitialConditions` controlling how strictly `ini_time` is handled ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
 
 ### Breaking Changes
+
+* Default of new `allow_flex_time` parameter for `InitialConditions` is set to `False`. Old behaviour was `allow_flex_time = True`. ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+* Fix bug in creation of `InitialConditions` ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
+
+## v3.1.2
+
+### New Features
+
+* Enhance `partition_netcdf` flexibility: now supports partitioning multiple input files and allows specifying a custom output directory for saved tiles ([#394](https://github.com/CWorthy-ocean/roms-tools/pull/394))
+* Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
+* Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
 
 ### Internal Changes
 
@@ -19,8 +41,6 @@
 
 * Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))
 * Include recommendation about `interp_frc` in INFO message ([#352](https://github.com/CWorthy-ocean/roms-tools/issues/352))
-
-### Bugfixes
 
 ## v3.1.1
 

@@ -6,6 +6,7 @@ from enum import StrEnum, auto
 from typing import Annotated, Literal
 
 import numpy as np
+import pandas as pd
 from annotated_types import Ge, Le
 from pydantic import (
     BaseModel,
@@ -24,6 +25,9 @@ from roms_tools.setup.utils import (
 )
 
 NonNegativeFloat = Annotated[float, Ge(0)]
+
+# Show all columns when printing a DataFrame
+pd.set_option("display.max_columns", None)
 
 
 @dataclass
@@ -277,9 +281,13 @@ class Release(BaseModel):
             if self.times[-1] < end_time:
                 self.times.append(end_time)
 
-    @staticmethod
-    def get_tracer_metadata():
+    @classmethod
+    def get_tracer_metadata(cls):
         return {}
+
+    @classmethod
+    def get_metadata(cls):
+        return pd.DataFrame(cls.get_tracer_metadata())
 
     def _compute_integrated_tracers(
         self,
@@ -449,14 +457,14 @@ class VolumeRelease(Release):
         Compute time-integrated tracer quantities over ROMS time steps.
 
         This method interpolates tracer flux time series from the CDR schedule
-        onto the provided ROMS time stamps (in days since model reference date),
+        onto the provided ROMS time stamps (in seconds since model reference date),
         then applies a "left-hold" rule: the interpolated value at t₀ is applied
         across the full interval [t₀, t₁).
 
         Parameters
         ----------
         roms_time_stamps : np.ndarray
-            1D array of ROMS time stamps (days since `model_reference_date`).
+            1D array of ROMS time stamps (seconds since `model_reference_date`).
             Must be strictly increasing.
         model_reference_date : datetime
             Reference date of the ROMS model calendar.

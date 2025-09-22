@@ -796,7 +796,7 @@ class CDRForcing(BaseModel):
             Columns 'temp' and 'salt' are excluded from integrated totals.
         """
         # Reconstruct ROMS time stamps
-        _, rel_days = _reconstruct_roms_time_stamps(
+        _, rel_seconds = _reconstruct_roms_time_stamps(
             self.start_time, self.end_time, dt, self.model_reference_date
         )
 
@@ -804,7 +804,7 @@ class CDRForcing(BaseModel):
         records = []
         release_names = []
         for release in self.releases:
-            result = release._do_accounting(rel_days, self.model_reference_date)
+            result = release._do_accounting(rel_seconds, self.model_reference_date)
             records.append(result)
             release_names.append(getattr(release, "name", f"release_{len(records)}"))
 
@@ -1124,9 +1124,6 @@ def _reconstruct_roms_time_stamps(
     """
     Reconstruct ROMS time stamps between `start_time` and `end_time` with step `dt`.
 
-    Uses `convert_to_relative_days` to express times relative to the
-    model reference date in ROMS convention (days since reference date).
-
     Parameters
     ----------
     start_time : datetime
@@ -1143,7 +1140,7 @@ def _reconstruct_roms_time_stamps(
     times : list of datetime
         Sequence of datetimes from `start_time` to `end_time`.
     rel_days : np.ndarray
-        Array of elapsed times in **days** relative to `model_reference_date`.
+        Array of elapsed times in **seconds** relative to `model_reference_date`.
 
     Raises
     ------
@@ -1165,5 +1162,6 @@ def _reconstruct_roms_time_stamps(
 
     # Convert to relative ROMS time (days since model_reference_date)
     rel_days = convert_to_relative_days(times, model_reference_date)
+    rel_seconds = rel_days * 3600 * 24
 
-    return times, rel_days
+    return times, rel_seconds

@@ -24,6 +24,12 @@ from roms_tools.setup.datasets import (
     get_glorys_bounds,
 )
 from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
+from roms_tools.setup.utils import get_target_coords
+
+try:
+    import copernicusmarine  # type: ignore
+except ImportError:
+    copernicusmarine = None
 
 
 @pytest.fixture
@@ -1039,3 +1045,63 @@ def test_get_glorys_bounds(tmp_path, grid_fixture, glorys_grid_fixture, request)
         "minimum_longitude",
         "maximum_longitude",
     }
+
+
+@pytest.mark.use_copernicus
+@pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "small_grid_that_straddles_dateline",
+        "small_grid_that_straddles_180_degree_meridian",
+        "tiny_grid",
+    ],
+)
+def test_invariance_to_get_glorys_bounds(
+    tmp_path, grid_fixture, global_glorys_file, use_dask, request
+):
+    grid = request.getfixturevalue(grid_fixture)
+    target_coords = get_target_coords(grid.ds, grid.straddle)
+
+    start_time = datetime(2012, 1, 1)
+
+    # download regional subset
+    bounds = get_glorys_bounds(grid_ds=grid.ds)
+    regional_file = tmp_path / "regional_GLORYS.nc"
+    copernicusmarine.subset(
+        dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
+        variables=["thetao", "so", "uo", "vo", "zos"],
+        **bounds,
+        start_datetime=start_time,
+        end_datetime=start_time,
+        coordinates_selection_method="outside",
+        output_filename=str(regional_file),
+    )
+
+    # create datasets from regional and global data
+    regional_data = GLORYSDataset(
+        filename=regional_file,
+        start_time=start_time,
+        climatology=False,
+        allow_flex_time=False,
+        use_dask=use_dask,
+    )
+    global_data = GLORYSDataset(
+        filename=global_glorys_file,
+        start_time=start_time,
+        climatology=False,
+        allow_flex_time=False,
+        use_dask=use_dask,
+    )
+
+    # subset both datasets and check they are the same
+    regional_data.choose_subdomain(target_coords)
+    global_data.choose_subdomain(target_coords)
+
+    # Use assert_allclose instead of equals: necessary for grids that straddle the 180° meridian.
+    # Copernicus returns data on [-180, 180] by default, but if you request a range
+    # like [170, 190], it remaps longitudes. That remapping introduces tiny floating
+    # point differences in the longitude coordinate, so strict equality will fail
+    # even though the data are effectively identical.
+    # For grids that do not straddle the 180° meridian, strict equality still holds.
+    xr.testing.assert_allclose(global_data.ds, regional_data.ds)

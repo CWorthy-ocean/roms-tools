@@ -780,7 +780,7 @@ class CDRForcing(BaseModel):
         fig.subplots_adjust(hspace=0.45)
         fig.suptitle(f"Release distribution for: {release_name}")
 
-    def compute_total_releases(self, dt: float) -> pd.DataFrame:
+    def compute_total_cdr_source(self, dt: float) -> pd.DataFrame:
         """
         Compute integrated tracer quantities for all releases and return a DataFrame.
 

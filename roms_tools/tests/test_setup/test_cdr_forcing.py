@@ -987,11 +987,11 @@ class TestCDRForcing:
             ("tracer_perturbation_cdr_forcing_without_grid", "tracer_fluxes"),
         ],
     )
-    def test_compute_total_releases(self, cdr_forcing, tracer_attr, request):
+    def test_compute_total_cdr_source(self, cdr_forcing, tracer_attr, request):
         dt = 30.0
         cdr_instance = getattr(self, cdr_forcing)
 
-        df = cdr_instance.compute_total_releases(dt)
+        df = cdr_instance.compute_total_cdr_source(dt)
 
         # Check type
         assert isinstance(df, pd.DataFrame)

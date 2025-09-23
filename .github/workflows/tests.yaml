@@ -56,6 +56,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: without-dask
+          name: without-dask-py${{ matrix.python-version }}
+          fail_ci_if_error: true
 
   test-with-dask:
     name: 3.13-build-with-dask
@@ -104,6 +106,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: with-dask
+          name: with-dask-py${{ matrix.python-version }}
+          fail_ci_if_error: true
 
   test-with-streaming:
     name: 3.13-build-with-streaming
@@ -157,6 +161,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: with-streaming
+          name: with-streaming
+          fail_ci_if_error: true
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
@@ -205,6 +211,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: with-dask-and-xesmf
+          name: with-dask-and-xesmf
+          fail_ci_if_error: true
 
 
   test-glorys-regional-invariance:
@@ -259,3 +267,5 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: glorys-regional-invariance
+          name: glorys-regional-invariance
+          fail_ci_if_error: true

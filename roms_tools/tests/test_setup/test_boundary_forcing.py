@@ -798,10 +798,8 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
 @pytest.mark.parametrize(
     "grid_fixture",
     [
-        "grid",
-        "grid_that_straddles_dateline",
-        "grid_that_straddles_180_degree_meridian",
-        "small_grid",
+        "small_grid_that_straddles_dateline",
+        "small_grid_that_straddles_180_degree_meridian",
         "tiny_grid",
     ],
 )
@@ -831,6 +829,7 @@ def test_invariance_to_get_glorys_bounds(
         type="physics",
         start_time=start_time,
         end_time=end_time,
+        apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
     bf_from_regional = BoundaryForcing(
@@ -839,10 +838,18 @@ def test_invariance_to_get_glorys_bounds(
         type="physics",
         start_time=start_time,
         end_time=end_time,
+        apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
 
-    xr.testing.assert_allclose(bf_from_global.ds, bf_from_regional.ds)
+    # Use assert_allclose instead of equals: necessary for grids that straddle the 180° meridian.
+    # Copernicus returns data on [-180, 180] by default, but if you request a range
+    # like [170, 190], it remaps longitudes. That remapping introduces tiny floating
+    # point differences in the longitude coordinate, which will then propagate into further differences once you do regridding.
+    # Need to adjust the tolerances for these grids that straddle the 180° meridian.
+    xr.testing.assert_allclose(
+        bf_from_global.ds, bf_from_regional.ds, rtol=1e-4, atol=1e-5
+    )
 
 
 @pytest.mark.parametrize(

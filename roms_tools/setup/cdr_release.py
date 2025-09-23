@@ -295,7 +295,40 @@ class Release(BaseModel):
         model_reference_date: datetime,
         tracer_series_dict: dict[str, np.ndarray],
     ) -> dict[str, float]:
-        """Generic left-hold integration over ROMS time steps."""
+        """
+        Compute time-integrated tracer quantities over ROMS time steps using a left-hold rule.
+
+        This method performs a left-hold (stepwise constant) integration of tracer fluxes
+        over the intervals defined by the ROMS time stamps. It first interpolates the
+        tracer time series from the release schedule onto the ROMS time stamps, then
+        multiplies the value at the start of each interval by the duration of that interval.
+
+        Parameters
+        ----------
+        roms_time_stamps : np.ndarray
+            1D array of ROMS model time stamps in seconds since `model_reference_date`.
+            Must be strictly increasing and contain at least two entries.
+        model_reference_date : datetime
+            Reference datetime of the ROMS model calendar, used to compute relative times
+            for interpolation.
+        tracer_series_dict : dict[str, np.ndarray]
+            Dictionary mapping tracer names to 1D arrays of tracer flux values at the
+            release schedule times (`self.times`). Each array must have the same length
+            as `self.times`.
+
+        Returns
+        -------
+        dict[str, float]
+            Dictionary mapping each tracer name to its integrated quantity over the
+            ROMS time period. Integration is performed using the left-hold rule,
+            ignoring the last release point because it defines the end of the final interval.
+
+        Raises
+        ------
+        ValueError
+            If `roms_time_stamps` has fewer than two entries, since at least one interval
+            is required for integration.
+        """
         if len(roms_time_stamps) < 2:
             raise ValueError("Need at least two ROMS time stamps to define intervals.")
 
@@ -304,7 +337,7 @@ class Release(BaseModel):
         for tracer, series in tracer_series_dict.items():
             interp_values = np.interp(
                 roms_time_stamps,
-                convert_to_relative_days(self.times, model_reference_date),
+                convert_to_relative_days(self.times, model_reference_date) * 3600 * 24,
                 series,
             )
             results[tracer] = np.sum(interp_values[:-1] * dt)

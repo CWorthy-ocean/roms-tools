@@ -159,6 +159,21 @@ def grid_that_straddles_dateline() -> Grid:
 
 
 @pytest.fixture(scope="session")
+def small_grid_that_straddles_dateline() -> Grid:
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=10,
+        size_y=10,
+        center_lon=0,
+        center_lat=61,
+        rot=20,
+    )
+
+    return grid
+
+
+@pytest.fixture(scope="session")
 def grid_that_straddles_180_degree_meridian() -> Grid:
     """Fixture for creating a domain that straddles 180 degree meridian.
 
@@ -179,6 +194,21 @@ def grid_that_straddles_180_degree_meridian() -> Grid:
 
 
 @pytest.fixture(scope="session")
+def small_grid_that_straddles_180_degree_meridian() -> Grid:
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=10,
+        size_y=10,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    return grid
+
+
+@pytest.fixture(scope="session")
 def small_grid() -> Grid:
     """Create a grid that covers a small surface area."""
     return Grid(
@@ -188,7 +218,7 @@ def small_grid() -> Grid:
         size_y=400,
         center_lon=-8,
         center_lat=58,
-        rot=0,
+        rot=10,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter

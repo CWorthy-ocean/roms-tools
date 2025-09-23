@@ -159,7 +159,7 @@ def grid_that_straddles_dateline() -> Grid:
 
 
 @pytest.fixture(scope="session")
-def small_grid_that_straddles_dateline() -> Grid:
+def tiny_grid_that_straddles_dateline() -> Grid:
     grid = Grid(
         nx=5,
         ny=5,
@@ -194,7 +194,7 @@ def grid_that_straddles_180_degree_meridian() -> Grid:
 
 
 @pytest.fixture(scope="session")
-def small_grid_that_straddles_180_degree_meridian() -> Grid:
+def tiny_grid_that_straddles_180_degree_meridian() -> Grid:
     grid = Grid(
         nx=5,
         ny=5,
@@ -218,7 +218,7 @@ def small_grid() -> Grid:
         size_y=400,
         center_lon=-8,
         center_lat=58,
-        rot=10,
+        rot=0,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
@@ -237,6 +237,24 @@ def tiny_grid() -> Grid:
         center_lon=-17,
         center_lat=60,
         rot=0,
+        N=3,  # number of vertical levels
+        theta_s=5.0,  # surface control parameter
+        theta_b=2.0,  # bottom control parameter
+        hc=250.0,  # critical depth
+    )
+
+
+@pytest.fixture(scope="session")
+def tiny_rotated_grid() -> Grid:
+    """Create a grid that covers a small surface area."""
+    return Grid(
+        nx=3,
+        ny=3,
+        size_x=10,
+        size_y=10,
+        center_lon=-17,
+        center_lat=60,
+        rot=20,
         N=3,  # number of vertical levels
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter

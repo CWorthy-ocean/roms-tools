@@ -798,9 +798,9 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
 @pytest.mark.parametrize(
     "grid_fixture",
     [
-        "small_grid_that_straddles_dateline",
-        "small_grid_that_straddles_180_degree_meridian",
-        "tiny_grid",
+        "tiny_grid_that_straddles_dateline",
+        "tiny_grid_that_straddles_180_degree_meridian",
+        "tiny_rotated_grid",
     ],
 )
 def test_invariance_to_get_glorys_bounds(

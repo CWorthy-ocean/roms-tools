@@ -2985,6 +2985,10 @@ def _select_initial_time(
             # Pick the time closest to start_time
             ds = ds.isel({time_dim: 0})
 
+        logging.warning(
+            f"Selected time entry closest to the specified start_time in +24 hour range: {ds[time_dim].values}"
+        )
+
     else:
         # Strict match required
         if not (ds[time_dim].values == np.datetime64(ini_time)).any():

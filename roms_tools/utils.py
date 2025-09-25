@@ -7,11 +7,46 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
+
+FilePaths: TypeAlias = str | Path | list[Path | str]
+
+
+def _path_list_from_input(files: FilePaths) -> list[Path]:
+    """Converts a generic user input to a list of Paths.
+
+    Takes a list of strings or paths, or wildcard pattern, and
+    returns a list of pathlib.Path objects
+
+    Parameters
+    ----------
+    files: FilePaths
+        A list of files (str, Path), single path as a str or Path, or a wildcard string
+
+    Returns
+    -------
+    List[Path]
+        A list of pathlib.Paths
+    """
+    if isinstance(files, str):
+        filepaths = sorted(Path(files).parent.glob(Path(files).name))
+        if not filepaths:
+            raise FileNotFoundError(f"No files matched: {files}")
+    elif isinstance(files, Path):
+        filepaths = [
+            files,
+        ]
+    elif isinstance(files, list):
+        filepaths = [Path(f) for f in files]
+    else:
+        raise TypeError("'files' should be str, Path, or List[Path | str]")
+
+    return filepaths
 
 
 @dataclass
@@ -115,48 +150,27 @@ def _get_ds_combine_base_params() -> dict[str, str]:
     }
 
 
-def _load_data_dask(
-    filenames: list[str],
-    dim_names: dict[str, str],
-    time_chunking: bool = True,
-    decode_times: bool = True,
-    read_zarr: bool = True,
-    load_kwargs: dict[str, str] | None = None,
-) -> xr.Dataset:
-    """Load dataset from the specified file using Dask.
+def get_dask_chunks(
+    dim_names: dict[str, str], time_chunking: bool = True
+) -> dict[str, int]:
+    """Return the default dask chunks for ROMS datasets.
 
     Parameters
     ----------
-    filename : Union[str, Path, List[Union[str, Path]]]
-        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
-        or a list of strings or Path objects containing multiple files.
-    dim_names : Dict[str, str], optional
+    dim_names : dict[str, str]
         Dictionary specifying the names of dimensions in the dataset.
-        Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
-        For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
+        - For lat-lon datasets, provide keys "latitude" and "longitude" (and optionally "depth" and "time").
+        - For ROMS datasets, the default ROMS dimensions are assumed ("eta_rho", "xi_rho", "s_rho", etc.).
     time_chunking : bool, optional
-        If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
-        If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
+        Whether to chunk along the time dimension.
+        - True: chunk time dimension with size 1 (useful for processing large time-series data with Dask).
+        - False: do not explicitly chunk time; Dask will use default auto-chunking.
         Defaults to True.
-    decode_times: bool, optional
-        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
-        Defaults to True.
-    read_zarr: bool, optional
-        If True, use the zarr engine to read the dataset, and don't use mfdataset.
-        Defaults to False.
 
     Returns
     -------
-    ds : xr.Dataset
-        The loaded xarray Dataset containing the forcing data.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the specified file does not exist.
-    ValueError
-        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
-
+    dict[str, int]
+        The default dask chunks for ROMS datasets.
     """
     if "latitude" in dim_names and "longitude" in dim_names:
         # for lat-lon datasets
@@ -181,6 +195,58 @@ def _load_data_dask(
     if "ntides" in dim_names:
         chunks[dim_names["ntides"]] = 1
 
+    return chunks
+
+
+def _load_data_dask(
+    filenames: list[str],
+    dim_names: dict[str, str],
+    time_chunking: bool = True,
+    decode_times: bool = True,
+    decode_timedelta: bool = True,
+    read_zarr: bool = True,
+    load_kwargs: dict[str, str] | None = None,
+) -> xr.Dataset:
+    """Load dataset from the specified file using Dask.
+
+    Parameters
+    ----------
+    filename : Union[str, Path, List[Union[str, Path]]]
+        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
+        or a list of strings or Path objects containing multiple files.
+    dim_names : Dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+        Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
+        For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
+    time_chunking : bool, optional
+        If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
+        If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
+        Defaults to True.
+    decode_times: bool, optional
+        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+    decode_timedelta: bool, optional
+        If True, decode timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+    read_zarr: bool, optional
+        If True, use the zarr engine to read the dataset, and don't use mfdataset.
+        Defaults to False.
+
+    Returns
+    -------
+    ds : xr.Dataset
+        The loaded xarray Dataset containing the forcing data.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified file does not exist.
+    ValueError
+        If a list of files is provided but dim_names["time"] is not available or use_dask=False.
+
+    """
+    chunks = get_dask_chunks(dim_names, time_chunking)
+
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -192,6 +258,7 @@ def _load_data_dask(
             return xr.open_zarr(
                 filenames[0],
                 decode_times=decode_times,
+                decode_timedelta=decode_timedelta,
                 chunks=chunks,
                 consolidated=None,
                 storage_options={"token": "anon"},
@@ -201,7 +268,7 @@ def _load_data_dask(
         return xr.open_mfdataset(
             filenames,
             decode_times=decode_times,
-            decode_timedelta=decode_times,
+            decode_timedelta=decode_timedelta,
             chunks=chunks,
             **kwargs,
         )
@@ -299,6 +366,7 @@ def load_data(
     use_dask: bool = False,
     time_chunking: bool = True,
     decode_times: bool = True,
+    decode_timedelta: bool = True,
     force_combine_nested: bool = False,
     read_zarr: bool = False,
     ds_loader_fn: Callable[[], xr.Dataset] | None = None,
@@ -321,7 +389,10 @@ def load_data(
         If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
         Defaults to True.
     decode_times: bool, optional
-        If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
+        Defaults to True.
+    decode_timedelta: bool, optional
+        If True, decode timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
     force_combine_nested: bool, optional
         If True, forces the use of nested combination (`combine_nested`) regardless of whether wildcards are used.
@@ -368,6 +439,7 @@ def load_data(
             dim_names,
             time_chunking,
             decode_times,
+            decode_timedelta,
             read_zarr,
             load_kwargs,
         )
@@ -377,7 +449,7 @@ def load_data(
             ds = xr.open_dataset(
                 file,
                 decode_times=decode_times,
-                decode_timedelta=decode_times,
+                decode_timedelta=decode_timedelta,
                 chunks=None,
             )
             ds_list.append(ds)
@@ -610,29 +682,6 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     saved_filenames.extend(Path(f) for f in output_filenames)
 
     return saved_filenames
-
-
-def get_dask_chunks(location, chunk_size):
-    """Returns the appropriate Dask chunking dictionary based on grid location.
-
-    Parameters
-    ----------
-    location : str
-        The grid location, one of "rho", "u", or "v".
-    chunk_size : int
-        The chunk size to apply.
-
-    Returns
-    -------
-    dict
-        Dictionary specifying the chunking strategy.
-    """
-    chunk_mapping = {
-        "rho": {"eta_rho": chunk_size, "xi_rho": chunk_size},
-        "u": {"eta_rho": chunk_size, "xi_u": chunk_size},
-        "v": {"eta_v": chunk_size, "xi_rho": chunk_size},
-    }
-    return chunk_mapping.get(location, {})
 
 
 def generate_coordinate_range(min_val: float, max_val: float, resolution: float):

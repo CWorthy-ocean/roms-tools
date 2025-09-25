@@ -10,7 +10,8 @@ import xarray as xr
 from matplotlib.axes import Axes
 
 from roms_tools import Grid
-from roms_tools.plot import plot
+from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
+from roms_tools.plot import plot, plot_uptake_efficiency
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
     generate_coordinate_range,
@@ -70,6 +71,27 @@ class ROMSOutput:
 
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
+
+    def cdr_metrics(self) -> None:
+        """
+        Compute and plot Carbon Dioxide Removal (CDR) metrics.
+
+        If the CDR metrics dataset (`self.ds_cdr`) does not already exist,
+        it computes the metrics using model output and grid information.
+        Afterwards, it generates a plot of the computed metrics.
+
+        Notes
+        -----
+        Metrics include:
+          - Grid cell area
+          - Selected tracer and flux variables
+          - Uptake efficiency computed from flux differences and DIC differences
+        """
+        if not hasattr(self, "ds_cdr"):
+            # Compute metrics and store
+            self.ds_cdr = compute_cdr_metrics(self.ds, self.grid.ds)
+
+        plot_uptake_efficiency(self.ds_cdr)
 
     def plot(
         self,
@@ -170,7 +192,7 @@ class ROMSOutput:
         """
         # Check if variable exists
         if var_name not in self.ds:
-            raise ValueError(f"Variable '{var_name}' is not found in the dataset.")
+            raise ValueError(f"Variable '{var_name}' is not found in self.ds.")
 
         # Pick the variable
         field = self.ds[var_name]
@@ -422,6 +444,8 @@ class ROMSOutput:
             self.path,
             dim_names={"time": "time"},
             use_dask=self.use_dask,
+            decode_times=False,
+            decode_timedelta=False,
             time_chunking=True,
             force_combine_nested=True,
         )

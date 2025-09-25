@@ -1,8 +1,10 @@
 import importlib.metadata
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import xarray as xr
@@ -11,7 +13,14 @@ from matplotlib.axes import Axes
 from roms_tools import Grid
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.datasets import CESMBGCDataset, GLORYSDataset, UnifiedBGCDataset
+from roms_tools.setup.datasets import (
+    CESMBGCDataset,
+    Dataset,
+    GLORYSDataset,
+    GLORYSDefaultDataset,
+    RawDataSource,
+    UnifiedBGCDataset,
+)
 from roms_tools.setup.utils import (
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
@@ -25,7 +34,6 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
-    get_dask_chunks,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     save_datasets,
@@ -48,7 +56,7 @@ class InitialConditions:
     ini_time : datetime
         The date and time at which the initial conditions are set.
         If no exact match is found, the closest time entry to `ini_time` within the time range [ini_time, ini_time + 24 hours] is selected.
-    source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+    source : RawDataSource
 
         Dictionary specifying the source of the physical initial condition data. Keys include:
 
@@ -57,10 +65,12 @@ class InitialConditions:
 
             - A single string (with or without wildcards).
             - A single Path object.
-            - A list of strings or Path objects containing multiple files.
+            - A list of strings or Path objects.
+            If omitted, the data will be streamed via the Copernicus Marine Toolkit.
+            Note: streaming is currently not recommended due to performance limitations.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
-    bgc_source : Dict[str, Union[str, Path, List[Union[str, Path]]], bool]
+    bgc_source : RawDataSource, optional
         Dictionary specifying the source of the biogeochemical (BGC) initial condition data. Keys include:
 
           - "name" (str): Name of the data source (e.g., "CESM_REGRIDDED").
@@ -78,6 +88,13 @@ class InitialConditions:
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    allow_flex_time: bool, optional
+        Controls how strictly `ini_time` is handled:
+
+        - If False (default): requires an exact match to `ini_time`. Raises a ValueError if no match exists.
+        - If True: allows a +24h search window after `ini_time` and selects the closest available
+          time entry within that window. Raises a ValueError if none are found.
+
     horizontal_chunk_size : int, optional
         The chunk size used for horizontal partitioning for the vertical regridding when `use_dask = True`. Defaults to 50.
         A larger number results in a bigger memory footprint but faster computations.
@@ -105,9 +122,9 @@ class InitialConditions:
     """Object representing the grid information."""
     ini_time: datetime
     """The date and time at which the initial conditions are set."""
-    source: dict[str, str | Path | list[str | Path]]
+    source: RawDataSource
     """Dictionary specifying the source of the physical initial condition data."""
-    bgc_source: dict[str, str | Path | list[str | Path]] | None = None
+    bgc_source: RawDataSource | None = None
     """Dictionary specifying the source of the biogeochemical (BGC) initial condition
     data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -115,6 +132,8 @@ class InitialConditions:
     adjust_depth_for_sea_surface_height: bool = False
     """Whether to account for sea surface height variations when computing depth
     coordinates."""
+    allow_flex_time: bool = False
+    """Whether to handle ini_time flexibly."""
     use_dask: bool = False
     """Whether to use dask for processing."""
     horizontal_chunk_size: int = 50
@@ -161,10 +180,7 @@ class InitialConditions:
     def _process_data(self, processed_fields, type="physics"):
         target_coords = get_target_coords(self.grid)
 
-        if type == "physics":
-            data = self._get_data()
-        else:
-            data = self._get_bgc_data()
+        data = self._get_data(forcing_type=type)
 
         data.choose_subdomain(
             target_coords,
@@ -255,7 +271,7 @@ class InitialConditions:
                         field = processed_fields[var_name]
                         if self.use_dask:
                             field = field.chunk(
-                                get_dask_chunks(location, self.horizontal_chunk_size)
+                                _set_dask_chunks(location, self.horizontal_chunk_size)
                             )
                         processed_fields[var_name] = vertical_regrid.apply(field)
 
@@ -280,7 +296,11 @@ class InitialConditions:
         if "name" not in self.source.keys():
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source.keys():
-            raise ValueError("`source` must include a 'path'.")
+            if self.source["name"] != "GLORYS":
+                raise ValueError("`source` must include a 'path'.")
+
+            self.source["path"] = GLORYSDefaultDataset.dataset_name
+
         # set self.source["climatology"] to False if not provided
         self.source = {
             **self.source,
@@ -307,40 +327,63 @@ class InitialConditions:
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
-    def _get_data(self):
-        if self.source["name"] == "GLORYS":
-            data = GLORYSDataset(
-                filename=self.source["path"],
-                start_time=self.ini_time,
-                climatology=self.source["climatology"],
-                use_dask=self.use_dask,
-            )
-        else:
-            raise ValueError('Only "GLORYS" is a valid option for source["name"].')
-        return data
+    def _get_data(self, forcing_type=Literal["physics", "bgc"]) -> Dataset:
+        """Determine the correct `Dataset` type and return an instance.
 
-    def _get_bgc_data(self):
-        if self.bgc_source["name"] == "CESM_REGRIDDED":
-            data = CESMBGCDataset(
-                filename=self.bgc_source["path"],
-                start_time=self.ini_time,
-                climatology=self.bgc_source["climatology"],
-                use_dask=self.use_dask,
-            )
-        elif self.bgc_source["name"] == "UNIFIED":
-            data = UnifiedBGCDataset(
-                filename=self.bgc_source["path"],
-                start_time=self.ini_time,
-                climatology=self.bgc_source["climatology"],
-                use_dask=self.use_dask,
-            )
+        forcing_type : str
+            Specifies the type of forcing data. Options are:
 
-        else:
-            raise ValueError(
-                'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for bgc_source["name"].'
-            )
+            - "physics": for physical atmospheric forcing.
+            - "bgc": for biogeochemical forcing.
+        Returns
+        -------
+        Dataset
+            The `Dataset` instance
+        """
+        dataset_map: dict[str, dict[str, dict[str, type[Dataset]]]] = {
+            "physics": {
+                "GLORYS": {
+                    "external": GLORYSDataset,
+                    "default": GLORYSDefaultDataset,
+                },
+            },
+            "bgc": {
+                "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
+                "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+            },
+        }
 
-        return data
+        source_dict = self.source if forcing_type == "physics" else self.bgc_source
+
+        if source_dict is None:
+            raise ValueError(f"{forcing_type} source is not set")
+
+        source_name = str(source_dict["name"])
+        if source_name not in dataset_map[forcing_type]:
+            tpl = 'Valid options for source["name"] for type {} include: {}'
+            msg = tpl.format(
+                forcing_type, " and ".join(dataset_map[forcing_type].keys())
+            )
+            raise ValueError(msg)
+
+        has_no_path = "path" not in source_dict
+        has_default_path = source_dict.get("path") == GLORYSDefaultDataset.dataset_name
+        use_default = has_no_path or has_default_path
+
+        variant = "default" if use_default else "external"
+
+        data_type = dataset_map[forcing_type][source_name][variant]
+
+        if isinstance(source_dict["path"], bool):
+            raise ValueError('source["path"] cannot be a boolean here')
+
+        return data_type(
+            filename=source_dict["path"],
+            start_time=self.ini_time,
+            climatology=source_dict["climatology"],  # type: ignore
+            allow_flex_time=self.allow_flex_time,
+            use_dask=self.use_dask,
+        )
 
     def _set_variable_info(self, data, type="physics"):
         """Sets up a dictionary with metadata for variables based on the type.
@@ -483,10 +526,10 @@ class InitialConditions:
                     zeta = interpolate_from_rho_to_v(zeta)
 
             if self.use_dask:
-                h = h.chunk(get_dask_chunks(location, self.horizontal_chunk_size))
+                h = h.chunk(_set_dask_chunks(location, self.horizontal_chunk_size))
                 if isinstance(zeta, xr.DataArray):
                     zeta = zeta.chunk(
-                        get_dask_chunks(location, self.horizontal_chunk_size)
+                        _set_dask_chunks(location, self.horizontal_chunk_size)
                     )
             depth = compute_depth(zeta, h, self.grid.ds.attrs["hc"], Cs, sigma)
             self.ds_depth_coords[key] = depth
@@ -816,3 +859,26 @@ class InitialConditions:
             **initial_conditions_params,
             use_dask=use_dask,
         )
+
+
+def _set_dask_chunks(location: str, chunk_size: int):
+    """Returns the appropriate Dask chunking dictionary based on grid location.
+
+    Parameters
+    ----------
+    location : str
+        The grid location, one of "rho", "u", or "v".
+    chunk_size : int
+        The chunk size to apply.
+
+    Returns
+    -------
+    dict
+        Dictionary specifying the chunking strategy.
+    """
+    chunk_mapping = {
+        "rho": {"eta_rho": chunk_size, "xi_rho": chunk_size},
+        "u": {"eta_rho": chunk_size, "xi_u": chunk_size},
+        "v": {"eta_v": chunk_size, "xi_rho": chunk_size},
+    }
+    return chunk_mapping.get(location, {})

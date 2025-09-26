@@ -1,6 +1,7 @@
 import importlib.metadata
 import logging
 import time
+import typing
 from collections.abc import Sequence
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -18,6 +19,9 @@ from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+
+if typing.TYPE_CHECKING:
+    from roms_tools.setup.grid import Grid
 
 yaml.SafeDumper.add_multi_representer(
     StrEnum,
@@ -1086,7 +1090,7 @@ def group_by_year(ds, filepath):
 
 
 def get_target_coords(
-    grid_ds: xr.Dataset, grid_straddle: bool, use_coarse_grid: bool = False
+    grid: "Grid", use_coarse_grid: bool = False
 ) -> dict[str, xr.DataArray | bool | None]:
     """
     Retrieve longitude, latitude, and auxiliary grid coordinates, adjusting for
@@ -1094,10 +1098,8 @@ def get_target_coords(
 
     Parameters
     ----------
-    grid_ds : xr.Dataset
-        Dataset containing the model grid information.
-    grid_straddle : bool
-        Indicates whether the ROMS grid crosses the Greenwich meridian.
+    grid : Grid
+        Grid object.
     use_coarse_grid : bool, optional
         If True, use the coarse grid variables (`lat_coarse`, `lon_coarse`, etc.)
         instead of the native grid. Defaults to False.
@@ -1124,36 +1126,36 @@ def get_target_coords(
 
     Notes
     -----
-    - If `grid_straddle` is False and the ROMS domain lies more than 5° from
+    - If `grid.straddle` is False and the ROMS domain lies more than 5° from
       the Greenwich meridian, longitudes are adjusted to 0-360 range.
     - Renaming of coarse grid dimensions is applied to match the rho-point
       naming convention (`eta_rho`, `xi_rho`) for compatibility with ROMS-Tools.
     """
     # Select grid variables based on whether the coarse grid is used
     if use_coarse_grid:
-        lat = grid_ds.lat_coarse.rename(
+        lat = grid.ds.lat_coarse.rename(
             {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
-        lon = grid_ds.lon_coarse.rename(
+        lon = grid.ds.lon_coarse.rename(
             {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
-        angle = grid_ds.angle_coarse.rename(
+        angle = grid.ds.angle_coarse.rename(
             {"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"}
         )
-        mask = grid_ds.get("mask_coarse")
+        mask = grid.ds.get("mask_coarse")
         if mask is not None:
             mask = mask.rename({"eta_coarse": "eta_rho", "xi_coarse": "xi_rho"})
 
-        lat_psi = grid_ds.get("lat_psi_coarse")
-        lon_psi = grid_ds.get("lon_psi_coarse")
+        lat_psi = grid.ds.get("lat_psi_coarse")
+        lon_psi = grid.ds.get("lon_psi_coarse")
 
     else:
-        lat = grid_ds.lat_rho
-        lon = grid_ds.lon_rho
-        angle = grid_ds.angle
-        mask = grid_ds.get("mask_rho")
-        lat_psi = grid_ds.get("lat_psi")
-        lon_psi = grid_ds.get("lon_psi")
+        lat = grid.ds.lat_rho
+        lon = grid.ds.lon_rho
+        angle = grid.ds.angle
+        mask = grid.ds.get("mask_rho")
+        lat_psi = grid.ds.get("lat_psi")
+        lon_psi = grid.ds.get("lon_psi")
 
     # Operate on longitudes between -180 and 180 unless ROMS domain lies at least 5 degrees in lontitude away from Greenwich meridian
     lon = xr.where(lon > 180, lon - 360, lon)
@@ -1161,7 +1163,7 @@ def get_target_coords(
         lon_psi = xr.where(lon_psi > 180, lon_psi - 360, lon_psi)
 
     straddle = True
-    if not grid_straddle and abs(lon).min() > 5:
+    if not grid.straddle and abs(lon).min() > 5:
         lon = xr.where(lon < 0, lon + 360, lon)
         if lon_psi is not None:
             lon_psi = xr.where(lon_psi < 0, lon_psi + 360, lon_psi)

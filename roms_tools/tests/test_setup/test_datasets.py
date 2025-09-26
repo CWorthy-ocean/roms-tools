@@ -1039,7 +1039,7 @@ def test_get_glorys_bounds(tmp_path, grid_fixture, glorys_grid_fixture, request)
     grid = request.getfixturevalue(grid_fixture)
     glorys_grid_path = request.getfixturevalue(glorys_grid_fixture)
 
-    bounds = get_glorys_bounds(grid_ds=grid.ds, glorys_grid_path=glorys_grid_path)
+    bounds = get_glorys_bounds(grid=grid, glorys_grid_path=glorys_grid_path)
     assert set(bounds) == {
         "minimum_latitude",
         "maximum_latitude",
@@ -1061,7 +1061,7 @@ def test_get_glorys_bounds(tmp_path, grid_fixture, glorys_grid_fixture, request)
 def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, request):
     start_time = datetime(2012, 1, 1)
     grid = request.getfixturevalue(grid_fixture)
-    target_coords = get_target_coords(grid.ds, grid.straddle)
+    target_coords = get_target_coords(grid)
 
     regional_file, bigger_regional_file = download_regional_and_bigger(
         tmp_path, grid, start_time

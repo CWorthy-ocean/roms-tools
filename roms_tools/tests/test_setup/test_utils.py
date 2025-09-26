@@ -16,6 +16,15 @@ from roms_tools.setup.utils import (
 )
 
 
+class DummyGrid:
+    """Lightweight grid wrapper mimicking the real Grid API for testing."""
+
+    def __init__(self, ds: xr.Dataset, straddle: bool):
+        """Initialize grid wrapper."""
+        self.ds = ds
+        self.straddle = straddle
+
+
 class TestGetTargetCoords:
     def make_rho_grid(self, lons, lats, with_mask=False):
         """Helper to create a minimal rho grid dataset."""
@@ -35,20 +44,23 @@ class TestGetTargetCoords:
 
     def test_basic_rho_grid(self):
         ds = self.make_rho_grid(lons=[-10, -5, 0, 5, 10], lats=[50, 55])
-        result = get_target_coords(ds, grid_straddle=True)
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid)
         assert "lat" in result and "lon" in result
         assert np.allclose(result["lon"], ds.lon_rho)
 
     def test_wrap_longitudes_to_minus180_180(self):
         ds = self.make_rho_grid(lons=[190, 200], lats=[0, 1])
-        result = get_target_coords(ds, grid_straddle=True)
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid)
         # longitudes >180 should wrap to -170, -160
         expected = np.array([[-170, -160], [-170, -160]])
         assert np.allclose(result["lon"].values, expected)
 
     def test_convert_to_0_360_if_far_from_greenwich(self):
         ds = self.make_rho_grid(lons=[-170, -160], lats=[0, 1])
-        result = get_target_coords(ds, grid_straddle=False)
+        grid = DummyGrid(ds, straddle=False)
+        result = get_target_coords(grid)
         # Should convert to 190, 200 since domain is far from Greenwich
         expected = np.array([[190, 200], [190, 200]])
         assert np.allclose(result["lon"].values, expected)
@@ -56,8 +68,8 @@ class TestGetTargetCoords:
 
     def test_close_to_greenwich_stays_minus180_180(self):
         ds = self.make_rho_grid(lons=[-2, -1], lats=[0, 1])
-        result = get_target_coords(ds, grid_straddle=False)
-
+        grid = DummyGrid(ds, straddle=False)
+        result = get_target_coords(grid)
         # Should remain unchanged (-2, -1), not converted to 358, 359
         expected = np.array([[-2, -1], [-2, -1]])
         assert np.allclose(result["lon"].values, expected)
@@ -65,7 +77,8 @@ class TestGetTargetCoords:
 
     def test_includes_optional_fields(self):
         ds = self.make_rho_grid(lons=[-10, -5], lats=[0, 1], with_mask=True)
-        result = get_target_coords(ds, grid_straddle=True)
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid)
         assert result["mask"] is not None
 
     def test_coarse_grid_selection(self):
@@ -80,7 +93,8 @@ class TestGetTargetCoords:
             },
             coords={"eta_coarse": [0], "xi_coarse": [0, 1]},
         )
-        result = get_target_coords(ds, grid_straddle=True, use_coarse_grid=True)
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid, use_coarse_grid=True)
         # Should wrap longitudes to -170, -160
         expected = np.array([[-170, -160]])
         assert np.allclose(result["lon"].values, expected)

@@ -165,9 +165,7 @@ class SurfaceForcing:
             opt_file,
         )
 
-        target_coords = get_target_coords(
-            self.grid.ds, self.grid.straddle, self.use_coarse_grid
-        )
+        target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords
 
         data.choose_subdomain(

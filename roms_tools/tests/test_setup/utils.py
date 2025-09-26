@@ -29,7 +29,7 @@ def download_regional_and_bigger(
     Tuple[Path, Path]
         Paths to the minimal and slightly bigger GLORYS subset files.
     """
-    bounds = get_glorys_bounds(grid_ds=grid.ds)
+    bounds = get_glorys_bounds(grid)
 
     # minimal dataset
     regional_file = tmp_path / "regional_GLORYS.nc"

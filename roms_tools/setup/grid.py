@@ -208,7 +208,7 @@ class Grid:
         hmin = hmin or self.hmin
 
         # Extract target coordinates for processing
-        target_coords = get_target_coords(self.ds, self.straddle)
+        target_coords = get_target_coords(self)
 
         with Timed(
             f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ===",

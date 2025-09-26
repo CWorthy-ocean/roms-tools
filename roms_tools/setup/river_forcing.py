@@ -134,7 +134,7 @@ class RiverForcing:
             logging.info(
                 "No river indices provided. Identify all rivers within the ROMS domain and assign each of them to the nearest coastal point."
             )
-            target_coords = get_target_coords(self.grid.ds, self.grid.straddle)
+            target_coords = get_target_coords(self.grid)
             # maximum dx in grid
             dx = (
                 np.sqrt((1 / self.grid.ds.pm) ** 2 + (1 / self.grid.ds.pn) ** 2) / 2

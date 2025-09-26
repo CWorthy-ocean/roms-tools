@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import typing
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -9,6 +10,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, ClassVar, Literal, TypeAlias, cast
+
+if typing.TYPE_CHECKING:
+    from roms_tools.setup.grid import Grid
 
 import numpy as np
 import xarray as xr
@@ -3244,7 +3248,7 @@ def choose_subdomain(
 
 
 def get_glorys_bounds(
-    grid_ds: xr.Dataset,
+    grid: Grid,
     glorys_grid_path: Path | str | None = None,
 ) -> dict[str, float]:
     """
@@ -3253,8 +3257,8 @@ def get_glorys_bounds(
 
     Parameters
     ----------
-    grid_ds : xr.Dataset
-        ROMS grid dataset.
+    grid : Grid
+        The grid object.
     glorys_grid_path : str, optional
         Path to the GLORYS global grid file. If None, defaults to
         "<repo_root>/data/grids/GLORYS_global_grid.nc".
@@ -3284,8 +3288,7 @@ def get_glorys_bounds(
     resolution = (res_lat + res_lon) / 2
 
     # Extract target grid coordinates
-    straddle = grid_ds.attrs["straddle"] == "True"  # convert string to bool
-    target_coords = get_target_coords(grid_ds=grid_ds, grid_straddle=straddle)
+    target_coords = get_target_coords(grid)
 
     # Select subdomain with margin
     ds_subset = choose_subdomain(

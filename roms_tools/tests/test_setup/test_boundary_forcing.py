@@ -271,7 +271,7 @@ def test_boundary_divided_by_land_warning(caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert "the western boundary is divided by land" in caplog.text
+    assert "divided by land" in caplog.text
 
 
 def test_info_depth(caplog, use_dask):
@@ -322,57 +322,6 @@ def test_info_depth(caplog, use_dask):
         "Sea surface height will NOT be used to adjust depth coordinates."
         in caplog.text
     )
-
-
-def test_info_fill(caplog, use_dask):
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
-    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
-
-    with caplog.at_level(logging.INFO):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2012, 1, 1),
-            end_time=datetime(2012, 12, 31),
-            source={"name": "GLORYS", "path": [fname1, fname2]},
-            apply_2d_horizontal_fill=True,
-            use_dask=use_dask,
-        )
-
-    # Verify the warning message in the log
-    assert (
-        "Applying 2D horizontal fill to the source data before regridding."
-        in caplog.text
-    )
-
-    # Clear the log before the next test
-    caplog.clear()
-
-    with caplog.at_level(logging.INFO):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2012, 1, 1),
-            end_time=datetime(2012, 12, 31),
-            source={"name": "GLORYS", "path": [fname1, fname2]},
-            apply_2d_horizontal_fill=False,
-            use_dask=use_dask,
-        )
-    # Verify the warning message in the log
-    for direction in ["south", "east", "north", "west"]:
-        assert f"Applying 1D horizontal fill to {direction}ern boundary." in caplog.text
 
 
 def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):

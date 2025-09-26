@@ -13,7 +13,7 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import get_glorys_bounds
+from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
     import copernicusmarine  # type: ignore
@@ -803,41 +803,29 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
         "tiny_rotated_grid",
     ],
 )
-def test_invariance_to_get_glorys_bounds(
-    tmp_path, grid_fixture, global_glorys_file, use_dask, request
-):
-    grid = request.getfixturevalue(grid_fixture)
+def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, request):
     start_time = datetime(2012, 1, 1)
-    end_time = datetime(2012, 1, 1)
+    grid = request.getfixturevalue(grid_fixture)
 
-    # Regional subset
-    bounds = get_glorys_bounds(grid_ds=grid.ds)
-    regional_file = tmp_path / "regional_GLORYS.nc"
-    copernicusmarine.subset(
-        dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
-        variables=["thetao", "so", "uo", "vo", "zos"],
-        **bounds,
-        start_datetime=start_time,
-        end_datetime=end_time,
-        coordinates_selection_method="outside",
-        output_filename=str(regional_file),
+    regional_file, bigger_regional_file = download_regional_and_bigger(
+        tmp_path, grid, start_time
     )
 
-    bf_from_global = BoundaryForcing(
-        grid=grid,
-        source={"name": "GLORYS", "path": str(global_glorys_file)},
-        type="physics",
-        start_time=start_time,
-        end_time=end_time,
-        apply_2d_horizontal_fill=True,
-        use_dask=use_dask,
-    )
     bf_from_regional = BoundaryForcing(
         grid=grid,
         source={"name": "GLORYS", "path": str(regional_file)},
         type="physics",
         start_time=start_time,
-        end_time=end_time,
+        end_time=start_time,
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    bf_from_bigger_regional = BoundaryForcing(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(bigger_regional_file)},
+        type="physics",
+        start_time=start_time,
+        end_time=start_time,
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
@@ -848,7 +836,7 @@ def test_invariance_to_get_glorys_bounds(
     # point differences in the longitude coordinate, which will then propagate into further differences once you do regridding.
     # Need to adjust the tolerances for these grids that straddle the 180° meridian.
     xr.testing.assert_allclose(
-        bf_from_global.ds, bf_from_regional.ds, rtol=1e-4, atol=1e-5
+        bf_from_bigger_regional.ds, bf_from_regional.ds, rtol=1e-4, atol=1e-5
     )
 
 

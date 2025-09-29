@@ -58,7 +58,8 @@ notebooks = [
     "zarr",
     "copernicusmarine",
     "gdown",
-    "ipykernel"
+    "ipykernel",
+    "jupyter"
 ]
 
 [project.urls]

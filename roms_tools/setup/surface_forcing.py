@@ -293,9 +293,7 @@ class SurfaceForcing:
             Whether to use the coarse grid or not.
         """
         # Get the target coordinates and select the subdomain of the data
-        target_coords = get_target_coords(
-            self.grid.ds, self.grid.straddle, use_coarse_grid=False
-        )
+        target_coords = get_target_coords(self.grid, use_coarse_grid=False)
         data_coords = data.choose_subdomain(
             target_coords, buffer_points=1, return_coords_only=True
         )

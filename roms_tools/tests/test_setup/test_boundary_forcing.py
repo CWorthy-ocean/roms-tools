@@ -13,6 +13,12 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
+from roms_tools.tests.test_setup.utils import download_regional_and_bigger
+
+try:
+    import copernicusmarine  # type: ignore
+except ImportError:
+    copernicusmarine = None
 
 
 @pytest.mark.parametrize(
@@ -785,6 +791,53 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
 
         expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}
         assert set(bf.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.use_copernicus
+@pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "tiny_grid_that_straddles_dateline",
+        "tiny_grid_that_straddles_180_degree_meridian",
+        "tiny_rotated_grid",
+    ],
+)
+def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, request):
+    start_time = datetime(2012, 1, 1)
+    grid = request.getfixturevalue(grid_fixture)
+
+    regional_file, bigger_regional_file = download_regional_and_bigger(
+        tmp_path, grid, start_time
+    )
+
+    bf_from_regional = BoundaryForcing(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(regional_file)},
+        type="physics",
+        start_time=start_time,
+        end_time=start_time,
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    bf_from_bigger_regional = BoundaryForcing(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(bigger_regional_file)},
+        type="physics",
+        start_time=start_time,
+        end_time=start_time,
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+
+    # Use assert_allclose instead of equals: necessary for grids that straddle the 180° meridian.
+    # Copernicus returns data on [-180, 180] by default, but if you request a range
+    # like [170, 190], it remaps longitudes. That remapping introduces tiny floating
+    # point differences in the longitude coordinate, which will then propagate into further differences once you do regridding.
+    # Need to adjust the tolerances for these grids that straddle the 180° meridian.
+    xr.testing.assert_allclose(
+        bf_from_bigger_regional.ds, bf_from_regional.ds, rtol=1e-4, atol=1e-5
+    )
 
 
 @pytest.mark.parametrize(

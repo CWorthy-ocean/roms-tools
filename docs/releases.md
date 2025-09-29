@@ -12,6 +12,7 @@
 * Introduce GLORYS streaming support for `InitialConditions` using copernicusmarine — not recommended yet; performance remains a blocker ([#424](https://github.com/CWorthy-ocean/roms-tools/pull/424))
 * Allow performing CDR analysis, including plotting CDR uptake curves ([#417](https://github.com/CWorthy-ocean/roms-tools/pull/417))
 * Introduce parameter `allow_flex_time` for `InitialConditions` controlling how strictly `ini_time` is handled ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
+* Add utility function `get_glorys_bounds` to return the min/max latitude and longitude required for GLORYS downloads for a fixed domain ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
 
 ### Breaking Changes
 
@@ -41,6 +42,7 @@
 
 * Fix broken link to GLORYS dataset ([#397](https://github.com/CWorthy-ocean/roms-tools/pull/397))
 * Include recommendation about `interp_frc` in INFO message ([#352](https://github.com/CWorthy-ocean/roms-tools/issues/352))
+* Document downloading of external datasets ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
 
 ## v3.1.1
 

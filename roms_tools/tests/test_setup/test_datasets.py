@@ -10,6 +10,7 @@ import xarray as xr
 
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import (
+    GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
     Dataset,
     ERA5ARCODataset,
@@ -18,8 +19,18 @@ from roms_tools.setup.datasets import (
     GLORYSDefaultDataset,
     RiverDataset,
     TPXODataset,
+    _concatenate_longitudes,
+    choose_subdomain,
+    get_glorys_bounds,
 )
 from roms_tools.setup.surface_forcing import DEFAULT_ERA5_ARCO_PATH
+from roms_tools.setup.utils import get_target_coords
+from roms_tools.tests.test_setup.utils import download_regional_and_bigger
+
+try:
+    import copernicusmarine  # type: ignore
+except ImportError:
+    copernicusmarine = None
 
 
 @pytest.fixture
@@ -491,7 +502,7 @@ def test_default_glorys_dataset_loading_dask_not_installed() -> None:
 
     with (
         pytest.raises(RuntimeError),
-        mock.patch("roms_tools.utils._has_dask", return_value=False),
+        mock.patch("roms_tools.utils.has_dask", return_value=False),
     ):
         _ = GLORYSDefaultDataset(
             filename=GLORYSDefaultDataset.dataset_name,
@@ -789,3 +800,299 @@ class TestRiverDataset:
         assert "Amazon_2" in names
         assert "Nile" in names
         assert len(set(names)) == len(names)  # all names must be unique
+
+
+# test _concatenate_longitudes
+
+
+@pytest.fixture
+def sample_ds(use_dask):
+    lon = xr.DataArray(np.array([0, 90, 180]), dims="lon", name="lon")
+    lat = xr.DataArray(np.array([-30, 0, 30]), dims="lat", name="lat")
+
+    var_with_lon = xr.DataArray(
+        np.arange(9).reshape(3, 3),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
+        name="var_with_lon",
+    )
+
+    var_no_lon = xr.DataArray(
+        np.array([1, 2, 3]),
+        dims="lat",
+        coords={"lat": lat},
+        name="var_no_lon",
+    )
+
+    ds = xr.Dataset({"var_with_lon": var_with_lon, "var_no_lon": var_no_lon})
+
+    if use_dask:
+        ds = ds.chunk({"lat": -1, "lon": -1})
+
+    return ds
+
+
+@pytest.mark.parametrize(
+    "end,expected_lons",
+    [
+        ("lower", [-360, -270, -180, 0, 90, 180]),
+        ("upper", [0, 90, 180, 360, 450, 540]),
+        ("both", [-360, -270, -180, 0, 90, 180, 360, 450, 540]),
+    ],
+)
+def test_concatenate_longitudes(sample_ds, end, expected_lons, use_dask):
+    dim_names = {"longitude": "lon"}
+
+    ds_concat = _concatenate_longitudes(
+        sample_ds, dim_names, end=end, use_dask=use_dask
+    )
+
+    # longitude should be extended as expected
+    np.testing.assert_array_equal(ds_concat.lon.values, expected_lons)
+
+    # variable with longitude should be extended in size
+    assert ds_concat.var_with_lon.shape[-1] == len(expected_lons)
+
+    # variable without longitude should remain untouched
+    np.testing.assert_array_equal(
+        ds_concat.var_no_lon.values,
+        sample_ds.var_no_lon.values,
+    )
+
+    if use_dask:
+        import dask
+
+        # Ensure dask array backing the data
+        assert isinstance(ds_concat.var_with_lon.data, dask.array.Array)
+        # Longitude dimension should be chunked (-1 → one chunk spanning the whole dim)
+        assert ds_concat.var_with_lon.chunks[-1] == (len(expected_lons),)
+    else:
+        # With use_dask=False, data should be a numpy array
+        assert isinstance(ds_concat.var_with_lon.data, np.ndarray)
+
+
+def test_invalid_end_raises(sample_ds):
+    dim_names = {"longitude": "lon"}
+    with pytest.raises(ValueError):
+        _concatenate_longitudes(sample_ds, dim_names, end="invalid")
+
+
+# test choose_subdomain
+
+
+def test_choose_subdomain_basic(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([0, 10]),
+        "lon": xr.DataArray([30, 40]),
+        "straddle": False,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=2,
+        use_dask=use_dask,
+    )
+    assert out.latitude.min() <= 0
+    assert out.latitude.max() >= 10
+    assert out.longitude.min() <= 30
+    assert out.longitude.max() >= 40
+
+
+def test_choose_subdomain_raises_on_empty_lon(non_global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([-10, 10]),
+        "lon": xr.DataArray([210, 215]),  # outside 0-180
+        "straddle": False,
+    }
+    with pytest.raises(ValueError, match="longitude range"):
+        choose_subdomain(
+            non_global_dataset,
+            dim_names={"latitude": "latitude", "longitude": "longitude"},
+            resolution=1.0,
+            is_global=False,
+            target_coords=target_coords,
+            use_dask=use_dask,
+        )
+
+
+def test_choose_subdomain_raises_on_empty_lat(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([1000, 1010]),  # outside dataset range
+        "lon": xr.DataArray([30, 40]),
+        "straddle": False,
+    }
+    with pytest.raises(ValueError, match="latitude range"):
+        choose_subdomain(
+            global_dataset,
+            dim_names={"latitude": "latitude", "longitude": "longitude"},
+            resolution=1.0,
+            is_global=True,
+            target_coords=target_coords,
+            use_dask=use_dask,
+        )
+
+
+def test_choose_subdomain_straddle(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([-10, 10]),
+        "lon": xr.DataArray([-170, 170]),  # cross the dateline
+        "straddle": True,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=5,
+        use_dask=use_dask,
+    )
+    # Ensure output includes both sides of the dateline, mapped into -180 - 180
+    assert (out.longitude.min() < 0) and (out.longitude.max() > 0)
+
+
+def test_choose_subdomain_wraps_negative_lon(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([0, 20]),
+        "lon": xr.DataArray([-20, -10]),  # negative longitudes
+        "straddle": False,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=2,
+        use_dask=use_dask,
+    )
+    # Output longitudes should be shifted into [0, 360]
+    assert (out.longitude >= 0).all()
+
+
+def test_choose_subdomain_respects_buffer(global_dataset, use_dask):
+    target_coords = {
+        "lat": xr.DataArray([0, 0]),
+        "lon": xr.DataArray([50, 50]),
+        "straddle": False,
+    }
+    out = choose_subdomain(
+        global_dataset,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=1.0,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=10,
+        use_dask=use_dask,
+    )
+    # Buffer should extend at least 10 degrees beyond target lon
+    assert out.longitude.min() <= 40
+    assert out.longitude.max() >= 60
+
+
+# test get_glorys_bounds
+
+
+@pytest.fixture
+def glorys_grid_0_360(tmp_path):
+    lats = np.linspace(-90, 90, 181)
+    lons = np.linspace(0, 360, 361)
+    ds = xr.Dataset(coords={"latitude": lats, "longitude": lons})
+    path = tmp_path / "GLORYS_0_360.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+@pytest.fixture
+def glorys_grid_neg180_180(tmp_path):
+    lats = np.linspace(-90, 90, 181)
+    lons = np.linspace(-180, 180, 361)
+    ds = xr.Dataset(coords={"latitude": lats, "longitude": lons})
+    path = tmp_path / "GLORYS_neg180_180.nc"
+    ds.to_netcdf(path)
+    return path
+
+
+@pytest.fixture
+def glorys_grid_real():
+    return GLORYS_GLOBAL_GRID_PATH
+
+
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid",
+        "grid_that_straddles_dateline",
+        "grid_that_straddles_180_degree_meridian",
+        "small_grid",
+        "tiny_grid",
+    ],
+)
+@pytest.mark.parametrize(
+    "glorys_grid_fixture",
+    ["glorys_grid_0_360", "glorys_grid_neg180_180", "glorys_grid_real"],
+)
+def test_get_glorys_bounds(tmp_path, grid_fixture, glorys_grid_fixture, request):
+    grid = request.getfixturevalue(grid_fixture)
+    glorys_grid_path = request.getfixturevalue(glorys_grid_fixture)
+
+    bounds = get_glorys_bounds(grid=grid, glorys_grid_path=glorys_grid_path)
+    assert set(bounds) == {
+        "minimum_latitude",
+        "maximum_latitude",
+        "minimum_longitude",
+        "maximum_longitude",
+    }
+
+
+@pytest.mark.use_copernicus
+@pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "tiny_grid_that_straddles_dateline",
+        "tiny_grid_that_straddles_180_degree_meridian",
+        "tiny_rotated_grid",
+    ],
+)
+def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, request):
+    start_time = datetime(2012, 1, 1)
+    grid = request.getfixturevalue(grid_fixture)
+    target_coords = get_target_coords(grid)
+
+    regional_file, bigger_regional_file = download_regional_and_bigger(
+        tmp_path, grid, start_time, variables=["thetao", "uo", "zos"]
+    )
+
+    # create datasets from regional and bigger regional data
+    regional_data = GLORYSDataset(
+        var_names={"temp": "thetao", "u": "uo", "zeta": "zos"},
+        filename=regional_file,
+        start_time=start_time,
+        climatology=False,
+        allow_flex_time=False,
+        use_dask=use_dask,
+    )
+    bigger_regional_data = GLORYSDataset(
+        var_names={"temp": "thetao", "u": "uo", "zeta": "zos"},
+        filename=bigger_regional_file,
+        start_time=start_time,
+        climatology=False,
+        allow_flex_time=False,
+        use_dask=use_dask,
+    )
+
+    # subset both datasets and check they are the same
+    regional_data.choose_subdomain(target_coords)
+    bigger_regional_data.choose_subdomain(target_coords)
+
+    # Use assert_allclose instead of equals: necessary for grids that straddle the 180° meridian.
+    # Copernicus returns data on [-180, 180] by default, but if you request a range
+    # like [170, 190], it remaps longitudes. That remapping introduces tiny floating
+    # point differences in the longitude coordinate, so strict equality will fail
+    # even though the data are effectively identical.
+    # For grids that do not straddle the 180° meridian, strict equality still holds.
+    xr.testing.assert_allclose(bigger_regional_data.ds, regional_data.ds)

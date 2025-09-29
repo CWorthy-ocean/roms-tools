@@ -44,6 +44,21 @@ jobs:
            python -V
            coverage run --rcfile=coverage.toml -m pytest --verbose roms_tools/tests/*
 
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: without-dask
+          name: without-dask-py${{ matrix.python-version }}
+          fail_ci_if_error: true
+
   test-with-dask:
     name: 3.13-build-with-dask
     runs-on: ubuntu-latest
@@ -78,6 +93,21 @@ jobs:
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: with-dask
+          name: with-dask-py${{ matrix.python-version }}
+          fail_ci_if_error: true
 
   test-with-streaming:
     name: 3.13-build-with-streaming
@@ -118,6 +148,21 @@ jobs:
            python -V
            copernicusmarine login
            coverage run --rcfile=coverage.toml -m pytest -m stream --stream --use_dask --use_gcsfs --use_copernicus --verbose roms_tools/tests/*
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: with-streaming
+          name: with-streaming
+          fail_ci_if_error: true
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
@@ -165,4 +210,62 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
-          flags: unittests # optional
+          flags: with-dask-and-xesmf
+          name: with-dask-and-xesmf
+          fail_ci_if_error: true
+
+
+  test-glorys-regional-invariance:
+    name: ${{ matrix.python-version }}-build-glorys-regional-invariance
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: ci/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+
+      - name: Conda info
+        run: conda info
+
+      - name: Install roms-tools
+        shell: micromamba-shell {0}
+        run: |
+           python -V
+           python -m pip install -e .[dask] --force-reinstall
+           python -m pip install copernicusmarine
+
+      - name: Running Tests without Dask
+        shell: bash -l {0}
+        env:
+          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
+        run: |
+           python -V
+           copernicusmarine login
+           coverage run --rcfile=coverage.toml -m pytest --use_copernicus --use_dask --verbose -k "test_invariance_to_get_glorys_bounds" roms_tools/tests/
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: glorys-regional-invariance
+          name: glorys-regional-invariance
+          fail_ci_if_error: true

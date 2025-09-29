@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import time
+import typing
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, ClassVar, Literal, TypeAlias, cast
+
+if typing.TYPE_CHECKING:
+    from roms_tools.setup.grid import Grid
 
 import numpy as np
 import xarray as xr
@@ -23,9 +26,11 @@ from roms_tools.download import (
 )
 from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import (
+    Timed,
     assign_dates_to_climatology,
     convert_cftime_to_datetime,
     gc_dist,
+    get_target_coords,
     get_time_type,
     interpolate_cyclic_time,
     interpolate_from_climatology,
@@ -34,6 +39,18 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import get_dask_chunks, get_pkg_error_msg, has_gcsfs, load_data
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
+REPO_ROOT = Path(__file__).resolve().parents[2]
+GLORYS_GLOBAL_GRID_PATH = (
+    REPO_ROOT / "roms_tools" / "data" / "grids" / "GLORYS_global_grid.nc"
+)
+DEFAULT_NR_BUFFER_POINTS = (
+    20  # Default number of buffer points for subdomain selection.
+)
+# Balances performance and accuracy:
+# - Too many points → more expensive computations
+# - Too few points → potential boundary artifacts when lateral refill is performed
+# See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
+# This default will be applied consistently across all datasets requiring lateral fill.
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
 # lat-lon datasets
@@ -497,58 +514,12 @@ class Dataset:
         ds_concatenated : xr.Dataset
             The concatenated dataset.
         """
-        if verbose:
-            start_time = time.time()
-
-        ds_concatenated = xr.Dataset()
-
-        lon = ds[self.dim_names["longitude"]]
-        if end == "lower":
-            lon_minus360 = lon - 360
-            lon_concatenated = xr.concat(
-                [lon_minus360, lon], dim=self.dim_names["longitude"]
-            )
-
-        elif end == "upper":
-            lon_plus360 = lon + 360
-            lon_concatenated = xr.concat(
-                [lon, lon_plus360], dim=self.dim_names["longitude"]
-            )
-
-        elif end == "both":
-            lon_minus360 = lon - 360
-            lon_plus360 = lon + 360
-            lon_concatenated = xr.concat(
-                [lon_minus360, lon, lon_plus360], dim=self.dim_names["longitude"]
-            )
-
-        for var in ds.data_vars:
-            if self.dim_names["longitude"] in ds[var].dims:
-                field = ds[var]
-
-                if end == "both":
-                    field_concatenated = xr.concat(
-                        [field, field, field], dim=self.dim_names["longitude"]
-                    )
-                else:
-                    field_concatenated = xr.concat(
-                        [field, field], dim=self.dim_names["longitude"]
-                    )
-
-                if self.use_dask:
-                    field_concatenated = field_concatenated.chunk(
-                        {self.dim_names["longitude"]: -1}
-                    )
-                field_concatenated[self.dim_names["longitude"]] = lon_concatenated
-                ds_concatenated[var] = field_concatenated
-            else:
-                ds_concatenated[var] = ds[var]
-
-        ds_concatenated[self.dim_names["longitude"]] = lon_concatenated
-
-        if verbose:
-            logging.info(
-                f"Concatenating the data along the longitude dimension: {time.time() - start_time:.3f} seconds"
+        with Timed(
+            "=== Concatenating the data along the longitude dimension ===",
+            verbose=verbose,
+        ):
+            ds_concatenated = _concatenate_longitudes(
+                ds, self.dim_names, end, self.use_dask
             )
 
         return ds_concatenated
@@ -588,7 +559,7 @@ class Dataset:
     def choose_subdomain(
         self,
         target_coords: dict[str, Any],
-        buffer_points: float = 20,
+        buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
@@ -629,95 +600,15 @@ class Dataset:
         ValueError
             If the selected latitude or longitude range does not intersect with the dataset.
         """
-        lat_min = target_coords["lat"].min().values
-        lat_max = target_coords["lat"].max().values
-        lon_min = target_coords["lon"].min().values
-        lon_max = target_coords["lon"].max().values
-
-        margin = self.resolution * buffer_points
-
-        # Select the subdomain in latitude direction (so that we have to concatenate fewer latitudes below if concatenation is necessary)
-        subdomain = self.ds.sel(
-            **{
-                self.dim_names["latitude"]: slice(lat_min - margin, lat_max + margin),
-            }
+        subdomain = choose_subdomain(
+            ds=self.ds,
+            dim_names=self.dim_names,
+            resolution=self.resolution,
+            is_global=self.is_global,
+            target_coords=target_coords,
+            buffer_points=buffer_points,
+            use_dask=self.use_dask,
         )
-        lon = subdomain[self.dim_names["longitude"]]
-
-        if self.is_global:
-            concats = []
-            # Concatenate only if necessary
-            if lon_max + margin > lon.max():
-                # See if shifting by +360 degrees helps
-                if (lon_min - margin > (lon + 360).min()) and (
-                    lon_max + margin < (lon + 360).max()
-                ):
-                    subdomain[self.dim_names["longitude"]] = lon + 360
-                    lon = subdomain[self.dim_names["longitude"]]
-                else:
-                    concats.append("upper")
-            if lon_min - margin < lon.min():
-                # See if shifting by -360 degrees helps
-                if (lon_min - margin > (lon - 360).min()) and (
-                    lon_max + margin < (lon - 360).max()
-                ):
-                    subdomain[self.dim_names["longitude"]] = lon - 360
-                    lon = subdomain[self.dim_names["longitude"]]
-                else:
-                    concats.append("lower")
-
-            if concats:
-                end = "both" if len(concats) == 2 else concats[0]
-                end = cast(TConcatEndTypes, end)
-                subdomain = self.concatenate_longitudes(
-                    subdomain, end=end, verbose=False
-                )
-                lon = subdomain[self.dim_names["longitude"]]
-
-        else:
-            # Adjust longitude range if needed to match the expected range
-            if not target_coords["straddle"]:
-                if lon.min() < -180:
-                    if lon_max + margin > 0:
-                        lon_min -= 360
-                        lon_max -= 360
-                elif lon.min() < 0:
-                    if lon_max + margin > 180:
-                        lon_min -= 360
-                        lon_max -= 360
-
-            if target_coords["straddle"]:
-                if lon.max() > 360:
-                    if lon_min - margin < 180:
-                        lon_min += 360
-                        lon_max += 360
-                elif lon.max() > 180:
-                    if lon_min - margin < 0:
-                        lon_min += 360
-                        lon_max += 360
-        # Select the subdomain in longitude direction
-
-        subdomain = subdomain.sel(
-            **{
-                self.dim_names["longitude"]: slice(lon_min - margin, lon_max + margin),
-            }
-        )
-
-        # Check if the selected subdomain has zero dimensions in latitude or longitude
-        if subdomain[self.dim_names["latitude"]].size == 0:
-            raise ValueError("Selected latitude range does not intersect with dataset.")
-
-        if subdomain[self.dim_names["longitude"]].size == 0:
-            raise ValueError(
-                "Selected longitude range does not intersect with dataset."
-            )
-
-        # Adjust longitudes to expected range if needed
-        lon = subdomain[self.dim_names["longitude"]]
-        if target_coords["straddle"]:
-            subdomain[self.dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
-        else:
-            subdomain[self.dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
 
         if return_coords_only:
             # Create and return a dataset with only latitudes and longitudes
@@ -3148,3 +3039,275 @@ def _deduplicate_river_names(
     ds[name_var] = updated_array
 
     return ds
+
+
+def _concatenate_longitudes(
+    ds: xr.Dataset,
+    dim_names: Mapping[str, str],
+    end: TConcatEndTypes,
+    use_dask: bool = False,
+) -> xr.Dataset:
+    """
+    Concatenate longitude dimension to handle global grids that cross
+    the 0/360-degree or -180/180-degree boundary.
+
+    Extends the longitude dimension either lower, upper, or both sides
+    by +/- 360 degrees and duplicates the corresponding variables along
+    that dimension.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Input xarray Dataset to be concatenated.
+    dim_names : Mapping[str, str]
+        Dictionary or mapping containing dimension names. Must include "longitude".
+    end : str
+        Specifies which side(s) to extend:
+        - "lower": extend by subtracting 360 degrees.
+        - "upper": extend by adding 360 degrees.
+        - "both": extend on both sides.
+    use_dask : bool, default False
+        If True, chunk the concatenated longitude dimension using Dask.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with longitude dimension extended and data variables duplicated.
+
+    Notes
+    -----
+    Only data variables containing the longitude dimension are concatenated;
+    others are left unchanged.
+    """
+    ds_concat = xr.Dataset()
+
+    lon_name = dim_names["longitude"]
+    lon = ds[lon_name]
+
+    match end:
+        case "lower":
+            lon_concat = xr.concat([lon - 360, lon], dim=lon_name)
+            n_copies = 2
+        case "upper":
+            lon_concat = xr.concat([lon, lon + 360], dim=lon_name)
+            n_copies = 2
+        case "both":
+            lon_concat = xr.concat([lon - 360, lon, lon + 360], dim=lon_name)
+            n_copies = 3
+        case _:
+            raise ValueError(f"Invalid `end` value: {end}")
+
+    for var in ds.variables:
+        if lon_name in ds[var].dims:
+            field = ds[var]
+            field_concat = xr.concat([field] * n_copies, dim=lon_name)
+
+            if use_dask:
+                field_concat = field_concat.chunk({lon_name: -1})
+
+            ds_concat[var] = field_concat
+        else:
+            ds_concat[var] = ds[var]
+
+    ds_concat = ds_concat.assign_coords({lon_name: lon_concat.values})
+
+    return ds_concat
+
+
+def choose_subdomain(
+    ds: xr.Dataset,
+    dim_names: Mapping[str, str],
+    resolution: float,
+    is_global: bool,
+    target_coords: Mapping[str, Any],
+    buffer_points: int = 20,
+    use_dask: bool = False,
+) -> xr.Dataset:
+    """
+    Select a subdomain from an xarray Dataset based on target coordinates,
+    with optional buffer points and global longitude handling.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The full xarray Dataset to subset.
+    dim_names : Mapping[str, str]
+        Dictionary mapping logical dimension names to dataset dimension names.
+        Example: {"latitude": "latitude", "longitude": "longitude"}.
+    resolution : float
+        Spatial resolution of the dataset, used to compute buffer margin.
+    is_global : bool
+        Whether the dataset covers global longitude (affects concatenation logic).
+    target_coords : Mapping[str, Any]
+        Dictionary containing target latitude and longitude coordinates.
+        Expected keys: "lat", "lon", and "straddle" (boolean for crossing 180°).
+    buffer_points : int, default 20
+        Number of grid points to extend beyond the target coordinates.
+    use_dask: bool, optional
+        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is processed eagerly. Defaults to False.
+
+    Returns
+    -------
+    xr.Dataset
+        Subset of the input Dataset covering the requested coordinates plus buffer.
+
+    Raises
+    ------
+    ValueError
+        If the selected latitude or longitude range does not intersect the dataset.
+    """
+    lat_min = target_coords["lat"].min().values
+    lat_max = target_coords["lat"].max().values
+    lon_min = target_coords["lon"].min().values
+    lon_max = target_coords["lon"].max().values
+
+    margin = resolution * buffer_points
+
+    # Select the subdomain in latitude direction (so that we have to concatenate fewer latitudes below if concatenation is necessary)
+    subdomain = ds.sel(
+        **{
+            dim_names["latitude"]: slice(lat_min - margin, lat_max + margin),
+        }
+    )
+    lon = subdomain[dim_names["longitude"]]
+
+    if is_global:
+        concats = []
+        # Concatenate only if necessary
+        if lon_max + margin > lon.max():
+            # See if shifting by +360 degrees helps
+            if (lon_min - margin > (lon + 360).min()) and (
+                lon_max + margin < (lon + 360).max()
+            ):
+                subdomain[dim_names["longitude"]] = lon + 360
+                lon = subdomain[dim_names["longitude"]]
+            else:
+                concats.append("upper")
+        if lon_min - margin < lon.min():
+            # See if shifting by -360 degrees helps
+            if (lon_min - margin > (lon - 360).min()) and (
+                lon_max + margin < (lon - 360).max()
+            ):
+                subdomain[dim_names["longitude"]] = lon - 360
+                lon = subdomain[dim_names["longitude"]]
+            else:
+                concats.append("lower")
+
+        if concats:
+            end = "both" if len(concats) == 2 else concats[0]
+            end = cast(TConcatEndTypes, end)
+            subdomain = _concatenate_longitudes(
+                subdomain, dim_names=dim_names, end=end, use_dask=use_dask
+            )
+            lon = subdomain[dim_names["longitude"]]
+
+    else:
+        # Adjust longitude range if needed to match the expected range
+        if not target_coords["straddle"]:
+            if lon.min() < -180:
+                if lon_max + margin > 0:
+                    lon_min -= 360
+                    lon_max -= 360
+            elif lon.min() < 0:
+                if lon_max + margin > 180:
+                    lon_min -= 360
+                    lon_max -= 360
+
+        if target_coords["straddle"]:
+            if lon.max() > 360:
+                if lon_min - margin < 180:
+                    lon_min += 360
+                    lon_max += 360
+            elif lon.max() > 180:
+                if lon_min - margin < 0:
+                    lon_min += 360
+                    lon_max += 360
+    # Select the subdomain in longitude direction
+    subdomain = subdomain.sel(
+        **{
+            dim_names["longitude"]: slice(lon_min - margin, lon_max + margin),
+        }
+    )
+    # Check if the selected subdomain has zero dimensions in latitude or longitude
+    if (
+        dim_names["latitude"] not in subdomain
+        or subdomain[dim_names["latitude"]].size == 0
+    ):
+        raise ValueError("Selected latitude range does not intersect with dataset.")
+
+    if (
+        dim_names["longitude"] not in subdomain
+        or subdomain[dim_names["longitude"]].size == 0
+    ):
+        raise ValueError("Selected longitude range does not intersect with dataset.")
+
+    # Adjust longitudes to expected range if needed
+    lon = subdomain[dim_names["longitude"]]
+    if target_coords["straddle"]:
+        subdomain[dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
+    else:
+        subdomain[dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
+
+    return subdomain
+
+
+def get_glorys_bounds(
+    grid: Grid,
+    glorys_grid_path: Path | str | None = None,
+) -> dict[str, float]:
+    """
+    Compute the latitude/longitude bounds of a GLORYS spatial subset
+    that fully covers the given ROMS grid (with margin for regridding).
+
+    Parameters
+    ----------
+    grid : Grid
+        The grid object.
+    glorys_grid_path : str, optional
+        Path to the GLORYS global grid file. If None, defaults to
+        "<repo_root>/data/grids/GLORYS_global_grid.nc".
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary containing the bounding box values:
+
+        - `"minimum_latitude"` : float
+        - `"maximum_latitude"` : float
+        - `"minimum_longitude"` : float
+        - `"maximum_longitude"` : float
+
+    Notes
+    -----
+    - The resolution is estimated as the mean of latitude and longitude spacing.
+    """
+    if glorys_grid_path is None:
+        glorys_grid_path = GLORYS_GLOBAL_GRID_PATH
+
+    ds = xr.open_dataset(glorys_grid_path)
+
+    # Estimate grid resolution (mean spacing in degrees)
+    res_lat = ds.latitude.diff("latitude").mean()
+    res_lon = ds.longitude.diff("longitude").mean()
+    resolution = (res_lat + res_lon) / 2
+
+    # Extract target grid coordinates
+    target_coords = get_target_coords(grid)
+
+    # Select subdomain with margin
+    ds_subset = choose_subdomain(
+        ds=ds,
+        dim_names={"latitude": "latitude", "longitude": "longitude"},
+        resolution=resolution,
+        is_global=True,
+        target_coords=target_coords,
+        buffer_points=DEFAULT_NR_BUFFER_POINTS + 1,
+    )
+
+    # Compute bounds
+    return {
+        "minimum_latitude": float(ds_subset.latitude.min()),
+        "maximum_latitude": float(ds_subset.latitude.max()),
+        "minimum_longitude": float(ds_subset.longitude.min()),
+        "maximum_longitude": float(ds_subset.longitude.max()),
+    }

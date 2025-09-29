@@ -1,6 +1,7 @@
 import importlib.metadata
 import logging
 import time
+import typing
 from collections.abc import Sequence
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
@@ -18,6 +19,9 @@ from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
+
+if typing.TYPE_CHECKING:
+    from roms_tools.setup.grid import Grid
 
 yaml.SafeDumper.add_multi_representer(
     StrEnum,
@@ -1085,22 +1089,47 @@ def group_by_year(ds, filepath):
     return dataset_list, output_filenames
 
 
-def get_target_coords(grid, use_coarse_grid=False):
-    """Retrieves longitude and latitude coordinates from the grid, adjusting them based
-    on longitude range.
+def get_target_coords(
+    grid: "Grid", use_coarse_grid: bool = False
+) -> dict[str, xr.DataArray | bool | None]:
+    """
+    Retrieve longitude, latitude, and auxiliary grid coordinates, adjusting for
+    longitude ranges and coarse grid usage.
 
     Parameters
     ----------
     grid : Grid
-        Object representing the grid information used for the model.
+        Grid object.
     use_coarse_grid : bool, optional
-        Use coarse grid data if True. Defaults to False.
+        If True, use the coarse grid variables (`lat_coarse`, `lon_coarse`, etc.)
+        instead of the native grid. Defaults to False.
 
     Returns
     -------
-    dict
-        Dictionary containing the longitude, latitude, angle and mask arrays, along with a boolean indicating
-        if the grid straddles the meridian.
+    dict[str, xr.DataArray | bool | None]
+        Dictionary containing the following keys:
+
+        - `"lat"` : xr.DataArray
+            Latitude at rho points.
+        - `"lon"` : xr.DataArray
+            Longitude at rho points, adjusted to -180 to 180 or 0 to 360 range.
+        - `"lat_psi"` : xr.DataArray | None
+            Latitude at psi points, if available.
+        - `"lon_psi"` : xr.DataArray | None
+            Longitude at psi points, if available.
+        - `"angle"` : xr.DataArray
+            Grid rotation angle.
+        - `"mask"` : xr.DataArray | None
+            Land/sea mask at rho points.
+        - `"straddle"` : bool
+            True if the grid crosses the Greenwich meridian, False otherwise.
+
+    Notes
+    -----
+    - If `grid.straddle` is False and the ROMS domain lies more than 5° from
+      the Greenwich meridian, longitudes are adjusted to 0-360 range.
+    - Renaming of coarse grid dimensions is applied to match the rho-point
+      naming convention (`eta_rho`, `xi_rho`) for compatibility with ROMS-Tools.
     """
     # Select grid variables based on whether the coarse grid is used
     if use_coarse_grid:

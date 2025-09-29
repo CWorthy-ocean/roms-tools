@@ -87,3 +87,4 @@ Utilities
    roms_tools.tiling.partition.partition_netcdf
    roms_tools.tiling.join.join_netcdf
    roms_tools.plot.plot
+   roms_tools.setup.datasets.get_glorys_bounds

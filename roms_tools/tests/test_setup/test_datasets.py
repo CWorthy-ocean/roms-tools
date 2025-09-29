@@ -1064,11 +1064,12 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
     target_coords = get_target_coords(grid)
 
     regional_file, bigger_regional_file = download_regional_and_bigger(
-        tmp_path, grid, start_time, variables=["thetao"]
+        tmp_path, grid, start_time, variables=["thetao", "uo", "zos"]
     )
 
     # create datasets from regional and bigger regional data
     regional_data = GLORYSDataset(
+        var_names={"temp": "thetao", "u": "uo", "zeta": "zos"},
         filename=regional_file,
         start_time=start_time,
         climatology=False,
@@ -1076,6 +1077,7 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
         use_dask=use_dask,
     )
     bigger_regional_data = GLORYSDataset(
+        var_names={"temp": "thetao", "u": "uo", "zeta": "zos"},
         filename=bigger_regional_file,
         start_time=start_time,
         climatology=False,

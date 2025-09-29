@@ -1064,7 +1064,7 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
     target_coords = get_target_coords(grid)
 
     regional_file, bigger_regional_file = download_regional_and_bigger(
-        tmp_path, grid, start_time
+        tmp_path, grid, start_time, variables=["thetao"]
     )
 
     # create datasets from regional and bigger regional data

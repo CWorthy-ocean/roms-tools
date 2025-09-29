@@ -10,7 +10,10 @@ except ImportError:
 
 
 def download_regional_and_bigger(
-    tmp_path: Path, grid: Grid, start_time: datetime
+    tmp_path: Path,
+    grid: Grid,
+    start_time: datetime,
+    variables: list[str] = ["thetao", "so", "uo", "vo", "zos"],
 ) -> tuple[Path, Path]:
     """
     Helper: download minimal and slightly bigger GLORYS subsets.
@@ -23,6 +26,8 @@ def download_regional_and_bigger(
         ROMS-Tools Grid object defining the target domain.
     start_time : datetime
         Start time of the requested subset.
+    variables : list[str]
+        What variables to download.
 
     Returns
     -------
@@ -35,7 +40,7 @@ def download_regional_and_bigger(
     regional_file = tmp_path / "regional_GLORYS.nc"
     copernicusmarine.subset(
         dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
-        variables=["thetao", "so", "uo", "vo", "zos"],
+        variables=variables,
         **bounds,
         start_datetime=start_time,
         end_datetime=start_time,
@@ -55,7 +60,7 @@ def download_regional_and_bigger(
     bigger_regional_file = tmp_path / "bigger_regional_GLORYS.nc"
     copernicusmarine.subset(
         dataset_id="cmems_mod_glo_phy_my_0.083deg_P1D-m",
-        variables=["thetao", "so", "uo", "vo", "zos"],
+        variables=variables,
         **bounds,
         start_datetime=start_time,
         end_datetime=start_time,

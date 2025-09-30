@@ -22,6 +22,8 @@
 
 ### Documentation
 
+* Add an end-to-end example to help users run through the full workflow ([#468](https://github.com/CWorthy-ocean/roms-tools/pull/468))
+
 ### Bugfixes
 
 * Fix bug in creation of `InitialConditions` ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))

@@ -298,9 +298,6 @@ class BoundaryForcing:
                     zeta_v = zeta_v.isel(**self.bdry_coords["v"][direction])
 
                 if not self.apply_2d_horizontal_fill and bdry_data.needs_lateral_fill:
-                    logging.info(
-                        f"Applying 1D horizontal fill to {direction}ern boundary."
-                    )
                     if not self.bypass_validation:
                         self._validate_1d_fill(
                             processed_fields,
@@ -777,6 +774,9 @@ class BoundaryForcing:
         None
             If a boundary is divided by land, a warning is issued. No return value is provided.
         """
+        if not hasattr(self, "_warned_directions"):
+            self._warned_directions = set()
+
         for var_name in processed_fields.keys():
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
@@ -799,16 +799,20 @@ class BoundaryForcing:
                 wet_nans = xr.where(da.where(mask).isnull(), 1, 0)
                 # Apply label to find connected components of wet NaNs
                 labeled_array, num_features = label(wet_nans)
+
                 left_margin = labeled_array[0]
                 right_margin = labeled_array[-1]
                 if left_margin != 0:
                     num_features = num_features - 1
                 if right_margin != 0:
                     num_features = num_features - 1
-                if num_features > 0:
+
+                if num_features > 0 and direction not in self._warned_directions:
                     logging.warning(
-                        f"For {var_name}, the {direction}ern boundary is divided by land. It would be safer (but slower) to use `apply_2d_horizontal_fill = True`."
+                        f"The {direction}ern boundary is divided by land. "
+                        "It would be safer (but slower and more memory-intensive) to use `apply_2d_horizontal_fill = True`."
                     )
+                    self._warned_directions.add(direction)
 
     def _validate(self, ds):
         """Validate the dataset for NaN values at the first time step (bry_time=0) for

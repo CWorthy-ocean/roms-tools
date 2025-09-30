@@ -687,13 +687,15 @@ class RiverForcing:
         Warning
             If NaN values are found in any of the dataset variables, a warning message is logged.
         """
-        for var_name in ds.data_vars:
-            da = ds[var_name]
-            if da.isnull().any().values:
+        var_name = "river_volume"
+        da = ds[var_name]
+        if da.isnull().any().values:
+            logging.warning(
+                f"NaNs detected in '{var_name}' and set to zero. This may indicate missing river data and affect model accuracy. "
+            )
+            if not self.climatology:
                 logging.warning(
-                    f"NaN values detected in the '{var_name}' field. These values are being set to zero. "
-                    "This may indicate missing river data, which could affect model accuracy. Consider setting "
-                    "`convert_to_climatology = 'if_any_missing'` to automatically fill missing values with climatological data."
+                    "Consider `convert_to_climatology='if_any_missing'` to fill missing values with climatological data."
                 )
 
     def plot_locations(self, river_names: list[str] | str = INCLUDE_ALL_RIVER_NAMES):

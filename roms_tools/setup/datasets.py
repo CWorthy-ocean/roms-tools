@@ -641,10 +641,6 @@ class Dataset:
         point to the same variable in the dataset.
         """
         if self.needs_lateral_fill:
-            logging.info(
-                "Applying 2D horizontal fill to the source data before regridding."
-            )
-
             lateral_fill = LateralFill(
                 self.ds["mask"],
                 [self.dim_names["latitude"], self.dim_names["longitude"]],
@@ -675,10 +671,6 @@ class Dataset:
                 else:
                     # Apply standard lateral fill for other variables
                     self.ds[var_name] = lateral_fill.apply(self.ds[var_name])
-        else:
-            logging.info(
-                "2D horizontal fill is skipped because source data already contains filled values."
-            )
 
     def extrapolate_deepest_to_bottom(self):
         """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth

@@ -18,7 +18,7 @@ The horizontal grid parameters are as follows:
 | `center_lat` | Latitude of the center of the domain                              | Degrees                     |
 | `rot`        | Rotation of the grid's x-direction from lines of constant longitude | Degrees (counter-clockwise) |
 
-Using these parameters, `ROMS-Tools` generates a curvilinear orthogonal grid designed to minimize variations in grid cell size across the domain. To achieve this, `ROMS-Tools` employs a Transverse Mercator projection.
+Using these parameters, `ROMS-Tools` generates a curvilinear orthogonal grid designed to maintain an equal aspect ratio across the domain. To achieve this, `ROMS-Tools` employs a Transverse Mercator projection.
 
 ## Mask
 

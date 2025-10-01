@@ -1,6 +1,5 @@
 name: JOSS paper
 on:
-  push: {}
   pull_request: {}
 
 jobs:

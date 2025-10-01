@@ -94,25 +94,9 @@ Importantly, tools from other modeling communities cannot simply be adapted, sin
 ROMS-Tools was developed to meet this need. Algorithmically, it builds on the legacy of the original UCLA MATLAB preprocessing scripts, which encapsulate decades of community experience in setting up regional ocean model inputs. Rather than being a direct line-by-line translation, ROMS-Tools reimplements and modernizes those approaches in Python, leveraging this accumulated knowledge while introducing improved workflows and enhanced reproducibility. By streamlining input generation and analysis, ROMS-Tools reduces technical overhead, lowers the barrier to entry, and enables scientists to focus on research rather than data preparation.
 While designed for ocean modelers developing new domains, the package is also gaining traction in the Carbon Dioxide Removal (CDR) community, where it enables testing of different climate intervention scenarios within existing, well-validated model setups.
 
-# Citations
-
-Citations to entries in paper.bib should be in
-[rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
-format.
-
-If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit.
-
-For a quick reference, the following citation commands can be used:
-- `@author:2001`  ->  "Author et al. (2001)"
-- `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
-
 # Acknowledgements
 
 Acknowledgement of any financial support.
 
-We acknowledge contributions from Brigitta Sipocz, Syrtis Major, and Semyeong
-Oh, and support from Kathryn Johnston during the genesis of this project.
 
 # References

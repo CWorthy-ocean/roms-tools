@@ -45,7 +45,7 @@ authors:
     orcid:
     affiliation: 1
 affiliations:
- - name: [C]Worthy LLC, Boulder, CO, United States
+ - name: '[C]Worthy LLC, Boulder, CO, United States'
    index: 1
  - name: Earthmover
    index: 2

@@ -64,6 +64,7 @@ A widely used regional ocean model is the **Regional Ocean Modeling System (ROMS
 High-resolution physical-BGC simulations provide the foundation for diverse applications, including environmental forecasting, sustainable fisheries management, and assessing the regional impacts of climate change.
 
 Yet configuring a regional ocean model like ROMS-MARBL remains a major challenge. Generating the required input files is time-consuming, error-prone, and difficult to reproduce, creating a bottleneck for both new and experienced researchers. The Python package **ROMS-Tools** addresses this challenge by providing an efficient, user-friendly, and reproducible workflow to generate all required inputs, including:
+
 - **Model Grid**: A customizable, curvilinear grid that can be rotated to efficiently align with complex coastlines and uses a terrain-following vertical coordinate to accurately represent seafloor bathymetry.
 - **Bathymetry and Land Mask**: High-resolution seafloor depth from **SRTM15** [@tozer_global_2019] and a corresponding land-sea mask from **Natural Earth**.
 - **Atmospheric Forcing:** Meteorological drivers (wind, radiation, precipitation) from ERA5 [@hersbach_era5_2020] and surface BGC forcing (pCO₂, dust, nitrogen deposition) from hybrid observational-model sources.

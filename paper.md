@@ -52,7 +52,7 @@ affiliations:
  - name: University of California, Los Angeles, CA, United States
    index: 3
 date: 26 September 2025
-bibliography: paper.bib
+bibliography: docs/references.bib
 
 ---
 
@@ -71,7 +71,7 @@ Yet configuring a regional ocean model like ROMS-MARBL remains a major challenge
 - **River Forcing:** Freshwater runoff from **Dai & Trenberth** `[@dai_estimates_2002]` or custom user-provided files.
 - **CDR Forcing**: Flexible user-defined tracers for Carbon Dioxide Removal (CDR) or other interventions.
 
-![Initial conditions.\label{fig:example}](figure.png){ width=100% }
+![Initial conditions.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
 
 An example of the generated inputs is shown in Figure \autoref{fig:example}, which illustrates initial conditions for the California Current System created with ROMS-Tools.
 

@@ -52,7 +52,7 @@ affiliations:
  - name: University of California, Los Angeles, CA, United States
    index: 3
 date: 26 September 2025
-bibliography: paper.bib
+bibliography: paper/paper.bib
 
 ---
 

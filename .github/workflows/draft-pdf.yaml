@@ -25,5 +25,5 @@ jobs:
       - name: Commit PDF to repository
         uses: EndBug/add-and-commit@v9
         with:
-          message: '(auto) Paper PDF Draft'
+          message: '(auto) Paper PDF Draft [skip ci]'
           add: 'paper.pdf'

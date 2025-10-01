@@ -1,6 +1,8 @@
 name: JOSS paper
 on:
-  pull_request: {}
+  pull_request:
+    paths:
+      - 'paper.md'
 
 jobs:
   paper:

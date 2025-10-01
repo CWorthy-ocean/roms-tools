@@ -58,9 +58,9 @@ bibliography: docs/references.bib
 
 # Summary
 
-The ocean shapes Earth's climate and sustains marine ecosystems by transporting and exchanging vast quantities of heat, oxygen, carbon, and nutrients with the atmosphere. To understand these complex processes, scientists rely on ocean models, powerful computer simulations of physical circulation and biogeochemical (BGC) dynamics. These models represent the ocean on a grid of cells, where higher resolution (more, smaller cells) provides greater detail but requires significantly more computing power. While global models simulate the entire ocean, **regional models** focus computational resources on a specific area to achieve much higher resolution and can therefore resolve fine-scale processes like mesoscale (10-100 km) and submesoscale (0.1-10 km) features, tidal dynamics, coastal currents, upwelling, and detailed BGC cycles.
+The ocean shapes Earth's climate and sustains marine ecosystems by transporting and exchanging vast quantities of heat, oxygen, carbon, and nutrients with the atmosphere. To understand these complex processes, scientists rely on ocean models, powerful computer simulations of physical circulation and biogeochemical (BGC) dynamics. These models represent the ocean on a grid of cells, where higher resolution (more, smaller cells) provides greater detail but requires significantly more computing power. While global ocean models simulate the entire ocean, **regional ocean models** focus computational resources on a specific area to achieve much higher resolution and can therefore resolve fine-scale processes like mesoscale (10-100 km) and submesoscale (0.1-10 km) features, tidal dynamics, coastal currents, upwelling, and detailed BGC cycles.
 
-A widely used regional ocean model is the **Regional Ocean Modeling System (ROMS)** [@shchepetkin_regional_2005]. To connect physical circulation with ecosystem dynamics, ROMS can be coupled to a BGC model, for example the Marine Biogeochemistry Library (MARBL) [@long_simulations_2021]. This coupled framework allows researchers to explore how physical processes drive ecosystem dynamics, such as how nutrient-rich waters from upwelling fuel the phytoplankton blooms that form the base of the marine food web [@gruber_eddy-resolving_2006].
+A widely used regional ocean model is the **Regional Ocean Modeling System (ROMS)** [@shchepetkin_regional_2005]. To connect physical circulation with ecosystem dynamics and the ocean carbon cycle, ROMS can be coupled to a BGC model, for example the Marine Biogeochemistry Library (MARBL) [@long_simulations_2021]. This coupled framework allows researchers to explore how physical processes drive ecosystem dynamics, such as how nutrient-rich waters from upwelling fuel the phytoplankton blooms that form the base of the marine food web [@gruber_eddy-resolving_2006].
 
 Yet configuring a regional ocean model like ROMS-MARBL remains a major challenge. Generating the required input files is time-consuming, error-prone, and difficult to reproduce, creating a bottleneck for both new and experienced researchers. The Python package `ROMS-Tools` addresses this challenge by providing an efficient, user-friendly, and reproducible workflow to generate all required inputs, including:
 
@@ -72,7 +72,7 @@ Yet configuring a regional ocean model like ROMS-MARBL remains a major challenge
 - **River Forcing:** Freshwater runoff from **Dai & Trenberth** [@dai_estimates_2002] or custom user-provided files.
 - **CDR Forcing**: Flexible user-defined tracers for Carbon Dioxide Removal (CDR) or other interventions.
 
-![Initial conditions.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
+![Surface initial conditions for the California Current System created with `ROMS-Tools` from GLORYS. Left: potential temperature. Right: zonal velocity. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
 
 An example of the generated inputs is shown in Figure \autoref{fig:example}, which illustrates initial conditions for the California Current System created with `ROMS-Tools`.
 

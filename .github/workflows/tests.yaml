@@ -57,7 +57,7 @@ jobs:
           files: ./coverage.xml
           flags: without-dask
           name: without-dask-py${{ matrix.python-version }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   test-with-dask:
     name: 3.13-build-with-dask
@@ -107,7 +107,7 @@ jobs:
           files: ./coverage.xml
           flags: with-dask
           name: with-dask-py${{ matrix.python-version }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   test-with-streaming:
     name: 3.13-build-with-streaming
@@ -162,7 +162,7 @@ jobs:
           files: ./coverage.xml
           flags: with-streaming
           name: with-streaming
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
@@ -212,12 +212,13 @@ jobs:
           files: ./coverage.xml
           flags: with-dask-and-xesmf
           name: with-dask-and-xesmf
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
 
   test-glorys-regional-invariance:
-    name: ${{ matrix.python-version }}-build-glorys-regional-invariance
+    name: 3.13-build-glorys-regional-invariance
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
     strategy:
       matrix:
         python-version: ["3.13"]
@@ -268,4 +269,4 @@ jobs:
           files: ./coverage.xml
           flags: glorys-regional-invariance
           name: glorys-regional-invariance
-          fail_ci_if_error: true
+          fail_ci_if_error: false

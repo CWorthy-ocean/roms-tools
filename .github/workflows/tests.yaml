@@ -51,7 +51,7 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: github.repository == 'CWorthy-ocean/roms-tools'
+        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -102,7 +102,7 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: github.repository == 'CWorthy-ocean/roms-tools'
+        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -158,7 +158,7 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: github.repository == 'CWorthy-ocean/roms-tools'
+        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -209,7 +209,7 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: github.repository == 'CWorthy-ocean/roms-tools'
+        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -266,7 +266,7 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: github.repository == 'CWorthy-ocean/roms-tools'
+        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

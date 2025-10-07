@@ -11,10 +11,8 @@
 * Introduce GLORYS streaming support for `InitialConditions` using copernicusmarine — not recommended yet; performance remains a blocker ([#424](https://github.com/CWorthy-ocean/roms-tools/pull/424))
 * Allow performing CDR analysis, including plotting CDR uptake curves ([#417](https://github.com/CWorthy-ocean/roms-tools/pull/417))
 * Introduce parameter `allow_flex_time` for `InitialConditions` controlling how strictly `ini_time` is handled ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
-* Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
-* Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
-* Add `compute_total_cdr_source ` method to `CDRForcing`, which computes integrated tracer quantities for all releases and returns a pandas DataFrame including a units row ([#444](https://github.com/CWorthy-ocean/roms-tools/pull/444))
 * Add utility function `get_glorys_bounds` to return the min/max latitude and longitude required for GLORYS downloads for a fixed domain ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
+* Add `compute_total_cdr_source ` method to `CDRForcing`, which computes integrated tracer quantities for all releases and returns a pandas DataFrame including a units row ([#444](https://github.com/CWorthy-ocean/roms-tools/pull/444))
 
 ### Breaking Changes
 

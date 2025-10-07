@@ -216,7 +216,7 @@ jobs:
 
 
   test-glorys-regional-invariance:
-    name: ${{ matrix.python-version }}-build-glorys-regional-invariance
+    name: 3.13-build-glorys-regional-invariance
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.pull_request.head.repo.fork == false
     strategy:

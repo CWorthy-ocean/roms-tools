@@ -13,7 +13,7 @@
 * Introduce parameter `allow_flex_time` for `InitialConditions` controlling how strictly `ini_time` is handled ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
 * Option to plot bathymetry along fixed lat/lon section ([#399](https://github.com/CWorthy-ocean/roms-tools/pull/399))
 * Truly centered Gaussian CDR releases, reflecting recent changes in ucla-roms ([#413](https://github.com/CWorthy-ocean/roms-tools/pull/413))
-* Add `compute_total_releases` method to `CDRForcing`, which computes integrated tracer quantities for all releases and returns a pandas DataFrame including a units row ([#444](https://github.com/CWorthy-ocean/roms-tools/pull/444))
+* Add `compute_total_cdr_source ` method to `CDRForcing`, which computes integrated tracer quantities for all releases and returns a pandas DataFrame including a units row ([#444](https://github.com/CWorthy-ocean/roms-tools/pull/444))
 
 ### Breaking Changes
 

@@ -51,14 +51,13 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: without-dask
           name: without-dask-py${{ matrix.python-version }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   test-with-dask:
     name: 3.13-build-with-dask
@@ -102,14 +101,13 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: with-dask
           name: with-dask-py${{ matrix.python-version }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   test-with-streaming:
     name: 3.13-build-with-streaming
@@ -158,14 +156,13 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: with-streaming
           name: with-streaming
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   test-with-dask-and-xesmf:
     name: 3.13-build-with-dask-and-xesmf
@@ -209,14 +206,13 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: with-dask-and-xesmf
           name: with-dask-and-xesmf
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
 
   test-glorys-regional-invariance:
@@ -266,11 +262,10 @@ jobs:
           coverage xml
 
       - name: Upload coverage reports to Codecov
-        if: secrets.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: glorys-regional-invariance
           name: glorys-regional-invariance
-          fail_ci_if_error: true
+          fail_ci_if_error: false

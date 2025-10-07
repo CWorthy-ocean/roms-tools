@@ -11,7 +11,16 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import Grid, InitialConditions
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import CESMBGCDataset, UnifiedBGCDataset
+from roms_tools.setup.datasets import (
+    CESMBGCDataset,
+    UnifiedBGCDataset,
+)
+from roms_tools.tests.test_setup.utils import download_regional_and_bigger
+
+try:
+    import copernicusmarine  # type: ignore
+except ImportError:
+    copernicusmarine = None
 
 
 @pytest.fixture
@@ -77,6 +86,46 @@ def test_initial_conditions_creation_with_default_glorys_dataset(example_grid: G
     )
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
     assert set(ic.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.use_copernicus
+@pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "tiny_grid_that_straddles_dateline",
+        "tiny_grid_that_straddles_180_degree_meridian",
+        "tiny_rotated_grid",
+    ],
+)
+def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, request):
+    ini_time = datetime(2012, 1, 1)
+    grid = request.getfixturevalue(grid_fixture)
+    regional_file, bigger_regional_file = download_regional_and_bigger(
+        tmp_path, grid, ini_time
+    )
+
+    ic_from_regional = InitialConditions(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(regional_file)},
+        ini_time=ini_time,
+        use_dask=use_dask,
+    )
+    ic_from_bigger_regional = InitialConditions(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(bigger_regional_file)},
+        ini_time=ini_time,
+        use_dask=use_dask,
+    )
+
+    # Use assert_allclose instead of equals: necessary for grids that straddle the 180° meridian.
+    # Copernicus returns data on [-180, 180] by default, but if you request a range
+    # like [170, 190], it remaps longitudes. That remapping introduces tiny floating
+    # point differences in the longitude coordinate, which will then propagate into further differences once you do regridding.
+    # Need to adjust the tolerances for these grids that straddle the 180° meridian.
+    xr.testing.assert_allclose(
+        ic_from_bigger_regional.ds, ic_from_regional.ds, rtol=1e-4, atol=1e-5
+    )
 
 
 def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:

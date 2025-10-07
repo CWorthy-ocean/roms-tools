@@ -64,6 +64,7 @@ This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nm
    installation
    methods
    datasets
+   end_to_end
 
 .. toctree::
    :maxdepth: 1

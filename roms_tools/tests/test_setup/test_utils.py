@@ -2,13 +2,103 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
 from roms_tools.setup.datasets import ERA5Correction
-from roms_tools.setup.utils import interpolate_from_climatology, validate_names
+from roms_tools.setup.utils import (
+    get_target_coords,
+    interpolate_from_climatology,
+    validate_names,
+)
+
+
+class DummyGrid:
+    """Lightweight grid wrapper mimicking the real Grid API for testing."""
+
+    def __init__(self, ds: xr.Dataset, straddle: bool):
+        """Initialize grid wrapper."""
+        self.ds = ds
+        self.straddle = straddle
+
+
+class TestGetTargetCoords:
+    def make_rho_grid(self, lons, lats, with_mask=False):
+        """Helper to create a minimal rho grid dataset."""
+        eta, xi = len(lats), len(lons)
+        lon_rho, lat_rho = np.meshgrid(lons, lats)
+        ds = xr.Dataset(
+            {
+                "lon_rho": (("eta_rho", "xi_rho"), lon_rho),
+                "lat_rho": (("eta_rho", "xi_rho"), lat_rho),
+                "angle": (("eta_rho", "xi_rho"), np.zeros_like(lon_rho)),
+            },
+            coords={"eta_rho": np.arange(eta), "xi_rho": np.arange(xi)},
+        )
+        if with_mask:
+            ds["mask_rho"] = (("eta_rho", "xi_rho"), np.ones_like(lon_rho))
+        return ds
+
+    def test_basic_rho_grid(self):
+        ds = self.make_rho_grid(lons=[-10, -5, 0, 5, 10], lats=[50, 55])
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid)
+        assert "lat" in result and "lon" in result
+        assert np.allclose(result["lon"], ds.lon_rho)
+
+    def test_wrap_longitudes_to_minus180_180(self):
+        ds = self.make_rho_grid(lons=[190, 200], lats=[0, 1])
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid)
+        # longitudes >180 should wrap to -170, -160
+        expected = np.array([[-170, -160], [-170, -160]])
+        assert np.allclose(result["lon"].values, expected)
+
+    def test_convert_to_0_360_if_far_from_greenwich(self):
+        ds = self.make_rho_grid(lons=[-170, -160], lats=[0, 1])
+        grid = DummyGrid(ds, straddle=False)
+        result = get_target_coords(grid)
+        # Should convert to 190, 200 since domain is far from Greenwich
+        expected = np.array([[190, 200], [190, 200]])
+        assert np.allclose(result["lon"].values, expected)
+        assert result["straddle"] is False
+
+    def test_close_to_greenwich_stays_minus180_180(self):
+        ds = self.make_rho_grid(lons=[-2, -1], lats=[0, 1])
+        grid = DummyGrid(ds, straddle=False)
+        result = get_target_coords(grid)
+        # Should remain unchanged (-2, -1), not converted to 358, 359
+        expected = np.array([[-2, -1], [-2, -1]])
+        assert np.allclose(result["lon"].values, expected)
+        assert result["straddle"] is True
+
+    def test_includes_optional_fields(self):
+        ds = self.make_rho_grid(lons=[-10, -5], lats=[0, 1], with_mask=True)
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid)
+        assert result["mask"] is not None
+
+    def test_coarse_grid_selection(self):
+        lon = np.array([[190, 200]])
+        lat = np.array([[10, 10]])
+        ds = xr.Dataset(
+            {
+                "lon_coarse": (("eta_coarse", "xi_coarse"), lon),
+                "lat_coarse": (("eta_coarse", "xi_coarse"), lat),
+                "angle_coarse": (("eta_coarse", "xi_coarse"), np.zeros_like(lon)),
+                "mask_coarse": (("eta_coarse", "xi_coarse"), np.ones_like(lon)),
+            },
+            coords={"eta_coarse": [0], "xi_coarse": [0, 1]},
+        )
+        grid = DummyGrid(ds, straddle=True)
+        result = get_target_coords(grid, use_coarse_grid=True)
+        # Should wrap longitudes to -170, -160
+        expected = np.array([[-170, -160]])
+        assert np.allclose(result["lon"].values, expected)
+        assert "mask" in result
 
 
 def test_interpolate_from_climatology(use_dask):

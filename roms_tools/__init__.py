@@ -10,6 +10,7 @@ except ImportError:  # pragma: no cover
 # grid must be imported first
 from roms_tools.setup.grid import Grid  # noqa: I001, F401
 from roms_tools.analysis.roms_output import ROMSOutput  # noqa: F401
+from roms_tools.analysis.cdr_ensemble import Ensemble  # noqa: F401
 from roms_tools.setup.boundary_forcing import BoundaryForcing  # noqa: F401
 from roms_tools.setup.cdr_forcing import CDRForcing  # noqa: F401
 from roms_tools.setup.cdr_release import TracerPerturbation, VolumeRelease  # noqa: F401

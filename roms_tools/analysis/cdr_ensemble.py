@@ -65,20 +65,37 @@ class Ensemble:
         -------
         xr.DataArray
             Efficiency reindexed to a relative time axis in days since release start.
+
+        Raises
+        ------
+        ValueError
+            If 'abs_time' coordinate is missing or there are no valid efficiency values.
         """
         eff = ds["cdr_efficiency"]
 
-        # Find first non-NaN time (release start)
-        valid = eff.dropna(dim="time")
-        if valid.time.size == 0:
-            raise ValueError("No valid efficiency values found in dataset.")
-        release_start = valid.abs_time.min()
+        # Check that abs_time exists
+        if "abs_time" in eff.coords:
+            abs_time = eff.coords["abs_time"]
+        elif "abs_time" in ds.data_vars:
+            abs_time = ds["abs_time"]
+        else:
+            raise ValueError(
+                "Dataset must contain an 'abs_time' coordinate or data variable."
+            )
 
-        # Reindex time relative to release_start in days
-        time = (eff.abs_time - release_start).astype("timedelta64[D]")
-        eff_rel = eff.assign_coords(time=time)
-        eff_rel.time.attrs.update({"long_name": "time since release start"})
-        eff_rel = eff_rel.drop_vars("abs_time")
+        # Drop NaNs to find first valid time
+        valid_mask = ~np.isnan(eff.values)
+        if not valid_mask.any():
+            raise ValueError("No valid efficiency values found in dataset.")
+
+        release_start = abs_time.values[valid_mask][0]
+
+        # Compute relative time in days
+        time_rel = (abs_time - release_start).astype("timedelta64[D]")
+
+        # Assign new time coordinate and drop abs_time if it was a data variable
+        eff_rel = eff.assign_coords(time=time_rel)
+        eff_rel.time.attrs["long_name"] = "time since release start"
 
         return eff_rel
 

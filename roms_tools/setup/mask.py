@@ -1,5 +1,7 @@
 import warnings
+from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import regionmask
 import xarray as xr
@@ -12,7 +14,7 @@ from roms_tools.setup.utils import (
 )
 
 
-def add_mask(ds):
+def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
     """Adds a land/water mask to the dataset at rho-points.
 
     Parameters
@@ -20,20 +22,39 @@ def add_mask(ds):
     ds : xarray.Dataset
         Input dataset containing latitude and longitude coordinates at rho-points.
 
+    shapefile: str or Path | None
+        Path to a coastal shapefile to determine the land mask. If None, NaturalEarth 10m is used.
+
     Returns
     -------
     xarray.Dataset
         The original dataset with an added 'mask_rho' variable, representing land/water mask.
     """
-    land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
-
     # Suppress specific warning
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="No gridpoint belongs to any region.*"
         )
-        land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
-    mask = land_mask.isnull()
+
+        if shapefile:
+            # We use the "3D" version of the mask, which returns an array of booleans for each "region" (polygon)
+            # in the original dataset. Then we take the boolean "max" along the region to include any point in any
+            # polygon. Finally, we do a boolean inversion (~) to get the same convention as before.
+
+            # There is an alternative "2D" method in regionmask, but it returns a single array that nominally contains
+            # the integer of the region at each point, but it uses np.nan to indicate points that aren't in any region,
+            # and in order to do that, it makes a huge float64 array that can blow out memory for a high-res grid. The
+            # 3D method ends up being more memory efficient as long as the number of "regions" in your domain isn't
+            # extreme.
+            coast = gpd.read_file(shapefile)
+            mask = ~regionmask.mask_3D_geopandas(
+                coast, ds["lon_rho"], ds["lat_rho"]
+            ).max(dim="region")
+
+        else:
+            land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
+            land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
+            mask = land_mask.isnull()
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)

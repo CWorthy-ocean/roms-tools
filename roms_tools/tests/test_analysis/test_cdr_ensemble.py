@@ -172,8 +172,7 @@ def test_compute_statistics(identical_members: dict[str, xr.Dataset]) -> None:
     xr.testing.assert_allclose(ds_stats.ensemble_mean, ds_stats[first_member_name])
 
     # For identical members, std should be 0
-    print(ds_stats)
-    xr.testing.assert_allclose(ds_stats.ensemble_std, 0)
+    np.testing.assert_allclose(ds_stats.ensemble_std.values, 0.0)
 
 
 def test_ensemble_post_init(identical_members: dict[str, xr.Dataset]) -> None:
@@ -181,7 +180,7 @@ def test_ensemble_post_init(identical_members: dict[str, xr.Dataset]) -> None:
     assert isinstance(ens.ds, xr.Dataset)
     assert "ensemble_mean" in ens.ds.data_vars
     assert "ensemble_std" in ens.ds.data_vars
-    xr.testing.assert_allclose(ens.ds.ensemble_std, 0)
+    np.testing.assert_allclose(ens.ds.ensemble_std.values, 0.0)
 
 
 def test_plot(identical_members: dict[str, xr.Dataset], tmp_path: Path) -> None:

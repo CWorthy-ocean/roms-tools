@@ -97,6 +97,11 @@ class Ensemble:
         eff_rel = eff.assign_coords(time=time_rel)
         eff_rel.time.attrs["long_name"] = "time since release start"
 
+        if hasattr(eff_rel, "coords") and "abs_time" in eff_rel.coords:
+            eff_rel = eff_rel.drop_vars("abs_time")
+        elif hasattr(eff_rel, "variables") and "abs_time" in eff_rel.variables:
+            eff_rel = eff_rel.drop_vars("abs_time")
+
         return eff_rel
 
     def _align_times(self, effs: dict[str, xr.DataArray]) -> xr.Dataset:

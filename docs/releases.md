@@ -13,6 +13,7 @@
 * Introduce parameter `allow_flex_time` for `InitialConditions` controlling how strictly `ini_time` is handled ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
 * Add utility function `get_glorys_bounds` to return the min/max latitude and longitude required for GLORYS downloads for a fixed domain ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
 * Add `compute_total_cdr_source ` method to `CDRForcing`, which computes integrated tracer quantities for all releases and returns a pandas DataFrame including a units row ([#444](https://github.com/CWorthy-ocean/roms-tools/pull/444))
+* Plot ensembles of CDR uptake curves and their mean and standard deviation ([#467](https://github.com/CWorthy-ocean/roms-tools/pull/467))
 
 ### Breaking Changes
 

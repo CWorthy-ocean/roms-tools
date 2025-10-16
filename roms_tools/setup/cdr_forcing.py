@@ -2,13 +2,14 @@ import itertools
 import logging
 from collections import Counter
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 from pydantic import (
     BaseModel,
@@ -39,6 +40,7 @@ from roms_tools.setup.utils import (
     from_yaml,
     gc_dist,
     get_target_coords,
+    get_tracer_metadata_dict,
     to_dict,
     validate_names,
     write_to_yaml,
@@ -126,6 +128,9 @@ class ReleaseCollector(RootModel):
             raise KeyError(f"Release named '{item}' not found.")
         else:
             raise TypeError(f"Invalid key type: {type(item)}. Must be int or str.")
+
+    def __len__(self):
+        return len(self.root)
 
     @model_validator(mode="before")
     @classmethod
@@ -775,6 +780,62 @@ class CDRForcing(BaseModel):
         fig.subplots_adjust(hspace=0.45)
         fig.suptitle(f"Release distribution for: {release_name}")
 
+    def compute_total_cdr_source(self, dt: float) -> pd.DataFrame:
+        """
+        Compute integrated tracer quantities for all releases and return a DataFrame.
+
+        Parameters
+        ----------
+        dt : float
+            Time step in seconds for reconstructing ROMS time stamps.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with one row per release and one row of units at the top.
+            Columns 'temp' and 'salt' are excluded from integrated totals.
+        """
+        # Reconstruct ROMS time stamps
+        _, rel_seconds = _reconstruct_roms_time_stamps(
+            self.start_time, self.end_time, dt, self.model_reference_date
+        )
+
+        # Collect accounting results for all releases
+        records = []
+        release_names = []
+        for release in self.releases:
+            result = release._do_accounting(rel_seconds, self.model_reference_date)
+            records.append(result)
+            release_names.append(getattr(release, "name", f"release_{len(records)}"))
+
+        # Build DataFrame: rows = releases, columns = tracer names
+        df = pd.DataFrame(records, index=release_names)
+
+        # Exclude temp and salt from units row and integrated totals
+        integrated_tracers = [col for col in df.columns if col not in ("temp", "salt")]
+
+        # Add a row of units only for integrated tracers
+        tracer_meta = get_tracer_metadata_dict(include_bgc=True, unit_type="integrated")
+        units_row = {
+            col: tracer_meta.get(col, {}).get("units", "") for col in integrated_tracers
+        }
+
+        df_units = pd.DataFrame([units_row], index=["units"])
+
+        # Keep only integrated_tracers columns in df, drop temp and salt
+        df_integrated = df[integrated_tracers]
+
+        # Concatenate units row on top
+        df_final = pd.concat([df_units, df_integrated])
+
+        # Store dt as metadata
+        df_final.attrs["time_step"] = dt
+        df_final.attrs["start_time"] = self.start_time
+        df_final.attrs["end_time"] = self.end_time
+        df_final.attrs["title"] = "Integrated tracer releases"
+
+        return df_final
+
     def save(
         self,
         filepath: str | Path,
@@ -1052,3 +1113,55 @@ def _map_3d_gaussian(
         distribution_3d /= distribution_3d.sum()
 
     return distribution_3d
+
+
+def _reconstruct_roms_time_stamps(
+    start_time: datetime,
+    end_time: datetime,
+    dt: float,
+    model_reference_date: datetime,
+) -> tuple[list[datetime], np.ndarray]:
+    """
+    Reconstruct ROMS time stamps between `start_time` and `end_time` with step `dt`.
+
+    Parameters
+    ----------
+    start_time : datetime
+        Beginning of the time series.
+    end_time : datetime
+        End of the time series (inclusive if it falls exactly on a step).
+    dt : float
+        Time step in seconds (can be fractional if needed).
+    model_reference_date : datetime
+        The reference date for ROMS time (elapsed time will be relative to this).
+
+    Returns
+    -------
+    times : list of datetime
+        Sequence of datetimes from `start_time` to `end_time`.
+    rel_days : np.ndarray
+        Array of elapsed times in **seconds** relative to `model_reference_date`.
+
+    Raises
+    ------
+    ValueError
+        If `end_time` is not after `start_time` or if `dt` is not positive.
+    """
+    if end_time <= start_time:
+        raise ValueError("end_time must be after start_time")
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+
+    # Generate absolute times
+    delta = timedelta(seconds=dt)
+    times: list[datetime] = []
+    t = start_time
+    while t <= end_time:
+        times.append(t)
+        t += delta
+
+    # Convert to relative ROMS time (days since model_reference_date)
+    rel_days = convert_to_relative_days(times, model_reference_date)
+    rel_seconds = rel_days * 3600 * 24
+
+    return times, rel_seconds

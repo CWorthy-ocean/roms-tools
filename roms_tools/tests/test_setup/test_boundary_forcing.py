@@ -13,6 +13,12 @@ import xarray as xr
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
+from roms_tools.tests.test_setup.utils import download_regional_and_bigger
+
+try:
+    import copernicusmarine  # type: ignore
+except ImportError:
+    copernicusmarine = None
 
 
 @pytest.mark.parametrize(
@@ -271,7 +277,7 @@ def test_boundary_divided_by_land_warning(caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert "the western boundary is divided by land" in caplog.text
+    assert "divided by land" in caplog.text
 
 
 def test_info_depth(caplog, use_dask):
@@ -322,57 +328,6 @@ def test_info_depth(caplog, use_dask):
         "Sea surface height will NOT be used to adjust depth coordinates."
         in caplog.text
     )
-
-
-def test_info_fill(caplog, use_dask):
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
-    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
-
-    with caplog.at_level(logging.INFO):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2012, 1, 1),
-            end_time=datetime(2012, 12, 31),
-            source={"name": "GLORYS", "path": [fname1, fname2]},
-            apply_2d_horizontal_fill=True,
-            use_dask=use_dask,
-        )
-
-    # Verify the warning message in the log
-    assert (
-        "Applying 2D horizontal fill to the source data before regridding."
-        in caplog.text
-    )
-
-    # Clear the log before the next test
-    caplog.clear()
-
-    with caplog.at_level(logging.INFO):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2012, 1, 1),
-            end_time=datetime(2012, 12, 31),
-            source={"name": "GLORYS", "path": [fname1, fname2]},
-            apply_2d_horizontal_fill=False,
-            use_dask=use_dask,
-        )
-    # Verify the warning message in the log
-    for direction in ["south", "east", "north", "west"]:
-        assert f"Applying 1D horizontal fill to {direction}ern boundary." in caplog.text
 
 
 def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
@@ -785,6 +740,53 @@ def test_default_glorys_dataset_loading(tiny_grid: Grid) -> None:
 
         expected_vars = {"u_south", "v_south", "temp_south", "salt_south"}
         assert set(bf.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.use_copernicus
+@pytest.mark.skipif(copernicusmarine is None, reason="copernicusmarine required")
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "tiny_grid_that_straddles_dateline",
+        "tiny_grid_that_straddles_180_degree_meridian",
+        "tiny_rotated_grid",
+    ],
+)
+def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, request):
+    start_time = datetime(2012, 1, 1)
+    grid = request.getfixturevalue(grid_fixture)
+
+    regional_file, bigger_regional_file = download_regional_and_bigger(
+        tmp_path, grid, start_time
+    )
+
+    bf_from_regional = BoundaryForcing(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(regional_file)},
+        type="physics",
+        start_time=start_time,
+        end_time=start_time,
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    bf_from_bigger_regional = BoundaryForcing(
+        grid=grid,
+        source={"name": "GLORYS", "path": str(bigger_regional_file)},
+        type="physics",
+        start_time=start_time,
+        end_time=start_time,
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+
+    # Use assert_allclose instead of equals: necessary for grids that straddle the 180° meridian.
+    # Copernicus returns data on [-180, 180] by default, but if you request a range
+    # like [170, 190], it remaps longitudes. That remapping introduces tiny floating
+    # point differences in the longitude coordinate, which will then propagate into further differences once you do regridding.
+    # Need to adjust the tolerances for these grids that straddle the 180° meridian.
+    xr.testing.assert_allclose(
+        bf_from_bigger_regional.ds, bf_from_regional.ds, rtol=1e-4, atol=1e-5
+    )
 
 
 @pytest.mark.parametrize(

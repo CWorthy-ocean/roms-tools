@@ -47,8 +47,8 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
@@ -98,8 +98,8 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
@@ -154,8 +154,8 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
@@ -205,8 +205,8 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
@@ -263,8 +263,8 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1

@@ -115,8 +115,10 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
 
     # Normalize by cumulative source with safe division (NaN where source=0)
     with np.errstate(divide="ignore", invalid="ignore"):
-        uptake_efficiency_flux = flux / source
-        uptake_efficiency_diff = diff_DIC / source
+        uptake_efficiency_flux = (flux / source).where(np.isfinite(flux / source))
+        uptake_efficiency_diff = (diff_DIC / source).where(
+            np.isfinite(diff_DIC / source)
+        )
 
     _validate_uptake_efficiency(uptake_efficiency_flux, uptake_efficiency_diff)
 

@@ -63,7 +63,7 @@ The ocean shapes Earth’s climate and sustains marine ecosystems by circulating
 A widely used regional ocean model is the **Regional Ocean Modeling System (ROMS)** [@shchepetkin_regional_2005]. To connect physical circulation with ecosystem dynamics and the ocean carbon cycle, ROMS has been coupled to a BGC model called  the Marine Biogeochemistry Library (MARBL) [@long_simulations_2021]. This coupled framework allows researchers to explore a variety of scientific and practical questions.  For example, it can be used to investigate the potential of ocean-based carbon removal strategies, such as adding alkaline materials to the ocean to sequester atmospheric carbon dioxide. It can also be used to study how physical processes drive ecosystem dynamics, such as how nutrient-rich waters from upwelling fuel the phytoplankton blooms that form the base of the marine food web [@gruber_eddy-resolving_2006].
 
 ## Input Data and Preprocessing
-Whether for research or industrial-focused applications, configuring a regional ocean model like ROMS-MARBL remains a major technical challenge. Generating the required input files is time-consuming, error-prone, and difficult to reproduce, creating a bottleneck for both new and experienced model users. The Python package `ROMS-Tools` addresses this challenge by providing an efficient, user-friendly, and reproducible workflow to generate all required model input files. Its user interface and underlying data model are based on `xarray` [@hoyer2017xarray] , enabling seamless handling of multidimensional datasets with rich metadata and optional parallelization via a `dask` [@dask] backend.
+Whether for research or industrial-focused applications, configuring a regional ocean model like ROMS-MARBL remains a major technical challenge. Generating the required input files is time-consuming, error-prone, and difficult to reproduce, creating a bottleneck for both new and experienced model users. The Python package `ROMS-Tools` addresses this challenge by providing an efficient, user-friendly, and reproducible workflow to generate all required model input files. Its user interface and underlying data model are based on `xarray` [@hoyer2017xarray], enabling seamless handling of multidimensional datasets with rich metadata and optional parallelization via a `dask` [@dask] backend.
 
 `ROMS-Tools` can automatically process commonly used datasets or incorporate custom user data and routines. Currently, it can generate the following inputs:
 
@@ -72,10 +72,10 @@ Whether for research or industrial-focused applications, configuring a regional 
 3. **Land Mask**: Inferred from **Natural Earth** coastlines.
 4. **Physical Ocean Conditions**:  Initial and open boundary conditions for sea surface height, temperature, salinity, and velocities derived from GLORYS [@jean-michel_copernicus_2021].
 5. **BGC Ocean Conditions**: Initial and open boundary conditions for dissolved inorganic carbon, alkalinity, and other biogeochemical tracers from CESM output [@yeager_2022] or hybrid observational-model sources.
-6. **Meteorological forcing**: Wind, radiation, precipitation, and air temperature/humidity processed from ERA5 [@hersbach_era5_2020] with optional radiation bias and coastal wind corrections.
-7. **BGC surface forcing**: pCO~2~, iron, dust, nitrogen deposition from CESM output [@yeager_2022] or hybrid observational-model sources.
+6. **Meteorological forcing**: Wind, radiation, precipitation, and air temperature/humidity processed from ERA5 [@hersbach_era5_2020] with optional corrections for radiation bias and coastal wind.
+7. **BGC surface forcing**: partial pressure of carbon dioxide, and iron, dust, and nitrogen depositions from CESM output [@yeager_2022] or hybrid observational-model sources.
 8. **Tidal Forcing:** Tidal potential, elevation, and velocities derived from **TPXO** [@egbert_efficient_2002] including self-attraction and loading (SAL) corrections.
-9. **River Forcing:** Freshwater runoff derived from **Dai & Trenberth** [@dai_estimates_2002] or custom files.
+9. **River Forcing:** Freshwater runoff derived from **Dai & Trenberth** [@dai_estimates_2002] or user-provided custom files.
 10. **CDR Forcing**: User-defined interventions that inject BGC tracers at point sources or as larger-scale Gaussian perturbations, suitable for the simulation of field- or large-scale CDR experiments.
 
 While the source datasets listed above are the ones currently supported, the package’s modular design  makes it straightforward to add new data sources or custom routines in the future.
@@ -84,30 +84,29 @@ To generate the model inputs listed above, ROMS-Tools automates several intermed
 * **Bathymetry processing**: The bathymetry is smoothed in two stages, first across the entire domain and then along the shelf, to ensure local steepness ratios are not exceeded and to reduce pressure-gradient errors. A minimum depth is enforced to prevent water levels from becoming negative during large tidal excursions.
 * **Mask definition**: The land-sea mask is generated by comparing the ROMS grid’s horizontal coordinates with a coastline dataset using regionmask [@hauser_regionmaskregionmask_2024]. Enclosed basins are subsequently filled with land.
 * **Land value handling**: Land values are filled via an algebraic multigrid method using pyamg [@pyamg2023] prior to horizontal regridding. This extends ocean values into land areas to resolve discrepancies between source data and ROMS land masks that could otherwise produce artificial values in ocean cells.
-* **Regridding**: Ocean and atmospheric fields are horizontally and vertically regridded from standard lat-lon-depth grids to the model’s curvilinear grid with a terrain-following vertical coordinate using xarray [@hoyer2017xarray]. Optional sea surface height corrections can be applied, and velocities are rotated to align with the rotated ROMS grid
+* **Regridding**: Ocean and atmospheric fields are horizontally and vertically regridded from standard lat-lon-depth grids to the model’s curvilinear grid with a terrain-following vertical coordinate using xarray [@hoyer2017xarray]. Optional sea surface height corrections can be applied, and velocities are rotated to align with the rotated ROMS grid.
 * **Longitude conventions**: `ROMS-Tools` handles differences in longitude conventions, converting between −180°–180° and 0°–360° as needed.
-* **River forcing**: Relevant rivers are automatically selected and relocated to the nearest coastal cell, while multi-cell or moving rivers can be managed manually.
+* **River locations**: Rivers that fall within the model domain are automatically identified and relocated to the nearest coastal grid cell, while rivers that must be shifted or span multiple cells can be configured manually.
 * **Atmospheric data streaming**: ERA5 atmospheric data can be accessed directly from the cloud, removing the need for users to pre-download large datasets locally.
 
-Users can quickly design and visualize regional grids and inspect all input fields with built-in plotting utilities. An example of surface initial conditions generated for a California Current System simulation is shown in Figure \autoref{fig:example}.
+Users can quickly design and visualize regional grids and inspect all input fields with built-in plotting utilities. An example of surface initial conditions generated for a California Current System simulation is shown in \autoref{fig:example}.
 
 ![Surface initial conditions for the California Current System created with `ROMS-Tools` from GLORYS. Left: potential temperature. Right: zonal velocity. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
 
-`ROMS-Tools` also includes features that facilitate simulation and output management. It supports partitioning and recombining input and output files to enable parallelized ROMS simulations across multiple nodes, and writes NetCDF outputs with metadata fully compatible with ROMS-MARBL. Currently, UCLA-ROMS [@ucla-roms] is fully supported, with the potential to add other ROMS versions, such as Rutgers ROMS [@rutgers-roms], in the future.
+`ROMS-Tools` also includes features that facilitate simulation management. It supports partitioning input files to enable parallelized ROMS simulations across multiple nodes, and writes NetCDF outputs with metadata fully compatible with ROMS-MARBL. Currently, UCLA-ROMS [@ucla-roms] is fully supported, with the potential to add other ROMS versions, such as Rutgers ROMS [@rutgers-roms], in the future.
 
 ## Postprocessing and Analysis
 
-`ROMS-Tools` includes an analysis layer for postprocessing ROMS-MARBL output. It provides utilities for general-purpose tasks, such as loading model output directly into an Xarray dataset with additional metadata, enabling seamless use of the Pangeo scientific Python ecosystem for further analysis and visualization. The analysis layer also supports regridding from the native curvilinear ROMS grid with terrain-following coordinate to a standard latitude-longitude-depth grid using xesmf [@xesmf]. Beyond these general-purpose features, the analysis layer offers a suite of targeted tools for evaluating CDR interventions. These include utilities for generating standard plots, such as CDR uptake efficiency curves, and performing specialized tasks essential for CDR monitoring, reporting, and verification.
+`ROMS-Tools` includes analysis tools for postprocessing ROMS-MARBL output. It first provides a joining tool (the counterpart to the input file partitioning utility described earlier) that merges ROMS output files produced as tiles from multi-node simulations. Beyond file management, there are `ROMS-Tools` analysis utilities for general-purpose tasks, such as loading model output directly into an Xarray dataset with additional metadata, enabling seamless use of the Pangeo scientific Python ecosystem for further analysis and visualization. The analysis layer also supports regridding from the native curvilinear ROMS grid with terrain-following coordinate to a standard latitude-longitude-depth grid using xesmf [@xesmf]. Beyond these general-purpose features, the `ROMS-Tools` analysis layer offers a suite of targeted tools for evaluating CDR interventions. These include utilities for generating standard plots, such as CDR uptake efficiency curves, and performing specialized tasks essential for CDR monitoring, reporting, and verification.
 
 ## Workflow, Reproducibility, and Performance
 
 `ROMS-Tools` is designed to support modern, reproducible workflows. It is easily installable via Conda or PyPI and can be run interactively from Jupyter Notebooks.
 To ensure reproducibility and facilitate collaboration, each workflow is defined in a simple YAML configuration file. These compact, text-based YAML files can be version-controlled and easily shared, eliminating the need to transfer large NetCDF files between researchers, as source data like GLORYS and ERA5 are accessible in the cloud.
-
 For performance, the package is integrated with `dask` [@dask] to enable efficient, out-of-core computations on large datasets.
 Finally, to ensure reliability, the software is rigorously tested with continuous integration (CI) and supported by comprehensive documentation.
 
-# Statement of need
+# Statement of Need
 
 Setting up a regional ocean model is a major undertaking. It requires generating a wide range of complex input files, including the model grid, initial and boundary conditions, and forcing from the atmosphere, tides, and rivers. Traditionally, this work has depended on a patchwork of custom scripts and lab-specific workflows, which can be time-consuming, error-prone, and difficult to reproduce.
 These challenges slow down science, create a steep barrier to entry for new researchers, and limit collaboration across groups.

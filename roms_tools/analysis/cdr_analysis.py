@@ -84,21 +84,33 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
 
     # Cumulative alkalinity source
     source = (
-        (ds["ALK_source"] - ds["DIC_source"]).sum(dim=["s_rho", "eta_rho", "xi_rho"])
-        * ds_cdr["window_length"]
-    ).cumsum(dim="time")
+        (
+            (ds["ALK_source"] - ds["DIC_source"]).sum(
+                dim=["s_rho", "eta_rho", "xi_rho"]
+            )
+            * ds_cdr["window_length"]
+        )
+        .cumsum(dim="time")
+        .compute()
+    )
 
     # Cumulative flux-based uptake (Method 1)
     flux = (
-        ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * ds_cdr["area"]).sum(
-            dim=["eta_rho", "xi_rho"]
+        (
+            ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * ds_cdr["area"]).sum(
+                dim=["eta_rho", "xi_rho"]
+            )
+            * ds_cdr["window_length"]
         )
-        * ds_cdr["window_length"]
-    ).cumsum(dim="time")
+        .cumsum(dim="time")
+        .compute()
+    )
 
     # DIC difference-based uptake (Method 2)
-    diff_DIC = ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * ds_cdr["area"]).sum(
-        dim=["s_rho", "eta_rho", "xi_rho"]
+    diff_DIC = (
+        ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * ds_cdr["area"])
+        .sum(dim=["s_rho", "eta_rho", "xi_rho"])
+        .compute()
     )
 
     # Normalize by cumulative source with safe division (NaN where source=0)

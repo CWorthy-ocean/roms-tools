@@ -75,6 +75,7 @@ Analyzing ROMS output
    :toctree: generated/
 
    roms_tools.ROMSOutput
+   roms_tools.Ensemble
 
 =======
 

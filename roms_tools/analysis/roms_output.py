@@ -355,21 +355,22 @@ class ROMSOutput:
                 layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
                 h_loc = lateral_regrid.apply(h_loc)
                 # Vertical regridding
-                vertical_regrid = VerticalRegridFromROMS(ds_loc)
-                for var_name in var_names_loc:
-                    if "s_rho" in ds_loc[var_name].dims:
-                        attrs = ds_loc[var_name].attrs
-                        regridded = vertical_regrid.apply(
-                            ds_loc[var_name],
-                            layer_depth_loc,
-                            depth_levels,
-                            mask_edges=False,
-                        )
-                        regridded = regridded.where(regridded.depth < h_loc)
-                        ds_loc[var_name] = regridded
-                        ds_loc[var_name].attrs = attrs
+                if "s_rho" in ds_loc.dims:
+                    vertical_regrid = VerticalRegridFromROMS(ds_loc)
+                    for var_name in var_names_loc:
+                        if "s_rho" in ds_loc[var_name].dims:
+                            attrs = ds_loc[var_name].attrs
+                            regridded = vertical_regrid.apply(
+                                ds_loc[var_name],
+                                layer_depth_loc,
+                                depth_levels,
+                                mask_edges=False,
+                            )
+                            regridded = regridded.where(regridded.depth < h_loc)
+                            ds_loc[var_name] = regridded
+                            ds_loc[var_name].attrs = attrs
 
-                ds_loc = ds_loc.assign_coords({"depth": depth_levels})
+                    ds_loc = ds_loc.assign_coords({"depth": depth_levels})
 
                 # Collect regridded dataset for merging
                 regridded_datasets.append(ds_loc)
@@ -538,35 +539,39 @@ class ROMSOutput:
 
         Notes
         -----
+        - Missing attributes trigger a warning instead of an exception.
         - `theta_s`, `theta_b`, and `hc` are checked for exact equality using `np.array_equal`.
         - `Cs_r` and `Cs_w` are checked for numerical closeness using `np.allclose`.
         """
-        # Check exact equality for theta_s, theta_b, and hc
-        if not np.array_equal(self.grid.theta_s, ds.attrs["theta_s"]):
-            raise ValueError(
-                f"theta_s from grid ({self.grid.theta_s}) does not match dataset ({ds.attrs['theta_s']})."
-            )
+        required_exact = ["theta_s", "theta_b", "hc"]
+        required_close = ["Cs_r", "Cs_w"]
 
-        if not np.array_equal(self.grid.theta_b, ds.attrs["theta_b"]):
-            raise ValueError(
-                f"theta_b from grid ({self.grid.theta_b}) does not match dataset ({ds.attrs['theta_b']})."
-            )
+        # Check exact equality
+        for param in required_exact:
+            value = ds.attrs.get(param, None)
+            if value is None:
+                logging.warning(
+                    f"Dataset is missing attribute '{param}'. Skipping this check."
+                )
+                continue
+            if not np.array_equal(getattr(self.grid, param), value):
+                raise ValueError(
+                    f"{param} from grid ({getattr(self.grid, param)}) does not match dataset ({value})."
+                )
 
-        if not np.array_equal(self.grid.hc, ds.attrs["hc"]):
-            raise ValueError(
-                f"hc from grid ({self.grid.hc}) does not match dataset ({ds.attrs['hc']})."
-            )
-
-        # Check numerical closeness for Cs_r and Cs_w
-        if not np.allclose(self.grid.ds.Cs_r, ds.attrs["Cs_r"]):
-            raise ValueError(
-                f"Cs_r from grid ({self.grid.ds.Cs_r}) is not close to dataset ({ds.attrs['Cs_r']})."
-            )
-
-        if not np.allclose(self.grid.ds.Cs_w, ds.attrs["Cs_w"]):
-            raise ValueError(
-                f"Cs_w from grid ({self.grid.ds.Cs_w}) is not close to dataset ({ds.attrs['Cs_w']})."
-            )
+        # Check numerical closeness
+        for param in required_close:
+            value = ds.attrs.get(param, None)
+            if value is None:
+                logging.warning(
+                    f"Dataset is missing attribute '{param}'. Skipping this check."
+                )
+                continue
+            grid_value = getattr(self.grid.ds, param)
+            if not np.allclose(grid_value, value):
+                raise ValueError(
+                    f"{param} from grid ({grid_value}) is not close to dataset ({value})."
+                )
 
     def _add_absolute_time(self, ds: xr.Dataset) -> xr.Dataset:
         """Add absolute time as a coordinate to the dataset.

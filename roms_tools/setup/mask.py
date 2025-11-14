@@ -1,3 +1,4 @@
+import logging
 import warnings
 from pathlib import Path
 
@@ -40,22 +41,21 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
             coast = gpd.read_file(shapefile)
 
             try:
-                # 2D method: returns a single array with integer codes for each region, using np.nan for points not in any region
-                # Pros: simpler, works well for small/medium grids
-                # Cons: can use a large float64 array internally for very high-resolution grids
-                mask_2d = regionmask.mask_geopandas(coast, ds["lon_rho"], ds["lat_rho"])
-                mask = mask_2d.isnull()
-
-            except MemoryError:
                 # 3D method: returns a boolean array for each region, then take max along the region dimension
                 # Pros: more memory-efficient for high-res grids if number of regions isn't extreme
-                # Cons: slightly more complex, slightly slower
-                print(
-                    "MemoryError encountered with 2D mask; falling back to 3D method."
-                )
                 mask = ~regionmask.mask_3D_geopandas(
                     coast, ds["lon_rho"], ds["lat_rho"]
                 ).max(dim="region")
+
+            except MemoryError:
+                logging.info(
+                    "MemoryError encountered with 3D mask; falling back to 2D method."
+                )
+                # 2D method: returns a single array with integer codes for each region, using np.nan for points not in any region
+                # Pros: works well for small/medium grids
+                # Cons: can use a large float64 array internally for very high-resolution grids
+                mask_2d = regionmask.mask_geopandas(coast, ds["lon_rho"], ds["lat_rho"])
+                mask = mask_2d.isnull()
 
         else:
             # Use Natural Earth 10m land polygons if no shapefile is provided

@@ -18,7 +18,7 @@ The horizontal grid parameters are as follows:
 | `center_lat` | Latitude of the center of the domain                              | Degrees                     |
 | `rot`        | Rotation of the grid's x-direction from lines of constant longitude | Degrees (counter-clockwise) |
 
-Using these parameters, `ROMS-Tools` generates a curvilinear orthogonal grid designed to maintain an equal aspect ratio across the domain. To achieve this, `ROMS-Tools` employs a Transverse Mercator projection.
+Using these parameters, `ROMS-Tools` generates a curvilinear orthogonal grid designed to maintain a nearly uniform horizontal resolution across the domain. The grid is rotatable to align with coastlines.
 
 ## Mask
 
@@ -28,11 +28,11 @@ The mask parameters are as follows:
 
 | Parameter            | Description                                           | Unit |
 |----------------------|-------------------------------------------------------|------|
-| `coastline_source`   | Source for the coastline shapefile used to define land regions | - |
+| `mask_shapefile`   | Source for the coastline shapefile used to define land regions | - |
 
 The mask is generated via the following two steps:
 
-1. **Mask Definition**: The mask is derived by comparing the grid’s latitude and longitude coordinates with the coastline geometry provided in `coastline_source`. If no shapefile is specified, `ROMS-Tools` defaults to the [Natural Earth](https://www.naturalearthdata.com/) 10m coastline dataset. This operation is carried out using the [regionmask](https://regionmask.readthedocs.io/en/stable/) package.
+1. **Mask Definition**: The mask is derived by comparing the grid’s latitude and longitude coordinates with the coastline geometry provided in `mask_shapefile`. If no shapefile is specified, `ROMS-Tools` defaults to the [Natural Earth](https://www.naturalearthdata.com/) 10m coastline dataset. This operation is carried out using the [regionmask](https://regionmask.readthedocs.io/en/stable/) package.
 
 2. **Filling Enclosed Basins**: The mask is modified by filling enclosed basins with land.
 

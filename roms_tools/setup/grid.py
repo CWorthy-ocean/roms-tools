@@ -65,7 +65,7 @@ class Grid:
         - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
 
         The default is "ETOPO5", which does not require a path.
-    coastline_source: str | Path | None, optional
+    mask_shapefile: str | Path | None, optional
         Path to a custom shapefile to use to determine the land mask; if None, use NaturalEarth 10m.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
@@ -111,7 +111,7 @@ class Grid:
     """The critical depth (in meters)."""
     topography_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the topography data."""
-    coastline_source: str | Path | None = None
+    mask_shapefile: str | Path | None = None
     """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
@@ -172,7 +172,7 @@ class Grid:
 
     def _create_mask(self, verbose=False) -> None:
         with Timed("=== Deriving the mask from coastlines ===", verbose=verbose):
-            ds = add_mask(self.ds, shapefile=self.coastline_source)
+            ds = add_mask(self.ds, shapefile=self.mask_shapefile)
             self.ds = ds
 
     def update_topography(

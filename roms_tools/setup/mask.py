@@ -15,7 +15,7 @@ from roms_tools.setup.utils import (
 )
 
 
-def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
+def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
     """Adds a land/water mask to the dataset at rho-points.
 
     Parameters
@@ -63,6 +63,8 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
             land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
             mask = land_mask.isnull()
 
+    ds = _add_coastlines_metadata(ds, shapefile)
+
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
     # adjust mask boundaries by copying values from adjacent cells
@@ -73,7 +75,33 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
     }
+
     ds = add_velocity_masks(ds)
+
+    return ds
+
+
+def _add_coastlines_metadata(
+    ds: xr.Dataset,
+    shapefile: str | Path | None = None,
+) -> xr.Dataset:
+    """
+    Add coastline metadata to a dataset.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset to be updated.
+    shapefile : str or pathlib.Path or None, optional
+        Path to the shapefile used for land/ocean masking.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with updated coastline-related metadata.
+    """
+    if shapefile is not None:
+        ds.attrs["mask_shapefile"] = str(shapefile)
 
     return ds
 

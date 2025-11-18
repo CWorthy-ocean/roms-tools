@@ -775,8 +775,14 @@ class Grid:
                 topo_source = {"name": ds.attrs["topography_source_name"]}
         else:
             topo_source = None
-
         grid.topography_source = topo_source
+
+        if "mask_shapefile" in ds.attrs:
+            mask_shapefile = ds.attrs["mask_shapefile"]
+        else:
+            mask_shapefile = None
+
+        grid.mask_shapefile = mask_shapefile
 
         return grid
 

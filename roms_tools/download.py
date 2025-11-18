@@ -86,6 +86,10 @@ pup_test_data = pooch.create(
         "eastpac25km_rst.19980106000000.nc": "8f56d72bd8daf72eb736cc6705f93f478f4ad0ae4a95e98c4c9393a38e032f4c",
         "eastpac25km_rst.19980126000000.nc": "20ad9007c980d211d1e108c50589183120c42a2d96811264cf570875107269e4",
         "epac25km_grd.nc": "ec26c69cda4c4e96abde5b7756c955a7e1074931ab5a0641f598b099778fb617",
+        "GSHHS_l_L1.dbf": "181236ffbf553a83d2afedc5fe5e1f2fea64190f56ea366fc7a8ff5aa6163663",
+        "GSHHS_l_L1.prj": "98aaf3d1c0ecadf1a424a4536de261c3daf4e373697cb86c40c43b989daf52eb",
+        "GSHHS_l_L1.shp": "bc76f101f9b8671f90e734b4026da91c20066fc627cc8b5889ba22d90cbf97e9",
+        "GSHHS_l_L1.shx": "72879354892d80d6c39c612f645661ec0edc75f3f9f8f74b19d9387ae0327377",
     },
 )
 

@@ -28,6 +28,7 @@
 ### Bugfixes
 
 * Fix bug in creation of `InitialConditions` ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
+* Remove coordinate variables in nesting info file that conflict with ROMS expectations ([#487](https://github.com/CWorthy-ocean/roms-tools/pull/487))
 
 ## v3.1.2
 

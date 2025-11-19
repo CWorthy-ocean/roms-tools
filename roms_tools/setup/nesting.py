@@ -452,7 +452,9 @@ def map_child_boundaries_onto_parent_grid_indices(
     return ds
 
 
-def interpolate_indices(parent_grid_ds, lon, lat, mask):
+def interpolate_indices(
+    parent_grid_ds: xr.Dataset, lon: xr.DataArray, lat: xr.DataArray, mask: xr.DataArray
+) -> tuple[xr.DataArray, xr.DataArray]:
     """Interpolate the parent indices to the child grid.
 
     Parameters
@@ -499,21 +501,20 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
     i = xr.DataArray(i, dims=lon.dims)
     j = xr.DataArray(j, dims=lon.dims)
 
-    # Check for NaN values
-    if np.sum(np.isnan(i)) > 0 or np.sum(np.isnan(j)) > 0:
+    # Check whether ocean child points fall outside the parent grid
+    if (
+        i.where(mask, other=0.0).isnull().any()
+        or j.where(mask, other=0.0).isnull().any()
+    ):
         raise ValueError(
-            "Some points are outside the grid. Please choose either a bigger parent grid or a smaller child grid."
+            "Some ocean child points are outside the parent grid. Please choose either a bigger parent grid or a smaller child grid."
         )
 
-    # Check whether indices are close to border of parent grid
+    # Warn if child boundary points are near the edges of the parent grid
     nxp, nyp = lon_parent.shape
-    if np.min(i) < 0 or np.max(i) > nxp - 2:
+    if i.min() < 0 or i.max() > nxp - 2 or j.min() < 0 or j.max() > nyp - 2:
         logging.warning(
-            "Some boundary points of the child grid are very close to the boundary of the parent grid."
-        )
-    if np.min(j) < 0 or np.max(j) > nyp - 2:
-        logging.warning(
-            "Some boundary points of the child grid are very close to the boundary of the parent grid."
+            "Some child boundary points lie very close to the edges of the parent grid."
         )
 
     return i, j

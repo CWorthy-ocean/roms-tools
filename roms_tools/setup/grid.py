@@ -198,6 +198,7 @@ class Grid:
         with Timed("=== Deriving the mask from coastlines ===", verbose=verbose):
             ds = add_mask(self.ds, shapefile=mask_shapefile)
             self.ds = ds
+            self.mask_shapefile = mask_shapefile
 
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False

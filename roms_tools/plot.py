@@ -148,67 +148,44 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
         The generated figure displaying the parent and child grid boundaries, mask,
         and additional map features.
     """
-    parent_lon_deg = parent_grid_ds["lon_rho"]
-    parent_lat_deg = parent_grid_ds["lat_rho"]
-
-    child_lon_deg = child_grid_ds["lon_rho"]
-    child_lat_deg = child_grid_ds["lat_rho"]
+    parent = parent_grid_ds.copy()
+    child = child_grid_ds.copy()
 
     if parent_straddle:
-        parent_lon_deg = xr.where(
-            parent_lon_deg > 180, parent_lon_deg - 360, parent_lon_deg
+        parent["lon_rho"] = xr.where(
+            parent["lon_rho"] > 180, parent["lon_rho"] - 360, parent["lon_rho"]
         )
-        child_lon_deg = xr.where(
-            child_lon_deg > 180, child_lon_deg - 360, child_lon_deg
+        child["lon_rho"] = xr.where(
+            child["lon_rho"] > 180, child["lon_rho"] - 360, child["lon_rho"]
         )
 
-    trans = get_projection(parent_lon_deg, parent_lat_deg)
+    fig, ax = plt.subplots()
 
-    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
-
-    _add_boundary_to_ax(
-        ax,
-        parent_lon_deg,
-        parent_lat_deg,
-        trans,
-        c="r",
-        label="parent grid",
-        with_dim_names=with_dim_names,
+    ax.pcolormesh(
+        parent.lon_rho,
+        parent.lat_rho,
+        parent.mask_rho.where(parent.mask_rho == 0),
+        cmap="gray",
     )
 
-    _add_boundary_to_ax(
-        ax,
-        child_lon_deg,
-        child_lat_deg,
-        trans,
-        c="g",
-        label="child grid",
-        with_dim_names=with_dim_names,
-    )
-
-    vmax = 3
-    vmin = 0
-    cmap = plt.colormaps.get_cmap("Blues")
-    cmap.set_bad(color="gray")
-    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-    field = parent_grid_ds.mask_rho
-    field = field.where(field)
-
-    _add_field_to_ax(
-        ax,
-        parent_lon_deg,
-        parent_lat_deg,
-        field,
-        add_colorbar=False,
-        kwargs=kwargs,
-    )
-
-    _add_gridlines(ax)
+    plt_bry(parent, ax, color="r", label="parent grid")
+    plt_bry(child, ax, color="g", label="child grid")
 
     ax.legend(loc="best")
 
     return fig
+
+
+def plt_bry(grid_ds: xr.Dataset, ax: Axes, label="", **kwargs):
+    left = grid_ds.isel(xi_rho=0)
+    right = grid_ds.isel(xi_rho=-1)
+    top = grid_ds.isel(eta_rho=-1)
+    bottom = grid_ds.isel(eta_rho=0)
+
+    ax.plot(left["lon_rho"], left["lat_rho"], label=label, **kwargs)
+    ax.plot(right["lon_rho"], right["lat_rho"], **kwargs)
+    ax.plot(top["lon_rho"], top["lat_rho"], **kwargs)
+    ax.plot(bottom["lon_rho"], bottom["lat_rho"], **kwargs)
 
 
 def section_plot(

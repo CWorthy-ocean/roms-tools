@@ -269,9 +269,12 @@ class ChildGrid(Grid):
             - The modified child grid dataset.
         """
         parent_grid_ds = wrap_longitudes(
-            self.parent_grid.ds, straddle=self.parent_grid.straddle
+            self.parent_grid.ds.copy(), straddle=self.parent_grid.straddle
         )
-        child_grid_ds = wrap_longitudes(self.ds, straddle=self.parent_grid.straddle)
+        child_grid_ds = wrap_longitudes(
+            self.ds.copy(), straddle=self.parent_grid.straddle
+        )
+
         return parent_grid_ds, child_grid_ds
 
     def _finalize_grid_datasets(
@@ -319,12 +322,12 @@ class ChildGrid(Grid):
 
 
 def map_child_boundaries_onto_parent_grid_indices(
-    parent_grid_ds,
-    child_grid_ds,
-    boundaries={"south": True, "east": True, "north": True, "west": True},
-    prefix="child",
-    period=3600.0,
-    update_land_indices=True,
+    parent_grid_ds: xr.Dataset,
+    child_grid_ds: xr.Dataset,
+    boundaries: dict = {"south": True, "east": True, "north": True, "west": True},
+    prefix: str = "child",
+    period: float = 3600.0,
+    update_land_indices: bool = True,
 ):
     """Maps child grid boundary points onto absolute indices of the parent grid.
 
@@ -370,6 +373,7 @@ def map_child_boundaries_onto_parent_grid_indices(
     bdry_coords_dict = get_boundary_coords()
 
     # add angles at u- and v-points
+
     child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
     child_grid_ds["angle_v"] = interpolate_from_rho_to_v(child_grid_ds["angle"])
 

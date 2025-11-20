@@ -457,6 +457,14 @@ def interpolate_indices(
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Interpolate the parent indices to the child grid.
 
+    Uses the parent grid ``lon_rho``/``lat_rho`` coordinates to compute
+    fractional i/j indices at child-grid longitude/latitude points using
+    linear interpolation. The function verifies that all ocean child points
+    (based on ``mask``) lie within the parent grid and warns if child
+    boundary points fall near the parent-grid edges. Land child points that fall
+    outside the parent grid (i.e., interpolation returns NaN) are filled with
+    ``-1e5``.
+
     Parameters
     ----------
     parent_grid_ds : xarray.Dataset
@@ -516,6 +524,10 @@ def interpolate_indices(
         logging.warning(
             "Some child boundary points lie very close to the edges of the parent grid."
         )
+
+    # Fill NaNs (land child points that fall outside parent grid) with fill value
+    i = i.fillna(-1e5)
+    j = j.fillna(-1e5)
 
     return i, j
 

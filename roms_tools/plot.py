@@ -148,28 +148,46 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
         The generated figure displaying the parent and child grid boundaries, mask,
         and additional map features.
     """
-    parent = parent_grid_ds.copy()
-    child = child_grid_ds.copy()
+    parent_lon_deg = parent_grid_ds["lon_rho"]
+    parent_lat_deg = parent_grid_ds["lat_rho"]
+
+    child_lon_deg = child_grid_ds["lon_rho"]
+    child_lat_deg = child_grid_ds["lat_rho"]
 
     if parent_straddle:
-        parent["lon_rho"] = xr.where(
-            parent["lon_rho"] > 180, parent["lon_rho"] - 360, parent["lon_rho"]
+        parent_lon_deg = xr.where(
+            parent_lon_deg > 180, parent_lon_deg - 360, parent_lon_deg
         )
-        child["lon_rho"] = xr.where(
-            child["lon_rho"] > 180, child["lon_rho"] - 360, child["lon_rho"]
+        child_lon_deg = xr.where(
+            child_lon_deg > 180, child_lon_deg - 360, child_lon_deg
         )
 
-    fig, ax = plt.subplots()
+    trans = get_projection(parent_lon_deg, parent_lat_deg)
 
-    ax.pcolormesh(
-        parent.lon_rho,
-        parent.lat_rho,
-        parent.mask_rho.where(parent.mask_rho == 0),
-        cmap="gray",
+    fig, ax = plt.subplots(1, 1, figsize=(13, 7), subplot_kw={"projection": trans})
+
+    _add_boundary_to_ax(
+        ax,
+        parent_lon_deg,
+        parent_lat_deg,
+        trans,
+        c="r",
+        label="parent grid",
+        with_dim_names=with_dim_names,
     )
 
-    plt_bry(parent, ax, color="r", label="parent grid")
-    plt_bry(child, ax, color="g", label="child grid")
+    _add_boundary_to_ax(
+        ax,
+        child_lon_deg,
+        child_lat_deg,
+        trans,
+        c="g",
+        label="child grid",
+        with_dim_names=with_dim_names,
+    )
+
+    _add_gridlines(ax)
+    ax.coastlines()
 
     ax.legend(loc="best")
 

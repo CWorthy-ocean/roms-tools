@@ -1,3 +1,4 @@
+import logging
 import warnings
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from roms_tools.setup.utils import (
 )
 
 
-def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
+def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
     """Adds a land/water mask to the dataset at rho-points.
 
     Parameters
@@ -37,24 +38,32 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
         )
 
         if shapefile:
-            # We use the "3D" version of the mask, which returns an array of booleans for each "region" (polygon)
-            # in the original dataset. Then we take the boolean "max" along the region to include any point in any
-            # polygon. Finally, we do a boolean inversion (~) to get the same convention as before.
-
-            # There is an alternative "2D" method in regionmask, but it returns a single array that nominally contains
-            # the integer of the region at each point, but it uses np.nan to indicate points that aren't in any region,
-            # and in order to do that, it makes a huge float64 array that can blow out memory for a high-res grid. The
-            # 3D method ends up being more memory efficient as long as the number of "regions" in your domain isn't
-            # extreme.
             coast = gpd.read_file(shapefile)
-            mask = ~regionmask.mask_3D_geopandas(
-                coast, ds["lon_rho"], ds["lat_rho"]
-            ).max(dim="region")
+
+            try:
+                # 3D method: returns a boolean array for each region, then take max along the region dimension
+                # Pros: more memory-efficient for high-res grids if number of regions isn't extreme
+                mask = ~regionmask.mask_3D_geopandas(
+                    coast, ds["lon_rho"], ds["lat_rho"]
+                ).max(dim="region")
+
+            except MemoryError:
+                logging.info(
+                    "MemoryError encountered with 3D mask; falling back to 2D method."
+                )
+                # 2D method: returns a single array with integer codes for each region, using np.nan for points not in any region
+                # Pros: works well for small/medium grids
+                # Cons: can use a large float64 array internally for very high-resolution grids
+                mask_2d = regionmask.mask_geopandas(coast, ds["lon_rho"], ds["lat_rho"])
+                mask = mask_2d.isnull()
 
         else:
+            # Use Natural Earth 10m land polygons if no shapefile is provided
             land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
             land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
             mask = land_mask.isnull()
+
+    ds = _add_coastlines_metadata(ds, shapefile)
 
     # fill enclosed basins with land
     mask = _fill_enclosed_basins(mask.values)
@@ -66,7 +75,33 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None):
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
     }
+
     ds = add_velocity_masks(ds)
+
+    return ds
+
+
+def _add_coastlines_metadata(
+    ds: xr.Dataset,
+    shapefile: str | Path | None = None,
+) -> xr.Dataset:
+    """
+    Add coastline metadata to a dataset.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset to be updated.
+    shapefile : str or pathlib.Path or None, optional
+        Path to the shapefile used for land/ocean masking.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with updated coastline-related metadata.
+    """
+    if shapefile is not None:
+        ds.attrs["mask_shapefile"] = str(shapefile)
 
     return ds
 

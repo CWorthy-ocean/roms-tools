@@ -29,6 +29,7 @@
 
 * Fix bug in creation of `InitialConditions` ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
 * Remove coordinate variables in nesting info file that conflict with ROMS expectations ([#487](https://github.com/CWorthy-ocean/roms-tools/pull/487))
+* Allow regridding of 2D fields ([#485](https://github.com/CWorthy-ocean/roms-tools/pull/485))
 
 ## v3.1.2
 

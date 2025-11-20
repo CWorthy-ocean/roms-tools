@@ -104,7 +104,7 @@ class TestInterpolateIndices:
 
             # Verify the warning message in the log
             assert (
-                "Some boundary points of the child grid are very close to the boundary of the parent grid."
+                "Some ocean child boundary points lie very close to the edges of the parent grid."
                 in caplog.text
             )
 
@@ -407,6 +407,35 @@ class TestNesting:
 
         with pytest.raises(ValueError, match="Some points are outside the grid."):
             ChildGrid(parent_grid=big_grid, **params)
+
+    def test_no_error_if_land_child_points_beyond_parent_grid(self):
+        # coarse resolution Pacific domain
+        parent_grid = Grid(
+            nx=50,
+            ny=50,
+            size_x=23000,
+            size_y=12000,
+            center_lon=-161,
+            center_lat=14.4,
+            rot=-3,
+        )
+
+        # California Current System domain, where some land points extend beyond Pacific domain
+        child_grid_parameters = {
+            "nx": 50,
+            "ny": 50,
+            "size_x": 2688,
+            "size_y": 5280,
+            "center_lat": 39.6,
+            "center_lon": -134.5,
+            "rot": 33.3,
+        }
+
+        child_grid = ChildGrid(
+            **child_grid_parameters,
+            parent_grid=parent_grid,
+        )
+        assert isinstance(child_grid.ds, xr.Dataset)
 
     @pytest.mark.parametrize(
         "child_grid_fixture",

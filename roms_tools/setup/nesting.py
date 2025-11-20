@@ -81,9 +81,10 @@ class ChildGrid(Grid):
     mapped onto parent grid indices."""
 
     def __post_init__(self):
+        # Call the parent __post_init__, which triggers update_topography.
+        # In the child class, update_topography is overridden to update the child topography and mask.
         super().__post_init__()
         self._map_child_boundaries_onto_parent_grid_indices(verbose=self.verbose)
-        self._modify_child_topography_and_mask(verbose=self.verbose)
 
     def _map_child_boundaries_onto_parent_grid_indices(self, verbose: bool = False):
         """Maps child grid boundary points onto absolute indices of the parent grid."""

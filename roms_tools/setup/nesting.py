@@ -520,9 +520,14 @@ def interpolate_indices(
 
     # Warn if child boundary points are near the edges of the parent grid
     nxp, nyp = lon_parent.shape
-    if i.min() < 0 or i.max() > nxp - 2 or j.min() < 0 or j.max() > nyp - 2:
+    if (
+        i.where(mask).min() < 0
+        or i.where(mask).max() > nxp - 2
+        or j.where(mask).min() < 0
+        or j.where(mask).max() > nyp - 2
+    ):
         logging.warning(
-            "Some child boundary points lie very close to the edges of the parent grid."
+            "Some ocean child boundary points lie very close to the edges of the parent grid."
         )
 
     # Fill NaNs (land child points that fall outside parent grid) with fill value

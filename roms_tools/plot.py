@@ -194,18 +194,6 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
     return fig
 
 
-def plt_bry(grid_ds: xr.Dataset, ax: Axes, label="", **kwargs):
-    left = grid_ds.isel(xi_rho=0)
-    right = grid_ds.isel(xi_rho=-1)
-    top = grid_ds.isel(eta_rho=-1)
-    bottom = grid_ds.isel(eta_rho=0)
-
-    ax.plot(left["lon_rho"], left["lat_rho"], label=label, **kwargs)
-    ax.plot(right["lon_rho"], right["lat_rho"], **kwargs)
-    ax.plot(top["lon_rho"], top["lat_rho"], **kwargs)
-    ax.plot(bottom["lon_rho"], bottom["lat_rho"], **kwargs)
-
-
 def section_plot(
     field: xr.DataArray,
     interface_depth: xr.DataArray | None = None,

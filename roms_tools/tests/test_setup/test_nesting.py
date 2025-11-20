@@ -102,11 +102,12 @@ class TestInterpolateIndices:
             with caplog.at_level(logging.WARNING):
                 i_eta, i_xi = interpolate_indices(grid.ds, lon, lat, mask)
 
-            # Verify the warning message in the log
-            assert (
-                "Some ocean child boundary points lie very close to the edges of the parent grid."
-                in caplog.text
-            )
+            if mask.sum() > 0:
+                # Verify the warning message in the log
+                assert (
+                    "Some ocean child boundary points lie very close to the edges of the parent grid."
+                    in caplog.text
+                )
 
             if direction == "south":
                 expected_i_eta = -0.5 * xr.ones_like(grid.ds.xi_rho)

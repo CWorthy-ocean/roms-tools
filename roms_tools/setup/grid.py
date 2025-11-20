@@ -167,7 +167,7 @@ class Grid:
                 )
 
     def _create_mask(self, verbose=False) -> None:
-        with Timed("=== Modifying child topography and mask ===", verbose=verbose):
+        with Timed("=== Creating the mask ===", verbose=verbose):
             ds = add_mask(self.ds)
             self.ds = ds
 

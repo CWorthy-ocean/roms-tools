@@ -207,7 +207,28 @@ def test_coords_relation(grid_fixture, request):
 )
 def test_successful_initialization_with_topography(grid_fixture, request):
     grid = request.getfixturevalue(grid_fixture)
-    assert grid is not None
+
+    expected_attrs = [
+        "nx",
+        "ny",
+        "size_x",
+        "size_y",
+        "center_lon",
+        "center_lat",
+        "rot",
+        "N",
+        "theta_s",
+        "theta_b",
+        "hc",
+        "topography_source",
+        "hmin",
+        "mask_shapefile",
+        "verbose",
+        "straddle",
+    ]
+
+    for attr in expected_attrs:
+        assert hasattr(grid, attr), f"Missing attribute: {attr}"
 
 
 def test_plot(grid_that_straddles_180_degree_meridian):
@@ -707,6 +728,47 @@ def test_hmin_criterion_and_update_topography():
 
 
 # Mask tests
+
+
+def test_update_mask():
+    iceland_fjord_kwargs = {
+        "nx": 80,
+        "ny": 40,
+        "size_x": 40,
+        "size_y": 20,
+        "center_lon": -21.76,
+        "center_lat": 64.325,
+        "rot": 0,
+        "N": 3,
+    }
+
+    # Make sure all 4 L1 files are downloaded
+    _ = download_test_data("GSHHS_l_L1.dbf")
+    _ = download_test_data("GSHHS_l_L1.prj")
+    _ = download_test_data("GSHHS_l_L1.shx")
+    shapefile = download_test_data("GSHHS_l_L1.shp")
+
+    grid = Grid(
+        **iceland_fjord_kwargs,
+        mask_shapefile=shapefile,
+    )
+
+    assert grid.mask_shapefile == shapefile
+
+    # Save original mask
+    mask_orig = grid.ds.mask_rho.copy()
+
+    # Update mask (switches to Natural Earth)
+    grid.update_mask()
+
+    assert grid.mask_shapefile is None
+
+    # New mask after update
+    mask_new = grid.ds.mask_rho.copy()
+
+    assert abs(mask_new - mask_orig).max() == 1, (
+        "Mask should change after update_mask()"
+    )
 
 
 # Boundary tests

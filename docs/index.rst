@@ -3,58 +3,52 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to the ROMS-Tools Documentation!
-========================================
+.. image:: https://img.shields.io/conda/vn/conda-forge/roms-tools.svg
+   :target: https://anaconda.org/conda-forge/roms-tools
 
-**ROMS-Tools** is a Python package designed for creating the input files necessary to run a `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_ simulation, with or without `MARBL biogeochemistry <https://marbl-ecosys.github.io/versions/latest_release/index.html>`_.
+.. image:: https://img.shields.io/pypi/v/roms-tools.svg
+   :target: https://pypi.org/project/roms-tools/
 
+.. image:: https://github.com/CWorthy-ocean/roms-tools/actions/workflows/tests.yaml/badge.svg
+   :target: https://github.com/CWorthy-ocean/roms-tools/actions/workflows/tests.yaml?query=branch%3Amain
 
-The package is designed with the following goals in mind:
+.. image:: https://codecov.io/gh/CWorthy-ocean/roms-tools/graph/badge.svg?token=5S1oNu39xE
+   :target: https://codecov.io/gh/CWorthy-ocean/roms-tools
 
-- **Automation** of complex preprocessing steps
-- **Intuitive usability** for new and experienced users
-- **Reproducibility** through configuration-based workflows
-- **Code efficiency** with support for parallel and lazy evaluation
-- **Commitment to best software practices**, including testing and documentation
+.. image:: https://readthedocs.org/projects/roms-tools/badge/?version=latest
+   :target: https://roms-tools.readthedocs.io/en/latest/?badge=latest
 
-ROMS-Tools streamlines the creation of the following inputs:
+.. image:: https://img.shields.io/pypi/pyversions/roms-tools
+   :target: https://img.shields.io/pypi/pyversions/roms-tools
 
-- **Grid**:
+.. image:: https://static.pepy.tech/personalized-badge/roms-tools?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads
+   :target: https://pepy.tech/projects/roms-tools
 
-  - Coordinates and metrics
-  - Bathymetry (derived from SRTM15)
-  - Land-sea mask (based on Natural Earth datasets)
+ROMS-Tools: Preparing and Analyzing ROMS Simulations
+=========================================================================
 
-- **Tidal forcing**:
+**ROMS-Tools** is a Python package that automates the creation, management, and analysis of all input and output files needed for regional ocean simulations with `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_, with optional `MARBL biogeochemistry (BGC) <https://marbl-ecosys.github.io/versions/latest_release/index.html>`_.
 
-  - Derived from TPXO tidal constituents
+Built on ``xarray`` and optionally powered by ``dask``, ``ROMS-Tools`` automates the generation of all major ROMS–MARBL inputs, including:
 
-- **Surface forcing**:
+1. **Model Grid**: Customizable, curvilinear, and orthogonal grid designed to maintain a nearly uniform horizontal resolution across the domain. The grid is rotatable to align with coastlines and features a terrain-following vertical coordinate.
+2. **Bathymetry**: Derived from **SRTM15**.
+3. **Land Mask**: Inferred from coastlines provided by **Natural Earth** or **GSHHG**.
+4. **Physical Ocean Conditions**:  Initial and open boundary conditions for sea surface height, temperature, salinity, and velocities derived from **GLORYS**.
+5. **BGC Ocean Conditions**: Initial and open boundary conditions for dissolved inorganic carbon, alkalinity, and other BGC tracers from **CESM** output or hybrid observational-model sources.
+6. **Meteorological forcing**: Wind, radiation, precipitation, and air temperature/humidity processed from **ERA5** with optional corrections for radiation bias and coastal wind.
+7. **BGC surface forcing**: Partial pressure of carbon dioxide, as well as iron, dust, and nitrogen deposition from **CESM** output or hybrid observational-model sources.
+8. **Tidal Forcing:** Tidal potential, elevation, and velocities derived from **TPXO** including self-attraction and loading (SAL) corrections.
+9. **River Forcing:** Freshwater runoff derived from **Dai & Trenberth** or user-provided custom files.
+10. **CDR Forcing**: User-defined interventions that inject BGC tracers at point sources or as larger-scale Gaussian perturbations, designed to simulate CDR interventions.
+11. **Nesting**: Support for creating nested grids and parent-child configurations.
 
-  - Physical/Meteorological forcing: wind, radiation, etc. (from ERA5)
-  - Biogeochemical forcing: atmospheric pCO₂, etc. (from CESM or hybrid observational/model sources)
+Beyond input generation, ``ROMS-Tools`` provides a suite of analysis and postprocessing utilities, including regridding fields to standard latitude-longitude-depth grids and performing specialized CDR-focused analysis.
 
-- **Initial conditions**:
+``ROMS-Tools`` supports modern, reproducible workflows with YAML-based configuration, cloud-accessible datasets, optional ``dask`` parallelization, interactive Jupyter usage, and CI-tested reliability with comprehensive documentation.
 
-  - Physical conditions: temperature, velocities, etc. (from GLORYS)
-  - Biogeochemical conditions: alkalinity, etc. (from CESM or hybrid observational/model sources)
-
-- **Boundary forcing**:
-
-  - Physical forcing: temperature, velocities, etc. (from GLORYS)
-  - Biogeochemical forcing: alkalinity, etc. (from CESM or hybrid observational/model sources)
-
-- **River forcing**:
-
-  - Physical forcing: river volume flux, river temperature, river salinity (from Dai and Trenberth, 2019, or a custom river dataset)
-
-- **Carbon Dioxide Removal (CDR) forcing**
-
-- **Nesting**
-
-In addition to input generation, ROMS-Tools includes utilities for postprocessing and analysis, particularly for CDR monitoring, reporting, and verification (MRV).
-
-This Python package is inspired by the `UCLA MATLAB tools <https://github.com/nmolem/ucla-tools/tree/main>`_.
+.. note::
+  Below is a series of examples. The `end-to-end workflow <https://roms-tools.readthedocs.io/en/latest/end_to_end.html>`_ demonstrates using ``ROMS-Tools`` to prepare inputs and analyze outputs for a ROMS–MARBL simulation, and is designed to run on a laptop. Subsequent examples cover more detailed, task-specific workflows and are configured for the Perlmutter supercomputing system, so you may need to pre-download data and adjust paths when running them elsewhere.
 
 
 .. toctree::

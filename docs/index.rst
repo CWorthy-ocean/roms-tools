@@ -45,7 +45,7 @@ Built on ``xarray`` and optionally powered by ``dask``, ``ROMS-Tools`` automates
 
 Beyond input generation, ``ROMS-Tools`` provides a suite of analysis and postprocessing utilities, including regridding fields to standard latitude-longitude-depth grids and performing specialized CDR-focused analysis.
 
-ROMS-Tools supports modern, reproducible workflows with YAML-based configuration, cloud-accessible datasets, optional ``dask`` parallelization, interactive Jupyter usage, and CI-tested reliability with comprehensive documentation.
+``ROMS-Tools`` supports modern, reproducible workflows with YAML-based configuration, cloud-accessible datasets, optional ``dask`` parallelization, interactive Jupyter usage, and CI-tested reliability with comprehensive documentation.
 
 .. note::
   Below is a series of examples. The `end-to-end workflow <https://roms-tools.readthedocs.io/en/latest/end_to_end.html>`_ demonstrates using ``ROMS-Tools`` to prepare inputs and analyze outputs for a ROMS–MARBL simulation, and is designed to run on a laptop. Subsequent examples cover more detailed, task-specific workflows and are configured for the Perlmutter supercomputing system, so you may need to pre-download data and adjust paths when running them elsewhere.

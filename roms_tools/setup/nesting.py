@@ -126,7 +126,7 @@ class ChildGrid(Grid):
         """Adjust child grid mask to align with the parent grid."""
         self._apply_child_modification(
             modifier=lambda p, c: modify_child_mask(p, c, self.boundaries),
-            modifier_name="topography and mask",
+            modifier_name="mask",
             verbose=verbose,
         )
 

@@ -108,7 +108,7 @@ class ChildGrid(Grid):
         verbose: bool = False,
     ):
         """Shared logic for modifying child mask/topography."""
-        with Timed(f"=== Modifying child {modifier_name} ===", verbose=verbose):
+        with Timed(f"=== Modifying the child {modifier_name} ===", verbose=verbose):
             # Prepare datasets (fix dateline)
             parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
 

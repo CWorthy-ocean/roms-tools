@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -80,40 +81,6 @@ class ChildGrid(Grid):
     """An xarray Dataset containing boundary mappings, where child grid boundaries are
     mapped onto parent grid indices."""
 
-    def __post_init__(self):
-        self._input_checks()
-
-        # Horizontal grid
-        self._create_horizontal_grid()
-
-        # Check if the Greenwich meridian goes through the domain.
-        self._straddle()
-
-        # Mask
-        self._create_mask(verbose=self.verbose)
-
-        # Coarsen the dataset if needed
-        self._coarsen()
-
-        # Map child boundaries onto parent grid
-        self._map_child_boundaries_onto_parent_grid_indices(verbose=self.verbose)
-
-        # Topography
-        self.update_topography(
-            topography_source=self.topography_source,
-            hmin=self.hmin,
-            verbose=self.verbose,
-        )
-
-        # Vertical coordinate system
-        self.update_vertical_coordinate(
-            N=self.N,
-            theta_s=self.theta_s,
-            theta_b=self.theta_b,
-            hc=self.hc,
-            verbose=self.verbose,
-        )
-
     def _map_child_boundaries_onto_parent_grid_indices(self, verbose: bool = False):
         """Maps child grid boundary points onto absolute indices of the parent grid."""
         with Timed(
@@ -134,66 +101,124 @@ class ChildGrid(Grid):
 
             self.ds_nesting = ds_nesting
 
-    def _modify_child_topography_and_mask(self, verbose: bool = False):
-        """Adjust the topography and mask of the child grid to align with the parent grid.
-
-        Uses a weighted sum based on boundary distance and clips depth values to a
-        minimum.
-        """
-        with Timed("=== Modifying child topography and mask ===", verbose=verbose):
-            # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
+    def _apply_child_modification(
+        self,
+        modifier: Callable,
+        modifier_name: str,
+        verbose: bool = False,
+    ):
+        """Shared logic for modifying child mask/topography."""
+        with Timed(f"=== Modifying child {modifier_name} ===", verbose=verbose):
+            # Prepare datasets (fix dateline)
             parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
-            child_grid_ds = modify_child_topography_and_mask(
-                parent_grid_ds, child_grid_ds, self.boundaries, self.hmin
-            )
 
-            # Finalize grid datasets by adjusting longitudes back to [0, 360] range
-            parent_grid_ds, child_grid_ds = self._finalize_grid_datasets(
+            # Apply modification function
+            child_grid_ds = modifier(parent_grid_ds, child_grid_ds)
+
+            # Restore longitudes to 0-360
+            _, child_grid_ds = self._finalize_grid_datasets(
                 parent_grid_ds, child_grid_ds
             )
 
             self.ds = child_grid_ds
 
-    def update_topography(
-        self, topography_source=None, hmin=None, verbose=False
-    ) -> None:
-        """Update the child grid topography via the following steps.
+    def _modify_child_mask(self, verbose: bool = False) -> None:
+        """Adjust child grid mask to align with the parent grid."""
+        self._apply_child_modification(
+            modifier=lambda p, c: modify_child_mask(p, c, self.boundaries),
+            modifier_name="topography and mask",
+            verbose=verbose,
+        )
 
-        - Regrids the topography based on the specified source.
-        - Applies global and local smoothing.
-        - Adjusts the child grid topography and mask to match the parent grid.
-        - Ensures the minimum depth constraint (`hmin`) is enforced.
-        - Updates the internal dataset (`self.ds`) with the processed topography.
+    def _modify_child_topography(self, hmin: float, verbose: bool = False) -> None:
+        """Adjust child grid topography to align with the parent grid."""
+        self._apply_child_modification(
+            modifier=lambda p, c: modify_child_topography(p, c, self.boundaries, hmin),
+            modifier_name="topography",
+            verbose=verbose,
+        )
+
+    def update_mask(
+        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+    ) -> None:
+        """
+        Update the child grid mask and ensure consistency with the parent grid.
+
+        This method performs the following steps:
+
+        1. Derives the child mask from the provided ``mask_shapefile`` (or from the
+           default Natural Earth 10m coastline if ``None``).
+        2. Updates the mapping of child boundaries to parent-grid indices.
+           This mapping depends on the updated mask, since masked (land) points may
+           extend outside the parent grid.
+        3. Adjusts the child mask to ensure consistency with the parent mask.
 
         Parameters
         ----------
-        topography_source : dict, optional
-            A dictionary specifying the source of the topography data. Expected keys:
-            - `"name"` (str): Name of the topography dataset (e.g., `"SRTM15"`).
-            - `"path"` (str or Path): File path to the topography dataset.
-
-            If not provided, the existing topography source remains unchanged.
-
-        hmin : float, optional
-            The minimum allowable ocean depth (in meters). If not provided, the existing
-            value remains unchanged.
-
-        verbose : bool, optional
-            If `True`, prints detailed information about each processing step, including
-            timing and modifications. Defaults to `False`.
+        mask_shapefile : str or Path, optional
+            Path to a coastal shapefile used to derive the land mask. If ``None``,
+            a default coastline dataset is used.
+        verbose : bool, default False
+            If True, prints timing and progress information.
 
         Returns
         -------
         None
-            This method updates the internal dataset (`self.ds`) in place, modifying the
-            topography variable. It does not return a value.
+            Updates the internal datasets (``self.ds`` and ``self.ds_nesting``) in place,
+            modifying the mask and ensuring consistent parent-child boundary mapping.
         """
-        super().update_topography(
-            topography_source=topography_source, hmin=hmin, verbose=verbose
-        )
+        super().update_mask(mask_shapefile=mask_shapefile, verbose=verbose)
+        self._map_child_boundaries_onto_parent_grid_indices(verbose=verbose)
+        self._modify_child_mask(verbose=verbose)
 
-        # Modify child topography and mask to match the parent grid
-        self._modify_child_topography_and_mask(verbose=verbose)
+    def update_topography(
+        self,
+        topography_source: dict | None = None,
+        hmin: float | None = None,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Update the child grid topography and ensure consistency with the parent grid.
+
+        This method performs the following operations:
+
+        1. Regrids the topography from the specified source.
+        2. Applies domain-wide and local smoothing.
+        3. Enforces the minimum depth constraint ``hmin``.
+        4. Adjusts the child grid topography to maintain consistency with the
+           parent grid.
+        5. Updates the internal dataset (``self.ds``) with the processed bathymetry.
+
+        Parameters
+        ----------
+        topography_source : dict, optional
+            Dictionary describing the topography data source. Expected keys:
+
+            - ``"name"`` (str): Name of the source dataset (e.g., ``"SRTM15"``).
+            - ``"path"`` (str or Path): Path to the dataset file.
+
+            If ``None``, the previously configured topography source is used.
+
+        hmin : float, optional
+            Minimum allowable ocean depth (meters). If ``None``, the existing value
+            is retained.
+
+        verbose : bool, default False
+            If ``True``, prints progress messages and timing information.
+
+        Returns
+        -------
+        None
+            Updates ``self.ds`` in place by modifying the topography field. Nothing
+            is returned.
+        """
+        hmin = hmin or self.hmin
+        super().update_topography(
+            topography_source=topography_source,
+            hmin=hmin,
+            verbose=verbose,
+        )
+        self._modify_child_topography(hmin=hmin, verbose=verbose)
 
     def plot_nesting(self, with_dim_names=False) -> None:
         """Plot the parent and child grids in a single figure.

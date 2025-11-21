@@ -1,5 +1,14 @@
 [tool.coverage.run]
+source = ["roms_tools"]
 omit = [
     "roms_tools/tests/*",
     "**/__init__.py",
 ]
+branch = true
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+
+[tool.coverage.xml]
+relative_files = true

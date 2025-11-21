@@ -47,11 +47,12 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
+        continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
@@ -97,11 +98,12 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
+        continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
@@ -152,11 +154,12 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
+        continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
@@ -202,11 +205,12 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
+        continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
@@ -259,11 +263,12 @@ jobs:
       - name: Get coverage report
         shell: bash -l {0}
         run: |
-          coverage report -m
-          coverage xml
+          coverage report -m || true
+          coverage xml || true
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
+        continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml

@@ -65,7 +65,7 @@ A widely used regional ocean model is the **Regional Ocean Modeling System (ROMS
 
 ## Input Data and Preprocessing
 
-Whether for research or industrial-focused applications, configuring a regional ocean model like ROMS-MARBL remains a major technical challenge. Generating the required input files is time-consuming, error-prone, and difficult to reproduce, creating a bottleneck for both new and experienced model users. The Python package `ROMS-Tools` addresses this challenge by providing a set of  efficient, user-friendly, and extensible tools to design new regional grids for  ROMS-MARBL and to process and stage all required model input files. `ROMS-Tools` supports reproducible and easy-to-interpret workflows that enable faster and more robust ROMS-MARBL setups. The package’s user interface and underlying data model are based on `xarray` [@hoyer2017xarray], allowing seamless handling of multidimensional datasets with rich metadata and optional parallelization via a `dask` [@dask] backend.
+Whether for research or industrial-focused applications, configuring a regional ocean model like ROMS-MARBL remains a major technical challenge. Generating the required input files is time-consuming, error-prone, and difficult to reproduce, creating a bottleneck for both new and experienced model users. The Python package `ROMS-Tools` addresses this challenge by providing a set of  efficient, user-friendly, and extensible tools to design new regional grids for  ROMS-MARBL and to process and stage all required model input files. The package’s user interface and underlying data model are based on `xarray` [@hoyer2017xarray], allowing seamless handling of multidimensional datasets with rich metadata and optional parallelization via a `dask` [@dask] backend.
 
 `ROMS-Tools` can automatically process commonly used datasets or incorporate custom user data and routines. Currently, it can generate the following inputs:
 
@@ -103,7 +103,7 @@ Users can quickly design and visualize regional grids and inspect all input fiel
 
 ## Workflow, Reproducibility, and Performance
 
-`ROMS-Tools` is designed to support modern, reproducible workflows. It is easily installable via Conda or PyPI and can be run interactively from Jupyter Notebooks.
+`ROMS-Tools` enables reproducible and easy-to-interpret workflows for faster and more robust ROMS-MARBL setups. It is easily installable via Conda or PyPI and can be run interactively from Jupyter Notebooks.
 To ensure reproducibility and facilitate collaboration, each workflow is defined in a simple YAML configuration file. These compact, text-based YAML files can be version-controlled and easily shared, eliminating the need to transfer large NetCDF files between researchers, as source data like GLORYS and ERA5 are accessible in the cloud.
 For performance, the package is integrated with `dask` [@dask] to enable efficient, out-of-core computations on large datasets.
 Finally, to ensure reliability, the software is rigorously tested with continuous integration (CI) and supported by comprehensive documentation with examples and tutorials.

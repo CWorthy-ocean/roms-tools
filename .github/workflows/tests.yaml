@@ -196,14 +196,19 @@ jobs:
            python -V
            python -m pip install -e .[dask]  --force-reinstall
 
+      - name: Check xesmf installation
+        shell: micromamba-shell {0}
+        run: |
+           python -c "import xesmf; print('xesmf version:', xesmf.__version__)"
+
       - name: Running Tests with Dask and Xesmf
-        shell: bash -l {0}
+        shell: micromamba-shell {0}
         run: |
            python -V
            coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
 
       - name: Get coverage report
-        shell: bash -l {0}
+        shell: micromamba-shell {0}
         run: |
           coverage report -m || true
           coverage xml || true

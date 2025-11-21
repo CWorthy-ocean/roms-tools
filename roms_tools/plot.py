@@ -96,12 +96,6 @@ def plot_2d_horizontal_field(
     lon_deg = field.lon
     lat_deg = field.lat
 
-    # check if North or South pole are in domain
-    if lat_deg.max().values > 89 or lat_deg.min().values < -89:
-        raise NotImplementedError(
-            "Plotting is not implemented for the case that the domain contains the North or South pole."
-        )
-
     trans = get_projection(lon_deg, lat_deg)
 
     if ax is None:
@@ -674,10 +668,36 @@ def _add_field_to_ax(
         ax.clabel(cs, inline=True, fontsize=FONT_SZ)
 
 
-def get_projection(lon, lat):
-    return ccrs.NearsidePerspective(
-        central_longitude=lon.mean().values, central_latitude=lat.mean().values
-    )
+def get_projection(lon: xr.DataArray, lat: xr.DataArray):
+    """
+    Return a Cartopy projection appropriate for the given lon/lat domain.
+
+    - Raises an error if the domain includes either pole.
+    - Uses PlateCarree if the longitudinal span > 90°.
+    - Otherwise uses NearsidePerspective centered on the domain.
+
+    Parameters
+    ----------
+    lon, lat : xr.DataArray
+        Longitude and latitude values in degrees.
+
+    Returns
+    -------
+    cartopy.crs.Projection
+        The chosen Cartopy projection.
+    """
+    # check if North or South pole are in domain
+    if lat.max() > 89 or lat.min() < -89:
+        raise NotImplementedError(
+            "Plotting is not implemented for the case that the domain contains the North or South pole."
+        )
+
+    if lon.max() - lon.min() > 90:
+        return ccrs.PlateCarree(central_longitude=lon.mean().values)
+    else:
+        return ccrs.NearsidePerspective(
+            central_longitude=lon.mean().values, central_latitude=lat.mean().values
+        )
 
 
 def _validate_plot_inputs(

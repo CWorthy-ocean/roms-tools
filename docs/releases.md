@@ -1,5 +1,20 @@
 # Release notes
 
+## v3.3.0 (unreleased)
+
+### New Features
+
+* Plot wide grids with different cartopy projection ([#496](https://github.com/CWorthy-ocean/roms-tools/pull/496))
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+
 ## v3.2.0
 
 ### New Features
@@ -19,8 +34,6 @@
 ### Breaking Changes
 
 * Default of new `allow_flex_time` parameter for `InitialConditions` is set to `False`. Old behaviour was `allow_flex_time = True`. ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
-
-### Internal Changes
 
 ### Documentation
 

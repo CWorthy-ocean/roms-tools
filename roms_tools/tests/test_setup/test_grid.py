@@ -121,6 +121,33 @@ def grid_that_straddles_180_degree_meridian_with_global_srtm15_data():
     return grid
 
 
+@pytest.fixture()
+def grid_with_gshhs_coastlines():
+    iceland_fjord_kwargs = {
+        "nx": 80,
+        "ny": 40,
+        "size_x": 40,
+        "size_y": 20,
+        "center_lon": -21.76,
+        "center_lat": 64.325,
+        "rot": 0,
+        "N": 3,
+    }
+
+    # Make sure all 4 L1 files are downloaded
+    _ = download_test_data("GSHHS_l_L1.dbf")
+    _ = download_test_data("GSHHS_l_L1.prj")
+    _ = download_test_data("GSHHS_l_L1.shx")
+    shapefile = download_test_data("GSHHS_l_L1.shp")
+
+    grid = Grid(
+        **iceland_fjord_kwargs,
+        mask_shapefile=shapefile,
+    )
+
+    return grid
+
+
 def test_grid_creation(grid):
     assert grid.nx == 1
     assert grid.ny == 1
@@ -175,11 +202,33 @@ def test_coords_relation(grid_fixture, request):
         "grid_that_straddles_180_degree_meridian_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_that_straddles_180_degree_meridian_with_global_srtm15_data",
+        "grid_with_gshhs_coastlines",
     ],
 )
 def test_successful_initialization_with_topography(grid_fixture, request):
     grid = request.getfixturevalue(grid_fixture)
-    assert grid is not None
+
+    expected_attrs = [
+        "nx",
+        "ny",
+        "size_x",
+        "size_y",
+        "center_lon",
+        "center_lat",
+        "rot",
+        "N",
+        "theta_s",
+        "theta_b",
+        "hc",
+        "topography_source",
+        "hmin",
+        "mask_shapefile",
+        "verbose",
+        "straddle",
+    ]
+
+    for attr in expected_attrs:
+        assert hasattr(grid, attr), f"Missing attribute: {attr}"
 
 
 def test_plot(grid_that_straddles_180_degree_meridian):
@@ -280,6 +329,7 @@ def test_grid_straddle_crosses_meridian():
         "grid",
         "grid_that_straddles_dateline_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
+        "grid_with_gshhs_coastlines",
     ],
 )
 def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
@@ -301,8 +351,8 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
             # Load the grid from the file
             grid_from_file = Grid.from_file(filepath.with_suffix(".nc"))
 
-            # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
             assert grid == grid_from_file
+            xr.testing.assert_equal(grid.ds, grid_from_file.ds)
 
             # Clean up the .nc file
             (filepath.with_suffix(".nc")).unlink()
@@ -314,6 +364,7 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
         "grid",
         "grid_that_straddles_dateline_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
+        "grid_with_gshhs_coastlines",
     ],
 )
 def test_roundtrip_yaml(grid_fixture, tmp_path, request):
@@ -332,8 +383,8 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
 
         grid_from_file = Grid.from_yaml(filepath)
 
-        # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
         assert grid == grid_from_file
+        xr.testing.assert_equal(grid.ds, grid_from_file.ds)
 
         filepath = Path(filepath)
         filepath.unlink()
@@ -345,6 +396,7 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
         "grid",
         "grid_that_straddles_dateline_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
+        "grid_with_gshhs_coastlines",
     ],
 )
 def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
@@ -359,30 +411,33 @@ def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
     filepath_yaml = Path(tmp_path / "test.yaml")
     grid_from_file.to_yaml(filepath_yaml)
 
+    grid_from_yaml = Grid.from_yaml(filepath_yaml)
+
+    assert grid_from_yaml == grid
+    xr.testing.assert_equal(grid.ds, grid_from_yaml.ds)
+
     filepath.unlink()
     filepath_yaml.unlink()
 
 
-def test_files_have_same_hash(tmp_path):
-    # Initialize a Grid object using the initializer
-    grid_init = Grid(
-        nx=10,
-        ny=15,
-        size_x=100.0,
-        size_y=150.0,
-        center_lon=0.0,
-        center_lat=0.0,
-        rot=0.0,
-        topography_source={"name": "ETOPO5"},
-        hmin=5.0,
-    )
+@pytest.mark.parametrize(
+    "grid_fixture",
+    [
+        "grid",
+        "grid_that_straddles_dateline_with_shifted_global_etopo_data",
+        "grid_that_straddles_dateline_with_global_srtm15_data",
+        "grid_with_gshhs_coastlines",
+    ],
+)
+def test_files_have_same_hash(grid_fixture, tmp_path, request):
+    grid = request.getfixturevalue(grid_fixture)
 
     yaml_filepath = tmp_path / "test_yaml"
     filepath1 = tmp_path / "test1.nc"
     filepath2 = tmp_path / "test2.nc"
 
-    grid_init.to_yaml(yaml_filepath)
-    grid_init.save(filepath1)
+    grid.to_yaml(yaml_filepath)
+    grid.save(filepath1)
 
     grid_from_file = Grid.from_yaml(yaml_filepath)
     grid_from_file.save(filepath2)
@@ -505,6 +560,9 @@ def test_from_yaml_version_mismatch(tmp_path, caplog):
         yaml_filepath.unlink()
 
 
+# Vertical coordinate tests
+
+
 def test_invalid_theta_s_value():
     """Test the validation of the theta_s value."""
     with pytest.raises(ValueError):
@@ -606,6 +664,152 @@ def test_plot_vertical_coordinate():
         grid.plot_vertical_coordinate(eta=-1, xi=0)
     with pytest.raises(ValueError, match="Exactly one of"):
         grid.plot_vertical_coordinate(eta=-1, xi=0, s=-1)
+
+
+# Topography tests
+
+
+def test_enclosed_regions():
+    """Test that there are only two connected regions, one dry and one wet."""
+    grid = Grid(
+        nx=100,
+        ny=100,
+        size_x=1800,
+        size_y=2400,
+        center_lon=30,
+        center_lat=61,
+        rot=20,
+    )
+
+    reg, nreg = label(grid.ds.mask_rho)
+    npt.assert_equal(nreg, 2)
+
+
+def test_rmax_criterion():
+    grid = Grid(
+        nx=100,
+        ny=100,
+        size_x=1800,
+        size_y=2400,
+        center_lon=30,
+        center_lat=61,
+        rot=20,
+    )
+    r_eta, r_xi = _compute_rfactor(grid.ds.h)
+    rmax0 = np.max([r_eta.max(), r_xi.max()])
+    npt.assert_array_less(rmax0, 0.2)
+
+
+def test_hmin_criterion_and_update_topography():
+    grid = Grid(
+        nx=100,
+        ny=100,
+        size_x=1800,
+        size_y=2400,
+        center_lon=30,
+        center_lat=61,
+        rot=20,
+        hmin=5.0,
+    )
+
+    assert grid.hmin == 5.0
+    assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+    grid.update_topography(hmin=10.0)
+
+    assert grid.hmin == 10.0
+    assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+    # this should not do anything
+    grid.update_topography()
+
+    assert grid.hmin == 10.0
+    assert np.less_equal(grid.hmin, grid.ds.h.min())
+
+
+# Mask tests
+
+
+def test_update_mask():
+    iceland_fjord_kwargs = {
+        "nx": 80,
+        "ny": 40,
+        "size_x": 40,
+        "size_y": 20,
+        "center_lon": -21.76,
+        "center_lat": 64.325,
+        "rot": 0,
+        "N": 3,
+    }
+
+    # Make sure all 4 L1 files are downloaded
+    _ = download_test_data("GSHHS_l_L1.dbf")
+    _ = download_test_data("GSHHS_l_L1.prj")
+    _ = download_test_data("GSHHS_l_L1.shx")
+    shapefile = download_test_data("GSHHS_l_L1.shp")
+
+    grid = Grid(
+        **iceland_fjord_kwargs,
+        mask_shapefile=shapefile,
+    )
+
+    assert grid.mask_shapefile == shapefile
+
+    # Save original mask
+    mask_orig = grid.ds.mask_rho.copy()
+
+    # Update mask (switches to Natural Earth)
+    grid.update_mask()
+
+    assert grid.mask_shapefile is None
+
+    # New mask after update
+    mask_new = grid.ds.mask_rho.copy()
+
+    assert abs(mask_new - mask_orig).max() == 1, (
+        "Mask should change after update_mask()"
+    )
+
+
+# Boundary tests
+
+
+def test_mask_topography_boundary():
+    """Test that the mask and topography along the grid boundaries (north, south, east,
+    west) are identical to the adjacent inland cells.
+    """
+    # Create a grid with some land along the northern boundary
+    grid = Grid(
+        nx=10, ny=10, size_x=1000, size_y=1000, center_lon=-20, center_lat=60, rot=0
+    )
+
+    # Toopography
+    np.testing.assert_array_equal(
+        grid.ds.h.isel(eta_rho=0).data, grid.ds.h.isel(eta_rho=1).data
+    )
+    np.testing.assert_array_equal(
+        grid.ds.h.isel(eta_rho=-1).data, grid.ds.h.isel(eta_rho=-2).data
+    )
+    np.testing.assert_array_equal(
+        grid.ds.h.isel(xi_rho=0).data, grid.ds.h.isel(xi_rho=1).data
+    )
+    np.testing.assert_array_equal(
+        grid.ds.h.isel(xi_rho=-1).data, grid.ds.h.isel(xi_rho=-2).data
+    )
+
+    # Mask
+    np.testing.assert_array_equal(
+        grid.ds.mask_rho.isel(eta_rho=0).data, grid.ds.mask_rho.isel(eta_rho=1).data
+    )
+    np.testing.assert_array_equal(
+        grid.ds.mask_rho.isel(eta_rho=-1).data, grid.ds.mask_rho.isel(eta_rho=-2).data
+    )
+    np.testing.assert_array_equal(
+        grid.ds.mask_rho.isel(xi_rho=0).data, grid.ds.mask_rho.isel(xi_rho=1).data
+    )
+    np.testing.assert_array_equal(
+        grid.ds.mask_rho.isel(xi_rho=-1).data, grid.ds.mask_rho.isel(xi_rho=-2).data
+    )
 
 
 # More Grid.from_file() tests
@@ -723,100 +927,3 @@ def test_from_file_partial_parameters_raises_error(grid, tmp_path):
 
     with pytest.raises(ValueError, match="must provide all of"):
         Grid.from_file(path, theta_s=5.0)
-
-
-# Topography tests
-def test_enclosed_regions():
-    """Test that there are only two connected regions, one dry and one wet."""
-    grid = Grid(
-        nx=100,
-        ny=100,
-        size_x=1800,
-        size_y=2400,
-        center_lon=30,
-        center_lat=61,
-        rot=20,
-    )
-
-    reg, nreg = label(grid.ds.mask_rho)
-    npt.assert_equal(nreg, 2)
-
-
-def test_rmax_criterion():
-    grid = Grid(
-        nx=100,
-        ny=100,
-        size_x=1800,
-        size_y=2400,
-        center_lon=30,
-        center_lat=61,
-        rot=20,
-    )
-    r_eta, r_xi = _compute_rfactor(grid.ds.h)
-    rmax0 = np.max([r_eta.max(), r_xi.max()])
-    npt.assert_array_less(rmax0, 0.2)
-
-
-def test_hmin_criterion():
-    grid = Grid(
-        nx=100,
-        ny=100,
-        size_x=1800,
-        size_y=2400,
-        center_lon=30,
-        center_lat=61,
-        rot=20,
-        hmin=5.0,
-    )
-
-    assert grid.hmin == 5.0
-    assert np.less_equal(grid.hmin, grid.ds.h.min())
-
-    grid.update_topography(hmin=10.0)
-
-    assert grid.hmin == 10.0
-    assert np.less_equal(grid.hmin, grid.ds.h.min())
-
-    # this should not do anything
-    grid.update_topography()
-
-    assert grid.hmin == 10.0
-    assert np.less_equal(grid.hmin, grid.ds.h.min())
-
-
-def test_mask_topography_boundary():
-    """Test that the mask and topography along the grid boundaries (north, south, east,
-    west) are identical to the adjacent inland cells.
-    """
-    # Create a grid with some land along the northern boundary
-    grid = Grid(
-        nx=10, ny=10, size_x=1000, size_y=1000, center_lon=-20, center_lat=60, rot=0
-    )
-
-    # Toopography
-    np.testing.assert_array_equal(
-        grid.ds.h.isel(eta_rho=0).data, grid.ds.h.isel(eta_rho=1).data
-    )
-    np.testing.assert_array_equal(
-        grid.ds.h.isel(eta_rho=-1).data, grid.ds.h.isel(eta_rho=-2).data
-    )
-    np.testing.assert_array_equal(
-        grid.ds.h.isel(xi_rho=0).data, grid.ds.h.isel(xi_rho=1).data
-    )
-    np.testing.assert_array_equal(
-        grid.ds.h.isel(xi_rho=-1).data, grid.ds.h.isel(xi_rho=-2).data
-    )
-
-    # Mask
-    np.testing.assert_array_equal(
-        grid.ds.mask_rho.isel(eta_rho=0).data, grid.ds.mask_rho.isel(eta_rho=1).data
-    )
-    np.testing.assert_array_equal(
-        grid.ds.mask_rho.isel(eta_rho=-1).data, grid.ds.mask_rho.isel(eta_rho=-2).data
-    )
-    np.testing.assert_array_equal(
-        grid.ds.mask_rho.isel(xi_rho=0).data, grid.ds.mask_rho.isel(xi_rho=1).data
-    )
-    np.testing.assert_array_equal(
-        grid.ds.mask_rho.isel(xi_rho=-1).data, grid.ds.mask_rho.isel(xi_rho=-2).data
-    )

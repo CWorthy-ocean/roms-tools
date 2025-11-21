@@ -65,6 +65,8 @@ class Grid:
         - "path" (Union[str, Path, List[Union[str, Path]]]): The path to the raw data file. Can be a string or a Path object.
 
         The default is "ETOPO5", which does not require a path.
+    mask_shapefile: str | Path | None, optional
+        Path to a custom shapefile to use to determine the land mask; if None, use NaturalEarth 10m.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
@@ -109,6 +111,8 @@ class Grid:
     """The critical depth (in meters)."""
     topography_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the topography data."""
+    mask_shapefile: str | Path | None = None
+    """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
@@ -130,7 +134,7 @@ class Grid:
         self._straddle()
 
         # Mask
-        self._create_mask(verbose=self.verbose)
+        self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
 
         # Coarsen the dataset if needed
         self._coarsen()
@@ -166,10 +170,35 @@ class Grid:
                     "`topography_source` must include a 'path' key when the 'name' is not 'ETOPO5'."
                 )
 
-    def _create_mask(self, verbose=False) -> None:
-        with Timed("=== Creating the mask ===", verbose=verbose):
-            ds = add_mask(self.ds)
+    def update_mask(
+        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+    ) -> None:
+        """
+        Update the land mask of the current grid dataset.
+
+        This method generates a land mask based on the provided coastline
+        shapefile, fills enclosed basins with lands and updates the dataset
+        stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
+        Earth 10m) is used. The operation is optionally timed and logged.
+
+        Parameters
+        ----------
+        mask_shapefile : str or Path, optional
+            Path to a coastal shapefile to derive the land mask. If `None`,
+            the default Natural Earth 10m coastline dataset is used.
+        verbose : bool, default False
+            If True, prints timing and progress information.
+
+        Returns
+        -------
+        None
+            Updates the `self.ds` attribute in place with the new mask.
+
+        """
+        with Timed("=== Deriving the mask from coastlines ===", verbose=verbose):
+            ds = add_mask(self.ds, shapefile=mask_shapefile)
             self.ds = ds
+            self.mask_shapefile = mask_shapefile
 
     def update_topography(
         self, topography_source=None, hmin=None, verbose=False
@@ -747,8 +776,14 @@ class Grid:
                 topo_source = {"name": ds.attrs["topography_source_name"]}
         else:
             topo_source = None
-
         grid.topography_source = topo_source
+
+        if "mask_shapefile" in ds.attrs:
+            mask_shapefile = ds.attrs["mask_shapefile"]
+        else:
+            mask_shapefile = None
+
+        grid.mask_shapefile = mask_shapefile
 
         return grid
 

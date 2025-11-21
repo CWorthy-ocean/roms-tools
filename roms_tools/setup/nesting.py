@@ -475,13 +475,6 @@ def map_child_boundaries_onto_parent_grid_indices(
     }
     ds = ds.rename(dims_to_rename)
 
-    ds = ds.assign_coords(
-        {
-            "indices_rho": ("two", ["xi", "eta"]),
-            "indices_vel": ("three", ["xi", "eta", "angle"]),
-        }
-    )
-
     return ds
 
 

@@ -1,6 +1,6 @@
 # Release notes
 
-## v3.2.0 (unreleased)
+## v3.2.0
 
 ### New Features
 
@@ -14,6 +14,7 @@
 * Add utility function `get_glorys_bounds` to return the min/max latitude and longitude required for GLORYS downloads for a fixed domain ([#445](https://github.com/CWorthy-ocean/roms-tools/pull/445))
 * Add `compute_total_cdr_source ` method to `CDRForcing`, which computes integrated tracer quantities for all releases and returns a pandas DataFrame including a units row ([#444](https://github.com/CWorthy-ocean/roms-tools/pull/444))
 * Plot ensembles of CDR uptake curves and their mean and standard deviation ([#467](https://github.com/CWorthy-ocean/roms-tools/pull/467))
+* Allow custom shapefiles (such as GSHHS) to be used for coastline masking ([#475](https://github.com/CWorthy-ocean/roms-tools/pull/475))
 
 ### Breaking Changes
 
@@ -28,6 +29,7 @@
 ### Bugfixes
 
 * Fix bug in creation of `InitialConditions` ([#460](https://github.com/CWorthy-ocean/roms-tools/pull/460))
+* Remove coordinate variables in nesting info file that conflict with ROMS expectations ([#487](https://github.com/CWorthy-ocean/roms-tools/pull/487))
 * Allow regridding of 2D fields ([#485](https://github.com/CWorthy-ocean/roms-tools/pull/485))
 
 ## v3.1.2

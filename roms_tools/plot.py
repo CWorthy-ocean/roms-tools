@@ -180,25 +180,8 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
         with_dim_names=with_dim_names,
     )
 
-    vmax = 3
-    vmin = 0
-    cmap = plt.colormaps.get_cmap("Blues")
-    cmap.set_bad(color="gray")
-    kwargs = {"vmax": vmax, "vmin": vmin, "cmap": cmap}
-
-    field = parent_grid_ds.mask_rho
-    field = field.where(field)
-
-    _add_field_to_ax(
-        ax,
-        parent_lon_deg,
-        parent_lat_deg,
-        field,
-        add_colorbar=False,
-        kwargs=kwargs,
-    )
-
     _add_gridlines(ax)
+    ax.coastlines()
 
     ax.legend(loc="best")
 

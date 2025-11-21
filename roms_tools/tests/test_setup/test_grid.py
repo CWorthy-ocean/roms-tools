@@ -236,6 +236,20 @@ def test_plot(grid_that_straddles_180_degree_meridian):
     grid_that_straddles_180_degree_meridian.plot(with_dim_names=True)
 
 
+def test_plot_wide_grid():
+    # This grid should be handled via different cartopy projection
+    grid = Grid(
+        nx=10,
+        ny=10,
+        size_x=15000,
+        size_y=15000,
+        center_lon=-161,
+        center_lat=14.4,
+        rot=-3,
+    )
+    grid.plot()
+
+
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
 def test_plot_along_lat_lon(grid_that_straddles_180_degree_meridian):
     grid_that_straddles_180_degree_meridian.plot(lat=61)

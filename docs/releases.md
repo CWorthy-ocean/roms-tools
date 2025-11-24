@@ -17,7 +17,7 @@
 
 ### Documentation
 
-* Document support for child grids that extend beyond parent grids (([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491)))
+* Document support for child grids that extend beyond parent grids ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 
 ### Bugfixes
 

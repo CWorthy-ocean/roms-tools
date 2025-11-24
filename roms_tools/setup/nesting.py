@@ -569,17 +569,38 @@ def interpolate_indices(
             "Some ocean child points are outside the parent grid. Please choose either a bigger parent grid or a smaller child grid."
         )
 
-    # Warn if child boundary points are near the edges of the parent grid
-    nxp, nyp = lon_parent.shape
-    if (
-        i.where(mask).min() < 0
-        or i.where(mask).max() > nxp - 2
-        or j.where(mask).min() < 0
-        or j.where(mask).max() > nyp - 2
-    ):
-        logging.warning(
-            "Some ocean child boundary points lie very close to the edges of the parent grid."
-        )
+    # Try to fix remaining NaNs and out-of-bounds indices
+    idx = xr.DataArray(np.arange(i.size), dims=i.dims)
+    nan_idx = (
+        i.isnull()
+        | j.isnull()
+        | (i > nxp - 2)
+        | (i < 0)
+        | (j > nyp - 2)
+        | (j < 0)
+    ) # remaining NaNs and out-of-bound indices
+
+    idx_tmp = idx.where(~nan_idx, drop=True) # valid poins
+    i_tmp = i.where(~nan_idx, drop=True) # valid points
+    j_tmp = j.where(~nan_idx, drop=True) # valid points
+
+    interp_i = interp1d(idx_tmp.values, i_tmp.values, kind="nearest", fill_value="extrapolate")
+    interp_j = interp1d(idx_tmp.values, j_tmp.values, kind="nearest", fill_value="extrapolate")
+    
+    i = i.where(~nan_idx, interp_i(idx[nan_idx].values))
+    j = j.where(~nan_idx, interp_j(idx[nan_idx].values))
+
+        # Warn if child boundary points are near the edges of the parent grid
+        nxp, nyp = lon_parent.shape
+        if (
+            i.where(mask).min() < 0
+            or i.where(mask).max() > nxp - 2
+            or j.where(mask).min() < 0
+            or j.where(mask).max() > nyp - 2
+        ):
+            logging.warning(
+                "Some ocean child boundary points lie very close to the edges of the parent grid."
+            )
 
     # Fill NaNs (land child points that fall outside parent grid) with fill value
     i = i.fillna(-1e5)
@@ -794,8 +815,6 @@ def modify_child_topography(
     xarray.Dataset
         The updated child grid dataset with modified topography (`h`).
     """
-    # regrid parent topography onto child grid
-    h_parent_interpolated = _interpolate_parent(parent_grid_ds["h"], child_grid_ds["h"])
 
     # compute weight based on distance
     alpha = compute_boundary_distance(child_grid_ds["mask_rho"], boundaries)

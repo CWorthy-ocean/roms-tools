@@ -11,7 +11,8 @@ from roms_tools.setup.nesting import (
     compute_boundary_distance,
     interpolate_indices,
     map_child_boundaries_onto_parent_grid_indices,
-    modify_child_topography_and_mask,
+    modify_child_mask,
+    modify_child_topography,
 )
 from roms_tools.setup.utils import get_boundary_coords
 
@@ -102,11 +103,12 @@ class TestInterpolateIndices:
             with caplog.at_level(logging.WARNING):
                 i_eta, i_xi = interpolate_indices(grid.ds, lon, lat, mask)
 
-            # Verify the warning message in the log
-            assert (
-                "Some boundary points of the child grid are very close to the boundary of the parent grid."
-                in caplog.text
-            )
+            if mask.sum() > 0:
+                # Verify the warning message in the log
+                assert (
+                    "Some ocean child boundary points lie very close to the edges of the parent grid."
+                    in caplog.text
+                )
 
             if direction == "south":
                 expected_i_eta = -0.5 * xr.ones_like(grid.ds.xi_rho)
@@ -292,9 +294,7 @@ class TestModifyChid:
     ):
         """Confirm child mask remains unchanged if no parent land is at boundaries."""
         mask_original = baby_grid.ds.mask_rho.copy()
-        modified_baby_grid_ds = modify_child_topography_and_mask(
-            small_grid.ds, baby_grid.ds
-        )
+        modified_baby_grid_ds = modify_child_mask(small_grid.ds, baby_grid.ds)
         xr.testing.assert_allclose(modified_baby_grid_ds.mask_rho, mask_original)
 
     @pytest.mark.parametrize(
@@ -311,7 +311,8 @@ class TestModifyChid:
 
         h_original = grid.ds.h.copy()
         mask_original = grid.ds.mask_rho.copy()
-        modified_grid_ds = modify_child_topography_and_mask(grid.ds, grid.ds)
+        modified_grid_ds = modify_child_mask(grid.ds, grid.ds)
+        modified_grid_ds = modify_child_topography(grid.ds, modified_grid_ds)
 
         xr.testing.assert_allclose(modified_grid_ds.h, h_original)
         xr.testing.assert_allclose(modified_grid_ds.mask_rho, mask_original)
@@ -325,7 +326,8 @@ class TestModifyChid:
         mask_original = small_grid.ds.mask_rho.copy()
 
         # Apply the modification function
-        modified_ds = modify_child_topography_and_mask(big_grid.ds, small_grid.ds)
+        modified_ds = modify_child_mask(big_grid.ds, small_grid.ds)
+        modified_ds = modify_child_topography(big_grid.ds, modified_ds)
 
         # Calculate the center indices for the grid
         eta_center = h_original.sizes["eta_rho"] // 2
@@ -405,8 +407,39 @@ class TestNesting:
         params = dataclasses.asdict(small_grid)
         del params["ds"], params["straddle"]
 
-        with pytest.raises(ValueError, match="Some points are outside the grid."):
+        with pytest.raises(
+            ValueError, match="Some ocean child points are outside the parent grid."
+        ):
             ChildGrid(parent_grid=big_grid, **params)
+
+    def test_no_error_if_land_child_points_beyond_parent_grid(self):
+        # coarse resolution Pacific domain
+        parent_grid = Grid(
+            nx=50,
+            ny=50,
+            size_x=23000,
+            size_y=12000,
+            center_lon=-161,
+            center_lat=14.4,
+            rot=-3,
+        )
+
+        # California Current System domain, where some land points extend beyond Pacific domain
+        child_grid_parameters = {
+            "nx": 50,
+            "ny": 50,
+            "size_x": 2688,
+            "size_y": 5280,
+            "center_lat": 39.6,
+            "center_lon": -134.5,
+            "rot": 33.3,
+        }
+
+        child_grid = ChildGrid(
+            **child_grid_parameters,
+            parent_grid=parent_grid,
+        )
+        assert isinstance(child_grid.ds, xr.Dataset)
 
     @pytest.mark.parametrize(
         "child_grid_fixture",

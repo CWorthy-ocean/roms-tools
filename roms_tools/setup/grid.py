@@ -201,13 +201,19 @@ class Grid:
             self.mask_shapefile = mask_shapefile
 
     def update_topography(
-        self, topography_source=None, hmin=None, verbose=False
+        self,
+        topography_source: dict | None = None,
+        hmin: float | None = None,
+        verbose: bool = False,
     ) -> None:
         """Update the grid dataset with processed topography.
 
-        This method performs several key operations, including regridding the topography, smoothing the
-        topography over the entire domain and locally.
-        The processed topography is then added to the grid's dataset.
+        This method performs the following operations:
+
+        1. Regrids the topography from the specified source.
+        2. Applies domain-wide and local smoothing.
+        3. Enforces the minimum depth constraint ``hmin``.
+        4. Updates the internal dataset (``self.ds``) with the processed bathymetry.
 
         Parameters
         ----------
@@ -236,11 +242,13 @@ class Grid:
         topography_source = topography_source or self.topography_source
         hmin = hmin or self.hmin
 
+        name = topography_source["name"]  # type: ignore[index]
+
         # Extract target coordinates for processing
         target_coords = get_target_coords(self)
 
         with Timed(
-            f"=== Generating the topography using {topography_source['name']} data and hmin = {hmin} meters ===",
+            f"=== Generating the topography using {name} data and hmin = {hmin} meters ===",
             verbose=verbose,
         ):
             ds = add_topography(

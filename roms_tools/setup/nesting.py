@@ -586,7 +586,7 @@ def interpolate_indices(
 
     interp_i = interp1d(idx_tmp.values, i_tmp.values, kind="nearest", fill_value="extrapolate")
     interp_j = interp1d(idx_tmp.values, j_tmp.values, kind="nearest", fill_value="extrapolate")
-    
+
     i = i.where(~nan_idx, interp_i(idx[nan_idx].values))
     j = j.where(~nan_idx, interp_j(idx[nan_idx].values))
 

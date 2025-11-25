@@ -80,7 +80,7 @@ def add_topography(
     # inserting hraw * mask_rho into this function eliminates any inconsistencies between
     # the land according to the topography and the land according to the mask; land points
     # will always be set to hmin
-    ds["h"] = _smooth_topography_locally(hraw * ds["mask_rho"], hmin, rmax)
+    ds["h"] = _smooth_topography_locally(hraw, hmin, rmax)
     ds["h"].attrs = {
         "long_name": "Bathymetry at rho-points",
         "units": "meter",

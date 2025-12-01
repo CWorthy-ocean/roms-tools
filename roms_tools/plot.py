@@ -653,7 +653,7 @@ def _add_field_to_ax(
     proj = ccrs.PlateCarree()
 
     p = ax.pcolormesh(lon_deg, lat_deg, field, transform=proj, **kwargs)
-    if hasattr(field, "long_name"):
+    if hasattr(field, "long_name") and hasattr(field, "units"):
         label = f"{field.long_name} [{field.units}]"
     elif hasattr(field, "Long_name"):
         # this is the case for matlab generated grids

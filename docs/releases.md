@@ -10,6 +10,8 @@
 
 ### Internal Changes
 
+* Rename `Dataset` to `LatLonDataset` and modularize `RiverDataset` ([#500](https://github.com/CWorthy-ocean/roms-tools/pull/500))
+
 ### Documentation
 
 ### Bugfixes

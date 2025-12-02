@@ -345,12 +345,12 @@ class InitialConditions:
                     "external": GLORYSDataset,
                     "default": GLORYSDefaultDataset,
                 },
-                "ROMS": defaultdict(lambda: ROMSDataset), 
+                "ROMS": defaultdict(lambda: ROMSDataset),
             },
             "bgc": {
                 "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
                 "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
-                "ROMS": defaultdict(lambda: ROMSDataset), 
+                "ROMS": defaultdict(lambda: ROMSDataset),
             },
         }
 

@@ -2015,6 +2015,7 @@ def check_dataset(
                 f"Optional variables missing (but not critical): {missing_optional_vars}"
             )
 
+
 def select_relevant_times(
     ds: xr.Dataset,
     time_dim: str,
@@ -2150,6 +2151,7 @@ def select_relevant_times(
 
     return ds
 
+
 def _select_initial_time(
     ds: xr.Dataset,
     time_dim: str,
@@ -2222,4 +2224,3 @@ def _select_initial_time(
         ds = ds.expand_dims(time_dim)
 
     return ds
-

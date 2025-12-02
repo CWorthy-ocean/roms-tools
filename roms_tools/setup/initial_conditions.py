@@ -13,7 +13,7 @@ from matplotlib.axes import Axes
 from roms_tools import Grid
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.datasets import (
+from roms_tools.setup.lat_lon_datasets import (
     CESMBGCDataset,
     Dataset,
     GLORYSDataset,
@@ -345,10 +345,12 @@ class InitialConditions:
                     "external": GLORYSDataset,
                     "default": GLORYSDefaultDataset,
                 },
+                "ROMS": defaultdict(lambda: ROMSDataset), 
             },
             "bgc": {
                 "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
                 "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+                "ROMS": defaultdict(lambda: ROMSDataset), 
             },
         }
 

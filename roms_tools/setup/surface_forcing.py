@@ -10,7 +10,7 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
-from roms_tools.setup.datasets import (
+from roms_tools.setup.lat_lon_datasets import (
     CESMBGCSurfaceForcingDataset,
     Dataset,
     ERA5ARCODataset,

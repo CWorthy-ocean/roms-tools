@@ -13,7 +13,7 @@ from scipy.ndimage import label
 from roms_tools import Grid
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.datasets import (
+from roms_tools.setup.lat_lon_datasets import (
     CESMBGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,

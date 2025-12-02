@@ -17,10 +17,10 @@ from roms_tools.setup.lat_lon_datasets import (
     CESMBGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
-    RawDataSource,
     UnifiedBGCDataset,
 )
 from roms_tools.setup.utils import (
+    RawDataSource,
     add_time_info_to_ds,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,

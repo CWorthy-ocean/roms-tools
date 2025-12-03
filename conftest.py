@@ -115,7 +115,31 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def use_dask(request: pytest.FixtureRequest) -> bool:
+def dask_cluster(request):
+    """Create a 2-worker Dask cluster if Dask tests are enabled.
+
+    Returns
+    -------
+    client : dask.distributed.Client or None
+        Returns None if `--use_dask` is not set.
+    """
+    use_dask = request.config.getoption("--use_dask")
+    if not use_dask:
+        yield None
+        return
+
+    from dask.distributed import Client, LocalCluster
+
+    cluster = LocalCluster(n_workers=2, threads_per_worker=1)
+    client = Client(cluster)
+    yield client
+    client.close()
+    cluster.close()
+
+
+@pytest.fixture(scope="session")
+def use_dask(request, dask_cluster) -> bool:
+    """Return True if Dask tests are enabled."""
     return request.config.getoption("--use_dask")
 
 

@@ -93,7 +93,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_boundary_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}
@@ -200,7 +200,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_boundary_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}

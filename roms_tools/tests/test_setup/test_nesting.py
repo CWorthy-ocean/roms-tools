@@ -101,12 +101,12 @@ class TestInterpolateIndices:
             mask = grid.ds[f"mask_{location}"].isel(**bdry_coords)
 
             with caplog.at_level(logging.WARNING):
-                i_eta, i_xi = interpolate_indices(grid.ds, lon, lat, mask)
+                i_eta, i_xi = interpolate_indices(grid.ds, lon, lat, mask, direction)
 
             if mask.sum() > 0:
                 # Verify the warning message in the log
                 assert (
-                    "Some ocean child boundary points lie very close to the edges of the parent grid."
+                    "boundary of the child grid lie very close to the edges of the parent grid"
                     in caplog.text
                 )
 
@@ -152,7 +152,9 @@ class TestInterpolateIndices:
                 lat = small_grid.ds[f"lat_{location}"].isel(**bdry_coords)
                 mask = small_grid.ds[f"mask_{location}"].isel(**bdry_coords)
 
-                i_eta, i_xi = interpolate_indices(big_grid.ds, lon, lat, mask)
+                i_eta, i_xi = interpolate_indices(
+                    big_grid.ds, lon, lat, mask, direction
+                )
 
                 expected_i_eta_min = -0.5
                 expected_i_eta_max = big_grid.ds.eta_rho[-1] - 0.5
@@ -408,7 +410,7 @@ class TestNesting:
         del params["ds"], params["straddle"]
 
         with pytest.raises(
-            ValueError, match="Some ocean child points are outside the parent grid."
+            ValueError, match="boundary of the child grid lie outside the parent grid"
         ):
             ChildGrid(parent_grid=big_grid, **params)
 

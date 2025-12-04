@@ -93,7 +93,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_setup/test_boundary_forcing.py --ignore=roms_tools/tests/test_setup/test_initial_conditions.py
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_setup/test_boundary_forcing.py --ignore=roms_tools/tests/test_setup/test_initial_conditions.py --ignore=roms_tools/tests/test_setup/test_surface_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}
@@ -144,7 +144,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/test_setup/test_boundary_forcing.py roms_tools/tests/test_setup/test_initial_conditions.py
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/test_setup/test_boundary_forcing.py roms_tools/tests/test_setup/test_initial_conditions.py roms_tools/tests/test_setup/test_surface_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}
@@ -251,7 +251,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_setup/test_boundary_forcing.py --ignore=roms_tools/tests/test_setup/test_initial_conditions.py
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_setup/test_boundary_forcing.py --ignore=roms_tools/tests/test_setup/test_initial_conditions.py --ignore=roms_tools/tests/test_setup/test_surface_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}
@@ -302,7 +302,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/test_setup/test_boundary_forcing.py roms_tools/tests/test_setup/test_initial_conditions.py
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/test_setup/test_boundary_forcing.py roms_tools/tests/test_setup/test_initial_conditions.py roms_tools/tests/test_setup/test_surface_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}

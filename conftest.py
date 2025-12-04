@@ -115,26 +115,27 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def dask_cluster(request):
-    """Create a 2-worker Dask cluster if Dask tests are enabled.
+def configure_dask_threads(request):
+    """
+    Configure Dask to use a threaded scheduler with 2 workers.
 
-    Returns
-    -------
-    client : dask.distributed.Client or None
-        Returns None if `--use_dask` is not set.
+    Parameters
+    ----------
+    request : pytest.FixtureRequest
+        Used to check whether the test suite was invoked with ``--use_dask``.
+
     """
     use_dask = request.config.getoption("--use_dask")
     if not use_dask:
-        yield None
         return
 
-    from dask.distributed import Client, LocalCluster
+    import dask
 
-    cluster = LocalCluster(n_workers=2, threads_per_worker=1)
-    client = Client(cluster)
-    yield client
-    client.close()
-    cluster.close()
+    # Configure threaded scheduling with 2 workers
+    dask.config.set(
+        scheduler="threads",
+        n_workers=2,
+    )
 
 
 @pytest.fixture(scope="session")

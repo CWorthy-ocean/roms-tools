@@ -9,15 +9,14 @@ import pytest
 import xarray as xr
 
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import (
+from roms_tools.setup.lat_lon_datasets import (
     GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
-    Dataset,
     ERA5ARCODataset,
     ERA5Correction,
     GLORYSDataset,
     GLORYSDefaultDataset,
-    RiverDataset,
+    LatLonDataset,
     TPXODataset,
     _concatenate_longitudes,
     choose_subdomain,
@@ -158,7 +157,7 @@ def test_select_times(data_fixture, expected_time_values, request, tmp_path, use
 
     filepath = tmp_path / "test.nc"
     dataset.to_netcdf(filepath)
-    dataset = Dataset(
+    dataset = LatLonDataset(
         filename=filepath,
         var_names={"var": "var"},
         start_time=start_time,
@@ -192,7 +191,7 @@ def test_select_times_valid_start_no_end_time(
     dataset.to_netcdf(filepath)
 
     # Instantiate Dataset object using the temporary file
-    dataset = Dataset(
+    dataset = LatLonDataset(
         filename=filepath,
         var_names={"var": "var"},
         start_time=start_time,
@@ -229,7 +228,7 @@ def test_select_times_invalid_start_no_end_time(
         ValueError,
         match="No exact match found ",
     ):
-        dataset = Dataset(
+        dataset = LatLonDataset(
             filename=filepath,
             var_names={"var": "var"},
             start_time=datetime(2022, 5, 1),
@@ -245,7 +244,7 @@ def test_multiple_matching_times(
     """
     filepath = tmp_path / "test.nc"
     global_dataset_with_multiple_times_per_day.to_netcdf(filepath)
-    dataset = Dataset(
+    dataset = LatLonDataset(
         filename=filepath,
         var_names={"var": "var"},
         start_time=datetime(2021, 12, 31, 22, 0),
@@ -265,7 +264,7 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
         start_time = datetime(2021, 1, 1)
         end_time = datetime(2021, 2, 1)
 
-        Dataset(
+        LatLonDataset(
             filename=filepath,
             var_names={"var": "var"},
             start_time=start_time,
@@ -279,7 +278,7 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
         start_time = datetime(2024, 1, 1)
         end_time = datetime(2024, 2, 1)
 
-        Dataset(
+        LatLonDataset(
             filename=filepath,
             var_names={"var": "var"},
             start_time=start_time,
@@ -291,13 +290,13 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
 
 
 def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):
-    """Test the from_ds method of the Dataset class."""
+    """Test the from_ds method of the LatLonDataset class."""
     start_time = datetime(2022, 1, 1)
 
     filepath = tmp_path / "test.nc"
     global_dataset.to_netcdf(filepath)
 
-    dataset = Dataset(
+    dataset = LatLonDataset(
         filename=filepath,
         var_names={"var": "var"},
         dim_names={
@@ -311,9 +310,9 @@ def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_p
         allow_flex_time=True,
     )
 
-    new_dataset = Dataset.from_ds(dataset, global_dataset_with_noon_times)
+    new_dataset = LatLonDataset.from_ds(dataset, global_dataset_with_noon_times)
 
-    assert isinstance(new_dataset, Dataset)  # Check that the new instance is a Dataset
+    assert isinstance(new_dataset, LatLonDataset)
     assert new_dataset.ds.equals(
         global_dataset_with_noon_times
     )  # Verify the new ds attribute is set correctly
@@ -330,7 +329,7 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
     global_dataset, tmp_path, use_dask
 ):
     """Test reversing latitude when it is not ascending, the choose_subdomain method,
-    and the convert_to_negative_depth method of the Dataset class.
+    and the convert_to_negative_depth method of the LatLonDataset class.
     """
     start_time = datetime(2022, 1, 1)
 
@@ -339,7 +338,7 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
     global_dataset["depth"] = global_dataset["depth"][::-1]
     global_dataset.to_netcdf(filepath)
 
-    dataset = Dataset(
+    dataset = LatLonDataset(
         filename=filepath,
         var_names={"var": "var"},
         dim_names={
@@ -393,7 +392,9 @@ def test_reverse_latitude_reverse_depth_choose_subdomain(
 def test_check_if_global_with_global_dataset(global_dataset, tmp_path, use_dask):
     filepath = tmp_path / "test.nc"
     global_dataset.to_netcdf(filepath)
-    dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
+    dataset = LatLonDataset(
+        filename=filepath, var_names={"var": "var"}, use_dask=use_dask
+    )
     is_global = dataset.check_if_global(dataset.ds)
     assert is_global
 
@@ -403,7 +404,9 @@ def test_check_if_global_with_non_global_dataset(
 ):
     filepath = tmp_path / "test.nc"
     non_global_dataset.to_netcdf(filepath)
-    dataset = Dataset(filename=filepath, var_names={"var": "var"}, use_dask=use_dask)
+    dataset = LatLonDataset(
+        filename=filepath, var_names={"var": "var"}, use_dask=use_dask
+    )
     is_global = dataset.check_if_global(dataset.ds)
 
     assert not is_global
@@ -421,7 +424,7 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
     with pytest.raises(
         ValueError, match="Dataset does not contain all required variables."
     ):
-        Dataset(
+        LatLonDataset(
             filename=filepath,
             var_names={"var": "var"},
             start_time=start_time,
@@ -440,7 +443,7 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
     with pytest.raises(
         ValueError, match="Dataset does not contain all required dimensions."
     ):
-        Dataset(
+        LatLonDataset(
             filename=filepath,
             var_names={"var": "var"},
             start_time=start_time,
@@ -758,48 +761,6 @@ class TestTPXODataset:
     def test_select_constituents_too_few(self, global_tpxo_dataset, omega):
         with pytest.raises(ValueError, match="The dataset contains tidal constituents"):
             global_tpxo_dataset.select_constituents(11, omega)
-
-
-class TestRiverDataset:
-    def test_deduplicate_river_names(self, tmp_path):
-        sample_dim_and_var_names = {
-            "dim_names": {"station": "station", "time": "time"},
-            "var_names": {
-                "latitude": "lat",
-                "longitude": "lon",
-                "flux": "flux",
-                "ratio": "ratio",
-                "name": "name",
-            },
-        }
-
-        data = {
-            "lat": (["station"], [10.0, 20.0, 30.0]),
-            "lon": (["station"], [100.0, 110.0, 120.0]),
-            "flux": (["time", "station"], np.random.rand(1, 3)),
-            "ratio": (["time", "station"], np.random.rand(1, 3)),
-            "name": (["station"], ["Amazon", "Nile", "Amazon"]),  # duplicate
-        }
-        coords = {"station": [0, 1, 2], "time": [0]}
-        ds = xr.Dataset(data, coords=coords)
-
-        # Write to temporary NetCDF file
-        file_path = tmp_path / "rivers.nc"
-        ds.to_netcdf(file_path)
-
-        river_dataset = RiverDataset(
-            filename=file_path,
-            start_time=datetime(2000, 1, 1),
-            end_time=datetime(2000, 1, 2),
-            dim_names=sample_dim_and_var_names["dim_names"],
-            var_names=sample_dim_and_var_names["var_names"],
-        )
-
-        names = river_dataset.ds["name"].values
-        assert "Amazon_1" in names
-        assert "Amazon_2" in names
-        assert "Nile" in names
-        assert len(set(names)) == len(names)  # all names must be unique
 
 
 # test _concatenate_longitudes

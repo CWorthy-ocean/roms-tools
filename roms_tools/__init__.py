@@ -20,7 +20,7 @@ from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
 from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401
 from roms_tools.setup.tides import TidalForcing  # noqa: F401
 from roms_tools.tiling.partition import partition_netcdf  # noqa: F401
-from roms_tools.setup.datasets import get_glorys_bounds  # noqa: F401
+from roms_tools.setup.lat_lon_datasets import get_glorys_bounds  # noqa: F401
 from roms_tools.tiling.join import open_partitions, join_netcdf  # noqa: F401
 
 

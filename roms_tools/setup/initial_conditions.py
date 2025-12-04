@@ -13,15 +13,15 @@ from matplotlib.axes import Axes
 from roms_tools import Grid
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.datasets import (
+from roms_tools.setup.lat_lon_datasets import (
     CESMBGCDataset,
-    Dataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
-    RawDataSource,
+    LatLonDataset,
     UnifiedBGCDataset,
 )
 from roms_tools.setup.utils import (
+    RawDataSource,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     from_yaml,
@@ -326,7 +326,7 @@ class InitialConditions:
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
-    def _get_data(self, forcing_type=Literal["physics", "bgc"]) -> Dataset:
+    def _get_data(self, forcing_type=Literal["physics", "bgc"]) -> LatLonDataset:
         """Determine the correct `Dataset` type and return an instance.
 
         forcing_type : str
@@ -339,7 +339,7 @@ class InitialConditions:
         Dataset
             The `Dataset` instance
         """
-        dataset_map: dict[str, dict[str, dict[str, type[Dataset]]]] = {
+        dataset_map: dict[str, dict[str, dict[str, type[LatLonDataset]]]] = {
             "physics": {
                 "GLORYS": {
                     "external": GLORYSDataset,

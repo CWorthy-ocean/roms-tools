@@ -457,7 +457,7 @@ def map_child_boundaries_onto_parent_grid_indices(
                 mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
 
                 i_eta, i_xi = interpolate_indices(
-                    parent_grid_ds, lon_child, lat_child, mask_child
+                    parent_grid_ds, lon_child, lat_child, mask_child, direction
                 )
 
                 if update_land_indices:
@@ -504,12 +504,16 @@ def map_child_boundaries_onto_parent_grid_indices(
 
 
 def interpolate_indices(
-    parent_grid_ds: xr.Dataset, lon: xr.DataArray, lat: xr.DataArray, mask: xr.DataArray
+    parent_grid_ds: xr.Dataset,
+    lon: xr.DataArray,
+    lat: xr.DataArray,
+    mask: xr.DataArray,
+    direction: str,
 ) -> tuple[xr.DataArray, xr.DataArray]:
-    """Interpolate the parent indices to the child grid.
+    """Interpolate the parent indices to the child grid boundary.
 
     Uses the parent grid ``lon_rho``/``lat_rho`` coordinates to compute
-    fractional i/j indices at child-grid longitude/latitude points using
+    fractional i/j indices at child-boundary longitude/latitude points using
     linear interpolation. The function verifies that all ocean child points
     (based on ``mask``) lie within the parent grid and warns if child
     boundary points fall near the parent-grid edges. Land child points that fall
@@ -526,6 +530,9 @@ def interpolate_indices(
         Latitudes of the child grid where interpolation is desired.
     mask: xarray.DataArray
         Mask for the child longitudes and latitudes under consideration.
+    direction : str
+        Boundary identifier (``"south"``, ``"north"``, ``"east"``, ``"west"``).
+        Used for generating informative warnings or errors.
     Returns
     -------
     i : xarray.DataArray
@@ -566,17 +573,26 @@ def interpolate_indices(
         or j.where(mask, other=0.0).isnull().any()
     ):
         raise ValueError(
-            "Some ocean child points are outside the parent grid. Please choose either a bigger parent grid or a smaller child grid."
+            f"Some wet points on the {direction}ern boundary of the child grid lie "
+            "outside the parent grid. Please use a larger parent grid or a smaller child grid."
         )
 
+    # Check whether the entire boundary is outside but on land
+    if i.isnull().all() or j.isnull().all():
+        raise ValueError(
+            f"The entire {direction}ern boundary of the child grid lies outside the "
+            "parent grid, but all of these boundary points are land. Please disable this boundary."
+        )
+
+    # Try to fix NaNs if there only a few per boundary. Fix with out-of-bounds points is not valid.
     nxp, nyp = lon_parent.shape
-    idx = xr.DataArray(np.arange(i.size), dims=i.dims)
     nan_idx = (
         i.isnull() | j.isnull() | (i > nxp - 2) | (i < 0) | (j > nyp - 2) | (j < 0)
-    )  # remaining NaNs and out-of-bound indices
+    )
 
-    # Interpolate indices for points that are invalid (NaN or out-of-bounds),
-    # but only if there are some valid points to use for interpolation.
+    idx = xr.DataArray(np.arange(i.size), dims=i.dims)
+
+    # Interpolate indices for points that are invalid (NaN or out-of-bounds)
     if nan_idx.any() and not nan_idx.all():
         idx_tmp = idx.where(~nan_idx, drop=True)  # valid poins
         i_tmp = i.where(~nan_idx, drop=True)  # valid points
@@ -592,6 +608,13 @@ def interpolate_indices(
         i[nan_idx.values] = interp_i(idx[nan_idx].values)
         j[nan_idx.values] = interp_j(idx[nan_idx].values)
 
+    # This should only occur in rare edge cases
+    if i.isnull().any() or j.isnull().any():
+        raise ValueError(
+            f"Mapping failed: the {direction}ern boundary of the child grid could not be "
+            "mapped onto parent-grid indices. Please adjust the parent/child grid configuration."
+        )
+
     # Warn if child boundary points are near the edges of the parent grid
     if (
         i.where(mask).min() < 0
@@ -600,12 +623,8 @@ def interpolate_indices(
         or j.where(mask).max() > nyp - 2
     ):
         logging.warning(
-            "Some ocean child boundary points lie very close to the edges of the parent grid."
+            f"Some wet points on the {direction}ern boundary of the child grid lie very close to the edges of the parent grid."
         )
-
-    # Last resort: Fill NaNs with fill value
-    i = i.fillna(-1e5)
-    j = j.fillna(-1e5)
 
     return i, j
 

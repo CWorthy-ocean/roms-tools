@@ -114,7 +114,32 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def use_dask(request: pytest.FixtureRequest) -> bool:
+def configure_dask_threads(request):
+    """
+    Configure Dask to use a threaded scheduler with 2 workers.
+
+    Parameters
+    ----------
+    request : pytest.FixtureRequest
+        Used to check whether the test suite was invoked with ``--use_dask``.
+
+    """
+    use_dask = request.config.getoption("--use_dask")
+    if not use_dask:
+        return
+
+    import dask
+
+    # Configure threaded scheduling with 2 workers
+    dask.config.set(
+        scheduler="threads",
+        n_workers=2,
+    )
+
+
+@pytest.fixture(scope="session")
+def use_dask(request, configure_dask_threads) -> bool:
+    """Return True if Dask tests are enabled."""
     return request.config.getoption("--use_dask")
 
 

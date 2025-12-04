@@ -16,6 +16,8 @@
 
 ### Bugfixes
 
+* Make unit handling in `RiverForcing.plot_locations()` robust for grids without `mask_rho` units ([#499](https://github.com/CWorthy-ocean/roms-tools/pull/499))
+
 
 ## v3.2.0
 

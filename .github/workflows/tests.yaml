@@ -60,8 +60,8 @@ jobs:
           name: without-dask-py${{ matrix.python-version }}
           fail_ci_if_error: false
 
-  test-with-dask:
-    name: 3.13-build-with-dask
+  test-with-dask-1:
+    name: 3.13-build-with-dask-1
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -93,7 +93,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_setup/test_boundary_forcing.py --ignore=roms_tools/tests/test_setup/test_initial_conditions.py --ignore=roms_tools/tests/test_setup/test_surface_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}
@@ -107,8 +107,59 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
-          flags: with-dask
-          name: with-dask-py${{ matrix.python-version }}
+          flags: with-dask-1
+          name: with-dask-1-py${{ matrix.python-version }}
+          fail_ci_if_error: false
+
+  test-with-dask-2:
+    name: 3.13-build-with-dask-2
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: ci/environment.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+
+      - name: Conda info
+        run: conda info
+
+      - name: Install roms-tools
+        shell: micromamba-shell {0}
+        run: |
+           python -V
+           python -m pip install -e .[dask]  --force-reinstall
+
+      - name: Running Tests with Dask
+        shell: bash -l {0}
+        run: |
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/test_setup/test_boundary_forcing.py roms_tools/tests/test_setup/test_initial_conditions.py roms_tools/tests/test_setup/test_surface_forcing.py
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m || true
+          coverage xml || true
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        continue-on-error: true
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: with-dask-2
+          name: with-dask-2-py${{ matrix.python-version }}
           fail_ci_if_error: false
 
   test-with-streaming:
@@ -167,8 +218,8 @@ jobs:
           name: with-streaming
           fail_ci_if_error: false
 
-  test-with-dask-and-xesmf:
-    name: 3.13-build-with-dask-and-xesmf
+  test-with-dask-and-xesmf-1:
+    name: 3.13-build-with-dask-and-xesmf-1
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -200,7 +251,7 @@ jobs:
         shell: bash -l {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/*
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/ --ignore=roms_tools/tests/test_setup/test_boundary_forcing.py --ignore=roms_tools/tests/test_setup/test_initial_conditions.py --ignore=roms_tools/tests/test_setup/test_surface_forcing.py
 
       - name: Get coverage report
         shell: bash -l {0}
@@ -214,10 +265,60 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
-          flags: with-dask-and-xesmf
-          name: with-dask-and-xesmf
+          flags: with-dask-and-xesmf-1
+          name: with-dask-and-xesmf-1
           fail_ci_if_error: false
 
+  test-with-dask-and-xesmf-2:
+    name: 3.13-build-with-dask-and-xesmf-2
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: ci/environment-with-xesmf.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+          cache-environment-key: micromamba-${{ matrix.python-version }}-${{ runner.os }}
+
+      - name: Conda info
+        run: conda info
+
+      - name: Install roms-tools
+        shell: micromamba-shell {0}
+        run: |
+           python -V
+           python -m pip install -e .[dask]  --force-reinstall
+
+      - name: Running Tests with Dask and Xesmf
+        shell: bash -l {0}
+        run: |
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest --use_dask --verbose roms_tools/tests/test_setup/test_boundary_forcing.py roms_tools/tests/test_setup/test_initial_conditions.py roms_tools/tests/test_setup/test_surface_forcing.py
+
+      - name: Get coverage report
+        shell: bash -l {0}
+        run: |
+          coverage report -m || true
+          coverage xml || true
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        continue-on-error: true
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: with-dask-and-xesmf-2
+          name: with-dask-and-xesmf-2
+          fail_ci_if_error: false
 
   test-glorys-regional-invariance:
     name: 3.13-build-glorys-regional-invariance

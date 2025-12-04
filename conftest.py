@@ -139,7 +139,7 @@ def configure_dask_threads(request):
 
 
 @pytest.fixture(scope="session")
-def use_dask(request, dask_cluster) -> bool:
+def use_dask(request, configure_dask_threads) -> bool:
     """Return True if Dask tests are enabled."""
     return request.config.getoption("--use_dask")
 

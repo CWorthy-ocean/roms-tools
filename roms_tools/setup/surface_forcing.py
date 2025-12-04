@@ -10,16 +10,16 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
-from roms_tools.setup.datasets import (
+from roms_tools.setup.lat_lon_datasets import (
     CESMBGCSurfaceForcingDataset,
-    Dataset,
     ERA5ARCODataset,
     ERA5Correction,
     ERA5Dataset,
-    RawDataSource,
+    LatLonDataset,
     UnifiedBGCSurfaceDataset,
 )
 from roms_tools.setup.utils import (
+    RawDataSource,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
     from_yaml,
@@ -420,7 +420,7 @@ class SurfaceForcing:
         self.variable_info = variable_info
 
     def _apply_radiation_correction(
-        self, radiation: xr.DataArray, data: Dataset
+        self, radiation: xr.DataArray, data: LatLonDataset
     ) -> xr.DataArray:
         """Apply a climatological correction to shortwave radiation.
 

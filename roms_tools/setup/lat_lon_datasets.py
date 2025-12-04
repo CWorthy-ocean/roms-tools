@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
-import logging
 import typing
-from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
-from typing import Any, ClassVar, Literal, TypeAlias, cast
+from typing import Any, ClassVar, Literal, cast
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -20,7 +18,6 @@ import xarray as xr
 from roms_tools.constants import R_EARTH
 from roms_tools.download import (
     download_correction_data,
-    download_river_data,
     download_sal_data,
     download_topo,
 )
@@ -28,13 +25,11 @@ from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
-    convert_cftime_to_datetime,
-    gc_dist,
+    check_dataset,
     get_target_coords,
-    get_time_type,
     interpolate_cyclic_time,
-    interpolate_from_climatology,
     one_dim_fill,
+    select_relevant_times,
 )
 from roms_tools.utils import get_dask_chunks, get_pkg_error_msg, has_gcsfs, load_data
 
@@ -51,13 +46,10 @@ DEFAULT_NR_BUFFER_POINTS = (
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
 # This default will be applied consistently across all datasets requiring lateral fill.
-RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
-
-# lat-lon datasets
 
 
 @dataclass(kw_only=True)
-class Dataset:
+class LatLonDataset:
     """Represents forcing data on original grid.
 
     Parameters
@@ -247,7 +239,7 @@ class Dataset:
         ValueError
             If the dataset does not contain the specified variables or dimensions.
         """
-        _check_dataset(ds, self.dim_names, self.var_names)
+        check_dataset(ds, self.dim_names, self.var_names)
 
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
         """Selects and returns a subset of the dataset containing only the variables
@@ -343,7 +335,7 @@ class Dataset:
         if self.start_time is None:
             raise ValueError("select_relevant_times called but start_time is None.")
 
-        ds = _select_relevant_times(
+        ds = select_relevant_times(
             ds,
             time_dim,
             self.start_time,
@@ -563,7 +555,7 @@ class Dataset:
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
-    ) -> xr.Dataset | Dataset | None:
+    ) -> xr.Dataset | LatLonDataset | None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
         ranges as necessary to accommodate the dataset's expected range and handles
@@ -618,7 +610,7 @@ class Dataset:
             return coords_ds
 
         if return_copy:
-            return Dataset.from_ds(self, subdomain)
+            return LatLonDataset.from_ds(self, subdomain)
         else:
             self.ds = subdomain
             return None
@@ -687,8 +679,8 @@ class Dataset:
                     )
 
     @classmethod
-    def from_ds(cls, original_dataset: Dataset, ds: xr.Dataset) -> Dataset:
-        """Substitute the internal dataset of a Dataset object with a new xarray
+    def from_ds(cls, original_dataset: LatLonDataset, ds: xr.Dataset) -> LatLonDataset:
+        """Substitute the internal dataset of a LatLonDataset object with a new xarray
         Dataset.
 
         This method creates a new Dataset instance, bypassing the usual `__init__`
@@ -698,18 +690,18 @@ class Dataset:
 
         Parameters
         ----------
-        original_dataset : Dataset
-            The original Dataset instance from which attributes will be copied.
+        original_dataset : LatLonDataset
+            The original LatLonDataset instance from which attributes will be copied.
         ds : xarray.Dataset
             The new xarray Dataset to assign to the `ds` attribute of the new instance.
 
         Returns
         -------
-        Dataset
+        LatLonDataset
             A new Dataset instance with the `ds` attribute set to the provided dataset
             and other attributes copied from the original instance.
         """
-        # Create a new Dataset instance without calling __init__ or __post_init__
+        # Create a new LatLonDataset instance without calling __init__ or __post_init__
         dataset = cls.__new__(cls)
 
         # Directly set the provided dataset as the 'ds' attribute
@@ -724,7 +716,7 @@ class Dataset:
 
 
 @dataclass(kw_only=True)
-class TPXODataset(Dataset):
+class TPXODataset(LatLonDataset):
     """Represents tidal data on the original grid from the TPXO dataset.
 
     Parameters
@@ -939,7 +931,7 @@ class TPXODataset(Dataset):
 
 
 @dataclass(kw_only=True)
-class GLORYSDataset(Dataset):
+class GLORYSDataset(LatLonDataset):
     """Represents GLORYS data on original grid."""
 
     var_names: dict[str, str] = field(
@@ -1104,7 +1096,7 @@ class GLORYSDefaultDataset(GLORYSDataset):
 
 
 @dataclass(kw_only=True)
-class UnifiedDataset(Dataset):
+class UnifiedDataset(LatLonDataset):
     """Represents unified BGC data on original grid.
 
     Notes
@@ -1253,7 +1245,7 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
 
 
 @dataclass(kw_only=True)
-class CESMDataset(Dataset):
+class CESMDataset(LatLonDataset):
     """Represents CESM data on original grid."""
 
     # overwrite clean_up method from parent class
@@ -1460,7 +1452,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
 
 @dataclass(kw_only=True)
-class ERA5Dataset(Dataset):
+class ERA5Dataset(LatLonDataset):
     """Represents ERA5 data on original grid."""
 
     var_names: dict[str, str] = field(
@@ -1584,7 +1576,7 @@ class ERA5ARCODataset(ERA5Dataset):
 
 
 @dataclass(kw_only=True)
-class ERA5Correction(Dataset):
+class ERA5Correction(LatLonDataset):
     """Global dataset to correct ERA5 radiation.
 
     The dataset contains multiplicative correction factors for the ERA5 shortwave
@@ -1667,7 +1659,7 @@ class ERA5Correction(Dataset):
 
 
 @dataclass(kw_only=True)
-class ETOPO5Dataset(Dataset):
+class ETOPO5Dataset(LatLonDataset):
     """Represents topography data on the original grid from the ETOPO5 dataset."""
 
     filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
@@ -1703,7 +1695,7 @@ class ETOPO5Dataset(Dataset):
 
 
 @dataclass(kw_only=True)
-class SRTM15Dataset(Dataset):
+class SRTM15Dataset(LatLonDataset):
     """Represents topography data on the original grid from the SRTM15 dataset."""
 
     var_names: dict[str, str] = field(
@@ -1714,428 +1706,6 @@ class SRTM15Dataset(Dataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
-
-
-# river datasets
-@dataclass(kw_only=True)
-class RiverDataset:
-    """Represents river data.
-
-    Parameters
-    ----------
-    filename : Union[str, Path, List[Union[str, Path]]]
-        The path to the data file(s). Can be a single string (with or without wildcards), a single Path object,
-        or a list of strings or Path objects containing multiple files.
-    start_time : datetime
-        The start time for selecting relevant data.
-    end_time : datetime
-        The end time for selecting relevant data.
-    dim_names: Dict[str, str]
-        Dictionary specifying the names of dimensions in the dataset.
-        Requires "station" and "time" as keys.
-    var_names: Dict[str, str]
-        Dictionary of variable names that are required in the dataset.
-        Requires the keys "latitude", "longitude", "flux", "ratio", and "name".
-    opt_var_names: Dict[str, str], optional
-        Dictionary of variable names that are optional in the dataset.
-        Defaults to an empty dictionary.
-    climatology : bool
-        Indicates whether the dataset is climatological. Defaults to False.
-
-    Attributes
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset containing the forcing data on its original grid.
-    """
-
-    filename: str | Path | list[str | Path]
-    start_time: datetime
-    end_time: datetime
-    dim_names: dict[str, str]
-    var_names: dict[str, str]
-    opt_var_names: dict[str, str] | None = field(default_factory=dict)
-    climatology: bool = False
-    ds: xr.Dataset = field(init=False, repr=False)
-
-    def __post_init__(self):
-        # Validate start_time and end_time
-        if not isinstance(self.start_time, datetime):
-            raise TypeError(
-                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
-            )
-        if not isinstance(self.end_time, datetime):
-            raise TypeError(
-                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
-            )
-
-        ds = self.load_data()
-        ds = self.clean_up(ds)
-        self.check_dataset(ds)
-        ds = _deduplicate_river_names(
-            ds, self.var_names["name"], self.dim_names["station"]
-        )
-
-        # Select relevant times
-        ds = self.add_time_info(ds)
-        self.ds = ds
-
-    def load_data(self) -> xr.Dataset:
-        """Load dataset from the specified file.
-
-        Returns
-        -------
-        ds : xr.Dataset
-            The loaded xarray Dataset containing the forcing data.
-        """
-        ds = load_data(
-            self.filename, self.dim_names, use_dask=False, decode_times=False
-        )
-
-        return ds
-
-    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """Decodes the 'name' variable (if byte-encoded) and updates the dataset.
-
-        This method checks if the 'name' variable is of dtype 'object' (i.e., byte-encoded),
-        and if so, decodes each byte array to a string and updates the dataset.
-        It also ensures that the 'station' dimension is of integer type.
-
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The dataset containing the 'name' variable to decode.
-
-        Returns
-        -------
-        ds : xr.Dataset
-            The dataset with the decoded 'name' variable.
-        """
-        if ds[self.var_names["name"]].dtype == "object":
-            names = []
-            for i in range(len(ds[self.dim_names["station"]])):
-                byte_array = ds[self.var_names["name"]].isel(
-                    **{self.dim_names["station"]: i}
-                )
-                name = decode_string(byte_array)
-                names.append(name)
-            ds[self.var_names["name"]] = xr.DataArray(
-                data=names, dims=self.dim_names["station"]
-            )
-
-        if ds[self.dim_names["station"]].dtype == "float64":
-            ds[self.dim_names["station"]] = ds[self.dim_names["station"]].astype(int)
-
-        # Drop all variables that have chars dim
-        vars_to_drop = ["ocn_name", "stn_name", "ct_name", "cn_name", "chars"]
-        existing_vars = [var for var in vars_to_drop if var in ds]
-        ds = ds.drop_vars(existing_vars)
-
-        return ds
-
-    def check_dataset(self, ds: xr.Dataset) -> None:
-        """Validate required variables, dimensions, and uniqueness of river names.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to check.
-
-        Raises
-        ------
-        ValueError
-            If the dataset does not contain the specified variables or dimensions.
-        """
-        _check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
-
-    def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
-        """Dummy method to be overridden by child classes to add time information to the
-        dataset.
-
-        This method is intended as a placeholder and should be implemented in subclasses
-        to provide specific functionality for adding time-related information to the dataset.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to which time information will be added.
-
-        Returns
-        -------
-        xr.Dataset
-            The xarray Dataset with time information added (as implemented by child classes).
-        """
-        return ds
-
-    def select_relevant_times(self, ds) -> xr.Dataset:
-        """Select a subset of the dataset based on the specified time range.
-
-        This method filters the dataset to include all records between `start_time` and `end_time`.
-        Additionally, it ensures that one record at or before `start_time` and one record at or
-        after `end_time` are included, even if they fall outside the strict time range.
-
-        If no `end_time` is specified, the method will select the time range of
-        [start_time, start_time + 24 hours] and return the closest time entry to `start_time` within that range.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The input dataset to be filtered. Must contain a time dimension.
-
-        Returns
-        -------
-        xr.Dataset
-            A dataset filtered to the specified time range, including the closest entries
-            at or before `start_time` and at or after `end_time` if applicable.
-
-        Warns
-        -----
-        UserWarning
-            If no records at or before `start_time` or no records at or after `end_time` are found.
-
-        UserWarning
-            If the dataset does not contain any time dimension or the time dimension is incorrectly named.
-        """
-        time_dim = self.dim_names["time"]
-
-        ds = _select_relevant_times(ds, time_dim, self.start_time, self.end_time, False)
-
-        return ds
-
-    def compute_climatology(self):
-        logging.info("Compute climatology for river forcing.")
-
-        time_dim = self.dim_names["time"]
-
-        flux = self.ds[self.var_names["flux"]].groupby(f"{time_dim}.month").mean()
-        self.ds[self.var_names["flux"]] = flux
-
-        ds = assign_dates_to_climatology(self.ds, "month")
-        ds = ds.swap_dims({"month": "time"})
-        self.ds = ds
-
-        updated_dim_names = {**self.dim_names}
-        updated_dim_names["time"] = "time"
-        self.dim_names = updated_dim_names
-
-        self.climatology = True
-
-    def sort_by_river_volume(self, ds: xr.Dataset) -> xr.Dataset:
-        """Sorts the dataset by river volume in descending order (largest rivers first),
-        if the volume variable is available.
-
-        This method uses the river volume to reorder the dataset such that the rivers with
-        the largest volumes come first in the `station` dimension. If the volume variable
-        is not present in the dataset, a warning is logged.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset containing the river data to be sorted by volume.
-
-        Returns
-        -------
-        xr.Dataset
-            The dataset with rivers sorted by their volume in descending order.
-            If the volume variable is not available, the original dataset is returned.
-        """
-        if self.opt_var_names is not None and "vol" in self.opt_var_names:
-            volume_values = ds[self.opt_var_names["vol"]].values
-            if isinstance(volume_values, np.ndarray):
-                # Check if all volume values are the same
-                if np.all(volume_values == volume_values[0]):
-                    # If all volumes are the same, no need to reverse order
-                    sorted_indices = np.argsort(
-                        volume_values
-                    )  # Sort in ascending order
-                else:
-                    # If volumes differ, reverse order for descending sort
-                    sorted_indices = np.argsort(volume_values)[
-                        ::-1
-                    ]  # Reverse for descending order
-
-                ds = ds.isel(**{self.dim_names["station"]: sorted_indices})
-
-            else:
-                logging.warning("The volume data is not in a valid array format.")
-        else:
-            logging.warning(
-                "Cannot sort rivers by volume. 'vol' is missing in the variable names."
-            )
-
-        return ds
-
-    def extract_relevant_rivers(self, target_coords, dx):
-        """Extracts a subset of the dataset based on the proximity of river mouths to
-        target coordinates.
-
-        This method calculates the distance between each river mouth and the provided target coordinates
-        (latitude and longitude) using the `gc_dist` function. It then filters the dataset to include only those
-        river stations whose minimum distance from the target is less than a specified threshold distance (`dx`).
-
-        Parameters
-        ----------
-        target_coords : dict
-            A dictionary containing the target coordinates for the comparison. It should include:
-            - "lon" (float): The target longitude in degrees.
-            - "lat" (float): The target latitude in degrees.
-            - "straddle" (bool): A flag indicating whether to adjust the longitudes for stations that cross the
-              International Date Line. If `True`, longitudes greater than 180 degrees are adjusted by subtracting 360,
-              otherwise, negative longitudes are adjusted by adding 360.
-
-        dx : float
-            The maximum distance threshold (in meters) for including a river station. Only river mouths that are
-            within `dx` meters from the target coordinates will be included in the returned dataset.
-
-        Returns
-        -------
-        indices : dict[str, list[tuple]]
-            A dictionary containing the indices of the rivers that are within the threshold distance from
-            the target coordinates. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
-            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
-        """
-        # Retrieve longitude and latitude of river mouths
-        river_lon = self.ds[self.var_names["longitude"]]
-        river_lat = self.ds[self.var_names["latitude"]]
-
-        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
-        if target_coords["straddle"]:
-            river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
-        else:
-            river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
-
-        # Calculate the distance between the target coordinates and each river mouth
-        dist = gc_dist(target_coords["lon"], target_coords["lat"], river_lon, river_lat)
-        dist_min = dist.min(dim=["eta_rho", "xi_rho"])
-        # Filter the dataset to include only stations within the distance threshold
-        if (dist_min < dx).any():
-            ds = self.ds.where(dist_min < dx, drop=True)
-            ds = self.sort_by_river_volume(ds)
-            dist = dist.where(dist_min < dx, drop=True).transpose(
-                self.dim_names["station"], "eta_rho", "xi_rho"
-            )
-
-            river_indices = get_indices_of_nearest_grid_cell_for_rivers(dist, self)
-        else:
-            ds = xr.Dataset()
-            river_indices = {}
-
-        self.ds = ds
-
-        return river_indices
-
-    def extract_named_rivers(self, indices):
-        """Extracts a subset of the dataset based on the provided river names in the
-        indices dictionary.
-
-        This method filters the dataset to include only the rivers specified in the `indices` dictionary.
-        The resulting subset is stored in the `ds` attribute of the class.
-
-        Parameters
-        ----------
-        indices : dict
-            A dictionary where the keys are river names (strings) and the values are dictionaries
-            containing river-related data (e.g., river indices, coordinates).
-
-        Returns
-        -------
-        None
-            The method modifies the `self.ds` attribute in place, setting it to the filtered dataset
-            containing only the data related to the specified rivers.
-
-        Raises
-        ------
-        ValueError
-            - If `indices` is not a dictionary.
-            - If any of the requested river names are not found in the dataset.
-        """
-        if not isinstance(indices, dict):
-            raise ValueError("`indices` must be a dictionary.")
-
-        river_names = list(indices.keys())
-
-        # Ensure the dataset is filtered based on the provided river names
-        ds_filtered = self.ds.where(
-            self.ds[self.var_names["name"]].isin(river_names), drop=True
-        )
-
-        # Check that all requested rivers exist in the dataset
-        filtered_river_names = set(ds_filtered[self.var_names["name"]].values)
-        missing_rivers = set(river_names) - filtered_river_names
-
-        if missing_rivers:
-            raise ValueError(
-                f"The following rivers were not found in the dataset: {missing_rivers}"
-            )
-
-        # Set the filtered dataset as the new `ds`
-        self.ds = ds_filtered
-
-
-@dataclass(kw_only=True)
-class DaiRiverDataset(RiverDataset):
-    """Represents river data from the Dai river dataset."""
-
-    filename: str | Path | list[str | Path] = field(
-        default_factory=lambda: download_river_data("dai_trenberth_may2019.nc")
-    )
-    dim_names: dict[str, str] = field(
-        default_factory=lambda: {
-            "station": "station",
-            "time": "time",
-        }
-    )
-    var_names: dict[str, str] = field(
-        default_factory=lambda: {
-            "latitude": "lat_mou",
-            "longitude": "lon_mou",
-            "flux": "FLOW",
-            "ratio": "ratio_m2s",
-            "name": "riv_name",
-        }
-    )
-    opt_var_names: dict[str, str] = field(
-        default_factory=lambda: {
-            "vol": "vol_stn",
-        }
-    )
-    climatology: bool = False
-
-    def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
-        """Adds time information to the dataset based on the climatology flag and
-        dimension names.
-
-        This method processes the dataset to include time information according to the climatology
-        setting. If the dataset represents climatology data and the time dimension is labeled as
-        "month", it assigns dates to the dataset based on a monthly climatology. Additionally, it
-        handles dimension name updates if necessary.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The input dataset to which time information will be added.
-
-        Returns
-        -------
-        xr.Dataset
-            The dataset with time information added, including adjustments for climatology and
-            dimension names.
-        """
-        time_dim = self.dim_names["time"]
-
-        # Extract the 'time' variable as a numpy array
-        time_vals = ds[time_dim].values
-
-        # Handle rounding of the time values
-        year = np.round(time_vals * 1e-2).astype(int)
-        month = np.round((time_vals * 1e-2 - year) * 1e2).astype(int)
-
-        # Convert to datetime (assuming the day is always 15th for this example)
-        dates = [datetime(year=i, month=m, day=15) for i, m in zip(year, month)]
-
-        ds[time_dim] = dates
-
-        return ds
 
 
 @dataclass
@@ -2625,281 +2195,6 @@ class TPXOManager:
         object.__setattr__(self.datasets["sal"], "var_names", var_names)
 
 
-# shared functions
-
-
-def _check_dataset(
-    ds: xr.Dataset,
-    dim_names: dict[str, str],
-    var_names: dict[str, str],
-    opt_var_names: dict[str, str] | None = None,
-) -> None:
-    """Check if the dataset contains the specified variables and dimensions.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset to check.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    var_names: Dict[str, str]
-        Dictionary of variable names that are required in the dataset.
-    opt_var_names : Optional[Dict[str, str]], optional
-        Dictionary of optional variable names.
-        These variables are not strictly required, and the function will not raise an error if they are missing.
-        Default is None, meaning no optional variables are considered.
-
-
-    Raises
-    ------
-    ValueError
-        If the dataset does not contain the specified variables or dimensions.
-    """
-    missing_dims = [dim for dim in dim_names.values() if dim not in ds.dims]
-    if missing_dims:
-        raise ValueError(
-            f"Dataset does not contain all required dimensions. The following dimensions are missing: {missing_dims}"
-        )
-
-    missing_vars = [var for var in var_names.values() if var not in ds.data_vars]
-    if missing_vars:
-        raise ValueError(
-            f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
-        )
-
-    if opt_var_names:
-        missing_optional_vars = [
-            var for var in opt_var_names.values() if var not in ds.data_vars
-        ]
-        if missing_optional_vars:
-            logging.warning(
-                f"Optional variables missing (but not critical): {missing_optional_vars}"
-            )
-
-
-def _select_relevant_times(
-    ds: xr.Dataset,
-    time_dim: str,
-    start_time: datetime,
-    end_time: datetime | None = None,
-    climatology: bool = False,
-    allow_flex_time: bool = False,
-) -> xr.Dataset:
-    """
-    Select a subset of the dataset based on time constraints.
-
-    This function supports two main use cases:
-
-    1. **Time range selection (start_time + end_time provided):**
-       - Returns all records strictly between `start_time` and `end_time`.
-       - Ensures at least one record at or before `start_time` and one record at or
-         after `end_time` are included, even if they fall outside the strict range.
-
-    2. **Initial condition selection (start_time provided, end_time=None):**
-       - Delegates to `_select_initial_time`, which reduces the dataset to exactly one
-         time entry.
-       - If `allow_flex_time=True`, a +24-hour buffer around `start_time` is allowed,
-         and the closest timestamp is chosen.
-       - If `allow_flex_time=False`, requires an exact timestamp match.
-
-    Additional behavior:
-    - If `climatology=True`, the dataset must contain exactly 12 time steps. If valid,
-      the climatology dataset is returned without further filtering.
-    - If the dataset uses `cftime` datetime objects, these are converted to
-      `np.datetime64` before filtering.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        The dataset to filter. Must contain a valid time dimension.
-    time_dim : str
-        Name of the time dimension in `ds`.
-    start_time : datetime
-        Start time for filtering.
-    end_time : datetime or None
-        End time for filtering. If `None`, the function assumes an initial condition
-        use case and selects exactly one timestamp.
-    climatology : bool, optional
-        If True, requires exactly 12 time steps and bypasses normal filtering.
-        Defaults to False.
-    allow_flex_time : bool, optional
-        Whether to allow a +24h search window after `start_time` when `end_time`
-        is None. If False (default), requires an exact match.
-
-    Returns
-    -------
-    xr.Dataset
-        A filtered dataset containing only the selected time entries.
-
-    Raises
-    ------
-    ValueError
-        - If `climatology=True` but the dataset does not contain exactly 12 time steps.
-        - If `climatology=False` and the dataset contains integer time values.
-        - If no valid records are found within the requested range or window.
-
-    Warns
-    -----
-    UserWarning
-        - If no records exist at or before `start_time` or at or after `end_time`.
-        - If the specified time dimension does not exist in the dataset.
-
-    Notes
-    -----
-    - For initial conditions (end_time=None), see `_select_initial_time` for details
-      on strict vs. flexible selection behavior.
-    - Logs warnings instead of failing hard when boundary records are missing, and
-      defaults to using the earliest or latest available time in such cases.
-    """
-    if time_dim not in ds.variables:
-        logging.warning(
-            f"Dataset does not contain time dimension '{time_dim}'. "
-            "Please check variable naming or dataset structure."
-        )
-        return ds
-
-    time_type = get_time_type(ds[time_dim])
-
-    if climatology:
-        if len(ds[time_dim]) != 12:
-            raise ValueError(
-                f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
-            )
-    else:
-        if time_type == "int":
-            raise ValueError(
-                "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
-            )
-    if time_type == "cftime":
-        ds = ds.assign_coords({time_dim: convert_cftime_to_datetime(ds[time_dim])})
-
-    if not end_time:
-        # Assume we are looking for exactly one time record for initial conditions
-        return _select_initial_time(
-            ds, time_dim, start_time, climatology, allow_flex_time
-        )
-
-    if climatology:
-        return ds
-
-    # Identify records before or at start_time
-    before_start = ds[time_dim] <= np.datetime64(start_time)
-    if before_start.any():
-        closest_before_start = ds[time_dim].where(before_start, drop=True)[-1]
-    else:
-        logging.warning(f"No records found at or before the start_time: {start_time}.")
-        closest_before_start = ds[time_dim][0]
-
-    # Identify records after or at end_time
-    after_end = ds[time_dim] >= np.datetime64(end_time)
-    if after_end.any():
-        closest_after_end = ds[time_dim].where(after_end, drop=True).min()
-    else:
-        logging.warning(f"No records found at or after the end_time: {end_time}.")
-        closest_after_end = ds[time_dim].max()
-
-    # Select records within the time range and add the closest before/after
-    within_range = (ds[time_dim] > np.datetime64(start_time)) & (
-        ds[time_dim] < np.datetime64(end_time)
-    )
-    selected_times = ds[time_dim].where(
-        within_range
-        | (ds[time_dim] == closest_before_start)
-        | (ds[time_dim] == closest_after_end),
-        drop=True,
-    )
-    ds = ds.sel({time_dim: selected_times})
-
-    return ds
-
-
-def _select_initial_time(
-    ds: xr.Dataset,
-    time_dim: str,
-    ini_time: datetime,
-    climatology: bool,
-    allow_flex_time: bool = False,
-) -> xr.Dataset:
-    """Select exactly one initial time from dataset.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        The input dataset with a time dimension.
-    time_dim : str
-        Name of the time dimension.
-    ini_time : datetime
-        The desired initial time.
-    allow_flex_time : bool
-        - If True: allow a +24h window and pick the closest available timestamp.
-        - If False (default): require an exact match, otherwise raise ValueError.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset reduced to exactly one timestamp.
-
-    Raises
-    ------
-    ValueError
-        If no matching time is found (when `allow_flex_time=False`), or no entries are
-        available within the +24h window (when `allow_flex_time=True`).
-    """
-    if climatology:
-        # Convert from timedelta64[ns] to fractional days
-        ds["time"] = ds["time"] / np.timedelta64(1, "D")
-        # Interpolate from climatology for initial conditions
-        return interpolate_from_climatology(ds, time_dim, ini_time)
-
-    if allow_flex_time:
-        # Look in time range [ini_time, ini_time + 24h)
-        end_time = ini_time + timedelta(days=1)
-        times = (np.datetime64(ini_time) <= ds[time_dim]) & (
-            ds[time_dim] < np.datetime64(end_time)
-        )
-
-        if np.all(~times):
-            raise ValueError(
-                f"No time entries found between {ini_time} and {end_time}."
-            )
-
-        ds = ds.where(times, drop=True)
-        if ds.sizes[time_dim] > 1:
-            # Pick the time closest to start_time
-            ds = ds.isel({time_dim: 0})
-
-        logging.warning(
-            f"Selected time entry closest to the specified start_time in +24 hour range: {ds[time_dim].values}"
-        )
-
-    else:
-        # Strict match required
-        if not (ds[time_dim].values == np.datetime64(ini_time)).any():
-            raise ValueError(
-                f"No exact match found for initial time {ini_time}. Consider setting allow_flex_time to True."
-            )
-
-        ds = ds.sel({time_dim: np.datetime64(ini_time)})
-
-    if time_dim not in ds.dims:
-        ds = ds.expand_dims(time_dim)
-
-    return ds
-
-
-def decode_string(byte_array):
-    # Decode each byte and handle errors with 'ignore'
-    decoded_string = "".join(
-        [
-            x.decode("utf-8", errors="ignore")  # Ignore invalid byte sequences
-            for x in byte_array.values
-            if isinstance(x, bytes) and x != b" " and x is not np.nan
-        ]
-    )
-
-    return decoded_string
-
-
 def modified_julian_days(year, month, day, hour=0):
     """Calculate the Modified Julian Day (MJD) for a given date and time.
 
@@ -2955,82 +2250,6 @@ def modified_julian_days(year, month, day, hour=0):
     mjd = jd - 2400000.5
 
     return mjd
-
-
-def get_indices_of_nearest_grid_cell_for_rivers(
-    dist: xr.DataArray, data: RiverDataset
-) -> dict[str, list[tuple[int, int]]]:
-    """Get the indices of the nearest grid cell for each river based on distance.
-
-    Parameters
-    ----------
-    dist : xr.DataArray
-        A 2D or 3D array representing distances from each river to coastal grid cells,
-        with dimensions including "eta_rho" and "xi_rho".
-    data : RiverDataset
-        An instance of RiverDataset containing river names and dimension metadata.
-
-    Returns
-    -------
-    dict[str, list[tuple[int, int]]]
-        Dictionary mapping each river name to a list containing the (eta_rho, xi_rho) index
-        of the closest coastal grid cell.
-    """
-    # Find indices of the nearest coastal grid cell for each river
-    indices = dist.argmin(dim=["eta_rho", "xi_rho"])
-
-    eta_rho_values = indices["eta_rho"].values
-    xi_rho_values = indices["xi_rho"].values
-
-    # Get the corresponding station indices and river names
-    stations = indices["eta_rho"][data.dim_names["station"]].values
-    names = (
-        data.ds[data.var_names["name"]]
-        .sel({data.dim_names["station"]: stations})
-        .values
-    )
-
-    # Build dictionary of river name to grid index
-    river_indices = {
-        str(names[i]): [(int(eta_rho_values[i]), int(xi_rho_values[i]))]
-        for i in range(len(stations))
-    }
-
-    return river_indices
-
-
-def _deduplicate_river_names(
-    ds: xr.Dataset, name_var: str, station_dim: str
-) -> xr.Dataset:
-    """Ensure river names are unique by appending _1, _2 to duplicates, excluding non-
-    duplicates.
-    """
-    original = ds[name_var]
-
-    # Force cast to plain Python strings
-    names = [str(name) for name in original.values]
-
-    # Count all names
-    name_counts = Counter(names)
-    seen: defaultdict[str, int] = defaultdict(int)
-
-    unique_names = []
-    for name in names:
-        if name_counts[name] > 1:
-            seen[name] += 1
-            unique_names.append(f"{name}_{seen[name]}")
-        else:
-            unique_names.append(name)
-
-    # Replace with updated names while preserving dtype, dims, attrs
-    updated_array = xr.DataArray(
-        data=np.array(unique_names, dtype=f"<U{max(len(n) for n in unique_names)}"),
-        dims=original.dims,
-        attrs=original.attrs,
-    )
-    ds[name_var] = updated_array
-
-    return ds
 
 
 def _concatenate_longitudes(

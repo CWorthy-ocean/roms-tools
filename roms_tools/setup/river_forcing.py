@@ -17,12 +17,12 @@ from roms_tools.plot import (
     plot_2d_horizontal_field,
     plot_location,
 )
-from roms_tools.setup.datasets import (
+from roms_tools.setup.river_datasets import (
     DaiRiverDataset,
-    RawDataSource,
     get_indices_of_nearest_grid_cell_for_rivers,
 )
 from roms_tools.setup.utils import (
+    RawDataSource,
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
     from_yaml,

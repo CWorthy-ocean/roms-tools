@@ -8,7 +8,7 @@ import xarray as xr
 
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import ERA5Correction
+from roms_tools.setup.lat_lon_datasets import ERA5Correction
 from roms_tools.setup.utils import (
     get_target_coords,
     interpolate_from_climatology,

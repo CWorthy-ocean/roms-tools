@@ -23,6 +23,7 @@
 ### Bugfixes
 
 * Make unit handling in `RiverForcing.plot_locations()` robust for grids without `mask_rho` units ([#499](https://github.com/CWorthy-ocean/roms-tools/pull/499))
+* Explicitly prohibit child boundaries that are entirely on land instead of throwing non-descriptive error message ([#503](https://github.com/CWorthy-ocean/roms-tools/pull/503))
 
 
 ## v3.2.0

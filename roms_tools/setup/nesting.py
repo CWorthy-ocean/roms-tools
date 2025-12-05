@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -80,11 +81,6 @@ class ChildGrid(Grid):
     """An xarray Dataset containing boundary mappings, where child grid boundaries are
     mapped onto parent grid indices."""
 
-    def __post_init__(self):
-        super().__post_init__()
-        self._map_child_boundaries_onto_parent_grid_indices(verbose=self.verbose)
-        self._modify_child_topography_and_mask(verbose=self.verbose)
-
     def _map_child_boundaries_onto_parent_grid_indices(self, verbose: bool = False):
         """Maps child grid boundary points onto absolute indices of the parent grid."""
         with Timed(
@@ -105,66 +101,124 @@ class ChildGrid(Grid):
 
             self.ds_nesting = ds_nesting
 
-    def _modify_child_topography_and_mask(self, verbose: bool = False):
-        """Adjust the topography and mask of the child grid to align with the parent grid.
-
-        Uses a weighted sum based on boundary distance and clips depth values to a
-        minimum.
-        """
-        with Timed("=== Modifying child topography and mask ===", verbose=verbose):
-            # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
+    def _apply_child_modification(
+        self,
+        modifier: Callable,
+        modifier_name: str,
+        verbose: bool = False,
+    ):
+        """Shared logic for modifying child mask/topography."""
+        with Timed(f"=== Modifying the child {modifier_name} ===", verbose=verbose):
+            # Prepare datasets (fix dateline)
             parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
-            child_grid_ds = modify_child_topography_and_mask(
-                parent_grid_ds, child_grid_ds, self.boundaries, self.hmin
-            )
 
-            # Finalize grid datasets by adjusting longitudes back to [0, 360] range
-            parent_grid_ds, child_grid_ds = self._finalize_grid_datasets(
+            # Apply modification function
+            child_grid_ds = modifier(parent_grid_ds, child_grid_ds)
+
+            # Restore longitudes to 0-360
+            _, child_grid_ds = self._finalize_grid_datasets(
                 parent_grid_ds, child_grid_ds
             )
 
             self.ds = child_grid_ds
 
-    def update_topography(
-        self, topography_source=None, hmin=None, verbose=False
-    ) -> None:
-        """Update the child grid topography via the following steps.
+    def _modify_child_mask(self, verbose: bool = False) -> None:
+        """Adjust child grid mask to align with the parent grid."""
+        self._apply_child_modification(
+            modifier=lambda p, c: modify_child_mask(p, c, self.boundaries),
+            modifier_name="mask",
+            verbose=verbose,
+        )
 
-        - Regrids the topography based on the specified source.
-        - Applies global and local smoothing.
-        - Adjusts the child grid topography and mask to match the parent grid.
-        - Ensures the minimum depth constraint (`hmin`) is enforced.
-        - Updates the internal dataset (`self.ds`) with the processed topography.
+    def _modify_child_topography(self, hmin: float, verbose: bool = False) -> None:
+        """Adjust child grid topography to align with the parent grid."""
+        self._apply_child_modification(
+            modifier=lambda p, c: modify_child_topography(p, c, self.boundaries, hmin),
+            modifier_name="topography",
+            verbose=verbose,
+        )
+
+    def update_mask(
+        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+    ) -> None:
+        """
+        Update the child grid mask and ensure consistency with the parent grid.
+
+        This method performs the following steps:
+
+        1. Derives the child mask from the provided ``mask_shapefile`` (or from the
+           default Natural Earth 10m coastline if ``None``).
+        2. Updates the mapping of child boundaries to parent-grid indices.
+           This mapping depends on the updated mask, since masked (land) points may
+           extend outside the parent grid.
+        3. Adjusts the child mask to ensure consistency with the parent mask.
 
         Parameters
         ----------
-        topography_source : dict, optional
-            A dictionary specifying the source of the topography data. Expected keys:
-            - `"name"` (str): Name of the topography dataset (e.g., `"SRTM15"`).
-            - `"path"` (str or Path): File path to the topography dataset.
-
-            If not provided, the existing topography source remains unchanged.
-
-        hmin : float, optional
-            The minimum allowable ocean depth (in meters). If not provided, the existing
-            value remains unchanged.
-
-        verbose : bool, optional
-            If `True`, prints detailed information about each processing step, including
-            timing and modifications. Defaults to `False`.
+        mask_shapefile : str or Path, optional
+            Path to a coastal shapefile used to derive the land mask. If ``None``,
+            a default coastline dataset is used.
+        verbose : bool, default False
+            If True, prints timing and progress information.
 
         Returns
         -------
         None
-            This method updates the internal dataset (`self.ds`) in place, modifying the
-            topography variable. It does not return a value.
+            Updates the internal datasets (``self.ds`` and ``self.ds_nesting``) in place,
+            modifying the mask and ensuring consistent parent-child boundary mapping.
         """
-        super().update_topography(
-            topography_source=topography_source, hmin=hmin, verbose=verbose
-        )
+        super().update_mask(mask_shapefile=mask_shapefile, verbose=verbose)
+        self._map_child_boundaries_onto_parent_grid_indices(verbose=verbose)
+        self._modify_child_mask(verbose=verbose)
 
-        # Modify child topography and mask to match the parent grid
-        self._modify_child_topography_and_mask(verbose=verbose)
+    def update_topography(
+        self,
+        topography_source: dict | None = None,
+        hmin: float | None = None,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Update the child grid topography and ensure consistency with the parent grid.
+
+        This method performs the following operations:
+
+        1. Regrids the topography from the specified source.
+        2. Applies domain-wide and local smoothing.
+        3. Enforces the minimum depth constraint ``hmin``.
+        4. Adjusts the child grid topography to maintain consistency with the
+           parent grid.
+        5. Updates the internal dataset (``self.ds``) with the processed bathymetry.
+
+        Parameters
+        ----------
+        topography_source : dict, optional
+            Dictionary describing the topography data source. Expected keys:
+
+            - ``"name"`` (str): Name of the source dataset (e.g., ``"SRTM15"``).
+            - ``"path"`` (str or Path): Path to the dataset file.
+
+            If ``None``, the previously configured topography source is used.
+
+        hmin : float, optional
+            Minimum allowable ocean depth (meters). If ``None``, the existing value
+            is retained.
+
+        verbose : bool, default False
+            If ``True``, prints progress messages and timing information.
+
+        Returns
+        -------
+        None
+            Updates ``self.ds`` in place by modifying the topography field. Nothing
+            is returned.
+        """
+        hmin = hmin or self.hmin
+        super().update_topography(
+            topography_source=topography_source,
+            hmin=hmin,
+            verbose=verbose,
+        )
+        self._modify_child_topography(hmin=hmin, verbose=verbose)
 
     def plot_nesting(self, with_dim_names=False) -> None:
         """Plot the parent and child grids in a single figure.
@@ -268,9 +322,12 @@ class ChildGrid(Grid):
             - The modified child grid dataset.
         """
         parent_grid_ds = wrap_longitudes(
-            self.parent_grid.ds, straddle=self.parent_grid.straddle
+            self.parent_grid.ds.copy(), straddle=self.parent_grid.straddle
         )
-        child_grid_ds = wrap_longitudes(self.ds, straddle=self.parent_grid.straddle)
+        child_grid_ds = wrap_longitudes(
+            self.ds.copy(), straddle=self.parent_grid.straddle
+        )
+
         return parent_grid_ds, child_grid_ds
 
     def _finalize_grid_datasets(
@@ -318,12 +375,12 @@ class ChildGrid(Grid):
 
 
 def map_child_boundaries_onto_parent_grid_indices(
-    parent_grid_ds,
-    child_grid_ds,
-    boundaries={"south": True, "east": True, "north": True, "west": True},
-    prefix="child",
-    period=3600.0,
-    update_land_indices=True,
+    parent_grid_ds: xr.Dataset,
+    child_grid_ds: xr.Dataset,
+    boundaries: dict = {"south": True, "east": True, "north": True, "west": True},
+    prefix: str = "child",
+    period: float = 3600.0,
+    update_land_indices: bool = True,
 ):
     """Maps child grid boundary points onto absolute indices of the parent grid.
 
@@ -369,6 +426,7 @@ def map_child_boundaries_onto_parent_grid_indices(
     bdry_coords_dict = get_boundary_coords()
 
     # add angles at u- and v-points
+
     child_grid_ds["angle_u"] = interpolate_from_rho_to_u(child_grid_ds["angle"])
     child_grid_ds["angle_v"] = interpolate_from_rho_to_v(child_grid_ds["angle"])
 
@@ -399,7 +457,7 @@ def map_child_boundaries_onto_parent_grid_indices(
                 mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
 
                 i_eta, i_xi = interpolate_indices(
-                    parent_grid_ds, lon_child, lat_child, mask_child
+                    parent_grid_ds, lon_child, lat_child, mask_child, direction
                 )
 
                 if update_land_indices:
@@ -445,8 +503,22 @@ def map_child_boundaries_onto_parent_grid_indices(
     return ds
 
 
-def interpolate_indices(parent_grid_ds, lon, lat, mask):
-    """Interpolate the parent indices to the child grid.
+def interpolate_indices(
+    parent_grid_ds: xr.Dataset,
+    lon: xr.DataArray,
+    lat: xr.DataArray,
+    mask: xr.DataArray,
+    direction: str,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Interpolate the parent indices to the child grid boundary.
+
+    Uses the parent grid ``lon_rho``/``lat_rho`` coordinates to compute
+    fractional i/j indices at child-boundary longitude/latitude points using
+    linear interpolation. The function verifies that all ocean child points
+    (based on ``mask``) lie within the parent grid and warns if child
+    boundary points fall near the parent-grid edges. Land child points that fall
+    outside the parent grid (i.e., interpolation returns NaN) are filled with
+    ``-1e5``.
 
     Parameters
     ----------
@@ -458,6 +530,9 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
         Latitudes of the child grid where interpolation is desired.
     mask: xarray.DataArray
         Mask for the child longitudes and latitudes under consideration.
+    direction : str
+        Boundary identifier (``"south"``, ``"north"``, ``"east"``, ``"west"``).
+        Used for generating informative warnings or errors.
     Returns
     -------
     i : xarray.DataArray
@@ -492,21 +567,63 @@ def interpolate_indices(parent_grid_ds, lon, lat, mask):
     i = xr.DataArray(i, dims=lon.dims)
     j = xr.DataArray(j, dims=lon.dims)
 
-    # Check for NaN values
-    if np.sum(np.isnan(i)) > 0 or np.sum(np.isnan(j)) > 0:
+    # Check whether ocean child points fall outside the parent grid
+    if (
+        i.where(mask, other=0.0).isnull().any()
+        or j.where(mask, other=0.0).isnull().any()
+    ):
         raise ValueError(
-            "Some points are outside the grid. Please choose either a bigger parent grid or a smaller child grid."
+            f"Some wet points on the {direction}ern boundary of the child grid lie "
+            "outside the parent grid. Please use a larger parent grid or a smaller child grid."
         )
 
-    # Check whether indices are close to border of parent grid
-    nxp, nyp = lon_parent.shape
-    if np.min(i) < 0 or np.max(i) > nxp - 2:
-        logging.warning(
-            "Some boundary points of the child grid are very close to the boundary of the parent grid."
+    # Check whether the entire boundary is outside but on land
+    if i.isnull().all() or j.isnull().all():
+        raise ValueError(
+            f"The entire {direction}ern boundary of the child grid lies outside the "
+            "parent grid, but all of these boundary points are land. Please disable this boundary."
         )
-    if np.min(j) < 0 or np.max(j) > nyp - 2:
+
+    # Try to fix NaNs if there only a few per boundary. Fix with out-of-bounds points is not valid.
+    nxp, nyp = lon_parent.shape
+    nan_idx = (
+        i.isnull() | j.isnull() | (i > nxp - 2) | (i < 0) | (j > nyp - 2) | (j < 0)
+    )
+
+    idx = xr.DataArray(np.arange(i.size), dims=i.dims)
+
+    # Interpolate indices for points that are invalid (NaN or out-of-bounds)
+    if nan_idx.any() and not nan_idx.all():
+        idx_tmp = idx.where(~nan_idx, drop=True)  # valid poins
+        i_tmp = i.where(~nan_idx, drop=True)  # valid points
+        j_tmp = j.where(~nan_idx, drop=True)  # valid points
+
+        interp_i = interp1d(
+            idx_tmp.values, i_tmp.values, kind="nearest", fill_value="extrapolate"
+        )
+        interp_j = interp1d(
+            idx_tmp.values, j_tmp.values, kind="nearest", fill_value="extrapolate"
+        )
+
+        i[nan_idx.values] = interp_i(idx[nan_idx].values)
+        j[nan_idx.values] = interp_j(idx[nan_idx].values)
+
+    # This should only occur in rare edge cases
+    if i.isnull().any() or j.isnull().any():
+        raise ValueError(
+            f"Mapping failed: the {direction}ern boundary of the child grid could not be "
+            "mapped onto parent-grid indices. Please adjust the parent/child grid configuration."
+        )
+
+    # Warn if child boundary points are near the edges of the parent grid
+    if (
+        i.where(mask).min() < 0
+        or i.where(mask).max() > nxp - 2
+        or j.where(mask).min() < 0
+        or j.where(mask).max() > nyp - 2
+    ):
         logging.warning(
-            "Some boundary points of the child grid are very close to the boundary of the parent grid."
+            f"Some wet points on the {direction}ern boundary of the child grid lie very close to the edges of the parent grid."
         )
 
     return i, j
@@ -606,13 +723,88 @@ def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds)
     return i_eta, i_xi
 
 
-def modify_child_topography_and_mask(
+def _interpolate_parent(
+    parent_da: xr.DataArray, child_da: xr.DataArray
+) -> xr.DataArray:
+    """
+    Interpolate data from a parent grid onto a child grid using linear interpolation.
+
+    Parameters
+    ----------
+    parent_da : xr.DataArray
+        The data array on the parent grid. Must have coordinates `lon_rho` and `lat_rho`.
+    child_da : xr.DataArray
+        The target child grid data array. Must have coordinates `lon_rho` and `lat_rho`.
+
+    Returns
+    -------
+    xr.DataArray
+        The interpolated data on the child grid, with dimensions ("eta_rho", "xi_rho").
+    """
+    points = np.column_stack(
+        (parent_da.lon_rho.values.ravel(), parent_da.lat_rho.values.ravel())
+    )
+    xi = (child_da.lon_rho.values, child_da.lat_rho.values)
+    values = parent_da.values.ravel()
+
+    parent_interpolated = griddata(points, values, xi, method="linear")
+    return xr.DataArray(parent_interpolated, dims=("eta_rho", "xi_rho"))
+
+
+def modify_child_mask(
+    parent_grid_ds: xr.Dataset,
+    child_grid_ds: xr.Dataset,
+    boundaries: dict = {"south": True, "east": True, "north": True, "west": True},
+):
+    """Adjust the child gridmask to align with the parent grid.
+
+    The mask of the child grid is adjusted using a weighted sum based on the boundary distance.
+
+    Parameters
+    ----------
+    parent_grid_ds : xarray.Dataset
+        The parent grid dataset containing `mask_rho` (land-sea mask).
+
+    child_grid_ds : xarray.Dataset
+        The child grid dataset whose `mask_rho` will be modified.
+
+    boundaries : dict, optional
+        A dictionary specifying which boundaries should be modified. Expected keys:
+        - `"south"` (bool): Whether to adjust the southern boundary.
+        - `"east"` (bool): Whether to adjust the eastern boundary.
+        - `"north"` (bool): Whether to adjust the northern boundary.
+        - `"west"` (bool): Whether to adjust the western boundary.
+        Defaults to modifying all boundaries.
+
+    Returns
+    -------
+    xarray.Dataset
+        The updated child grid dataset with modified mask (`mask_rho`).
+    """
+    # regrid parent mask onto child grid
+    mask_parent_interpolated = _interpolate_parent(
+        parent_grid_ds["mask_rho"], child_grid_ds["mask_rho"]
+    )
+
+    # compute weight based on distance
+    alpha = compute_boundary_distance(child_grid_ds["mask_rho"], boundaries)
+
+    # update child mask to be weighted sum between original child and interpolated parent
+    child_mask = (
+        alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated
+    )
+    child_grid_ds["mask_rho"] = xr.where(child_mask >= 0.5, 1, 0)
+
+    return child_grid_ds
+
+
+def modify_child_topography(
     parent_grid_ds,
     child_grid_ds,
     boundaries={"south": True, "east": True, "north": True, "west": True},
     hmin=5.0,
 ):
-    """Adjust the child grid topography and mask to align with the parent grid.
+    """Adjust the child grid topography to align with the parent grid.
 
     The topography of the child grid is adjusted using a weighted sum based on the boundary distance,
     and the depth values are clipped to enforce a minimum depth constraint.
@@ -620,10 +812,10 @@ def modify_child_topography_and_mask(
     Parameters
     ----------
     parent_grid_ds : xarray.Dataset
-        The parent grid dataset containing `h` (topography) and `mask_rho` (land-sea mask).
+        The parent grid dataset containing `h` (topography).
 
     child_grid_ds : xarray.Dataset
-        The child grid dataset whose `h` and `mask_rho` will be modified.
+        The child grid dataset whose `h` will be modified.
 
     boundaries : dict, optional
         A dictionary specifying which boundaries should be modified. Expected keys:
@@ -641,39 +833,21 @@ def modify_child_topography_and_mask(
     Returns
     -------
     xarray.Dataset
-        The updated child grid dataset with modified topography (`h`) and mask (`mask_rho`).
+        The updated child grid dataset with modified topography (`h`).
     """
-    # regrid parent topography and mask onto child grid
-    points = np.column_stack(
-        (parent_grid_ds.lon_rho.values.ravel(), parent_grid_ds.lat_rho.values.ravel())
-    )
-    xi = (child_grid_ds.lon_rho.values, child_grid_ds.lat_rho.values)
-
-    values = parent_grid_ds["h"].values.ravel()
-    h_parent_interpolated = griddata(points, values, xi, method="linear")
-    h_parent_interpolated = xr.DataArray(
-        h_parent_interpolated, dims=("eta_rho", "xi_rho")
-    )
-
-    values = parent_grid_ds["mask_rho"].values.ravel()
-    mask_parent_interpolated = griddata(points, values, xi, method="linear")
-    mask_parent_interpolated = xr.DataArray(
-        mask_parent_interpolated, dims=("eta_rho", "xi_rho")
-    )
+    # regrid parent mask onto child grid
+    h_parent_interpolated = _interpolate_parent(parent_grid_ds["h"], child_grid_ds["h"])
 
     # compute weight based on distance
     alpha = compute_boundary_distance(child_grid_ds["mask_rho"], boundaries)
-    # update child topography and mask to be weighted sum between original child and interpolated parent
+
+    # update child topography to be weighted sum between original child and interpolated parent
     child_grid_ds["h"] = (
         alpha * child_grid_ds["h"] + (1 - alpha) * h_parent_interpolated
     )
+
     # Clip depth on modified child topography
     child_grid_ds["h"] = clip_depth(child_grid_ds["h"], hmin)
-
-    child_mask = (
-        alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated
-    )
-    child_grid_ds["mask_rho"] = xr.where(child_mask >= 0.5, 1, 0)
 
     return child_grid_ds
 

@@ -2293,7 +2293,7 @@ def check_and_set_boundaries(
                 f"{inferred_defaults[key]}"
             )
 
-    logging.info(f"Using final boundary configuration: {completed}")
+    logging.info(f"Using boundary configuration: {completed}")
     return completed
 
 

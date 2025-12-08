@@ -460,7 +460,7 @@ def map_child_boundaries_onto_parent_grid_indices(
                     parent_grid_ds, lon_child, lat_child, mask_child, direction
                 )
 
-                if update_land_indices:
+                if update_land_indices and mask_child.sum() > 0:
                     i_eta, i_xi = update_indices_if_on_parent_land(
                         i_eta, i_xi, grid_location, parent_grid_ds
                     )
@@ -577,13 +577,6 @@ def interpolate_indices(
             "outside the parent grid. Please use a larger parent grid or a smaller child grid."
         )
 
-    # Check whether the entire boundary is outside but on land
-    if i.isnull().all() or j.isnull().all():
-        raise ValueError(
-            f"The entire {direction}ern boundary of the child grid lies outside the "
-            "parent grid, but all of these boundary points are land. Please disable this boundary."
-        )
-
     # Try to fix NaNs if there only a few per boundary. Fix with out-of-bounds points is not valid.
     nxp, nyp = lon_parent.shape
     nan_idx = (
@@ -629,7 +622,12 @@ def interpolate_indices(
     return i, j
 
 
-def update_indices_if_on_parent_land(i_eta, i_xi, grid_location, parent_grid_ds):
+def update_indices_if_on_parent_land(
+    i_eta: xr.DataArray,
+    i_xi: xr.DataArray,
+    grid_location: str,
+    parent_grid_ds: xr.Dataset,
+) -> tuple[xr.DataArray, xr.DataArray]:
     """Finds points that are in the parent land mask but not land masked in the child
     and replaces parent indices with nearest neighbor wet points.
 

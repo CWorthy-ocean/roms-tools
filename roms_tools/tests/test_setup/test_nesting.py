@@ -462,6 +462,40 @@ class TestNesting:
         )
         assert isinstance(child_grid.ds, xr.Dataset)
 
+    def test_no_error_if_child_boundary_entirely_on_land(self):
+        parent_grid = Grid(
+            nx=7,
+            ny=7,
+            size_x=240,
+            size_y=240,
+            center_lon=-4.1,
+            center_lat=52.36,
+            rot=0,
+        )
+
+        child_grid_parameters = {
+            "nx": 5,
+            "ny": 5,
+            "size_x": 100,
+            "size_y": 100,
+            "center_lon": -4.1,
+            "center_lat": 52.36,
+        }
+
+        child_grid = ChildGrid(
+            **child_grid_parameters,
+            parent_grid=parent_grid,
+            boundaries={
+                "south": True,
+                "east": True,
+                "north": True,
+                "west": True,
+            },
+        )
+
+        assert isinstance(child_grid.ds, xr.Dataset)
+        assert isinstance(child_grid.ds_nesting, xr.Dataset)
+
     @pytest.mark.parametrize(
         "child_grid_fixture",
         ["child_grid", "child_grid_that_straddles"],

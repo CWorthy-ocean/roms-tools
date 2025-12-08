@@ -21,6 +21,7 @@ from roms_tools.datasets.download import (
     download_sal_data,
     download_topo,
 )
+from roms_tools.datasets.utils import convert_to_float64
 from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
@@ -543,7 +544,7 @@ class LatLonDataset:
         None
             This method modifies the dataset in place and does not return anything.
         """
-        ds = self.ds.astype({var: "float64" for var in self.ds.data_vars})
+        ds = convert_to_float64(self.ds)
         self.ds = ds
 
         return None

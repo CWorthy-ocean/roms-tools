@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
+from roms_tools.datasets.utils import convert_to_float64
 from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import (
     one_dim_fill,
@@ -352,7 +353,6 @@ class ROMSDataset:
         self,
         target_coords: dict[str, Any],
         buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
-        verbose: bool = False,
     ) -> None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -367,9 +367,6 @@ class ROMSDataset:
         buffer_points : int
             The number of grid points to extend beyond the specified latitude and longitude
             ranges when selecting the subdomain. Defaults to 20.
-        verbose : bool, optional
-            If True, print message if dataset is concatenated along longitude dimension.
-            Defaults to False.
 
         Returns
         -------
@@ -384,46 +381,9 @@ class ROMSDataset:
         ValueError
             If the selected latitude or longitude range does not intersect with the dataset.
         """
-        lat_min = target_coords["lat"].min().values
-        lat_max = target_coords["lat"].max().values
-        lon_min = target_coords["lon"].min().values
-        lon_max = target_coords["lon"].max().values
-
-        # Extract grid spacing (in meters)
-        dx = 0.5 * (
-            (1 / self.grid.ds.pm).mean() + (1 / self.grid.ds.pn).mean()
-        )  # meters
-        buffer = dx * buffer_points  # buffer distance in meters
-
-        lat = np.deg2rad(0.5 * (lat_min + lat_max))
-
-        deg_per_meter_lat = 1 / 111_320.0
-        margin_lat = buffer * deg_per_meter_lat
-
-        deg_per_meter_lon = 1 / (111_320.0 * np.cos(lat))
-        margin_lon = buffer * deg_per_meter_lon
-
-        subset_mask = (
-            (self.ds.lat_rho > lat_min - margin_lat)
-            & (self.ds.lat_rho < lat_max + margin_lat)
-            & (self.ds.lon_rho > lon_min - margin_lon)
-            & (self.ds.lon_rho < lon_max + margin_lon)
+        subdomain = choose_subdomain(
+            self.ds, self.grid.ds, target_coords, buffer_points
         )
-
-        eta_mask = subset_mask.any(dim="xi_rho")
-        eta_rho_indices = np.where(eta_mask)[0]
-        first_eta = eta_rho_indices[0]
-        last_eta = eta_rho_indices[-1]
-
-        xi_mask = subset_mask.any(dim="eta_rho")
-        xi_rho_indices = np.where(xi_mask)[0]
-        first_xi = xi_rho_indices[0]
-        last_xi = xi_rho_indices[-1]
-
-        subdomain = self.ds.isel(
-            eta_rho=slice(first_eta, last_eta), xi_rho=slice(first_xi, last_xi)
-        )
-
         self.ds = subdomain
 
         return None
@@ -444,7 +404,7 @@ class ROMSDataset:
         None
             This method modifies the dataset in place and does not return anything.
         """
-        ds = self.ds.astype({var: "float64" for var in self.ds.data_vars})
+        ds = convert_to_float64(self.ds)
         self.ds = ds
 
         return None
@@ -572,3 +532,78 @@ class ROMSDataset:
             raise KeyError(
                 f"The following variables are missing from the dataset: {missing_vars}"
             )
+
+
+def choose_subdomain(
+    ds: xr.Dataset,
+    ds_grid: xr.Dataset,
+    target_coords: dict[str, Any],
+    buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
+):
+    """Selects a subdomain from the xarray Dataset based on specified target
+    coordinates, extending the selection by a defined buffer. Adjusts longitude
+    ranges as necessary to accommodate the dataset's expected range and handles
+    potential discontinuities.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The full ROMS xarray Dataset to subset.
+    ds_grid: xr.Dataset
+        Dataset containing the grid coordinates, in particular `pm` and `pn`.
+    target_coords : dict
+        A dictionary containing the target latitude and longitude coordinates, typically
+        with keys "lat", "lon", and "straddle".
+    buffer_points : int
+        The number of grid points to extend beyond the specified latitude and longitude
+        ranges when selecting the subdomain. Defaults to 20.
+
+    Returns
+    -------
+    xr.Dataset
+        Returns the subset of the original dataset.
+
+    Raises
+    ------
+    ValueError
+        If the selected latitude or longitude range does not intersect with the dataset.
+    """
+    lat_min = target_coords["lat"].min().values
+    lat_max = target_coords["lat"].max().values
+    lon_min = target_coords["lon"].min().values
+    lon_max = target_coords["lon"].max().values
+
+    # Extract grid spacing (in meters)
+    dx = 0.5 * ((1 / ds_grid.pm).mean() + (1 / ds_grid.pn).mean())  # meters
+    buffer = dx * buffer_points  # buffer distance in meters
+
+    lat = np.deg2rad(0.5 * (lat_min + lat_max))
+
+    deg_per_meter_lat = 1 / 111_320.0
+    margin_lat = buffer * deg_per_meter_lat
+
+    deg_per_meter_lon = 1 / (111_320.0 * np.cos(lat))
+    margin_lon = buffer * deg_per_meter_lon
+
+    subset_mask = (
+        (ds.lat_rho > lat_min - margin_lat)
+        & (ds.lat_rho < lat_max + margin_lat)
+        & (ds.lon_rho > lon_min - margin_lon)
+        & (ds.lon_rho < lon_max + margin_lon)
+    )
+
+    eta_mask = subset_mask.any(dim="xi_rho")
+    eta_rho_indices = np.where(eta_mask)[0]
+    first_eta = eta_rho_indices[0]
+    last_eta = eta_rho_indices[-1]
+
+    xi_mask = subset_mask.any(dim="eta_rho")
+    xi_rho_indices = np.where(xi_mask)[0]
+    first_xi = xi_rho_indices[0]
+    last_xi = xi_rho_indices[-1]
+
+    subdomain = ds.isel(
+        eta_rho=slice(first_eta, last_eta), xi_rho=slice(first_xi, last_xi)
+    )
+
+    return subdomain

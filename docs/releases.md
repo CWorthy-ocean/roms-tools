@@ -7,6 +7,7 @@
 * Plot wide grids with different cartopy projection ([#496](https://github.com/CWorthy-ocean/roms-tools/pull/496))
 * Allow child domains with land points outside parent ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Add `apply_mask` option to `plot` function ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
+* Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
 
 ### Breaking Changes
 

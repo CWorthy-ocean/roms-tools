@@ -7,8 +7,8 @@ import pytest
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.download import download_test_data
-from roms_tools.roms_dataset import ROMSDataset
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.roms_dataset import ROMSDataset
 
 try:
     import xesmf  # type: ignore

@@ -11,14 +11,14 @@ import xarray as xr
 from scipy.ndimage import label
 
 from roms_tools import Grid
-from roms_tools.plot import line_plot, section_plot
-from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.lat_lon_datasets import (
+from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     UnifiedBGCDataset,
 )
+from roms_tools.plot import line_plot, section_plot
+from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,

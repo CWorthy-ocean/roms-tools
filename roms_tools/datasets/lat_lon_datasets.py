@@ -16,7 +16,7 @@ import numpy as np
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
-from roms_tools.download import (
+from roms_tools.datasets.download import (
     download_correction_data,
     download_sal_data,
     download_topo,
@@ -2331,7 +2331,7 @@ def choose_subdomain(
     resolution: float,
     is_global: bool,
     target_coords: Mapping[str, Any],
-    buffer_points: int = 20,
+    buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
     use_dask: bool = False,
 ) -> xr.Dataset:
     """

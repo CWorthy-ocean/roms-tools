@@ -6,9 +6,9 @@ import xarray as xr
 from matplotlib.axes import Axes
 
 from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
+from roms_tools.datasets.roms_dataset import ROMSDataset
 from roms_tools.plot import plot, plot_uptake_efficiency
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
-from roms_tools.roms_dataset import ROMSDataset
 from roms_tools.utils import (
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,

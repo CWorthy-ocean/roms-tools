@@ -12,7 +12,7 @@ import xarray as xr
 
 from conftest import calculate_data_hash
 from roms_tools import BoundaryForcing, Grid
-from roms_tools.download import download_test_data
+from roms_tools.datasets.download import download_test_data
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:

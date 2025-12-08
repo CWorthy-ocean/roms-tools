@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.download import download_test_data
-from roms_tools.setup.lat_lon_datasets import (
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.lat_lon_datasets import (
     GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
     ERA5ARCODataset,

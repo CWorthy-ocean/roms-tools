@@ -461,11 +461,6 @@ def map_child_boundaries_onto_parent_grid_indices(
 
                 mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
 
-                if mask_child.sum() == 0:
-                    raise ValueError(
-                        f"The entire {direction}ern boundary of the child grid lies on land. Please disable this boundary."
-                    )
-
                 i_eta, i_xi = interpolate_indices(
                     parent_grid_ds, lon_child, lat_child, mask_child, direction
                 )

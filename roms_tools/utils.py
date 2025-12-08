@@ -1031,3 +1031,33 @@ def get_pkg_error_msg(purpose: str, package_name: str, option_name: str) -> str:
           • `pip install {package_name}` or
           • `conda install {package_name}`
         Alternatively, install `roms-tools` with conda to include all dependencies.""")
+
+
+def wrap_longitudes(ds: xr.Dataset, straddle: bool) -> xr.Dataset:
+    """Adjusts longitude values in a dataset to handle dateline crossing.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset containing longitude variables to adjust.
+    straddle : bool
+        If True, adjusts longitudes to the range [-180, 180] for datasets
+        that straddle the dateline. If False, adjusts longitudes to the
+        range [0, 360].
+
+    Returns
+    -------
+    xr.Dataset
+        The dataset with adjusted longitude values.
+    """
+    for lon_dim in ["lon_rho", "lon_u", "lon_v"]:
+        if straddle:
+            ds[lon_dim] = xr.where(
+                ds[lon_dim] > 180,
+                ds[lon_dim] - 360,
+                ds[lon_dim],
+            )
+        else:
+            ds[lon_dim] = xr.where(ds[lon_dim] < 0, ds[lon_dim] + 360, ds[lon_dim])
+
+    return ds

@@ -1861,38 +1861,6 @@ def get_boundary_coords():
     return bdry_coords
 
 
-def wrap_longitudes(grid_ds, straddle):
-    """Adjusts longitude values in a dataset to handle dateline crossing.
-
-    Parameters
-    ----------
-    grid_ds : xr.Dataset
-        The dataset containing longitude variables to adjust.
-    straddle : bool
-        If True, adjusts longitudes to the range [-180, 180] for datasets
-        that straddle the dateline. If False, adjusts longitudes to the
-        range [0, 360].
-
-    Returns
-    -------
-    xr.Dataset
-        The dataset with adjusted longitude values.
-    """
-    for lon_dim in ["lon_rho", "lon_u", "lon_v"]:
-        if straddle:
-            grid_ds[lon_dim] = xr.where(
-                grid_ds[lon_dim] > 180,
-                grid_ds[lon_dim] - 360,
-                grid_ds[lon_dim],
-            )
-        else:
-            grid_ds[lon_dim] = xr.where(
-                grid_ds[lon_dim] < 0, grid_ds[lon_dim] + 360, grid_ds[lon_dim]
-            )
-
-    return grid_ds
-
-
 def to_float(val):
     """Convert a value or list of values to float.
 

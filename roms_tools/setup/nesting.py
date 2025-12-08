@@ -19,10 +19,9 @@ from roms_tools.setup.utils import (
     interpolate_from_rho_to_v,
     pop_grid_data,
     to_dict,
-    wrap_longitudes,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets
+from roms_tools.utils import save_datasets, wrap_longitudes
 
 
 @dataclass(kw_only=True)

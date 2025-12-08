@@ -470,7 +470,7 @@ def map_child_boundaries_onto_parent_grid_indices(
                     parent_grid_ds, lon_child, lat_child, mask_child, direction
                 )
 
-                if update_land_indices:
+                if update_land_indices and mask_child.sum() > 0:
                     i_eta, i_xi = update_indices_if_on_parent_land(
                         i_eta, i_xi, grid_location, parent_grid_ds
                     )

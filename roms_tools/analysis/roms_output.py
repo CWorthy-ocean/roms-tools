@@ -1,32 +1,24 @@
-import logging
-import re
 import warnings
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 import xarray as xr
 from matplotlib.axes import Axes
 
-from roms_tools import Grid
 from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
 from roms_tools.plot import plot, plot_uptake_efficiency
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
+from roms_tools.roms_dataset import ROMSDataset
 from roms_tools.utils import (
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
-    load_data,
-)
-from roms_tools.vertical_coordinate import (
-    compute_depth_coordinates,
 )
 
 
 @dataclass(kw_only=True)
-class ROMSOutput:
+class ROMSOutput(ROMSDataset):
     """Represents ROMS model output.
 
     Parameters
@@ -45,32 +37,6 @@ class ROMSOutput:
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
     """
-
-    grid: Grid
-    """Object representing the grid information."""
-    path: str | Path
-    """Filename, or list of filenames with model output."""
-    use_dask: bool = False
-    """Whether to use dask for processing."""
-    model_reference_date: datetime | None = None
-    """Reference date of ROMS simulation."""
-    adjust_depth_for_sea_surface_height: bool | None = False
-    """Whether to account for sea surface height variations when computing depth
-    coordinates."""
-
-    ds: xr.Dataset = field(init=False, repr=False)
-    """An xarray Dataset containing the ROMS output."""
-
-    def __post_init__(self):
-        ds = self._load_model_output()
-        self._infer_model_reference_date_from_metadata(ds)
-        self._check_vertical_coordinate(ds)
-        ds = self._add_absolute_time(ds)
-        ds = self._add_lat_lon_coords(ds)
-        self.ds = ds
-
-        # Dataset for depth coordinates
-        self.ds_depth_coords = xr.Dataset()
 
     def cdr_metrics(self) -> None:
         """
@@ -387,264 +353,3 @@ class ROMSOutput:
             ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}
 
             return ds
-
-    def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
-        """Ensure depth coordinates are stored for a given location and depth type.
-
-        Calculates vertical depth coordinates (layer or interface) for specified locations (e.g., rho, u, v points)
-        and updates them in the dataset (`self.ds`).
-
-        Parameters
-        ----------
-        depth_type : str
-            The type of depth coordinate to compute. Valid options:
-            - "layer": Compute layer depth coordinates.
-            - "interface": Compute interface depth coordinates.
-        locations : list[str], optional
-            Locations for which to compute depth coordinates. Default is ["rho", "u", "v"].
-            Valid options include:
-            - "rho": Depth coordinates at rho points.
-            - "u": Depth coordinates at u points.
-            - "v": Depth coordinates at v points.
-
-        Updates
-        -------
-        self.ds_depth_coords : xarray.Dataset
-
-        Raises
-        ------
-        ValueError
-            If `adjust_depth_for_sea_surface_height` is enabled but `zeta` is missing from `self.ds`.
-
-        Notes
-        -----
-        - This method relies on the `compute_depth_coordinates` function to perform calculations.
-        - If `adjust_depth_for_sea_surface_height` is `True`, the method accounts for variations
-          in sea surface height (`zeta`).
-        """
-        if self.adjust_depth_for_sea_surface_height:
-            if "zeta" not in self.ds:
-                raise ValueError(
-                    "`zeta` is required in provided ROMS output when `adjust_depth_for_sea_surface_height` is enabled."
-                )
-            zeta = self.ds.zeta
-        else:
-            zeta = 0
-
-        for location in locations:
-            var_name = f"{depth_type}_depth_{location}"
-            if var_name not in self.ds_depth_coords:
-                self.ds_depth_coords[var_name] = compute_depth_coordinates(
-                    self.grid.ds, zeta, depth_type, location
-                )
-
-    def _load_model_output(self) -> xr.Dataset:
-        """Load the model output."""
-        # Load the dataset
-        ds = load_data(
-            self.path,
-            dim_names={"time": "time"},
-            use_dask=self.use_dask,
-            decode_times=False,
-            decode_timedelta=False,
-            time_chunking=True,
-            force_combine_nested=True,
-        )
-
-        return ds
-
-    def _infer_model_reference_date_from_metadata(self, ds: xr.Dataset) -> None:
-        """Infer and validate the model reference date from `ocean_time` metadata.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            Dataset with an `ocean_time` variable and a `long_name` attribute
-            in the format `Time since YYYY/MM/DD`.
-
-        Raises
-        ------
-        ValueError
-            If `self.model_reference_date` is not set and the reference date cannot
-            be inferred, or if the inferred date does not match `self.model_reference_date`.
-
-        Warns
-        -----
-        UserWarning
-            If `self.model_reference_date` is set but the reference date cannot be inferred.
-        """
-        # Check if 'long_name' exists in the attributes of 'ocean_time'
-        if "long_name" in ds.ocean_time.attrs:
-            input_string = ds.ocean_time.attrs["long_name"]
-            match = re.search(r"(\d{4})/(\d{2})/(\d{2})", input_string)
-
-            if match:
-                # If a match is found, extract year, month, day and create the inferred date
-                year, month, day = map(int, match.groups())
-                inferred_date = datetime(year, month, day)
-
-                if hasattr(self, "model_reference_date") and self.model_reference_date:
-                    # Check if the inferred date matches the provided model reference date
-                    if self.model_reference_date != inferred_date:
-                        raise ValueError(
-                            f"Mismatch between `self.model_reference_date` ({self.model_reference_date}) "
-                            f"and inferred reference date ({inferred_date})."
-                        )
-                else:
-                    # Set the model reference date if not already set
-                    self.model_reference_date = inferred_date
-            else:
-                # Handle case where no match is found
-                if hasattr(self, "model_reference_date") and self.model_reference_date:
-                    logging.warning(
-                        "Could not infer the model reference date from the metadata. "
-                        "`self.model_reference_date` will be used.",
-                    )
-                else:
-                    raise ValueError(
-                        "Model reference date could not be inferred from the metadata, "
-                        "and `self.model_reference_date` is not set."
-                    )
-        else:
-            # Handle case where 'long_name' attribute doesn't exist
-            if hasattr(self, "model_reference_date") and self.model_reference_date:
-                logging.warning(
-                    "`long_name` attribute not found in ocean_time. "
-                    "`self.model_reference_date` will be used instead.",
-                )
-            else:
-                raise ValueError(
-                    "Model reference date could not be inferred from the metadata, "
-                    "and `self.model_reference_date` is not set."
-                )
-
-    def _check_vertical_coordinate(self, ds: xr.Dataset) -> None:
-        """Check that the vertical coordinate parameters in the dataset are consistent
-        with the model grid.
-
-        This method compares the vertical coordinate parameters (`theta_s`, `theta_b`, `hc`, `Cs_r`, `Cs_w`) in
-        the provided dataset (`ds`) with those in the model grid (`self.grid`). The first three parameters are
-        checked for exact equality, while the last two are checked for numerical closeness.
-
-        Parameters
-        ----------
-        ds : xarray.Dataset
-            The dataset containing vertical coordinate parameters in its attributes, such as `theta_s`, `theta_b`,
-            `hc`, `Cs_r`, and `Cs_w`.
-
-        Raises
-        ------
-        ValueError
-            If the vertical coordinate parameters do not match the expected values (based on exact or approximate equality).
-
-        Notes
-        -----
-        - Missing attributes trigger a warning instead of an exception.
-        - `theta_s`, `theta_b`, and `hc` are checked for exact equality using `np.array_equal`.
-        - `Cs_r` and `Cs_w` are checked for numerical closeness using `np.allclose`.
-        """
-        required_exact = ["theta_s", "theta_b", "hc"]
-        required_close = ["Cs_r", "Cs_w"]
-
-        # Check exact equality
-        for param in required_exact:
-            value = ds.attrs.get(param, None)
-            if value is None:
-                logging.warning(
-                    f"Dataset is missing attribute '{param}'. Skipping this check."
-                )
-                continue
-            if not np.array_equal(getattr(self.grid, param), value):
-                raise ValueError(
-                    f"{param} from grid ({getattr(self.grid, param)}) does not match dataset ({value})."
-                )
-
-        # Check numerical closeness
-        for param in required_close:
-            value = ds.attrs.get(param, None)
-            if value is None:
-                logging.warning(
-                    f"Dataset is missing attribute '{param}'. Skipping this check."
-                )
-                continue
-            grid_value = getattr(self.grid.ds, param)
-            if not np.allclose(grid_value, value):
-                raise ValueError(
-                    f"{param} from grid ({grid_value}) is not close to dataset ({value})."
-                )
-
-    def _add_absolute_time(self, ds: xr.Dataset) -> xr.Dataset:
-        """Add absolute time as a coordinate to the dataset.
-
-        Computes "abs_time" based on "ocean_time" and a reference date,
-        and adds it as a coordinate.
-
-        Parameters
-        ----------
-        ds : xarray.Dataset
-            Dataset containing "ocean_time" in seconds since the model reference date.
-
-        Returns
-        -------
-        xarray.Dataset
-            Dataset with "abs_time" added and "time" removed.
-        """
-        if self.model_reference_date is None:
-            raise ValueError(
-                "`model_reference_date` must be set before computing absolute time."
-            )
-
-        ocean_time_seconds = ds["ocean_time"].values
-
-        abs_time = np.array(
-            [
-                self.model_reference_date + timedelta(seconds=seconds)
-                for seconds in ocean_time_seconds
-            ]
-        )
-
-        abs_time = xr.DataArray(
-            abs_time, dims=["time"], coords={"time": ds["ocean_time"]}
-        )
-        abs_time.attrs["long_name"] = "absolute time"
-        ds = ds.assign_coords({"abs_time": abs_time})
-        ds = ds.drop_vars("time")
-
-        return ds
-
-    def _add_lat_lon_coords(self, ds: xr.Dataset) -> xr.Dataset:
-        """Add latitude and longitude coordinates to the dataset based on the grid.
-
-        This method assigns latitude and longitude coordinates from the grid to the dataset.
-        It always adds the "lat_rho" and "lon_rho" coordinates. If the dataset contains the
-        "xi_u" or "eta_v" dimensions, it also adds the corresponding "lat_u", "lon_u",
-        "lat_v", and "lon_v" coordinates.
-
-        Parameters
-        ----------
-        ds : xarray.Dataset
-            Input dataset to which latitude and longitude coordinates will be added.
-
-        Returns
-        -------
-        xarray.Dataset
-            Updated dataset with the appropriate latitude and longitude coordinates
-            assigned to "rho", "u", and "v" points if applicable.
-        """
-        coords_to_add = {
-            "lat_rho": self.grid.ds["lat_rho"],
-            "lon_rho": self.grid.ds["lon_rho"],
-        }
-
-        if "xi_u" in ds.dims:
-            coords_to_add.update(
-                {"lat_u": self.grid.ds["lat_u"], "lon_u": self.grid.ds["lon_u"]}
-            )
-        if "eta_v" in ds.dims:
-            coords_to_add.update(
-                {"lat_v": self.grid.ds["lat_v"], "lon_v": self.grid.ds["lon_v"]}
-            )
-
-        # Add all necessary coordinates in one go
-        ds = ds.assign_coords(coords_to_add)
-        return ds

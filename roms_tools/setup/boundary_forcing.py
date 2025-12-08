@@ -393,7 +393,7 @@ class BoundaryForcing:
                 "Both `start_time` and `end_time` must be provided together as datetime objects or both should be None."
             )
 
-        if self.start_time is None:
+        if self.start_time is None and self.end_time is None:
             logging.warning(
                 "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
             )

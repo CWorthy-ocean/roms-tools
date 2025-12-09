@@ -7,6 +7,7 @@
 * Plot wide grids with different cartopy projection ([#496](https://github.com/CWorthy-ocean/roms-tools/pull/496))
 * Allow child domains with land points outside parent ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Add `apply_mask` option to `plot` function ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
+* Improved bathymetry smoothing to better match UCLA MATLAB tools ([#506](https://github.com/CWorthy-ocean/roms-tools/pull/506))
 
 ### Breaking Changes
 

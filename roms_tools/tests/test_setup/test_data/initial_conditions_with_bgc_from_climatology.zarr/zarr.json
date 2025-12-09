@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS initial conditions file created by ROMS-Tools",
-    "roms_tools_version": "2.6.1.dev52+gd44fe5da",
+    "roms_tools_version": "3.1.3.dev32+g91d580e67.d20250929",
     "ini_time": "2021-06-29 00:00:00",
     "model_reference_date": "2000-01-01 00:00:00",
     "adjust_depth_for_sea_surface_height": "False",
@@ -16,63 +16,6 @@
     "kind": "inline",
     "must_understand": false,
     "metadata": {
-      "spCaCO3": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "small phytoplankton CaCO3",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
       "spP": {
         "shape": [
           1,
@@ -116,345 +59,6 @@
         ],
         "attributes": {
           "long_name": "small phytoplankton phosphorous",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "zeta": {
-        "shape": [
-          1,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "sea surface height",
-          "units": "m",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "PO4": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "dissolved inorganic phosphate",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "Lig": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "iron binding ligand",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "spC": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "small phytoplankton carbon",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "diatFe": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "diatom iron",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "DIC": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "dissolved inorganic carbon",
           "units": "mmol/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
@@ -583,6 +187,449 @@
         "node_type": "array",
         "storage_transformers": []
       },
+      "PO4": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "dissolved inorganic phosphate",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "spCaCO3": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "small phytoplankton CaCO3",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "spC": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "small phytoplankton carbon",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "Lig": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "iron binding ligand",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "zeta": {
+        "shape": [
+          1,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "sea surface height",
+          "units": "m",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "diatFe": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "diatom iron",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "DIC": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "dissolved inorganic carbon",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "abs_time": {
+        "shape": [
+          1
+        ],
+        "data_type": "int64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "absolute time",
+          "units": "days since 2021-06-29 00:00:00",
+          "calendar": "proleptic_gregorian"
+        },
+        "dimension_names": [
+          "ocean_time"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
       "diazP": {
         "shape": [
           1,
@@ -692,281 +739,6 @@
           "s_rho",
           "eta_rho",
           "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "diazFe": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "diazotroph iron",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "diatP": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "diatom phosphorus",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "DON": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "dissolved organic nitrogen",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "diatChl": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "diatom chloropyll",
-          "units": "mg/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "abs_time": {
-        "shape": [
-          1
-        ],
-        "data_type": "int64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "absolute time",
-          "units": "days since 2021-06-29 00:00:00",
-          "calendar": "proleptic_gregorian"
-        },
-        "dimension_names": [
-          "ocean_time"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -1143,54 +915,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "ocean_time": {
-        "shape": [
-          1
-        ],
-        "data_type": "float64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "relative time: seconds since 2000-01-01 00:00:00",
-          "units": "seconds",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "DOCr": {
+      "diatChl": {
         "shape": [
           1,
           3,
@@ -1232,7 +957,121 @@
           }
         ],
         "attributes": {
-          "long_name": "refractory dissolved organic carbon",
+          "long_name": "diatom chloropyll",
+          "units": "mg/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "diazFe": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "diazotroph iron",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "DON": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "dissolved organic nitrogen",
           "units": "mmol/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
@@ -1304,6 +1143,100 @@
         "node_type": "array",
         "storage_transformers": []
       },
+      "ocean_time": {
+        "shape": [
+          1
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "relative time: seconds since 2000-01-01 00:00:00",
+          "units": "seconds",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "Cs_w": {
+        "shape": [
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "Vertical stretching function at w-points",
+          "units": "nondimensional",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "s_w"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
       "u": {
         "shape": [
           1,
@@ -1361,7 +1294,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "diazChl": {
+      "spFe": {
         "shape": [
           1,
           3,
@@ -1403,8 +1336,8 @@
           }
         ],
         "attributes": {
-          "long_name": "diazotroph chloropyll",
-          "units": "mg/m^3",
+          "long_name": "small phytoplankton iron",
+          "units": "mmol/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1418,54 +1351,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "Cs_w": {
-        "shape": [
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Vertical stretching function at w-points",
-          "units": "nondimensional",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "s_w"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "DIC_ALT_CO2": {
+      "DOCr": {
         "shape": [
           1,
           3,
@@ -1507,7 +1393,7 @@
           }
         ],
         "attributes": {
-          "long_name": "dissolved inorganic carbon, alternative CO2",
+          "long_name": "refractory dissolved organic carbon",
           "units": "mmol/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
@@ -1576,7 +1462,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "salt": {
+      "diazChl": {
         "shape": [
           1,
           3,
@@ -1618,8 +1504,8 @@
           }
         ],
         "attributes": {
-          "long_name": "salinity",
-          "units": "PSU",
+          "long_name": "diazotroph chloropyll",
+          "units": "mg/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1690,7 +1576,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "spFe": {
+      "salt": {
         "shape": [
           1,
           3,
@@ -1732,8 +1618,8 @@
           }
         ],
         "attributes": {
-          "long_name": "small phytoplankton iron",
-          "units": "mmol/m^3",
+          "long_name": "salinity",
+          "units": "PSU",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -1747,7 +1633,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "NO3": {
+      "DIC_ALT_CO2": {
         "shape": [
           1,
           3,
@@ -1789,64 +1675,7 @@
           }
         ],
         "attributes": {
-          "long_name": "dissolved inorganic nitrate",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "DOP": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "dissolved organic phosphorus",
+          "long_name": "dissolved inorganic carbon, alternative CO2",
           "units": "mmol/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
@@ -1915,6 +1744,120 @@
         "node_type": "array",
         "storage_transformers": []
       },
+      "DOP": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "dissolved organic phosphorus",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "diatP": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "diatom phosphorus",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
       "ALK_ALT_CO2": {
         "shape": [
           1,
@@ -1959,63 +1902,6 @@
         "attributes": {
           "long_name": "alkalinity, alternative CO2",
           "units": "meq/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "zooC": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "zooplankton carbon",
-          "units": "mmol/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -2086,7 +1972,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "NH4": {
+      "NO3": {
         "shape": [
           1,
           3,
@@ -2128,7 +2014,64 @@
           }
         ],
         "attributes": {
-          "long_name": "dissolved ammonia",
+          "long_name": "dissolved inorganic nitrate",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "diatSi": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "diatom silicate",
           "units": "mmol/m^3",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
@@ -2257,6 +2200,177 @@
         "node_type": "array",
         "storage_transformers": []
       },
+      "zooC": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "zooplankton carbon",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "NH4": {
+        "shape": [
+          1,
+          3,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              3,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "dissolved ammonia",
+          "units": "mmol/m^3",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_rho",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "w": {
+        "shape": [
+          1,
+          4,
+          4,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              4,
+              4,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "w-flux component",
+          "units": "m/s",
+          "coordinates": "abs_time",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "ocean_time",
+          "s_w",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
       "Cs_r": {
         "shape": [
           3
@@ -2355,120 +2469,6 @@
           "ocean_time",
           "s_rho",
           "eta_v",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "diatSi": {
-        "shape": [
-          1,
-          3,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              3,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "diatom silicate",
-          "units": "mmol/m^3",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_rho",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "w": {
-        "shape": [
-          1,
-          4,
-          4,
-          4
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              1,
-              4,
-              4,
-              4
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "w-flux component",
-          "units": "m/s",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "ocean_time",
-          "s_w",
-          "eta_rho",
           "xi_rho"
         ],
         "zarr_format": 3,

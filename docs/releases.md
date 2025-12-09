@@ -15,6 +15,7 @@
 * Reorder operations in `ChildGrid` for correctness and clarity ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Update `ChildGrid.plot_nesting` to support nesting configurations where the child grid extends beyond the parent domain ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Rename `Dataset` to `LatLonDataset` and modularize `RiverDataset` ([#500](https://github.com/CWorthy-ocean/roms-tools/pull/500))
+* Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
 
 ### Documentation
 

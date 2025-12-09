@@ -5,14 +5,25 @@
 ### New Features
 
 * Plot wide grids with different cartopy projection ([#496](https://github.com/CWorthy-ocean/roms-tools/pull/496))
+* Allow child domains with land points outside parent ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
+* Add `apply_mask` option to `plot` function ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 
 ### Breaking Changes
 
 ### Internal Changes
 
+* Reorder operations in `ChildGrid` for correctness and clarity ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
+* Update `ChildGrid.plot_nesting` to support nesting configurations where the child grid extends beyond the parent domain ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
+* Rename `Dataset` to `LatLonDataset` and modularize `RiverDataset` ([#500](https://github.com/CWorthy-ocean/roms-tools/pull/500))
+
 ### Documentation
 
+* Document support for child grids that extend beyond parent grids ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
+
 ### Bugfixes
+
+* Make unit handling in `RiverForcing.plot_locations()` robust for grids without `mask_rho` units ([#499](https://github.com/CWorthy-ocean/roms-tools/pull/499))
+* Only update child boundary indices if boundary not entirely on land ([#503](https://github.com/CWorthy-ocean/roms-tools/pull/503))
 
 
 ## v3.2.0

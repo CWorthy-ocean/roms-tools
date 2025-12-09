@@ -9,7 +9,7 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
-from roms_tools.setup.datasets import TPXOManager
+from roms_tools.setup.lat_lon_datasets import TPXOManager
 from roms_tools.setup.utils import (
     from_yaml,
     get_target_coords,

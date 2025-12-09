@@ -16,10 +16,9 @@ from roms_tools import (
     TidalForcing,
 )
 from roms_tools.download import download_test_data
-from roms_tools.setup.datasets import (
+from roms_tools.setup.lat_lon_datasets import (
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
-    Dataset,
     ERA5Dataset,
     GLORYSDataset,
     TPXODataset,
@@ -115,7 +114,32 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def use_dask(request: pytest.FixtureRequest) -> bool:
+def configure_dask_threads(request):
+    """
+    Configure Dask to use a threaded scheduler with 2 workers.
+
+    Parameters
+    ----------
+    request : pytest.FixtureRequest
+        Used to check whether the test suite was invoked with ``--use_dask``.
+
+    """
+    use_dask = request.config.getoption("--use_dask")
+    if not use_dask:
+        return
+
+    import dask
+
+    # Configure threaded scheduling with 2 workers
+    dask.config.set(
+        scheduler="threads",
+        n_workers=2,
+    )
+
+
+@pytest.fixture(scope="session")
+def use_dask(request, configure_dask_threads) -> bool:
+    """Return True if Dask tests are enabled."""
     return request.config.getoption("--use_dask")
 
 
@@ -879,7 +903,7 @@ def river_forcing_with_bgc() -> RiverForcing:
 
 
 @pytest.fixture(scope="session")
-def era5_data(use_dask: bool) -> Dataset:
+def era5_data(use_dask: bool) -> ERA5Dataset:
     fname = download_test_data("ERA5_regional_test_data.nc")
     data = ERA5Dataset(
         filename=fname,
@@ -892,7 +916,7 @@ def era5_data(use_dask: bool) -> Dataset:
 
 
 @pytest.fixture(scope="session")
-def glorys_data(use_dask: bool) -> Dataset:
+def glorys_data(use_dask: bool) -> GLORYSDataset:
     # the following GLORYS data has a wide enough domain
     # to have different masks for tracers vs. velocities
     fname = download_test_data("GLORYS_test_data.nc")
@@ -913,7 +937,7 @@ def glorys_data(use_dask: bool) -> Dataset:
 
 
 @pytest.fixture(scope="session")
-def tpxo_data(use_dask: bool) -> Dataset:
+def tpxo_data(use_dask: bool) -> TPXODataset:
     fname = download_test_data("regional_h_tpxo10v2a.nc")
     fname_grid = download_test_data("regional_grid_tpxo10v2a.nc")
 
@@ -929,7 +953,7 @@ def tpxo_data(use_dask: bool) -> Dataset:
 
 
 @pytest.fixture(scope="session")
-def cesm_bgc_data(use_dask: bool) -> Dataset:
+def cesm_bgc_data(use_dask: bool) -> CESMBGCDataset:
     fname = download_test_data("CESM_regional_test_data_one_time_slice.nc")
 
     data = CESMBGCDataset(
@@ -944,7 +968,7 @@ def cesm_bgc_data(use_dask: bool) -> Dataset:
 
 
 @pytest.fixture(scope="session")
-def coarsened_cesm_bgc_data(use_dask: bool) -> Dataset:
+def coarsened_cesm_bgc_data(use_dask: bool) -> CESMBGCDataset:
     fname = download_test_data("CESM_BGC_2012.nc")
 
     data = CESMBGCDataset(
@@ -961,7 +985,7 @@ def coarsened_cesm_bgc_data(use_dask: bool) -> Dataset:
 
 
 @pytest.fixture(scope="session")
-def cesm_surface_bgc_data(use_dask: bool) -> Dataset:
+def cesm_surface_bgc_data(use_dask: bool) -> CESMBGCSurfaceForcingDataset:
     fname = download_test_data("CESM_BGC_SURFACE_2012.nc")
 
     data = CESMBGCSurfaceForcingDataset(
@@ -977,7 +1001,7 @@ def cesm_surface_bgc_data(use_dask: bool) -> Dataset:
 
 
 @pytest.fixture(scope="session")
-def unified_bgc_data(use_dask: bool) -> Dataset:
+def unified_bgc_data(use_dask: bool) -> UnifiedBGCDataset:
     fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
 
     data = UnifiedBGCDataset(
@@ -993,7 +1017,7 @@ def unified_bgc_data(use_dask: bool) -> Dataset:
 
 
 @pytest.fixture(scope="session")
-def unified_surface_bgc_data(use_dask: bool) -> Dataset:
+def unified_surface_bgc_data(use_dask: bool) -> UnifiedBGCSurfaceDataset:
     fname = download_test_data("coarsened_UNIFIED_bgc_dataset.nc")
 
     data = UnifiedBGCSurfaceDataset(

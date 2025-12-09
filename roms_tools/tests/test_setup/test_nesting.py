@@ -11,9 +11,10 @@ from roms_tools.setup.nesting import (
     compute_boundary_distance,
     interpolate_indices,
     map_child_boundaries_onto_parent_grid_indices,
-    modify_child_topography_and_mask,
+    modify_child_mask,
+    modify_child_topography,
 )
-from roms_tools.setup.utils import get_boundary_coords
+from roms_tools.setup.utils import get_boundary_coords, wrap_longitudes
 
 
 @pytest.fixture()
@@ -46,9 +47,7 @@ def big_grid_that_straddles():
 
 @pytest.fixture()
 def small_grid_that_straddles():
-    return Grid(
-        nx=10, ny=10, center_lon=10, center_lat=61, rot=-20, size_x=500, size_y=500
-    )
+    return Grid(nx=10, ny=10, center_lon=0, center_lat=61, rot=0, size_x=50, size_y=200)
 
 
 @pytest.fixture()
@@ -71,11 +70,11 @@ def child_grid_that_straddles(big_grid_that_straddles):
         parent_grid=big_grid_that_straddles,
         nx=10,
         ny=10,
-        center_lon=10,
+        center_lon=0,
         center_lat=61,
-        rot=-20,
-        size_x=500,
-        size_y=500,
+        rot=0,
+        size_x=50,
+        size_y=200,
     )
 
 
@@ -100,13 +99,14 @@ class TestInterpolateIndices:
             mask = grid.ds[f"mask_{location}"].isel(**bdry_coords)
 
             with caplog.at_level(logging.WARNING):
-                i_eta, i_xi = interpolate_indices(grid.ds, lon, lat, mask)
+                i_eta, i_xi = interpolate_indices(grid.ds, lon, lat, mask, direction)
 
-            # Verify the warning message in the log
-            assert (
-                "Some boundary points of the child grid are very close to the boundary of the parent grid."
-                in caplog.text
-            )
+            if mask.sum() > 0:
+                # Verify the warning message in the log
+                assert (
+                    "boundary of the child grid lie very close to the edges of the parent grid"
+                    in caplog.text
+                )
 
             if direction == "south":
                 expected_i_eta = -0.5 * xr.ones_like(grid.ds.xi_rho)
@@ -142,20 +142,27 @@ class TestInterpolateIndices:
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
+        big_grid_ds = wrap_longitudes(big_grid.ds.copy(), straddle=big_grid.straddle)
+        small_grid_ds = wrap_longitudes(
+            small_grid.ds.copy(), straddle=big_grid.straddle
+        )
+
         bdry_coords_dict = get_boundary_coords()
         for location in ["rho", "u", "v"]:
             for direction in ["south", "east", "north", "west"]:
                 bdry_coords = bdry_coords_dict[location][direction]
-                lon = small_grid.ds[f"lon_{location}"].isel(**bdry_coords)
-                lat = small_grid.ds[f"lat_{location}"].isel(**bdry_coords)
-                mask = small_grid.ds[f"mask_{location}"].isel(**bdry_coords)
+                lon = small_grid_ds[f"lon_{location}"].isel(**bdry_coords)
+                lat = small_grid_ds[f"lat_{location}"].isel(**bdry_coords)
+                mask = small_grid_ds[f"mask_{location}"].isel(**bdry_coords)
 
-                i_eta, i_xi = interpolate_indices(big_grid.ds, lon, lat, mask)
+                i_eta, i_xi = interpolate_indices(
+                    big_grid_ds, lon, lat, mask, direction
+                )
 
                 expected_i_eta_min = -0.5
-                expected_i_eta_max = big_grid.ds.eta_rho[-1] - 0.5
+                expected_i_eta_max = big_grid_ds.eta_rho[-1] - 0.5
                 expected_i_xi_min = -0.5
-                expected_i_xi_max = big_grid.ds.xi_rho[-1] - 0.5
+                expected_i_xi_max = big_grid_ds.xi_rho[-1] - 0.5
 
                 assert (i_eta >= expected_i_eta_min).all()
                 assert (i_eta <= expected_i_eta_max).all()
@@ -166,11 +173,16 @@ class TestInterpolateIndices:
 class TestMapChildBoundaries:
     def test_update_indices_does_nothing_if_no_parent_land(self, small_grid, baby_grid):
         """Verify no change in indices when parent grid has no land at boundaries."""
+        small_grid_ds = wrap_longitudes(
+            small_grid.ds.copy(), straddle=small_grid.straddle
+        )
+        baby_grid_ds = wrap_longitudes(baby_grid.ds.copy(), straddle=baby_grid.straddle)
+
         ds_without_updated_indices = map_child_boundaries_onto_parent_grid_indices(
-            small_grid.ds, baby_grid.ds, update_land_indices=False
+            small_grid_ds, baby_grid_ds, update_land_indices=False
         )
         ds_with_updated_indices = map_child_boundaries_onto_parent_grid_indices(
-            small_grid.ds, baby_grid.ds, update_land_indices=True
+            small_grid_ds, baby_grid_ds, update_land_indices=True
         )
 
         xr.testing.assert_allclose(ds_without_updated_indices, ds_with_updated_indices)
@@ -189,7 +201,12 @@ class TestMapChildBoundaries:
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
-        ds = map_child_boundaries_onto_parent_grid_indices(big_grid.ds, small_grid.ds)
+        big_grid_ds = wrap_longitudes(big_grid.ds.copy(), straddle=big_grid.straddle)
+        small_grid_ds = wrap_longitudes(
+            small_grid.ds.copy(), straddle=big_grid.straddle
+        )
+
+        ds = map_child_boundaries_onto_parent_grid_indices(big_grid_ds, small_grid_ds)
         for direction in ["south", "east", "north", "west"]:
             for location in ["rho", "u", "v"]:
                 if location == "rho":
@@ -224,9 +241,14 @@ class TestMapChildBoundaries:
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
+        big_grid_ds = wrap_longitudes(big_grid.ds.copy(), straddle=big_grid.straddle)
+        small_grid_ds = wrap_longitudes(
+            small_grid.ds.copy(), straddle=big_grid.straddle
+        )
+
         for update_land_indices in [False, True]:
             ds = map_child_boundaries_onto_parent_grid_indices(
-                big_grid.ds, small_grid.ds, update_land_indices=update_land_indices
+                big_grid_ds, small_grid_ds, update_land_indices=update_land_indices
             )
 
             for direction in ["south", "east", "north", "west"]:
@@ -292,9 +314,7 @@ class TestModifyChid:
     ):
         """Confirm child mask remains unchanged if no parent land is at boundaries."""
         mask_original = baby_grid.ds.mask_rho.copy()
-        modified_baby_grid_ds = modify_child_topography_and_mask(
-            small_grid.ds, baby_grid.ds
-        )
+        modified_baby_grid_ds = modify_child_mask(small_grid.ds, baby_grid.ds)
         xr.testing.assert_allclose(modified_baby_grid_ds.mask_rho, mask_original)
 
     @pytest.mark.parametrize(
@@ -311,7 +331,8 @@ class TestModifyChid:
 
         h_original = grid.ds.h.copy()
         mask_original = grid.ds.mask_rho.copy()
-        modified_grid_ds = modify_child_topography_and_mask(grid.ds, grid.ds)
+        modified_grid_ds = modify_child_mask(grid.ds, grid.ds)
+        modified_grid_ds = modify_child_topography(grid.ds, modified_grid_ds)
 
         xr.testing.assert_allclose(modified_grid_ds.h, h_original)
         xr.testing.assert_allclose(modified_grid_ds.mask_rho, mask_original)
@@ -325,7 +346,8 @@ class TestModifyChid:
         mask_original = small_grid.ds.mask_rho.copy()
 
         # Apply the modification function
-        modified_ds = modify_child_topography_and_mask(big_grid.ds, small_grid.ds)
+        modified_ds = modify_child_mask(big_grid.ds, small_grid.ds)
+        modified_ds = modify_child_topography(big_grid.ds, modified_ds)
 
         # Calculate the center indices for the grid
         eta_center = h_original.sizes["eta_rho"] // 2
@@ -405,8 +427,74 @@ class TestNesting:
         params = dataclasses.asdict(small_grid)
         del params["ds"], params["straddle"]
 
-        with pytest.raises(ValueError, match="Some points are outside the grid."):
+        with pytest.raises(
+            ValueError, match="boundary of the child grid lie outside the parent grid"
+        ):
             ChildGrid(parent_grid=big_grid, **params)
+
+    def test_no_error_if_land_child_points_beyond_parent_grid(self):
+        # coarse resolution Pacific domain
+        parent_grid = Grid(
+            nx=50,
+            ny=50,
+            size_x=23000,
+            size_y=12000,
+            center_lon=-161,
+            center_lat=14.4,
+            rot=-3,
+        )
+
+        # California Current System domain, where some land points extend beyond Pacific domain
+        child_grid_parameters = {
+            "nx": 50,
+            "ny": 50,
+            "size_x": 2688,
+            "size_y": 5280,
+            "center_lat": 39.6,
+            "center_lon": -134.5,
+            "rot": 33.3,
+        }
+
+        child_grid = ChildGrid(
+            **child_grid_parameters,
+            parent_grid=parent_grid,
+            boundaries={"north": True, "west": True, "south": True, "east": False},
+        )
+        assert isinstance(child_grid.ds, xr.Dataset)
+
+    def test_no_error_if_child_boundary_entirely_on_land(self):
+        parent_grid = Grid(
+            nx=7,
+            ny=7,
+            size_x=240,
+            size_y=240,
+            center_lon=-4.1,
+            center_lat=52.36,
+            rot=0,
+        )
+
+        child_grid_parameters = {
+            "nx": 5,
+            "ny": 5,
+            "size_x": 100,
+            "size_y": 100,
+            "center_lon": -4.1,
+            "center_lat": 52.36,
+        }
+
+        child_grid = ChildGrid(
+            **child_grid_parameters,
+            parent_grid=parent_grid,
+            boundaries={
+                "south": True,
+                "east": True,
+                "north": True,
+                "west": True,
+            },
+        )
+
+        assert isinstance(child_grid.ds, xr.Dataset)
+        assert isinstance(child_grid.ds_nesting, xr.Dataset)
 
     @pytest.mark.parametrize(
         "child_grid_fixture",

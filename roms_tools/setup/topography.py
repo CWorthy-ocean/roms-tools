@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 
 from roms_tools.regrid import LateralRegridToROMS
-from roms_tools.setup.datasets import ETOPO5Dataset, SRTM15Dataset
+from roms_tools.setup.lat_lon_datasets import ETOPO5Dataset, SRTM15Dataset
 from roms_tools.setup.utils import handle_boundaries
 
 

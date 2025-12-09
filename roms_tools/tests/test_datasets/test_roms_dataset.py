@@ -8,7 +8,8 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.datasets.download import download_test_data
-from roms_tools.datasets.roms_dataset import ROMSDataset
+from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
+from roms_tools.setup.utils import get_target_coords
 
 try:
     import xesmf  # type: ignore
@@ -272,7 +273,7 @@ def test_check_vertical_coordinate_mismatch(use_dask):
         output._check_vertical_coordinate(ds_mock)
 
 
-def test_that_coordinates_are_added(use_dask):
+def test_that_coordinates_and_masks_are_added(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)
 
@@ -282,3 +283,189 @@ def test_that_coordinates_are_added(use_dask):
     assert "abs_time" in output.ds.coords
     assert "lat_rho" in output.ds.coords
     assert "lon_rho" in output.ds.coords
+    assert "mask_rho" in output.ds
+    assert "mask_u" in output.ds
+    assert "mask_v" in output.ds
+
+
+# Test choose_subdomain
+grid_cases = [
+    # --- SMALL INSIDE WESTERN HEMISPHERE -----------------------------------
+    (
+        # big grid west, does NOT cross Greenwich
+        {
+            "nx": 40,
+            "ny": 40,
+            "size_x": 4000,
+            "size_y": 4000,
+            "center_lon": -30,
+            "center_lat": 50,
+            "rot": 0,
+        },
+        # small grid fully west
+        {
+            "nx": 10,
+            "ny": 10,
+            "size_x": 500,
+            "size_y": 500,
+            "center_lon": -20,
+            "center_lat": 50,
+            "rot": 0,
+        },
+    ),
+    # --- SMALL INSIDE EASTERN HEMISPHERE ----------------------------------
+    (
+        {
+            "nx": 40,
+            "ny": 40,
+            "size_x": 4000,
+            "size_y": 4000,
+            "center_lon": 10,
+            "center_lat": 45,
+            "rot": 0,
+        },
+        {
+            "nx": 10,
+            "ny": 10,
+            "size_x": 500,
+            "size_y": 500,
+            "center_lon": 20,
+            "center_lat": 45,
+            "rot": 0,
+        },
+    ),
+    # --- SMALL GRID STRADDLING GREENWICH ----------------------------------
+    (
+        # big grid centered slightly west
+        {
+            "nx": 40,
+            "ny": 40,
+            "size_x": 5000,
+            "size_y": 4000,
+            "center_lon": -5,
+            "center_lat": 45,
+            "rot": 0,
+        },
+        # small grid crosses 0°
+        {
+            "nx": 10,
+            "ny": 10,
+            "size_x": 600,
+            "size_y": 600,
+            "center_lon": 0,
+            "center_lat": 45,
+            "rot": 0,
+        },
+    ),
+    # --- LARGE GRID CROSSES GREENWICH, SMALL IS WEST -----------------------
+    (
+        {
+            "nx": 50,
+            "ny": 50,
+            "size_x": 8000,
+            "size_y": 5000,
+            "center_lon": -2,
+            "center_lat": 40,
+            "rot": 0,
+        },
+        {
+            "nx": 10,
+            "ny": 10,
+            "size_x": 400,
+            "size_y": 400,
+            "center_lon": -10,
+            "center_lat": 40,
+            "rot": 0,
+        },
+    ),
+    # --- LARGE GRID CROSSES GREENWICH, SMALL IS EAST -----------------------
+    (
+        {
+            "nx": 50,
+            "ny": 50,
+            "size_x": 8000,
+            "size_y": 5000,
+            "center_lon": -2,
+            "center_lat": 40,
+            "rot": 0,
+        },
+        {
+            "nx": 10,
+            "ny": 10,
+            "size_x": 400,
+            "size_y": 400,
+            "center_lon": 8,
+            "center_lat": 40,
+            "rot": 0,
+        },
+    ),
+    # --- BOTH GRIDS CROSS GREENWICH ---------------------------------------
+    (
+        {
+            "nx": 60,
+            "ny": 60,
+            "size_x": 9000,
+            "size_y": 6000,
+            "center_lon": 1,
+            "center_lat": 48,
+            "rot": 0,
+        },
+        {
+            "nx": 12,
+            "ny": 12,
+            "size_x": 900,
+            "size_y": 900,
+            "center_lon": -1,
+            "center_lat": 48,
+            "rot": 0,
+        },
+    ),
+]
+
+
+# ----------------------------------------------------------------------
+# THE TEST
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "big_params, small_params",
+    grid_cases,
+)
+def test_choose_subdomain(big_params, small_params):
+    """Tests choose_subdomain() over grids that straddle or do not straddle
+    the Greenwich meridian. Ensures robustness of masking, slicing, and
+    wrap_longitudes handling.
+    """
+    # --- build big grid ---
+    big = Grid(**big_params)
+    ds = xr.Dataset()
+    ds = ds.assign_coords(
+        {
+            "lat_rho": big.ds.lat_rho,
+            "lon_rho": big.ds.lon_rho,
+        }
+    )
+
+    # simple field for testing
+    ds["field"] = (("eta_rho", "xi_rho"), (big.ds["eta_rho"] * big.ds["xi_rho"]).values)
+
+    # --- build small grid ---
+    small = Grid(**small_params)
+    target_coords = get_target_coords(small)
+
+    # --- apply function ---
+    sub = choose_subdomain(ds, big.ds, target_coords, buffer_points=1)
+
+    # --- tests ---
+    assert sub.lat_rho.shape[0] <= ds.lat_rho.shape[0]
+    assert sub.lat_rho.shape[1] <= ds.lat_rho.shape[1]
+
+    # ensure physically consistent subdomain
+    assert float(sub.lat_rho.min()) >= float(ds.lat_rho.min()) - 1e-6
+    assert float(sub.lat_rho.max()) <= float(ds.lat_rho.max()) + 1e-6
+
+    # values should be preserved
+    assert not sub.field.isnull().any()
+    assert float(sub.field.max()) <= float(ds.field.max()) + 1e-9
+    assert float(sub.field.min()) >= float(ds.field.min()) - 1e-9

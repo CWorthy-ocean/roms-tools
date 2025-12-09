@@ -17,7 +17,7 @@ def add_topography(
     target_coords,
     topography_source,
     hmin,
-    smooth_factor=6.0,
+    smooth_factor=5.0,
     rmax=0.2,
     verbose=False,
 ) -> xr.Dataset:

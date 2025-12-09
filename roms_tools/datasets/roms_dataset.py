@@ -9,11 +9,8 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.datasets.utils import convert_to_float64
-from roms_tools.setup.fill import LateralFill
-from roms_tools.setup.utils import (
-    one_dim_fill,
-)
+from roms_tools.datasets.utils import convert_to_float64, extrapolate_deepest_to_bottom
+from roms_tools.fill import LateralFill
 from roms_tools.utils import load_data, wrap_longitudes
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
@@ -416,11 +413,7 @@ class ROMSDataset:
         For each variable with a depth dimension, fills missing values at the bottom by
         propagating the deepest available data downward.
         """
-        for var_name in self.ds.data_vars:
-            if "s_rho" in self.ds[var_name].dims:
-                self.ds[var_name] = one_dim_fill(
-                    self.ds[var_name], "s_rho", direction="forward"
-                )
+        self.ds = extrapolate_deepest_to_bottom(self.ds, "s_rho")
 
     def apply_lateral_fill(self):
         """Apply lateral fill to variables using the dataset's mask and grid dimensions."""

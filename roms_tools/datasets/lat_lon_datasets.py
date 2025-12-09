@@ -21,15 +21,14 @@ from roms_tools.datasets.download import (
     download_sal_data,
     download_topo,
 )
-from roms_tools.datasets.utils import convert_to_float64
-from roms_tools.setup.fill import LateralFill
+from roms_tools.datasets.utils import convert_to_float64, extrapolate_deepest_to_bottom
+from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
     check_dataset,
     get_target_coords,
     interpolate_cyclic_time,
-    one_dim_fill,
     select_relevant_times,
 )
 from roms_tools.utils import get_dask_chunks, get_pkg_error_msg, has_gcsfs, load_data
@@ -673,11 +672,7 @@ class LatLonDataset:
         propagating the deepest available data downward.
         """
         if "depth" in self.dim_names:
-            for var_name in self.ds.data_vars:
-                if self.dim_names["depth"] in self.ds[var_name].dims:
-                    self.ds[var_name] = one_dim_fill(
-                        self.ds[var_name], self.dim_names["depth"], direction="forward"
-                    )
+            self.ds = extrapolate_deepest_to_bottom(self.ds, self.dim_names["depth"])
 
     @classmethod
     def from_ds(cls, original_dataset: LatLonDataset, ds: xr.Dataset) -> LatLonDataset:

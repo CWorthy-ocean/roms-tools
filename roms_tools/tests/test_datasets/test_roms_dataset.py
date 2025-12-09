@@ -288,6 +288,38 @@ def test_that_coordinates_and_masks_are_added(use_dask):
     assert "mask_v" in output.ds
 
 
+def test_apply_lateral_fill():
+    grid_parameters = {
+        "nx": 10,
+        "ny": 10,
+        "size_x": 2500,
+        "size_y": 3000,
+        "center_lon": -30,
+        "center_lat": 57,
+        "rot": -20,
+    }
+
+    grid = Grid(**grid_parameters)
+
+    ds = xr.Dataset()
+    ds["field"] = 5 * grid.ds.mask_rho.copy()
+    ds["mask_rho"] = grid.ds.mask_rho.copy()
+    ds["mask_u"] = grid.ds.mask_u.copy()
+    ds["mask_v"] = grid.ds.mask_v.copy()
+
+    roms_dataset = ROMSDataset.__new__(ROMSDataset)
+    roms_dataset.ds = ds
+    roms_dataset.grid = grid
+
+    # Check that initially some values are zero (land)
+    assert (roms_dataset.ds["field"].values == 0).any()
+
+    roms_dataset.apply_lateral_fill()
+
+    # After filling the ocean values (all 5) should have propagated into land
+    assert (roms_dataset.ds["field"].values == 5).all()
+
+
 # Test choose_subdomain
 grid_cases = [
     # --- SMALL INSIDE WESTERN HEMISPHERE -----------------------------------

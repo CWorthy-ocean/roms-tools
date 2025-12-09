@@ -14,7 +14,7 @@ from roms_tools.setup.fill import LateralFill
 from roms_tools.setup.utils import (
     one_dim_fill,
 )
-from roms_tools.utils import load_data
+from roms_tools.utils import load_data, wrap_longitudes
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
@@ -568,6 +568,9 @@ def choose_subdomain(
     ValueError
         If the selected latitude or longitude range does not intersect with the dataset.
     """
+    # Adjust longitude range if needed to match the expected range
+    ds = wrap_longitudes(ds, target_coords["straddle"])
+
     lat_min = target_coords["lat"].min().values
     lat_max = target_coords["lat"].max().values
     lon_min = target_coords["lon"].min().values

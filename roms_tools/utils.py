@@ -1034,30 +1034,40 @@ def get_pkg_error_msg(purpose: str, package_name: str, option_name: str) -> str:
 
 
 def wrap_longitudes(ds: xr.Dataset, straddle: bool) -> xr.Dataset:
-    """Adjusts longitude values in a dataset to handle dateline crossing.
+    """
+    Safely adjust longitude variables for datasets that may or may not cross
+    the dateline. Only modifies longitude-like variables that are present.
 
     Parameters
     ----------
     ds : xr.Dataset
-        The dataset containing longitude variables to adjust.
+        Dataset containing longitude variables (e.g., lon_rho, lon_u, lon_v).
     straddle : bool
-        If True, adjusts longitudes to the range [-180, 180] for datasets
-        that straddle the dateline. If False, adjusts longitudes to the
-        range [0, 360].
+        - True: force longitudes into [-180, 180]
+        - False: force longitudes into [0, 360]
 
     Returns
     -------
     xr.Dataset
-        The dataset with adjusted longitude values.
+        A new dataset with adjusted longitude values.
     """
-    for lon_dim in ["lon_rho", "lon_u", "lon_v"]:
+    lon_vars = ["lon_rho", "lon_u", "lon_v"]
+
+    for lon_dim in lon_vars:
+        if lon_dim not in ds:
+            continue  # skip missing coordinate
+
+        lon = ds[lon_dim]
+
         if straddle:
-            ds[lon_dim] = xr.where(
-                ds[lon_dim] > 180,
-                ds[lon_dim] - 360,
-                ds[lon_dim],
-            )
+            # wrap into [-180, 180]
+            lon_wrapped = xr.where(lon > 180, lon - 360, lon)
         else:
-            ds[lon_dim] = xr.where(ds[lon_dim] < 0, ds[lon_dim] + 360, ds[lon_dim])
+            # wrap into [0, 360]
+            lon_wrapped = xr.where(lon < 0, lon + 360, lon)
+
+        # preserve attributes
+        lon_wrapped.attrs.update(lon.attrs)
+        ds[lon_dim] = lon_wrapped
 
     return ds

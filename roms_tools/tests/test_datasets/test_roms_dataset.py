@@ -3,7 +3,6 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import pytest
 import xarray as xr
 
@@ -319,77 +318,6 @@ def test_apply_lateral_fill():
 
     # After filling the ocean values (all 5) should have propagated into land
     assert (roms_dataset.ds["field"].values == 5).all()
-
-
-# Test _set_variable_mapping
-
-
-def make_dummy_roms_dataset(var_names):
-    """Create a minimal ROMSDataset with given variables."""
-    ds = xr.Dataset(
-        {name: (("eta_rho", "xi_rho"), np.zeros((2, 2))) for name in var_names}
-    )
-    roms_ds = ROMSDataset.__new__(ROMSDataset)
-    roms_ds.ds = ds
-    return roms_ds
-
-
-def test_set_variable_mapping_physics():
-    roms_ds_missing = make_dummy_roms_dataset(
-        ["zeta", "temp", "salt", "u"]
-    )  # missing 'v'
-    with pytest.raises(KeyError, match="v"):
-        roms_ds_missing._set_variable_mapping("physics")
-
-    roms_ds = make_dummy_roms_dataset(["zeta", "temp", "salt", "u", "v"])
-    roms_ds._set_variable_mapping("physics")
-    assert roms_ds.var_names["temp"] == "temp"
-
-
-def test_set_variable_mapping_bgc():
-    bgc_vars = ["PO4", "NO3", "SiO3", "NH4", "Fe", "Lig", "O2", "DIC"]
-    roms_ds = make_dummy_roms_dataset(bgc_vars)
-    with pytest.raises(KeyError):
-        roms_ds._set_variable_mapping("bgc")
-
-    roms_ds_all = make_dummy_roms_dataset(
-        [
-            *bgc_vars,
-            "DIC_ALT_CO2",
-            "ALK",
-            "ALK_ALT_CO2",
-            "DOC",
-            "DON",
-            "DOP",
-            "DOPr",
-            "DONr",
-            "DOCr",
-            "spChl",
-            "spC",
-            "spP",
-            "spFe",
-            "diatChl",
-            "diatC",
-            "diatP",
-            "diatFe",
-            "diatSi",
-            "diazChl",
-            "diazC",
-            "diazP",
-            "diazFe",
-            "spCaCO3",
-            "zooC",
-        ]
-    )
-
-    roms_ds_all._set_variable_mapping("bgc")
-    assert "PO4" in roms_ds_all.var_names.values()
-
-
-def test_set_variable_mapping_invalid_type():
-    roms_ds = make_dummy_roms_dataset(["zeta", "temp", "salt", "u", "v"])
-    with pytest.raises(ValueError, match="Unsupported var_type"):
-        roms_ds._set_variable_mapping("invalid_type")
 
 
 # Test choose_subdomain

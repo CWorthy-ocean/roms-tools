@@ -996,29 +996,29 @@ def _set_dask_chunks(location: str, chunk_size: int):
     }
     return chunk_mapping.get(location, {})
 
-
-def _set_variable_mapping(self, var_type: str = "physics") -> None:
+def _set_required_vars(var_type: str = "physics") -> dict[str, str]:
     """
-    Set up variable name mapping for the ROMS dataset.
-
-    This mapping makes the dataset compatible with `InitialConditions`.
+    Return the canonical variable-name mapping for a ROMS dataset.
 
     Parameters
     ----------
     var_type : str, optional
-        Type of variables to map. Supported values are:
-        - "physics" : physical variables like temperature, salinity, currents.
-        - "bgc" : biogeochemical variables like nutrients, chlorophyll, and carbon.
+        Category of variables. Supported values:
+        - "physics": physical variables (temperature, salinity, currents, etc.)
+        - "bgc": biogeochemical variables (nutrients, pigments, carbon, etc.)
         Default is "physics".
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping from logical variable names to dataset variable names.
 
     Raises
     ------
     ValueError
-        If `var_type` is not one of the supported types.
-    KeyError
-        If any of the mapped variables are missing from `self.ds`.
+        If an unsupported `var_type` is provided.
     """
-    # Define variable mappings
+
     var_mappings = {
         "physics": {
             "zeta": "zeta",
@@ -1063,18 +1063,9 @@ def _set_variable_mapping(self, var_type: str = "physics") -> None:
         },
     }
 
-    # Validate type
     if var_type not in var_mappings:
         raise ValueError(
             f"Unsupported var_type '{var_type}'. Choose from {list(var_mappings.keys())}."
         )
 
-    # Assign variable mapping
-    self.var_names = var_mappings[var_type]
-
-    # Check all mapped variables exist in the dataset
-    missing_vars = [v for v in self.var_names.values() if v not in self.ds.variables]
-    if missing_vars:
-        raise KeyError(
-            f"The following variables are missing from the dataset: {missing_vars}"
-        )
+    return var_mappings[var_type]

@@ -9,7 +9,13 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.datasets.utils import convert_to_float64, extrapolate_deepest_to_bottom
+from roms_tools.datasets.utils import (
+    check_dataset,
+    convert_to_float64,
+    extrapolate_deepest_to_bottom,
+    select_relevant_times,
+    validate_start_end_time,
+)
 from roms_tools.fill import LateralFill
 from roms_tools.utils import load_data, wrap_longitudes
 from roms_tools.vertical_coordinate import (
@@ -32,10 +38,28 @@ class ROMSDataset:
 
     Parameters
     ----------
+    path: str | Path | list[str | Path]
+        Filename, or list of filenames with model output.
     grid : Grid
         Object representing the grid information.
-    path : Union[str, Path, List[Union[str, Path]]]
-        Filename, or list of filenames with model output.
+    start_time : Optional[datetime], optional
+        Start time for selecting relevant data. If not provided, no time-based filtering is applied.
+    end_time : Optional[datetime], optional
+        End time for selecting relevant data. If not provided, the dataset selects the time entry
+        closest to `start_time` within the range `[start_time, start_time + 24 hours)`.
+        If `start_time` is also not provided, no time-based filtering is applied.
+    allow_flex_time: bool, optional
+        Controls how strictly the dataset selects a time entry when `end_time` is not provided (relevant for initial conditions):
+
+        - If False (default): requires an exact match to `start_time`. Raises a ValueError if no match exists.
+        - If True: allows a +24h search window after `start_time` and selects the closest available
+          time entry within that window. Raises a ValueError if none are found.
+
+        Only used when `end_time` is None. Has no effect otherwise.
+    dim_names: dict[str, str], optional
+        Dictionary specifying the names of dimensions in the dataset.
+    var_names: dict[str, str], optional
+        Dictionary of variable names that are required in the dataset.
     model_reference_date : datetime, optional
         Reference date of ROMS simulation.
         If not specified, this is inferred from metadata of the model output
@@ -47,10 +71,27 @@ class ROMSDataset:
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
     """
 
+    path: str | Path | list[str | Path]
+    """Filename, or list of filenames with model output."""
     grid: Grid
     """Object representing the grid information."""
-    path: str | Path
-    """Filename, or list of filenames with model output."""
+    start_time: datetime | None = None
+    """Start time for selecting relevant data."""
+    end_time: datetime | None = None
+    """End time for selecting relevant data."""
+    allow_flex_time: bool = False
+    """Controls how strictly the dataset selects a time entry when `end_time` is not provided."""
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "eta_rho": "eta_rho",
+            "xi_rho": "xi_rho",
+            "s_rho": "s_rho",
+            "time": "time",
+        }
+    )
+    """Dictionary specifying the names of dimensions in the dataset."""
+    var_names: dict[str, str] | None = None
+    """Dictionary of variable names that are required in the dataset."""
     use_dask: bool = False
     """Whether to use dask for processing."""
     model_reference_date: datetime | None = None
@@ -63,10 +104,17 @@ class ROMSDataset:
     """An xarray Dataset containing the ROMS output."""
 
     def __post_init__(self):
-        ds = self._load_model_output()
-        self._infer_model_reference_date_from_metadata(ds)
+        validate_start_end_time(self.start_time, self.end_time)
+        ds = self.load_data()
+        check_dataset(ds, self.dim_names, self.var_names)
         self._check_vertical_coordinate(ds)
+        self._infer_model_reference_date_from_metadata(ds)
         ds = self._add_absolute_time(ds)
+
+        ds = self.select_relevant_fields(ds)
+        if self.start_time is not None:
+            ds = self.select_relevant_times(ds)
+
         ds = self._add_lat_lon_coords_and_masks(ds)
         self.ds = ds
 
@@ -123,17 +171,105 @@ class ROMSDataset:
                     self.grid.ds, zeta, depth_type, location
                 )
 
-    def _load_model_output(self) -> xr.Dataset:
-        """Load the model output."""
-        # Load the dataset
+    def load_data(self) -> xr.Dataset:
+        """Load the ROMS data."""
         ds = load_data(
-            self.path,
+            filename=self.path,
             dim_names={"time": "time"},
             use_dask=self.use_dask,
             decode_times=False,
             decode_timedelta=False,
             time_chunking=True,
             force_combine_nested=True,
+        )
+
+        return ds
+
+    def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Return a dataset containing only the required variables defined in
+        ``self.var_names``.
+
+        If ``self.var_names`` is provided, all data variables in ``ds`` that are
+        *not* listed in ``self.var_names`` are removed. Optional variables are not
+        considered in this method, and no warnings are issued for missing entries.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset from which required variables will be selected.
+
+        Returns
+        -------
+        xr.Dataset
+            A dataset containing only the variables specified in
+            ``self.var_names``. If ``self.var_names`` is empty or None,
+            the input dataset is returned unchanged.
+        """
+        if self.var_names:
+            for var in ds.data_vars:
+                if var not in self.var_names.values():
+                    ds = ds.drop_vars(var)
+
+        return ds
+
+    def select_relevant_times(self, ds: xr.Dataset) -> xr.Dataset:
+        """Select a subset of the dataset based on the specified time range.
+
+        This method filters the dataset to include all records between `start_time` and `end_time`.
+        Additionally, it ensures that one record at or before `start_time` and one record at or
+        after `end_time` are included, even if they fall outside the strict time range.
+
+        If no `end_time` is specified, the method will select the time range of
+        [start_time, start_time + 24 hours) and return the closest time entry to `start_time` within that range.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The input dataset to be filtered. Must contain a time dimension.
+
+        Returns
+        -------
+        xr.Dataset
+            A dataset filtered to the specified time range, including the closest entries
+            at or before `start_time` and at or after `end_time` if applicable.
+
+        Raises
+        ------
+        ValueError
+            If no matching times are found between `start_time` and `start_time + 24 hours`.
+
+        Warns
+        -----
+        UserWarning
+            If the dataset contains exactly 12 time steps but the climatology flag is not set.
+            This may indicate that the dataset represents climatology data.
+
+        UserWarning
+            If no records at or before `start_time` or no records at or after `end_time` are found.
+
+        UserWarning
+            If the dataset does not contain any time dimension or the time dimension is incorrectly named.
+
+        Notes
+        -----
+        - If the `climatology` flag is set and `end_time` is not provided, the method will
+          interpolate initial conditions from climatology data.
+        - If the dataset uses `cftime` datetime objects, these will be converted to standard
+          `np.datetime64` objects before filtering.
+        """
+        time_dim = self.dim_names["time"]
+
+        # Ensure start_time is not None for type safety
+        if self.start_time is None:
+            raise ValueError("select_relevant_times called but start_time is None.")
+
+        ds = select_relevant_times(
+            ds=ds,
+            time_dim=time_dim,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            allow_flex_time=self.allow_flex_time,
         )
 
         return ds

@@ -22,6 +22,7 @@ from roms_tools.datasets.download import (
     download_topo,
 )
 from roms_tools.datasets.utils import (
+    check_dataset,
     convert_to_float64,
     extrapolate_deepest_to_bottom,
     validate_start_end_time,
@@ -30,7 +31,6 @@ from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
-    check_dataset,
     get_target_coords,
     interpolate_cyclic_time,
     select_relevant_times,
@@ -147,7 +147,7 @@ class LatLonDataset:
         validate_start_end_time(self.start_time, self.end_time)
         ds = self.load_data()
         ds = self.clean_up(ds)
-        self.check_dataset(ds)
+        check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
         # Select relevant fields
         ds = self.select_relevant_fields(ds)
@@ -220,21 +220,6 @@ class LatLonDataset:
             The cleaned-up xarray Dataset (as implemented by child classes).
         """
         return ds  # Default behavior (no-op, subclasses should override)
-
-    def check_dataset(self, ds: xr.Dataset) -> None:
-        """Check if the dataset contains the specified variables and dimensions.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to check.
-
-        Raises
-        ------
-        ValueError
-            If the dataset does not contain the specified variables or dimensions.
-        """
-        check_dataset(ds, self.dim_names, self.var_names)
 
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
         """Selects and returns a subset of the dataset containing only the variables

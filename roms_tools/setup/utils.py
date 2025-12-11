@@ -1909,55 +1909,6 @@ def validate_names(
     return names
 
 
-def check_dataset(
-    ds: xr.Dataset,
-    dim_names: dict[str, str],
-    var_names: dict[str, str],
-    opt_var_names: dict[str, str] | None = None,
-) -> None:
-    """Check if the dataset contains the specified variables and dimensions.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        The xarray Dataset to check.
-    dim_names: Dict[str, str], optional
-        Dictionary specifying the names of dimensions in the dataset.
-    var_names: Dict[str, str]
-        Dictionary of variable names that are required in the dataset.
-    opt_var_names : Optional[Dict[str, str]], optional
-        Dictionary of optional variable names.
-        These variables are not strictly required, and the function will not raise an error if they are missing.
-        Default is None, meaning no optional variables are considered.
-
-
-    Raises
-    ------
-    ValueError
-        If the dataset does not contain the specified variables or dimensions.
-    """
-    missing_dims = [dim for dim in dim_names.values() if dim not in ds.dims]
-    if missing_dims:
-        raise ValueError(
-            f"Dataset does not contain all required dimensions. The following dimensions are missing: {missing_dims}"
-        )
-
-    missing_vars = [var for var in var_names.values() if var not in ds.data_vars]
-    if missing_vars:
-        raise ValueError(
-            f"Dataset does not contain all required variables. The following variables are missing: {missing_vars}"
-        )
-
-    if opt_var_names:
-        missing_optional_vars = [
-            var for var in opt_var_names.values() if var not in ds.data_vars
-        ]
-        if missing_optional_vars:
-            logging.warning(
-                f"Optional variables missing (but not critical): {missing_optional_vars}"
-            )
-
-
 def select_relevant_times(
     ds: xr.Dataset,
     time_dim: str,

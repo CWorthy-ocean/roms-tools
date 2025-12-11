@@ -8,9 +8,9 @@ import numpy as np
 import xarray as xr
 
 from roms_tools.datasets.download import download_river_data
+from roms_tools.datasets.utils import check_dataset
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
-    check_dataset,
     gc_dist,
     select_relevant_times,
 )

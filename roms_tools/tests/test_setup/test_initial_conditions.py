@@ -15,6 +15,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     UnifiedBGCDataset,
 )
+from roms_tools.setup.initial_conditions import _set_required_vars
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
@@ -263,7 +264,7 @@ def test_initial_conditions_missing_ini_time(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
         ValueError,
-        match="`ini_time` must be a valid datetime object and cannot be None.",
+        match="`ini_time` cannot be None unless the source data is from ROMS.",
     ):
         InitialConditions(
             grid=example_grid,
@@ -679,6 +680,7 @@ def test_from_yaml_missing_initial_conditions(tmp_path, use_dask):
 
 
 # Test _set_required_vars
+
 
 def test_default_var_type():
     vars_map = _set_required_vars()

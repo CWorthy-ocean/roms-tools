@@ -334,11 +334,12 @@ class InitialConditions:
             return processed_fields
 
     def _regrid_vertically(self, data, target_coords, processed_fields, var_names):
+        print(var_names)
         for location in ["rho", "u", "v"]:
             filtered_vars = [
                 var_name
                 for var_name, info in var_names.items()
-                if info["location"] == location and info[var_name]["is_3d"]
+                if info["location"] == location and info["is_3d"]
             ]
 
             if filtered_vars:
@@ -426,7 +427,9 @@ class InitialConditions:
                     "`ini_time` cannot be None unless the BGC source data is from ROMS."
                 )
 
-    def _get_data(self, forcing_type=Literal["physics", "bgc"]) -> LatLonDataset:
+    def _get_data(
+        self, forcing_type=Literal["physics", "bgc"]
+    ) -> LatLonDataset | ROMSDataset:
         """Determine the correct `Dataset` type and return an instance.
 
         forcing_type : str
@@ -437,9 +440,11 @@ class InitialConditions:
         Returns
         -------
         Dataset
-            The `Dataset` instance
+            The `LatLonDataset` or `ROMSDataset` instance
         """
-        dataset_map: dict[str, dict[str, dict[str, type[LatLonDataset]]]] = {
+        dataset_map: dict[
+            str, dict[str, dict[str, type[LatLonDataset | ROMSDataset]]]
+        ] = {
             "physics": {
                 "GLORYS": {
                     "external": GLORYSDataset,
@@ -478,10 +483,13 @@ class InitialConditions:
         if isinstance(source_dict["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
-        if source_dict["source"] == "ROMS":
+        if source_dict["name"] == "ROMS":
+            var_names = _set_required_vars(forcing_type)
+
             data = data_type(
-                grid=source_dict["grid"],
-                path=source_dict["path"],
+                path=source_dict["path"],  # type: ignore
+                grid=source_dict["grid"],  # type: ignore
+                var_names=var_names,
                 start_time=self.ini_time,
                 allow_flex_time=self.allow_flex_time,
                 use_dask=self.use_dask,
@@ -489,7 +497,7 @@ class InitialConditions:
 
         else:
             data = data_type(
-                filename=source_dict["path"],
+                filename=source_dict["path"],  # type: ignore
                 start_time=self.ini_time,
                 climatology=source_dict["climatology"],  # type: ignore
                 allow_flex_time=self.allow_flex_time,
@@ -996,6 +1004,7 @@ def _set_dask_chunks(location: str, chunk_size: int):
     }
     return chunk_mapping.get(location, {})
 
+
 def _set_required_vars(var_type: str = "physics") -> dict[str, str]:
     """
     Return the canonical variable-name mapping for a ROMS dataset.
@@ -1018,7 +1027,6 @@ def _set_required_vars(var_type: str = "physics") -> dict[str, str]:
     ValueError
         If an unsupported `var_type` is provided.
     """
-
     var_mappings = {
         "physics": {
             "zeta": "zeta",

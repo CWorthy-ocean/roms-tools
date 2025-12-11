@@ -141,10 +141,10 @@ class ROMSDataset:
         """
         eta = self.dim_names["eta_rho"]
         xi = self.dim_names["xi_rho"]
-        grid_eta = self.grid.ds.dims.get(eta)
-        grid_xi = self.grid.ds.dims.get(xi)
-        ds_eta = ds.dims.get(eta)
-        ds_xi = ds.dims.get(xi)
+        grid_eta = self.grid.ds.sizes.get(eta)
+        grid_xi = self.grid.ds.sizes.get(xi)
+        ds_eta = ds.sizes.get(eta)
+        ds_xi = ds.sizes.get(xi)
 
         if grid_eta != ds_eta or grid_xi != ds_xi:
             raise ValueError(

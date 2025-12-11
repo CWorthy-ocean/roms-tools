@@ -25,6 +25,7 @@
 
 * Make unit handling in `RiverForcing.plot_locations()` robust for grids without `mask_rho` units ([#499](https://github.com/CWorthy-ocean/roms-tools/pull/499))
 * Only update child boundary indices if boundary not entirely on land ([#503](https://github.com/CWorthy-ocean/roms-tools/pull/503))
+* Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
 
 
 ## v3.2.0

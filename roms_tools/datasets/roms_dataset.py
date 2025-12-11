@@ -430,9 +430,6 @@ class ROMSDataset:
     def _add_absolute_time(self, ds: xr.Dataset) -> xr.Dataset:
         """Add absolute time as a coordinate to the dataset.
 
-        Computes "abs_time" based on "ocean_time" and a reference date,
-        and adds it as a coordinate.
-
         Parameters
         ----------
         ds : xarray.Dataset
@@ -441,7 +438,7 @@ class ROMSDataset:
         Returns
         -------
         xarray.Dataset
-            Dataset with "abs_time" added and "time" removed.
+            Dataset with absolute time added.
         """
         if self.model_reference_date is None:
             raise ValueError(

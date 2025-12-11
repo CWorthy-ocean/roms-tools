@@ -106,6 +106,7 @@ class ROMSDataset:
     def __post_init__(self):
         validate_start_end_time(self.start_time, self.end_time)
         ds = self.load_data()
+        self._check_consistency_data_grid(ds)
         check_dataset(ds, self.dim_names, self.var_names)
         self._check_vertical_coordinate(ds)
         self._infer_model_reference_date_from_metadata(ds)
@@ -120,6 +121,37 @@ class ROMSDataset:
 
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
+
+    def _check_consistency_data_grid(self, ds: xr.Dataset) -> None:
+        """
+        Ensure that the input dataset `ds` is consistent with the grid dataset.
+
+        Specifically, checks that the dimensions of the dataset match the grid's
+        `eta_rho` and `xi_rho` dimensions.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset to check against the grid.
+
+        Raises
+        ------
+        ValueError
+            If the `eta_rho` or `xi_rho` dimensions of `ds` do not match those of `self.grid.ds`.
+        """
+        eta = self.dim_names["eta_rho"]
+        xi = self.dim_names["xi_rho"]
+        grid_eta = self.grid.ds.dims.get(eta)
+        grid_xi = self.grid.ds.dims.get(xi)
+        ds_eta = ds.dims.get(eta)
+        ds_xi = ds.dims.get(xi)
+
+        if grid_eta != ds_eta or grid_xi != ds_xi:
+            raise ValueError(
+                f"Inconsistent dataset dimensions: "
+                f"grid ({eta}={grid_eta}, {xi}={grid_xi}), "
+                f"dataset ({eta}={ds_eta}, {xi}={ds_xi})."
+            )
 
     def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
         """Ensure depth coordinates are stored for a given location and depth type.

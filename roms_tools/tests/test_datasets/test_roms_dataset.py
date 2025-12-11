@@ -115,6 +115,25 @@ def test_invalid_path(use_dask):
         )
 
 
+def test_check_consistency_data_grid(use_dask):
+    grid_params = {
+        "nx": 5,
+        "ny": 5,
+        "center_lon": -128,
+        "center_lat": 9,
+        "size_x": 100,
+        "size_y": 100,
+    }
+    grid = Grid(**grid_params)
+
+    with pytest.raises(ValueError, match="Inconsistent dataset dimensions"):
+        ROMSDataset(
+            grid=grid,
+            path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+            use_dask=use_dask,
+        )
+
+
 def test_set_correct_model_reference_date(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
     grid = Grid.from_file(fname_grid)

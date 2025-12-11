@@ -23,10 +23,10 @@ class ROMSOutput(ROMSDataset):
 
     Parameters
     ----------
+    path: str | Path | list[str | Path]
+        Filename, or list of filenames with model output.
     grid : Grid
         Object representing the grid information.
-    path : Union[str, Path, List[Union[str, Path]]]
-        Filename, or list of filenames with model output.
     model_reference_date : datetime, optional
         Reference date of ROMS simulation.
         If not specified, this is inferred from metadata of the model output

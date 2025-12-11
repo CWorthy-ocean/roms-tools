@@ -21,17 +21,26 @@ from roms_tools.datasets.download import (
     download_sal_data,
     download_topo,
 )
-from roms_tools.datasets.utils import convert_to_float64, extrapolate_deepest_to_bottom
+from roms_tools.datasets.utils import (
+    check_dataset,
+    convert_to_float64,
+    extrapolate_deepest_to_bottom,
+    select_relevant_times,
+    validate_start_end_time,
+)
 from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
-    check_dataset,
     get_target_coords,
-    interpolate_cyclic_time,
-    select_relevant_times,
 )
-from roms_tools.utils import get_dask_chunks, get_pkg_error_msg, has_gcsfs, load_data
+from roms_tools.utils import (
+    get_dask_chunks,
+    get_pkg_error_msg,
+    has_gcsfs,
+    interpolate_cyclic_time,
+    load_data,
+)
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -140,21 +149,11 @@ class LatLonDataset:
         4. Ensures latitude, longitude, and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
-        # Validate start_time and end_time
-        if self.start_time is not None and not isinstance(self.start_time, datetime):
-            raise TypeError(
-                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
-            )
-        if self.end_time is not None and not isinstance(self.end_time, datetime):
-            raise TypeError(
-                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
-            )
-
+        validate_start_end_time(self.start_time, self.end_time)
         ds = self.load_data()
         ds = self.clean_up(ds)
-        self.check_dataset(ds)
+        check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
-        # Select relevant fields
         ds = self.select_relevant_fields(ds)
 
         # Select relevant times
@@ -226,34 +225,26 @@ class LatLonDataset:
         """
         return ds  # Default behavior (no-op, subclasses should override)
 
-    def check_dataset(self, ds: xr.Dataset) -> None:
-        """Check if the dataset contains the specified variables and dimensions.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to check.
-
-        Raises
-        ------
-        ValueError
-            If the dataset does not contain the specified variables or dimensions.
-        """
-        check_dataset(ds, self.dim_names, self.var_names)
-
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
-        """Selects and returns a subset of the dataset containing only the variables
-        specified in `self.var_names`.
+        """
+        Return a subset of the dataset containing only the required and optional
+        variables defined for this object.
+
+        Variables retained are those listed in ``self.var_names`` and
+        ``self.opt_var_names``. Any other data variables are removed, except for
+        the special variable ``"mask"``, which is always preserved if present.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The input dataset from which variables will be selected.
+            The input dataset from which relevant variables will be selected.
 
         Returns
         -------
         xr.Dataset
-            A dataset containing only the variables specified in `self.var_names`.
+            A new dataset containing only the required variables specified in
+            ``self.var_names`` and the optional variables specified in
+            ``self.opt_var_names``, along with ``"mask"`` if present.
         """
         for var in ds.data_vars:
             if (
@@ -336,12 +327,12 @@ class LatLonDataset:
             raise ValueError("select_relevant_times called but start_time is None.")
 
         ds = select_relevant_times(
-            ds,
-            time_dim,
-            self.start_time,
-            self.end_time,
-            self.climatology,
-            self.allow_flex_time,
+            ds=ds,
+            time_dim=time_dim,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            climatology=self.climatology,
+            allow_flex_time=self.allow_flex_time,
         )
 
         return ds

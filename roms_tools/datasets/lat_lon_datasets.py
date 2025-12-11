@@ -329,6 +329,7 @@ class LatLonDataset:
         ds = select_relevant_times(
             ds=ds,
             time_dim=time_dim,
+            time_coord=time_dim,
             start_time=self.start_time,
             end_time=self.end_time,
             climatology=self.climatology,
@@ -1134,7 +1135,8 @@ class UnifiedDataset(LatLonDataset):
                         if var_name in ds.data_vars and "season" in ds[var_name].dims:
                             ds[var_name] = interpolate_cyclic_time(
                                 ds[var_name],
-                                time_dim_name="season",
+                                time_dim="season",
+                                time_coord="season",
                                 day_of_year=ds["month"],
                             )
 

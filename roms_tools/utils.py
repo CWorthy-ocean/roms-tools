@@ -1076,7 +1076,8 @@ def wrap_longitudes(ds: xr.Dataset, straddle: bool) -> xr.Dataset:
 
 def interpolate_from_climatology(
     field: xr.DataArray | xr.Dataset,
-    time_dim_name: str,
+    time_dim: str,
+    time_coord: str,
     time: xr.DataArray | pd.DatetimeIndex,
 ) -> xr.DataArray | xr.Dataset:
     """Interpolates a climatological field to specified time points.
@@ -1092,8 +1093,10 @@ def interpolate_from_climatology(
         - If `field` is an `xarray.DataArray`, it must have a time dimension identified by `time_dim_name`.
         - If `field` is an `xarray.Dataset`, all variables within the dataset are interpolated along `time_dim_name`.
         The time dimension is assumed to represent `day_of_year` for climatological purposes.
-    time_dim_name : str
-        The name of the time dimension in `field`. This dimension is used for interpolation.
+    time_dim : str
+        The name of the time dimension in `field`.
+    time_coord : str
+        The name of the time coordinate in `field`.
     time : xarray.DataArray or pandas.DatetimeIndex
         The target time points for interpolation. These are internally converted to `day_of_year`
         before performing interpolation.
@@ -1137,13 +1140,11 @@ def interpolate_from_climatology(
                 )
 
         data_array_interpolated = interpolate_cyclic_time(
-            data_array, time_dim_name, day_of_year
+            data_array, time_dim, time_coord, day_of_year
         )
 
         if np.size(time) == 1:
-            data_array_interpolated = data_array_interpolated.expand_dims(
-                {time_dim_name: 1}
-            )
+            data_array_interpolated = data_array_interpolated.expand_dims({time_dim: 1})
         return data_array_interpolated
 
     if isinstance(field, xr.DataArray):
@@ -1161,7 +1162,8 @@ def interpolate_from_climatology(
 
 def interpolate_cyclic_time(
     data_array: xr.DataArray,
-    time_dim_name: str,
+    time_dim: str,
+    time_coord: str,
     day_of_year: int | float | np.ndarray | xr.DataArray | Sequence[int | float],
 ) -> xr.DataArray:
     """Interpolates a DataArray cyclically across the start and end of the year.
@@ -1175,8 +1177,10 @@ def interpolate_cyclic_time(
     ----------
     data_array : xr.DataArray
         The input data array containing a time-like dimension.
-    time_dim_name : str
+    time_dim : str
         The name of the time dimension in the dataset.
+    time_coord : str
+        The name of the time coordinate in the dataset.
     day_of_year : Union[int, float, np.ndarray, xr.DataArray, Sequence[Union[int, float]]]
         The target day(s) of the year for interpolation. This can be:
         - A single integer or float representing the day of the year.
@@ -1197,28 +1201,26 @@ def interpolate_cyclic_time(
     # Concatenate across the beginning and end of the year
     time_concat = xr.concat(
         [
-            data_array[time_dim_name][-1] - 365.25,  # Shift last time backward
-            data_array[time_dim_name],
-            data_array[time_dim_name][0] + 365.25,  # Shift first time forward
+            data_array[time_coord][-1] - 365.25,  # Shift last time backward
+            data_array[time_coord],
+            data_array[time_coord][0] + 365.25,  # Shift first time forward
         ],
-        dim=time_dim_name,
+        dim=time_dim,
     )
 
     data_array_concat = xr.concat(
         [
-            data_array.isel(
-                **{time_dim_name: -1}
-            ),  # Append last value at the beginning
+            data_array.isel(**{time_dim: -1}),  # Append last value at the beginning
             data_array,
-            data_array.isel(**{time_dim_name: 0}),  # Append first value at the end
+            data_array.isel(**{time_dim: 0}),  # Append first value at the end
         ],
-        dim=time_dim_name,
+        dim=time_dim,
     )
-    data_array_concat[time_dim_name] = time_concat
+    data_array_concat[time_dim] = time_concat
 
     # Interpolate to specified times
     data_array_interpolated = data_array_concat.interp(
-        **{time_dim_name: day_of_year}, method="linear"
+        **{time_dim: day_of_year}, method="linear"
     )
 
     return data_array_interpolated

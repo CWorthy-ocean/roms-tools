@@ -299,6 +299,7 @@ class ROMSDataset:
         ds = select_relevant_times(
             ds=ds,
             time_dim=time_dim,
+            time_coord="abs_time",
             start_time=self.start_time,
             end_time=self.end_time,
             allow_flex_time=self.allow_flex_time,

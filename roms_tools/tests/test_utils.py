@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -15,6 +16,7 @@ from roms_tools.utils import (
     has_copernicus,
     has_dask,
     has_gcsfs,
+    interpolate_cyclic_time,
     interpolate_from_climatology,
     load_data,
 )
@@ -246,7 +248,68 @@ def test_time_chunking_false_roms():
     assert "ocean_time" not in result
 
 
-def test_interpolate_from_climatology(use_dask):
+# test interpolate_from_climatology
+
+
+@pytest.fixture
+def climatology_data():
+    """Create a simple annual cycle dataset with 12 time points."""
+    time_coord = np.arange(1, 13)  # months as day_of_year approximation
+    da = xr.DataArray(np.arange(12), dims=("time",), coords={"time": time_coord})
+    ds = xr.Dataset({"var1": da, "var2": da * 2})
+    return da, ds, "time", "time"
+
+
+def test_interpolate_dataarray_single_time(climatology_data):
+    da, _, time_dim, time_coord = climatology_data
+    target_time = pd.Timestamp("2000-03-15")  # day_of_year ~ 75
+    interpolated = interpolate_from_climatology(da, time_dim, time_coord, target_time)
+    assert isinstance(interpolated, xr.DataArray)
+    assert interpolated.sizes[time_dim] == 1
+
+
+def test_interpolate_dataset_multiple_times(climatology_data):
+    _, ds, time_dim, time_coord = climatology_data
+    target_times = pd.date_range("2000-01-01", periods=3, freq="M")
+    interpolated = interpolate_from_climatology(ds, time_dim, time_coord, target_times)
+    assert isinstance(interpolated, xr.Dataset)
+    assert all(interpolated[var].sizes[time_dim] == 3 for var in interpolated.data_vars)
+
+
+def test_interpolate_dataarray_time_dim_not_equal_time_coord():
+    time_values = np.arange(1, 13)
+    da = xr.DataArray(
+        np.arange(12),
+        dims=("time_dim",),
+        coords={"time_coord": ("time_dim", time_values)},
+    )
+    target_time = pd.Timestamp("2000-06-15")
+    interpolated = interpolate_from_climatology(
+        da, time_dim="time_dim", time_coord="time_coord", time=target_time
+    )
+    assert interpolated.sizes["time_dim"] == 1
+    assert np.issubdtype(interpolated.dtype, np.number)
+
+
+def test_interpolate_cyclic_time_basic():
+    time_values = np.arange(1, 13)
+    da = xr.DataArray(np.arange(12), dims=("time",), coords={"time": time_values})
+    target_days = [0.5, 6.5, 12.5]  # fractional days, include cyclic behavior
+    interpolated = interpolate_cyclic_time(
+        da, time_dim="time", time_coord="time", day_of_year=target_days
+    )
+    assert isinstance(interpolated, xr.DataArray)
+    assert interpolated.sizes["time"] == len(target_days)
+
+
+def test_interpolate_from_climatology_invalid_input():
+    with pytest.raises(TypeError):
+        interpolate_from_climatology(
+            "not a dataset", "time", "time", pd.Timestamp("2000-01-01")
+        )
+
+
+def test_interpolate_from_real_climatology(use_dask):
     fname = download_test_data("ERA5_regional_test_data.nc")
     era5_times = xr.open_dataset(fname).time
 
@@ -254,5 +317,5 @@ def test_interpolate_from_climatology(use_dask):
     field = climatology.ds["ssr_corr"]
     field["time"] = field["time"].dt.days
 
-    interpolated_field = interpolate_from_climatology(field, "time", era5_times)
+    interpolated_field = interpolate_from_climatology(field, "time", "time", era5_times)
     assert len(interpolated_field.time) == len(era5_times)

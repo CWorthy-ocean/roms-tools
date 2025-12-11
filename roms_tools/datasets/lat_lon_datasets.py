@@ -327,12 +327,12 @@ class LatLonDataset:
             raise ValueError("select_relevant_times called but start_time is None.")
 
         ds = select_relevant_times(
-            ds,
-            time_dim,
-            self.start_time,
-            self.end_time,
-            self.climatology,
-            self.allow_flex_time,
+            ds=ds,
+            time_dim=time_dim,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            climatology=self.climatology,
+            allow_flex_time=self.allow_flex_time,
         )
 
         return ds

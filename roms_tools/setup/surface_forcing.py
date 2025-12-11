@@ -26,7 +26,6 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     group_dataset,
-    interpolate_from_climatology,
     min_dist_to_land,
     nan_check,
     rotate_velocities,
@@ -34,7 +33,11 @@ from roms_tools.setup.utils import (
     to_dict,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets, transpose_dimensions
+from roms_tools.utils import (
+    interpolate_from_climatology,
+    save_datasets,
+    transpose_dimensions,
+)
 
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"

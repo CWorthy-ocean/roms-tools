@@ -25,6 +25,7 @@ from roms_tools.datasets.utils import (
     check_dataset,
     convert_to_float64,
     extrapolate_deepest_to_bottom,
+    select_relevant_times,
     validate_start_end_time,
 )
 from roms_tools.fill import LateralFill
@@ -32,10 +33,14 @@ from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
     get_target_coords,
-    interpolate_cyclic_time,
-    select_relevant_times,
 )
-from roms_tools.utils import get_dask_chunks, get_pkg_error_msg, has_gcsfs, load_data
+from roms_tools.utils import (
+    get_dask_chunks,
+    get_pkg_error_msg,
+    has_gcsfs,
+    interpolate_cyclic_time,
+    load_data,
+)
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -149,7 +154,6 @@ class LatLonDataset:
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
-        # Select relevant fields
         ds = self.select_relevant_fields(ds)
 
         # Select relevant times
@@ -222,18 +226,25 @@ class LatLonDataset:
         return ds  # Default behavior (no-op, subclasses should override)
 
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
-        """Selects and returns a subset of the dataset containing only the variables
-        specified in `self.var_names`.
+        """
+        Return a subset of the dataset containing only the required and optional
+        variables defined for this object.
+
+        Variables retained are those listed in ``self.var_names`` and
+        ``self.opt_var_names``. Any other data variables are removed, except for
+        the special variable ``"mask"``, which is always preserved if present.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The input dataset from which variables will be selected.
+            The input dataset from which relevant variables will be selected.
 
         Returns
         -------
         xr.Dataset
-            A dataset containing only the variables specified in `self.var_names`.
+            A new dataset containing only the required variables specified in
+            ``self.var_names`` and the optional variables specified in
+            ``self.opt_var_names``, along with ``"mask"`` if present.
         """
         for var in ds.data_vars:
             if (

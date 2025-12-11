@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.lat_lon_datasets import ERA5Correction
 from roms_tools.utils import (
     _path_list_from_input,
     generate_focused_coordinate_range,
@@ -13,6 +15,7 @@ from roms_tools.utils import (
     has_copernicus,
     has_dask,
     has_gcsfs,
+    interpolate_from_climatology,
     load_data,
 )
 
@@ -241,3 +244,15 @@ def test_time_chunking_false_roms():
     dim_names = {"time": "ocean_time"}
     result = get_dask_chunks(dim_names, time_chunking=False)
     assert "ocean_time" not in result
+
+
+def test_interpolate_from_climatology(use_dask):
+    fname = download_test_data("ERA5_regional_test_data.nc")
+    era5_times = xr.open_dataset(fname).time
+
+    climatology = ERA5Correction(use_dask=use_dask)
+    field = climatology.ds["ssr_corr"]
+    field["time"] = field["time"].dt.days
+
+    interpolated_field = interpolate_from_climatology(field, "time", era5_times)
+    assert len(interpolated_field.time) == len(era5_times)

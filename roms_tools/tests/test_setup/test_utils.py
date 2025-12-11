@@ -8,10 +8,8 @@ import xarray as xr
 
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
-from roms_tools.datasets.lat_lon_datasets import ERA5Correction
 from roms_tools.setup.utils import (
     get_target_coords,
-    interpolate_from_climatology,
     validate_names,
 )
 
@@ -99,18 +97,6 @@ class TestGetTargetCoords:
         expected = np.array([[-170, -160]])
         assert np.allclose(result["lon"].values, expected)
         assert "mask" in result
-
-
-def test_interpolate_from_climatology(use_dask):
-    fname = download_test_data("ERA5_regional_test_data.nc")
-    era5_times = xr.open_dataset(fname).time
-
-    climatology = ERA5Correction(use_dask=use_dask)
-    field = climatology.ds["ssr_corr"]
-    field["time"] = field["time"].dt.days
-
-    interpolated_field = interpolate_from_climatology(field, "time", era5_times)
-    assert len(interpolated_field.time) == len(era5_times)
 
 
 # Test yaml roundtrip with multiple source files

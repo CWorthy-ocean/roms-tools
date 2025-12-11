@@ -1,7 +1,14 @@
+from datetime import datetime, timedelta
+
 import numpy as np
+import pytest
 import xarray as xr
 
-from roms_tools.datasets.utils import convert_to_float64, extrapolate_deepest_to_bottom
+from roms_tools.datasets.utils import (
+    convert_to_float64,
+    extrapolate_deepest_to_bottom,
+    validate_start_end_time,
+)
 
 
 def test_convert_to_float64():
@@ -47,3 +54,50 @@ def test_extrapolate_deepest_to_bottom():
         ]
     )
     np.testing.assert_array_equal(ds_filled["var"].values, expected)
+
+
+# tests for  validate_start_end_time
+
+
+def test_valid_times():
+    start = datetime(2024, 1, 1, 12, 0)
+    end = start + timedelta(hours=3)
+
+    # Should not raise
+    validate_start_end_time(start, end)
+
+
+def test_none_times():
+    # None for both is allowed
+    validate_start_end_time(None, None)
+
+    # Only start_time provided
+    validate_start_end_time(datetime(2024, 1, 1), None)
+
+    # Only end_time provided
+    validate_start_end_time(None, datetime(2024, 1, 2))
+
+
+def test_equal_times():
+    t = datetime(2024, 1, 1, 12, 0)
+
+    # end_time == start_time is allowed
+    validate_start_end_time(t, t)
+
+
+def test_invalid_start_type():
+    with pytest.raises(TypeError):
+        validate_start_end_time("2024-01-01", None)
+
+
+def test_invalid_end_type():
+    with pytest.raises(TypeError):
+        validate_start_end_time(None, 123)
+
+
+def test_end_time_before_start_time():
+    start = datetime(2024, 1, 2)
+    end = datetime(2024, 1, 1)
+
+    with pytest.raises(ValueError):
+        validate_start_end_time(start, end)

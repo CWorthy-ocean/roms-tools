@@ -21,7 +21,11 @@ from roms_tools.datasets.download import (
     download_sal_data,
     download_topo,
 )
-from roms_tools.datasets.utils import convert_to_float64, extrapolate_deepest_to_bottom
+from roms_tools.datasets.utils import (
+    convert_to_float64,
+    extrapolate_deepest_to_bottom,
+    validate_start_end_time,
+)
 from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
@@ -140,16 +144,7 @@ class LatLonDataset:
         4. Ensures latitude, longitude, and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
-        # Validate start_time and end_time
-        if self.start_time is not None and not isinstance(self.start_time, datetime):
-            raise TypeError(
-                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
-            )
-        if self.end_time is not None and not isinstance(self.end_time, datetime):
-            raise TypeError(
-                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
-            )
-
+        validate_start_end_time(self.start_time, self.end_time)
         ds = self.load_data()
         ds = self.clean_up(ds)
         self.check_dataset(ds)

@@ -106,6 +106,7 @@ class ROMSDataset:
     def __post_init__(self):
         validate_start_end_time(self.start_time, self.end_time)
         ds = self.load_data()
+        self._check_consistency_data_grid(ds)
         check_dataset(ds, self.dim_names, self.var_names)
         self._check_vertical_coordinate(ds)
         self._infer_model_reference_date_from_metadata(ds)
@@ -120,6 +121,37 @@ class ROMSDataset:
 
         # Dataset for depth coordinates
         self.ds_depth_coords = xr.Dataset()
+
+    def _check_consistency_data_grid(self, ds: xr.Dataset) -> None:
+        """
+        Ensure that the input dataset `ds` is consistent with the grid dataset.
+
+        Specifically, checks that the dimensions of the dataset match the grid's
+        `eta_rho` and `xi_rho` dimensions.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset to check against the grid.
+
+        Raises
+        ------
+        ValueError
+            If the `eta_rho` or `xi_rho` dimensions of `ds` do not match those of `self.grid.ds`.
+        """
+        eta = self.dim_names["eta_rho"]
+        xi = self.dim_names["xi_rho"]
+        grid_eta = self.grid.ds.dims.get(eta)
+        grid_xi = self.grid.ds.dims.get(xi)
+        ds_eta = ds.dims.get(eta)
+        ds_xi = ds.dims.get(xi)
+
+        if grid_eta != ds_eta or grid_xi != ds_xi:
+            raise ValueError(
+                f"Inconsistent dataset dimensions: "
+                f"grid ({eta}={grid_eta}, {xi}={grid_xi}), "
+                f"dataset ({eta}={ds_eta}, {xi}={ds_xi})."
+            )
 
     def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
         """Ensure depth coordinates are stored for a given location and depth type.
@@ -466,20 +498,23 @@ class ROMSDataset:
             "lat_rho": self.grid.ds["lat_rho"],
             "lon_rho": self.grid.ds["lon_rho"],
         }
+        vars_to_add = {"mask_rho": self.grid.ds["mask_rho"]}
 
         if "xi_u" in ds.dims:
             coords_to_add.update(
                 {"lat_u": self.grid.ds["lat_u"], "lon_u": self.grid.ds["lon_u"]}
             )
+            vars_to_add.update({"mask_u": self.grid.ds["mask_u"]})
         if "eta_v" in ds.dims:
             coords_to_add.update(
                 {"lat_v": self.grid.ds["lat_v"], "lon_v": self.grid.ds["lon_v"]}
             )
+            vars_to_add.update({"mask_v": self.grid.ds["mask_v"]})
 
         ds = ds.assign_coords(coords_to_add)
+        for mask_name, mask_data in vars_to_add.items():
+            ds[mask_name] = mask_data
 
-        for mask_name in ["mask_rho", "mask_u", "mask_v"]:
-            ds[mask_name] = self.grid.ds[mask_name]
         return ds
 
     def choose_subdomain(

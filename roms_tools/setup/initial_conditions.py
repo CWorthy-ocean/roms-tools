@@ -481,11 +481,11 @@ class InitialConditions:
         if source_dict["source"] == "ROMS":
             data = data_type(
                 grid=source_dict["grid"],
-                filename=source_dict["path"],
+                path=source_dict["path"],
+                start_time=self.ini_time,
+                allow_flex_time=self.allow_flex_time,
                 use_dask=self.use_dask,
             )
-            data.ds = data.ds.isel({data.dim_names["time"]: source_dict["time_index"]})
-            data._set_variable_mapping()
 
         else:
             data = data_type(

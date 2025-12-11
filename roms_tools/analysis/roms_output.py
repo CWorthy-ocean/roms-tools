@@ -1,4 +1,3 @@
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -345,9 +344,6 @@ class ROMSOutput(ROMSDataset):
         if regridded_datasets:
             ds = xr.merge(regridded_datasets)
 
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                ds = ds.rename({"abs_time": "time"}).set_index(time="time")
             ds["time"].attrs = {"long_name": "Time"}
             ds["lon"].attrs = {"long_name": "Longitude", "units": "Degrees East"}
             ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}

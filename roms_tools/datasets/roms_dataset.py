@@ -299,7 +299,7 @@ class ROMSDataset:
         ds = select_relevant_times(
             ds=ds,
             time_dim=time_dim,
-            time_coord="abs_time",
+            time_coord="time",
             start_time=self.start_time,
             end_time=self.end_time,
             allow_flex_time=self.allow_flex_time,
@@ -463,6 +463,7 @@ class ROMSDataset:
         abs_time.attrs["long_name"] = "absolute time"
         ds = ds.assign_coords({"abs_time": abs_time})
         ds = ds.drop_vars("time")
+        ds = ds.set_index(time="abs_time")
 
         return ds
 

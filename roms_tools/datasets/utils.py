@@ -362,7 +362,7 @@ def _select_initial_time(
                 f"No exact match found for initial time {ini_time}. Consider setting allow_flex_time to True."
             )
 
-        ds = ds.sel({time_dim: np.datetime64(ini_time)})
+        ds = ds.sel({time_coord: np.datetime64(ini_time)})
 
     if time_dim not in ds.dims:
         ds = ds.expand_dims(time_dim)

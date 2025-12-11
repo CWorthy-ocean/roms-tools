@@ -1073,12 +1073,8 @@ def _set_variable_mapping(self, var_type: str = "physics") -> None:
     self.var_names = var_mappings[var_type]
 
     # Check all mapped variables exist in the dataset
-    missing_vars = [
-        v for v in self.var_names.values() if v not in self.ds.variables
-    ]
+    missing_vars = [v for v in self.var_names.values() if v not in self.ds.variables]
     if missing_vars:
         raise KeyError(
             f"The following variables are missing from the dataset: {missing_vars}"
         )
-
-

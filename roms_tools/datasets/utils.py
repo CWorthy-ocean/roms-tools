@@ -150,6 +150,7 @@ def validate_start_end_time(
 def select_relevant_times(
     ds: xr.Dataset,
     time_dim: str,
+    time_coord: str,
     start_time: datetime,
     end_time: datetime | None = None,
     climatology: bool = False,
@@ -184,6 +185,8 @@ def select_relevant_times(
         The dataset to filter. Must contain a valid time dimension.
     time_dim : str
         Name of the time dimension in `ds`.
+    time_coord : str
+        Name of the time coordinate in `ds`.
     start_time : datetime
         Start time for filtering.
     end_time : datetime or None
@@ -221,19 +224,26 @@ def select_relevant_times(
     - Logs warnings instead of failing hard when boundary records are missing, and
       defaults to using the earliest or latest available time in such cases.
     """
-    if time_dim not in ds.variables:
+    if time_dim not in ds.dims:
         logging.warning(
             f"Dataset does not contain time dimension '{time_dim}'. "
             "Please check variable naming or dataset structure."
         )
         return ds
 
-    time_type = get_time_type(ds[time_dim])
+    if time_coord not in ds.variables:
+        logging.warning(
+            f"Dataset does not contain time coordinate '{time_coord}'. "
+            "Please check variable naming or dataset structure."
+        )
+        return ds
+
+    time_type = get_time_type(ds[time_coord])
 
     if climatology:
-        if len(ds[time_dim]) != 12:
+        if len(ds[time_coord]) != 12:
             raise ValueError(
-                f"The dataset contains {len(ds[time_dim])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
+                f"The dataset contains {len(ds[time_coord])} time steps, but the climatology flag is set to True, which requires exactly 12 time steps."
             )
     else:
         if time_type == "int":
@@ -241,41 +251,41 @@ def select_relevant_times(
                 "The dataset contains integer time values, which are only supported when the climatology flag is set to True. However, your climatology flag is set to False."
             )
     if time_type == "cftime":
-        ds = ds.assign_coords({time_dim: convert_cftime_to_datetime(ds[time_dim])})
+        ds = ds.assign_coords({time_dim: convert_cftime_to_datetime(ds[time_coord])})
 
     if not end_time:
         # Assume we are looking for exactly one time record for initial conditions
         return _select_initial_time(
-            ds, time_dim, start_time, climatology, allow_flex_time
+            ds, time_dim, time_coord, start_time, climatology, allow_flex_time
         )
 
     if climatology:
         return ds
 
     # Identify records before or at start_time
-    before_start = ds[time_dim] <= np.datetime64(start_time)
+    before_start = ds[time_coord] <= np.datetime64(start_time)
     if before_start.any():
-        closest_before_start = ds[time_dim].where(before_start, drop=True)[-1]
+        closest_before_start = ds[time_coord].where(before_start, drop=True)[-1]
     else:
         logging.warning(f"No records found at or before the start_time: {start_time}.")
-        closest_before_start = ds[time_dim][0]
+        closest_before_start = ds[time_coord][0]
 
     # Identify records after or at end_time
-    after_end = ds[time_dim] >= np.datetime64(end_time)
+    after_end = ds[time_coord] >= np.datetime64(end_time)
     if after_end.any():
-        closest_after_end = ds[time_dim].where(after_end, drop=True).min()
+        closest_after_end = ds[time_coord].where(after_end, drop=True).min()
     else:
         logging.warning(f"No records found at or after the end_time: {end_time}.")
-        closest_after_end = ds[time_dim].max()
+        closest_after_end = ds[time_coord].max()
 
     # Select records within the time range and add the closest before/after
-    within_range = (ds[time_dim] > np.datetime64(start_time)) & (
-        ds[time_dim] < np.datetime64(end_time)
+    within_range = (ds[time_coord] > np.datetime64(start_time)) & (
+        ds[time_coord] < np.datetime64(end_time)
     )
-    selected_times = ds[time_dim].where(
+    selected_times = ds[time_coord].where(
         within_range
-        | (ds[time_dim] == closest_before_start)
-        | (ds[time_dim] == closest_after_end),
+        | (ds[time_coord] == closest_before_start)
+        | (ds[time_coord] == closest_after_end),
         drop=True,
     )
     ds = ds.sel({time_dim: selected_times})
@@ -286,6 +296,7 @@ def select_relevant_times(
 def _select_initial_time(
     ds: xr.Dataset,
     time_dim: str,
+    time_coord: str,
     ini_time: datetime,
     climatology: bool,
     allow_flex_time: bool = False,
@@ -298,6 +309,8 @@ def _select_initial_time(
         The input dataset with a time dimension.
     time_dim : str
         Name of the time dimension.
+    time_coord : str
+        Name of the time coordinate.
     ini_time : datetime
         The desired initial time.
     allow_flex_time : bool
@@ -319,13 +332,13 @@ def _select_initial_time(
         # Convert from timedelta64[ns] to fractional days
         ds["time"] = ds["time"] / np.timedelta64(1, "D")
         # Interpolate from climatology for initial conditions
-        return interpolate_from_climatology(ds, time_dim, ini_time)
+        return interpolate_from_climatology(ds, time_dim, time_coord, ini_time)
 
     if allow_flex_time:
         # Look in time range [ini_time, ini_time + 24h)
         end_time = ini_time + timedelta(days=1)
-        times = (np.datetime64(ini_time) <= ds[time_dim]) & (
-            ds[time_dim] < np.datetime64(end_time)
+        times = (np.datetime64(ini_time) <= ds[time_coord]) & (
+            ds[time_coord] < np.datetime64(end_time)
         )
 
         if np.all(~times):
@@ -339,12 +352,12 @@ def _select_initial_time(
             ds = ds.isel({time_dim: 0})
 
         logging.warning(
-            f"Selected time entry closest to the specified start_time in +24 hour range: {ds[time_dim].values}"
+            f"Selected time entry closest to the specified start_time in +24 hour range: {ds[time_coord].values}"
         )
 
     else:
         # Strict match required
-        if not (ds[time_dim].values == np.datetime64(ini_time)).any():
+        if not (ds[time_coord].values == np.datetime64(ini_time)).any():
             raise ValueError(
                 f"No exact match found for initial time {ini_time}. Consider setting allow_flex_time to True."
             )

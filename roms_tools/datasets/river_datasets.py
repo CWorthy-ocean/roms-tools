@@ -197,7 +197,13 @@ class RiverDataset:
         """
         time_dim = self.dim_names["time"]
 
-        ds = select_relevant_times(ds, time_dim, self.start_time, self.end_time, False)
+        ds = select_relevant_times(
+            ds=ds,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            start_time=self.start_time,
+            end_time=self.end_time,
+        )
 
         return ds
 

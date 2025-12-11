@@ -464,8 +464,9 @@ class SurfaceForcing:
             corr_factor = xr.concat(
                 [
                     interpolate_from_climatology(
-                        correction_data.ds[correction_data.var_names["swr_corr"]],
-                        correction_data.dim_names["time"],
+                        field=correction_data.ds[correction_data.var_names["swr_corr"]],
+                        time_dim=correction_data.dim_names["time"],
+                        time_coord=correction_data.dim_names["time"],
                         time=time,
                     )
                     for time in radiation.time
@@ -475,8 +476,9 @@ class SurfaceForcing:
         else:
             # Interpolate across all time steps at once
             corr_factor = interpolate_from_climatology(
-                correction_data.ds[correction_data.var_names["swr_corr"]],
-                correction_data.dim_names["time"],
+                field=correction_data.ds[correction_data.var_names["swr_corr"]],
+                time_dim=correction_data.dim_names["time"],
+                time_coord=correction_data.dim_names["time"],
                 time=radiation.time,
             )
 

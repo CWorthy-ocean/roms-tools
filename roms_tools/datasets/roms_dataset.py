@@ -466,20 +466,23 @@ class ROMSDataset:
             "lat_rho": self.grid.ds["lat_rho"],
             "lon_rho": self.grid.ds["lon_rho"],
         }
+        vars_to_add = {"mask_rho": self.grid.ds["mask_rho"]}
 
         if "xi_u" in ds.dims:
             coords_to_add.update(
                 {"lat_u": self.grid.ds["lat_u"], "lon_u": self.grid.ds["lon_u"]}
             )
+            vars_to_add.update({"mask_u": self.grid.ds["mask_u"]})
         if "eta_v" in ds.dims:
             coords_to_add.update(
                 {"lat_v": self.grid.ds["lat_v"], "lon_v": self.grid.ds["lon_v"]}
             )
+            vars_to_add.update({"mask_v": self.grid.ds["mask_v"]})
 
         ds = ds.assign_coords(coords_to_add)
+        for mask_name, mask_data in vars_to_add.items():
+            ds[mask_name] = mask_data
 
-        for mask_name in ["mask_rho", "mask_u", "mask_v"]:
-            ds[mask_name] = self.grid.ds[mask_name]
         return ds
 
     def choose_subdomain(

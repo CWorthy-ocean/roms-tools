@@ -13,6 +13,7 @@ from roms_tools.datasets.utils import (
     check_dataset,
     convert_to_float64,
     extrapolate_deepest_to_bottom,
+    select_relevant_fields,
     select_relevant_times,
     validate_start_end_time,
 )
@@ -60,6 +61,9 @@ class ROMSDataset:
         Dictionary specifying the names of dimensions in the dataset.
     var_names: dict[str, str], optional
         Dictionary of variable names that are required in the dataset.
+    opt_var_names: dict[str, str], optional
+        Dictionary of variable names that are optional in the dataset.
+        Defaults to an empty dictionary.
     model_reference_date : datetime, optional
         Reference date of ROMS simulation.
         If not specified, this is inferred from metadata of the model output
@@ -92,6 +96,8 @@ class ROMSDataset:
     """Dictionary specifying the names of dimensions in the dataset."""
     var_names: dict[str, str] | None = None
     """Dictionary of variable names that are required in the dataset."""
+    opt_var_names: dict[str, str] = field(default_factory=dict)
+    """Dictionary of variable names that are optional in the dataset."""
     use_dask: bool = False
     """Whether to use dask for processing."""
     model_reference_date: datetime | None = None
@@ -107,6 +113,9 @@ class ROMSDataset:
         validate_start_end_time(self.start_time, self.end_time)
         ds = self.load_data()
         self._check_consistency_data_grid(ds)
+
+        self._set_default_var_names(ds)
+
         check_dataset(ds, self.dim_names, self.var_names)
         self._check_vertical_coordinate(ds)
         self._infer_model_reference_date_from_metadata(ds)
@@ -152,6 +161,21 @@ class ROMSDataset:
                 f"grid ({eta}={grid_eta}, {xi}={grid_xi}), "
                 f"dataset ({eta}={ds_eta}, {xi}={ds_xi})."
             )
+
+    def _set_default_var_names(self, ds: xr.Dataset) -> None:
+        """
+        Ensure ``self.var_names`` is a valid mapping.
+
+        If ``self.var_names`` is ``None``, it is initialized as an identity
+        mapping for all variables in ``ds``.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset whose variable names are used when creating defaults.
+        """
+        if self.var_names is None:
+            self.var_names = {name: name for name in ds.data_vars}
 
     def _get_depth_coordinates(self, depth_type="layer", locations=["rho"]):
         """Ensure depth coordinates are stored for a given location and depth type.
@@ -219,31 +243,29 @@ class ROMSDataset:
 
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
         """
-        Return a dataset containing only the required variables defined in
-        ``self.var_names``.
+        Return a subset of the dataset containing only the required and optional
+        variables defined for this object.
 
-        If ``self.var_names`` is provided, all data variables in ``ds`` that are
-        *not* listed in ``self.var_names`` are removed. Optional variables are not
-        considered in this method, and no warnings are issued for missing entries.
+        Variables retained are those listed in ``self.var_names`` and
+        ``self.opt_var_names``. Any other data variables are removed, except for
+        the special variable ``"mask"``, which is always preserved if present.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The dataset from which required variables will be selected.
+            The input dataset from which relevant variables will be selected.
 
         Returns
         -------
         xr.Dataset
-            A dataset containing only the variables specified in
-            ``self.var_names``. If ``self.var_names`` is empty or None,
-            the input dataset is returned unchanged.
+            A new dataset containing only the required variables specified in
+            ``self.var_names`` and the optional variables specified in
+            ``self.opt_var_names``, along with ``"mask"`` if present.
         """
-        if self.var_names:
-            for var in ds.data_vars:
-                if var not in self.var_names.values():
-                    ds = ds.drop_vars(var)
-
-        return ds
+        return select_relevant_fields(
+            ds,
+            [*self.var_names.values(), *self.opt_var_names.values()],  # type: ignore
+        )
 
     def select_relevant_times(self, ds: xr.Dataset) -> xr.Dataset:
         """Select a subset of the dataset based on the specified time range.

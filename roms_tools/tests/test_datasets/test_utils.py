@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from datetime import datetime, timedelta
 
 import cftime
@@ -13,6 +14,7 @@ from roms_tools.datasets.utils import (
     convert_to_float64,
     extrapolate_deepest_to_bottom,
     get_time_type,
+    select_relevant_fields,
     select_relevant_times,
     validate_start_end_time,
 )
@@ -168,6 +170,66 @@ def test_no_checks_pass():
 
     # Should not fail because no dim_names/var_names provided
     check_dataset(ds)
+
+
+# tests for select_relevant_fields
+
+
+def test_select_relevant_fields_basic():
+    """Keep only required + optional variables and drop others."""
+    ds = xr.Dataset(
+        {
+            "temp": (("x",), np.arange(5)),
+            "salt": (("x",), np.arange(5) * 2),
+            "u": (("x",), np.arange(5) * 3),
+            "mask": (("x",), np.ones(5)),
+            "extra": (("x",), np.zeros(5)),
+        }
+    )
+
+    keep_vars = ["temp", "u"]  # required + optional
+
+    out = select_relevant_fields(ds, keep_vars)
+
+    assert set(out.data_vars) == {"temp", "u", "mask"}
+    assert "salt" not in out
+    assert "extra" not in out
+
+
+def test_select_relevant_fields_does_not_modify_input():
+    """Function must not mutate the original dataset."""
+    ds = xr.Dataset(
+        {
+            "temp": (("x",), np.arange(5)),
+            "salt": (("x",), np.arange(5)),
+            "mask": (("x",), np.ones(5)),
+        }
+    )
+
+    ds_copy = deepcopy(ds)
+
+    _ = select_relevant_fields(ds, ["temp"])
+
+    # ensure original dataset is unchanged
+    assert set(ds.data_vars) == set(ds_copy.data_vars)
+    assert "salt" in ds
+    assert "mask" in ds
+
+
+def test_select_relevant_fields_duplicate_keep_names():
+    """Duplicate keep names should not cause issues."""
+    ds = xr.Dataset(
+        {
+            "temp": (("x",), np.arange(5)),
+            "mask": (("x",), np.ones(5)),
+        }
+    )
+
+    keep_vars = ["temp", "temp"]  # duplicates
+
+    out = select_relevant_fields(ds, keep_vars)
+
+    assert set(out.data_vars) == {"temp", "mask"}
 
 
 # tests for select_relevant_times

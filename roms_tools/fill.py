@@ -298,3 +298,29 @@ def stencil_grid_mod(S, grid, msk, dtype=None, format=None):
                 data[4, i + diags[4]] = 0
 
     return sparse.dia_matrix((data, diags), shape=(N_v, N_v)).asformat(format)
+
+
+def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
+    """Fill NaN values in a DataArray along a specified dimension.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        The input DataArray with NaN values to be filled, which must include the specified dimension.
+    dim : str
+        The name of the dimension along which to fill NaN values (e.g., 'depth' or 'time').
+    direction : str, optional
+        The filling direction; either "forward" to propagate non-NaN values downward or "backward" to propagate them upward.
+        Defaults to "forward".
+
+    Returns
+    -------
+    xr.DataArray
+        A new DataArray with NaN values filled in the specified direction, leaving the original data unchanged.
+    """
+    if dim in da.dims:
+        if direction == "forward":
+            return da.ffill(dim=dim)
+        elif direction == "backward":
+            return da.bfill(dim=dim)
+    return da

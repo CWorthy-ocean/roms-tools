@@ -15,8 +15,8 @@ from roms_tools import (
     SurfaceForcing,
     TidalForcing,
 )
-from roms_tools.download import download_test_data
-from roms_tools.setup.lat_lon_datasets import (
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
     ERA5Dataset,

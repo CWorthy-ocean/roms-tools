@@ -8,9 +8,7 @@ import numpy as np
 import xarray as xr
 
 from roms_tools import Grid
-from roms_tools.plot import plot
-from roms_tools.regrid import LateralRegridToROMS
-from roms_tools.setup.lat_lon_datasets import (
+from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCSurfaceForcingDataset,
     ERA5ARCODataset,
     ERA5Correction,
@@ -18,6 +16,8 @@ from roms_tools.setup.lat_lon_datasets import (
     LatLonDataset,
     UnifiedBGCSurfaceDataset,
 )
+from roms_tools.plot import plot
+from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
@@ -26,7 +26,6 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     group_dataset,
-    interpolate_from_climatology,
     min_dist_to_land,
     nan_check,
     rotate_velocities,
@@ -34,7 +33,11 @@ from roms_tools.setup.utils import (
     to_dict,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets, transpose_dimensions
+from roms_tools.utils import (
+    interpolate_from_climatology,
+    save_datasets,
+    transpose_dimensions,
+)
 
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
@@ -461,8 +464,9 @@ class SurfaceForcing:
             corr_factor = xr.concat(
                 [
                     interpolate_from_climatology(
-                        correction_data.ds[correction_data.var_names["swr_corr"]],
-                        correction_data.dim_names["time"],
+                        field=correction_data.ds[correction_data.var_names["swr_corr"]],
+                        time_dim=correction_data.dim_names["time"],
+                        time_coord=correction_data.dim_names["time"],
                         time=time,
                     )
                     for time in radiation.time
@@ -472,8 +476,9 @@ class SurfaceForcing:
         else:
             # Interpolate across all time steps at once
             corr_factor = interpolate_from_climatology(
-                correction_data.ds[correction_data.var_names["swr_corr"]],
-                correction_data.dim_names["time"],
+                field=correction_data.ds[correction_data.var_names["swr_corr"]],
+                time_dim=correction_data.dim_names["time"],
+                time_coord=correction_data.dim_names["time"],
                 time=radiation.time,
             )
 

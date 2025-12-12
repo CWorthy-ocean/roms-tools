@@ -3,7 +3,7 @@ from datetime import datetime
 import numpy as np
 import xarray as xr
 
-from roms_tools.setup.river_datasets import RiverDataset
+from roms_tools.datasets.river_datasets import RiverDataset
 
 
 class TestRiverDataset:

@@ -6,7 +6,7 @@ import xarray as xr
 
 from conftest import calculate_data_hash
 from roms_tools import Grid, TidalForcing
-from roms_tools.download import download_test_data
+from roms_tools.datasets.download import download_test_data
 
 
 @pytest.fixture(scope="session")

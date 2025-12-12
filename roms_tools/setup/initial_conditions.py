@@ -11,15 +11,15 @@ import xarray as xr
 from matplotlib.axes import Axes
 
 from roms_tools import Grid
-from roms_tools.plot import plot
-from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
-from roms_tools.setup.lat_lon_datasets import (
+from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     LatLonDataset,
     UnifiedBGCDataset,
 )
+from roms_tools.plot import plot
+from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
 from roms_tools.setup.utils import (
     RawDataSource,
     compute_barotropic_velocity,

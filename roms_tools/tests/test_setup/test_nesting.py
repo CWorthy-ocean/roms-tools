@@ -14,7 +14,8 @@ from roms_tools.setup.nesting import (
     modify_child_mask,
     modify_child_topography,
 )
-from roms_tools.setup.utils import get_boundary_coords, wrap_longitudes
+from roms_tools.setup.utils import get_boundary_coords
+from roms_tools.utils import wrap_longitudes
 
 
 @pytest.fixture()

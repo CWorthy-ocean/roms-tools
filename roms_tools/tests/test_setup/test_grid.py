@@ -18,7 +18,7 @@ from roms_tools.constants import (
     UPPER_BOUND_THETA_B,
     UPPER_BOUND_THETA_S,
 )
-from roms_tools.download import download_test_data
+from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.topography import _compute_rfactor
 
 try:

@@ -88,4 +88,4 @@ Utilities
    roms_tools.tiling.partition.partition_netcdf
    roms_tools.tiling.join.join_netcdf
    roms_tools.plot.plot
-   roms_tools.setup.lat_lon_datasets.get_glorys_bounds
+   roms_tools.datasets.lat_lon_datasets.get_glorys_bounds

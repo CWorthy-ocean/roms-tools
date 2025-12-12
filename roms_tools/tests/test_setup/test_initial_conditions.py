@@ -10,8 +10,8 @@ import xarray as xr
 
 from conftest import calculate_data_hash
 from roms_tools import Grid, InitialConditions
-from roms_tools.download import download_test_data
-from roms_tools.setup.lat_lon_datasets import (
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     UnifiedBGCDataset,
 )

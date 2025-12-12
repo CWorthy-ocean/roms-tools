@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.download import download_test_data
-from roms_tools.setup.lat_lon_datasets import (
+from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.lat_lon_datasets import (
     GLORYS_GLOBAL_GRID_PATH,
     CESMBGCDataset,
     ERA5ARCODataset,
@@ -604,14 +604,14 @@ def test_data_concatenation(use_dask):
 def test_time_validation(use_dask):
     fname = download_test_data("GLORYS_NA_2012.nc")
 
-    with pytest.raises(TypeError, match="start_time must be a datetime object"):
+    with pytest.raises(TypeError, match="`start_time` must be a datetime object"):
         GLORYSDataset(
             filename=fname,
             start_time="dummy",
             end_time=datetime(2013, 1, 1),
             use_dask=use_dask,
         )
-    with pytest.raises(TypeError, match="end_time must be a datetime object"):
+    with pytest.raises(TypeError, match="`end_time` must be a datetime object"):
         GLORYSDataset(
             filename=fname,
             start_time=datetime(2012, 1, 1),

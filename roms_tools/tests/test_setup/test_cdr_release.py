@@ -328,11 +328,10 @@ class TestTracerPerturbation:
         with pytest.raises(ValidationError):
             TracerPerturbation(**self.params, tracer_fluxes={"ALK": ["not", "valid"]})
 
-    def test_tracer_fluxes_non_negative(self):
-        with pytest.raises(ValidationError):
-            TracerPerturbation(**self.params, tracer_fluxes={"ALK": -1})
-        with pytest.raises(ValidationError):
-            TracerPerturbation(**self.params, tracer_fluxes={"ALK": [-1, 15]})
+    def test_tracer_fluxes_negative(self):
+        tp = TracerPerturbation(**self.params, tracer_fluxes={"DIC": -1})
+
+        assert tp.tracer_fluxes["DIC"].values <= 0.0
 
     def test_zero_fill_strategy(self):
         alk_value = 100.0

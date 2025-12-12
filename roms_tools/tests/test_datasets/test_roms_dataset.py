@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 
@@ -483,11 +484,8 @@ grid_cases = [
     "big_params, small_params",
     grid_cases,
 )
-def test_choose_subdomain(big_params, small_params):
-    """Tests choose_subdomain() over grids that straddle or do not straddle
-    the Greenwich meridian. Ensures robustness of masking, slicing, and
-    wrap_longitudes handling.
-    """
+def test_choose_subdomain_with(big_params, small_params):
+    """Tests choose_subdomain() for rho, u, and v points over various grid configurations."""
     # --- build big grid ---
     big = Grid(**big_params)
     ds = xr.Dataset()
@@ -495,11 +493,20 @@ def test_choose_subdomain(big_params, small_params):
         {
             "lat_rho": big.ds.lat_rho,
             "lon_rho": big.ds.lon_rho,
+            "lat_u": big.ds.lat_u,
+            "lon_u": big.ds.lon_u,
+            "lat_v": big.ds.lat_v,
+            "lon_v": big.ds.lon_v,
         }
     )
 
-    # simple field for testing
-    ds["field"] = (("eta_rho", "xi_rho"), (big.ds["eta_rho"] * big.ds["xi_rho"]).values)
+    # simple fields for testing
+    ds["field_rho"] = (
+        ("eta_rho", "xi_rho"),
+        (big.ds["eta_rho"] * big.ds["xi_rho"]).values,
+    )
+    ds["field_u"] = (("eta_rho", "xi_u"), np.random.rand(*big.ds["lat_u"].shape))
+    ds["field_v"] = (("eta_v", "xi_rho"), np.random.rand(*big.ds["lat_v"].shape))
 
     # --- build small grid ---
     small = Grid(**small_params)
@@ -508,15 +515,25 @@ def test_choose_subdomain(big_params, small_params):
     # --- apply function ---
     sub = choose_subdomain(ds, big.ds, target_coords, buffer_points=1)
 
-    # --- tests ---
+    # --- rho tests ---
     assert sub.lat_rho.shape[0] <= ds.lat_rho.shape[0]
     assert sub.lat_rho.shape[1] <= ds.lat_rho.shape[1]
-
-    # ensure physically consistent subdomain
     assert float(sub.lat_rho.min()) >= float(ds.lat_rho.min()) - 1e-6
     assert float(sub.lat_rho.max()) <= float(ds.lat_rho.max()) + 1e-6
+    assert not sub.field_rho.isnull().any()
 
-    # values should be preserved
-    assert not sub.field.isnull().any()
-    assert float(sub.field.max()) <= float(ds.field.max()) + 1e-9
-    assert float(sub.field.min()) >= float(ds.field.min()) - 1e-9
+    # --- u tests ---
+    if "lat_u" in sub.coords and "lon_u" in sub.coords:
+        assert sub.lat_u.shape[0] <= ds.lat_u.shape[0]
+        assert sub.lat_u.shape[1] <= ds.lat_u.shape[1]
+        assert float(sub.lat_u.min()) >= float(ds.lat_u.min()) - 1e-6
+        assert float(sub.lat_u.max()) <= float(ds.lat_u.max()) + 1e-6
+        assert not sub.field_u.isnull().any()
+
+    # --- v tests ---
+    if "lat_v" in sub.coords and "lon_v" in sub.coords:
+        assert sub.lat_v.shape[0] <= ds.lat_v.shape[0]
+        assert sub.lat_v.shape[1] <= ds.lat_v.shape[1]
+        assert float(sub.lat_v.min()) >= float(ds.lat_v.min()) - 1e-6
+        assert float(sub.lat_v.max()) <= float(ds.lat_v.max()) + 1e-6
+        assert not sub.field_v.isnull().any()

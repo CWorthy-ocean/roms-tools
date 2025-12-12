@@ -44,20 +44,18 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
         "climatology": False,
     }
     assert boundary_forcing.model_reference_date == datetime(2000, 1, 1)
-    assert boundary_forcing.boundaries == {
-        "south": True,
-        "east": True,
-        "north": True,
-        "west": True,
-    }
+    assert all(
+        k in boundary_forcing.boundaries for k in ["south", "east", "north", "west"]
+    )
 
     assert boundary_forcing.ds.source == "GLORYS"
     for direction in ["south", "east", "north", "west"]:
-        assert f"temp_{direction}" in boundary_forcing.ds
-        assert f"salt_{direction}" in boundary_forcing.ds
-        assert f"u_{direction}" in boundary_forcing.ds
-        assert f"v_{direction}" in boundary_forcing.ds
-        assert f"zeta_{direction}" in boundary_forcing.ds
+        if boundary_forcing.boundaries[direction]:
+            assert f"temp_{direction}" in boundary_forcing.ds
+            assert f"salt_{direction}" in boundary_forcing.ds
+            assert f"u_{direction}" in boundary_forcing.ds
+            assert f"v_{direction}" in boundary_forcing.ds
+            assert f"zeta_{direction}" in boundary_forcing.ds
 
     assert len(boundary_forcing.ds.bry_time) == 2
     assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
@@ -104,12 +102,9 @@ def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
     assert boundary_forcing.end_time == datetime(2021, 6, 30)
     assert boundary_forcing.source["climatology"]
     assert boundary_forcing.model_reference_date == datetime(2000, 1, 1)
-    assert boundary_forcing.boundaries == {
-        "south": True,
-        "east": True,
-        "north": True,
-        "west": True,
-    }
+    assert all(
+        k in boundary_forcing.boundaries for k in ["south", "east", "north", "west"]
+    )
 
     expected_bgc_variables = [
         "PO4",
@@ -147,8 +142,9 @@ def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
     ]
 
     for direction in ["south", "east", "north", "west"]:
-        for var in expected_bgc_variables:
-            assert f"{var}_{direction}" in boundary_forcing.ds
+        if boundary_forcing.boundaries[direction]:
+            for var in expected_bgc_variables:
+                assert f"{var}_{direction}" in boundary_forcing.ds
 
     assert len(boundary_forcing.ds.bry_time) == 12
     assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
@@ -408,14 +404,15 @@ def test_correct_depth_coords_adjusted_for_zeta(
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for direction in ["south", "east", "north", "west"]:
-        # Test that uppermost interface coincides with sea surface height
-        assert np.allclose(
-            boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
-            .isel(s_w=-1)
-            .values,
-            -boundary_forcing.ds[f"zeta_{direction}"].values,
-            atol=1e-6,
-        )
+        if boundary_forcing.boundaries[direction]:
+            # Test that uppermost interface coincides with sea surface height
+            assert np.allclose(
+                boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
+                .isel(s_w=-1)
+                .values,
+                -boundary_forcing.ds[f"zeta_{direction}"].values,
+                atol=1e-6,
+            )
 
 
 @pytest.mark.parametrize(
@@ -429,14 +426,15 @@ def test_correct_depth_coords_zero_zeta(boundary_forcing_fixture, request, use_d
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for direction in ["south", "east", "north", "west"]:
-        # Test that uppermost interface coincides with sea surface height
-        assert np.allclose(
-            boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
-            .isel(s_w=-1)
-            .values,
-            0 * boundary_forcing.ds[f"zeta_{direction}"].values,
-            atol=1e-6,
-        )
+        if boundary_forcing.boundaries[direction]:
+            # Test that uppermost interface coincides with sea surface height
+            assert np.allclose(
+                boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
+                .isel(s_w=-1)
+                .values,
+                0 * boundary_forcing.ds[f"zeta_{direction}"].values,
+                atol=1e-6,
+            )
 
 
 def test_computed_missing_optional_fields(
@@ -446,16 +444,16 @@ def test_computed_missing_optional_fields(
 
     # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
 
-    # 'DOCr' was missing in the source data and should have been filled with a constant default value
     for direction in ["south", "east", "north", "west"]:
-        assert np.allclose(
-            ds[f"DOCr_{direction}"].std(), 0.0, rtol=1e-10, atol=1e-10
-        ), "DOCr should be constant across space and time"
-    # 'DOC' was present in the source data and should show spatial or temporal variability
-    for direction in ["south", "east", "north", "west"]:
-        assert ds[f"DOC_{direction}"].std() > 1e-10, (
-            "DOC should vary across space and time"
-        )
+        if bgc_boundary_forcing_from_unified_climatology.boundaries[direction]:
+            # 'DOCr' was missing in the source data and should have been filled with a constant default value
+            assert np.allclose(
+                ds[f"DOCr_{direction}"].std(), 0.0, rtol=1e-10, atol=1e-10
+            ), "DOCr should be constant across space and time"
+            # 'DOC' was present in the source data and should show spatial or temporal variability
+            assert ds[f"DOC_{direction}"].std() > 1e-10, (
+                "DOC should vary across space and time"
+            )
 
 
 @pytest.mark.parametrize(
@@ -472,24 +470,25 @@ def test_boundary_forcing_plot(boundary_forcing_fixture, request):
     boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
     for direction in ["south", "east", "north", "west"]:
-        for layer_contours in [False, True]:
-            boundary_forcing.plot(
-                var_name=f"temp_{direction}", layer_contours=layer_contours
-            )
-            boundary_forcing.plot(
-                var_name=f"u_{direction}", layer_contours=layer_contours
-            )
-            boundary_forcing.plot(
-                var_name=f"v_{direction}", layer_contours=layer_contours
-            )
-        boundary_forcing.plot(var_name=f"zeta_{direction}")
-        boundary_forcing.plot(var_name=f"vbar_{direction}")
-        boundary_forcing.plot(var_name=f"ubar_{direction}")
+        if boundary_forcing.boundaries[direction]:
+            for layer_contours in [False, True]:
+                boundary_forcing.plot(
+                    var_name=f"temp_{direction}", layer_contours=layer_contours
+                )
+                boundary_forcing.plot(
+                    var_name=f"u_{direction}", layer_contours=layer_contours
+                )
+                boundary_forcing.plot(
+                    var_name=f"v_{direction}", layer_contours=layer_contours
+                )
+            boundary_forcing.plot(var_name=f"zeta_{direction}")
+            boundary_forcing.plot(var_name=f"vbar_{direction}")
+            boundary_forcing.plot(var_name=f"ubar_{direction}")
 
-    # Test that passing a matplotlib.axes.Axes works
-    fig, ax = plt.subplots(1, 1)
-    boundary_forcing.plot(var_name=f"temp_{direction}", ax=ax)
-    boundary_forcing.plot(var_name=f"zeta_{direction}", ax=ax)
+            # Test that passing a matplotlib.axes.Axes works
+            fig, ax = plt.subplots(1, 1)
+            boundary_forcing.plot(var_name=f"temp_{direction}", ax=ax)
+            boundary_forcing.plot(var_name=f"zeta_{direction}", ax=ax)
 
 
 @pytest.mark.parametrize(
@@ -543,10 +542,9 @@ def test_bgc_boundary_forcing_plot(boundary_forcing_fixture, request):
     """Test plot method."""
     bgc_boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
 
-    bgc_boundary_forcing.plot(var_name="ALK_south", layer_contours=True)
-    bgc_boundary_forcing.plot(var_name="ALK_east", layer_contours=True)
-    bgc_boundary_forcing.plot(var_name="ALK_north", layer_contours=True)
-    bgc_boundary_forcing.plot(var_name="ALK_west", layer_contours=True)
+    for direction in ["south", "east", "north", "west"]:
+        if bgc_boundary_forcing.boundaries[direction]:
+            bgc_boundary_forcing.plot(var_name=f"ALK_{direction}", layer_contours=True)
 
 
 @pytest.mark.parametrize(

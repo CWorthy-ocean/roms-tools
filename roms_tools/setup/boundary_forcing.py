@@ -22,6 +22,7 @@ from roms_tools.setup.lat_lon_datasets import (
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
+    check_and_set_boundaries,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     from_yaml,
@@ -61,8 +62,9 @@ class BoundaryForcing:
         The end time of the desired surface forcing data. This time is used to filter the dataset
         to include only records on or before this time, with a single record at or after this time.
         If no time filtering is desired, set it to None. Default is None.
-    boundaries : Dict[str, bool], optional
-        Dictionary specifying which boundaries are forced (south, east, north, west). Default is all True.
+    boundaries : dict[str, bool], optional
+        Specifies which grid boundaries ('south', 'east', 'north', 'west') are active and to be processed.
+        if not provided, valid (non-land) boundaries are enabled automatically.
     source : RawDataSource
         Dictionary specifying the source of the boundary forcing data. Keys include:
 
@@ -117,14 +119,7 @@ class BoundaryForcing:
     """The start time of the desired surface forcing data."""
     end_time: datetime | None = None
     """The end time of the desired surface forcing data."""
-    boundaries: dict[str, bool] = field(
-        default_factory=lambda: {
-            "south": True,
-            "east": True,
-            "north": True,
-            "west": True,
-        }
-    )
+    boundaries: dict[str, bool] | None = None
     """Dictionary specifying which boundaries are forced (south, east, north, west)."""
     source: RawDataSource
     """Dictionary specifying the source of the boundary forcing data."""
@@ -388,45 +383,59 @@ class BoundaryForcing:
 
         self.ds = ds
 
-    def _input_checks(self):
-        # Check that start_time and end_time are both None or none of them is
+    def _input_checks(self) -> None:
+        """Validate and normalize user-provided input parameters."""
+        # -------------------------------------------------------
+        # Time range checks
+        # -------------------------------------------------------
         if (self.start_time is None) != (self.end_time is None):
             raise ValueError(
                 "Both `start_time` and `end_time` must be provided together as datetime objects or both should be None."
             )
 
-        # Trigger a warning if both are None
         if self.start_time is None and self.end_time is None:
             logging.warning(
                 "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
             )
 
-        # Validate the 'type' parameter
-        if self.type not in ["physics", "bgc"]:
+        # -------------------------------------------------------
+        # Type check
+        # -------------------------------------------------------
+        if self.type not in {"physics", "bgc"}:
             raise ValueError("`type` must be either 'physics' or 'bgc'.")
 
-        # Ensure 'source' dictionary contains required keys
+        # -------------------------------------------------------
+        # Source configuration checks
+        # -------------------------------------------------------
         if "name" not in self.source:
             raise ValueError("`source` must include a 'name'.")
+
         if "path" not in self.source:
             if self.source["name"] != "GLORYS":
                 raise ValueError("`source` must include a 'path'.")
-
             self.source["path"] = GLORYSDefaultDataset.dataset_name
 
-        # Set 'climatology' to False if not provided in 'source'
-        self.source = {
-            **self.source,
-            "climatology": self.source.get("climatology", False),
-        }
+        # Assign default value
+        self.source["climatology"] = self.source.get("climatology", False)
 
-        # Ensure adjust_depth_for_sea_surface_height is only used with type="physics"
+        # -------------------------------------------------------
+        # Boundary selection defaults and validation
+        # -------------------------------------------------------
+
+        self.boundaries = check_and_set_boundaries(
+            self.boundaries, self.grid.ds.mask_rho
+        )
+
+        # -------------------------------------------------------
+        # Depth adjustment checks
+        # -------------------------------------------------------
         if self.type == "bgc" and self.adjust_depth_for_sea_surface_height:
             logging.warning(
                 "adjust_depth_for_sea_surface_height is not applicable for BGC fields. "
                 "Setting it to False."
             )
             self.adjust_depth_for_sea_surface_height = False
+
         elif self.adjust_depth_for_sea_surface_height:
             logging.info("Sea surface height will be used to adjust depth coordinates.")
         else:

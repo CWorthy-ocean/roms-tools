@@ -223,9 +223,16 @@ class ROMSDataset:
         for location in locations:
             var_name = f"{depth_type}_depth_{location}"
             if var_name not in self.ds_depth_coords:
-                self.ds_depth_coords[var_name] = compute_depth_coordinates(
+                depth_da = compute_depth_coordinates(
                     self.grid.ds, zeta, depth_type, location
                 )
+                depth_da = depth_da.assign_coords(
+                    {
+                        f"lat_{location}": self.grid.ds[f"lat_{location}"],
+                        f"lon_{location}": self.grid.ds[f"lon_{location}"],
+                    }
+                )
+                self.ds_depth_coords[var_name] = depth_da
 
     def load_data(self) -> xr.Dataset:
         """Load the ROMS data."""
@@ -689,25 +696,49 @@ def choose_subdomain(
     deg_per_meter_lon = 1 / (111_320.0 * np.cos(lat))
     margin_lon = buffer * deg_per_meter_lon
 
-    subset_mask = (
-        (ds.lat_rho > lat_min - margin_lat)
-        & (ds.lat_rho < lat_max + margin_lat)
-        & (ds.lon_rho > lon_min - margin_lon)
-        & (ds.lon_rho < lon_max + margin_lon)
-    )
+    mapping = {
+        "rho": ("eta_rho", "xi_rho"),
+        "u": ("eta_rho", "xi_u"),
+        "v": ("eta_v", "xi_rho"),
+    }
 
-    eta_mask = subset_mask.any(dim="xi_rho")
-    eta_rho_indices = np.where(eta_mask)[0]
-    first_eta = eta_rho_indices[0]
-    last_eta = eta_rho_indices[-1]
+    for location in ["rho", "u", "v"]:
+        eta_dim, xi_dim = mapping[location]
 
-    xi_mask = subset_mask.any(dim="eta_rho")
-    xi_rho_indices = np.where(xi_mask)[0]
-    first_xi = xi_rho_indices[0]
-    last_xi = xi_rho_indices[-1]
+        if eta_dim in ds.dims and xi_dim in ds.dims:
+            # Check that lat/lon coordinates exist
+            lat_coord = f"lat_{location}"
+            lon_coord = f"lon_{location}"
+            if lat_coord not in ds.coords or lon_coord not in ds.coords:
+                raise ValueError(
+                    f"Dataset is missing expected coordinates for location '{location}': "
+                    f"expected '{lat_coord}' and '{lon_coord}'"
+                )
 
-    subdomain = ds.isel(
-        eta_rho=slice(first_eta, last_eta), xi_rho=slice(first_xi, last_xi)
-    )
+            # Build subset mask
+            subset_mask = (
+                (ds[lat_coord] > lat_min - margin_lat)
+                & (ds[lat_coord] < lat_max + margin_lat)
+                & (ds[lon_coord] > lon_min - margin_lon)
+                & (ds[lon_coord] < lon_max + margin_lon)
+            )
 
-    return subdomain
+            # Reduce along xi_dim
+            eta_mask = subset_mask.any(dim=xi_dim)
+            eta_indices = np.where(eta_mask)[0]
+            first_eta, last_eta = eta_indices[0], eta_indices[-1]
+
+            # Reduce along eta_dim
+            xi_mask = subset_mask.any(dim=eta_dim)
+            xi_indices = np.where(xi_mask)[0]
+            first_xi, last_xi = xi_indices[0], xi_indices[-1]
+
+            # Subset the dataset
+            ds = ds.isel(
+                **{
+                    eta_dim: slice(first_eta, last_eta + 1),
+                    xi_dim: slice(first_xi, last_xi + 1),
+                }
+            )
+
+    return ds

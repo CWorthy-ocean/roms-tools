@@ -86,18 +86,16 @@ def test_extract_efficiency(create_member_ds: xr.Dataset) -> None:
     assert eff_rel.time.attrs.get("long_name") == "time since release start"
 
 
-def test_extract_efficiency_missing_abs_time() -> None:
-    """Test that _extract_efficiency raises an error if 'abs_time' is missing."""
+def test_extract_efficiency_missing_time() -> None:
+    """Test that _extract_efficiency raises an error if 'time' is missing."""
     times = np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[ns]")
     ds = xr.Dataset(
         {"cdr_efficiency": ("time", [0.1, 0.2])},
-        coords={"time": times},  # Note: no 'abs_time' coordinate
+        coords={"abs_time": times},  # Note: no 'time' coordinate
     )
 
     ens = Ensemble.__new__(Ensemble)
-    with pytest.raises(
-        ValueError, match="Dataset must contain an 'abs_time' coordinate."
-    ):
+    with pytest.raises(ValueError, match="Dataset must contain a 'time' coordinate."):
         ens._extract_efficiency(ds)
 
 

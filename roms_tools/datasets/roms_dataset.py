@@ -299,7 +299,7 @@ class ROMSDataset:
         ds = select_relevant_times(
             ds=ds,
             time_dim=time_dim,
-            time_coord="abs_time",
+            time_coord="time",
             start_time=self.start_time,
             end_time=self.end_time,
             allow_flex_time=self.allow_flex_time,
@@ -430,9 +430,6 @@ class ROMSDataset:
     def _add_absolute_time(self, ds: xr.Dataset) -> xr.Dataset:
         """Add absolute time as a coordinate to the dataset.
 
-        Computes "abs_time" based on "ocean_time" and a reference date,
-        and adds it as a coordinate.
-
         Parameters
         ----------
         ds : xarray.Dataset
@@ -441,7 +438,7 @@ class ROMSDataset:
         Returns
         -------
         xarray.Dataset
-            Dataset with "abs_time" added and "time" removed.
+            Dataset with absolute time added.
         """
         if self.model_reference_date is None:
             raise ValueError(
@@ -463,6 +460,7 @@ class ROMSDataset:
         abs_time.attrs["long_name"] = "absolute time"
         ds = ds.assign_coords({"abs_time": abs_time})
         ds = ds.drop_vars("time")
+        ds = ds.set_index(time="abs_time")
 
         return ds
 

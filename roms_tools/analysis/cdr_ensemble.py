@@ -59,7 +59,7 @@ class Ensemble:
         Parameters
         ----------
         ds : xr.Dataset
-            Dataset containing a "cdr_efficiency" variable and "abs_time" coordinate.
+            Dataset containing a "cdr_efficiency" variable and "time" coordinate.
 
         Returns
         -------
@@ -69,18 +69,20 @@ class Ensemble:
         Raises
         ------
         ValueError
-            If 'abs_time' coordinate is missing or there are no valid efficiency values.
+            If 'time' coordinate is missing or there are no valid efficiency values.
         """
         eff = ds["cdr_efficiency"]
 
-        # Check that abs_time exists
-        if "abs_time" in eff.coords:
-            abs_time = eff.coords["abs_time"]
-        elif "abs_time" in ds.data_vars:
-            abs_time = ds["abs_time"]
+        # Check that time coordinate exists
+        if "time" in eff.coords:
+            abs_time = eff.coords["time"]
+            eff = eff.drop_vars("time")
+        elif "time" in ds.data_vars:
+            abs_time = ds["time"]
+            eff = eff.drop_vars("time")
         else:
             raise ValueError(
-                "Dataset must contain an 'abs_time' coordinate or data variable."
+                "Dataset must contain a 'time' coordinate or data variable."
             )
 
         # Drop NaNs to find first valid time
@@ -96,11 +98,6 @@ class Ensemble:
         # Assign new time coordinate and drop abs_time if it was a data variable
         eff_rel = eff.assign_coords(time=time_rel)
         eff_rel.time.attrs["long_name"] = "time since release start"
-
-        if hasattr(eff_rel, "coords") and "abs_time" in eff_rel.coords:
-            eff_rel = eff_rel.drop_vars("abs_time")
-        elif hasattr(eff_rel, "variables") and "abs_time" in eff_rel.variables:
-            eff_rel = eff_rel.drop_vars("abs_time")
 
         return eff_rel
 

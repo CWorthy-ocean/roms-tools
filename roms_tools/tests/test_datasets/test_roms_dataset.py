@@ -299,7 +299,7 @@ def test_that_coordinates_and_masks_are_added(use_dask):
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     output = ROMSDataset(grid=grid, path=fname_restart1, use_dask=use_dask)
 
-    assert "abs_time" in output.ds.coords
+    assert "time" in output.ds.coords
     assert "lat_rho" in output.ds.coords
     assert "lon_rho" in output.ds.coords
     assert "mask_rho" in output.ds

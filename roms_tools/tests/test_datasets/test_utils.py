@@ -200,6 +200,7 @@ def test_climatology_must_have_12_steps():
         select_relevant_times(
             ds,
             "time",
+            "time",
             datetime(2024, 1, 1),
             climatology=True,
             end_time=datetime(2024, 1, 2),
@@ -212,6 +213,7 @@ def test_climatology_pass_through():
 
     out = select_relevant_times(
         ds,
+        "time",
         "time",
         datetime(2024, 1, 1),
         end_time=datetime(2024, 1, 10),
@@ -227,7 +229,9 @@ def test_int_time_rejected():
     )
 
     with pytest.raises(ValueError):
-        select_relevant_times(ds, "time", datetime(2024, 1, 1), datetime(2024, 1, 2))
+        select_relevant_times(
+            ds, "time", "time", datetime(2024, 1, 1), datetime(2024, 1, 2)
+        )
 
 
 def test_cftime_conversion(monkeypatch):
@@ -246,7 +250,9 @@ def test_cftime_conversion(monkeypatch):
         "roms_tools.datasets.utils.convert_cftime_to_datetime", mock_convert
     )
 
-    out = select_relevant_times(ds, "time", datetime(2024, 1, 1), datetime(2024, 1, 3))
+    out = select_relevant_times(
+        ds, "time", "time", datetime(2024, 1, 1), datetime(2024, 1, 3)
+    )
 
     assert np.issubdtype(out["time"].dtype, np.datetime64)
 
@@ -259,6 +265,7 @@ def test_time_range_selection():
 
     out = select_relevant_times(
         ds,
+        "time",
         "time",
         datetime(2024, 1, 2),
         datetime(2024, 1, 7),
@@ -284,6 +291,7 @@ def test_range_selection_missing_before(caplog):
         out = select_relevant_times(
             ds,
             "time",
+            "time",
             datetime(2024, 1, 1),
             datetime(2024, 1, 12),
         )
@@ -300,6 +308,7 @@ def test_range_selection_missing_after(caplog):
     with caplog.at_level(logging.WARNING):
         out = select_relevant_times(
             ds,
+            "time",
             "time",
             datetime(2024, 1, 1),
             datetime(2024, 1, 10),
@@ -319,6 +328,7 @@ def test_initial_time_exact_match():
     out = _select_initial_time(
         ds,
         "time",
+        "time",
         datetime(2024, 1, 2),
         climatology=False,
         allow_flex_time=False,
@@ -335,6 +345,7 @@ def test_initial_time_no_exact_match():
         _select_initial_time(
             ds,
             "time",
+            "time",
             datetime(2024, 1, 2),
             climatology=False,
             allow_flex_time=False,
@@ -347,6 +358,7 @@ def test_initial_flexible_time():
 
     out = _select_initial_time(
         ds,
+        "time",
         "time",
         datetime(2024, 1, 1),
         climatology=False,
@@ -363,6 +375,7 @@ def test_initial_flexible_time_out_of_range():
     with pytest.raises(ValueError):
         _select_initial_time(
             ds,
+            "time",
             "time",
             datetime(2024, 1, 1),
             climatology=False,

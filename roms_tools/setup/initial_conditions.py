@@ -18,7 +18,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     LatLonDataset,
     UnifiedBGCDataset,
 )
-from roms_tools.datasets.roms_dataset import ROMSDataset
+from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
 from roms_tools.plot import plot
 from roms_tools.regrid import (
     LateralRegridFromROMS,
@@ -286,9 +286,10 @@ class InitialConditions:
 
     def _regrid_laterally(self, data, target_coords, processed_fields, var_names):
         """Regrid variables in data.ds laterally to rho points of ROMS grid."""
-        if data is ROMSDataset:
+        if isinstance(data, ROMSDataset):
             # source data is at three different locations: rho-, u-, v- points
             for location in ["rho", "u", "v"]:
+                print(location)
                 filtered_vars = [
                     var_name
                     for var_name, info in var_names.items()
@@ -298,7 +299,6 @@ class InitialConditions:
                     ds_loc = data.ds[filtered_vars].rename(
                         {f"lat_{location}": "lat", f"lon_{location}": "lon"}
                     )
-
                     lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
 
                     ds_loc = lateral_regrid.apply(ds_loc)
@@ -309,18 +309,23 @@ class InitialConditions:
                     data._get_depth_coordinates(
                         depth_type="layer", locations=[location]
                     )
-                    layer_depth_loc = data.ds_depth_coords[f"layer_depth_{location}"]
-                    h_loc = self.grid.ds.h
+                    layer_depth_loc = choose_subdomain(
+                        data.ds_depth_coords[f"layer_depth_{location}"],
+                        data.grid.ds,
+                        target_coords,
+                    )
+                    h_loc = choose_subdomain(
+                        data.grid.ds.h, data.grid.ds, target_coords
+                    )
                     if location == "u":
                         h_loc = interpolate_from_rho_to_u(h_loc)
                     elif location == "v":
                         h_loc = interpolate_from_rho_to_v(h_loc)
 
-                    layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
-                    h_loc = lateral_regrid.apply(h_loc)
-
-                    processed_fields[f"h_{location}"] = h_loc
-                    processed_fields[f"layer_depth_{location}"] = layer_depth_loc
+                    processed_fields[f"layer_depth_{location}"] = lateral_regrid.apply(
+                        layer_depth_loc
+                    )
+                    processed_fields[f"h_{location}"] = lateral_regrid.apply(h_loc)
 
         else:
             # all variables are at the same location
@@ -343,7 +348,7 @@ class InitialConditions:
             ]
 
             if filtered_vars:
-                if data is ROMSDataset:
+                if isinstance(data, ROMSDataset):
                     vertical_regrid = VerticalRegridFromROMS(
                         processed_fields[filtered_vars[0]]
                     )

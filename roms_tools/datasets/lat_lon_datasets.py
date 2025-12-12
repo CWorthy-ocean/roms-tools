@@ -25,6 +25,7 @@ from roms_tools.datasets.utils import (
     check_dataset,
     convert_to_float64,
     extrapolate_deepest_to_bottom,
+    select_relevant_fields,
     select_relevant_times,
     validate_start_end_time,
 )
@@ -246,15 +247,9 @@ class LatLonDataset:
             ``self.var_names`` and the optional variables specified in
             ``self.opt_var_names``, along with ``"mask"`` if present.
         """
-        for var in ds.data_vars:
-            if (
-                var not in self.var_names.values()
-                and var not in self.opt_var_names.values()
-                and var != "mask"
-            ):
-                ds = ds.drop_vars(var)
-
-        return ds
+        return select_relevant_fields(
+            ds, [*self.var_names.values(), *self.opt_var_names.values()]
+        )
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Dummy method to be overridden by child classes to add time information to the

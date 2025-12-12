@@ -147,6 +147,33 @@ def validate_start_end_time(
             )
 
 
+def select_relevant_fields(ds: xr.Dataset, var_names: list[str]) -> xr.Dataset:
+    """
+    Return a subset of the dataset containing only the specified variables.
+
+    All data variables not listed in ``var_names`` are removed, except for the
+    special variable ``"mask"``, which is always retained if present.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The input dataset from which variables will be selected.
+    var_names : list of str
+        Names of variables that should be kept in the resulting dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        A new dataset containing only the variables in ``var_names`` and
+        ``"mask"`` (if it exists in the input dataset).
+    """
+    for var in ds.data_vars:
+        if var not in var_names and var != "mask":
+            ds = ds.drop_vars(var)
+
+    return ds
+
+
 def select_relevant_times(
     ds: xr.Dataset,
     time_dim: str,

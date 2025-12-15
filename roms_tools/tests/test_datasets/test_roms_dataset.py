@@ -308,36 +308,136 @@ def test_that_coordinates_and_masks_are_added(use_dask):
     assert "mask_v" in output.ds
 
 
-def test_apply_lateral_fill():
-    grid_parameters = {
-        "nx": 10,
-        "ny": 10,
-        "size_x": 2500,
-        "size_y": 3000,
-        "center_lon": -30,
-        "center_lat": 57,
-        "rot": -20,
-    }
+# Test applying lateral fill
 
-    grid = Grid(**grid_parameters)
+
+def make_roms_dataset(ds, grid):
+    roms = ROMSDataset.__new__(ROMSDataset)
+    roms.ds = ds
+    roms.grid = grid
+    return roms
+
+
+def test_apply_lateral_fill_rho_success():
+    grid = Grid(
+        nx=10, ny=10, size_x=2500, size_y=3000, center_lon=-30, center_lat=57, rot=-20
+    )
 
     ds = xr.Dataset()
     ds["field"] = 5 * grid.ds.mask_rho.copy()
     ds["mask_rho"] = grid.ds.mask_rho.copy()
+
+    roms = make_roms_dataset(ds, grid)
+
+    # land exists initially
+    assert (roms.ds["field"] == 0).any()
+
+    roms.apply_lateral_fill()
+
+    assert (roms.ds["field"] == 5).all()
+
+
+def test_apply_lateral_fill_rho_missing_mask_raises():
+    grid = Grid(
+        nx=10, ny=10, size_x=2500, size_y=3000, center_lon=-30, center_lat=57, rot=-20
+    )
+
+    ds = xr.Dataset()
+    ds["field"] = grid.ds.mask_rho.copy()
+
+    roms = make_roms_dataset(ds, grid)
+
+    with pytest.raises(ValueError, match="mask_rho"):
+        roms.apply_lateral_fill()
+
+
+def test_apply_lateral_fill_u_success():
+    grid = Grid(
+        nx=10, ny=10, size_x=2500, size_y=3000, center_lon=-30, center_lat=57, rot=-20
+    )
+
+    ds = xr.Dataset()
+    ds["u_field"] = 7 * grid.ds.mask_u.copy()
+    ds["mask_u"] = grid.ds.mask_u.copy()
+
+    roms = make_roms_dataset(ds, grid)
+
+    assert (roms.ds["u_field"] == 0).any()
+
+    roms.apply_lateral_fill()
+
+    assert (roms.ds["u_field"] == 7).all()
+
+
+def test_apply_lateral_fill_u_missing_mask_raises():
+    grid = Grid(
+        nx=10, ny=10, size_x=2500, size_y=3000, center_lon=-30, center_lat=57, rot=-20
+    )
+
+    ds = xr.Dataset()
+    ds["u_field"] = grid.ds.mask_u.copy()
+    ds["mask_rho"] = grid.ds.mask_rho.copy()
+
+    roms = make_roms_dataset(ds, grid)
+
+    with pytest.raises(ValueError, match="mask_u"):
+        roms.apply_lateral_fill()
+
+
+def test_apply_lateral_fill_v_success():
+    grid = Grid(
+        nx=10, ny=10, size_x=2500, size_y=3000, center_lon=-30, center_lat=57, rot=-20
+    )
+
+    ds = xr.Dataset()
+    ds["v_field"] = 9 * grid.ds.mask_v.copy()
+    ds["mask_v"] = grid.ds.mask_v.copy()
+
+    roms = make_roms_dataset(ds, grid)
+
+    assert (roms.ds["v_field"] == 0).any()
+
+    roms.apply_lateral_fill()
+
+    assert (roms.ds["v_field"] == 9).all()
+
+
+def test_apply_lateral_fill_v_missing_mask_raises():
+    grid = Grid(
+        nx=10, ny=10, size_x=2500, size_y=3000, center_lon=-30, center_lat=57, rot=-20
+    )
+
+    ds = xr.Dataset()
+    ds["v_field"] = grid.ds.mask_v.copy()
+    ds["mask_rho"] = grid.ds.mask_rho.copy()
+
+    roms = make_roms_dataset(ds, grid)
+
+    with pytest.raises(ValueError, match="mask_v"):
+        roms.apply_lateral_fill()
+
+
+def test_apply_lateral_fill_mixed_grids():
+    grid = Grid(
+        nx=10, ny=10, size_x=2500, size_y=3000, center_lon=-30, center_lat=57, rot=-20
+    )
+
+    ds = xr.Dataset()
+    ds["rho"] = 1 * grid.ds.mask_rho.copy()
+    ds["u"] = 2 * grid.ds.mask_u.copy()
+    ds["v"] = 3 * grid.ds.mask_v.copy()
+
+    ds["mask_rho"] = grid.ds.mask_rho.copy()
     ds["mask_u"] = grid.ds.mask_u.copy()
     ds["mask_v"] = grid.ds.mask_v.copy()
 
-    roms_dataset = ROMSDataset.__new__(ROMSDataset)
-    roms_dataset.ds = ds
-    roms_dataset.grid = grid
+    roms = make_roms_dataset(ds, grid)
 
-    # Check that initially some values are zero (land)
-    assert (roms_dataset.ds["field"].values == 0).any()
+    roms.apply_lateral_fill()
 
-    roms_dataset.apply_lateral_fill()
-
-    # After filling the ocean values (all 5) should have propagated into land
-    assert (roms_dataset.ds["field"].values == 5).all()
+    assert (roms.ds["rho"] == 1).all()
+    assert (roms.ds["u"] == 2).all()
+    assert (roms.ds["v"] == 3).all()
 
 
 # Test choose_subdomain

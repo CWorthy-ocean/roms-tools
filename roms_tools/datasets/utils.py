@@ -160,9 +160,13 @@ def select_relevant_fields(ds: xr.Dataset, var_names: list[str]) -> xr.Dataset:
         A new dataset containing only the variables in ``var_names`` and
         ``"mask"`` (if it exists in the input dataset).
     """
-    for var in ds.data_vars:
-        if var not in var_names and var != "mask":
-            ds = ds.drop_vars(var)
+    vars_to_keep = set(var_names)
+    vars_to_drop = [
+        var for var in ds.data_vars if var not in vars_to_keep and var != "mask"
+    ]
+
+    if vars_to_drop:
+        ds = ds.drop_vars(vars_to_drop)
 
     return ds
 

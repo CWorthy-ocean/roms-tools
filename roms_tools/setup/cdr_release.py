@@ -573,7 +573,7 @@ class TracerPerturbation(Release):
 
     tracer_fluxes : dict, optional
 
-        Dictionary of tracer names and their non-negative flux values. The flux values can be either
+        Dictionary of tracer names and their flux values. The flux values can be either
         a float (constant in time) or a list of float (time-varying).
 
         - Constant: applies uniformly across the entire simulation period.
@@ -589,9 +589,7 @@ class TracerPerturbation(Release):
     """
 
     times: list[datetime] = Field([])
-    tracer_fluxes: dict[str, Flux | NonNegativeFloat | list[NonNegativeFloat]] = Field(
-        {}
-    )
+    tracer_fluxes: dict[str, Flux | float | list[float]] = Field({})
     """Dictionary of tracer names and their non-negative flux values."""
 
     release_type: Literal[ReleaseType.tracer_perturbation] = (

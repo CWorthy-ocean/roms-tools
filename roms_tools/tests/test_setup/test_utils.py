@@ -9,6 +9,8 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
+    _infer_valid_boundaries_from_mask,
+    check_and_set_boundaries,
     get_target_coords,
     validate_names,
 )
@@ -196,3 +198,100 @@ def test_non_string_elements_in_list_raises():
 def test_custom_label_in_errors():
     with pytest.raises(ValueError, match="Invalid foozs: z"):
         validate_names(["z"], VALID_NAMES, SENTINEL, MAX_TO_PLOT, label="fooz")
+
+
+# test _infer_valid_boundaries_from_mask
+@pytest.fixture
+def simple_mask():
+    data = np.array(
+        [
+            [0, 0, 0, 0],  # south
+            [1, 0, 0, 0],
+            [1, 0, 0, 0],
+            [1, 1, 1, 1],  # north
+        ]
+    )
+    return xr.DataArray(data, dims=("eta_rho", "xi_rho"))
+
+
+def test_infer_valid_boundaries_partial(simple_mask):
+    out = _infer_valid_boundaries_from_mask(simple_mask)
+
+    assert out == {
+        "south": False,
+        "north": True,
+        "west": True,
+        "east": True,
+    }
+
+
+def test_infer_valid_boundaries_all_ocean():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "xi_rho"))
+
+    out = _infer_valid_boundaries_from_mask(mask)
+    assert all(out.values())
+
+
+# test check_and_set_boundaries
+
+
+def test_check_and_set_default_boundaries(simple_mask, monkeypatch):
+    monkeypatch.setattr(
+        "roms_tools.setup.utils._infer_valid_boundaries_from_mask",
+        lambda mask: {
+            "south": True,
+            "north": False,
+            "west": True,
+            "east": False,
+        },
+    )
+
+    result = check_and_set_boundaries(None, simple_mask)
+
+    assert result == {
+        "south": True,
+        "north": False,
+        "west": True,
+        "east": False,
+    }
+
+
+def test_check_and_set_partial_boundaries(simple_mask, monkeypatch):
+    monkeypatch.setattr(
+        "roms_tools.setup.utils._infer_valid_boundaries_from_mask",
+        lambda mask: {
+            "south": True,
+            "north": False,
+            "west": True,
+            "east": False,
+        },
+    )
+
+    user = {"south": False}  # user overrides south → False
+
+    result = check_and_set_boundaries(user, simple_mask)
+
+    assert result == {
+        "south": False,  # user-preserved
+        "north": False,  # inferred
+        "west": True,  # inferred
+        "east": False,  # inferred
+    }
+
+
+def test_check_and_set_type_error(simple_mask):
+    with pytest.raises(TypeError):
+        check_and_set_boundaries({"south": "yes"}, simple_mask)
+
+
+def test_check_and_set_invalid_key(simple_mask):
+    with pytest.raises(ValueError):
+        check_and_set_boundaries({"northeast": True}, simple_mask)
+
+
+def test_check_and_set_full_user_boundaries(simple_mask):
+    boundaries = {"south": False, "north": True, "east": False, "west": True}
+
+    result = check_and_set_boundaries(boundaries, simple_mask)
+
+    assert result == boundaries  # unchanged

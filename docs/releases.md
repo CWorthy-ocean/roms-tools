@@ -7,6 +7,8 @@
 * Plot wide grids with different cartopy projection ([#496](https://github.com/CWorthy-ocean/roms-tools/pull/496))
 * Allow child domains with land points outside parent ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Add `apply_mask` option to `plot` function ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
+* Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
+* Improved bathymetry smoothing to better match UCLA MATLAB tools ([#506](https://github.com/CWorthy-ocean/roms-tools/pull/506))
 
 ### Breaking Changes
 
@@ -25,6 +27,7 @@
 
 * Make unit handling in `RiverForcing.plot_locations()` robust for grids without `mask_rho` units ([#499](https://github.com/CWorthy-ocean/roms-tools/pull/499))
 * Only update child boundary indices if boundary not entirely on land ([#503](https://github.com/CWorthy-ocean/roms-tools/pull/503))
+* Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
 
 
 ## v3.2.0

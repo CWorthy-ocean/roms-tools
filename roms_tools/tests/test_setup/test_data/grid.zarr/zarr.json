@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS grid created by ROMS-Tools",
-    "roms_tools_version": "2.6.1.dev52+gd44fe5da",
+    "roms_tools_version": "3.1.3.dev32+g91d580e67.d20250929",
     "size_x": 100,
     "size_y": 100,
     "center_lon": -20,
@@ -19,6 +19,57 @@
     "kind": "inline",
     "must_understand": false,
     "metadata": {
+      "pm": {
+        "shape": [
+          3,
+          3
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              3,
+              3
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "Curvilinear coordinate metric in xi-direction",
+          "units": "meter-1",
+          "coordinates": "lat_rho lon_rho",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
       "lat_u": {
         "shape": [
           3,
@@ -69,17 +120,17 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "mask_u": {
+      "lat_coarse": {
         "shape": [
-          3,
+          2,
           2
         ],
-        "data_type": "int32",
+        "data_type": "float64",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              3,
+              2,
               2
             ]
           }
@@ -90,7 +141,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0,
+        "fill_value": 0.0,
         "codecs": [
           {
             "name": "bytes",
@@ -107,13 +158,64 @@
           }
         ],
         "attributes": {
-          "long_name": "Mask at u-points",
-          "units": "land/water (0/1)",
-          "coordinates": "lat_u lon_u"
+          "long_name": "latitude of rho-points on coarsened grid",
+          "units": "degrees North",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "eta_coarse",
+          "xi_coarse"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "f": {
+        "shape": [
+          3,
+          3
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              3,
+              3
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "Coriolis parameter at rho-points",
+          "units": "second-1",
+          "coordinates": "lat_rho lon_rho",
+          "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
           "eta_rho",
-          "xi_u"
+          "xi_rho"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -217,106 +319,6 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "mask_rho": {
-        "shape": [
-          3,
-          3
-        ],
-        "data_type": "int32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              3,
-              3
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Mask at rho-points",
-          "units": "land/water (0/1)",
-          "coordinates": "lat_rho lon_rho"
-        },
-        "dimension_names": [
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "lat_coarse": {
-        "shape": [
-          2,
-          2
-        ],
-        "data_type": "float64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              2,
-              2
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "latitude of rho-points on coarsened grid",
-          "units": "degrees North",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "eta_coarse",
-          "xi_coarse"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
       "angle": {
         "shape": [
           3,
@@ -368,12 +370,12 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "pm": {
+      "mask_rho": {
         "shape": [
           3,
           3
         ],
-        "data_type": "float64",
+        "data_type": "int32",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
@@ -389,7 +391,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": 0,
         "codecs": [
           {
             "name": "bytes",
@@ -406,61 +408,9 @@
           }
         ],
         "attributes": {
-          "long_name": "Curvilinear coordinate metric in xi-direction",
-          "units": "meter-1",
-          "coordinates": "lat_rho lon_rho",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "f": {
-        "shape": [
-          3,
-          3
-        ],
-        "data_type": "float64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              3,
-              3
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Coriolis parameter at rho-points",
-          "units": "second-1",
-          "coordinates": "lat_rho lon_rho",
-          "_FillValue": "AAAAAAAA+H8="
+          "long_name": "Mask at rho-points",
+          "units": "land/water (0/1)",
+          "coordinates": "lat_rho lon_rho"
         },
         "dimension_names": [
           "eta_rho",
@@ -520,16 +470,18 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "Cs_w": {
+      "mask_u": {
         "shape": [
-          101
+          3,
+          2
         ],
-        "data_type": "float32",
+        "data_type": "int32",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              101
+              3,
+              2
             ]
           }
         },
@@ -539,7 +491,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": 0,
         "codecs": [
           {
             "name": "bytes",
@@ -556,12 +508,13 @@
           }
         ],
         "attributes": {
-          "long_name": "Vertical stretching function at w-points",
-          "units": "nondimensional",
-          "_FillValue": "AAAAAAAA+H8="
+          "long_name": "Mask at u-points",
+          "units": "land/water (0/1)",
+          "coordinates": "lat_u lon_u"
         },
         "dimension_names": [
-          "s_w"
+          "eta_rho",
+          "xi_u"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -669,116 +622,16 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "mask_coarse": {
+      "Cs_w": {
         "shape": [
-          2,
-          2
-        ],
-        "data_type": "int32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              2,
-              2
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Mask at rho-points on coarsened grid",
-          "units": "land/water (0/1)",
-          "coordinates": "lat_coarse lon_coarse"
-        },
-        "dimension_names": [
-          "eta_coarse",
-          "xi_coarse"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "mask_v": {
-        "shape": [
-          2,
-          3
-        ],
-        "data_type": "int32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              2,
-              3
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "Mask at v-points",
-          "units": "land/water (0/1)",
-          "coordinates": "lat_v lon_v"
-        },
-        "dimension_names": [
-          "eta_v",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "Cs_r": {
-        "shape": [
-          100
+          101
         ],
         "data_type": "float32",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              100
+              101
             ]
           }
         },
@@ -805,62 +658,12 @@
           }
         ],
         "attributes": {
-          "long_name": "Vertical stretching function at rho-points",
+          "long_name": "Vertical stretching function at w-points",
           "units": "nondimensional",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "s_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "lon_coarse": {
-        "shape": [
-          2,
-          2
-        ],
-        "data_type": "float64",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              2,
-              2
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "longitude of rho-points on coarsened grid",
-          "units": "degrees East",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "eta_coarse",
-          "xi_coarse"
+          "s_w"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -907,16 +710,18 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "sigma_w": {
+      "lat_rho": {
         "shape": [
-          101
+          3,
+          3
         ],
-        "data_type": "float32",
+        "data_type": "float64",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              101
+              3,
+              3
             ]
           }
         },
@@ -943,12 +748,63 @@
           }
         ],
         "attributes": {
-          "long_name": "Fractional vertical stretching coordinate at w-points",
-          "units": "nondimensional",
+          "long_name": "latitude of rho-points",
+          "units": "degrees North",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "s_w"
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "mask_coarse": {
+        "shape": [
+          2,
+          2
+        ],
+        "data_type": "int32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2,
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "Mask at rho-points on coarsened grid",
+          "units": "land/water (0/1)",
+          "coordinates": "lat_coarse lon_coarse"
+        },
+        "dimension_names": [
+          "eta_coarse",
+          "xi_coarse"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -1004,18 +860,16 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "lon_rho": {
+      "sigma_w": {
         "shape": [
-          3,
-          3
+          101
         ],
-        "data_type": "float64",
+        "data_type": "float32",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              3,
-              3
+              101
             ]
           }
         },
@@ -1042,29 +896,28 @@
           }
         ],
         "attributes": {
-          "long_name": "longitude of rho-points",
-          "units": "degrees East",
+          "long_name": "Fractional vertical stretching coordinate at w-points",
+          "units": "nondimensional",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "eta_rho",
-          "xi_rho"
+          "s_w"
         ],
         "zarr_format": 3,
         "node_type": "array",
         "storage_transformers": []
       },
-      "lat_rho": {
+      "mask_v": {
         "shape": [
-          3,
+          2,
           3
         ],
-        "data_type": "float64",
+        "data_type": "int32",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              3,
+              2,
               3
             ]
           }
@@ -1075,7 +928,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": 0,
         "codecs": [
           {
             "name": "bytes",
@@ -1092,12 +945,12 @@
           }
         ],
         "attributes": {
-          "long_name": "latitude of rho-points",
-          "units": "degrees North",
-          "_FillValue": "AAAAAAAA+H8="
+          "long_name": "Mask at v-points",
+          "units": "land/water (0/1)",
+          "coordinates": "lat_v lon_v"
         },
         "dimension_names": [
-          "eta_rho",
+          "eta_v",
           "xi_rho"
         ],
         "zarr_format": 3,
@@ -1149,6 +1002,153 @@
         "dimension_names": [
           "eta_rho",
           "xi_u"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "lon_coarse": {
+        "shape": [
+          2,
+          2
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2,
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "longitude of rho-points on coarsened grid",
+          "units": "degrees East",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "eta_coarse",
+          "xi_coarse"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "lon_rho": {
+        "shape": [
+          3,
+          3
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              3,
+              3
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "longitude of rho-points",
+          "units": "degrees East",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "Cs_r": {
+        "shape": [
+          100
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              100
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "Vertical stretching function at rho-points",
+          "units": "nondimensional",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "s_rho"
         ],
         "zarr_format": 3,
         "node_type": "array",

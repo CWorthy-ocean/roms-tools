@@ -1672,3 +1672,103 @@ def validate_names(
         names = names[:max_to_plot]
 
     return names
+
+
+def check_and_set_boundaries(
+    boundaries: dict[str, bool] | None,
+    mask: xr.DataArray,
+) -> dict[str, bool]:
+    """
+    Validate and finalize the `boundaries` dictionary.
+
+    Parameters
+    ----------
+    boundaries : dict[str, bool] or None
+        User-supplied dictionary controlling which boundaries are active.
+        Keys may include any subset of {"south", "east", "north", "west"}.
+        Missing keys will be filled from mask-based defaults.
+        If None, all boundaries are inferred from the land mask.
+
+    mask : xr.DataArray
+        2D land/sea mask on rho-points. Used to determine which boundaries
+        contain at least one ocean point.
+
+    Returns
+    -------
+    dict[str, bool]
+        Completed and validated boundary configuration.
+    """
+    valid_keys = {"south", "east", "north", "west"}
+
+    # --------------------------------------------
+    # Case 1: boundaries not provided → infer them
+    # --------------------------------------------
+    if boundaries is None:
+        inferred = _infer_valid_boundaries_from_mask(mask)
+        logging.info(f"No `boundaries` provided. Using mask-based defaults: {inferred}")
+        return inferred
+
+    # --------------------------------------------
+    # Case 2: boundaries provided → validate
+    # --------------------------------------------
+    if not isinstance(boundaries, dict):
+        raise TypeError(
+            "`boundaries` must be a dict mapping boundary names to booleans."
+        )
+
+    # Unknown keys?
+    unknown_keys = set(boundaries) - valid_keys
+    if unknown_keys:
+        raise ValueError(
+            f"`boundaries` contains invalid keys: {unknown_keys}. "
+            "Allowed keys are: 'south', 'east', 'north', 'west'."
+        )
+
+    # Type-check provided values
+    for key, val in boundaries.items():
+        if not isinstance(val, bool):
+            raise TypeError(f"Boundary '{key}' must be a boolean.")
+
+    # Fill missing boundaries using defaults
+    inferred_defaults = _infer_valid_boundaries_from_mask(mask)
+    completed = boundaries.copy()
+
+    for key in valid_keys:
+        if key not in completed:
+            completed[key] = inferred_defaults[key]
+            logging.info(
+                f"`boundaries[{key!r}]` not provided — defaulting to "
+                f"{inferred_defaults[key]}"
+            )
+
+    logging.info(f"Using boundary configuration: {completed}")
+    return completed
+
+
+def _infer_valid_boundaries_from_mask(mask: xr.DataArray) -> dict[str, bool]:
+    """
+    Determine which grid boundaries contain at least one ocean point.
+
+    Any boundary consisting entirely of land is considered inactive.
+
+    Parameters
+    ----------
+    mask : xr.DataArray
+        2D mask array on rho-points where 1 = ocean, 0 = land.
+
+    Returns
+    -------
+    dict[str, bool]
+        Boolean availability for {south, east, north, west}.
+    """
+    bdry_coords = get_boundary_coords()
+    boundaries = {}
+
+    for direction in ["south", "east", "north", "west"]:
+        coords = bdry_coords["rho"][direction]
+        bdry_mask = mask.isel(**coords)
+
+        # Boundary is valid if ANY ocean point exists
+        boundaries[direction] = bool(bdry_mask.values.any())
+
+    return boundaries

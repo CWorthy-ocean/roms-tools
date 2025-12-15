@@ -13,6 +13,7 @@ from roms_tools.plot import plot_nesting
 from roms_tools.setup.topography import clip_depth
 from roms_tools.setup.utils import (
     Timed,
+    check_and_set_boundaries,
     from_yaml,
     get_boundary_coords,
     interpolate_from_rho_to_u,
@@ -42,8 +43,8 @@ class ChildGrid(Grid):
     parent_grid : Grid
         The parent grid object, providing the reference for the topography and mask of the child grid.
     boundaries : Dict[str, bool]
-        Specifies which child grid boundaries (south, east, north, west) should be adjusted for topography/mask
-        and included in `ds_nesting`. Defaults to all `True`.
+        Specifies which child grid boundaries ('south', 'east', 'north', 'west') should be adjusted for topography/mask
+        and included in `ds_nesting`. If not provided, valid (non-land) boundaries are enabled automatically.
     metadata : Dict[str, Any]
         Dictionary configuring the boundary nesting process, including:
 
@@ -86,6 +87,10 @@ class ChildGrid(Grid):
             "=== Mapping the child grid boundary points onto the indices of the parent grid ===",
             verbose=verbose,
         ):
+            self.boundaries = check_and_set_boundaries(
+                self.boundaries, self.ds.mask_rho
+            )
+
             # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
             parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
 

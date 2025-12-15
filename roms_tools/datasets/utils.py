@@ -421,25 +421,21 @@ def get_time_type(data_array: xr.DataArray) -> str:
         cftime.DatetimeProlepticGregorian,
     )
 
-    # Check if any of the coordinate values are of cftime, datetime, or integer type
-    if isinstance(data_array.values, np.ndarray | list):
-        # Check if the data type is numpy datetime64, indicating standard datetime objects
-        if data_array.values.dtype == "datetime64[ns]":
-            return "datetime"
+    values = data_array.values
 
-        # Check if any values in the array are instances of cftime types
-        if any(isinstance(value, cftime_types) for value in data_array.values):
-            return "cftime"
+    # numpy datetime64
+    if values.dtype == "datetime64[ns]":
+        return "datetime"
 
-        # Check if all values are of integer type (e.g., for indices or time steps)
-        if np.issubdtype(data_array.values.dtype, np.integer):
-            return "int"
+    # cftime objects (stored as object dtype)
+    if any(isinstance(value, cftime_types) for value in values):
+        return "cftime"
 
-        # If none of the above conditions are met, raise a ValueError
-        raise ValueError("Unsupported data type for time values in input dataset.")
+    # integer time axis
+    if np.issubdtype(values.dtype, np.integer):
+        return "int"
 
-    # Handle unexpected types
-    raise TypeError("DataArray values must be of type numpy.ndarray or list.")
+    raise ValueError("Unsupported data type for time values in input dataset.")
 
 
 def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:

@@ -23,7 +23,7 @@ from roms_tools.plot import plot
 from roms_tools.regrid import (
     LateralRegridFromROMS,
     LateralRegridToROMS,
-    VerticalRegridFromROMS,
+    VerticalRegrid,
     VerticalRegridToROMS,
 )
 from roms_tools.setup.utils import (
@@ -126,12 +126,11 @@ class InitialConditions:
     >>> initial_conditions = InitialConditions(
     ...     grid=grid,
     ...     ini_time=datetime(2022, 1, 1),
-    ...     source={"name": "ROMS", "grid": parent_grid, "path": "restart.nc", "time_index": 0},
+    ...     source={"name": "ROMS", "grid": parent_grid, "path": "restart.nc"},
     ...     bgc_source={
     ...         "name": "ROMS",
     ...         "grid": parent_grid,
     ...         "path": "restart.nc",
-    ...         "time_index": 0
     ...     },
     ... )
 
@@ -244,7 +243,6 @@ class InitialConditions:
         processed_fields = self._regrid_laterally(
             data, target_coords, processed_fields, var_names
         )
-
         # Rotation of velocities and interpolation to u/v points
         if "u" in var_names and "v" in var_names:
             processed_fields["u"], processed_fields["v"] = rotate_velocities(
@@ -252,6 +250,16 @@ class InitialConditions:
                 processed_fields["v"],
                 target_coords["angle"],
                 interpolate=True,
+            )
+
+        # Interpolation to u/v points
+        if "layer_depth_u" in processed_fields:
+            processed_fields["layer_depth_u"] = interpolate_from_rho_to_u(
+                processed_fields["layer_depth_u"]
+            )
+        if "layer_depth_v" in processed_fields:
+            processed_fields["layer_depth_v"] = interpolate_from_rho_to_v(
+                processed_fields["layer_depth_v"]
             )
 
         if type == "bgc":
@@ -269,9 +277,7 @@ class InitialConditions:
             self._get_depth_coordinates(zeta, location, "layer")
 
         # Vertical regridding
-        processed_fields = self._regrid_vertically(
-            data, target_coords, processed_fields, var_names
-        )
+        processed_fields = self._regrid_vertically(data, processed_fields, var_names)
 
         # Compute barotropic velocities
         if "u" in var_names and "v" in var_names:
@@ -289,7 +295,6 @@ class InitialConditions:
         if isinstance(data, ROMSDataset):
             # source data is at three different locations: rho-, u-, v- points
             for location in ["rho", "u", "v"]:
-                print(location)
                 filtered_vars = [
                     var_name
                     for var_name, info in var_names.items()
@@ -305,7 +310,7 @@ class InitialConditions:
                     for var_name in filtered_vars:
                         processed_fields[var_name] = ds_loc[var_name]
 
-                    # also regrid depth coordinates and bathymetry
+                    # also regrid depth coordinates
                     data._get_depth_coordinates(
                         depth_type="layer", locations=[location]
                     )
@@ -314,18 +319,10 @@ class InitialConditions:
                         data.grid.ds,
                         target_coords,
                     )
-                    h_loc = choose_subdomain(
-                        data.grid.ds.h, data.grid.ds, target_coords
-                    )
-                    if location == "u":
-                        h_loc = interpolate_from_rho_to_u(h_loc)
-                    elif location == "v":
-                        h_loc = interpolate_from_rho_to_v(h_loc)
 
                     processed_fields[f"layer_depth_{location}"] = lateral_regrid.apply(
                         layer_depth_loc
                     )
-                    processed_fields[f"h_{location}"] = lateral_regrid.apply(h_loc)
 
         else:
             # all variables are at the same location
@@ -336,10 +333,9 @@ class InitialConditions:
                     data.ds[var_names[var_name]["name"]]
                 )
 
-            return processed_fields
+        return processed_fields
 
-    def _regrid_vertically(self, data, target_coords, processed_fields, var_names):
-        print(var_names)
+    def _regrid_vertically(self, data, processed_fields, var_names):
         for location in ["rho", "u", "v"]:
             filtered_vars = [
                 var_name
@@ -349,24 +345,23 @@ class InitialConditions:
 
             if filtered_vars:
                 if isinstance(data, ROMSDataset):
-                    vertical_regrid = VerticalRegridFromROMS(
-                        processed_fields[filtered_vars[0]]
-                    )
+                    ds_tmp = xr.Dataset()
+                    ds_tmp[filtered_vars[0]] = processed_fields[filtered_vars[0]]
+                    vertical_regrid = VerticalRegrid(ds_tmp)
 
                     for var_name in filtered_vars:
                         if var_name in processed_fields:
-                            # attrs = processed_fields[var_name].attrs
                             regridded = vertical_regrid.apply(
                                 processed_fields[var_name],
-                                processed_fields[f"layer_depth_{location}"],
-                                self.ds_depth_coords[f"layer_depth_{location}"],
+                                source_depth_coords=processed_fields[
+                                    f"layer_depth_{location}"
+                                ],
+                                target_depth_coords=self.ds_depth_coords[
+                                    f"layer_depth_{location}"
+                                ],
                                 mask_edges=False,
                             )
-                            regridded = regridded.where(
-                                regridded.depth < processed_fields[f"h_{location}"]
-                            )
                             processed_fields[var_name] = regridded
-                            # processed_fields[var_name].attrs = attrs
 
                 else:
                     vertical_regrid = VerticalRegridToROMS(

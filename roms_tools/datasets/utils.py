@@ -36,22 +36,14 @@ def extrapolate_deepest_to_bottom(ds: xr.Dataset, depth_dim: str) -> xr.Dataset:
 
 
 def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
-    """Convert all non-mask data variables in the dataset to float64.
+    """Convert all non-mask data variables to float64.
 
-    Variables whose names start with ``"mask_"`` are left unchanged, since
-    masks are typically integer or boolean valued.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Input dataset.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with non-mask variables converted to double precision.
+    Variables whose names start with ``"mask_"`` are left unchanged.
     """
-    dtype_map = {var: "float64" for var in ds.data_vars if not var.startswith("mask_")}
+    dtype_map = {
+        name: ("float64" if not name.startswith("mask_") else var.dtype)
+        for name, var in ds.data_vars.items()
+    }
 
     return ds.astype(dtype_map)
 

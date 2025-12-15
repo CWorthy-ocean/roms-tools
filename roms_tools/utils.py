@@ -1113,37 +1113,37 @@ def interpolate_from_climatology(
     - The `time` input is automatically converted to `day_of_year`, so manual conversion is not required before calling this function.
     """
 
+    def np_times_to_fractional_days(
+        np_times: np.ndarray | pd.DatetimeIndex | np.datetime64 | pd.Timestamp,
+    ) -> np.ndarray:
+        """Convert datetime(s) to fractional day-of-year values."""
+        pd_times = pd.to_datetime(np_times)
+
+        # scalar input -> make it a 1-element array
+        if np.isscalar(pd_times):
+            pd_times = np.array([pd_times])
+
+        fractional_days = pd_times.dayofyear + (
+            pd_times.hour / 24 + pd_times.minute / 1440 + pd_times.second / 86400
+        )
+        return (
+            fractional_days.values
+            if hasattr(fractional_days, "values")
+            else np.array(fractional_days)
+        )
+
     def interpolate_single_field(data_array: xr.DataArray) -> xr.DataArray:
         if isinstance(time, xr.DataArray):
-            # Extract day of year from xarray.DataArray
             day_of_year = time.dt.dayofyear
         else:
-            if np.size(time) == 1:
-                # Convert single datetime64 object to pandas.Timestamp
-                date = pd.Timestamp(time)
-                day_of_year = (
-                    date.dayofyear
-                    + (date.hour / 24)
-                    + (date.minute / 1440)
-                    + (date.second / 86400)
-                )
-            else:
-                # Convert each datetime64 object in the array to pandas.Timestamp and compute fractional day of year
-                day_of_year = np.array(
-                    [
-                        pd.Timestamp(t).dayofyear
-                        + (pd.Timestamp(t).hour / 24)
-                        + (pd.Timestamp(t).minute / 1440)
-                        + (pd.Timestamp(t).second / 86400)
-                        for t in time
-                    ]
-                )
+            day_of_year = np_times_to_fractional_days(time)
 
         data_array_interpolated = interpolate_cyclic_time(
             data_array, time_dim, time_coord, day_of_year
         )
 
-        if np.size(time) == 1:
+        # expand dims if single element
+        if day_of_year.size == 1:
             data_array_interpolated = data_array_interpolated.expand_dims({time_dim: 1})
         return data_array_interpolated
 

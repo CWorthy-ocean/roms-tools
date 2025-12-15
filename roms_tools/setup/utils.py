@@ -2321,6 +2321,6 @@ def _infer_valid_boundaries_from_mask(mask: xr.DataArray) -> dict[str, bool]:
         bdry_mask = mask.isel(**coords)
 
         # Boundary is valid if ANY ocean point exists
-        boundaries[direction] = bool(bdry_mask.sum() > 0)
+        boundaries[direction] = bool(bdry_mask.values.any())
 
     return boundaries

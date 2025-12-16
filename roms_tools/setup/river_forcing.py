@@ -11,15 +11,15 @@ import xarray as xr
 
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
+from roms_tools.datasets.river_datasets import (
+    DaiRiverDataset,
+    get_indices_of_nearest_grid_cell_for_rivers,
+)
 from roms_tools.plot import (
     assign_category_colors,
     get_projection,
     plot_2d_horizontal_field,
     plot_location,
-)
-from roms_tools.setup.river_datasets import (
-    DaiRiverDataset,
-    get_indices_of_nearest_grid_cell_for_rivers,
 )
 from roms_tools.setup.utils import (
     RawDataSource,

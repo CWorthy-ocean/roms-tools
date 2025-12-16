@@ -16,22 +16,32 @@ import numpy as np
 import xarray as xr
 
 from roms_tools.constants import R_EARTH
-from roms_tools.download import (
+from roms_tools.datasets.download import (
     download_correction_data,
     download_sal_data,
     download_topo,
 )
-from roms_tools.setup.fill import LateralFill
+from roms_tools.datasets.utils import (
+    check_dataset,
+    convert_to_float64,
+    extrapolate_deepest_to_bottom,
+    select_relevant_fields,
+    select_relevant_times,
+    validate_start_end_time,
+)
+from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
-    check_dataset,
     get_target_coords,
-    interpolate_cyclic_time,
-    one_dim_fill,
-    select_relevant_times,
 )
-from roms_tools.utils import get_dask_chunks, get_pkg_error_msg, has_gcsfs, load_data
+from roms_tools.utils import (
+    get_dask_chunks,
+    get_pkg_error_msg,
+    has_gcsfs,
+    interpolate_cyclic_time,
+    load_data,
+)
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -140,21 +150,11 @@ class LatLonDataset:
         4. Ensures latitude, longitude, and depth values are in ascending order.
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
-        # Validate start_time and end_time
-        if self.start_time is not None and not isinstance(self.start_time, datetime):
-            raise TypeError(
-                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
-            )
-        if self.end_time is not None and not isinstance(self.end_time, datetime):
-            raise TypeError(
-                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
-            )
-
+        validate_start_end_time(self.start_time, self.end_time)
         ds = self.load_data()
         ds = self.clean_up(ds)
-        self.check_dataset(ds)
+        check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
-        # Select relevant fields
         ds = self.select_relevant_fields(ds)
 
         # Select relevant times
@@ -226,44 +226,30 @@ class LatLonDataset:
         """
         return ds  # Default behavior (no-op, subclasses should override)
 
-    def check_dataset(self, ds: xr.Dataset) -> None:
-        """Check if the dataset contains the specified variables and dimensions.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The xarray Dataset to check.
-
-        Raises
-        ------
-        ValueError
-            If the dataset does not contain the specified variables or dimensions.
-        """
-        check_dataset(ds, self.dim_names, self.var_names)
-
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
-        """Selects and returns a subset of the dataset containing only the variables
-        specified in `self.var_names`.
+        """
+        Return a subset of the dataset containing only the required and optional
+        variables defined for this object.
+
+        Variables retained are those listed in ``self.var_names`` and
+        ``self.opt_var_names``. Any other data variables are removed, except for
+        the special variable ``"mask"``, which is always preserved if present.
 
         Parameters
         ----------
         ds : xr.Dataset
-            The input dataset from which variables will be selected.
+            The input dataset from which relevant variables will be selected.
 
         Returns
         -------
         xr.Dataset
-            A dataset containing only the variables specified in `self.var_names`.
+            A new dataset containing only the required variables specified in
+            ``self.var_names`` and the optional variables specified in
+            ``self.opt_var_names``, along with ``"mask"`` if present.
         """
-        for var in ds.data_vars:
-            if (
-                var not in self.var_names.values()
-                and var not in self.opt_var_names.values()
-                and var != "mask"
-            ):
-                ds = ds.drop_vars(var)
-
-        return ds
+        return select_relevant_fields(
+            ds, [*self.var_names.values(), *self.opt_var_names.values()]
+        )
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Dummy method to be overridden by child classes to add time information to the
@@ -336,12 +322,13 @@ class LatLonDataset:
             raise ValueError("select_relevant_times called but start_time is None.")
 
         ds = select_relevant_times(
-            ds,
-            time_dim,
-            self.start_time,
-            self.end_time,
-            self.climatology,
-            self.allow_flex_time,
+            ds=ds,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            climatology=self.climatology,
+            allow_flex_time=self.allow_flex_time,
         )
 
         return ds
@@ -543,7 +530,7 @@ class LatLonDataset:
         None
             This method modifies the dataset in place and does not return anything.
         """
-        ds = self.ds.astype({var: "float64" for var in self.ds.data_vars})
+        ds = convert_to_float64(self.ds)
         self.ds = ds
 
         return None
@@ -672,11 +659,7 @@ class LatLonDataset:
         propagating the deepest available data downward.
         """
         if "depth" in self.dim_names:
-            for var_name in self.ds.data_vars:
-                if self.dim_names["depth"] in self.ds[var_name].dims:
-                    self.ds[var_name] = one_dim_fill(
-                        self.ds[var_name], self.dim_names["depth"], direction="forward"
-                    )
+            self.ds = extrapolate_deepest_to_bottom(self.ds, self.dim_names["depth"])
 
     @classmethod
     def from_ds(cls, original_dataset: LatLonDataset, ds: xr.Dataset) -> LatLonDataset:
@@ -1147,7 +1130,8 @@ class UnifiedDataset(LatLonDataset):
                         if var_name in ds.data_vars and "season" in ds[var_name].dims:
                             ds[var_name] = interpolate_cyclic_time(
                                 ds[var_name],
-                                time_dim_name="season",
+                                time_dim="season",
+                                time_coord="season",
                                 day_of_year=ds["month"],
                             )
 
@@ -2331,7 +2315,7 @@ def choose_subdomain(
     resolution: float,
     is_global: bool,
     target_coords: Mapping[str, Any],
-    buffer_points: int = 20,
+    buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
     use_dask: bool = False,
 ) -> xr.Dataset:
     """

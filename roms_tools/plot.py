@@ -1276,7 +1276,7 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     ----------
     ds : xarray.Dataset
         Dataset containing the following variables:
-        - "abs_time": array of timestamps (datetime-like)
+        - "time": array of timestamps (datetime-like)
         - "cdr_efficiency": uptake efficiency from flux differences
         - "cdr_efficiency_from_delta_diff": uptake efficiency from DIC differences
 
@@ -1289,16 +1289,16 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     -------
     None
     """
-    required_vars = ["abs_time", "cdr_efficiency", "cdr_efficiency_from_delta_diff"]
+    required_vars = ["time", "cdr_efficiency", "cdr_efficiency_from_delta_diff"]
     for var in required_vars:
         if var not in ds or ds[var].size == 0:
             raise ValueError(f"Dataset must contain non-empty variable '{var}'.")
 
-    times = ds["abs_time"]
+    times = ds["time"]
 
     # Check for monotonically increasing times
     if not np.all(times[1:] >= times[:-1]):
-        raise ValueError("abs_time must be strictly increasing.")
+        raise ValueError("time must be strictly increasing.")
 
     fig, ax = plt.subplots(figsize=(10, 4))
 

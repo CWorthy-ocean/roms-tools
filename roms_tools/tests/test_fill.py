@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.setup.fill import LateralFill
+from roms_tools.fill import LateralFill
 
 
 @pytest.mark.parametrize(

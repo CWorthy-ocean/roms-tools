@@ -22,6 +22,10 @@ try:
     import copernicusmarine  # type: ignore
 except ImportError:
     copernicusmarine = None
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
 
 
 @pytest.fixture
@@ -71,6 +75,14 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
     assert set(ic.ds.data_vars).issuperset(expected_vars)
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_initial_conditions_creation_from_roms(initial_conditions_from_roms):
+    """Test the creation of the InitialConditions object."""
+    assert isinstance(initial_conditions_from_roms.ds, xr.Dataset)
+    expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
+    assert set(initial_conditions_from_roms.ds.data_vars).issuperset(expected_vars)
 
 
 @pytest.mark.stream
@@ -175,6 +187,7 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        "initial_conditions_from_roms",
     ],
 )
 def test_initial_condition_creation_with_bgc(ic_fixture, request):
@@ -218,6 +231,37 @@ def test_initial_condition_creation_with_bgc(ic_fixture, request):
 
     for var in expected_bgc_variables:
         assert var in ic.ds
+
+
+def test_initial_conditions_raises_on_regridded_nans():
+    """Raise ValueError if regridded ROMS fields contain NaNs due to grid mismatch."""
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    # create grid that is not entirely contained in the parent grid
+    grid_params = {
+        "nx": 5,
+        "ny": 5,
+        "center_lon": -128,
+        "center_lat": 9,
+        "size_x": 100,
+        "size_y": 100,
+    }
+    grid = Grid(**grid_params)
+
+    with pytest.raises(ValueError, match="NaN values found in regridded field."):
+        InitialConditions(
+            grid=grid,
+            ini_time=datetime(1998, 1, 6),
+            source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
+            use_dask=True,
+            bgc_source={
+                "name": "ROMS",
+                "grid": parent_grid,
+                "path": restart_file,
+            },
+        )
 
 
 # Test initialization with missing 'name' in source

@@ -138,7 +138,7 @@ class InitialConditions:
 
     grid: Grid
     """Object representing the grid information."""
-    ini_time: datetime | None = None
+    ini_time: datetime
     """The date and time at which the initial conditions are set."""
     source: RawDataSource
     """Dictionary specifying the source of the physical initial condition data."""
@@ -414,17 +414,6 @@ class InitialConditions:
             logging.info(
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
-
-        if self.ini_time is None:
-            if self.source.get("name") != "ROMS":
-                raise ValueError(
-                    "`ini_time` cannot be None unless the source data is from ROMS."
-                )
-
-            if self.bgc_source is not None and self.bgc_source.get("name") != "ROMS":
-                raise ValueError(
-                    "`ini_time` cannot be None unless the BGC source data is from ROMS."
-                )
 
     def _get_data(
         self, forcing_type=Literal["physics", "bgc"]

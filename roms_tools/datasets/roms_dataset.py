@@ -565,11 +565,8 @@ class ROMSDataset:
 
         Returns
         -------
-        xr.Dataset or None
-            Returns the subset of the original dataset as an xarray Dataset if
-            `return_subdomain` is True, including an extended area covering additional
-            grid points beyond the specified ranges. Returns None if `return_subdomain`
-            is False, as the subset is assigned to `self.ds`.
+        None
+            The subdomain of the xarray Dataset is assigned to `self.ds`.
 
         Raises
         ------
@@ -580,8 +577,6 @@ class ROMSDataset:
             self.ds, self.grid.ds, target_coords, buffer_points
         )
         self.ds = subdomain
-
-        return None
 
     def convert_to_float64(self) -> None:
         """Convert all data variables in the dataset to float64.

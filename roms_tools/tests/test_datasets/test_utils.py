@@ -25,18 +25,21 @@ def test_convert_to_float64():
     ds = xr.Dataset(
         {
             "temp": (("x",), np.array([1, 2, 3], dtype=np.float32)),
-            "mask": (("x",), np.array([0, 1, 0], dtype=np.int16)),
+            "mask_rho": (("x",), np.array([0, 1, 0], dtype=np.int16)),
         }
     )
 
     out = convert_to_float64(ds)
 
-    # All variables should now be float64
-    assert all(out[var].dtype == np.float64 for var in out.data_vars)
+    # Non-mask variables should be converted to float64
+    assert out["temp"].dtype == np.float64
+
+    # Mask variables should keep their original dtype
+    assert out["mask_rho"].dtype == np.int16
 
     # Values should be preserved
     xr.testing.assert_equal(out["temp"], ds["temp"].astype("float64"))
-    xr.testing.assert_equal(out["mask"], ds["mask"].astype("float64"))
+    xr.testing.assert_equal(out["mask_rho"], ds["mask_rho"])
 
 
 def test_extrapolate_deepest_to_bottom():

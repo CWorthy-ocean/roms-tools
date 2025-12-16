@@ -40,7 +40,7 @@ def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
 
     This method updates the dataset by converting all of its data variables to the
     `float64` data type, ensuring consistency for numerical operations that require
-    high precision.
+    high precision. Variables whose names start with ``"mask_"`` are left unchanged.
 
     Parameters
     ----------
@@ -52,7 +52,12 @@ def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
     xr.Dataset:
         Input dataset with data variables converted to double precision.
     """
-    return ds.astype({var: "float64" for var in ds.data_vars})
+    dtype_map = {
+        name: ("float64" if not name.startswith("mask_") else var.dtype)
+        for name, var in ds.data_vars.items()
+    }
+
+    return ds.astype(dtype_map)
 
 
 def check_dataset(
@@ -167,9 +172,13 @@ def select_relevant_fields(ds: xr.Dataset, var_names: list[str]) -> xr.Dataset:
         A new dataset containing only the variables in ``var_names`` and
         ``"mask"`` (if it exists in the input dataset).
     """
-    for var in ds.data_vars:
-        if var not in var_names and var != "mask":
-            ds = ds.drop_vars(var)
+    vars_to_keep = set(var_names)
+    vars_to_drop = [
+        var for var in ds.data_vars if var not in vars_to_keep and var != "mask"
+    ]
+
+    if vars_to_drop:
+        ds = ds.drop_vars(vars_to_drop)
 
     return ds
 
@@ -424,25 +433,21 @@ def get_time_type(data_array: xr.DataArray) -> str:
         cftime.DatetimeProlepticGregorian,
     )
 
-    # Check if any of the coordinate values are of cftime, datetime, or integer type
-    if isinstance(data_array.values, np.ndarray | list):
-        # Check if the data type is numpy datetime64, indicating standard datetime objects
-        if data_array.values.dtype == "datetime64[ns]":
-            return "datetime"
+    values = data_array.values
 
-        # Check if any values in the array are instances of cftime types
-        if any(isinstance(value, cftime_types) for value in data_array.values):
-            return "cftime"
+    # numpy datetime64
+    if values.dtype == "datetime64[ns]":
+        return "datetime"
 
-        # Check if all values are of integer type (e.g., for indices or time steps)
-        if np.issubdtype(data_array.values.dtype, np.integer):
-            return "int"
+    # cftime objects (stored as object dtype)
+    if any(isinstance(value, cftime_types) for value in values):
+        return "cftime"
 
-        # If none of the above conditions are met, raise a ValueError
-        raise ValueError("Unsupported data type for time values in input dataset.")
+    # integer time axis
+    if np.issubdtype(values.dtype, np.integer):
+        return "int"
 
-    # Handle unexpected types
-    raise TypeError("DataArray values must be of type numpy.ndarray or list.")
+    raise ValueError("Unsupported data type for time values in input dataset.")
 
 
 def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:

@@ -307,8 +307,8 @@ def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
 def test_initial_conditions_missing_ini_time(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
-        ValueError,
-        match="`ini_time` cannot be None unless the source data is from ROMS.",
+        TypeError,
+        match="`ini_time` must be a datetime object",
     ):
         InitialConditions(
             grid=example_grid,
@@ -546,6 +546,7 @@ def test_computed_missing_optional_fields(
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        "initial_conditions_from_roms",
     ],
 )
 def test_initial_conditions_plot(initial_conditions_fixture, request):
@@ -594,6 +595,7 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
         "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        "initial_conditions_from_roms",
     ],
 )
 def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
@@ -622,6 +624,7 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
         "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        "initial_conditions_from_roms",
     ],
 )
 def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask):
@@ -655,6 +658,7 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
         "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        "initial_conditions_from_roms",
     ],
 )
 def test_files_have_same_hash(initial_conditions_fixture, request, tmp_path, use_dask):

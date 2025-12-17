@@ -415,6 +415,11 @@ class InitialConditions:
                 "Sea surface height will NOT be used to adjust depth coordinates."
             )
 
+        if not isinstance(self.ini_time, datetime):
+            raise TypeError(
+                f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
+            )
+
     def _get_data(
         self, forcing_type=Literal["physics", "bgc"]
     ) -> LatLonDataset | ROMSDataset:

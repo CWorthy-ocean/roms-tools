@@ -1428,6 +1428,72 @@ def deserialize_datetime(
     return value
 
 
+def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Serialize a source or BGC source dictionary for YAML or JSON output.
+
+    This function performs the following transformations:
+    - Converts any `Path` objects (including nested lists or dicts) to strings.
+    - Serializes any nested `Grid` objects using `serialize_grid`.
+    - Creates a deep copy of the input dictionary to avoid modifying the original.
+
+    Parameters
+    ----------
+    src : dict[str, Any] | None
+        The source or BGC source dictionary to serialize. Keys typically include:
+        - "path": path(s) to files
+        - "grid": a Grid object
+
+    Returns
+    -------
+    dict[str, Any] | None
+        A serialized dictionary suitable for saving to YAML or JSON, with:
+        - Paths converted to strings
+        - Nested Grid objects serialized
+        Returns `None` if input `src` is `None`.
+    """
+    if src is None:
+        return None
+
+    src = deepcopy(src)
+
+    # Serialize paths
+    if "path" in src:
+        src["path"] = serialize_paths(src["path"])
+
+    # Serialize nested grid
+    if "grid" in src and src["grid"] is not None:
+        src["grid"] = serialize_grid(src["grid"])
+
+    return src
+
+
+def deserialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Deserialize a source / bgc_source dictionary.
+
+    Converts string paths back to Path objects.
+
+    Parameters
+    ----------
+    src : dict[str, Any] | None
+        Serialized source or bgc_source dictionary.
+
+    Returns
+    -------
+    dict[str, Any] | None
+        Dictionary with paths converted to Path objects.
+    """
+    if src is None:
+        return None
+
+    src = deepcopy(src)
+
+    # Deserialize paths
+    if "path" in src:
+        src["path"] = normalize_paths(src["path"])
+
+    return src
+
+
 def serialize_grid(grid_obj: Any) -> dict[str, Any]:
     """Serialize a Grid object to a dictionary, excluding non-serializable attributes."""
     return pop_grid_data(asdict(grid_obj))
@@ -1480,23 +1546,6 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     exclude_list = exclude or []
     exclude_set: set[str] = {"grid", "parent_grid", "ds", *exclude_list}
 
-    def serialize_source_dict(src):
-        """Serialize source / bgc_source dictionaries."""
-        if src is None:
-            return None
-
-        src = deepcopy(src)
-
-        # Serialize paths
-        if "path" in src:
-            src["path"] = serialize_paths(src["path"])
-
-        # Serialize nested grid
-        if "grid" in src and src["grid"] is not None:
-            src["grid"] = serialize_grid(src["grid"])
-
-        return src
-
     # --- Serialize top-level grid(s) ---
     yaml_data = {}
 
@@ -1544,7 +1593,10 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
     """Load configuration for a forcing object from a YAML file.
 
     Searches for a dictionary keyed by the class name of `forcing_object` and
-    returns it, converting any ISO-format date strings to `datetime` objects.
+    returns it, converting:
+    - ISO-format date strings to `datetime` objects
+    - Path-like strings back to `Path` objects
+    - `source` and `bgc_source` nested dictionaries back to proper Grid objects
 
     Parameters
     ----------
@@ -1556,7 +1608,7 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
     Returns
     -------
     dict[str, Any]
-        Dictionary of configuration parameters with ISO dates converted.
+        Dictionary of configuration parameters with dates, paths, and nested grids restored.
 
     Raises
     ------
@@ -1588,6 +1640,11 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
 
     # Convert path-like strings back to Path objects
     forcing_data = normalize_paths(forcing_data)
+
+    # Deserialize source and bgc_source nested dictionaries
+    for key in ["source", "bgc_source"]:
+        if key in forcing_data:
+            forcing_data[key] = deserialize_source_dict(forcing_data[key])
 
     return forcing_data
 

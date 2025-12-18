@@ -3,6 +3,7 @@ import logging
 import time
 import typing
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -1368,83 +1369,108 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
 def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     """Serialize a forcing object (including its grid) into a dictionary.
 
-    This function serializes a dataclass object (forcing_object) and its associated
-    `grid` attribute into a dictionary. It omits fields like `grid` and `ds`
-    that are not serializable or meant to be excluded.
+    This function serializes a forcing object (dataclass or pydantic model),
+    including its associated grid(s), into a dictionary suitable for YAML output.
 
-    The function also converts datetime fields to ISO format strings for proper
-    serialization.
+    - Top-level grids (`grid`, `parent_grid`) are serialized consistently
+    - Nested grids inside `source` and `bgc_source` are also serialized
+    - Datetime objects are converted to ISO strings
+    - Path objects are converted to strings
 
     Parameters
     ----------
     forcing_object : object
-        The object that contains the forcing data, typically a dataclass with attributes
-        such as `grid`, `start_time`, `end_time`, etc.
+        A dataclass or pydantic model representing a forcing configuration.
     exclude : list[str], optional
-        List of keys to exclude from the serialized output. Defaults to empty list. The field "ds" is always excluded by default.
+        List of field names to exclude from serialization. The fields
+        "grid", "parent_grid", and "ds" are always excluded.
 
     Returns
     -------
     dict
+        Serialized representation of the forcing object.
     """
-    # Serialize Grid data
-    if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
-        grid_data = asdict(forcing_object.grid)
-        grid_yaml_data = {"Grid": pop_grid_data(grid_data)}
-    elif hasattr(forcing_object, "parent_grid"):
-        grid_data = asdict(forcing_object.parent_grid)
-        grid_yaml_data = {"ParentGrid": pop_grid_data(grid_data)}
+    exclude_list = exclude or []
+    exclude_set: set[str] = {"grid", "parent_grid", "ds", *exclude_list}
 
-    # Ensure Paths are Strings
-    def ensure_paths_are_strings(obj, key):
-        attr = getattr(obj, key, None)
-        if attr is not None and "path" in attr:
-            paths = attr["path"]
-            if isinstance(paths, list):
-                attr["path"] = [str(p) if isinstance(p, Path) else p for p in paths]
-            elif isinstance(paths, Path):
-                attr["path"] = str(paths)
-            elif isinstance(paths, dict):
-                for key, path in paths.items():
-                    attr["path"][key] = str(path)
+    def serialize_grid(grid_obj):
+        """Serialize a Grid object consistently."""
+        return pop_grid_data(asdict(grid_obj))
 
-    ensure_paths_are_strings(forcing_object, "source")
-    ensure_paths_are_strings(forcing_object, "bgc_source")
+    def serialize_paths(value):
+        """Convert Path objects (including nested containers) to strings."""
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, list):
+            return [serialize_paths(v) for v in value]
+        if isinstance(value, dict):
+            return {k: serialize_paths(v) for k, v in value.items()}
+        return value
 
-    # Prepare Forcing Data
-    forcing_data = {}
-    if isinstance(forcing_object, BaseModel):
-        field_names = forcing_object.model_fields
-    elif is_dataclass(forcing_object):
-        field_names = [field.name for field in fields(forcing_object)]
-    else:
-        raise TypeError("Forcing object is not a dataclass or pydantic model")
-
-    if exclude is None:
-        exclude = []
-    exclude = ["grid", "parent_grid", "ds", *exclude]
-
-    filtered_field_names = [param for param in field_names if param not in exclude]
-
-    for field_name in filtered_field_names:
-        # Retrieve the value of each field using getattr
-        value = getattr(forcing_object, field_name)
-
-        # If the field is a datetime object, convert it to ISO format
+    def serialize_datetime(value):
+        """Convert datetime or list of datetimes to ISO strings."""
         if isinstance(value, datetime):
-            value = value.isoformat()
-        # Convert list of datetimes to list of ISO strings
-        elif isinstance(value, list) and all(isinstance(v, datetime) for v in value):
-            value = [v.isoformat() for v in value]
+            return value.isoformat()
+        if isinstance(value, list) and all(isinstance(v, datetime) for v in value):
+            return [v.isoformat() for v in value]
+        return value
 
-        # Add the field and its value to the forcing_data dictionary
-        forcing_data[field_name] = value
+    def serialize_source_dict(src):
+        """Serialize source / bgc_source dictionaries."""
+        if src is None:
+            return None
 
-    # Combine Grid and Forcing Data into a single dictionary for the final YAML content
-    yaml_data = {
-        **grid_yaml_data,  # Add the grid data to the final YAML structure
-        forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
-    }
+        src = deepcopy(src)
+
+        # Serialize paths
+        if "path" in src:
+            src["path"] = serialize_paths(src["path"])
+
+        # Serialize nested grid
+        if "grid" in src and src["grid"] is not None:
+            src["grid"] = serialize_grid(src["grid"])
+
+        return src
+
+    # --- Serialize top-level grid(s) ---
+    yaml_data = {}
+
+    if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
+        yaml_data["Grid"] = serialize_grid(forcing_object.grid)
+
+    if (
+        hasattr(forcing_object, "parent_grid")
+        and forcing_object.parent_grid is not None
+    ):
+        yaml_data["ParentGrid"] = serialize_grid(forcing_object.parent_grid)
+
+    # --- Collect forcing fields ---
+    if isinstance(forcing_object, BaseModel):
+        field_names = forcing_object.model_fields.keys()
+    elif is_dataclass(forcing_object):
+        field_names = [f.name for f in fields(forcing_object)]
+    else:
+        raise TypeError("Forcing object must be a dataclass or pydantic model")
+
+    forcing_data = {}
+
+    for name in field_names:
+        if name in exclude_set:
+            continue
+
+        value = getattr(forcing_object, name)
+
+        if name in {"source", "bgc_source"}:
+            forcing_data[name] = serialize_source_dict(value)
+            continue
+
+        value = serialize_datetime(value)
+        value = serialize_paths(value)
+
+        forcing_data[name] = value
+
+    # --- Final YAML structure ---
+    yaml_data[forcing_object.__class__.__name__] = forcing_data
 
     return yaml_data
 

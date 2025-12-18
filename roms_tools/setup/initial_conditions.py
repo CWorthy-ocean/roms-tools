@@ -34,6 +34,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     nan_check,
+    pop_grid_data,
     rotate_velocities,
     substitute_nans_by_fillvalue,
     to_dict,
@@ -968,6 +969,14 @@ class InitialConditions:
 
         grid = Grid.from_yaml(filepath)
         initial_conditions_params = from_yaml(cls, filepath)
+
+        # Deserialize nested grids inside 'source' and 'bgc_source'
+        for name in ["source", "bgc_source"]:
+            src_dict = initial_conditions_params.get(name)
+            if src_dict and "grid" in src_dict and src_dict["grid"] is not None:
+                grid_data = pop_grid_data(src_dict["grid"])
+                src_dict["grid"] = Grid(**grid_data)
+
         return cls(
             grid=grid,
             **initial_conditions_params,

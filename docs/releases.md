@@ -9,6 +9,7 @@
 * Add `apply_mask` option to `plot` function ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
 * Improved bathymetry smoothing to better match UCLA MATLAB tools ([#506](https://github.com/CWorthy-ocean/roms-tools/pull/506))
+* Create initial conditions from outer nest restart file ([513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
 
 ### Breaking Changes
 

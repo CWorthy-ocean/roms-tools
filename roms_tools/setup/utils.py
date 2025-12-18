@@ -1366,6 +1366,93 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
         )
 
 
+def serialize_paths(value: Any) -> Any:
+    """Recursively convert Path objects to strings."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, list):
+        return [serialize_paths(v) for v in value]
+    if isinstance(value, dict):
+        return {k: serialize_paths(v) for k, v in value.items()}
+    return value
+
+
+def normalize_paths(value: Any) -> Any:
+    """Recursively convert path-like strings back to Path objects.
+
+    Heuristic: strings containing '/' or ending with '.nc' are treated as paths.
+    """
+    if isinstance(value, str):
+        return Path(value) if "/" in value or value.endswith(".nc") else value
+    if isinstance(value, list):
+        return [normalize_paths(v) for v in value]
+    if isinstance(value, dict):
+        return {k: normalize_paths(v) for k, v in value.items()}
+    return value
+
+
+def serialize_datetime(value: datetime | list[datetime] | Any) -> Any:
+    """Convert datetime or list of datetimes to ISO 8601 strings."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list) and all(isinstance(v, datetime) for v in value):
+        return [v.isoformat() for v in value]
+    return value
+
+
+def deserialize_datetime(
+    value: str | list[str] | datetime | Any,
+) -> datetime | list[datetime] | Any:
+    """Convert ISO 8601 string(s) to datetime object(s).
+
+    Returns:
+        datetime if input is string,
+        list of datetime if input is list of strings,
+        original value if parsing fails or input is already datetime.
+    """
+    if isinstance(value, list):
+        result: list[datetime | Any] = []
+        for v in value:
+            try:
+                result.append(datetime.fromisoformat(str(v)))
+            except ValueError:
+                result.append(v)
+        return result
+
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return value
+
+    return value
+
+
+def serialize_grid(grid_obj: Any) -> dict[str, Any]:
+    """Serialize a Grid object to a dictionary, excluding non-serializable attributes."""
+    return pop_grid_data(asdict(grid_obj))
+
+
+def pop_grid_data(grid_data: dict[str, Any]) -> dict[str, Any]:
+    """Remove non-serializable or unnecessary keys from a Grid dictionary.
+
+    Removes 'ds', 'straddle', and 'verbose' keys if present.
+
+    Parameters
+    ----------
+    grid_data : dict
+        Dictionary representation of a Grid object.
+
+    Returns
+    -------
+    dict
+        Cleaned dictionary suitable for serialization.
+    """
+    for key in ("ds", "straddle", "verbose"):
+        grid_data.pop(key, None)
+    return grid_data
+
+
 def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     """Serialize a forcing object (including its grid) into a dictionary.
 
@@ -1392,28 +1479,6 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     """
     exclude_list = exclude or []
     exclude_set: set[str] = {"grid", "parent_grid", "ds", *exclude_list}
-
-    def serialize_grid(grid_obj):
-        """Serialize a Grid object consistently."""
-        return pop_grid_data(asdict(grid_obj))
-
-    def serialize_paths(value):
-        """Convert Path objects (including nested containers) to strings."""
-        if isinstance(value, Path):
-            return str(value)
-        if isinstance(value, list):
-            return [serialize_paths(v) for v in value]
-        if isinstance(value, dict):
-            return {k: serialize_paths(v) for k, v in value.items()}
-        return value
-
-    def serialize_datetime(value):
-        """Convert datetime or list of datetimes to ISO strings."""
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, list) and all(isinstance(v, datetime) for v in value):
-            return [v.isoformat() for v in value]
-        return value
 
     def serialize_source_dict(src):
         """Serialize source / bgc_source dictionaries."""
@@ -1475,58 +1540,36 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     return yaml_data
 
 
-def pop_grid_data(grid_data):
-    grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
-    grid_data.pop("straddle", None)
-    grid_data.pop("verbose", None)
-
-    return grid_data
-
-
 def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
-    """Extract the configuration data for a given forcing object from a YAML file.
+    """Load configuration for a forcing object from a YAML file.
 
-    This function reads a YAML file, searches for the configuration data associated
-    with the class name of the forcing object, and returns the configuration data
-    as a dictionary. The dictionary contains the forcing parameters extracted from
-    the YAML file, with any date fields converted from ISO format.
+    Searches for a dictionary keyed by the class name of `forcing_object` and
+    returns it, converting any ISO-format date strings to `datetime` objects.
 
     Parameters
     ----------
-    filepath : Union[str, Path]
-        The path to the YAML file from which the parameters will be read.
-    forcing_object : Type
-        The class type (e.g., TidalForcing) whose configuration data is to be loaded
-        from the YAML file. The class name is used to locate the relevant data in
-        the YAML structure.
+    forcing_object : type
+        The class type whose configuration to load (e.g., `TidalForcing`).
+    filepath : str | Path
+        Path to the YAML file containing the configuration.
 
     Returns
     -------
-    dict
-        A dictionary containing the forcing parameters extracted from the YAML file.
-        This dictionary contains key-value pairs where the keys are the parameter
-        names, and the values are the corresponding values from the YAML file.
-        Any date fields are converted from ISO format if necessary.
+    dict[str, Any]
+        Dictionary of configuration parameters with ISO dates converted.
 
     Raises
     ------
     ValueError
-        If no configuration for the specified class name is found in the YAML file.
+        If no configuration for the specified class is found in the YAML file.
     """
-    # Ensure filepath is a Path object
     filepath = Path(filepath)
-
-    # Read the entire file content
-    with filepath.open("r") as file:
-        file_content = file.read()
-
-    # Split the content into YAML documents
-    documents = list(yaml.safe_load_all(file_content))
+    with filepath.open("r") as f:
+        documents = list(yaml.safe_load_all(f))
 
     forcing_data = None
     forcing_object_name = forcing_object.__name__
 
-    # Process the YAML documents to find the forcing data for the given object
     for doc in documents:
         if doc is None:
             continue
@@ -1539,21 +1582,14 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
             f"No {forcing_object_name} configuration found in the YAML file."
         )
 
-    # Convert any date fields from ISO format if necessary
+    # Convert ISO date strings to datetime objects
     for key, value in forcing_data.items():
-        forcing_data[key] = _convert_from_iso_format(value)
+        forcing_data[key] = deserialize_datetime(value)
 
-    # Return the forcing data as a dictionary
+    # Convert path-like strings back to Path objects
+    forcing_data = normalize_paths(forcing_data)
+
     return forcing_data
-
-
-def _convert_from_iso_format(value):
-    try:
-        # Return the parsed datetime object if successful
-        return datetime.fromisoformat(str(value))
-    except ValueError:
-        # Return None or raise an exception if parsing fails
-        return value
 
 
 def handle_boundaries(field):

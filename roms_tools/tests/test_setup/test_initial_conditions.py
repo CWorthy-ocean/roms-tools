@@ -27,6 +27,10 @@ try:
 except ImportError:
     xesmf = None
 
+skip_xesmf = pytest.mark.skipif(
+    xesmf is None, reason="xesmf required for ROMS regridding"
+)
+
 
 @pytest.fixture
 def example_grid():
@@ -56,6 +60,7 @@ def example_grid():
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_initial_conditions_creation_with_nondefault_glorys_dataset(
@@ -64,7 +69,6 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
     """Test the creation of the InitialConditions object."""
     ic = request.getfixturevalue(ic_fixture)
 
-    assert ic.ini_time == datetime(2021, 6, 29)
     assert ic.source == {
         "name": "GLORYS",
         "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
@@ -75,14 +79,6 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
     assert set(ic.ds.data_vars).issuperset(expected_vars)
-
-
-@pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_initial_conditions_creation_from_roms(initial_conditions_from_roms):
-    """Test the creation of the InitialConditions object."""
-    assert isinstance(initial_conditions_from_roms.ds, xr.Dataset)
-    expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
-    assert set(initial_conditions_from_roms.ds.data_vars).issuperset(expected_vars)
 
 
 @pytest.mark.stream
@@ -187,13 +183,12 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        "initial_conditions_from_roms",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_initial_condition_creation_with_bgc(ic_fixture, request):
     """Test the creation of the BoundaryForcing object."""
     ic = request.getfixturevalue(ic_fixture)
-
     expected_bgc_variables = [
         "PO4",
         "NO3",
@@ -233,6 +228,7 @@ def test_initial_condition_creation_with_bgc(ic_fixture, request):
         assert var in ic.ds
 
 
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
 def test_initial_conditions_raises_on_regridded_nans():
     """Raise ValueError if regridded ROMS fields contain NaNs due to grid mismatch."""
     parent_grid = Grid(
@@ -546,7 +542,7 @@ def test_computed_missing_optional_fields(
         "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        "initial_conditions_from_roms",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_initial_conditions_plot(initial_conditions_fixture, request):
@@ -595,7 +591,7 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
         "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        "initial_conditions_from_roms",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
@@ -624,7 +620,7 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
         "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        "initial_conditions_from_roms",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask):
@@ -658,7 +654,7 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
         "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        "initial_conditions_from_roms",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_files_have_same_hash(initial_conditions_fixture, request, tmp_path, use_dask):

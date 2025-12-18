@@ -298,27 +298,26 @@ class VerticalRegridFromROMS:
 
 
 class VerticalRegrid:
-    """A class for regridding data from the ROMS vertical coordinate system to target
-    depth levels.
+    """Regrid ROMS variables along the vertical, using spatially varying coordinates.
 
-    This class uses the `xgcm` package to perform the transformation from the ROMS depth coordinates to
-    a user-defined set of target depth levels. It assumes that the input dataset `ds` contains the necessary
-    vertical coordinate information (`s_rho`).
+    This class uses the `xgcm` package to transform data from a ROMS vertical coordinate
+    system (`s_rho`) to a user-defined set of target depth levels, where both the source
+    and target coordinates can vary spatially (i.e., 2D fields in horizontal space).
 
     Attributes
     ----------
     grid : xgcm.Grid
-        The grid object used for regridding, initialized with the given dataset `ds`.
+        The XGCM grid object used for vertical regridding, initialized with the input dataset `ds`.
     """
 
-    def __init__(self, ds):
-        """Initializes the `VerticalRegridFromROMS` object by creating an `xgcm.Grid`
-        instance.
+    def __init__(self, ds: "xr.Dataset"):
+        """Initialize the VerticalRegrid object with a ROMS dataset.
 
         Parameters
         ----------
         ds : xarray.Dataset
-            The dataset containing the ROMS output data, which must include the vertical coordinate `s_rho`.
+            The ROMS dataset containing the vertical coordinate `s_rho` and the variable(s)
+            to be regridded.
         """
         self.grid = xgcm.Grid(
             ds,
@@ -327,31 +326,38 @@ class VerticalRegrid:
             autoparse_metadata=False,
         )
 
-    def apply(self, da, source_depth_coords, target_depth_coords, mask_edges=True):
-        """Applies vertical regridding from ROMS to the specified target depth levels.
+    def apply(
+        self,
+        da: "xr.DataArray",
+        source_depth_coords: "xr.DataArray",
+        target_depth_coords: "xr.DataArray",
+        mask_edges: bool = True,
+    ) -> "xr.DataArray":
+        """Regrid a ROMS variable from source vertical coordinates to target vertical coordinates.
 
-        This method transforms the input data array `da` from the ROMS vertical coordinate (`s_rho`)
-        to a set of target depth levels defined by `target_depth_levels`.
+        This method supports spatially varying vertical coordinates for both source and target,
+        meaning that the depth levels can vary across the horizontal grid.
 
         Parameters
         ----------
         da : xarray.DataArray
-            The data array containing the ROMS output field to be regridded. It must have a vertical
-            dimension corresponding to `s_rho`.
+            The data array to regrid. Must have a vertical dimension corresponding to `s_rho`.
 
-        source_depth_coords : array-like
-            The depth coordinates of the input data array `da` (typically the `s_rho` coordinate in ROMS).
+        source_depth_coords : array-like (1D or 2D)
+            Depth coordinates of the source data. Can be a 1D array (same for all horizontal points)
+            or a 2D array (varying in horizontal space).
 
-        target_depth_coords : array-like
-            The target depth levels to which the input data `da` will be regridded.
+        target_depth_coords : array-like (1D or 2D)
+            Desired depth coordinates of the regridded data. Can also be 1D or 2D.
 
-        mask_edges: bool, optional
-            If activated, target values outside the range of depth_coords are masked with nan. Defaults to True.
+        mask_edges : bool, optional
+            If True, target values outside the range of source depth coordinates are masked with NaN.
+            Defaults to True.
 
         Returns
         -------
         xarray.DataArray
-            A new `xarray.DataArray` containing the regridded data at the specified target depth levels.
+            A new `DataArray` containing the regridded variable at the target depth coordinates.
         """
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")

@@ -315,7 +315,7 @@ class InitialConditions:
                         depth_type="layer", locations=[location]
                     )
                     layer_depth_loc = choose_subdomain(
-                        data.ds_depth_coords[f"layer_depth_{location}"],
+                        data.ds_depth_coords[f"layer_depth_{location}"].squeeze(),
                         data.grid.ds,
                         target_coords,
                     )
@@ -342,7 +342,6 @@ class InitialConditions:
                 for var_name, info in var_names.items()
                 if info["location"] == location and info["is_3d"]
             ]
-
             if filtered_vars:
                 if isinstance(data, ROMSDataset):
                     ds_tmp = xr.Dataset()
@@ -486,6 +485,7 @@ class InitialConditions:
                 var_names=var_names,
                 start_time=self.ini_time,
                 allow_flex_time=self.allow_flex_time,
+                adjust_depth_for_sea_surface_height=True,
                 use_dask=self.use_dask,
             )
 
@@ -589,7 +589,16 @@ class InitialConditions:
                 if var_name == "ALK":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
-                    variable_info[var_name] = {**default_info, "validate": False}
+                    if var_name == "zeta":
+                        variable_info[var_name] = {
+                            "location": "rho",
+                            "is_vector": False,
+                            "vector_pair": None,
+                            "is_3d": False,
+                            "validate": False,
+                        }
+                    else:
+                        variable_info[var_name] = {**default_info, "validate": False}
 
         object.__setattr__(self, f"variable_info_{type}", variable_info)
 
@@ -1038,6 +1047,7 @@ def _set_required_vars(var_type: str = "physics") -> dict[str, str]:
             "v": "v",
         },
         "bgc": {
+            "zeta": "zeta",  # to infer vertical coordinate
             "PO4": "PO4",
             "NO3": "NO3",
             "SiO3": "SiO3",

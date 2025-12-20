@@ -1,23 +1,40 @@
 # Release notes
 
-## v3.3.0 (unreleased)
+## v3.4.0 (unreleased)
+
+### New Features
+
+* Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
+
+### Breaking Changes
+
+* Remove user-facing control of SSH-adjusted depth coordinates (`adjust_depth_for_sea_surface_height` parameter) for `InitialConditions` and `BoundaryForcing`, enforcing consistent and physically sensible defaults ([#514](https://github.com/CWorthy-ocean/roms-tools/pull/514))
+
+### Internal Changes
+
+* Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
+
+### Documentation
+
+### Bugfixes
+
+* Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
+
+
+## v3.3.0
 
 ### New Features
 
 * Plot wide grids with different cartopy projection ([#496](https://github.com/CWorthy-ocean/roms-tools/pull/496))
 * Allow child domains with land points outside parent ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Add `apply_mask` option to `plot` function ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
-* Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
 * Improved bathymetry smoothing to better match UCLA MATLAB tools ([#506](https://github.com/CWorthy-ocean/roms-tools/pull/506))
-
-### Breaking Changes
 
 ### Internal Changes
 
 * Reorder operations in `ChildGrid` for correctness and clarity ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Update `ChildGrid.plot_nesting` to support nesting configurations where the child grid extends beyond the parent domain ([#491](https://github.com/CWorthy-ocean/roms-tools/pull/491))
 * Rename `Dataset` to `LatLonDataset` and modularize `RiverDataset` ([#500](https://github.com/CWorthy-ocean/roms-tools/pull/500))
-* Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
 
 ### Documentation
 
@@ -27,7 +44,6 @@
 
 * Make unit handling in `RiverForcing.plot_locations()` robust for grids without `mask_rho` units ([#499](https://github.com/CWorthy-ocean/roms-tools/pull/499))
 * Only update child boundary indices if boundary not entirely on land ([#503](https://github.com/CWorthy-ocean/roms-tools/pull/503))
-* Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
 
 
 ## v3.2.0

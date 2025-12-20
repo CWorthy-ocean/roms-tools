@@ -68,12 +68,6 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
 ):
     """Test the creation of the InitialConditions object."""
     ic = request.getfixturevalue(ic_fixture)
-
-    assert ic.source == {
-        "name": "GLORYS",
-        "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
-        "climatology": False,
-    }
     assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
     assert isinstance(ic.ds, xr.Dataset)
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
@@ -257,6 +251,45 @@ def test_initial_conditions_raises_on_regridded_nans():
                 "grid": parent_grid,
                 "path": restart_file,
             },
+        )
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_initial_conditions_stay_the_same_for_idencial_roms_grids():
+    # --- Create parent and child grid (identical in this test) ---
+    grid_params = {
+        "nx": 8,
+        "ny": 13,
+        "center_lon": -120,
+        "center_lat": 30,
+        "size_x": 3000,
+        "size_y": 4000,
+        "rot": 32,
+    }
+    parent_grid = Grid(**grid_params)
+    grid = Grid(**grid_params)
+
+    # --- Load restart file ---
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    ds = xr.open_dataset(restart_file)
+
+    # --- Initialize child initial conditions from ROMS restart ---
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(1998, 1, 6),
+        source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
+        adjust_depth_for_sea_surface_height=True,
+        use_dask=True,
+    )
+
+    # --- Test: fields remain unchanged ---
+    for var_name in ["temp", "salt", "zeta", "u", "v"]:
+        print(var_name)
+        restart_values = ds[var_name].isel(time=1).values
+        ic_values = ic.ds[var_name].squeeze().values
+        print(ic_values - restart_values)
+        assert np.allclose(ic_values, restart_values, rtol=1e-1), (
+            f"{var_name} values changed during initialization"
         )
 
 

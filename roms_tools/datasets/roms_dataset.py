@@ -23,9 +23,7 @@ from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
 
-DEFAULT_NR_BUFFER_POINTS = (
-    20  # Default number of buffer points for subdomain selection.
-)
+DEFAULT_NR_BUFFER_POINTS = 5  # Default number of buffer points for subdomain selection.
 # Balances performance and accuracy:
 # - Too many points → more expensive computations
 # - Too few points → potential boundary artifacts when lateral refill is performed
@@ -577,6 +575,12 @@ class ROMSDataset:
             self.ds, self.grid.ds, target_coords, buffer_points
         )
         self.ds = subdomain
+
+        subdomain_grid = choose_subdomain(
+            self.grid.ds, self.grid.ds, target_coords, buffer_points
+        )
+
+        self.grid.ds = subdomain_grid
 
     def convert_to_float64(self) -> None:
         """Convert all data variables in the dataset to float64.

@@ -637,3 +637,44 @@ def test_choose_subdomain_with(big_params, small_params):
         assert float(sub.lat_v.min()) >= float(ds.lat_v.min()) - 1e-6
         assert float(sub.lat_v.max()) <= float(ds.lat_v.max()) + 1e-6
         assert not sub.field_v.isnull().any()
+
+
+def test_choose_subdomain_dataset_and_grid(roms_dataset_from_restart_file):
+    # Save original sizes
+    orig_grid_sizes = dict(roms_dataset_from_restart_file.grid.ds.sizes)
+    orig_ds_sizes = dict(roms_dataset_from_restart_file.ds.sizes)
+
+    # Create a small child grid and target coordinates
+    child_grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=100,
+        size_y=100,
+        center_lon=-128.0,
+        center_lat=9.0,
+        rot=32.0,
+    )
+    target_coords = get_target_coords(child_grid)
+
+    # Apply subdomain selection
+    roms_dataset_from_restart_file.choose_subdomain(target_coords, buffer_points=1)
+
+    new_grid_sizes = dict(roms_dataset_from_restart_file.grid.ds.sizes)
+    new_ds_sizes = dict(roms_dataset_from_restart_file.ds.sizes)
+
+    # Grid and dataset should both be reduced
+    assert new_grid_sizes != orig_grid_sizes, (
+        "Grid sizes did not change after choose_subdomain"
+    )
+    assert new_ds_sizes != orig_ds_sizes, (
+        "Dataset sizes did not change after choose_subdomain"
+    )
+
+    # Grid and dataset should remain consistent with each other
+    joint_dims = ["eta_rho", "xi_rho", "xi_u", "eta_v", "s_rho"]
+
+    for dim in joint_dims:
+        assert new_grid_sizes.get(dim) == new_ds_sizes.get(dim), (
+            f"Mismatch in dimension '{dim}': "
+            f"grid={new_grid_sizes.get(dim)}, ds={new_ds_sizes.get(dim)}"
+        )

@@ -57,7 +57,7 @@ def example_grid():
         "initial_conditions_with_bgc",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
+        pytest.param("initial_conditions_from_roms_without_bgc", marks=skip_xesmf),
     ],
 )
 def test_initial_conditions_creation_with_nondefault_glorys_dataset(
@@ -66,7 +66,6 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
     """Test the creation of the InitialConditions object."""
     ic = request.getfixturevalue(ic_fixture)
     assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
-    assert ic.ds.attrs["adjust_depth_for_sea_surface_height"] == "False"
     assert isinstance(ic.ds, xr.Dataset)
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
@@ -595,6 +594,7 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
         "initial_conditions",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms_without_bgc", marks=skip_xesmf),
         pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )

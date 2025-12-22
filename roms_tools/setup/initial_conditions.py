@@ -470,7 +470,7 @@ class InitialConditions:
 
         if source_dict["name"] == "ROMS":
             var_names = _set_required_vars(forcing_type)
-            self.adjust_depth_for_sea_surface_height = False
+            self.adjust_depth_for_sea_surface_height = True
 
             data = data_type(
                 path=source_dict["path"],  # type: ignore

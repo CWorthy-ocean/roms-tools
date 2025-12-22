@@ -251,8 +251,7 @@ def test_initial_conditions_raises_on_regridded_nans():
 
 
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_initial_conditions_stay_the_same_for_idencial_roms_grids():
-    # --- Create parent and child grid (identical in this test) ---
+def test_initial_conditions_unchanged_when_parent_and_child_grids_match():
     grid_params = {
         "nx": 8,
         "ny": 13,
@@ -265,11 +264,9 @@ def test_initial_conditions_stay_the_same_for_idencial_roms_grids():
     parent_grid = Grid(**grid_params)
     grid = Grid(**grid_params)
 
-    # --- Load restart file ---
     restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     ds = xr.open_dataset(restart_file)
 
-    # --- Initialize child initial conditions from ROMS restart ---
     ic = InitialConditions(
         grid=grid,
         ini_time=datetime(1998, 1, 6),
@@ -277,15 +274,25 @@ def test_initial_conditions_stay_the_same_for_idencial_roms_grids():
         use_dask=True,
     )
 
-    # --- Test: fields remain unchanged ---
+    mask_map = {
+        "temp": grid.ds.mask_rho,
+        "salt": grid.ds.mask_rho,
+        "zeta": grid.ds.mask_rho,
+        "u": grid.ds.mask_u,
+        "v": grid.ds.mask_v,
+    }
+
     for var_name in ["temp", "salt", "zeta", "u", "v"]:
-        print(var_name)
-        restart_values = ds[var_name].isel(time=1).values
-        ic_values = ic.ds[var_name].squeeze().values
-        print(ic_values - restart_values)
-        assert np.allclose(ic_values, restart_values, rtol=1e-1), (
-            f"{var_name} values changed during initialization"
-        )
+        mask = mask_map[var_name]
+
+        restart_values = ds[var_name].isel(time=1).where(mask).values
+        ic_values = ic.ds[var_name].squeeze().where(mask).values
+
+        assert np.allclose(
+            ic_values,
+            restart_values,
+            equal_nan=True,
+        ), f"{var_name} values changed during initialization"
 
 
 # Test initialization with missing 'name' in source

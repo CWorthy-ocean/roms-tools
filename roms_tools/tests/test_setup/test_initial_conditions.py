@@ -1,4 +1,3 @@
-import logging
 import textwrap
 from datetime import datetime
 from pathlib import Path
@@ -55,9 +54,7 @@ def example_grid():
     "ic_fixture",
     [
         "initial_conditions",
-        "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc",
-        "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
         pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
@@ -69,6 +66,7 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
     """Test the creation of the InitialConditions object."""
     ic = request.getfixturevalue(ic_fixture)
     assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
+    assert ic.ds.attrs["adjust_depth_for_sea_surface_height"] == "False"
     assert isinstance(ic.ds, xr.Dataset)
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
@@ -174,7 +172,6 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
     "ic_fixture",
     [
         "initial_conditions_with_bgc",
-        "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
         pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
@@ -278,7 +275,6 @@ def test_initial_conditions_stay_the_same_for_idencial_roms_grids():
         grid=grid,
         ini_time=datetime(1998, 1, 6),
         source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
-        adjust_depth_for_sea_surface_height=True,
         use_dask=True,
     )
 
@@ -375,90 +371,6 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
     )
 
     assert initial_conditions.bgc_source["climatology"] is False
-
-
-def test_info_depth(caplog, use_dask):
-    grid = Grid(
-        nx=2,
-        ny=2,
-        size_x=500,
-        size_y=1000,
-        center_lon=0,
-        center_lat=55,
-        rot=10,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-
-    with caplog.at_level(logging.INFO):
-        InitialConditions(
-            grid=grid,
-            ini_time=datetime(2021, 6, 29),
-            source={"path": fname, "name": "GLORYS"},
-            adjust_depth_for_sea_surface_height=True,
-            use_dask=use_dask,
-        )
-    # Verify the warning message in the log
-    assert "Sea surface height will be used to adjust depth coordinates." in caplog.text
-
-    # Clear the log before the next test
-    caplog.clear()
-
-    with caplog.at_level(logging.INFO):
-        InitialConditions(
-            grid=grid,
-            ini_time=datetime(2021, 6, 29),
-            source={"path": fname, "name": "GLORYS"},
-            adjust_depth_for_sea_surface_height=False,
-            use_dask=use_dask,
-        )
-    # Verify the warning message in the log
-    assert (
-        "Sea surface height will NOT be used to adjust depth coordinates."
-        in caplog.text
-    )
-
-
-@pytest.mark.parametrize(
-    "initial_conditions_fixture",
-    [
-        "initial_conditions_adjusted_for_zeta",
-        "initial_conditions_with_bgc_adjusted_for_zeta",
-    ],
-)
-def test_correct_depth_coords_adjusted_for_zeta(
-    initial_conditions_fixture, request, use_dask
-):
-    initial_conditions = request.getfixturevalue(initial_conditions_fixture)
-
-    # compute interface depth at rho-points and write it into .ds_depth_coords
-    zeta = initial_conditions.ds.zeta
-    initial_conditions._get_depth_coordinates(
-        zeta, location="rho", depth_type="interface"
-    )
-    # Test that lowermost interface coincides with topography
-    assert np.allclose(
-        initial_conditions.ds_depth_coords["interface_depth_rho"]
-        .isel(s_w=0)
-        .squeeze()
-        .values,  # Extract raw NumPy array
-        initial_conditions.grid.ds.h.values,
-        atol=1e-6,  # Adjust tolerance as needed
-    )
-
-    # Test that uppermost interface coincides with sea surface height
-    assert np.allclose(
-        initial_conditions.ds_depth_coords["interface_depth_rho"]
-        .isel(s_w=-1)
-        .squeeze()
-        .values,
-        -zeta.values,
-        atol=1e-6,
-    )
 
 
 @pytest.mark.parametrize(
@@ -572,7 +484,6 @@ def test_computed_missing_optional_fields(
 @pytest.mark.parametrize(
     "initial_conditions_fixture",
     [
-        "initial_conditions_with_bgc_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
         pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
@@ -621,7 +532,6 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
     "initial_conditions_fixture",
     [
         "initial_conditions",
-        "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
         pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
@@ -650,7 +560,6 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
     "initial_conditions_fixture",
     [
         "initial_conditions",
-        "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
         pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
@@ -684,7 +593,6 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
     "initial_conditions_fixture",
     [
         "initial_conditions",
-        "initial_conditions_adjusted_for_zeta",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
         pytest.param("initial_conditions_from_roms", marks=skip_xesmf),

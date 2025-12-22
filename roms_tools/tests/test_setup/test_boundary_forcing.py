@@ -25,9 +25,7 @@ except ImportError:
     "boundary_forcing_fixture",
     [
         "boundary_forcing",
-        "boundary_forcing_adjusted_for_zeta",
         "boundary_forcing_with_2d_fill",
-        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
     ],
 )
 def test_boundary_forcing_creation(boundary_forcing_fixture, request):
@@ -61,6 +59,7 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     assert boundary_forcing.ds.coords["bry_time"].attrs["units"] == "days"
     assert not hasattr(boundary_forcing.ds, "climatology")
     assert hasattr(boundary_forcing.ds, "adjust_depth_for_sea_surface_height")
+    assert boundary_forcing.ds.attrs["adjust_depth_for_sea_surface_height"] == "False"
     assert hasattr(boundary_forcing.ds, "apply_2d_horizontal_fill")
 
 
@@ -276,56 +275,6 @@ def test_boundary_divided_by_land_warning(caplog, use_dask):
     assert "divided by land" in caplog.text
 
 
-def test_info_depth(caplog, use_dask):
-    grid = Grid(
-        nx=3,
-        ny=3,
-        size_x=400,
-        size_y=400,
-        center_lon=-8,
-        center_lat=58,
-        rot=0,
-        N=3,  # number of vertical levels
-        theta_s=5.0,  # surface control parameter
-        theta_b=2.0,  # bottom control parameter
-        hc=250.0,  # critical depth
-    )
-
-    fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))
-    fname2 = Path(download_test_data("GLORYS_NA_20121231.nc"))
-
-    with caplog.at_level(logging.INFO):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2012, 1, 1),
-            end_time=datetime(2012, 12, 31),
-            source={"name": "GLORYS", "path": [fname1, fname2]},
-            adjust_depth_for_sea_surface_height=True,
-            use_dask=use_dask,
-        )
-
-    # Verify the warning message in the log
-    assert "Sea surface height will be used to adjust depth coordinates." in caplog.text
-
-    # Clear the log before the next test
-    caplog.clear()
-
-    with caplog.at_level(logging.INFO):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2012, 1, 1),
-            end_time=datetime(2012, 12, 31),
-            source={"name": "GLORYS", "path": [fname1, fname2]},
-            adjust_depth_for_sea_surface_height=False,
-            use_dask=use_dask,
-        )
-    # Verify the warning message in the log
-    assert (
-        "Sea surface height will NOT be used to adjust depth coordinates."
-        in caplog.text
-    )
-
-
 def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
     grid = Grid(
         nx=2,
@@ -394,30 +343,6 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
 @pytest.mark.parametrize(
     "boundary_forcing_fixture",
     [
-        "boundary_forcing_adjusted_for_zeta",
-        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
-    ],
-)
-def test_correct_depth_coords_adjusted_for_zeta(
-    boundary_forcing_fixture, request, use_dask
-):
-    boundary_forcing = request.getfixturevalue(boundary_forcing_fixture)
-
-    for direction in ["south", "east", "north", "west"]:
-        if boundary_forcing.boundaries[direction]:
-            # Test that uppermost interface coincides with sea surface height
-            assert np.allclose(
-                boundary_forcing.ds_depth_coords[f"interface_depth_rho_{direction}"]
-                .isel(s_w=-1)
-                .values,
-                -boundary_forcing.ds[f"zeta_{direction}"].values,
-                atol=1e-6,
-            )
-
-
-@pytest.mark.parametrize(
-    "boundary_forcing_fixture",
-    [
         "boundary_forcing",
         "boundary_forcing_with_2d_fill",
     ],
@@ -461,8 +386,6 @@ def test_computed_missing_optional_fields(
     [
         "boundary_forcing",
         "boundary_forcing_with_2d_fill",
-        "boundary_forcing_adjusted_for_zeta",
-        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
     ],
 )
 def test_boundary_forcing_plot(boundary_forcing_fixture, request):
@@ -496,8 +419,6 @@ def test_boundary_forcing_plot(boundary_forcing_fixture, request):
     [
         "boundary_forcing",
         "boundary_forcing_with_2d_fill",
-        "boundary_forcing_adjusted_for_zeta",
-        "boundary_forcing_with_2d_fill_adjusted_for_zeta",
     ],
 )
 def test_boundary_forcing_save(boundary_forcing_fixture, request, tmp_path):

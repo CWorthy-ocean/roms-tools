@@ -1,5 +1,4 @@
 import importlib.metadata
-import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -88,9 +87,6 @@ class InitialConditions:
             - A list of strings or Path objects containing multiple files.
           - "climatology" (bool): Indicates if the data is climatology data. Defaults to False.
 
-    adjust_depth_for_sea_surface_height : bool, optional
-        Whether to account for sea surface height variations when computing depth coordinates.
-        Defaults to `False`.
     model_reference_date : datetime, optional
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
@@ -148,9 +144,6 @@ class InitialConditions:
     data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """The reference date for the model."""
-    adjust_depth_for_sea_surface_height: bool = False
-    """Whether to account for sea surface height variations when computing depth
-    coordinates."""
     allow_flex_time: bool = False
     """Whether to handle ini_time flexibly."""
     use_dask: bool = False
@@ -164,11 +157,16 @@ class InitialConditions:
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
+    adjust_depth_for_sea_surface_height: bool = field(init=False)
+    """Whether to account for sea surface height when computing depth coordinates."""
+    ds_depth_coords: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing the depth coordinates."""
 
     def __post_init__(self):
-        self._input_checks()
-        # Dataset for depth coordinates
+        # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
+
+        self._input_checks()
 
         processed_fields = {}
         processed_fields = self._process_data(processed_fields, type="physics")
@@ -408,12 +406,6 @@ class InitialConditions:
                 **self.bgc_source,
                 "climatology": self.bgc_source.get("climatology", False),
             }
-        if self.adjust_depth_for_sea_surface_height:
-            logging.info("Sea surface height will be used to adjust depth coordinates.")
-        else:
-            logging.info(
-                "Sea surface height will NOT be used to adjust depth coordinates."
-            )
 
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
@@ -478,6 +470,7 @@ class InitialConditions:
 
         if source_dict["name"] == "ROMS":
             var_names = _set_required_vars(forcing_type)
+            self.adjust_depth_for_sea_surface_height = False
 
             data = data_type(
                 path=source_dict["path"],  # type: ignore
@@ -485,11 +478,12 @@ class InitialConditions:
                 var_names=var_names,
                 start_time=self.ini_time,
                 allow_flex_time=self.allow_flex_time,
-                adjust_depth_for_sea_surface_height=True,
+                adjust_depth_for_sea_surface_height=self.adjust_depth_for_sea_surface_height,
                 use_dask=self.use_dask,
             )
 
         else:
+            self.adjust_depth_for_sea_surface_height = False
             data = data_type(
                 filename=source_dict["path"],  # type: ignore
                 start_time=self.ini_time,
@@ -951,7 +945,14 @@ class InitialConditions:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        forcing_dict = to_dict(self, exclude=["use_dask"])
+        forcing_dict = to_dict(
+            self,
+            exclude=[
+                "ds_depth_coords",
+                "adjust_depth_for_sea_surface_height",
+                "use_dask",
+            ],
+        )
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod

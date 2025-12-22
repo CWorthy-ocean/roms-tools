@@ -613,8 +613,7 @@ def test_choose_subdomain_with(big_params, small_params):
     target_coords = get_target_coords(small)
 
     # --- apply function ---
-    sub = choose_subdomain(ds, big.ds, target_coords, buffer_points=1)
-
+    sub = choose_subdomain(ds, big.ds, target_coords, buffer_points=10)
     # --- rho tests ---
     assert sub.lat_rho.shape[0] <= ds.lat_rho.shape[0]
     assert sub.lat_rho.shape[1] <= ds.lat_rho.shape[1]

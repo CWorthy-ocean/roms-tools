@@ -705,69 +705,115 @@ def choose_subdomain(
     ValueError
         If the selected latitude or longitude range does not intersect with the dataset.
     """
-    # Adjust longitude range if needed to match the expected range
-    ds = wrap_longitudes(ds, target_coords["straddle"])
-
+    # Extract lat/lon min/max from target
     lat_min = target_coords["lat"].min().values
     lat_max = target_coords["lat"].max().values
     lon_min = target_coords["lon"].min().values
     lon_max = target_coords["lon"].max().values
 
-    # Extract grid spacing (in meters)
-    dx = 0.5 * ((1 / ds_grid.pm).mean() + (1 / ds_grid.pn).mean())  # meters
-    buffer = dx * buffer_points  # buffer distance in meters
+    # Compute buffer in degrees
+    dx = 0.5 * ((1 / ds_grid.pm).mean() + (1 / ds_grid.pn).mean())
+    buffer = dx * buffer_points
+    lat_center = np.deg2rad(0.5 * (lat_min + lat_max))
+    margin_lat = buffer / 111_320.0
+    margin_lon = buffer / (111_320.0 * np.cos(lat_center))
 
-    lat = np.deg2rad(0.5 * (lat_min + lat_max))
+    lon_min_buf = lon_min - margin_lon
+    lon_max_buf = lon_max + margin_lon
 
-    deg_per_meter_lat = 1 / 111_320.0
-    margin_lat = buffer * deg_per_meter_lat
+    # Normalize buffered bounds to target convention
+    if target_coords["straddle"]:
+        # [-180, 180]
+        if lon_min_buf < -180:
+            lon_min_buf += 360
+        if lon_max_buf > 180:
+            lon_max_buf -= 360
+    else:
+        # [0, 360]
+        if lon_min_buf < 0:
+            lon_min_buf += 360
+        if lon_max_buf >= 360:
+            lon_max_buf -= 360
 
-    deg_per_meter_lon = 1 / (111_320.0 * np.cos(lat))
-    margin_lon = buffer * deg_per_meter_lon
+    # Wrap dataset longitudes to target convention
+    ds = wrap_longitudes(ds, target_coords["straddle"])
 
-    mapping = {
-        "rho": ("eta_rho", "xi_rho"),
-        "u": ("eta_rho", "xi_u"),
-        "v": ("eta_v", "xi_rho"),
-    }
+    # Rho points
+    location = "rho"
+    eta_dim, xi_dim = "eta_rho", "xi_rho"
+    lat_coord, lon_coord = f"lat_{location}", f"lon_{location}"
+    _check_latlon_coords(ds, eta_dim, xi_dim, location)
+    ds_lon = ds[lon_coord]
 
-    for location in ["rho", "u", "v"]:
-        eta_dim, xi_dim = mapping[location]
+    print(lon_min)
+    print(lon_max)
+    print(lon_min_buf)
+    print(lon_max_buf)
+    print(ds_lon.min().values)
+    print(ds_lon.max().values)
 
-        if eta_dim in ds.dims and xi_dim in ds.dims:
-            # Check that lat/lon coordinates exist
-            lat_coord = f"lat_{location}"
-            lon_coord = f"lon_{location}"
-            if lat_coord not in ds.coords or lon_coord not in ds.coords:
-                raise ValueError(
-                    f"Dataset is missing expected coordinates for location '{location}': "
-                    f"expected '{lat_coord}' and '{lon_coord}'"
-                )
+    if lon_max_buf < lon_min_buf:  # crosses dateline
+        subset_mask_lon = (ds_lon >= lon_min_buf) | (ds_lon <= lon_max_buf)
+    else:
+        subset_mask_lon = (ds_lon >= lon_min_buf) & (ds_lon <= lon_max_buf)
 
-            # Build subset mask
-            subset_mask = (
-                (ds[lat_coord] > lat_min - margin_lat)
-                & (ds[lat_coord] < lat_max + margin_lat)
-                & (ds[lon_coord] > lon_min - margin_lon)
-                & (ds[lon_coord] < lon_max + margin_lon)
-            )
+    # Full mask including latitude
+    subset_mask = (
+        (ds[lat_coord] >= lat_min - margin_lat)
+        & (ds[lat_coord] <= lat_max + margin_lat)
+        & subset_mask_lon
+    )
 
-            # Reduce along xi_dim
-            eta_mask = subset_mask.any(dim=xi_dim)
-            eta_indices = np.where(eta_mask)[0]
-            first_eta, last_eta = eta_indices[0], eta_indices[-1]
+    eta_mask = subset_mask.any(dim=xi_dim)
+    xi_mask = subset_mask.any(dim=eta_dim)
+    eta_indices = np.where(eta_mask)[0]
+    xi_indices = np.where(xi_mask)[0]
+    first_eta, last_eta = eta_indices[0], eta_indices[-1]
+    first_xi, last_xi = xi_indices[0], xi_indices[-1]
 
-            # Reduce along eta_dim
-            xi_mask = subset_mask.any(dim=eta_dim)
-            xi_indices = np.where(xi_mask)[0]
-            first_xi, last_xi = xi_indices[0], xi_indices[-1]
+    # Subset rho points
+    ds = ds.isel(
+        **{
+            "eta_rho": slice(first_eta, last_eta + 1),
+            "xi_rho": slice(first_xi, last_xi + 1),
+        }
+    )
 
-            # Subset the dataset
-            ds = ds.isel(
-                **{
-                    eta_dim: slice(first_eta, last_eta + 1),
-                    xi_dim: slice(first_xi, last_xi + 1),
-                }
-            )
+    # Subset u points only if these dimensions exist
+    if "xi_u" in ds.dims and "eta_rho" in ds.dims:
+        ds = ds.isel(
+            **{
+                "eta_rho": slice(first_eta, last_eta + 1),
+                "xi_u": slice(first_xi, last_xi),
+            }
+        )
+
+    # Subset v points only if these dimensions exist
+    if "eta_v" in ds.dims and "xi_rho" in ds.dims:
+        ds = ds.isel(
+            **{
+                "eta_v": slice(first_eta, last_eta),
+                "xi_rho": slice(first_xi, last_xi + 1),
+            }
+        )
 
     return ds
+
+
+def _check_latlon_coords(
+    ds: xr.Dataset, eta_dim: str, xi_dim: str, location: str
+) -> None:
+    """
+    Ensure latitude and longitude coordinates exist for a given grid location.
+
+    Raises ValueError if the expected coordinates are missing.
+    """
+    if eta_dim in ds.dims and xi_dim in ds.dims:
+        lat_coord = f"lat_{location}"
+        lon_coord = f"lon_{location}"
+
+        if lat_coord not in ds.coords or lon_coord not in ds.coords:
+            raise ValueError(
+                f"Dataset missing coordinates for location '{location}': "
+                f"expected '{lat_coord}' and '{lon_coord}'"
+            )

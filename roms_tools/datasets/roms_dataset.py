@@ -23,7 +23,9 @@ from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
 
-DEFAULT_NR_BUFFER_POINTS = 5  # Default number of buffer points for subdomain selection.
+DEFAULT_NR_BUFFER_POINTS = (
+    20  # Default number of buffer points for subdomain selection.
+)
 # Balances performance and accuracy:
 # - Too many points → more expensive computations
 # - Too few points → potential boundary artifacts when lateral refill is performed

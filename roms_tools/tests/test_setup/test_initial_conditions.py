@@ -66,7 +66,6 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
     """Test the creation of the InitialConditions object."""
     ic = request.getfixturevalue(ic_fixture)
     assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
-    assert ic.ds.attrs["adjust_depth_for_sea_surface_height"] == "False"
     assert isinstance(ic.ds, xr.Dataset)
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}

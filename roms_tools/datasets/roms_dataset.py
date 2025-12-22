@@ -745,13 +745,6 @@ def choose_subdomain(
     _check_latlon_coords(ds, eta_dim, xi_dim, location)
     ds_lon = ds[lon_coord]
 
-    print(lon_min)
-    print(lon_max)
-    print(lon_min_buf)
-    print(lon_max_buf)
-    print(ds_lon.min().values)
-    print(ds_lon.max().values)
-
     if lon_max_buf < lon_min_buf:  # crosses dateline
         subset_mask_lon = (ds_lon >= lon_min_buf) | (ds_lon <= lon_max_buf)
     else:

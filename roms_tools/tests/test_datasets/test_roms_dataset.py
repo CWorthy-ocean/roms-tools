@@ -713,6 +713,31 @@ def test_choose_subdomain_does_not_mutate_shared_grid(use_dask):
         rot=32.0,
     )
     target_coords = get_target_coords(child_grid)
-    rd1.choose_subdomain(target_coords)
+    rd1.choose_subdomain(target_coords, buffer_points=1)
 
     assert rd2.grid.ds.sizes == grid.ds.sizes
+
+
+def test_choose_subdomain_then_compute_depth_coordinates(use_dask):
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+
+    rd = ROMSDataset(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        use_dask=use_dask,
+    )
+
+    child_grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=100,
+        size_y=100,
+        center_lon=-128.0,
+        center_lat=9.0,
+        rot=32.0,
+    )
+    target_coords = get_target_coords(child_grid)
+    rd.choose_subdomain(target_coords, buffer_points=1)
+
+    rd._get_depth_coordinates(locations=["rho", "u", "v"])

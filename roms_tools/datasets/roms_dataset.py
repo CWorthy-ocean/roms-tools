@@ -773,20 +773,18 @@ def choose_subdomain(
     )
 
     # Subset u points only if these dimensions exist
-    if "xi_u" in ds.dims and "eta_rho" in ds.dims:
+    if "xi_u" in ds.dims:
         ds = ds.isel(
             **{
-                "eta_rho": slice(first_eta, last_eta + 1),
                 "xi_u": slice(first_xi, last_xi),
             }
         )
 
     # Subset v points only if these dimensions exist
-    if "eta_v" in ds.dims and "xi_rho" in ds.dims:
+    if "eta_v" in ds.dims:
         ds = ds.isel(
             **{
                 "eta_v": slice(first_eta, last_eta),
-                "xi_rho": slice(first_xi, last_xi + 1),
             }
         )
 

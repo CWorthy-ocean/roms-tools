@@ -408,7 +408,6 @@ class InitialConditions:
                 **self.bgc_source,
                 "climatology": self.bgc_source.get("climatology", False),
             }
-
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
                 f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."

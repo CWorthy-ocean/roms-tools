@@ -291,7 +291,18 @@ class InitialConditions:
     def _regrid_laterally(self, data, target_coords, processed_fields, var_names):
         """Regrid variables in data.ds laterally to rho points of ROMS grid."""
         if isinstance(data, ROMSDataset):
-            # source data is at three different locations: rho-, u-, v- points
+            # source data can be at three different locations: rho-, u-, v- points
+            active_locations = {info["location"] for info in var_names.values()}
+
+            # compute depth coordinates on source data and subset consistent with subsetting of data
+            for location in active_locations:
+                data._get_depth_coordinates(depth_type="layer", locations=[location])
+            data.ds_depth_coords = choose_subdomain(
+                data.ds_depth_coords,
+                data.grid.ds,
+                target_coords,
+            )
+
             for location in ["rho", "u", "v"]:
                 filtered_vars = [
                     var_name
@@ -309,17 +320,8 @@ class InitialConditions:
                         processed_fields[var_name] = ds_loc[var_name]
 
                     # also regrid depth coordinates
-                    data._get_depth_coordinates(
-                        depth_type="layer", locations=[location]
-                    )
-                    layer_depth_loc = choose_subdomain(
-                        data.ds_depth_coords[f"layer_depth_{location}"].squeeze(),
-                        data.grid.ds,
-                        target_coords,
-                    )
-
                     processed_fields[f"layer_depth_{location}"] = lateral_regrid.apply(
-                        layer_depth_loc
+                        data.ds_depth_coords[f"layer_depth_{location}"]
                     )
 
         else:

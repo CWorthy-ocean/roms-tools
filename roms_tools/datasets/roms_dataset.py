@@ -576,11 +576,11 @@ class ROMSDataset:
         )
         self.ds = subdomain
 
-        subdomain_grid = choose_subdomain(
+        subdomain_grid_ds = choose_subdomain(
             self.grid.ds, self.grid.ds, target_coords, buffer_points
         )
 
-        self.grid.ds = subdomain_grid
+        self.grid = self.grid.copy_with_ds(subdomain_grid_ds)
 
     def convert_to_float64(self) -> None:
         """Convert all data variables in the dataset to float64.

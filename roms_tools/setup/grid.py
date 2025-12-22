@@ -1,3 +1,4 @@
+import copy
 import importlib.metadata
 import logging
 import re
@@ -1248,6 +1249,17 @@ class Grid:
         z_centers = np.round(z_centers, 2)
 
         return z_centers, z_faces
+
+    def copy_with_ds(self, ds: xr.Dataset) -> "Grid":
+        """
+        Return a copy of this Grid with the given Dataset.
+
+        Grid metadata is preserved; only the backing xarray Dataset
+        is replaced. The original Grid is not modified.
+        """
+        new = copy.copy(self)  # shallow copy of metadata
+        new.ds = ds
+        return new
 
 
 def _rotate(coords, rot):

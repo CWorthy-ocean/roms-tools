@@ -639,10 +639,19 @@ def test_choose_subdomain_with(big_params, small_params):
         assert not sub.field_v.isnull().any()
 
 
-def test_choose_subdomain_dataset_and_grid(roms_dataset_from_restart_file):
+def test_choose_subdomain_dataset_and_grid(use_dask):
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+
+    roms_dataset = ROMSDataset(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        use_dask=use_dask,
+    )
+
     # Save original sizes
-    orig_grid_sizes = dict(roms_dataset_from_restart_file.grid.ds.sizes)
-    orig_ds_sizes = dict(roms_dataset_from_restart_file.ds.sizes)
+    orig_grid_sizes = dict(roms_dataset.grid.ds.sizes)
+    orig_ds_sizes = dict(roms_dataset.ds.sizes)
 
     # Create a small child grid and target coordinates
     child_grid = Grid(
@@ -657,10 +666,10 @@ def test_choose_subdomain_dataset_and_grid(roms_dataset_from_restart_file):
     target_coords = get_target_coords(child_grid)
 
     # Apply subdomain selection
-    roms_dataset_from_restart_file.choose_subdomain(target_coords, buffer_points=1)
+    roms_dataset.choose_subdomain(target_coords, buffer_points=1)
 
-    new_grid_sizes = dict(roms_dataset_from_restart_file.grid.ds.sizes)
-    new_ds_sizes = dict(roms_dataset_from_restart_file.ds.sizes)
+    new_grid_sizes = dict(roms_dataset.grid.ds.sizes)
+    new_ds_sizes = dict(roms_dataset.ds.sizes)
 
     # Grid and dataset should both be reduced
     assert new_grid_sizes != orig_grid_sizes, (
@@ -678,3 +687,33 @@ def test_choose_subdomain_dataset_and_grid(roms_dataset_from_restart_file):
             f"Mismatch in dimension '{dim}': "
             f"grid={new_grid_sizes.get(dim)}, ds={new_ds_sizes.get(dim)}"
         )
+
+
+def test_choose_subdomain_does_not_mutate_shared_grid(use_dask):
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+
+    rd1 = ROMSDataset(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        use_dask=use_dask,
+    )
+    rd2 = ROMSDataset(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        use_dask=use_dask,
+    )
+
+    child_grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=100,
+        size_y=100,
+        center_lon=-128.0,
+        center_lat=9.0,
+        rot=32.0,
+    )
+    target_coords = get_target_coords(child_grid)
+    rd1.choose_subdomain(target_coords)
+
+    assert rd2.grid.ds.sizes == grid.ds.sizes

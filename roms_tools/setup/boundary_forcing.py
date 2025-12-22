@@ -88,10 +88,6 @@ class BoundaryForcing:
         Indicates whether to perform a two-dimensional horizontal fill on the source data prior to regridding to boundaries.
         If `False`, a one-dimensional horizontal fill is performed separately on each of the four regridded boundaries.
         Defaults to `False`.
-    adjust_depth_for_sea_surface_height : bool, optional
-        Whether to account for sea surface height (`zeta`) variations when computing depth coordinates.
-        This adjustment is only applicable for `type="physics"`, as for biogeochemical fields usually `zeta` is not available.
-        Defaults to `False`.
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
@@ -128,9 +124,6 @@ class BoundaryForcing:
     apply_2d_horizontal_fill: bool = False
     """Whether to perform a two-dimensional horizontal fill on the source data prior to
     regridding to boundaries."""
-    adjust_depth_for_sea_surface_height: bool = False
-    """Whether to account for sea surface height (`zeta`) variations when computing
-    depth coordinates."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the model."""
     use_dask: bool = False
@@ -141,11 +134,17 @@ class BoundaryForcing:
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
+    adjust_depth_for_sea_surface_height: bool = field(init=False)
+    """Whether to account for sea surface height when computing depth coordinates."""
+    ds_depth_coords: xr.Dataset = field(init=False, repr=False)
+    """An xarray Dataset containing the depth coordinates."""
 
     def __post_init__(self):
-        self._input_checks()
-        # Dataset for depth coordinates
+        # Initialize depth coordinates
+        self.adjust_depth_for_sea_surface_height = False
         self.ds_depth_coords = xr.Dataset()
+
+        self._input_checks()
 
         target_coords = get_target_coords(self.grid)
 
@@ -435,13 +434,6 @@ class BoundaryForcing:
                 "Setting it to False."
             )
             self.adjust_depth_for_sea_surface_height = False
-
-        elif self.adjust_depth_for_sea_surface_height:
-            logging.info("Sea surface height will be used to adjust depth coordinates.")
-        else:
-            logging.info(
-                "Sea surface height will NOT be used to adjust depth coordinates."
-            )
 
     def _get_data(
         self,
@@ -1070,7 +1062,14 @@ class BoundaryForcing:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        forcing_dict = to_dict(self, exclude=["use_dask"])
+        forcing_dict = to_dict(
+            self,
+            exclude=[
+                "ds_depth_coords",
+                "adjust_depth_for_sea_surface_height",
+                "use_dask",
+            ],
+        )
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod

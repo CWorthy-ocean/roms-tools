@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.regrid import VerticalRegridToROMS
+from roms_tools.regrid import VerticalRegrid, VerticalRegridToROMS
 
 try:
     import xesmf  # type: ignore
@@ -134,3 +134,122 @@ def test_vertical_regrid(request, depth_values, layer_depth_rho_values, temp_dat
     regridded = vertical_regrid.apply(data.temp_data, fill_nans=True)
     expected = np.interp(layer_depth_rho_values, depth_values, temp_data)
     assert np.allclose(expected, regridded.data, equal_nan=True)
+
+
+# Test VerticalRegrid
+def test_vertical_regrid_2d_depths_different_vertical_levels():
+    """
+    Vertical regridding with 2D (eta, xi) depth coordinates where
+    source and target have different numbers of vertical levels.
+    """
+    # --- dimensions ---
+    time = xr.DataArray(
+        np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[ns]"),
+        dims="time",
+    )
+
+    s_rho_src = xr.DataArray(np.arange(6), dims="s_rho")  # source: 6 levels
+    s_rho_tgt = xr.DataArray(np.arange(10), dims="s_rho")  # target: 10 levels
+
+    eta = xr.DataArray(np.arange(3), dims="eta")
+    xi = xr.DataArray(np.arange(4), dims="xi")
+
+    # --- source depth coords: 2D + s_rho ---
+    base_depth = -(100 + 10 * eta.values[:, None] + 5 * xi.values[None, :])
+
+    source_depth = xr.DataArray(
+        base_depth,
+        dims=("eta", "xi"),
+        coords={"eta": eta, "xi": xi},
+    ).expand_dims(time=time, s_rho=s_rho_src)
+
+    source_depth = source_depth + 20 * s_rho_src
+
+    # --- target depth coords: 2D + different s_rho ---
+    target_depth = xr.DataArray(
+        base_depth,
+        dims=("eta", "xi"),
+        coords={"eta": eta, "xi": xi},
+    ).expand_dims(s_rho=s_rho_tgt)
+
+    target_depth = target_depth + 20 * s_rho_tgt
+
+    # --- synthetic temperature field: varies linearly with depth ---
+    temp_data = xr.DataArray(
+        np.broadcast_to(
+            s_rho_src.values[None, :, None, None] * 2.0,
+            (len(time), len(s_rho_src), len(eta), len(xi)),
+        ),
+        dims=("time", "s_rho", "eta", "xi"),
+        coords={
+            "time": time,
+            "s_rho": s_rho_src,
+            "eta": eta,
+            "xi": xi,
+        },
+        name="temp",
+    )
+
+    ds = xr.Dataset(
+        {
+            "temp": temp_data,
+        },
+        coords={
+            "time": time,
+            "s_rho": s_rho_src,
+            "eta": eta,
+            "xi": xi,
+        },
+    )
+
+    # --- regrid ---
+    regridder = VerticalRegrid(ds)
+    out = regridder.apply(
+        temp_data,
+        source_depth_coords=source_depth,
+        target_depth_coords=target_depth,
+    )
+
+    # --- assertions ---
+    assert isinstance(out, xr.DataArray)
+
+    # vertical dimension changed to target resolution
+    assert out.sizes["s_rho"] == s_rho_tgt.size
+
+    # horizontal + time preserved
+    assert out.sizes["time"] == time.size
+    assert out.sizes["eta"] == eta.size
+    assert out.sizes["xi"] == xi.size
+
+    # output contains finite values
+    assert np.isfinite(out).any()
+
+    # interpolation stays within source bounds
+    assert out.min() >= temp_data.min()
+    assert out.max() <= temp_data.max()
+
+
+def test_vertical_regrid_mask_edges():
+    """Values outside source depth range should be masked when mask_edges=True."""
+    s_rho = xr.DataArray(np.linspace(-1, 0, 5), dims="s_rho")
+    source_depth = xr.DataArray([-100, -75, -50, -25, 0], dims="s_rho")
+
+    target_depth = xr.DataArray([-200, -50, 10], dims="s_rho")
+
+    data = xr.DataArray(
+        source_depth.values,
+        dims="s_rho",
+        coords={"s_rho": s_rho},
+    )
+
+    ds = xr.Dataset(
+        {"data": data, "depth": source_depth},
+        coords={"s_rho": s_rho},
+    )
+
+    regridder = VerticalRegrid(ds)
+    out = regridder.apply(data, source_depth, target_depth, mask_edges=True)
+
+    assert np.isnan(out[0])
+    assert np.isnan(out[-1])
+    assert not np.isnan(out[1])

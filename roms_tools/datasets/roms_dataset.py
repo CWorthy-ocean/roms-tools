@@ -89,7 +89,6 @@ class ROMSDataset:
         default_factory=lambda: {
             "eta_rho": "eta_rho",
             "xi_rho": "xi_rho",
-            "s_rho": "s_rho",
             "time": "time",
         }
     )
@@ -579,6 +578,12 @@ class ROMSDataset:
         )
         self.ds = subdomain
 
+        subdomain_grid_ds = choose_subdomain(
+            self.grid.ds, self.grid.ds, target_coords, buffer_points
+        )
+
+        self.grid = self.grid.copy_with_ds(subdomain_grid_ds)
+
     def convert_to_float64(self) -> None:
         """Convert all data variables in the dataset to float64.
 
@@ -609,32 +614,63 @@ class ROMSDataset:
         """
         self.ds = extrapolate_deepest_to_bottom(self.ds, "s_rho")
 
-    def apply_lateral_fill(self):
-        """Apply lateral fill to variables using the dataset's mask and grid dimensions."""
-        # Map dimension sets to their corresponding masks
-        lateral_fills = {
-            frozenset(["eta_rho", "xi_rho"]): self.ds["mask_rho"],
-            frozenset(["eta_rho", "xi_u"]): self.ds["mask_u"],
-            frozenset(["eta_v", "xi_rho"]): self.ds["mask_v"],
+    def apply_lateral_fill(self) -> None:
+        """Apply lateral fill to variables using available masks and grid dimensions.
+
+        Lateral fill is applied only when:
+        - A corresponding mask exists in the dataset, and
+        - At least one variable is defined on the associated horizontal grid.
+
+        Raises
+        ------
+        ValueError
+            If variables exist on a horizontal grid (rho, u, or v) but the
+            corresponding mask is missing.
+        """
+        # Mapping of horizontal dims to required mask name
+        dim_to_mask = {
+            frozenset(("eta_rho", "xi_rho")): "mask_rho",
+            frozenset(("eta_rho", "xi_u")): "mask_u",
+            frozenset(("eta_v", "xi_rho")): "mask_v",
         }
 
-        # Create LateralFill objects
-        lateral_fillers = {
-            dims: LateralFill(xr.where(mask == 1, True, False), list(dims))
-            for dims, mask in lateral_fills.items()
+        horiz_dim_names = {"eta_rho", "xi_rho", "eta_v", "xi_u"}
+
+        # Identify which horizontal dim sets are actually used
+        used_dim_sets: set[frozenset[str]] = set()
+        for var in self.ds.data_vars.values():
+            horiz_dims = frozenset(d for d in var.dims if d in horiz_dim_names)
+            if horiz_dims:
+                used_dim_sets.add(horiz_dims)
+
+        # Enforce required masks for all grids (rho, u, v)
+        for dims, mask_name in dim_to_mask.items():
+            if dims in used_dim_sets and mask_name not in self.ds:
+                raise ValueError(
+                    f"Variable(s) found on grid {tuple(dims)}, but required mask "
+                    f"'{mask_name}' is missing from the dataset."
+                )
+
+        # Build lateral fillers
+        lateral_fillers: dict[frozenset[str], LateralFill] = {
+            dims: LateralFill(
+                xr.where(self.ds[mask_name] == 1, True, False),
+                list(dims),
+            )
+            for dims, mask_name in dim_to_mask.items()
+            if dims in used_dim_sets
         }
 
-        # Apply the appropriate lateral fill to each variable
+        # Apply lateral fill
         for var_name, var in self.ds.data_vars.items():
             if var_name.startswith("mask"):
-                # Skip variables that are mask types
                 continue
-            else:
-                var_horiz_dims = frozenset(
-                    d for d in var.dims if d in ["eta_rho", "xi_rho", "eta_v", "xi_u"]
-                )
-                if var_horiz_dims in lateral_fillers:
-                    self.ds[var_name] = lateral_fillers[var_horiz_dims].apply(var)
+
+            var_horiz_dims = frozenset(d for d in var.dims if d in horiz_dim_names)
+            filler = lateral_fillers.get(var_horiz_dims)
+
+            if filler is not None:
+                self.ds[var_name] = filler.apply(var)
 
 
 def choose_subdomain(
@@ -671,69 +707,106 @@ def choose_subdomain(
     ValueError
         If the selected latitude or longitude range does not intersect with the dataset.
     """
-    # Adjust longitude range if needed to match the expected range
-    ds = wrap_longitudes(ds, target_coords["straddle"])
-
+    # Extract lat/lon min/max from target
     lat_min = target_coords["lat"].min().values
     lat_max = target_coords["lat"].max().values
     lon_min = target_coords["lon"].min().values
     lon_max = target_coords["lon"].max().values
 
-    # Extract grid spacing (in meters)
-    dx = 0.5 * ((1 / ds_grid.pm).mean() + (1 / ds_grid.pn).mean())  # meters
-    buffer = dx * buffer_points  # buffer distance in meters
+    # Compute buffer in degrees
+    dx = 0.5 * ((1 / ds_grid.pm).mean() + (1 / ds_grid.pn).mean())
+    buffer = dx * buffer_points
+    lat_center = np.deg2rad(0.5 * (lat_min + lat_max))
+    margin_lat = buffer / 111_320.0
+    margin_lon = buffer / (111_320.0 * np.cos(lat_center))
 
-    lat = np.deg2rad(0.5 * (lat_min + lat_max))
+    lon_min_buf = lon_min - margin_lon
+    lon_max_buf = lon_max + margin_lon
 
-    deg_per_meter_lat = 1 / 111_320.0
-    margin_lat = buffer * deg_per_meter_lat
+    # Normalize buffered bounds to target convention
+    if target_coords["straddle"]:
+        # [-180, 180]
+        if lon_min_buf < -180:
+            lon_min_buf += 360
+        if lon_max_buf > 180:
+            lon_max_buf -= 360
+    else:
+        # [0, 360]
+        if lon_min_buf < 0:
+            lon_min_buf += 360
+        if lon_max_buf >= 360:
+            lon_max_buf -= 360
 
-    deg_per_meter_lon = 1 / (111_320.0 * np.cos(lat))
-    margin_lon = buffer * deg_per_meter_lon
+    # Wrap dataset longitudes to target convention
+    ds = wrap_longitudes(ds, target_coords["straddle"])
 
-    mapping = {
-        "rho": ("eta_rho", "xi_rho"),
-        "u": ("eta_rho", "xi_u"),
-        "v": ("eta_v", "xi_rho"),
-    }
+    # Rho points
+    location = "rho"
+    eta_dim, xi_dim = "eta_rho", "xi_rho"
+    lat_coord, lon_coord = f"lat_{location}", f"lon_{location}"
+    _check_latlon_coords(ds, eta_dim, xi_dim, location)
+    ds_lon = ds[lon_coord]
 
-    for location in ["rho", "u", "v"]:
-        eta_dim, xi_dim = mapping[location]
+    if lon_max_buf < lon_min_buf:  # crosses dateline
+        subset_mask_lon = (ds_lon >= lon_min_buf) | (ds_lon <= lon_max_buf)
+    else:
+        subset_mask_lon = (ds_lon >= lon_min_buf) & (ds_lon <= lon_max_buf)
 
-        if eta_dim in ds.dims and xi_dim in ds.dims:
-            # Check that lat/lon coordinates exist
-            lat_coord = f"lat_{location}"
-            lon_coord = f"lon_{location}"
-            if lat_coord not in ds.coords or lon_coord not in ds.coords:
-                raise ValueError(
-                    f"Dataset is missing expected coordinates for location '{location}': "
-                    f"expected '{lat_coord}' and '{lon_coord}'"
-                )
+    # Full mask including latitude
+    subset_mask = (
+        (ds[lat_coord] >= lat_min - margin_lat)
+        & (ds[lat_coord] <= lat_max + margin_lat)
+        & subset_mask_lon
+    )
 
-            # Build subset mask
-            subset_mask = (
-                (ds[lat_coord] > lat_min - margin_lat)
-                & (ds[lat_coord] < lat_max + margin_lat)
-                & (ds[lon_coord] > lon_min - margin_lon)
-                & (ds[lon_coord] < lon_max + margin_lon)
-            )
+    eta_mask = subset_mask.any(dim=xi_dim)
+    xi_mask = subset_mask.any(dim=eta_dim)
+    eta_indices = np.where(eta_mask)[0]
+    xi_indices = np.where(xi_mask)[0]
+    first_eta, last_eta = eta_indices[0], eta_indices[-1]
+    first_xi, last_xi = xi_indices[0], xi_indices[-1]
 
-            # Reduce along xi_dim
-            eta_mask = subset_mask.any(dim=xi_dim)
-            eta_indices = np.where(eta_mask)[0]
-            first_eta, last_eta = eta_indices[0], eta_indices[-1]
+    # Subset rho points
+    ds = ds.isel(
+        **{
+            "eta_rho": slice(first_eta, last_eta + 1),
+            "xi_rho": slice(first_xi, last_xi + 1),
+        }
+    )
 
-            # Reduce along eta_dim
-            xi_mask = subset_mask.any(dim=eta_dim)
-            xi_indices = np.where(xi_mask)[0]
-            first_xi, last_xi = xi_indices[0], xi_indices[-1]
+    # Subset u points only if these dimensions exist
+    if "xi_u" in ds.dims:
+        ds = ds.isel(
+            **{
+                "xi_u": slice(first_xi, last_xi),
+            }
+        )
 
-            # Subset the dataset
-            ds = ds.isel(
-                **{
-                    eta_dim: slice(first_eta, last_eta + 1),
-                    xi_dim: slice(first_xi, last_xi + 1),
-                }
-            )
+    # Subset v points only if these dimensions exist
+    if "eta_v" in ds.dims:
+        ds = ds.isel(
+            **{
+                "eta_v": slice(first_eta, last_eta),
+            }
+        )
 
     return ds
+
+
+def _check_latlon_coords(
+    ds: xr.Dataset, eta_dim: str, xi_dim: str, location: str
+) -> None:
+    """
+    Ensure latitude and longitude coordinates exist for a given grid location.
+
+    Raises ValueError if the expected coordinates are missing.
+    """
+    if eta_dim in ds.dims and xi_dim in ds.dims:
+        lat_coord = f"lat_{location}"
+        lon_coord = f"lon_{location}"
+
+        if lat_coord not in ds.coords or lon_coord not in ds.coords:
+            raise ValueError(
+                f"Dataset missing coordinates for location '{location}': "
+                f"expected '{lat_coord}' and '{lon_coord}'"
+            )

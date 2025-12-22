@@ -295,3 +295,79 @@ class VerticalRegridFromROMS:
             )
 
         return transformed
+
+
+class VerticalRegrid:
+    """Regrid ROMS variables along the vertical, using spatially varying coordinates.
+
+    This class uses the `xgcm` package to transform data from a ROMS vertical coordinate
+    system (`s_rho`) to a user-defined set of target depth levels, where both the source
+    and target coordinates can vary spatially (i.e., 2D fields in horizontal space).
+
+    Attributes
+    ----------
+    grid : xgcm.Grid
+        The XGCM grid object used for vertical regridding, initialized with the input dataset `ds`.
+    """
+
+    def __init__(self, ds: "xr.Dataset"):
+        """Initialize the VerticalRegrid object with a ROMS dataset.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The ROMS dataset containing the vertical coordinate `s_rho` and the variable(s)
+            to be regridded.
+        """
+        self.grid = xgcm.Grid(
+            ds,
+            coords={"s_rho": {"center": "s_rho"}},
+            periodic=False,
+            autoparse_metadata=False,
+        )
+
+    def apply(
+        self,
+        da: "xr.DataArray",
+        source_depth_coords: "xr.DataArray",
+        target_depth_coords: "xr.DataArray",
+        mask_edges: bool = True,
+    ) -> "xr.DataArray":
+        """Regrid a ROMS variable from source vertical coordinates to target vertical coordinates.
+
+        This method supports spatially varying vertical coordinates for both source and target,
+        meaning that the depth levels can vary across the horizontal grid.
+
+        Parameters
+        ----------
+        da : xarray.DataArray
+            The data array to regrid. Must have a vertical dimension corresponding to `s_rho`.
+
+        source_depth_coords : array-like (1D or 2D)
+            Depth coordinates of the source data. Can be a 1D array (same for all horizontal points)
+            or a 2D array (varying in horizontal space).
+
+        target_depth_coords : array-like (1D or 2D)
+            Desired depth coordinates of the regridded data. Can also be 1D or 2D.
+
+        mask_edges : bool, optional
+            If True, target values outside the range of source depth coordinates are masked with NaN.
+            Defaults to True.
+
+        Returns
+        -------
+        xarray.DataArray
+            A new `DataArray` containing the regridded variable at the target depth coordinates.
+        """
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
+            transformed = self.grid.transform(
+                da,
+                "s_rho",
+                target=target_depth_coords,
+                target_data=source_depth_coords,
+                target_dim="s_rho",
+                mask_edges=mask_edges,
+            )
+
+        return transformed

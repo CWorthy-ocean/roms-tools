@@ -17,8 +17,14 @@ from roms_tools.datasets.lat_lon_datasets import (
     LatLonDataset,
     UnifiedBGCDataset,
 )
+from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
 from roms_tools.plot import plot
-from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
+from roms_tools.regrid import (
+    LateralRegridFromROMS,
+    LateralRegridToROMS,
+    VerticalRegrid,
+    VerticalRegridToROMS,
+)
 from roms_tools.setup.utils import (
     RawDataSource,
     compute_barotropic_velocity,
@@ -27,6 +33,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     nan_check,
+    pop_grid_data,
     rotate_velocities,
     substitute_nans_by_fillvalue,
     to_dict,
@@ -112,6 +119,18 @@ class InitialConditions:
     ...         "climatology": False,
     ...     },
     ... )
+
+    >>> initial_conditions = InitialConditions(
+    ...     grid=grid,
+    ...     ini_time=datetime(2022, 1, 1),
+    ...     source={"name": "ROMS", "grid": parent_grid, "path": "restart.nc"},
+    ...     bgc_source={
+    ...         "name": "ROMS",
+    ...         "grid": parent_grid,
+    ...         "path": "restart.nc",
+    ...     },
+    ... )
+
     """
 
     grid: Grid
@@ -145,7 +164,6 @@ class InitialConditions:
 
     def __post_init__(self):
         # Initialize depth coordinates
-        self.adjust_depth_for_sea_surface_height = False
         self.ds_depth_coords = xr.Dataset()
 
         self._input_checks()
@@ -202,6 +220,7 @@ class InitialConditions:
             var: {
                 "name": data.var_names[var],
                 "location": variable_info[var]["location"],
+                "is_3d": variable_info[var]["is_3d"],
             }
             for var in data.var_names.keys()
             if data.var_names[var] in data.ds.data_vars
@@ -212,21 +231,18 @@ class InitialConditions:
                 var: {
                     "name": data.opt_var_names[var],
                     "location": variable_info[var]["location"],
+                    "is_3d": variable_info[var]["is_3d"],
                 }
                 for var in data.opt_var_names.keys()
                 if data.opt_var_names[var] in data.ds.data_vars
             }
         )
 
-        # lateral regridding
-        lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
-
-        for var_name in var_names:
-            processed_fields[var_name] = lateral_regrid.apply(
-                data.ds[var_names[var_name]["name"]]
-            )
-
-        # rotation of velocities and interpolation to u/v points
+        # Lateral regridding
+        processed_fields = self._regrid_laterally(
+            data, target_coords, processed_fields, var_names
+        )
+        # Rotation of velocities and interpolation to u/v points
         if "u" in var_names and "v" in var_names:
             processed_fields["u"], processed_fields["v"] = rotate_velocities(
                 processed_fields["u"],
@@ -234,6 +250,15 @@ class InitialConditions:
                 target_coords["angle"],
                 interpolate=True,
             )
+
+            if "layer_depth_u" in processed_fields:
+                processed_fields["layer_depth_u"] = interpolate_from_rho_to_u(
+                    processed_fields["layer_depth_u"]
+                )
+            if "layer_depth_v" in processed_fields:
+                processed_fields["layer_depth_v"] = interpolate_from_rho_to_v(
+                    processed_fields["layer_depth_v"]
+                )
 
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
@@ -246,32 +271,11 @@ class InitialConditions:
         zeta = (
             processed_fields["zeta"] if self.adjust_depth_for_sea_surface_height else 0
         )
-
         for location in ["rho", "u", "v"]:
-            # Filter var_names by location and check for 3D variables
-            filtered_vars = [
-                var_name
-                for var_name, info in var_names.items()
-                if info["location"] == location and variable_info[var_name]["is_3d"]
-            ]
+            self._get_depth_coordinates(zeta, location, "layer")
 
-            if filtered_vars:
-                # Handle depth coordinates
-                self._get_depth_coordinates(zeta, location, "layer")
-
-                # Vertical regridding
-                vertical_regrid = VerticalRegridToROMS(
-                    self.ds_depth_coords[f"layer_depth_{location}"],
-                    data.ds[data.dim_names["depth"]],
-                )
-                for var_name in filtered_vars:
-                    if var_name in processed_fields:
-                        field = processed_fields[var_name]
-                        if self.use_dask:
-                            field = field.chunk(
-                                _set_dask_chunks(location, self.horizontal_chunk_size)
-                            )
-                        processed_fields[var_name] = vertical_regrid.apply(field)
+        # Vertical regridding
+        processed_fields = self._regrid_vertically(data, processed_fields, var_names)
 
         # Compute barotropic velocities
         if "u" in var_names and "v" in var_names:
@@ -284,13 +288,99 @@ class InitialConditions:
 
         return processed_fields
 
-    def _input_checks(self):
-        # Check that ini_time is not None
-        if self.ini_time is None:
-            raise ValueError(
-                "`ini_time` must be a valid datetime object and cannot be None."
+    def _regrid_laterally(self, data, target_coords, processed_fields, var_names):
+        """Regrid variables in data.ds laterally to rho points of ROMS grid."""
+        if isinstance(data, ROMSDataset):
+            # source data can be at three different locations: rho-, u-, v- points
+            active_locations = {info["location"] for info in var_names.values()}
+
+            # compute depth coordinates on source data and subset consistent with subsetting of data
+            for location in active_locations:
+                data._get_depth_coordinates(depth_type="layer", locations=[location])
+            data.ds_depth_coords = choose_subdomain(
+                data.ds_depth_coords,
+                data.grid.ds,
+                target_coords,
             )
 
+            for location in ["rho", "u", "v"]:
+                filtered_vars = [
+                    var_name
+                    for var_name, info in var_names.items()
+                    if info["location"] == location
+                ]
+                if filtered_vars:
+                    ds_loc = data.ds[filtered_vars].rename(
+                        {f"lat_{location}": "lat", f"lon_{location}": "lon"}
+                    )
+                    lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
+
+                    ds_loc = lateral_regrid.apply(ds_loc)
+                    for var_name in filtered_vars:
+                        processed_fields[var_name] = ds_loc[var_name]
+
+                    # also regrid depth coordinates
+                    processed_fields[f"layer_depth_{location}"] = lateral_regrid.apply(
+                        data.ds_depth_coords[f"layer_depth_{location}"]
+                    )
+
+        else:
+            # all variables are at the same location
+            lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
+
+            for var_name in var_names:
+                processed_fields[var_name] = lateral_regrid.apply(
+                    data.ds[var_names[var_name]["name"]]
+                )
+
+        return processed_fields
+
+    def _regrid_vertically(self, data, processed_fields, var_names):
+        for location in ["rho", "u", "v"]:
+            filtered_vars = [
+                var_name
+                for var_name, info in var_names.items()
+                if info["location"] == location and info["is_3d"]
+            ]
+            if filtered_vars:
+                if isinstance(data, ROMSDataset):
+                    ds_tmp = xr.Dataset()
+                    ds_tmp[filtered_vars[0]] = processed_fields[filtered_vars[0]]
+                    vertical_regrid = VerticalRegrid(ds_tmp)
+
+                    for var_name in filtered_vars:
+                        if var_name in processed_fields:
+                            regridded = vertical_regrid.apply(
+                                processed_fields[var_name],
+                                source_depth_coords=processed_fields[
+                                    f"layer_depth_{location}"
+                                ],
+                                target_depth_coords=self.ds_depth_coords[
+                                    f"layer_depth_{location}"
+                                ],
+                                mask_edges=False,
+                            )
+                            processed_fields[var_name] = regridded
+
+                else:
+                    vertical_regrid = VerticalRegridToROMS(
+                        self.ds_depth_coords[f"layer_depth_{location}"],
+                        data.ds[data.dim_names["depth"]],
+                    )
+                    for var_name in filtered_vars:
+                        if var_name in processed_fields:
+                            field = processed_fields[var_name]
+                            if self.use_dask:
+                                field = field.chunk(
+                                    _set_dask_chunks(
+                                        location, self.horizontal_chunk_size
+                                    )
+                                )
+                            processed_fields[var_name] = vertical_regrid.apply(field)
+
+        return processed_fields
+
+    def _input_checks(self):
         if "name" not in self.source.keys():
             raise ValueError("`source` must include a 'name'.")
         if "path" not in self.source.keys():
@@ -318,8 +408,14 @@ class InitialConditions:
                 **self.bgc_source,
                 "climatology": self.bgc_source.get("climatology", False),
             }
+        if not isinstance(self.ini_time, datetime):
+            raise TypeError(
+                f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
+            )
 
-    def _get_data(self, forcing_type=Literal["physics", "bgc"]) -> LatLonDataset:
+    def _get_data(
+        self, forcing_type=Literal["physics", "bgc"]
+    ) -> LatLonDataset | ROMSDataset:
         """Determine the correct `Dataset` type and return an instance.
 
         forcing_type : str
@@ -330,18 +426,22 @@ class InitialConditions:
         Returns
         -------
         Dataset
-            The `Dataset` instance
+            The `LatLonDataset` or `ROMSDataset` instance
         """
-        dataset_map: dict[str, dict[str, dict[str, type[LatLonDataset]]]] = {
+        dataset_map: dict[
+            str, dict[str, dict[str, type[LatLonDataset | ROMSDataset]]]
+        ] = {
             "physics": {
                 "GLORYS": {
                     "external": GLORYSDataset,
                     "default": GLORYSDefaultDataset,
                 },
+                "ROMS": defaultdict(lambda: ROMSDataset),
             },
             "bgc": {
                 "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
                 "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+                "ROMS": defaultdict(lambda: ROMSDataset),
             },
         }
 
@@ -369,13 +469,31 @@ class InitialConditions:
         if isinstance(source_dict["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
-        return data_type(
-            filename=source_dict["path"],
-            start_time=self.ini_time,
-            climatology=source_dict["climatology"],  # type: ignore
-            allow_flex_time=self.allow_flex_time,
-            use_dask=self.use_dask,
-        )
+        if source_dict["name"] == "ROMS":
+            var_names = _set_required_vars(forcing_type)
+            self.adjust_depth_for_sea_surface_height = True
+
+            data = data_type(
+                path=source_dict["path"],  # type: ignore
+                grid=source_dict["grid"],  # type: ignore
+                var_names=var_names,
+                start_time=self.ini_time,
+                allow_flex_time=self.allow_flex_time,
+                adjust_depth_for_sea_surface_height=True,
+                use_dask=self.use_dask,
+            )
+
+        else:
+            self.adjust_depth_for_sea_surface_height = False
+            data = data_type(
+                filename=source_dict["path"],  # type: ignore
+                start_time=self.ini_time,
+                climatology=source_dict["climatology"],  # type: ignore
+                allow_flex_time=self.allow_flex_time,
+                use_dask=self.use_dask,
+            )
+
+        return data
 
     def _set_variable_info(self, data, type="physics"):
         """Sets up a dictionary with metadata for variables based on the type.
@@ -466,7 +584,16 @@ class InitialConditions:
                 if var_name == "ALK":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
-                    variable_info[var_name] = {**default_info, "validate": False}
+                    if var_name == "zeta":
+                        variable_info[var_name] = {
+                            "location": "rho",
+                            "is_vector": False,
+                            "vector_pair": None,
+                            "is_3d": False,
+                            "validate": False,
+                        }
+                    else:
+                        variable_info[var_name] = {**default_info, "validate": False}
 
         object.__setattr__(self, f"variable_info_{type}", variable_info)
 
@@ -853,6 +980,14 @@ class InitialConditions:
 
         grid = Grid.from_yaml(filepath)
         initial_conditions_params = from_yaml(cls, filepath)
+
+        # Deserialize nested grids inside 'source' and 'bgc_source'
+        for name in ["source", "bgc_source"]:
+            src_dict = initial_conditions_params.get(name)
+            if src_dict and "grid" in src_dict and src_dict["grid"] is not None:
+                grid_data = pop_grid_data(src_dict["grid"])
+                src_dict["grid"] = Grid(**grid_data)
+
         return cls(
             grid=grid,
             **initial_conditions_params,
@@ -881,3 +1016,78 @@ def _set_dask_chunks(location: str, chunk_size: int):
         "v": {"eta_v": chunk_size, "xi_rho": chunk_size},
     }
     return chunk_mapping.get(location, {})
+
+
+def _set_required_vars(var_type: str = "physics") -> dict[str, str]:
+    """
+    Return the canonical variable-name mapping for a ROMS dataset.
+
+    Parameters
+    ----------
+    var_type : str, optional
+        Category of variables. Supported values:
+        - "physics": physical variables (temperature, salinity, currents, etc.)
+        - "bgc": biogeochemical variables (nutrients, pigments, carbon, etc.)
+        Default is "physics".
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping from logical variable names to dataset variable names.
+
+    Raises
+    ------
+    ValueError
+        If an unsupported `var_type` is provided.
+    """
+    var_mappings = {
+        "physics": {
+            "zeta": "zeta",
+            "temp": "temp",
+            "salt": "salt",
+            "u": "u",
+            "v": "v",
+        },
+        "bgc": {
+            "zeta": "zeta",  # to infer vertical coordinate
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "SiO3",
+            "NH4": "NH4",
+            "Fe": "Fe",
+            "Lig": "Lig",
+            "O2": "O2",
+            "DIC": "DIC",
+            "DIC_ALT_CO2": "DIC_ALT_CO2",
+            "ALK": "ALK",
+            "ALK_ALT_CO2": "ALK_ALT_CO2",
+            "DOC": "DOC",
+            "DON": "DON",
+            "DOP": "DOP",
+            "DOPr": "DOPr",
+            "DONr": "DONr",
+            "DOCr": "DOCr",
+            "spChl": "spChl",
+            "spC": "spC",
+            "spP": "spP",
+            "spFe": "spFe",
+            "diatChl": "diatChl",
+            "diatC": "diatC",
+            "diatP": "diatP",
+            "diatFe": "diatFe",
+            "diatSi": "diatSi",
+            "diazChl": "diazChl",
+            "diazC": "diazC",
+            "diazP": "diazP",
+            "diazFe": "diazFe",
+            "spCaCO3": "spCaCO3",
+            "zooC": "zooC",
+        },
+    }
+
+    if var_type not in var_mappings:
+        raise ValueError(
+            f"Unsupported var_type '{var_type}'. Choose from {list(var_mappings.keys())}."
+        )
+
+    return var_mappings[var_type]

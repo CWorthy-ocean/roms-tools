@@ -480,7 +480,7 @@ class InitialConditions:
                 var_names=var_names,
                 start_time=self.ini_time,
                 allow_flex_time=self.allow_flex_time,
-                adjust_depth_for_sea_surface_height=self.adjust_depth_for_sea_surface_height,
+                adjust_depth_for_sea_surface_height=True,
                 use_dask=self.use_dask,
             )
 

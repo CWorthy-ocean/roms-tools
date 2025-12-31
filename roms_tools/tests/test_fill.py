@@ -116,3 +116,67 @@ def test_lateral_fill_reproducibility(data_fixture, request):
             )
 
     assert ds0.equals(ds1)
+
+
+def test_lateralfill_raises_notimplemented_for_non2d_mask():
+    mask_3d = np.ones((3, 3, 3), dtype=bool)
+    with pytest.raises(
+        NotImplementedError, match="LateralFill currently supports only 2D masks"
+    ):
+        LateralFill(mask_3d, dims=["eta_rho", "xi_rho"])
+
+
+def test_lateralfill_raises_valueerror_for_wrong_number_of_dims():
+    mask = np.ones((3, 3), dtype=bool)
+    with pytest.raises(
+        ValueError, match="'dims' must contain exactly two dimension names"
+    ):
+        LateralFill(mask, dims=["eta_rho"])  # only 1 dim
+
+    with pytest.raises(
+        ValueError, match="'dims' must contain exactly two dimension names"
+    ):
+        LateralFill(mask, dims=["eta_rho", "xi_rho", "extra_dim"])  # 3 dims
+
+
+def test_lateralfill_raises_valueerror_for_mask_dim_order_mismatch():
+    data = xr.DataArray(np.ones((3, 3)), dims=("xi_rho", "eta_rho"))  # dims reversed
+    with pytest.raises(ValueError, match="Dimension order mismatch in LateralFill"):
+        LateralFill(data, dims=["eta_rho", "xi_rho"])
+
+
+def test_apply_raises_if_var_missing_dims():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "xi_rho"))
+    lf = LateralFill(mask, dims=["eta_rho", "xi_rho"])
+    var = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "eta_u"))  # missing xi_rho
+    with pytest.raises(
+        ValueError, match="input variable does not contain required dimensions"
+    ):
+        lf.apply(var)
+
+
+def test_apply_raises_if_var_dim_order_mismatch():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "xi_rho"))
+    lf = LateralFill(mask, dims=["eta_rho", "xi_rho"])
+    var = xr.DataArray(np.ones((3, 3)), dims=("xi_rho", "eta_rho"))  # wrong order
+    with pytest.raises(ValueError, match="dimension order mismatch"):
+        lf.apply(var)
+
+
+def test_apply_raises_if_var_has_nans_on_valid_mask():
+    # 2D mask
+    mask = xr.DataArray(np.ones((3, 3), dtype=bool), dims=("eta_rho", "xi_rho"))
+
+    # Create LateralFill operator
+    lf = LateralFill(mask, dims=["eta_rho", "xi_rho"])
+
+    # Variable with a NaN at a location where mask is True
+    data = np.ones((3, 3))
+    data[1, 1] = np.nan
+    var = xr.DataArray(data, dims=("eta_rho", "xi_rho"))
+
+    # Expect ValueError
+    with pytest.raises(
+        ValueError, match="contains NaNs at grid points marked as valid"
+    ):
+        lf.apply(var)

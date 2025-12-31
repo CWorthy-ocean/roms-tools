@@ -5,27 +5,53 @@ from scipy import sparse
 
 
 class LateralFill:
-    def __init__(self, mask, dims, tol=1.0e-4):
-        """Initializes the LateralFill class, which fills NaN values in a DataArray by
-        iteratively solving a Poisson equation using a lateral diffusion approach.
+    """
+    Fill NaN values in a 2D field using an iterative lateral diffusion (Poisson) solver.
+
+    The fill is performed along two horizontal dimensions. The **order of these
+    dimensions is significant** and must match the order of the dimensions of the
+    input data passed to :meth:`apply`.
+    """
+
+    def __init__(self, mask, dims, tol: float = 1.0e-4):
+        """
+        Initialize a lateral fill operator.
 
         Parameters
         ----------
         mask : xarray.DataArray or ndarray of bool
-            A 2D boolean mask indicating valid points (True) and land points (False).
-            Boundary points are automatically set to land (True).
+            A 2D boolean mask defining valid points (True) and masked points (False).
+            The mask dimensions **must be ordered consistently with `dims`**.
         dims : list of str
-            Dimensions along which to perform the lateral fill.
+            Names of the two horizontal dimensions along which the fill is applied.
+            **Order matters** and must match the dimension order of both `mask`
+            and the data being filled (e.g., ``["eta_rho", "xi_rho"]``).
         tol : float, optional
-            Tolerance for the iterative solver, determining convergence. Default is 1.0e-4.
+            Convergence tolerance for the iterative solver. Default is ``1.0e-4``.
 
         Raises
         ------
+        ValueError
+            If the mask dimensionality or dimension order is inconsistent with `dims`.
         NotImplementedError
-            If the input mask has more than two dimensions, which is not supported by the current implementation.
+            If the mask is not two-dimensional.
         """
-        if len(mask.shape) > 2:
+        if len(dims) != 2:
+            raise ValueError(
+                f"'dims' must contain exactly two dimension names, got {dims}."
+            )
+
+        if len(mask.shape) != 2:
             raise NotImplementedError("LateralFill currently supports only 2D masks.")
+
+        if isinstance(mask, xr.DataArray):
+            if tuple(mask.dims) != tuple(dims):
+                raise ValueError(
+                    "Dimension order mismatch in LateralFill:\n"
+                    f"  mask.dims = {mask.dims}\n"
+                    f"  dims      = {dims}\n"
+                    "The order of dimensions must match exactly."
+                )
 
         self.mask = mask
 
@@ -35,7 +61,6 @@ class LateralFill:
         mask[-1, :] = True
         mask[:, 0] = True
         mask[:, -1] = True
-
         # Flatten the mask for use in the sparse matrix solver
         mask_flat = mask.values.flatten()
 
@@ -63,6 +88,26 @@ class LateralFill:
             A DataArray with NaN values filled by iterative smoothing, while preserving
             non-NaN values.
         """
+        # --- sanity checks ---
+        if not all(d in var.dims for d in self.dims):
+            raise ValueError(
+                "LateralFill error: input variable does not contain required dimensions.\n"
+                f"  required dims = {self.dims}\n"
+                f"  var.dims      = {var.dims}"
+            )
+
+        # Extract the order of the horizontal dims as they appear in var
+        var_horiz_dims = [d for d in var.dims if d in self.dims]
+
+        if var_horiz_dims != self.dims:
+            raise ValueError(
+                "LateralFill error: dimension order mismatch.\n"
+                f"  expected order = {self.dims}\n"
+                f"  found order    = {var_horiz_dims}\n"
+                "Reorder the variable before applying LateralFill, e.g.:\n"
+                f"  var = var.transpose(..., {', '.join(self.dims)})"
+            )
+
         # Apply fill to anomaly field
         mean = var.where(self.mask).mean(dim=self.dims, skipna=True)
         var = var - mean
@@ -72,6 +117,11 @@ class LateralFill:
 
         # Initial guess: ocean points take their original values, land points are set to 0
         x0 = xr.where(self.mask, var, 0)
+
+        if x0.isnull().any():
+            raise ValueError(
+                "LateralFill error: The fill operation cannot proceed because the input field contains NaNs at grid points marked as valid by the mask."
+            )
 
         # Apply the iterative solver using a custom NumPy function
         var_filled = xr.apply_ufunc(

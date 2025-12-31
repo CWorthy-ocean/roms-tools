@@ -628,19 +628,19 @@ class ROMSDataset:
             corresponding mask is missing.
         """
         # Mapping of horizontal dims to required mask name
-        dim_to_mask = {
-            frozenset(("eta_rho", "xi_rho")): "mask_rho",
-            frozenset(("eta_rho", "xi_u")): "mask_u",
-            frozenset(("eta_v", "xi_rho")): "mask_v",
+        dim_to_mask: dict[tuple[str, str], str] = {
+            ("eta_rho", "xi_rho"): "mask_rho",
+            ("eta_rho", "xi_u"): "mask_u",
+            ("eta_v", "xi_rho"): "mask_v",
         }
-
-        horiz_dim_names = {"eta_rho", "xi_rho", "eta_v", "xi_u"}
+        horiz_dim_order = ("eta_rho", "eta_v", "xi_rho", "xi_u")
 
         # Identify which horizontal dim sets are actually used
-        used_dim_sets: set[frozenset[str]] = set()
+        used_dim_sets: set[tuple[str, str]] = set()
+
         for var in self.ds.data_vars.values():
-            horiz_dims = frozenset(d for d in var.dims if d in horiz_dim_names)
-            if horiz_dims:
+            horiz_dims = tuple(d for d in horiz_dim_order if d in var.dims)
+            if len(horiz_dims) == 2:
                 used_dim_sets.add(horiz_dims)
 
         # Enforce required masks for all grids (rho, u, v)
@@ -652,10 +652,10 @@ class ROMSDataset:
                 )
 
         # Build lateral fillers
-        lateral_fillers: dict[frozenset[str], LateralFill] = {
+        lateral_fillers: dict[tuple[str, str], LateralFill] = {
             dims: LateralFill(
                 xr.where(self.ds[mask_name] == 1, True, False),
-                list(dims),
+                list(dims),  # ORDER PRESERVED
             )
             for dims, mask_name in dim_to_mask.items()
             if dims in used_dim_sets
@@ -666,11 +666,12 @@ class ROMSDataset:
             if var_name.startswith("mask"):
                 continue
 
-            var_horiz_dims = frozenset(d for d in var.dims if d in horiz_dim_names)
-            filler = lateral_fillers.get(var_horiz_dims)
-
-            if filler is not None:
-                self.ds[var_name] = filler.apply(var)
+            # Keep dims in canonical order
+            var_horiz_dims = tuple(d for d in horiz_dim_order if d in var.dims)
+            if len(var_horiz_dims) == 2:
+                filler = lateral_fillers.get(var_horiz_dims)
+                if filler is not None:
+                    self.ds[var_name] = filler.apply(var)
 
 
 def choose_subdomain(

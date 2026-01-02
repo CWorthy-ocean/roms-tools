@@ -8,11 +8,8 @@ import regionmask
 import xarray as xr
 from scipy.ndimage import label
 
-from roms_tools.setup.utils import (
-    handle_boundaries,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
-)
+from roms_tools.setup.utils import handle_boundaries
+from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 
 def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:

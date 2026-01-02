@@ -18,7 +18,6 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
-from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -965,46 +964,6 @@ def get_target_coords(
     }
 
     return target_coords
-
-
-def rotate_velocities(
-    u: xr.DataArray, v: xr.DataArray, angle: xr.DataArray, interpolate: bool = True
-) -> tuple[xr.DataArray, xr.DataArray]:
-    """Rotate and optionally interpolate velocity components to align with grid
-    orientation.
-
-    Parameters
-    ----------
-    u : xarray.DataArray
-        Zonal (east-west) velocity component at u-points.
-    v : xarray.DataArray
-        Meridional (north-south) velocity component at v-points.
-    angle : xarray.DataArray
-        Grid angle values for rotation.
-    interpolate : bool, optional
-        If True, interpolates rotated velocities to grid points (default is True).
-
-    Returns
-    -------
-    tuple of xarray.DataArray
-        Rotated velocity components (u_rot, v_rot).
-
-    Notes
-    -----
-    - Rotation formulas:
-      - u_rot = u * cos(angle) + v * sin(angle)
-      - v_rot = v * cos(angle) - u * sin(angle)
-    """
-    # Rotate velocities to grid orientation
-    u_rot = u * np.cos(angle) + v * np.sin(angle)
-    v_rot = v * np.cos(angle) - u * np.sin(angle)
-
-    # Interpolate to u- and v-points
-    if interpolate:
-        u_rot = interpolate_from_rho_to_u(u_rot)
-        v_rot = interpolate_from_rho_to_v(v_rot)
-
-    return u_rot, v_rot
 
 
 def compute_barotropic_velocity(

@@ -598,6 +598,78 @@ def interpolate_from_v_to_rho(
     )
 
 
+def rotate_velocities(
+    u: xr.DataArray,
+    v: xr.DataArray,
+    angle: xr.DataArray,
+    interpolate_before: bool = False,
+    interpolate_after: bool = True,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """
+    Rotate horizontal velocity components to align with a rotated grid.
+
+    This function rotates zonal (u) and meridional (v) velocity components
+    using a grid angle field. It can be used to:
+
+    1. Rotate model velocities from the ROMS model grid to a lat-lon reference frame.
+    2. Rotate lat-lon velocities onto the ROMS model grid.
+
+    Optionally, velocities can be interpolated between staggered C-grid
+    locations (u-, v-, and rho-points) before and/or after rotation.
+
+    Parameters
+    ----------
+    u : xarray.DataArray
+        Zonal (east-west) velocity component defined on u-points.
+    v : xarray.DataArray
+        Meridional (north-south) velocity component defined on v-points.
+    angle : xarray.DataArray
+        Grid orientation angle in radians, defined at rho-points. Positive
+        angles correspond to counterclockwise rotation from east. To rotate
+        in the opposite direction (e.g., model → lat-lon), provide the
+        negative of this angle.
+    interpolate_before : bool, optional
+        If True, interpolate ``u`` and ``v`` to rho-points before rotation.
+        Default is False.
+    interpolate_after : bool, optional
+        If True, interpolate the rotated velocities back to u- and v-points
+        after rotation. Default is True.
+
+    Returns
+    -------
+    u_rot, v_rot : tuple of xarray.DataArray
+        Rotated velocity components. If ``interpolate_after`` is True, ``u_rot``
+        is defined on u-points and ``v_rot`` on v-points; otherwise, both are
+        defined at rho-points.
+
+    Notes
+    -----
+    The rotation follows the standard ROMS convention:
+
+    - ``u_rot =  u * cos(angle) + v * sin(angle)``
+    - ``v_rot =  v * cos(angle) - u * sin(angle)``
+
+    This function is versatile and can be used for both directions of rotation:
+    - Lat-lon → model grid: provide the grid angle.
+    - Model grid → lat-lon: provide the negative of the grid angle.
+    """
+    # Interpolate to rho-points
+    if interpolate_before:
+        u = interpolate_from_u_to_rho(u)
+        v = interpolate_from_v_to_rho(v)
+
+    # Rotate velocities to grid orientation
+    u_rot = u * np.cos(angle) + v * np.sin(angle)
+    v_rot = v * np.cos(angle) - u * np.sin(angle)
+
+    # Interpolate to u- and v-points
+    if interpolate_after:
+        u_rot = interpolate_from_rho_to_u(u_rot)
+        v_rot = interpolate_from_rho_to_v(v_rot)
+
+    return u_rot, v_rot
+
+
 def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     """Transpose the dimensions of an xarray.DataArray to ensure that 'time', any
     dimension starting with 's_', 'eta_', and 'xi_' are ordered first, followed by the

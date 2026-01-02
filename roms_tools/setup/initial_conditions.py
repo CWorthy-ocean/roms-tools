@@ -34,7 +34,6 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     nan_check,
     pop_grid_data,
-    rotate_velocities,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -42,6 +41,7 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    rotate_velocities,
     save_datasets,
     transpose_dimensions,
 )
@@ -206,6 +206,7 @@ class InitialConditions:
         data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
+        data.rotate_velocities_to_east_and_north()
 
         self._set_variable_info(data, type=type)
         attr_name = f"variable_info_{type}"

@@ -13,19 +13,19 @@ class LateralFill:
     input data passed to :meth:`apply`.
     """
 
-    def __init__(self, mask, dims, tol: float = 1.0e-4):
+    def __init__(self, mask: xr.DataArray, dims: tuple[str, str], tol: float = 1.0e-4):
         """
         Initialize a lateral fill operator.
 
         Parameters
         ----------
-        mask : xarray.DataArray or ndarray of bool
+        mask : xarray.DataArray
             A 2D boolean mask defining valid points (True) and masked points (False).
             The mask dimensions **must be ordered consistently with `dims`**.
-        dims : list of str
-            Names of the two horizontal dimensions along which the fill is applied.
+        dims : tuple of str
+            The two horizontal dimensions along which the fill is applied.
             **Order matters** and must match the dimension order of both `mask`
-            and the data being filled (e.g., ``["eta_rho", "xi_rho"]``).
+            and the data passed to :meth:`apply` (e.g., ``("eta_rho", "xi_rho")``).
         tol : float, optional
             Convergence tolerance for the iterative solver. Default is ``1.0e-4``.
 

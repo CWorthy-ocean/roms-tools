@@ -36,9 +36,14 @@ class LateralFill:
         NotImplementedError
             If the mask is not two-dimensional.
         """
+        # Type check
+        if not isinstance(dims, tuple):
+            raise TypeError(
+                f"LateralFill error: 'dims' must be a tuple of two strings, got {type(dims).__name__}."
+            )
         if len(dims) != 2:
             raise ValueError(
-                f"'dims' must contain exactly two dimension names, got {dims}."
+                f"LateralFill error: 'dims' must contain exactly two dimension names, got {len(dims)}: {dims}"
             )
 
         if len(mask.shape) != 2:
@@ -341,19 +346,27 @@ def _check_dimension_match(dims: tuple[str, str], da: xr.DataArray):
     Raises
     ------
     ValueError
-        If the required dimensions are missing or if their order in ``da``
+        If the required dimensions are missing, extra, or their order in ``da``
         does not exactly match ``dims``. The error message includes guidance
         on how to reorder the DataArray using ``transpose``.
     """
-    # Extract the order of the horizontal dims as they appear in da
+    # Extract the horizontal dims from the DataArray
     var_horiz_dims = tuple(d for d in da.dims if d in dims)
+
+    if set(var_horiz_dims) != set(dims):
+        raise ValueError(
+            "LateralFill error: DataArray does not contain the required horizontal dimensions.\n"
+            f"  expected dims = {dims}\n"
+            f"  found dims    = {tuple(da.dims)}\n"
+            "Ensure the DataArray includes all required dimensions."
+        )
 
     if var_horiz_dims != dims:
         raise ValueError(
-            "LateralFill error: dimension order mismatch.\n"
+            "LateralFill error: DataArray horizontal dimension order is incorrect.\n"
             f"  expected order = {dims}\n"
             f"  found order    = {var_horiz_dims}\n"
-            "Reorder the variable before applying LateralFill, e.g.:\n"
+            "Reorder the DataArray before applying LateralFill, e.g.:\n"
             f"  var = var.transpose(..., {', '.join(dims)})"
         )
 

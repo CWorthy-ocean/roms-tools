@@ -609,32 +609,64 @@ class ROMSDataset:
         """
         self.ds = extrapolate_deepest_to_bottom(self.ds, "s_rho")
 
-    def apply_lateral_fill(self):
-        """Apply lateral fill to variables using the dataset's mask and grid dimensions."""
-        # Map dimension sets to their corresponding masks
-        lateral_fills = {
-            frozenset(["eta_rho", "xi_rho"]): self.ds["mask_rho"],
-            frozenset(["eta_rho", "xi_u"]): self.ds["mask_u"],
-            frozenset(["eta_v", "xi_rho"]): self.ds["mask_v"],
+    def apply_lateral_fill(self) -> None:
+        """Apply lateral fill to variables using available masks and grid dimensions.
+
+        Lateral fill is applied only when:
+        - A corresponding mask exists in the dataset, and
+        - At least one variable is defined on the associated horizontal grid.
+
+        Raises
+        ------
+        ValueError
+            If variables exist on a horizontal grid (rho, u, or v) but the
+            corresponding mask is missing.
+        """
+        # Mapping of horizontal dims to required mask name
+        dim_to_mask: dict[tuple[str, str], str] = {
+            ("eta_rho", "xi_rho"): "mask_rho",
+            ("eta_rho", "xi_u"): "mask_u",
+            ("eta_v", "xi_rho"): "mask_v",
+        }
+        horiz_dim_order = ("eta_rho", "eta_v", "xi_rho", "xi_u")
+
+        # Identify which horizontal dim sets are actually used
+        used_dim_sets: set[tuple[str, str]] = set()
+
+        for var in self.ds.data_vars.values():
+            horiz_dims = tuple(d for d in horiz_dim_order if d in var.dims)
+            if len(horiz_dims) == 2:
+                used_dim_sets.add(horiz_dims)
+
+        # Enforce required masks for all grids (rho, u, v)
+        for dims, mask_name in dim_to_mask.items():
+            if dims in used_dim_sets and mask_name not in self.ds:
+                raise ValueError(
+                    f"Variable(s) found on grid {tuple(dims)}, but required mask "
+                    f"'{mask_name}' is missing from the dataset."
+                )
+
+        # Build lateral fillers
+        lateral_fillers: dict[tuple[str, str], LateralFill] = {
+            dims: LateralFill(
+                xr.where(self.ds[mask_name] == 1, True, False),
+                list(dims),  # ORDER PRESERVED
+            )
+            for dims, mask_name in dim_to_mask.items()
+            if dims in used_dim_sets
         }
 
-        # Create LateralFill objects
-        lateral_fillers = {
-            dims: LateralFill(xr.where(mask == 1, True, False), list(dims))
-            for dims, mask in lateral_fills.items()
-        }
-
-        # Apply the appropriate lateral fill to each variable
+        # Apply lateral fill
         for var_name, var in self.ds.data_vars.items():
             if var_name.startswith("mask"):
-                # Skip variables that are mask types
                 continue
-            else:
-                var_horiz_dims = frozenset(
-                    d for d in var.dims if d in ["eta_rho", "xi_rho", "eta_v", "xi_u"]
-                )
-                if var_horiz_dims in lateral_fillers:
-                    self.ds[var_name] = lateral_fillers[var_horiz_dims].apply(var)
+
+            # Keep dims in canonical order
+            var_horiz_dims = tuple(d for d in horiz_dim_order if d in var.dims)
+            if len(var_horiz_dims) == 2:
+                filler = lateral_fillers.get(var_horiz_dims)
+                if filler is not None:
+                    self.ds[var_name] = filler.apply(var)
 
 
 def choose_subdomain(

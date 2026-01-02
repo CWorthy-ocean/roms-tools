@@ -10,6 +10,7 @@ import xarray as xr
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import ERA5Correction
 from roms_tools.utils import (
+    _interpolate_generic,
     _path_list_from_input,
     generate_focused_coordinate_range,
     get_dask_chunks,
@@ -18,6 +19,10 @@ from roms_tools.utils import (
     has_gcsfs,
     interpolate_cyclic_time,
     interpolate_from_climatology,
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    interpolate_from_u_to_rho,
+    interpolate_from_v_to_rho,
     load_data,
     wrap_longitudes,
 )
@@ -371,3 +376,175 @@ def test_wrap_longitudes_staggered():
     # Check attributes preserved
     for name in ["lon_rho", "lon_u", "lon_v"]:
         assert ds.coords[name].attrs == ds_wrapped.coords[name].attrs
+
+
+# test _interpolate_generic and its wrappers
+
+# -------------------------
+# Fixtures
+# -------------------------
+
+
+@pytest.fixture
+def sample_rho_field() -> xr.DataArray:
+    """Create a simple rho-point field for testing."""
+    data = np.arange(12, dtype=float).reshape(3, 4)
+    eta = np.arange(3)
+    xi = np.arange(4)
+
+    return xr.DataArray(
+        data,
+        dims=("eta_rho", "xi_rho"),
+        coords={
+            "lat_rho": (("eta_rho", "xi_rho"), eta[:, None] * np.ones((1, 4))),
+            "lon_rho": (("eta_rho", "xi_rho"), np.ones((3, 1)) * xi[None, :]),
+        },
+    )
+
+
+@pytest.fixture
+def sample_u_field() -> xr.DataArray:
+    """Create a simple u-point field for testing."""
+    data = np.arange(9, dtype=float).reshape(3, 3)
+    eta = np.arange(3)
+    xi = np.arange(3)
+
+    return xr.DataArray(
+        data,
+        dims=("eta_rho", "xi_u"),
+        coords={
+            "lat_u": (("eta_rho", "xi_u"), eta[:, None] * np.ones((1, 3))),
+            "lon_u": (("eta_rho", "xi_u"), np.ones((3, 1)) * xi[None, :]),
+        },
+    )
+
+
+@pytest.fixture
+def sample_v_field() -> xr.DataArray:
+    """Create a simple v-point field for testing."""
+    data = np.arange(8, dtype=float).reshape(2, 4)
+    eta = np.arange(2)
+    xi = np.arange(4)
+
+    return xr.DataArray(
+        data,
+        dims=("eta_v", "xi_rho"),
+        coords={
+            "lat_v": (("eta_v", "xi_rho"), eta[:, None] * np.ones((1, 4))),
+            "lon_v": (("eta_v", "xi_rho"), np.ones((2, 1)) * xi[None, :]),
+        },
+    )
+
+
+# -------------------------
+# Generic interpolation tests
+# -------------------------
+
+
+def test_interpolate_from_rho_to_u_additive(sample_rho_field: xr.DataArray):
+    result = _interpolate_generic(
+        sample_rho_field, dim_in="xi_rho", dim_out="xi_u", method="additive"
+    )
+
+    # One fewer point along xi
+    assert result.shape[1] == sample_rho_field.shape[1] - 1
+
+    expected = 0.5 * (sample_rho_field.values[:, 1:] + sample_rho_field.values[:, :-1])
+    np.testing.assert_allclose(result.values, expected)
+
+
+def test_interpolate_from_rho_to_u_multiplicative(sample_rho_field: xr.DataArray):
+    result = _interpolate_generic(
+        sample_rho_field, dim_in="xi_rho", dim_out="xi_u", method="multiplicative"
+    )
+
+    expected = sample_rho_field.values[:, 1:] * sample_rho_field.values[:, :-1]
+    np.testing.assert_allclose(result.values, expected)
+
+
+# -------------------------
+# Wrapper tests
+# -------------------------
+
+
+def test_rho_to_u_wrapper_additive(sample_rho_field: xr.DataArray):
+    result = interpolate_from_rho_to_u(sample_rho_field, method="additive")
+
+    # Dimension swap
+    assert "xi_u" in result.dims
+    assert "xi_rho" not in result.dims
+
+    # Coordinates dropped
+    for coord in ("lat_rho", "lon_rho"):
+        assert coord not in result.coords
+
+    # Shape check
+    assert result.sizes["xi_u"] == sample_rho_field.sizes["xi_rho"] - 1
+
+
+def test_rho_to_v_wrapper_additive(sample_rho_field: xr.DataArray):
+    result = interpolate_from_rho_to_v(sample_rho_field, method="additive")
+
+    # Dimension swap
+    assert "eta_v" in result.dims
+    assert "eta_rho" not in result.dims
+
+    # Coordinates dropped
+    for coord in ("lat_rho", "lon_rho"):
+        assert coord not in result.coords
+
+    # Shape check
+    assert result.sizes["eta_v"] == sample_rho_field.sizes["eta_rho"] - 1
+
+
+def test_u_to_rho_wrapper_additive(sample_u_field: xr.DataArray):
+    result = interpolate_from_u_to_rho(sample_u_field, method="additive")
+
+    # Dimension swap
+    assert "xi_rho" in result.dims
+    assert "xi_u" not in result.dims
+
+    # Coordinates dropped
+    for coord in ("lat_u", "lon_u"):
+        assert coord not in result.coords
+
+    # Shape: one more along xi due to padding
+    assert result.sizes["xi_rho"] == sample_u_field.sizes["xi_u"] + 1
+
+
+def test_v_to_rho_wrapper_additive(sample_v_field: xr.DataArray):
+    result = interpolate_from_v_to_rho(sample_v_field, method="additive")
+
+    # Dimension swap
+    assert "eta_rho" in result.dims
+    assert "eta_v" not in result.dims
+
+    # Coordinates dropped
+    for coord in ("lat_v", "lon_v"):
+        assert coord not in result.coords
+
+    # Shape: one more along eta due to padding
+    assert result.sizes["eta_rho"] == sample_v_field.sizes["eta_v"] + 1
+
+
+# -------------------------
+# Error handling
+# -------------------------
+
+
+def test_invalid_method_raises(
+    sample_rho_field: xr.DataArray,
+    sample_u_field: xr.DataArray,
+    sample_v_field: xr.DataArray,
+):
+    with pytest.raises(NotImplementedError):
+        interpolate_from_rho_to_u(sample_rho_field, method="unsupported")
+
+    with pytest.raises(NotImplementedError):
+        interpolate_from_rho_to_v(sample_rho_field, method="unsupported")
+
+    with pytest.raises(NotImplementedError):
+        interpolate_from_u_to_rho(sample_u_field, method="unsupported")
+
+    with pytest.raises(NotImplementedError):
+        interpolate_from_v_to_rho(sample_v_field, method="unsupported")

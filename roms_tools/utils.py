@@ -477,96 +477,125 @@ def load_data(
     return ds
 
 
-def interpolate_from_rho_to_u(field, method="additive"):
-    """Interpolates the given field from rho points to u points.
-
-    This function performs an interpolation from the rho grid (cell centers) to the u grid
-    (cell edges in the xi direction). Depending on the chosen method, it either averages
-    (additive) or multiplies (multiplicative) the field values between adjacent rho points
-    along the xi dimension. It also handles the removal of unnecessary coordinate variables
-    and updates the dimensions accordingly.
+def _interpolate_generic(
+    field: xr.DataArray,
+    dim_in: str,
+    dim_out: str,
+    method: str = "additive",
+    drop_vars: Sequence[str] | None = None,
+    pad_end: bool = False,
+) -> xr.DataArray:
+    """
+    Generic interpolation along one horizontal dimension.
 
     Parameters
     ----------
     field : xr.DataArray
-        The input data array on the rho grid to be interpolated. It is assumed to have a dimension
-        named "xi_rho".
-
-    method : str, optional, default='additive'
-        The method to use for interpolation. Options are:
-        - 'additive': Average the field values between adjacent rho points.
-        - 'multiplicative': Multiply the field values between adjacent rho points. Appropriate for
-          binary masks.
-
-    Returns
-    -------
-    field_interpolated : xr.DataArray
-        The interpolated data array on the u grid with the dimension "xi_u".
-    """
-    if method == "additive":
-        field_interpolated = 0.5 * (field + field.shift(xi_rho=1)).isel(
-            xi_rho=slice(1, None)
-        )
-    elif method == "multiplicative":
-        field_interpolated = (field * field.shift(xi_rho=1)).isel(xi_rho=slice(1, None))
-    else:
-        raise NotImplementedError(f"Unsupported method '{method}' specified.")
-
-    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
-    for var in vars_to_drop:
-        if var in field_interpolated.coords:
-            field_interpolated = field_interpolated.drop_vars(var)
-
-    field_interpolated = field_interpolated.swap_dims({"xi_rho": "xi_u"})
-
-    return field_interpolated
-
-
-def interpolate_from_rho_to_v(field, method="additive"):
-    """Interpolates the given field from rho points to v points.
-
-    This function performs an interpolation from the rho grid (cell centers) to the v grid
-    (cell edges in the eta direction). Depending on the chosen method, it either averages
-    (additive) or multiplies (multiplicative) the field values between adjacent rho points
-    along the eta dimension. It also handles the removal of unnecessary coordinate variables
-    and updates the dimensions accordingly.
-
-    Parameters
-    ----------
-    field : xr.DataArray
-        The input data array on the rho grid to be interpolated. It is assumed to have a dimension
-        named "eta_rho".
-
-    method : str, optional, default='additive'
-        The method to use for interpolation. Options are:
-        - 'additive': Average the field values between adjacent rho points.
-        - 'multiplicative': Multiply the field values between adjacent rho points. Appropriate for
-          binary masks.
+        Input array to interpolate.
+    dim_in : str
+        Dimension along which to interpolate (e.g., "xi_rho").
+    dim_out : str
+        New dimension name after interpolation (e.g., "xi_u").
+    method : str, default "additive"
+        Interpolation method:
+        - "additive": average adjacent points
+        - "multiplicative": multiply adjacent points (useful for masks)
+    drop_vars : Sequence[str] or None, optional
+        Coordinate variables to drop after interpolation (e.g., ["lat_rho", "lon_rho"]).
+    pad_end : bool, default False
+        Whether to pad the last point with NaN (useful when interpolating back to rho grid).
 
     Returns
     -------
-    field_interpolated : xr.DataArray
-        The interpolated data array on the v grid with the dimension "eta_v".
+    xr.DataArray
+        Interpolated array with dimension `dim_out`.
     """
+    if not isinstance(field, xr.DataArray):
+        raise TypeError(
+            "_interpolate_generic expects an xarray.DataArray, "
+            f"got {type(field).__name__}"
+        )
+
+    if drop_vars:
+        for var in drop_vars:
+            if var in field.coords:
+                field = field.drop_vars(var)
+
     if method == "additive":
-        field_interpolated = 0.5 * (field + field.shift(eta_rho=1)).isel(
-            eta_rho=slice(1, None)
-        )
+        interp = 0.5 * (field + field.shift(**{dim_in: 1}))
     elif method == "multiplicative":
-        field_interpolated = (field * field.shift(eta_rho=1)).isel(
-            eta_rho=slice(1, None)
-        )
+        interp = field * field.shift(**{dim_in: 1})
     else:
         raise NotImplementedError(f"Unsupported method '{method}' specified.")
 
-    vars_to_drop = ["lat_rho", "lon_rho", "eta_rho", "xi_rho"]
-    for var in vars_to_drop:
-        if var in field_interpolated.coords:
-            field_interpolated = field_interpolated.drop_vars(var)
+    if pad_end:
+        pad_shape = {d: field.sizes[d] for d in field.dims}
+        pad_shape[dim_in] = 1
+        pad = xr.DataArray(
+            np.nan * np.ones(tuple(pad_shape[d] for d in field.dims)),
+            dims=field.dims,
+        )
+        interp = xr.concat([interp, pad], dim=dim_in)
+    else:
+        interp = interp.isel({dim_in: slice(1, None)})
 
-    field_interpolated = field_interpolated.swap_dims({"eta_rho": "eta_v"})
+    interp = interp.swap_dims({dim_in: dim_out})
 
-    return field_interpolated
+    return interp
+
+
+def interpolate_from_rho_to_u(
+    field: xr.DataArray, method: str = "additive"
+) -> xr.DataArray:
+    """Interpolate a field from rho points to u points (xi direction)."""
+    return _interpolate_generic(
+        field,
+        dim_in="xi_rho",
+        dim_out="xi_u",
+        method=method,
+        drop_vars=["lat_rho", "lon_rho"],
+    )
+
+
+def interpolate_from_rho_to_v(
+    field: xr.DataArray, method: str = "additive"
+) -> xr.DataArray:
+    """Interpolate a field from rho points to v points (eta direction)."""
+    return _interpolate_generic(
+        field,
+        dim_in="eta_rho",
+        dim_out="eta_v",
+        method=method,
+        drop_vars=["lat_rho", "lon_rho"],
+    )
+
+
+def interpolate_from_u_to_rho(
+    field: xr.DataArray, method: str = "additive"
+) -> xr.DataArray:
+    """Interpolate a field from u points back to rho points (xi direction)."""
+    return _interpolate_generic(
+        field,
+        dim_in="xi_u",
+        dim_out="xi_rho",
+        method=method,
+        drop_vars=["lat_u", "lon_u"],
+        pad_end=True,
+    )
+
+
+def interpolate_from_v_to_rho(
+    field: xr.DataArray, method: str = "additive"
+) -> xr.DataArray:
+    """Interpolate a field from v points back to rho points (eta direction)."""
+    return _interpolate_generic(
+        field,
+        dim_in="eta_v",
+        dim_out="eta_rho",
+        method=method,
+        drop_vars=["lat_v", "lon_v"],
+        pad_end=True,
+    )
 
 
 def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:

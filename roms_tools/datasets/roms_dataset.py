@@ -89,7 +89,6 @@ class ROMSDataset:
         default_factory=lambda: {
             "eta_rho": "eta_rho",
             "xi_rho": "xi_rho",
-            "s_rho": "s_rho",
             "time": "time",
         }
     )

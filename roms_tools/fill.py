@@ -44,15 +44,9 @@ class LateralFill:
         if len(mask.shape) != 2:
             raise NotImplementedError("LateralFill currently supports only 2D masks.")
 
-        if isinstance(mask, xr.DataArray):
-            if tuple(mask.dims) != tuple(dims):
-                raise ValueError(
-                    "Dimension order mismatch in LateralFill:\n"
-                    f"  mask.dims = {mask.dims}\n"
-                    f"  dims      = {dims}\n"
-                    "The order of dimensions must match exactly."
-                )
+        _check_dimension_match(dims, mask)
 
+        self.dims = dims
         self.mask = mask
 
         # Ensure the mask is 2D, copy it and set boundary values to True
@@ -70,7 +64,6 @@ class LateralFill:
         # Use algebraic multigrid solver for solving the Poisson equation with set seed to ensure reproducibility
         np.random.seed(123089)
         self.ml = pyamg.smoothed_aggregation_solver(A, max_coarse=10)
-        self.dims = dims
         self.tol = tol
 
     def apply(self, var):
@@ -88,25 +81,7 @@ class LateralFill:
             A DataArray with NaN values filled by iterative smoothing, while preserving
             non-NaN values.
         """
-        # --- sanity checks ---
-        if not all(d in var.dims for d in self.dims):
-            raise ValueError(
-                "LateralFill error: input variable does not contain required dimensions.\n"
-                f"  required dims = {self.dims}\n"
-                f"  var.dims      = {var.dims}"
-            )
-
-        # Extract the order of the horizontal dims as they appear in var
-        var_horiz_dims = [d for d in var.dims if d in self.dims]
-
-        if var_horiz_dims != self.dims:
-            raise ValueError(
-                "LateralFill error: dimension order mismatch.\n"
-                f"  expected order = {self.dims}\n"
-                f"  found order    = {var_horiz_dims}\n"
-                "Reorder the variable before applying LateralFill, e.g.:\n"
-                f"  var = var.transpose(..., {', '.join(self.dims)})"
-            )
+        _check_dimension_match(self.dims, var)
 
         # Apply fill to anomaly field
         mean = var.where(self.mask).mean(dim=self.dims, skipna=True)
@@ -348,6 +323,39 @@ def stencil_grid_mod(S, grid, msk, dtype=None, format=None):
                 data[4, i + diags[4]] = 0
 
     return sparse.dia_matrix((data, diags), shape=(N_v, N_v)).asformat(format)
+
+
+def _check_dimension_match(dims: tuple[str, str], da: xr.DataArray):
+    """
+    Validate that a DataArray contains the required horizontal dimensions
+    in the correct order.
+
+    Parameters
+    ----------
+    dims : tuple[str, str]
+        Names of the two horizontal dimensions, in the required order
+        (e.g., ``("eta_rho", "xi_rho")``).
+    da : xarray.DataArray
+        The DataArray to validate.
+
+    Raises
+    ------
+    ValueError
+        If the required dimensions are missing or if their order in ``da``
+        does not exactly match ``dims``. The error message includes guidance
+        on how to reorder the DataArray using ``transpose``.
+    """
+    # Extract the order of the horizontal dims as they appear in da
+    var_horiz_dims = tuple(d for d in da.dims if d in dims)
+
+    if var_horiz_dims != dims:
+        raise ValueError(
+            "LateralFill error: dimension order mismatch.\n"
+            f"  expected order = {dims}\n"
+            f"  found order    = {var_horiz_dims}\n"
+            "Reorder the variable before applying LateralFill, e.g.:\n"
+            f"  var = var.transpose(..., {', '.join(dims)})"
+        )
 
 
 def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:

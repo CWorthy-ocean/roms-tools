@@ -5,28 +5,53 @@ from scipy import sparse
 
 
 class LateralFill:
-    def __init__(self, mask, dims, tol=1.0e-4):
-        """Initializes the LateralFill class, which fills NaN values in a DataArray by
-        iteratively solving a Poisson equation using a lateral diffusion approach.
+    """
+    Fill NaN values in a 2D field using an iterative lateral diffusion (Poisson) solver.
+
+    The fill is performed along two horizontal dimensions. The **order of these
+    dimensions is significant** and must match the order of the dimensions of the
+    input data passed to :meth:`apply`.
+    """
+
+    def __init__(self, mask: xr.DataArray, dims: tuple[str, str], tol: float = 1.0e-4):
+        """
+        Initialize a lateral fill operator.
 
         Parameters
         ----------
-        mask : xarray.DataArray or ndarray of bool
-            A 2D boolean mask indicating valid points (True) and land points (False).
-            Boundary points are automatically set to land (True).
-        dims : list of str
-            Dimensions along which to perform the lateral fill.
+        mask : xarray.DataArray
+            A 2D boolean mask defining valid points (True) and masked points (False).
+            The mask dimensions **must be ordered consistently with `dims`**.
+        dims : tuple of str
+            The two horizontal dimensions along which the fill is applied.
+            **Order matters** and must match the dimension order of both `mask`
+            and the data passed to :meth:`apply` (e.g., ``("eta_rho", "xi_rho")``).
         tol : float, optional
-            Tolerance for the iterative solver, determining convergence. Default is 1.0e-4.
+            Convergence tolerance for the iterative solver. Default is ``1.0e-4``.
 
         Raises
         ------
+        ValueError
+            If the mask dimensionality or dimension order is inconsistent with `dims`.
         NotImplementedError
-            If the input mask has more than two dimensions, which is not supported by the current implementation.
+            If the mask is not two-dimensional.
         """
-        if len(mask.shape) > 2:
+        # Type check
+        if not isinstance(dims, tuple):
+            raise TypeError(
+                f"LateralFill error: 'dims' must be a tuple of two strings, got {type(dims).__name__}."
+            )
+        if len(dims) != 2:
+            raise ValueError(
+                f"LateralFill error: 'dims' must contain exactly two dimension names, got {len(dims)}: {dims}"
+            )
+
+        if len(mask.shape) != 2:
             raise NotImplementedError("LateralFill currently supports only 2D masks.")
 
+        _check_dimension_match(dims, mask)
+
+        self.dims = dims
         self.mask = mask
 
         # Ensure the mask is 2D, copy it and set boundary values to True
@@ -35,7 +60,6 @@ class LateralFill:
         mask[-1, :] = True
         mask[:, 0] = True
         mask[:, -1] = True
-
         # Flatten the mask for use in the sparse matrix solver
         mask_flat = mask.values.flatten()
 
@@ -45,7 +69,6 @@ class LateralFill:
         # Use algebraic multigrid solver for solving the Poisson equation with set seed to ensure reproducibility
         np.random.seed(123089)
         self.ml = pyamg.smoothed_aggregation_solver(A, max_coarse=10)
-        self.dims = dims
         self.tol = tol
 
     def apply(self, var):
@@ -63,6 +86,8 @@ class LateralFill:
             A DataArray with NaN values filled by iterative smoothing, while preserving
             non-NaN values.
         """
+        _check_dimension_match(self.dims, var)
+
         # Apply fill to anomaly field
         mean = var.where(self.mask).mean(dim=self.dims, skipna=True)
         var = var - mean
@@ -72,6 +97,11 @@ class LateralFill:
 
         # Initial guess: ocean points take their original values, land points are set to 0
         x0 = xr.where(self.mask, var, 0)
+
+        if x0.isnull().any():
+            raise ValueError(
+                "LateralFill error: The fill operation cannot proceed because the input field contains NaNs at grid points marked as valid by the mask."
+            )
 
         # Apply the iterative solver using a custom NumPy function
         var_filled = xr.apply_ufunc(
@@ -298,6 +328,47 @@ def stencil_grid_mod(S, grid, msk, dtype=None, format=None):
                 data[4, i + diags[4]] = 0
 
     return sparse.dia_matrix((data, diags), shape=(N_v, N_v)).asformat(format)
+
+
+def _check_dimension_match(dims: tuple[str, str], da: xr.DataArray):
+    """
+    Validate that a DataArray contains the required horizontal dimensions
+    in the correct order.
+
+    Parameters
+    ----------
+    dims : tuple[str, str]
+        Names of the two horizontal dimensions, in the required order
+        (e.g., ``("eta_rho", "xi_rho")``).
+    da : xarray.DataArray
+        The DataArray to validate.
+
+    Raises
+    ------
+    ValueError
+        If the required dimensions are missing, extra, or their order in ``da``
+        does not exactly match ``dims``. The error message includes guidance
+        on how to reorder the DataArray using ``transpose``.
+    """
+    # Extract the horizontal dims from the DataArray
+    var_horiz_dims = tuple(d for d in da.dims if d in dims)
+
+    if set(var_horiz_dims) != set(dims):
+        raise ValueError(
+            "LateralFill error: DataArray does not contain the required horizontal dimensions.\n"
+            f"  expected dims = {dims}\n"
+            f"  found dims    = {tuple(da.dims)}\n"
+            "Ensure the DataArray includes all required dimensions."
+        )
+
+    if var_horiz_dims != dims:
+        raise ValueError(
+            "LateralFill error: DataArray horizontal dimension order is incorrect.\n"
+            f"  expected order = {dims}\n"
+            f"  found order    = {var_horiz_dims}\n"
+            "Reorder the DataArray before applying LateralFill, e.g.:\n"
+            f"  var = var.transpose(..., {', '.join(dims)})"
+        )
 
 
 def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:

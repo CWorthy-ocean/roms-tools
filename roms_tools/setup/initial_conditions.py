@@ -198,8 +198,6 @@ class InitialConditions:
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data(forcing_type=type)
-        data.rotate_velocities_to_east_and_north()
-
         data.choose_subdomain(
             target_coords,
         )
@@ -207,6 +205,7 @@ class InitialConditions:
         data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
+        data.rotate_velocities_to_east_and_north()
 
         self._set_variable_info(data, type=type)
         attr_name = f"variable_info_{type}"

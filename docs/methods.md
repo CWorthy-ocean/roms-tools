@@ -213,9 +213,9 @@ The initial conditions data is sourced from:
 
 The data is then regridded onto the ROMS grid through the following steps:
 
-1. **Rotation of Ocean Velocities and Interpolation (for internal ROMS data only)**: If the source data comes from an outer-nest ROMS, velocities are rotated to east and north directions and interpolated to rho-points (cell centers). This step can be skipped for external data, as it is already aligned on a latitude-longitude grid and provided at grid centers.
-2. **Extrapolation to Depth**: Values are extrapolated to depth by propagating the deepest available value down to the bottom.
-3. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the source data grids and the ROMS target grid may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in NaN values at ocean points that are water in the ROMS grid but marked as land in the GLORYS, CESM, observational, or outer-nest ROMS data.
+1. **Extrapolation to Depth**: Values are extrapolated to depth by propagating the deepest available value down to the bottom.
+2. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the source data grids and the ROMS target grid may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in NaN values at ocean points that are water in the ROMS grid but marked as land in the GLORYS, CESM, observational, or outer-nest ROMS data.
+3. **Rotation of Ocean Velocities and Interpolation (for internal ROMS data only)**: If the source data comes from an outer-nest ROMS, velocities are rotated to east and north directions and interpolated to rho-points (cell centers). This step can be skipped for external data, as it is already aligned on a latitude-longitude grid and provided at grid centers.
 4. **Horizontal Regridding**: The horizontally filled initial conditions data is then regridded onto the ROMS grid using **linear** interpolation.
 
 ```{note}

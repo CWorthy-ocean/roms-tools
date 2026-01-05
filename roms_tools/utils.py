@@ -603,7 +603,7 @@ def rotate_velocities(
     v: xr.DataArray,
     angle: xr.DataArray,
     interpolate_before: bool = False,
-    interpolate_after: bool = True,
+    interpolate_after: bool = False,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Rotate horizontal velocity components to align with a rotated grid.
@@ -624,10 +624,16 @@ def rotate_velocities(
     v : xarray.DataArray
         Meridional (north-south) velocity component defined on v-points.
     angle : xarray.DataArray
-        Grid orientation angle in radians, defined at rho-points. Positive
-        angles correspond to counterclockwise rotation from east. To rotate
-        in the opposite direction (e.g., model → lat-lon), provide the
-        negative of this angle.
+        Grid orientation angle in radians, defined at rho-points. This is the
+        ROMS grid angle: the angle between the model xi-direction and true east.
+        Positive values indicate that the model grid is rotated counterclockwise
+        relative to east (which is mathematically equivalent to rotating velocity
+        vectors clockwise).
+
+        The rotation transforms velocity components between earth-relative
+        (east/north) and grid-relative (xi/eta) coordinates. To reverse the
+        transformation (e.g., model → lat-lon), provide ``-angle``.
+
     interpolate_before : bool, optional
         If True, interpolate ``u`` and ``v`` to rho-points before rotation.
         Default is False.

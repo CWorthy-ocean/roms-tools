@@ -18,7 +18,7 @@ from roms_tools.datasets.utils import (
     validate_start_end_time,
 )
 from roms_tools.fill import LateralFill
-from roms_tools.utils import load_data, wrap_longitudes
+from roms_tools.utils import load_data, rotate_velocities, wrap_longitudes
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
@@ -672,6 +672,46 @@ class ROMSDataset:
                 filler = lateral_fillers.get(var_horiz_dims)
                 if filler is not None:
                     self.ds[var_name] = filler.apply(var)
+
+    def rotate_velocities_to_east_and_north(self) -> None:
+        """
+        Rotate model-grid velocity components to earth-relative east/north directions.
+
+        This method rotates the dataset velocity variables from ROMS grid-relative
+        coordinates (xi/eta) to earth-relative coordinates (east/north) using the
+        grid angle. The rotation follows the standard ROMS convention and uses
+        ``-angle`` to reverse the grid-to-earth transformation.
+
+        The velocity components are interpolated to rho-points prior to rotation
+        to ensure consistency on the staggered grid.
+
+        Raises
+        ------
+        ValueError
+            If the mapping of velocity variable names is missing, or if either
+            the u- or v-velocity variable is not present in the dataset.
+        """
+        if self.var_names is None:
+            raise ValueError(
+                "Cannot rotate velocities to east/north: 'var_names' is not set. "
+                "Please provide a mapping for the u- and v-velocity variables."
+            )
+
+        if "u" not in self.var_names or "v" not in self.var_names:
+            raise ValueError(
+                "Cannot rotate velocities to east/north: both 'u' and 'v' "
+                "velocity variables must be present in 'var_names'."
+            )
+
+        u_name = self.var_names["u"]
+        v_name = self.var_names["v"]
+
+        self.ds[u_name], self.ds[v_name] = rotate_velocities(
+            self.ds[u_name],
+            self.ds[v_name],
+            -self.grid.ds["angle"],
+            interpolate_before=True,
+        )
 
 
 def choose_subdomain(

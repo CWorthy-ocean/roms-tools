@@ -661,6 +661,19 @@ class LatLonDataset:
         if "depth" in self.dim_names:
             self.ds = extrapolate_deepest_to_bottom(self.ds, self.dim_names["depth"])
 
+    def rotate_velocities_to_east_and_north(self) -> None:
+        """
+        Rotate velocity components to east/north directions.
+
+        For lat-lon datasets, velocity components are already defined in
+        earth-relative east/north coordinates. Therefore, no rotation is
+        required and this method is a no-op.
+
+        This method is provided for API compatibility with ROMSDataset,
+        where an explicit rotation using the grid angle is necessary.
+        """
+        return None
+
     @classmethod
     def from_ds(cls, original_dataset: LatLonDataset, ds: xr.Dataset) -> LatLonDataset:
         """Substitute the internal dataset of a LatLonDataset object with a new xarray

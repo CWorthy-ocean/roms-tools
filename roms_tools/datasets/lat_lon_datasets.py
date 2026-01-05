@@ -622,7 +622,7 @@ class LatLonDataset:
         if self.needs_lateral_fill:
             lateral_fill = LateralFill(
                 self.ds["mask"],
-                [self.dim_names["latitude"], self.dim_names["longitude"]],
+                (self.dim_names["latitude"], self.dim_names["longitude"]),
             )
 
             separate_fill_for_velocities = False
@@ -631,7 +631,7 @@ class LatLonDataset:
             if "mask_vel" in self.ds.data_vars:
                 lateral_fill_vel = LateralFill(
                     self.ds["mask_vel"],
-                    [self.dim_names["latitude"], self.dim_names["longitude"]],
+                    (self.dim_names["latitude"], self.dim_names["longitude"]),
                 )
                 separate_fill_for_velocities = True
 

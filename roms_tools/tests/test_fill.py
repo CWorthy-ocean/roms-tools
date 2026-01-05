@@ -19,12 +19,12 @@ def test_lateral_fill_no_nans(data_fixture, request):
     data = request.getfixturevalue(data_fixture)
     lateral_fill = LateralFill(
         data.ds["mask"],
-        [data.dim_names["latitude"], data.dim_names["longitude"]],
+        (data.dim_names["latitude"], data.dim_names["longitude"]),
     )
     if "mask_vel" in data.ds.data_vars:
         lateral_fill_vel = LateralFill(
             data.ds["mask_vel"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
+            (data.dim_names["latitude"], data.dim_names["longitude"]),
         )
 
     for var in data.var_names:
@@ -40,10 +40,10 @@ def test_lateral_fill_no_nans(data_fixture, request):
 def test_lateral_fill_correct_order_of_magnitude(coarsened_cesm_bgc_data):
     lateral_fill = LateralFill(
         coarsened_cesm_bgc_data.ds["mask"],
-        [
+        (
             coarsened_cesm_bgc_data.dim_names["latitude"],
             coarsened_cesm_bgc_data.dim_names["longitude"],
-        ],
+        ),
     )
 
     ALK = coarsened_cesm_bgc_data.ds["ALK"]
@@ -78,21 +78,21 @@ def test_lateral_fill_reproducibility(data_fixture, request):
     data = request.getfixturevalue(data_fixture)
     lateral_fill0 = LateralFill(
         data.ds["mask"],
-        [data.dim_names["latitude"], data.dim_names["longitude"]],
+        (data.dim_names["latitude"], data.dim_names["longitude"]),
     )
     if "mask_vel" in data.ds.data_vars:
         lateral_fill_vel0 = LateralFill(
             data.ds["mask_vel"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
+            (data.dim_names["latitude"], data.dim_names["longitude"]),
         )
     lateral_fill1 = LateralFill(
         data.ds["mask"],
-        [data.dim_names["latitude"], data.dim_names["longitude"]],
+        (data.dim_names["latitude"], data.dim_names["longitude"]),
     )
     if "mask_vel" in data.ds.data_vars:
         lateral_fill_vel1 = LateralFill(
             data.ds["mask_vel"],
-            [data.dim_names["latitude"], data.dim_names["longitude"]],
+            (data.dim_names["latitude"], data.dim_names["longitude"]),
         )
 
     ds0 = data.ds.copy()
@@ -116,3 +116,66 @@ def test_lateral_fill_reproducibility(data_fixture, request):
             )
 
     assert ds0.equals(ds1)
+
+
+def test_lateralfill_raises_notimplemented_for_non2d_mask():
+    mask_3d = xr.DataArray(np.ones((3, 3, 3)), dims=("eta_rho", "xi_rho", "s_rho"))
+    with pytest.raises(
+        NotImplementedError, match="LateralFill currently supports only 2D masks"
+    ):
+        LateralFill(mask_3d, dims=("eta_rho", "xi_rho"))
+
+
+def test_lateralfill_raises_valueerror_for_list_of_dims():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "xi_rho"))
+    with pytest.raises(TypeError, match="must be a tuple"):
+        LateralFill(mask, dims=["eta_rho", "xi_rho"])
+
+
+def test_lateralfill_raises_valueerror_for_wrong_number_of_dims():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "xi_rho"))
+
+    with pytest.raises(ValueError, match="must contain exactly two"):
+        LateralFill(mask, dims=("eta_rho", "xi_rho", "extra_dim"))  # 3 dims
+
+
+def test_lateralfill_raises_valueerror_for_mask_dim_order_mismatch():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("xi_rho", "eta_rho"))  # dims reversed
+    with pytest.raises(ValueError, match="dimension order is incorrect"):
+        LateralFill(mask, dims=("eta_rho", "xi_rho"))
+
+
+def test_apply_raises_if_var_missing_dims():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "xi_rho"))
+    lf = LateralFill(mask, dims=("eta_rho", "xi_rho"))
+    var = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "eta_u"))  # missing xi_rho
+    with pytest.raises(
+        ValueError, match="does not contain the required horizontal dimensions"
+    ):
+        lf.apply(var)
+
+
+def test_apply_raises_if_var_dim_order_mismatch():
+    mask = xr.DataArray(np.ones((3, 3)), dims=("eta_rho", "xi_rho"))
+    lf = LateralFill(mask, dims=("eta_rho", "xi_rho"))
+    var = xr.DataArray(np.ones((3, 3)), dims=("xi_rho", "eta_rho"))  # wrong order
+    with pytest.raises(ValueError, match="dimension order is incorrect"):
+        lf.apply(var)
+
+
+def test_apply_raises_if_var_has_nans_on_valid_mask():
+    # 2D mask
+    mask = xr.DataArray(np.ones((3, 3), dtype=bool), dims=("eta_rho", "xi_rho"))
+
+    lf = LateralFill(mask, dims=("eta_rho", "xi_rho"))
+
+    # Variable with a NaN at a location where mask is True
+    data = np.ones((3, 3))
+    data[1, 1] = np.nan
+    var = xr.DataArray(data, dims=("eta_rho", "xi_rho"))
+
+    # Expect ValueError
+    with pytest.raises(
+        ValueError, match="contains NaNs at grid points marked as valid"
+    ):
+        lf.apply(var)

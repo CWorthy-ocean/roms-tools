@@ -658,10 +658,7 @@ class ROMSDataset:
 
         # Build lateral fillers
         lateral_fillers: dict[tuple[str, str], LateralFill] = {
-            dims: LateralFill(
-                xr.where(self.ds[mask_name] == 1, True, False),
-                list(dims),  # ORDER PRESERVED
-            )
+            dims: LateralFill(xr.where(self.ds[mask_name] == 1, True, False), dims)
             for dims, mask_name in dim_to_mask.items()
             if dims in used_dim_sets
         }

@@ -482,7 +482,7 @@ def _interpolate_generic(
     dim_in: str,
     dim_out: str,
     method: str = "additive",
-    drop_vars: Sequence[str] | None = None,
+    drop_coords: Sequence[str] | None = None,
     pad_end: bool = False,
 ) -> xr.DataArray:
     """
@@ -500,8 +500,8 @@ def _interpolate_generic(
         Interpolation method:
         - "additive": average adjacent points
         - "multiplicative": multiply adjacent points (useful for masks)
-    drop_vars : Sequence[str] or None, optional
-        Coordinate variables to drop after interpolation (e.g., ["lat_rho", "lon_rho"]).
+    drop_coords : Sequence[str] or None, optional
+        Coordinate variables to drop (e.g., ["lat_rho", "lon_rho"]).
     pad_end : bool, default False
         Whether to pad the last point with NaN (useful when interpolating back to rho grid).
 
@@ -516,10 +516,10 @@ def _interpolate_generic(
             f"got {type(field).__name__}"
         )
 
-    if drop_vars:
-        for var in drop_vars:
-            if var in field.coords:
-                field = field.drop_vars(var)
+    if drop_coords:
+        for coord in drop_coords:
+            if coord in field.coords:
+                field = field.drop_vars(coord)
 
     if method == "additive":
         interp = 0.5 * (field + field.shift(**{dim_in: 1}))
@@ -553,7 +553,7 @@ def interpolate_from_rho_to_u(
         dim_in="xi_rho",
         dim_out="xi_u",
         method=method,
-        drop_vars=["lat_rho", "lon_rho"],
+        drop_coords=["lat_rho", "lon_rho", "eta_rho", "xi_rho"],
     )
 
 
@@ -566,7 +566,7 @@ def interpolate_from_rho_to_v(
         dim_in="eta_rho",
         dim_out="eta_v",
         method=method,
-        drop_vars=["lat_rho", "lon_rho"],
+        drop_coords=["lat_rho", "lon_rho", "eta_rho", "xi_rho"],
     )
 
 
@@ -579,7 +579,7 @@ def interpolate_from_u_to_rho(
         dim_in="xi_u",
         dim_out="xi_rho",
         method=method,
-        drop_vars=["lat_u", "lon_u"],
+        drop_coords=["lat_u", "lon_u", "eta_rho", "xi_u"],
         pad_end=True,
     )
 
@@ -593,7 +593,7 @@ def interpolate_from_v_to_rho(
         dim_in="eta_v",
         dim_out="eta_rho",
         method=method,
-        drop_vars=["lat_v", "lon_v"],
+        drop_coords=["lat_v", "lon_v", "eta_v", "xi_rho"],
         pad_end=True,
     )
 

@@ -24,6 +24,7 @@ from roms_tools.utils import (
     interpolate_from_u_to_rho,
     interpolate_from_v_to_rho,
     load_data,
+    rotate_velocities,
     wrap_longitudes,
 )
 
@@ -548,3 +549,60 @@ def test_invalid_method_raises(
 
     with pytest.raises(NotImplementedError):
         interpolate_from_v_to_rho(sample_v_field, method="unsupported")
+
+
+# Test rotate_velocities
+@pytest.fixture
+def sample_velocities_centered():
+    """Create a centered-grid velocity field with random values and grid angle."""
+    np.random.seed(42)  # For reproducibility
+
+    eta_rho, xi_rho = 10, 15
+
+    u = xr.DataArray(
+        np.random.rand(eta_rho, xi_rho),
+        dims=("eta_rho", "xi_rho"),
+        coords={
+            "eta_rho": np.arange(eta_rho),
+            "xi_rho": np.arange(xi_rho),
+        },
+    )
+
+    v = xr.DataArray(
+        np.random.rand(eta_rho, xi_rho),
+        dims=("eta_rho", "xi_rho"),
+        coords={
+            "eta_rho": np.arange(eta_rho),
+            "xi_rho": np.arange(xi_rho),
+        },
+    )
+
+    angle = xr.DataArray(
+        np.random.rand(eta_rho, xi_rho) * np.pi / 2
+        - np.pi / 4,  # random angles in [-45°, 45°]
+        dims=("eta_rho", "xi_rho"),
+        coords={
+            "eta_rho": np.arange(eta_rho),
+            "xi_rho": np.arange(xi_rho),
+        },
+    )
+
+    return u, v, angle
+
+
+def test_rotate_velocities_roundtrip(sample_velocities_centered):
+    """Test rotation to grid and back recovers original velocities."""
+    u, v, angle = sample_velocities_centered
+
+    # Rotate forward: lat-lon → model grid
+    u_rot, v_rot = rotate_velocities(
+        u, v, angle, interpolate_before=False, interpolate_after=False
+    )
+
+    # Rotate backward: model grid → lat-lon
+    u_back, v_back = rotate_velocities(
+        u_rot, v_rot, -angle, interpolate_before=False, interpolate_after=False
+    )
+
+    np.testing.assert_allclose(u.values, u_back.values)
+    np.testing.assert_allclose(v.values, v_back.values)

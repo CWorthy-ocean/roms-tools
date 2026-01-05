@@ -18,7 +18,12 @@ from roms_tools.datasets.utils import (
     validate_start_end_time,
 )
 from roms_tools.fill import LateralFill
-from roms_tools.utils import load_data, rotate_velocities, wrap_longitudes
+from roms_tools.utils import (
+    get_dask_chunks,
+    load_data,
+    rotate_velocities,
+    wrap_longitudes,
+)
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
@@ -685,23 +690,18 @@ class ROMSDataset:
         The velocity components are interpolated to rho-points prior to rotation
         to ensure consistency on the staggered grid.
 
-        Raises
+        Notes
         ------
-        ValueError
-            If the mapping of velocity variable names is missing, or if either
-            the u- or v-velocity variable is not present in the dataset.
-        """
-        if self.var_names is None:
-            raise ValueError(
-                "Cannot rotate velocities to east/north: 'var_names' is not set. "
-                "Please provide a mapping for the u- and v-velocity variables."
-            )
+        If `self.var_names` is `None` or does not contain "u" or "v", this method
+        silently does nothing.
 
-        if "u" not in self.var_names or "v" not in self.var_names:
-            raise ValueError(
-                "Cannot rotate velocities to east/north: both 'u' and 'v' "
-                "velocity variables must be present in 'var_names'."
-            )
+        """
+        if (
+            self.var_names is None
+            or "u" not in self.var_names
+            or "v" not in self.var_names
+        ):
+            return
 
         u_name = self.var_names["u"]
         v_name = self.var_names["v"]
@@ -712,6 +712,10 @@ class ROMSDataset:
             -self.grid.ds["angle"],
             interpolate_before=True,
         )
+
+        if self.use_dask:
+            chunks = get_dask_chunks(self.dim_names)
+            self.ds = self.ds.chunk(chunks)
 
 
 def choose_subdomain(

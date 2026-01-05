@@ -198,6 +198,7 @@ class InitialConditions:
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data(forcing_type=type)
+        data.rotate_velocities_to_east_and_north()
 
         data.choose_subdomain(
             target_coords,
@@ -206,7 +207,6 @@ class InitialConditions:
         data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
         data.apply_lateral_fill()
-        data.rotate_velocities_to_east_and_north()
 
         self._set_variable_info(data, type=type)
         attr_name = f"variable_info_{type}"
@@ -249,7 +249,7 @@ class InitialConditions:
                 processed_fields["u"],
                 processed_fields["v"],
                 target_coords["angle"],
-                interpolate=True,
+                interpolate_after=True,
             )
 
             if "layer_depth_u" in processed_fields:
@@ -289,95 +289,153 @@ class InitialConditions:
 
         return processed_fields
 
-    def _regrid_laterally(self, data, target_coords, processed_fields, var_names):
-        """Regrid variables in data.ds laterally to rho points of ROMS grid."""
-        if isinstance(data, ROMSDataset):
-            # source data can be at three different locations: rho-, u-, v- points
-            active_locations = {info["location"] for info in var_names.values()}
+    def _regrid_laterally(
+        self,
+        data: ROMSDataset | LatLonDataset,
+        target_coords: dict[str, xr.DataArray],
+        processed_fields: dict[str, xr.DataArray],
+        var_names: dict[str, dict[str, str]],
+    ):
+        """Regrid variables in data.ds laterally to target coordinates.
 
-            # compute depth coordinates on source data and subset consistent with subsetting of data
-            for location in active_locations:
-                data._get_depth_coordinates(depth_type="layer", locations=[location])
+        Parameters
+        ----------
+        data : ROMSDataset or LatLonDataset
+            The dataset containing variables to regrid.
+        target_coords : dict[str, xr.DataArray]
+            Dictionary of target coordinates for regridding.
+        processed_fields : dict[str, xr.DataArray]
+            Dictionary where regridded variables will be stored.
+        var_names : dict[str, dict[str, str]]
+            Mapping from variable keys to dataset variable names and metadata.
+
+        Returns
+        -------
+        processed_fields : dict[str, xr.DataArray]
+            Updated dictionary with regridded variables.
+        """
+        if isinstance(data, ROMSDataset):
+            # Compute depth coordinates on source data for rho
+            data._get_depth_coordinates(depth_type="layer", locations=["rho"])
+            # Subset depth coordinate to target subdomain
             data.ds_depth_coords = choose_subdomain(
                 data.ds_depth_coords,
                 data.grid.ds,
                 target_coords,
             )
 
-            for location in ["rho", "u", "v"]:
-                filtered_vars = [
-                    var_name
-                    for var_name, info in var_names.items()
-                    if info["location"] == location
-                ]
-                if filtered_vars:
-                    ds_loc = data.ds[filtered_vars].rename(
-                        {f"lat_{location}": "lat", f"lon_{location}": "lon"}
-                    )
-                    lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
-
-                    ds_loc = lateral_regrid.apply(ds_loc)
-                    for var_name in filtered_vars:
-                        processed_fields[var_name] = ds_loc[var_name]
-
-                    # also regrid depth coordinates
-                    processed_fields[f"layer_depth_{location}"] = lateral_regrid.apply(
-                        data.ds_depth_coords[f"layer_depth_{location}"]
-                    )
-
-        else:
-            # all variables are at the same location
-            lateral_regrid = LateralRegridToROMS(target_coords, data.dim_names)
+            # Regrid all rho variables
+            ds_rho = data.ds[[var_names[var]["name"] for var in var_names]].rename(
+                {"lat_rho": "lat", "lon_rho": "lon"}
+            )
+            lateral_regrid_from_roms = LateralRegridFromROMS(ds_rho, target_coords)
+            ds_rho = lateral_regrid_from_roms.apply(ds_rho)
 
             for var_name in var_names:
-                processed_fields[var_name] = lateral_regrid.apply(
+                processed_fields[var_name] = ds_rho[var_name]
+
+            # Regrid depth coordinates
+            processed_fields["layer_depth_rho"] = lateral_regrid_from_roms.apply(
+                data.ds_depth_coords["layer_depth_rho"]
+            )
+
+        else:
+            lateral_regrid_to_roms = LateralRegridToROMS(target_coords, data.dim_names)
+            for var_name in var_names:
+                processed_fields[var_name] = lateral_regrid_to_roms.apply(
                     data.ds[var_names[var_name]["name"]]
                 )
 
         return processed_fields
 
-    def _regrid_vertically(self, data, processed_fields, var_names):
+    def _regrid_vertically(
+        self,
+        data: ROMSDataset | LatLonDataset,
+        processed_fields: dict[str, xr.DataArray],
+        var_names: dict[str, dict[str, str | bool]],
+    ) -> dict[str, xr.DataArray]:
+        """
+        Perform vertical regridding of 3D variables to the model's vertical grid.
+
+        For each vertical location ('rho', 'u', 'v'), this method regrids variables
+        that are flagged as 3D in `var_names`. The regridding procedure differs
+        depending on whether the source dataset is a ROMSDataset or a LatLonDataset.
+
+        Parameters
+        ----------
+        data : ROMSDataset or LatLonDataset
+            Dataset containing the variables to regrid.
+        processed_fields : dict[str, xarray.DataArray]
+            Dictionary containing fields that have already been regridded laterally.
+            This method updates the entries in-place with vertically regridded fields.
+        var_names : dict[str, dict[str, str | bool]]
+            Mapping of variable keys to dataset variable metadata:
+                - 'name': dataset variable name
+                - 'location': vertical location ('rho', 'u', 'v')
+                - 'is_3d': whether the variable is 3D and requires vertical regridding
+
+        Returns
+        -------
+        processed_fields : dict[str, xarray.DataArray]
+            Dictionary containing the same variables as `processed_fields`, now updated
+            with vertically regridded values.
+        """
         for location in ["rho", "u", "v"]:
+            # Select variables for this vertical location that are 3D
             filtered_vars = [
                 var_name
                 for var_name, info in var_names.items()
                 if info["location"] == location and info["is_3d"]
             ]
-            if filtered_vars:
-                if isinstance(data, ROMSDataset):
-                    ds_tmp = xr.Dataset()
-                    ds_tmp[filtered_vars[0]] = processed_fields[filtered_vars[0]]
-                    vertical_regrid = VerticalRegrid(ds_tmp)
 
-                    for var_name in filtered_vars:
-                        if var_name in processed_fields:
-                            regridded = vertical_regrid.apply(
-                                processed_fields[var_name],
-                                source_depth_coords=processed_fields[
-                                    f"layer_depth_{location}"
-                                ],
-                                target_depth_coords=self.ds_depth_coords[
-                                    f"layer_depth_{location}"
-                                ],
-                                mask_edges=False,
-                            )
-                            processed_fields[var_name] = regridded
+            if not filtered_vars:
+                continue
 
-                else:
-                    vertical_regrid = VerticalRegridToROMS(
-                        self.ds_depth_coords[f"layer_depth_{location}"],
-                        data.ds[data.dim_names["depth"]],
+            if isinstance(data, ROMSDataset):
+                # Interpolate depth coordinates from rho to u/v points if needed
+                if location == "u":
+                    processed_fields["layer_depth_u"] = interpolate_from_rho_to_u(
+                        processed_fields["layer_depth_rho"]
                     )
-                    for var_name in filtered_vars:
-                        if var_name in processed_fields:
-                            field = processed_fields[var_name]
-                            if self.use_dask:
-                                field = field.chunk(
-                                    _set_dask_chunks(
-                                        location, self.horizontal_chunk_size
-                                    )
-                                )
-                            processed_fields[var_name] = vertical_regrid.apply(field)
+                elif location == "v":
+                    processed_fields["layer_depth_v"] = interpolate_from_rho_to_v(
+                        processed_fields["layer_depth_rho"]
+                    )
+
+                # Use the first variable to initialize VerticalRegrid
+                ds_tmp = xr.Dataset(
+                    {filtered_vars[0]: processed_fields[filtered_vars[0]]}
+                )
+                vertical_regrid = VerticalRegrid(ds_tmp)
+
+                for var_name in filtered_vars:
+                    if var_name in processed_fields:
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
+                            source_depth_coords=processed_fields[
+                                f"layer_depth_{location}"
+                            ],
+                            target_depth_coords=self.ds_depth_coords[
+                                f"layer_depth_{location}"
+                            ],
+                            mask_edges=False,
+                        )
+            else:
+                # LatLonDataset: create a regrid object for all variables
+                vertical_regrid_to_roms = VerticalRegridToROMS(
+                    self.ds_depth_coords[f"layer_depth_{location}"],
+                    data.ds[data.dim_names["depth"]],
+                )
+
+                for var_name in filtered_vars:
+                    if var_name not in processed_fields:
+                        continue
+                    field = processed_fields[var_name]
+                    if getattr(self, "use_dask", False):
+                        field = field.chunk(
+                            _set_dask_chunks(location, self.horizontal_chunk_size)
+                        )
+                    processed_fields[var_name] = vertical_regrid_to_roms.apply(field)
 
         return processed_fields
 

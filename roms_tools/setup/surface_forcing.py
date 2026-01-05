@@ -201,7 +201,6 @@ class SurfaceForcing:
                 processed_fields["uwnd"],
                 processed_fields["vwnd"],
                 target_coords["angle"],
-                interpolate=False,
             )
 
         if self.type == "physics":

@@ -273,7 +273,7 @@ class BoundaryForcing:
                         processed_fields["u"],
                         processed_fields["v"],
                         angle,
-                        interpolate=True,
+                        interpolate_after=True,
                     )
                     if self.adjust_depth_for_sea_surface_height:
                         zeta_u = interpolate_from_rho_to_u(zeta_vector)

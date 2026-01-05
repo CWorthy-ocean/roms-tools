@@ -143,7 +143,6 @@ class TidalForcing:
                     processed_fields[u_component],
                     processed_fields[v_component],
                     target_coords["angle"],
-                    interpolate=False,
                 )
 
         # convert to barotropic velocity

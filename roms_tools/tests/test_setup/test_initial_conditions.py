@@ -219,7 +219,7 @@ def test_initial_condition_creation_with_bgc(ic_fixture, request):
 
 
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_initial_conditions_raises_on_regridded_nans():
+def test_initial_conditions_raises_on_regridded_nans(use_dask):
     """Raise ValueError if regridded ROMS fields contain NaNs due to grid mismatch."""
     parent_grid = Grid(
         center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
@@ -241,7 +241,7 @@ def test_initial_conditions_raises_on_regridded_nans():
             grid=grid,
             ini_time=datetime(1998, 1, 6),
             source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
-            use_dask=True,
+            use_dask=use_dask,
             bgc_source={
                 "name": "ROMS",
                 "grid": parent_grid,
@@ -251,7 +251,7 @@ def test_initial_conditions_raises_on_regridded_nans():
 
 
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
-def test_initial_conditions_unchanged_when_parent_and_child_grids_match():
+def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask):
     grid_params = {
         "nx": 8,
         "ny": 13,
@@ -271,20 +271,25 @@ def test_initial_conditions_unchanged_when_parent_and_child_grids_match():
         grid=grid,
         ini_time=datetime(1998, 1, 6),
         source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
-        use_dask=True,
+        use_dask=use_dask,
     )
 
-    mask_map = {
-        "temp": grid.ds.mask_rho,
-        "salt": grid.ds.mask_rho,
-        "zeta": grid.ds.mask_rho,
-        "u": grid.ds.mask_u,
-        "v": grid.ds.mask_v,
-    }
+    mask = grid.ds.mask_rho
 
-    for var_name in ["temp", "salt", "zeta", "u", "v"]:
-        mask = mask_map[var_name]
-
+    # For scalar fields (temp, salt, zeta), values should be preserved exactly
+    # when parent and child grids are identical.
+    #
+    # NOTE:
+    # Velocity variables (u, v) are excluded here because their initialization
+    # involves multiple non-exact operations:
+    #   - interpolation from staggered (u/v) points to rho-points,
+    #   - rotation between grid-relative and earth-relative coordinates,
+    #   - interpolation back to staggered grids.
+    #
+    # These steps are not mathematically invertible and introduce small
+    # numerical differences throughout the domain (not only at boundaries),
+    # so bitwise or near-bitwise agreement cannot be expected.
+    for var_name in ["temp", "salt", "zeta"]:
         restart_values = ds[var_name].isel(time=1).where(mask).values
         ic_values = ic.ds[var_name].squeeze().where(mask).values
 

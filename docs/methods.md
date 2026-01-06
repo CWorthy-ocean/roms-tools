@@ -127,15 +127,15 @@ Example plots of the vertical stretching functions and layer depths can be found
 Step 3 is executed only when needed, during the creation of initial conditions and boundary forcing.
 Depending on the dataset, either the actual sea surface height or a flat sea surface height ($\zeta(x,y,t)=0$) is used.
 
-**Actual sea surface height** ($\zeta \neq 0$), consistent with measuring elevation above the bottom:
+**Actual sea surface height** ($\zeta \not\equiv 0$), consistent with measuring elevation above the bottom:
 
 - Initial conditions derived from an outer-nest ROMS simulation (used for both target and source vertical coordinates).
 
-**Flat sea surface height** ($\zeta = 0$), consistent with measuring depth relative to the surface:
+**Flat sea surface height** ($\zeta \equiv 0$), consistent with measuring depth relative to the surface:
 
 - Initial and boundary conditions derived from external datasets such as GLORYS or BGC data from hybrid model-obs sources.
 
-For most external datasets, it is unclear whether depth values are relative to the surface or above the bottom, and not all datasets include sea surface height. To avoid inconsistencies, `ROMS-Tools` defaults to a flat sea surface ($\zeta=0$) when using external data.
+For most external datasets, it is unclear whether depth values are relative to the surface or above the bottom, and not all datasets include sea surface height. To avoid inconsistencies, `ROMS-Tools` defaults to a flat sea surface ($\zeta \equiv 0$) when using external data.
 
 ## Tidal Forcing
 
@@ -205,7 +205,7 @@ For practical examples, see [this notebook](surface_forcing.ipynb).
 
 ## Initial Conditions
 
-The initial conditions data is sourced from:
+The initial conditions data is sourced from either external or internal data:
 
 - **External data**:
   - GLORYS (for physical fields)

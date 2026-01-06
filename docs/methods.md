@@ -123,20 +123,19 @@ Here, $\zeta(x,y,t)$ is the time-varying sea surface height, and $h(x,y)$ is the
 
 Example plots of the vertical stretching functions and layer depths can be found [here](grid.ipynb#The-vertical-coordinate-system).
 
-`ROMS-Tools` executes steps 1 and 2 during grid generation, when an instance of the :py:class:`roms_tools.Grid` class is created.
+`ROMS-Tools` executes steps 1 and 2 during grid generation, when an instance of the {py:obj}`roms_tools.Grid` class is created.
 Step 3 is executed only when needed, during the creation of initial conditions and boundary forcing.
-Depending on the dataset, either the actual sea surface height or a flat sea surface height (:math:`\zeta(x,y,t)=0`) is used.
+Depending on the dataset, either the actual sea surface height or a flat sea surface height ($\zeta(x,y,t)=0$) is used.
 
-**Actual sea surface height** (:math:`\zeta \neq 0`), consistent with measuring elevation above the bottom:
+**Actual sea surface height** ($\zeta \neq 0$), consistent with measuring elevation above the bottom:
 
 - Initial conditions derived from an outer-nest ROMS simulation (used for both target and source vertical coordinates).
 
-**Flat sea surface height** (:math:`\zeta = 0`), consistent with measuring depth relative to the surface:
+**Flat sea surface height** ($\zeta = 0$), consistent with measuring depth relative to the surface:
 
 - Initial and boundary conditions derived from external datasets such as GLORYS or BGC data from hybrid model-obs sources.
 
-For most external datasets, it is unclear whether depth values are relative to the surface or above the bottom, and not all datasets include sea surface height. To avoid inconsistencies, `ROMS-Tools` defaults to a flat sea surface (:math:`\zeta=0`)
-when using external data.
+For most external datasets, it is unclear whether depth values are relative to the surface or above the bottom, and not all datasets include sea surface height. To avoid inconsistencies, `ROMS-Tools` defaults to a flat sea surface ($\zeta=0$) when using external data.
 
 ## Tidal Forcing
 
@@ -208,7 +207,9 @@ For practical examples, see [this notebook](surface_forcing.ipynb).
 
 The initial conditions data is sourced from:
 
-- **External data**: GLORYS (for physical fields) and CESM or observational/model-based sources (for biogeochemical fields)
+- **External data**:
+  - GLORYS (for physical fields)
+  - CESM or observational/model-based sources (for biogeochemical fields)
 - **Internal data**: outer-nest ROMS
 
 The data is then regridded onto the ROMS grid through the following steps:

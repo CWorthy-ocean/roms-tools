@@ -5,6 +5,15 @@ from pathlib import Path
 import pytest
 import xarray as xr
 
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
+
+skip_xesmf = pytest.mark.skipif(
+    xesmf is None, reason="xesmf required for ROMS regridding"
+)
+
 
 @pytest.mark.parametrize(
     "forcing_fixture",
@@ -14,7 +23,7 @@ import xarray as xr
         "tidal_forcing",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        "initial_conditions_from_roms",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
@@ -60,7 +69,7 @@ def test_save_results(
         "tidal_forcing",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
-        "initial_conditions_from_roms",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",

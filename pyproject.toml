@@ -29,7 +29,7 @@ dependencies = [
     "packaging",
     "scipy",
     "gcm_filters >=0.5.1",
-    "netcdf4==1.7.3",
+    "netcdf4",
     "PyYAML",
     "pyamg",
     "bottleneck",

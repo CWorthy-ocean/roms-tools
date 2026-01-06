@@ -251,15 +251,6 @@ class InitialConditions:
                 interpolate_after=True,
             )
 
-            if "layer_depth_u" in processed_fields:
-                processed_fields["layer_depth_u"] = interpolate_from_rho_to_u(
-                    processed_fields["layer_depth_u"]
-                )
-            if "layer_depth_v" in processed_fields:
-                processed_fields["layer_depth_v"] = interpolate_from_rho_to_v(
-                    processed_fields["layer_depth_v"]
-                )
-
         if type == "bgc":
             # Ensure time coordinate matches that of physical variables
             for var_name in var_names:

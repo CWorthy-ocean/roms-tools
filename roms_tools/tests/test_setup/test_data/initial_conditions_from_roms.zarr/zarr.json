@@ -4,7 +4,7 @@
     "roms_tools_version": "3.1.2.dev21+g719a5b8c0",
     "ini_time": "1998-01-06 00:00:00",
     "model_reference_date": "2000-01-01 00:00:00",
-    "adjust_depth_for_sea_surface_height": "False",
+    "adjust_depth_for_sea_surface_height": "True",
     "source": "ROMS",
     "bgc_source": "ROMS",
     "theta_s": 5.0,
@@ -66,7 +66,7 @@
       "ALK": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -76,7 +76,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -123,7 +123,7 @@
       "ALK_ALT_CO2": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -133,7 +133,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -179,14 +179,14 @@
       },
       "Cs_r": {
         "shape": [
-          100
+          3
         ],
         "data_type": "float32",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              100
+              3
             ]
           }
         },
@@ -226,14 +226,14 @@
       },
       "Cs_w": {
         "shape": [
-          101
+          4
         ],
         "data_type": "float32",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
             "chunk_shape": [
-              101
+              4
             ]
           }
         },
@@ -274,7 +274,7 @@
       "diatC": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -284,7 +284,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -331,7 +331,7 @@
       "diatChl": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -341,7 +341,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -388,7 +388,7 @@
       "diatFe": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -398,7 +398,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -445,7 +445,7 @@
       "diatP": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -455,7 +455,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -502,7 +502,7 @@
       "diatSi": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -512,7 +512,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -559,7 +559,7 @@
       "diazC": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -569,7 +569,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -616,7 +616,7 @@
       "diazChl": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -626,7 +626,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -673,7 +673,7 @@
       "diazFe": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -683,7 +683,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -730,7 +730,7 @@
       "diazP": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -740,7 +740,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -787,7 +787,7 @@
       "DIC": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -797,7 +797,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -844,7 +844,7 @@
       "DIC_ALT_CO2": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -854,7 +854,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -901,7 +901,7 @@
       "DOC": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -911,7 +911,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -958,7 +958,7 @@
       "DOCr": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -968,7 +968,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1015,7 +1015,7 @@
       "DON": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1025,7 +1025,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1072,7 +1072,7 @@
       "DONr": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1082,7 +1082,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1129,7 +1129,7 @@
       "DOP": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1139,7 +1139,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1186,7 +1186,7 @@
       "DOPr": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1196,7 +1196,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1243,7 +1243,7 @@
       "Fe": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1253,7 +1253,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1300,7 +1300,7 @@
       "Lig": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1310,7 +1310,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1357,7 +1357,7 @@
       "NH4": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1367,7 +1367,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1414,7 +1414,7 @@
       "NO3": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1424,7 +1424,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1471,7 +1471,7 @@
       "O2": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1481,7 +1481,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1575,7 +1575,7 @@
       "PO4": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1585,7 +1585,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1632,7 +1632,7 @@
       "salt": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1642,7 +1642,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1689,7 +1689,7 @@
       "SiO3": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1699,7 +1699,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1746,7 +1746,7 @@
       "spC": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1756,7 +1756,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1803,7 +1803,7 @@
       "spCaCO3": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1813,7 +1813,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1860,7 +1860,7 @@
       "spChl": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1870,7 +1870,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1917,7 +1917,7 @@
       "spFe": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1927,7 +1927,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -1974,7 +1974,7 @@
       "spP": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -1984,7 +1984,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -2031,7 +2031,7 @@
       "temp": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -2041,7 +2041,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]
@@ -2088,7 +2088,7 @@
       "u": {
         "shape": [
           1,
-          100,
+          3,
           7,
           6
         ],
@@ -2098,7 +2098,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               6
             ]
@@ -2199,7 +2199,7 @@
       "v": {
         "shape": [
           1,
-          100,
+          3,
           6,
           7
         ],
@@ -2209,7 +2209,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               6,
               7
             ]
@@ -2310,7 +2310,7 @@
       "w": {
         "shape": [
           1,
-          101,
+          4,
           7,
           7
         ],
@@ -2320,7 +2320,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              101,
+              4,
               7,
               7
             ]
@@ -2421,7 +2421,7 @@
       "zooC": {
         "shape": [
           1,
-          100,
+          3,
           7,
           7
         ],
@@ -2431,7 +2431,7 @@
           "configuration": {
             "chunk_shape": [
               1,
-              100,
+              3,
               7,
               7
             ]

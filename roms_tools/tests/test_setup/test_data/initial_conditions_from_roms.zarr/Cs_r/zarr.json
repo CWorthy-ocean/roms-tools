@@ -1,13 +1,13 @@
 {
   "shape": [
-    100
+    3
   ],
   "data_type": "float32",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        100
+        3
       ]
     }
   },

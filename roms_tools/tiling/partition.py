@@ -16,8 +16,8 @@ def partition(
 
     This function divides the input dataset into `np_eta` by `np_xi` tiles, where each tile
     represents a subdomain of the original dataset. The partitioning is performed along
-    the spatial dimensions `eta_rho`, `xi_rho`, `eta_v`, `xi_u`, `eta_psi`, `xi_psi`, `eta_coarse`, and `xi_coarse`,
-    depending on which dimensions are present in the dataset.
+    the spatial dimensions `eta_rho`, `eta_u`, `eta_v`, `eta_coarse`, `xi_rho`, `xi_u`, `xi_v`,
+    and `xi_coarse`, depending on which dimensions are present in the dataset.
 
     Parameters
     ----------
@@ -73,10 +73,12 @@ def partition(
 
     base_dims = [
         "eta_rho",
-        "xi_rho",
+        "eta_u",
         "eta_v",
-        "xi_u",
         "eta_psi",
+        "xi_rho",
+        "xi_u",
+        "xi_v",
         "xi_psi",
     ]
     coarse_dims = ["eta_coarse", "xi_coarse"]
@@ -84,18 +86,8 @@ def partition(
 
     dims_to_partition = [d for d in partitionable_dims if d in ds.dims]
 
-    # if eta is periodic there are no ghost cells along those dimensions
-    if "eta_v" in ds.sizes and ds.sizes["eta_rho"] == ds.sizes["eta_v"]:
-        # TODO how are we supposed to know if eta is periodic if eta_v doesn't appear? partit.F doesn't say...
-        n_eta_ghost_cells = 0
-    else:
-        n_eta_ghost_cells = 1
-
-    # if xi is periodic there are no ghost cells along those dimensions
-    if "xi_u" in ds.sizes and ds.sizes["xi_rho"] == ds.sizes["xi_u"]:
-        n_xi_ghost_cells = 0
-    else:
-        n_xi_ghost_cells = 1
+    n_eta_ghost_cells = 1
+    n_xi_ghost_cells = 1
 
     def integer_division_or_raise(a: int, b: int, dimension: str) -> int:
         """Perform integer division and ensure that the division is exact.
@@ -133,9 +125,9 @@ def partition(
             ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, np_eta, "eta_rho"
         )
 
-    if "xi_rho" in dims_to_partition:
-        xi_rho_domain_size = integer_division_or_raise(
-            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, np_xi, "xi_rho"
+    if "eta_u" in dims_to_partition:
+        eta_u_domain_size = integer_division_or_raise(
+            ds.sizes["eta_u"] - 2 * n_eta_ghost_cells, np_eta, "eta_u"
         )
 
     if "eta_v" in dims_to_partition:
@@ -143,14 +135,24 @@ def partition(
             ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, np_eta, "eta_v"
         )
 
+    if "eta_psi" in dims_to_partition:
+        eta_psi_domain_size = integer_division_or_raise(
+            ds.sizes["eta_psi"] - 3 * n_eta_ghost_cells, np_eta, "eta_psi"
+        )
+
+    if "xi_rho" in dims_to_partition:
+        xi_rho_domain_size = integer_division_or_raise(
+            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, np_xi, "xi_rho"
+        )
+
     if "xi_u" in dims_to_partition:
         xi_u_domain_size = integer_division_or_raise(
             ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, np_xi, "xi_u"
         )
 
-    if "eta_psi" in dims_to_partition:
-        eta_psi_domain_size = integer_division_or_raise(
-            ds.sizes["eta_psi"] - 3 * n_eta_ghost_cells, np_eta, "eta_psi"
+    if "xi_v" in dims_to_partition:
+        xi_v_domain_size = integer_division_or_raise(
+            ds.sizes["xi_v"] - 2 * n_xi_ghost_cells, np_xi, "xi_v"
         )
 
     if "xi_psi" in dims_to_partition:
@@ -172,7 +174,6 @@ def partition(
         dim: [size] for dim, size in ds.sizes.items() if dim in dims_to_partition
     }
 
-    # TODO refactor to use two functions for odd- and even-length dimensions
     if "eta_v" in dims_to_partition:
         partitioned_sizes["eta_v"] = [eta_v_domain_size] * (np_eta - 1) + [
             eta_v_domain_size + n_eta_ghost_cells
@@ -188,6 +189,12 @@ def partition(
                 [eta_rho_domain_size + n_eta_ghost_cells]
                 + [eta_rho_domain_size] * (np_eta - 2)
                 + [eta_rho_domain_size + n_eta_ghost_cells]
+            )
+        if "eta_u" in dims_to_partition:
+            partitioned_sizes["eta_u"] = (
+                [eta_u_domain_size + n_eta_ghost_cells]
+                + [eta_u_domain_size] * (np_eta - 2)
+                + [eta_u_domain_size + n_eta_ghost_cells]
             )
         if "eta_psi" in dims_to_partition:
             partitioned_sizes["eta_psi"] = (
@@ -208,6 +215,12 @@ def partition(
                 [xi_rho_domain_size + n_xi_ghost_cells]
                 + [xi_rho_domain_size] * (np_xi - 2)
                 + [xi_rho_domain_size + n_xi_ghost_cells]
+            )
+        if "xi_v" in dims_to_partition:
+            partitioned_sizes["xi_v"] = (
+                [xi_v_domain_size + n_xi_ghost_cells]
+                + [xi_v_domain_size] * (np_xi - 2)
+                + [xi_v_domain_size + n_xi_ghost_cells]
             )
         if "xi_psi" in dims_to_partition:
             partitioned_sizes["xi_psi"] = (
@@ -244,23 +257,17 @@ def partition(
                     int(eta_rho_partition_indices[i]),
                     int(eta_rho_partition_indices[i + 1]),
                 )
-            if "xi_rho" in dims_to_partition:
-                xi_rho_partition_indices = cumsum(partitioned_sizes["xi_rho"])
-                indexers["xi_rho"] = slice(
-                    int(xi_rho_partition_indices[j]),
-                    int(xi_rho_partition_indices[j + 1]),
+            if "eta_u" in dims_to_partition:
+                eta_u_partition_indices = cumsum(partitioned_sizes["eta_u"])
+                indexers["eta_u"] = slice(
+                    int(eta_u_partition_indices[i]),
+                    int(eta_u_partition_indices[i + 1]),
                 )
-
             if "eta_v" in dims_to_partition:
                 eta_v_partition_indices = cumsum(partitioned_sizes["eta_v"])
                 indexers["eta_v"] = slice(
                     int(eta_v_partition_indices[i]),
                     int(eta_v_partition_indices[i + 1]),
-                )
-            if "xi_u" in dims_to_partition:
-                xi_u_partition_indices = cumsum(partitioned_sizes["xi_u"])
-                indexers["xi_u"] = slice(
-                    int(xi_u_partition_indices[j]), int(xi_u_partition_indices[j + 1])
                 )
             if "eta_psi" in dims_to_partition:
                 eta_psi_partition_indices = cumsum(partitioned_sizes["eta_psi"])
@@ -268,13 +275,6 @@ def partition(
                     int(eta_psi_partition_indices[i]),
                     int(eta_psi_partition_indices[i + 1]),
                 )
-            if "xi_psi" in dims_to_partition:
-                xi_psi_partition_indices = cumsum(partitioned_sizes["xi_psi"])
-                indexers["xi_psi"] = slice(
-                    int(xi_psi_partition_indices[j]),
-                    int(xi_psi_partition_indices[j + 1]),
-                )
-
             if "eta_coarse" in dims_to_partition:
                 eta_coarse_partition_indices = cumsum(partitioned_sizes["eta_coarse"])
                 indexers["eta_coarse"] = slice(
@@ -282,6 +282,29 @@ def partition(
                     int(eta_coarse_partition_indices[i + 1]),
                 )
 
+            if "xi_rho" in dims_to_partition:
+                xi_rho_partition_indices = cumsum(partitioned_sizes["xi_rho"])
+                indexers["xi_rho"] = slice(
+                    int(xi_rho_partition_indices[j]),
+                    int(xi_rho_partition_indices[j + 1]),
+                )
+            if "xi_u" in dims_to_partition:
+                xi_u_partition_indices = cumsum(partitioned_sizes["xi_u"])
+                indexers["xi_u"] = slice(
+                    int(xi_u_partition_indices[j]), int(xi_u_partition_indices[j + 1])
+                )
+            if "xi_v" in dims_to_partition:
+                xi_v_partition_indices = cumsum(partitioned_sizes["xi_v"])
+                indexers["xi_v"] = slice(
+                    int(xi_v_partition_indices[j]),
+                    int(xi_v_partition_indices[j + 1]),
+                )
+            if "xi_psi" in dims_to_partition:
+                xi_psi_partition_indices = cumsum(partitioned_sizes["xi_psi"])
+                indexers["xi_psi"] = slice(
+                    int(xi_psi_partition_indices[j]),
+                    int(xi_psi_partition_indices[j + 1]),
+                )
             if "xi_coarse" in dims_to_partition:
                 xi_coarse_partition_indices = cumsum(partitioned_sizes["xi_coarse"])
                 indexers["xi_coarse"] = slice(

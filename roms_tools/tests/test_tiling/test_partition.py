@@ -20,7 +20,7 @@ class TestPartitionGrid:
     def test_partition_grid_along_x(self, grid):
         _, [ds1, ds2, ds3] = partition(grid.ds, np_eta=3, np_xi=1)
 
-        assert ds1.sizes == {
+        assert dict(ds1.sizes) == {
             "eta_rho": 11,
             "xi_rho": 32,
             "xi_u": 31,
@@ -32,7 +32,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds2.sizes == {
+        assert dict(ds2.sizes) == {
             "eta_rho": 10,
             "xi_rho": 32,
             "xi_u": 31,
@@ -44,7 +44,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds3.sizes == {
+        assert dict(ds3.sizes) == {
             "eta_rho": 11,
             "xi_rho": 32,
             "xi_u": 31,
@@ -60,7 +60,7 @@ class TestPartitionGrid:
     def test_partition_grid_along_y(self, grid):
         _, [ds1, ds2, ds3] = partition(grid.ds, np_eta=1, np_xi=3)
 
-        assert ds1.sizes == {
+        assert dict(ds1.sizes) == {
             "eta_rho": 32,
             "xi_rho": 11,
             "xi_u": 10,
@@ -72,7 +72,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds2.sizes == {
+        assert dict(ds2.sizes) == {
             "eta_rho": 32,
             "xi_rho": 10,
             "xi_u": 10,
@@ -84,7 +84,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds3.sizes == {
+        assert dict(ds3.sizes) == {
             "eta_rho": 32,
             "xi_rho": 11,
             "xi_u": 11,
@@ -105,7 +105,7 @@ class TestPartitionGrid:
          ds7, ds8, ds9] = partition(grid.ds, np_eta=3, np_xi=3)
         # fmt: on
 
-        assert ds1.sizes == {
+        assert dict(ds1.sizes) == {
             "eta_rho": 11,
             "xi_rho": 11,
             "xi_u": 10,
@@ -117,7 +117,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds4.sizes == {
+        assert dict(ds4.sizes) == {
             "eta_rho": 10,
             "xi_rho": 11,
             "xi_u": 10,
@@ -129,7 +129,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds7.sizes == {
+        assert dict(ds7.sizes) == {
             "eta_rho": 11,
             "xi_rho": 11,
             "xi_u": 10,
@@ -141,7 +141,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds2.sizes == {
+        assert dict(ds2.sizes) == {
             "eta_rho": 11,
             "xi_rho": 10,
             "xi_u": 10,
@@ -153,7 +153,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds5.sizes == {
+        assert dict(ds5.sizes) == {
             "eta_rho": 10,
             "xi_rho": 10,
             "xi_u": 10,
@@ -165,7 +165,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds8.sizes == {
+        assert dict(ds8.sizes) == {
             "eta_rho": 11,
             "xi_rho": 10,
             "xi_u": 10,
@@ -177,7 +177,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds3.sizes == {
+        assert dict(ds3.sizes) == {
             "eta_rho": 11,
             "xi_rho": 11,
             "xi_u": 11,
@@ -189,7 +189,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds6.sizes == {
+        assert dict(ds6.sizes) == {
             "eta_rho": 10,
             "xi_rho": 11,
             "xi_u": 11,
@@ -201,7 +201,7 @@ class TestPartitionGrid:
             "s_rho": 100,
             "s_w": 101,
         }
-        assert ds9.sizes == {
+        assert dict(ds9.sizes) == {
             "eta_rho": 11,
             "xi_rho": 11,
             "xi_u": 11,

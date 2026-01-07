@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
+import xarray as xr
 import xarray.testing as xrt
 
 from roms_tools import Grid
@@ -244,6 +246,52 @@ class TestPartitionGrid:
         for ds in partitioned_datasets:
             assert ds.sizes["eta_coarse"] == grid.ds.sizes["eta_coarse"]
             assert ds.sizes["xi_coarse"] == grid.ds.sizes["xi_coarse"]
+
+
+class TestPartitionGridWithExtraDims:
+    @pytest.fixture
+    def ds_with_extra_dims(self):
+        # Base dims
+        eta_rho = 10
+        xi_rho = 12
+        s_rho = 5
+        eta_v = eta_rho - 1
+        xi_u = xi_rho - 1
+
+        # Extra dims
+        eta_u = eta_rho
+        xi_v = xi_rho
+
+        ds = xr.Dataset(
+            {
+                "zeta": (("eta_rho", "xi_rho"), np.zeros((eta_rho, xi_rho))),
+                "u": (("s_rho", "eta_u", "xi_u"), np.zeros((s_rho, eta_u, xi_u))),
+                "v": (("s_rho", "eta_v", "xi_v"), np.zeros((s_rho, eta_v, xi_v))),
+            },
+            coords={
+                "eta_rho": np.arange(eta_rho),
+                "eta_u": np.arange(eta_u),
+                "eta_v": np.arange(eta_v),
+                "xi_rho": np.arange(xi_rho),
+                "xi_u": np.arange(xi_u),
+                "xi_v": np.arange(xi_v),
+                "s_rho": np.arange(s_rho),
+            },
+        )
+
+        return ds
+
+    def test_partition_with_extra_dims(self, ds_with_extra_dims):
+        file_numbers, parts = partition(ds_with_extra_dims, np_eta=2, np_xi=2)
+
+        # Test that partitioned datasets contain eta_u and xi_v
+        for ds_part in parts:
+            assert "eta_u" in ds_part.dims
+            assert "xi_v" in ds_part.dims
+            assert ds_part.sizes["eta_u"] < ds_with_extra_dims.sizes["eta_u"]
+            assert ds_part.sizes["xi_v"] < ds_with_extra_dims.sizes["xi_v"]
+            assert ds_part.sizes["eta_u"] > 0
+            assert ds_part.sizes["xi_v"] > 0
 
 
 class TestPartitionMissingDims:

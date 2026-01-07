@@ -281,7 +281,7 @@ class ROMSOutput(ROMSDataset):
 
         # Compute depth coordinates on source data
         self._get_depth_coordinates(depth_type="layer", locations=["rho"])
-        layer_depth = self.ds_depth_coords[f"layer_depth_rho"]
+        layer_depth = self.ds_depth_coords["layer_depth_rho"]
         h = self.grid.ds.h
 
         # Rename coordinates

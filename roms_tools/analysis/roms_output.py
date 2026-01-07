@@ -11,8 +11,6 @@ from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
 from roms_tools.utils import (
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
 )
 
 
@@ -248,12 +246,11 @@ class ROMSOutput(ROMSDataset):
         # Retain only the variables in var_names and drop others
         ds = self.ds[var_names]
 
-        # Prepare lateral regrid
+        # Prepare lateral target coords
         lat_deg = self.grid.ds["lat_rho"]
         lon_deg = self.grid.ds["lon_rho"]
         if self.grid.straddle:
             lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
         if horizontal_resolution is None:
             horizontal_resolution = infer_nominal_horizontal_resolution(self.grid.ds)
         lons = generate_coordinate_range(
@@ -266,86 +263,66 @@ class ROMSOutput(ROMSDataset):
         lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
         target_coords = {"lat": lats, "lon": lons}
 
-        # Prepare vertical regrid
+        # Prepare vertical target coords
         if depth_levels is None:
             depth_levels, _ = self.grid._compute_exponential_depth_levels()
-
-        # Ensure depth_levels is an xarray.DataArray
         if not isinstance(depth_levels, xr.DataArray):
             depth_levels = xr.DataArray(
                 np.asarray(depth_levels),
                 dims=["depth"],
                 attrs={"long_name": "Depth", "units": "m"},
             )
-
         depth_levels = depth_levels.astype(np.float32)
 
-        # Initialize list to hold regridded datasets
-        regridded_datasets = []
+        # Interpolate velocities to rho-points and rotate to east/north directions
+        self.rotate_velocities_to_east_and_north(
+            velocity_pairs=(("u", "v"), ("ubar", "vbar"), ("u_slow", "v_slow"))
+        )
 
-        for loc, dims in [
-            ("rho", ("eta_rho", "xi_rho")),
-            ("u", ("eta_rho", "xi_u")),
-            ("v", ("eta_v", "xi_rho")),
-        ]:
-            var_names_loc = [
-                var_name
-                for var_name in var_names
-                if all(dim in ds[var_name].dims for dim in dims)
-            ]
-            if var_names_loc:
-                ds_loc = (
-                    ds[var_names_loc]
-                    .rename({f"lat_{loc}": "lat", f"lon_{loc}": "lon"})
-                    .where(self.grid.ds[f"mask_{loc}"])
-                )
-                self._get_depth_coordinates(depth_type="layer", locations=[loc])
-                layer_depth_loc = self.ds_depth_coords[f"layer_depth_{loc}"]
-                h_loc = self.grid.ds.h
-                if loc == "u":
-                    h_loc = interpolate_from_rho_to_u(h_loc)
-                elif loc == "v":
-                    h_loc = interpolate_from_rho_to_v(h_loc)
+        # Compute depth coordinates on source data
+        self._get_depth_coordinates(depth_type="layer", locations=["rho"])
+        layer_depth = self.ds_depth_coords[f"layer_depth_rho"]
+        h = self.grid.ds.h
 
-                # Exclude the horizontal boundary cells since diagnostic variables may contain zeros there
-                ds_loc = ds_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
-                layer_depth_loc = layer_depth_loc.isel(
-                    {dims[0]: slice(1, -1), dims[1]: slice(1, -1)}
-                )
-                h_loc = h_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
+        # Rename coordinates
+        ds = (
+            self.ds[[var_names[var]["name"] for var in var_names]]
+            .rename({"lat_rho": "lat", "lon_rho": "lon"})
+            .where(self.grid.ds.mask_rho)
+        )
 
-                # Lateral regridding
-                lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
-                ds_loc = lateral_regrid.apply(ds_loc)
-                layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
-                h_loc = lateral_regrid.apply(h_loc)
-                # Vertical regridding
-                if "s_rho" in ds_loc.dims:
-                    vertical_regrid = VerticalRegridFromROMS(ds_loc)
-                    for var_name in var_names_loc:
-                        if "s_rho" in ds_loc[var_name].dims:
-                            attrs = ds_loc[var_name].attrs
-                            regridded = vertical_regrid.apply(
-                                ds_loc[var_name],
-                                layer_depth_loc,
-                                depth_levels,
-                                mask_edges=False,
-                            )
-                            regridded = regridded.where(regridded.depth < h_loc)
-                            ds_loc[var_name] = regridded
-                            ds_loc[var_name].attrs = attrs
+        # Exclude the horizontal boundary cells since diagnostic variables may contain zeros there
+        coords = {"eta_rho": slice(1, -1), "xi_rho": slice(1, -1)}
+        ds = ds.isel(**coords)
+        layer_depth.isel(**coords)
+        h = h.isel(**coords)
 
-                    ds_loc = ds_loc.assign_coords({"depth": depth_levels})
+        # Lateral regridding
+        lateral_regrid = LateralRegridFromROMS(ds, target_coords)
+        ds = lateral_regrid.apply(ds)
+        layer_depth = lateral_regrid.apply(layer_depth)
+        h = lateral_regrid.apply(h)
 
-                # Collect regridded dataset for merging
-                regridded_datasets.append(ds_loc)
+        # Vertical regridding
+        if "s_rho" in ds.dims:
+            vertical_regrid = VerticalRegridFromROMS(ds)
+            for var_name in var_names:
+                if "s_rho" in ds[var_name].dims:
+                    attrs = ds[var_name].attrs
+                    regridded = vertical_regrid.apply(
+                        ds[var_name],
+                        layer_depth,
+                        depth_levels,
+                        mask_edges=False,
+                    )
+                    regridded = regridded.where(regridded.depth < h)
+                    ds[var_name] = regridded
+                    ds[var_name].attrs = attrs
 
-        # Merge all regridded datasets
-        if regridded_datasets:
-            ds = xr.merge(regridded_datasets)
+            ds = ds.assign_coords({"depth": depth_levels})
 
-            ds["time"].attrs = {"long_name": "Time"}
-            ds["lon"].attrs = {"long_name": "Longitude", "units": "Degrees East"}
-            ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}
+        ds["time"].attrs = {"long_name": "Time"}
+        ds["lon"].attrs = {"long_name": "Longitude", "units": "Degrees East"}
+        ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}
 
-            return ds
+        return ds

@@ -15,15 +15,17 @@ from roms_tools.setup.utils import (
     get_target_coords,
     get_variable_metadata,
     get_vector_pairs,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
     nan_check,
-    rotate_velocities,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets
+from roms_tools.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    rotate_velocities,
+    save_datasets,
+)
 
 
 @dataclass(kw_only=True)
@@ -141,7 +143,6 @@ class TidalForcing:
                     processed_fields[u_component],
                     processed_fields[v_component],
                     target_coords["angle"],
-                    interpolate=False,
                 )
 
         # convert to barotropic velocity

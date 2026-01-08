@@ -16,13 +16,16 @@ from roms_tools.setup.utils import (
     check_and_set_boundaries,
     from_yaml,
     get_boundary_coords,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
     pop_grid_data,
     to_dict,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets, wrap_longitudes
+from roms_tools.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    save_datasets,
+    wrap_longitudes,
+)
 
 
 @dataclass(kw_only=True)

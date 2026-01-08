@@ -10,6 +10,8 @@ from scipy.ndimage import label
 
 from roms_tools.setup.utils import (
     handle_boundaries,
+)
+from roms_tools.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
 )

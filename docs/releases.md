@@ -14,6 +14,7 @@
 
 * Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
 * `LateralFill`: enforce correct dimension order for mask and input arrays ([#517](https://github.com/CWorthy-ocean/roms-tools/pull/517))
+* Refactor `rotate_velocities` and staggered interpolation ([#527](https://github.com/CWorthy-ocean/roms-tools/pull/527))
 
 ### Documentation
 

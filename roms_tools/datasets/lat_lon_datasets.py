@@ -664,6 +664,7 @@ class LatLonDataset:
     def rotate_velocities_to_east_and_north(self) -> None:
         """
         Rotate velocity components to east/north directions.
+
         For lat-lon datasets, velocity components are already defined in
         earth-relative east/north coordinates. Therefore, no rotation is
         required and this method is a no-op.

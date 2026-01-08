@@ -610,8 +610,10 @@ def rotate_velocities(
 
     This function rotates zonal (u) and meridional (v) velocity components
     using a grid angle field. It can be used to:
+
     1. Rotate model velocities from the ROMS model grid to a lat-lon reference frame.
     2. Rotate lat-lon velocities onto the ROMS model grid.
+
     Optionally, velocities can be interpolated between staggered C-grid
     locations (u-, v-, and rho-points) before and/or after rotation.
 

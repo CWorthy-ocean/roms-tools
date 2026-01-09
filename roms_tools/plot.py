@@ -1104,8 +1104,9 @@ def plot(
         field = vertical_regrid.apply(
             field,
             source_depth_coords=layer_depth,
-            target_depth_coords=np.array([depth]),
+            target_depth_coords=xr.DataArray(np.array([depth]), dims=["depth"]),
         ).squeeze()
+
         # Reset attributes
         field.attrs = attrs
         title = title + f", depth = {depth}m"

@@ -231,9 +231,8 @@ class VerticalRegridToROMS:
 class VerticalRegrid:
     """Regrid ROMS variables along the vertical.
 
-    This class uses the `xgcm` package to transform data from a ROMS vertical coordinate
-    system (`s_rho`) to a user-defined set of target depth levels, where both the source
-    and target coordinates can vary spatially (i.e., they can be 3D fields).
+    This class uses the `xgcm` package. Both the source and target coordinates can vary spatially
+    (i.e., they can be 3D fields).
 
     Attributes
     ----------
@@ -241,20 +240,23 @@ class VerticalRegrid:
         The XGCM grid object used for vertical regridding, initialized with the input dataset `ds`.
     """
 
-    def __init__(self, ds: "xr.Dataset"):
+    def __init__(self, ds: "xr.Dataset", source_dim: str):
         """Initialize the VerticalRegrid object with a ROMS dataset.
 
         Parameters
         ----------
         ds : xarray.Dataset
             A ROMS source dataset containing the vertical coordinate `s_rho`.
+        source_dim : str
+            Name of the vertical source dimension in the dataset.
         """
         self.grid = xgcm.Grid(
             ds,
-            coords={"s_rho": {"center": "s_rho"}},
+            coords={source_dim: {"center": source_dim}},
             periodic=False,
             autoparse_metadata=False,
         )
+        self.source_dim = source_dim
 
     def apply(
         self,
@@ -271,7 +273,7 @@ class VerticalRegrid:
         Parameters
         ----------
         da : xarray.DataArray
-            The data array to regrid. Must have a vertical dimension corresponding to `s_rho`.
+            The data array to regrid. Must have a vertical dimension corresponding to `self.source_dim.
 
         source_depth_coords : array-like (1D or 3D)
             Depth coordinates of the source data. Can be a 1D array (same for all horizontal points)
@@ -299,7 +301,7 @@ class VerticalRegrid:
             warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
             transformed = self.grid.transform(
                 da,
-                "s_rho",
+                self.source_dim,
                 target=target_depth_coords,
                 target_data=source_depth_coords,
                 target_dim=target_dim,

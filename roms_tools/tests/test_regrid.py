@@ -203,7 +203,7 @@ def test_vertical_regrid_2d_depths_different_vertical_levels():
     )
 
     # --- regrid ---
-    regridder = VerticalRegrid(ds)
+    regridder = VerticalRegrid(ds, source_dim="s_rho")
     out = regridder.apply(
         temp_data,
         source_depth_coords=source_depth,
@@ -247,7 +247,7 @@ def test_vertical_regrid_mask_edges():
         coords={"s_rho": s_rho},
     )
 
-    regridder = VerticalRegrid(ds)
+    regridder = VerticalRegrid(ds, source_dim="s_rho")
     out = regridder.apply(data, source_depth, target_depth, mask_edges=True)
 
     assert np.isnan(out[0])

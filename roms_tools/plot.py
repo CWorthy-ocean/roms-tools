@@ -1098,7 +1098,7 @@ def plot(
     if depth is not None:
         ds = xr.Dataset()
         ds["s_rho"] = field["s_rho"]
-        vertical_regrid = VerticalRegrid(ds)
+        vertical_regrid = VerticalRegrid(ds, source_dim="s_rho")
         # Save attributes before vertical regridding
         attrs = field.attrs
         field = vertical_regrid.apply(

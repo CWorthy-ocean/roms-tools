@@ -321,7 +321,7 @@ class ROMSOutput(ROMSDataset):
                 h_loc = lateral_regrid.apply(h_loc)
                 # Vertical regridding
                 if "s_rho" in ds_loc.dims:
-                    vertical_regrid = VerticalRegrid(ds_loc)
+                    vertical_regrid = VerticalRegrid(ds_loc, source_dim="s_rho")
                     for var_name in var_names_loc:
                         if "s_rho" in ds_loc[var_name].dims:
                             attrs = ds_loc[var_name].attrs

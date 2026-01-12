@@ -263,7 +263,7 @@ class VerticalRegrid:
         da: "xr.DataArray",
         source_depth_coords: "xr.DataArray",
         target_depth_coords: "xr.DataArray",
-        mask_edges: bool = True,
+        mask_edges: bool = False,
     ) -> "xr.DataArray":
         """Regrid a ROMS variable from source vertical coordinates to target vertical coordinates.
 
@@ -284,7 +284,7 @@ class VerticalRegrid:
 
         mask_edges : bool, optional
             If True, target values outside the range of source depth coordinates are masked with NaN.
-            Defaults to True.
+            Defaults to False.
 
         Returns
         -------

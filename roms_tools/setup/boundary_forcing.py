@@ -19,7 +19,7 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.fill import one_dim_fill
 from roms_tools.plot import line_plot, section_plot
-from roms_tools.regrid import LateralRegridToROMS, VerticalRegridToROMS
+from roms_tools.regrid import LateralRegridToROMS, VerticalRegrid
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
@@ -334,14 +334,19 @@ class BoundaryForcing:
                             self._get_depth_coordinates(zeta_v, direction, "v", "layer")
 
                         # vertical regridding
-                        vertical_regrid = VerticalRegridToROMS(
-                            self.ds_depth_coords[f"layer_depth_{location}_{direction}"],
-                            bdry_data.ds[bdry_data.dim_names["depth"]],
+                        vertical_regrid = VerticalRegrid(
+                            bdry_data.ds, source_dim=bdry_data.dim_names["depth"]
                         )
                         for var_name in filtered_vars:
                             if var_name in processed_fields:
                                 processed_fields[var_name] = vertical_regrid.apply(
-                                    processed_fields[var_name]
+                                    processed_fields[var_name],
+                                    source_depth_coords=bdry_data.ds[
+                                        bdry_data.dim_names["depth"]
+                                    ],
+                                    target_depth_coords=self.ds_depth_coords[
+                                        f"layer_depth_{location}_{direction}"
+                                    ],
                                 )
 
                 # compute barotropic velocities

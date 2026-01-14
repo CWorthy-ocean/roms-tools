@@ -5,15 +5,18 @@
 ### New Features
 
 * Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
+* Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 
 ### Breaking Changes
 
 * Remove user-facing control of SSH-adjusted depth coordinates (`adjust_depth_for_sea_surface_height` parameter) for `InitialConditions` and `BoundaryForcing`, enforcing consistent and physically sensible defaults ([#514](https://github.com/CWorthy-ocean/roms-tools/pull/514))
+* Remove `horizontal_chunk_size` parameter from `InitialConditions`; the new vertical regridding scheme is sufficiently memory-efficient without it ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 
 ### Internal Changes
 
 * Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
 * `LateralFill`: enforce correct dimension order for mask and input arrays ([#517](https://github.com/CWorthy-ocean/roms-tools/pull/517))
+* Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 
 ### Documentation
 

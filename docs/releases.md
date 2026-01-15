@@ -21,6 +21,7 @@
 ### Bugfixes
 
 * Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
+* Improve robustness of `Grid.update_topography` for externally generated grids ([#523](https://github.com/CWorthy-ocean/roms-tools/pull/523))
 
 
 ## v3.3.0

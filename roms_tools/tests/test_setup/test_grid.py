@@ -751,6 +751,12 @@ def test_update_topography_raises_if_grid_loaded_from_file_has_no_source_info():
     ):
         grid.update_topography(hmin=15)
 
+    with pytest.raises(
+        ValueError,
+        match="Minimal ocean depth is not available",
+    ):
+        grid.update_topography(topography_source={"name": "ETOPO5"})
+
 
 # Mask tests
 

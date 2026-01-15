@@ -252,6 +252,12 @@ class Grid:
                 "Please provide `topography_source` explicitly when calling "
                 "`update_topography()`."
             )
+        # This can only happen for externally generated grids read via Grid.from_file()
+        if hmin is None:
+            raise ValueError(
+                "Minimal ocean depth is not available. "
+                "Please provide `hmin` explicitly when calling `update_topography()`."
+            )
 
         name = topography_source["name"]  # type: ignore[index]
 

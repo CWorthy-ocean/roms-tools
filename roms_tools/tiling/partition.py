@@ -7,6 +7,61 @@ import xarray as xr
 
 from roms_tools.utils import save_datasets
 
+DIM_INFO = {
+    # eta-direction
+    "eta_rho": dict(axis="eta", ghost=2, edge="both"),
+    "eta_u": dict(axis="eta", ghost=2, edge="both"),
+    "eta_v": dict(axis="eta", ghost=1, edge="upper"),
+    "eta_psi": dict(axis="eta", ghost=3, edge="both"),
+    "eta_coarse": dict(axis="eta", ghost=2, edge="both"),
+    # xi-direction
+    "xi_rho": dict(axis="xi", ghost=2, edge="both"),
+    "xi_u": dict(axis="xi", ghost=1, edge="upper"),
+    "xi_v": dict(axis="xi", ghost=2, edge="both"),
+    "xi_psi": dict(axis="xi", ghost=3, edge="both"),
+    "xi_coarse": dict(axis="xi", ghost=2, edge="both"),
+}
+
+
+def _exact_division(size: int, nparts: int, dim: str) -> int:
+    if size % nparts != 0:
+        raise ValueError(
+            f"Dimension '{dim}' of size {size} cannot be evenly divided into {nparts} partitions."
+        )
+    return size // nparts
+
+
+def _compute_partition_sizes(
+    total_size: int,
+    nparts: int,
+    ghost: int,
+    edge: str,
+    dim: str,
+) -> list[int]:
+    """Compute per-tile sizes including ghost cells."""
+    if nparts == 1:
+        return [total_size]
+
+    core = _exact_division(total_size - ghost, nparts, dim)
+
+    sizes = [core] * nparts
+
+    if edge == "both":
+        sizes[0] += ghost // 2
+        sizes[-1] += ghost - ghost // 2
+    elif edge == "upper":
+        sizes[-1] += ghost
+    else:
+        raise ValueError(f"Unknown edge rule '{edge}' for {dim}")
+
+    return sizes
+
+
+def _cumsum(sizes: list[int]) -> np.ndarray:
+    out = np.zeros(len(sizes) + 1, dtype=int)
+    out[1:] = np.cumsum(sizes)
+    return out
+
 
 def partition(
     ds: xr.Dataset, np_eta: int = 1, np_xi: int = 1, include_coarse_dims: bool = True
@@ -16,8 +71,8 @@ def partition(
 
     This function divides the input dataset into `np_eta` by `np_xi` tiles, where each tile
     represents a subdomain of the original dataset. The partitioning is performed along
-    the spatial dimensions `eta_rho`, `xi_rho`, `eta_v`, `xi_u`, `eta_psi`, `xi_psi`, `eta_coarse`, and `xi_coarse`,
-    depending on which dimensions are present in the dataset.
+    the spatial dimensions `eta_rho`, `eta_u`, `eta_v`, `eta_coarse`, `xi_rho`, `xi_u`, `xi_v`,
+    and `xi_coarse`, depending on which dimensions are present in the dataset.
 
     Parameters
     ----------
@@ -71,227 +126,42 @@ def partition(
     ):
         raise ValueError("np_eta and np_xi must be positive integers")
 
-    base_dims = [
-        "eta_rho",
-        "xi_rho",
-        "eta_v",
-        "xi_u",
-        "eta_psi",
-        "xi_psi",
+    # Select applicable dimensions
+    dims_to_partition = [
+        d
+        for d in DIM_INFO
+        if d in ds.dims and (include_coarse_dims or "coarse" not in d)
     ]
-    coarse_dims = ["eta_coarse", "xi_coarse"]
-    partitionable_dims = base_dims + coarse_dims if include_coarse_dims else base_dims
 
-    dims_to_partition = [d for d in partitionable_dims if d in ds.dims]
+    partitioned_sizes = {}
 
-    # if eta is periodic there are no ghost cells along those dimensions
-    if "eta_v" in ds.sizes and ds.sizes["eta_rho"] == ds.sizes["eta_v"]:
-        # TODO how are we supposed to know if eta is periodic if eta_v doesn't appear? partit.F doesn't say...
-        n_eta_ghost_cells = 0
-    else:
-        n_eta_ghost_cells = 1
+    for dim in dims_to_partition:
+        info = DIM_INFO[dim]
+        nparts = np_eta if info["axis"] == "eta" else np_xi
 
-    # if xi is periodic there are no ghost cells along those dimensions
-    if "xi_u" in ds.sizes and ds.sizes["xi_rho"] == ds.sizes["xi_u"]:
-        n_xi_ghost_cells = 0
-    else:
-        n_xi_ghost_cells = 1
-
-    def integer_division_or_raise(a: int, b: int, dimension: str) -> int:
-        """Perform integer division and ensure that the division is exact.
-
-        Parameters
-        ----------
-        a : int
-            The numerator for the division.
-        b : int
-            The denominator for the division.
-        dimension : str
-            The name of the dimension being partitioned, used for error reporting.
-
-        Returns
-        -------
-        int
-            The result of the integer division.
-
-        Raises
-        ------
-        ValueError
-            If the division is not exact, indicating that the domain cannot be evenly divided
-            along the specified dimension.
-        """
-        remainder = a % b
-        if remainder == 0:
-            return a // b
-        else:
-            raise ValueError(
-                f"Dimension '{dimension}' of size {a} cannot be evenly divided into {b} partitions."
-            )
-
-    if "eta_rho" in dims_to_partition:
-        eta_rho_domain_size = integer_division_or_raise(
-            ds.sizes["eta_rho"] - 2 * n_eta_ghost_cells, np_eta, "eta_rho"
+        partitioned_sizes[dim] = _compute_partition_sizes(
+            total_size=ds.sizes[dim],
+            nparts=nparts,
+            ghost=info["ghost"],
+            edge=info["edge"],
+            dim=dim,
         )
-
-    if "xi_rho" in dims_to_partition:
-        xi_rho_domain_size = integer_division_or_raise(
-            ds.sizes["xi_rho"] - 2 * n_xi_ghost_cells, np_xi, "xi_rho"
-        )
-
-    if "eta_v" in dims_to_partition:
-        eta_v_domain_size = integer_division_or_raise(
-            ds.sizes["eta_v"] - 1 * n_eta_ghost_cells, np_eta, "eta_v"
-        )
-
-    if "xi_u" in dims_to_partition:
-        xi_u_domain_size = integer_division_or_raise(
-            ds.sizes["xi_u"] - 1 * n_xi_ghost_cells, np_xi, "xi_u"
-        )
-
-    if "eta_psi" in dims_to_partition:
-        eta_psi_domain_size = integer_division_or_raise(
-            ds.sizes["eta_psi"] - 3 * n_eta_ghost_cells, np_eta, "eta_psi"
-        )
-
-    if "xi_psi" in dims_to_partition:
-        xi_psi_domain_size = integer_division_or_raise(
-            ds.sizes["xi_psi"] - 3 * n_xi_ghost_cells, np_xi, "xi_psi"
-        )
-
-    if "eta_coarse" in dims_to_partition:
-        eta_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["eta_coarse"] - 2 * n_eta_ghost_cells, np_eta, "eta_coarse"
-        )
-    if "xi_coarse" in dims_to_partition:
-        xi_coarse_domain_size = integer_division_or_raise(
-            ds.sizes["xi_coarse"] - 2 * n_xi_ghost_cells, np_xi, "xi_coarse"
-        )
-
-    # unpartitioned dimensions should have sizes unchanged
-    partitioned_sizes = {
-        dim: [size] for dim, size in ds.sizes.items() if dim in dims_to_partition
-    }
-
-    # TODO refactor to use two functions for odd- and even-length dimensions
-    if "eta_v" in dims_to_partition:
-        partitioned_sizes["eta_v"] = [eta_v_domain_size] * (np_eta - 1) + [
-            eta_v_domain_size + n_eta_ghost_cells
-        ]
-    if "xi_u" in dims_to_partition:
-        partitioned_sizes["xi_u"] = [xi_u_domain_size] * (np_xi - 1) + [
-            xi_u_domain_size + n_xi_ghost_cells
-        ]
-
-    if np_eta > 1:
-        if "eta_rho" in dims_to_partition:
-            partitioned_sizes["eta_rho"] = (
-                [eta_rho_domain_size + n_eta_ghost_cells]
-                + [eta_rho_domain_size] * (np_eta - 2)
-                + [eta_rho_domain_size + n_eta_ghost_cells]
-            )
-        if "eta_psi" in dims_to_partition:
-            partitioned_sizes["eta_psi"] = (
-                [n_eta_ghost_cells + eta_psi_domain_size]
-                + [eta_psi_domain_size] * (np_eta - 2)
-                + [eta_psi_domain_size + 2 * n_eta_ghost_cells]
-            )
-        if "eta_coarse" in dims_to_partition:
-            partitioned_sizes["eta_coarse"] = (
-                [eta_coarse_domain_size + n_eta_ghost_cells]
-                + [eta_coarse_domain_size] * (np_eta - 2)
-                + [eta_coarse_domain_size + n_eta_ghost_cells]
-            )
-
-    if np_xi > 1:
-        if "xi_rho" in dims_to_partition:
-            partitioned_sizes["xi_rho"] = (
-                [xi_rho_domain_size + n_xi_ghost_cells]
-                + [xi_rho_domain_size] * (np_xi - 2)
-                + [xi_rho_domain_size + n_xi_ghost_cells]
-            )
-        if "xi_psi" in dims_to_partition:
-            partitioned_sizes["xi_psi"] = (
-                [n_xi_ghost_cells + xi_psi_domain_size]
-                + [xi_psi_domain_size] * (np_xi - 2)
-                + [xi_psi_domain_size + 2 * n_xi_ghost_cells]
-            )
-        if "xi_coarse" in dims_to_partition:
-            partitioned_sizes["xi_coarse"] = (
-                [xi_coarse_domain_size + n_xi_ghost_cells]
-                + [xi_coarse_domain_size] * (np_xi - 2)
-                + [xi_coarse_domain_size + n_xi_ghost_cells]
-            )
-
-    def cumsum(pmf):
-        """Implementation of cumsum which ensures the result starts with zero."""
-        cdf = np.empty(len(pmf) + 1, dtype=int)
-        cdf[0] = 0
-        np.cumsum(pmf, out=cdf[1:])
-        return cdf
 
     file_numbers = []
     partitioned_datasets = []
+
     for i in range(np_eta):
         for j in range(np_xi):
-            file_number = j + (i * np_xi)
-            file_numbers.append(file_number)
-
+            file_numbers.append(j + i * np_xi)
             indexers = {}
 
-            if "eta_rho" in dims_to_partition:
-                eta_rho_partition_indices = cumsum(partitioned_sizes["eta_rho"])
-                indexers["eta_rho"] = slice(
-                    int(eta_rho_partition_indices[i]),
-                    int(eta_rho_partition_indices[i + 1]),
-                )
-            if "xi_rho" in dims_to_partition:
-                xi_rho_partition_indices = cumsum(partitioned_sizes["xi_rho"])
-                indexers["xi_rho"] = slice(
-                    int(xi_rho_partition_indices[j]),
-                    int(xi_rho_partition_indices[j + 1]),
-                )
+            for dim, sizes in partitioned_sizes.items():
+                info = DIM_INFO[dim]
+                idx = i if info["axis"] == "eta" else j
+                bounds = _cumsum(sizes)
+                indexers[dim] = slice(bounds[idx], bounds[idx + 1])
 
-            if "eta_v" in dims_to_partition:
-                eta_v_partition_indices = cumsum(partitioned_sizes["eta_v"])
-                indexers["eta_v"] = slice(
-                    int(eta_v_partition_indices[i]),
-                    int(eta_v_partition_indices[i + 1]),
-                )
-            if "xi_u" in dims_to_partition:
-                xi_u_partition_indices = cumsum(partitioned_sizes["xi_u"])
-                indexers["xi_u"] = slice(
-                    int(xi_u_partition_indices[j]), int(xi_u_partition_indices[j + 1])
-                )
-            if "eta_psi" in dims_to_partition:
-                eta_psi_partition_indices = cumsum(partitioned_sizes["eta_psi"])
-                indexers["eta_psi"] = slice(
-                    int(eta_psi_partition_indices[i]),
-                    int(eta_psi_partition_indices[i + 1]),
-                )
-            if "xi_psi" in dims_to_partition:
-                xi_psi_partition_indices = cumsum(partitioned_sizes["xi_psi"])
-                indexers["xi_psi"] = slice(
-                    int(xi_psi_partition_indices[j]),
-                    int(xi_psi_partition_indices[j + 1]),
-                )
-
-            if "eta_coarse" in dims_to_partition:
-                eta_coarse_partition_indices = cumsum(partitioned_sizes["eta_coarse"])
-                indexers["eta_coarse"] = slice(
-                    int(eta_coarse_partition_indices[i]),
-                    int(eta_coarse_partition_indices[i + 1]),
-                )
-
-            if "xi_coarse" in dims_to_partition:
-                xi_coarse_partition_indices = cumsum(partitioned_sizes["xi_coarse"])
-                indexers["xi_coarse"] = slice(
-                    int(xi_coarse_partition_indices[j]),
-                    int(xi_coarse_partition_indices[j + 1]),
-                )
-
-            partitioned_ds = ds.isel(**indexers)
-
-            partitioned_datasets.append(partitioned_ds)
+            partitioned_datasets.append(ds.isel(**indexers))
 
     return file_numbers, partitioned_datasets
 

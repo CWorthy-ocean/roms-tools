@@ -5,6 +5,7 @@
 ### New Features
 
 * Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
+* Partition `eta_u` and `xi_v` dimension if present ([#526](https://github.com/CWorthy-ocean/roms-tools/pull/526))
 
 ### Breaking Changes
 

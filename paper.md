@@ -1,5 +1,5 @@
 ---
-title: 'ROMS-Tools: Reproducible preprocessing and analysis for regional ocean modeling'
+title: 'ROMS-Tools: Reproducible Preprocessing and Analysis for ROMS Simulations'
 tags:
   - Python
   - ocean modeling
@@ -145,3 +145,5 @@ Generative AI tools were used to assist with writing docstrings and developing t
 # Acknowledgements
 
 Development of `ROMS-Tools` has been supported by ARPA-E (DE-AR0001838) and philanthropic donations to [C]Worthy from the Grantham Foundation for the Environment, the Chan Zuckerberg Initiative, Founders Pledge, and the Ocean Resilience Climate Alliance.
+
+# References

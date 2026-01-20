@@ -660,7 +660,7 @@ class LatLonDataset:
         """
         if "depth" in self.dim_names:
             self.ds = extrapolate_deepest_to_bottom(self.ds, self.dim_names["depth"])
-            
+
     @classmethod
     def from_ds(cls, original_dataset: LatLonDataset, ds: xr.Dataset) -> LatLonDataset:
         """Substitute the internal dataset of a LatLonDataset object with a new xarray
@@ -1691,12 +1691,13 @@ class SRTM15Dataset(LatLonDataset):
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
 
+
 @dataclass(kw_only=True)
 class EMODDataset(LatLonDataset):
     """Represents topography data on the original grid from the SRTM15 dataset."""
 
     translate_lon_to_360: bool = True
-    
+
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "topo": "elevation",
@@ -1705,6 +1706,7 @@ class EMODDataset(LatLonDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
+
 
 @dataclass
 class TPXOManager:

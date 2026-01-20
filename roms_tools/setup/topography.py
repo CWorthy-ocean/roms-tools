@@ -154,6 +154,7 @@ def _make_raw_topography(
     data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
     # Enforce double precision to ensure reproducibility
     data.convert_to_float64()
+    data.apply_lateral_fill()
 
     if verbose:
         start_time = time.time()

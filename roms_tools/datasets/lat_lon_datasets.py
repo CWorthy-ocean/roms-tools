@@ -1708,6 +1708,16 @@ class EMODDataset(LatLonDataset):
     )
     needs_lateral_fill: bool = True
 
+    def post_process(self) -> None:
+        """Assign land mask."""
+        mask = xr.where(
+            self.ds[self.var_names["topo"]].isnull(),
+            0,
+            1,
+        )
+
+        self.ds["mask"] = mask
+
 
 @dataclass
 class TPXOManager:

@@ -122,6 +122,25 @@ def grid_that_straddles_180_degree_meridian_with_global_srtm15_data():
 
 
 @pytest.fixture()
+def grid_with_emod_data():
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=32,
+        size_y=19.2,
+        center_lon=-21.68,
+        center_lat=64.325,
+        rot=0,
+        topography_source={
+            "name": "EMOD",
+            "path": download_test_data("EMODnet_C2_coarse100.nc"),
+        },
+    )
+
+    return grid
+
+
+@pytest.fixture()
 def grid_with_gshhs_coastlines():
     iceland_fjord_kwargs = {
         "nx": 80,
@@ -203,6 +222,7 @@ def test_coords_relation(grid_fixture, request):
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_that_straddles_180_degree_meridian_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
+        "grid_with_emod_data",
     ],
 )
 def test_successful_initialization_with_topography(grid_fixture, request):
@@ -344,6 +364,7 @@ def test_grid_straddle_crosses_meridian():
         "grid_that_straddles_dateline_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
+        "grid_with_emod_data",
     ],
 )
 def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
@@ -379,6 +400,7 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
+        "grid_with_emod_data",
     ],
 )
 def test_roundtrip_yaml(grid_fixture, tmp_path, request):
@@ -411,6 +433,7 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
+        "grid_with_emod_data",
     ],
 )
 def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
@@ -441,6 +464,7 @@ def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_shifted_global_etopo_data",
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
+        "grid_with_emod_data",
     ],
 )
 def test_files_have_same_hash(grid_fixture, tmp_path, request):

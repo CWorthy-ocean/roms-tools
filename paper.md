@@ -54,7 +54,8 @@ affiliations:
    index: 3
 date: 3 November 2025
 bibliography: docs/references.bib
-—
+
+---
 
 # Summary
 

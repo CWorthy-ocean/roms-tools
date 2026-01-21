@@ -1,6 +1,19 @@
 # Release notes
 
-## v3.4.0 (unreleased)
+## v3.5.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+### Documentation
+
+### Bugfixes
+
+
+## v3.4.0
 
 ### New Features
 
@@ -16,13 +29,10 @@
 * Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
 * `LateralFill`: enforce correct dimension order for mask and input arrays ([#517](https://github.com/CWorthy-ocean/roms-tools/pull/517))
 
-### Documentation
-
 ### Bugfixes
 
 * Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
 * Improve robustness of `Grid.update_topography` for externally generated grids ([#523](https://github.com/CWorthy-ocean/roms-tools/pull/523))
-
 
 ## v3.3.0
 

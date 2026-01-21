@@ -137,7 +137,8 @@ Internally, `ROMS-Tools` follows a **layered, modular architecture**. Low-level 
 
 # Research Impact Statement
 
-`ROMS-Tools` is used by two primary research communities. First, regional ocean modelers use it to generate reproducible input datasets for ROMS simulations; external users include researchers at **PNNL**, **WHOI**, and **UCLA**. Second, researchers in the ocean-based carbon dioxide removal (CDR) community use `ROMS-Tools` to configure reproducible ROMS–MARBL simulations of climate intervention scenarios, with adopters including **[C]Worthy**, **Carbon to Sea**, **Ebb Carbon**, and **SCCWRP**. All of these groups have contacted the developers directly or engaged in offline discussions regarding their use of the package.
+`ROMS-Tools` is used by two primary research communities. First, regional ocean modelers use it to generate reproducible input datasets for ROMS simulations; external users include researchers at **PNNL**, **WHOI**, and **UCLA**. Second, researchers in the ocean-based carbon dioxide removal (CDR) community use `ROMS-Tools` to configure reproducible ROMS–MARBL simulations of climate intervention scenarios, with adopters including **[C]Worthy**, **Carbon to Sea**, **Ebb Carbon**, and **SCCWRP**.
+All of these groups have contacted the developers directly or engaged with the project through GitHub or offline discussions.
 
 Additional evidence of community uptake comes from public usage metrics. At the time of writing, the GitHub repository shows **119 unique cloners in the past 14 days**, with stars from users at institutions including the University of Waikato, NCAR, University of Maryland, National Oceanography Centre, McGill University, UC Santa Cruz, and others. Distribution statistics indicate **over 3,100 conda-forge downloads in the past six months**, including **68 downloads of the most recent release (v3.3.0)**, and **more than 48,000 total PyPI downloads** (noting that PyPI counts include automated CI usage, whereas conda downloads do not).
 
@@ -145,7 +146,7 @@ Additional evidence of community uptake comes from public usage metrics. At the 
 
 # AI Usage Disclosure
 
-Generative AI tools were used to assist with writing docstrings and developing tests for the `ROMS-Tools` software, to improve the clarity and readability of the documentation, and to shorten and edit portions of the manuscript text. All AI-assisted content was reviewed and verified by the authors for technical accuracy and correctness.
+Generative AI tools were used to help write docstrings, develop tests, and improve the clarity and readability of both the ROMS-Tools documentation and manuscript text. All AI-assisted content was reviewed and verified by the authors for technical accuracy and correctness.
 
 # Acknowledgements
 

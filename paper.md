@@ -112,7 +112,7 @@ Tools from other modeling communities cannot simply be adopted, since each ocean
 
 # Software Design
 
-`ROMS-Tools` is designed to balance **ease of use, flexibility, reproducibility, and scalability** in regional ocean modeling workflows, providing both high-level user interfaces and a modular, extensible architecture that supports efficient data handling, customizable workflows, and scalable computation.
+`ROMS-Tools` is designed to balance **ease of use, flexibility, reproducibility, and scalability**.
 
 ## Design Trade-Offs
 

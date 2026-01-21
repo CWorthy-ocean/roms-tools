@@ -90,6 +90,7 @@ pup_test_data = pooch.create(
         "GSHHS_l_L1.prj": "98aaf3d1c0ecadf1a424a4536de261c3daf4e373697cb86c40c43b989daf52eb",
         "GSHHS_l_L1.shp": "bc76f101f9b8671f90e734b4026da91c20066fc627cc8b5889ba22d90cbf97e9",
         "GSHHS_l_L1.shx": "72879354892d80d6c39c612f645661ec0edc75f3f9f8f74b19d9387ae0327377",
+        "EMODnet_C2_coarse100.nc": "4202a6a5877de726bf13f41de7a1edfea2db83278ce371fe7732eb4b6770ed6d",
     },
 )
 

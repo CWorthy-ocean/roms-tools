@@ -1,5 +1,5 @@
 ---
-title: 'ROMS-Tools: Reproducible Preprocessing and Analysis for ROMS Simulations'
+title: 'ROMS-Tools: Reproducible and Scalable Preprocessing and Analysis for Regional Ocean Modeling with ROMS'
 tags:
   - Python
   - ocean modeling
@@ -60,9 +60,9 @@ bibliography: docs/references.bib
 # Summary
 
 The ocean regulates Earth’s climate and sustains marine ecosystems by circulating and storing heat, carbon, oxygen, and nutrients, while exchanging gases with the atmosphere. Scientists study these processes using ocean models, which simulate the ocean on a grid.
-**Regional ocean models** focus computational resources on a limited geographical area with fine grid spacing, resolving fine-scale phenomena such as mesoscale and submesoscale features, tidal dynamics, coastal currents, upwelling, and detailed biogeochemical (BGC) processes. A widely used regional ocean model is the **Regional Ocean Modeling System (ROMS)** [@shchepetkin_regional_2005]. ROMS has been coupled to the Marine Biogeochemistry Library (MARBL) [@long_simulations_2021; @ucla-roms] to link physical and BGC processes. ROMS-MARBL supports research on environmental management, fisheries, regional climate impacts, and ocean-based carbon dioxide removal (CDR) strategies.
+**Regional ocean models** focus computational resources on a limited geographical area with fine grid spacing, and can resolve fine-scale phenomena such as mesoscale and submesoscale features, tidal dynamics, coastal currents, upwelling, and detailed biogeochemical (BGC) processes. A widely used regional ocean model is the **Regional Ocean Modeling System (ROMS)** [@shchepetkin_regional_2005]. ROMS has been coupled to the Marine Biogeochemistry Library (MARBL) [@long_simulations_2021; @ucla-roms] to link physical and BGC processes. ROMS-MARBL supports research on environmental management, fisheries, regional climate impacts, and ocean-based carbon dioxide removal (CDR) strategies.
 
-Configuring a regional ocean model like ROMS-MARBL is technically challenging. Setting up a model requires initializing and forcing it with oceanic and atmospheric data from multiple external sources in diverse formats, which can reach several petabytes for global datasets. These data must be subsetted, processed, and mapped onto the target domain’s geometry, producing input datasets of 10–100 terabytes for large regional models. Generating these input files is time-consuming, error-prone, and hard to reproduce, creating a bottleneck for both new and experienced users. The Python package `ROMS-Tools` addresses this challenge by providing efficient, dask-backed [@dask], user-friendly tools that can be installed via Conda or PyPI and run interactively from Jupyter notebooks. It supports creating regional grids, preprocessing all required model inputs, and postprocessing and analysis. Current capabilities are fully compatible with UCLA-ROMS [@ucla-roms; @ucla-roms-cworthy], with potential support for other ROMS versions, such as Rutgers ROMS [@rutgers-roms], in the future.
+Configuring a regional ocean model like ROMS-MARBL is technically challenging. Setting up a model requires initializing and forcing it with oceanic and atmospheric data from multiple external sources in diverse formats, which can reach several petabytes for global datasets. These data must be subsetted, processed, and mapped onto the target domain’s geometry, producing input datasets of 10–100 terabytes for large regional models. Generating these input files is time-consuming, error-prone, and hard to reproduce, creating a bottleneck for both new and experienced users. The Python package `ROMS-Tools` addresses this challenge by providing efficient, `dask`-backed [@dask], user-friendly tools that can be installed via Conda or PyPI and run interactively from Jupyter notebooks. It supports creating regional grids, preprocessing all required model inputs, and postprocessing and analysis. Current capabilities are fully compatible with UCLA-ROMS [@ucla-roms; @ucla-roms-cworthy], with potential support for other ROMS versions, such as Rutgers ROMS [@rutgers-roms], in the future.
 
 
 ## Input Data and Preprocessing
@@ -129,7 +129,7 @@ Internally, `ROMS-Tools` uses a **layered, modular architecture**. Abstract base
 
 ## Computational and Data Model Choices
 
-`ROMS-Tools` is built on `xarray`, which lets users take advantage of its clear, consistent interface for exploring and inspecting datasets. The package integrates seamlessly with the broader Pangeo ecosystem. Optional `dask` support [@dask] allows workflows to scale from a laptop to HPC systems, enabling parallel and out-of-core computation for very large input and output datasets.
+`ROMS-Tools` is built on `xarray`, which lets users take advantage of its clear, consistent interface for exploring and inspecting datasets. The package integrates seamlessly with the broader Pangeo ecosystem. Optional `dask` support allows workflows to scale from a laptop to HPC systems, enabling parallel and out-of-core computation for very large input and output datasets.
 
 # Research Impact Statement
 
@@ -137,9 +137,9 @@ Internally, `ROMS-Tools` uses a **layered, modular architecture**. Abstract base
 
 Broader engagement is evident from GitHub stars, with users from institutions including the University of Waikato, NCAR, University of Maryland, National Oceanography Centre, Fathom Science, McGill University, Gwangju Institute of Science and Technology, UC Santa Cruz, RedLine Performance Solutions, and Submarine.
 
-`ROMS-Tools` is also integrated into broader workflows, including **C-Star**, an open-source platform to provide scientifically credible monitoring, reporting, and verification (MRV) for the emerging marine carbon market.
+`ROMS-Tools` is also integrated into broader workflows, including **C-Star**[@cstar], an open-source platform to provide scientifically credible monitoring, reporting, and verification (MRV) for the emerging marine carbon market.
 
-# AI usage disclosure
+# AI Usage Disclosure
 
 Generative AI tools were used to assist with writing docstrings and developing tests for the `ROMS-Tools` software, to improve the clarity and readability of the documentation, and to shorten and edit portions of the manuscript text. All AI-assisted content was reviewed and verified by the authors for technical accuracy and correctness.
 

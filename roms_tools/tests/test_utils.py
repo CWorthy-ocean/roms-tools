@@ -270,7 +270,7 @@ def test_interpolate_dataarray_single_time(climatology_data):
 
 def test_interpolate_dataset_multiple_times(climatology_data):
     _, ds, time_dim, time_coord = climatology_data
-    target_times = pd.date_range("2000-01-01", periods=3, freq="M")
+    target_times = pd.date_range("2000-01-01", periods=3, freq="ME")
     interpolated = interpolate_from_climatology(ds, time_dim, time_coord, target_times)
     assert isinstance(interpolated, xr.Dataset)
     assert all(interpolated[var].sizes[time_dim] == 3 for var in interpolated.data_vars)

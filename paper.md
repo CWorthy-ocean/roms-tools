@@ -121,44 +121,19 @@ The original MATLAB scripts were powerful but required users to edit source code
 
 ## Design Trade-Offs
 
-A central design trade-off in `ROMS-Tools` is between **automation** and **user control**. Rather than enforcing a fixed workflow, the package exposes key choices such as physical options (e.g., radiation or wind corrections), interpolation and fill methods, and computational backends. This approach contrasts with opinionated frameworks that fix defaults and directory structures to maximize automation. While users must make explicit decisions, some steps remain automated to prevent errors. For example, bathymetry smoothing is applied automatically with a non-tunable parameter, since overly small smoothing factors could produce rough bathymetry and crash simulations due to pressure gradient errors. This design choice directly addresses issues new users faced in the MATLAB scripts, balancing **flexibility, reproducibility, and safety**.
+A central design trade-off in `ROMS-Tools` is between **automation** and **user control**. Rather than enforcing a fixed workflow, the package exposes key choices such as physical options (e.g., radiation or wind corrections), interpolation and fill methods, and computational backends. This approach contrasts with opinionated frameworks that fix defaults and directory structures to maximize automation. While users must make explicit decisions, some steps remain automated to prevent errors. For example, bathymetry smoothing is applied automatically with a non-tunable parameter, since overly small smoothing factors could produce rough bathymetry and crash simulations due to pressure gradient errors. This design choice directly addresses issues new users faced in the MATLAB scripts, and balances **flexibility, reproducibility, and safety**, enabling transparent experimentation withoutexposing users to avoidable pitfalls.
 
 Another key trade-off is between **monolithic workflows** and **incremental, modular steps**. `ROMS-Tools` uses small, composable components (such as generating initial conditions, boundary forcing, and surface forcing) that can be executed, saved, and revisited independently. This avoids unnecessary recomputation when only some inputs change. To ensure reproducibility despite a modular workflow, configuration choices are stored in compact, text-based YAML files. These files are version-controllable, easy to share, and remove the need to transfer large model input NetCDF datasets. This directly remedies the MATLAB scripts’ lack of explicit workflow tracking.
 
 ## Architecture
 
-At the user-facing level, `ROMS-Tools` provides high-level objects such as `Grid`, `InitialConditions`, and `BoundaryForcing`. Each object exposes a consistent interface (`.ds`, `.plot()`, `.save()`, `.to_yaml()`), so users can always call the same methods in sequence or inspect attributes that are guaranteed to exist. This design reduces cognitive overhead and prevents the need for new users to manipulate raw scripts or track intermediate files manually.
+At the user-facing level, `ROMS-Tools` provides high-level objects such as `Grid`, `InitialConditions`, and `BoundaryForcing`. Each object exposes a consistent interface (`.ds`, `.plot()`, `.save()`, `.to_yaml()`), allowing users to call the same methods in sequence or inspect attributes that are always present. This design reduces cognitive overhead, makes workflows predictable and easy to follow, and eliminates the need for new users to manipulate raw scripts or track intermediate files manually.
 
 Internally, `ROMS-Tools` uses a **layered, modular architecture**. Abstract base classes (`LatLonDataset`, `ROMSDataset`) handle data ingestion and preprocessing. Source-specific datasets (e.g., `ERA5Dataset`, `GLORYSDataset`, `SRTMDataset`) inherit from these base classes and encode dataset-specific conventions, such as variable names, coordinates, and masking. Common operations, like subdomain selection and lateral filling, are implemented once and reused across datasets. Adding a new data source typically requires only a small subclass to define variable mappings while reusing the existing logic, keeping changes to the core code minimal. This layered design supports **extensibility and maintainability**, avoiding the pitfalls of the monolithic MATLAB scripts.
 
 ## Computational and Data Model Choices
 
 `ROMS-Tools` is built on `xarray`, which provides a clear, consistent interface for exploring and inspecting labeled, multi-dimensional geophysical datasets. Users can take advantage of `xarray`’s intuitive indexing, plotting, and metadata handling. Optional `dask` support allows workflows to scale from laptops to HPC systems, enabling parallel and out-of-core computation for very large input and output datasets. By combining modern Python tools with a user-friendly interface, `ROMS-Tools` addresses the usability and reproducibility challenges that hampered new users in the MATLAB-based workflow.
-
-
-# Software Design
-
-`ROMS-Tools` is designed to balance **ease of use, flexibility, reproducibility, and scalability** by combining high-level user interfaces with a modular, extensible architecture.
-
-## Lessons from MATLAB Tools
-
-The original UCLA MATLAB preprocessing scripts were powerful, but users had to edit source code directly to configure simulations. This workflow led to frequent errors for new users, hindered their ability to track completed steps, and limited reproducibility. `ROMS-Tools` addresses these issues with high-level API calls, automated error-prone steps, and explicit workflow state management via YAML. Users can inspect attributes, call consistent methods, and re-run components without losing track of prior steps.
-
-## Design Trade-Offs
-
-A central design trade-off in `ROMS-Tools` is between **automation** and **user control**. Rather than enforcing a fixed workflow, the package exposes key choices, such as physical options (e.g., radiation or wind corrections), interpolation and fill methods, and computational backends. This contrasts with more opinionated frameworks that fix defaults and directory structures to maximize automation. While users make explicit decisions, some steps remain automated to prevent errors; for example, bathymetry smoothing is applied automatically with a non-tunable parameter, since overly small smoothing factors could produce rough bathymetry and crash simulations. This approach balances flexibility and safety, enabling transparent experimentation without exposing users to avoidable pitfalls.
-
-Another key trade-off is between **monolithic workflows** and **incremental, modular steps**. `ROMS-Tools` uses small, composable components, such as generating initial conditions, boundary forcing, and surface forcing. Each component can be executed, saved, and revisited independently. This avoids unnecessary recomputation when only some inputs change. To ensure reproducibility despite a modular workflow, configuration choices are stored in compact, text-based YAML files. These files are version-controllable, easy to share, and remove the need to transfer large model input NetCDF datasets.
-
-## Architecture
-
-At the user-facing level, `ROMS-Tools` provides high-level objects such as `Grid`, `InitialConditions`, and `BoundaryForcing`. Each object exposes a consistent interface (`.ds`, `.plot()`, `.save()`, `.to_yaml()`), so users can always call the same methods in sequence or inspect attributes that are guaranteed to exist. This object-oriented design reduces cognitive overhead and makes workflows predictable and easy to follow.
-
-Internally, `ROMS-Tools` uses a **layered, modular architecture**. Abstract base classes (`LatLonDataset`, `ROMSDataset`) handle data ingestion and preprocessing. Source-specific datasets (e.g., `ERA5Dataset`, `GLORYSDataset`, `SRTMDataset`) inherit from these base classes and encode dataset-specific conventions, such as variable names, coordinates, and masking. Common operations, like subdomain selection and lateral filling, are implemented once and reused across datasets. Adding a new data source usually requires only a small subclass to define variable mappings while reusing the existing subsetting, filling, regridding, and I/O logic. This approach keeps changes to the core code minimal.
-
-## Computational and Data Model Choices
-
-`ROMS-Tools` is built on `xarray`, which lets users take advantage of its clear, consistent interface for exploring and inspecting datasets. The package integrates seamlessly with the broader Pangeo ecosystem. Optional `dask` support allows workflows to scale from a laptop to HPC systems, enabling parallel and out-of-core computation for very large input and output datasets.
 
 # Research Impact Statement
 

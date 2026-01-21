@@ -112,7 +112,7 @@ Tools from other modeling communities cannot simply be adopted, since each ocean
 
 # Software Design
 
-`ROMS-Tools` is designed to balance **ease of use, flexibility, reproducibility, and scalability**.
+`ROMS-Tools` is designed to balance **ease of use, flexibility, reproducibility, and scalability** by combining high-level user interfaces with a modular, extensible architecture.
 
 ## Design Trade-Offs
 

@@ -423,6 +423,7 @@ def get_time_type(data_array: xr.DataArray) -> str:
 
     values = data_array.values
 
+    print(values)
     # numpy datetime64
     if values.dtype == "datetime64[ns]":
         return "datetime"

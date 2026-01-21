@@ -121,7 +121,7 @@ A central design trade-off in `ROMS-Tools` is between **automation** and **user 
 
 Another key trade-off is between **monolithic workflows** and **incremental, modular steps**. `ROMS-Tools` uses small, composable components, such as generating initial conditions, boundary forcing, and surface forcing. Each component can be executed, saved, and revisited independently. This avoids unnecessary recomputation when only some inputs change. To ensure reproducibility despite a modular workflow, configuration choices are stored in compact, text-based YAML files. These files are version-controllable, easy to share, and remove the need to transfer large model input NetCDF datasets.
 
-## Architecture and Rationale
+## Architecture
 
 At the user-facing level, `ROMS-Tools` provides high-level objects such as `Grid`, `InitialConditions`, and `BoundaryForcing`. Each object exposes a consistent interface (`.ds`, `.plot()`, `.save()`, `.to_yaml()`), so users can always call the same methods in sequence or inspect attributes that are guaranteed to exist. This object-oriented design reduces cognitive overhead and makes workflows predictable and easy to follow.
 
@@ -133,9 +133,9 @@ Internally, `ROMS-Tools` uses a **layered, modular architecture**. Abstract base
 
 # Research Impact Statement
 
-`ROMS-Tools` serves two primary user communities. First, ocean modelers developing new regional domains rely on it to generate input datasets for ROMS simulations. External users in this category include researchers at **PNNL**, **WHOI**, **UCLA**, and in **New Zealand and Australia**. Second, researchers in the ocean-based carbon dioxide removal (CDR) community use `ROMS-Tools` to set up reproducible ROMS-MARBL simulations of climate intervention scenarios, with adopters such as **[C]Worthy**, **Carbon to Sea**, **Ebb Carbon**, and **SCCWRP**. All of these users have contacted the developers directly or consulted offline regarding their use of the package.
+`ROMS-Tools` is used by two primary research communities. First, regional ocean modelers use it to generate reproducible input datasets for ROMS simulations; external users include researchers at **PNNL**, **WHOI**, and **UCLA**. Second, researchers in the ocean-based carbon dioxide removal (CDR) community use `ROMS-Tools` to configure reproducible ROMS–MARBL simulations of climate intervention scenarios, with adopters including **[C]Worthy**, **Carbon to Sea**, **Ebb Carbon**, and **SCCWRP**. All of these groups have contacted the developers directly or engaged in offline discussions regarding their use of the package.
 
-Broader engagement is evident from GitHub stars, with users from institutions including the University of Waikato, NCAR, University of Maryland, National Oceanography Centre, Fathom Science, McGill University, Gwangju Institute of Science and Technology, UC Santa Cruz, RedLine Performance Solutions, and Submarine.
+Additional evidence of community uptake comes from public usage metrics. At the time of writing, the GitHub repository shows **119 unique cloners in the past 14 days**, with stars from users at institutions including the University of Waikato, NCAR, University of Maryland, National Oceanography Centre, McGill University, UC Santa Cruz, and others. Distribution statistics indicate **over 3,100 conda-forge downloads in the past six months**, including **68 downloads of the most recent release (v3.3.0)**, and **more than 48,000 total PyPI downloads** (noting that PyPI counts include automated CI usage, whereas conda downloads do not).
 
 `ROMS-Tools` is also integrated into broader workflows, including **C-Star**[@cstar], an open-source platform to provide scientifically credible monitoring, reporting, and verification (MRV) for the emerging marine carbon market.
 

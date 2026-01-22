@@ -138,7 +138,7 @@ Internally, `ROMS-Tools` follows a **layered, modular architecture**. Low-level 
 # Research Impact Statement
 
 `ROMS-Tools` is used by two primary research communities. First, regional ocean modelers use it to generate reproducible input datasets for ROMS simulations; external users include researchers at **PNNL**, **WHOI**, and **UCLA**. Second, researchers in the ocean-based carbon dioxide removal (CDR) community use `ROMS-Tools` to configure reproducible ROMS–MARBL simulations of climate intervention scenarios, with adopters including **[C]Worthy**, **Carbon to Sea**, **Ebb Carbon**, and **SCCWRP**.
-All of these groups have contacted the developers directly or engaged with the project through GitHub or offline discussions.
+All of these groups have contacted the developers directly or engaged with the project through GitHub or offline discussions. Several manuscripts from these communities are currently in preparation.
 
 Beyond standalone use, ROMS-Tools is integrated into broader scientific workflows, including C-Star [@cstar], an open-source platform that provides scientifically credible monitoring, reporting, and verification (MRV) for the emerging marine carbon market.
 

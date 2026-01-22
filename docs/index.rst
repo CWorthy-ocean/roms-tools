@@ -27,7 +27,7 @@
 ROMS-Tools: Preparing and Analyzing ROMS Simulations
 =========================================================================
 
-**ROMS-Tools** is a Python package that automates the creation, management, and analysis of all input and output files needed for regional ocean simulations with `UCLA-ROMS <https://github.com/CESR-lab/ucla-roms>`_, with optional `MARBL biogeochemistry (BGC) <https://marbl-ecosys.github.io/versions/latest_release/index.html>`_.
+**ROMS-Tools** is a Python package that automates the creation, management, and analysis of all input and output files needed for regional ocean simulations with `UCLA-ROMS <https://github.com/CWorthy-ocean/ucla-roms>`_, with optional `MARBL biogeochemistry (BGC) <https://marbl-ecosys.github.io/versions/latest_release/index.html>`_.
 
 Built on ``xarray`` and optionally powered by ``dask``, ``ROMS-Tools`` automates the generation of all major ROMS–MARBL inputs, including:
 

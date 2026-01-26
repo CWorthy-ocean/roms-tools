@@ -94,7 +94,7 @@ To generate the model inputs, `ROMS-Tools` automates several intermediate proces
 
 Users can quickly design and visualize regional grids and inspect all input fields with built-in plotting utilities. An example of surface initial conditions generated for a California Current System simulation at 5 km horizontal grid spacing is shown in \autoref{fig:example}.
 
-![Surface initial conditions for the California Current System created with `ROMS-Tools` from GLORYS. Left: potential temperature. Right: zonal velocity. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
+![Surface initial conditions for the California Current System created with `ROMS-Tools` from GLORYS. Left: potential temperature. Right: grid-aligned horizontal velocity in $\xi$-direction. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
 
 ## Postprocessing and Analysis
 

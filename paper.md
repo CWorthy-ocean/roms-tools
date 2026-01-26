@@ -80,7 +80,7 @@ Configuring a regional ocean model like ROMS-MARBL is technically challenging; i
 9. **River Forcing:** Freshwater runoff derived from **Dai & Trenberth** [@dai_estimates_2002] or user-provided custom files.
 10. **CDR Forcing**: User-defined interventions that inject BGC tracers at point sources or as larger-scale Gaussian perturbations to simulate CDR interventions. The CDR forcing is prescribed as volume and tracer fluxes (e.g., alkalinity for ocean alkalinity enhancement, iron for iron fertilization, or other BGC constituents).  Users can control the magnitude, spatial footprint, and temporal evolution, allowing flexible representation of CDR interventions.
 
-Some source datasets are accessed automatically by the `ROMS-Tools`, including Natural Earth, Dai & Trenberth runoff, and ERA5 meteorology, while users must manually download SRTM15, GSHHG, GLORYS, the BGC datasets, and TPXO tidal files. Although these are the datasets currently supported, the modular design of `ROMS-Tools` makes it straightforward to add new source datasets in the future.
+Some source datasets are accessed automatically by `ROMS-Tools`, including Natural Earth, Dai & Trenberth runoff, and ERA5 meteorology, while users must manually download SRTM15, GSHHG, GLORYS, the BGC datasets, and TPXO tidal files. Although these are the datasets currently supported, the modular design of `ROMS-Tools` makes it straightforward to add new source datasets in the future.
 
 To generate the model inputs, `ROMS-Tools` automates several intermediate processing steps, including:
 

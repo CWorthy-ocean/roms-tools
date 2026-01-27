@@ -4,6 +4,8 @@
 
 ### New Features
 
+* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
+
 ### Breaking Changes
 
 ### Internal Changes

@@ -867,6 +867,30 @@ def test_mask_topography_boundary():
     )
 
 
+def test_grid_copy_with_ds_does_not_mutate_original(grid):
+    """
+    copy_with_ds should return a new Grid instance with the same metadata
+    but a different backing Dataset, leaving the original Grid unchanged.
+    """
+    orig_ds = grid.ds
+    new_ds = orig_ds.isel(xi_rho=slice(0, 2), eta_rho=slice(0, 2))
+
+    new_grid = grid.copy_with_ds(new_ds)
+
+    # New object
+    assert new_grid is not grid
+
+    # Dataset replaced on copy
+    assert new_grid.ds is new_ds
+
+    # Original grid untouched
+    assert grid.ds is orig_ds
+
+    # Metadata preserved (adjust as needed for your Grid attributes)
+    for attr in ["nx", "ny", "size_x", "size_y", "center_lon", "center_lat", "rot"]:
+        assert getattr(new_grid, attr) == getattr(grid, attr)
+
+
 # More Grid.from_file() tests
 
 

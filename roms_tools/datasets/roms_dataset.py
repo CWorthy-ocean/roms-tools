@@ -675,40 +675,38 @@ class ROMSDataset:
                 if filler is not None:
                     self.ds[var_name] = filler.apply(var)
 
-    def rotate_velocities_to_east_and_north(self) -> None:
+    def rotate_velocities_to_east_and_north(
+        self,
+        velocity_pairs: tuple[tuple[str, str], ...] = (("u", "v"),),
+    ) -> None:
         """
         Rotate model-grid velocity components to earth-relative east/north directions.
 
-        This method rotates the dataset velocity variables from ROMS grid-relative
-        coordinates (xi/eta) to earth-relative coordinates (east/north) using the
-        grid angle. The rotation follows the standard ROMS convention and uses
-        ``-angle`` to reverse the grid-to-earth transformation.
-
-        The velocity components are interpolated to rho-points prior to rotation
-        to ensure consistency on the staggered grid.
-
-        Notes
-        ------
-        If `self.var_names` is `None` or does not contain "u" or "v", this method
-        silently does nothing.
-
+        Parameters
+        ----------
+        velocity_pairs : tuple of (str, str), optional
+            Pairs of velocity variable keys (as used in ``self.var_names``) to rotate,
+            e.g. ("u", "v") or ("ubar", "vbar"). By default, only the 3D velocities
+            ("u", "v") are rotated.
         """
-        if (
-            self.var_names is None
-            or "u" not in self.var_names
-            or "v" not in self.var_names
-        ):
+        if self.var_names is None:
             return
 
-        u_name = self.var_names["u"]
-        v_name = self.var_names["v"]
+        angle = -self.grid.ds["angle"]
 
-        self.ds[u_name], self.ds[v_name] = rotate_velocities(
-            self.ds[u_name],
-            self.ds[v_name],
-            -self.grid.ds["angle"],
-            interpolate_before=True,
-        )
+        for u_key, v_key in velocity_pairs:
+            if u_key not in self.var_names or v_key not in self.var_names:
+                continue
+
+            u_name = self.var_names[u_key]
+            v_name = self.var_names[v_key]
+
+            self.ds[u_name], self.ds[v_name] = rotate_velocities(
+                self.ds[u_name],
+                self.ds[v_name],
+                angle,
+                interpolate_before=True,
+            )
 
         if self.use_dask:
             chunks = get_dask_chunks(self.dim_names)

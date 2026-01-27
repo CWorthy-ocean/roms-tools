@@ -629,11 +629,9 @@ def rotate_velocities(
         Positive values indicate that the model grid is rotated counterclockwise
         relative to east (which is mathematically equivalent to rotating velocity
         vectors clockwise).
-
         The rotation transforms velocity components between earth-relative
         (east/north) and grid-relative (xi/eta) coordinates. To reverse the
         transformation (e.g., model → lat-lon), provide ``-angle``.
-
     interpolate_before : bool, optional
         If True, interpolate ``u`` and ``v`` to rho-points before rotation.
         Default is False.
@@ -651,10 +649,8 @@ def rotate_velocities(
     Notes
     -----
     The rotation follows the standard ROMS convention:
-
     - ``u_rot =  u * cos(angle) + v * sin(angle)``
     - ``v_rot =  v * cos(angle) - u * sin(angle)``
-
     This function is versatile and can be used for both directions of rotation:
     - Lat-lon → model grid: provide the grid angle.
     - Model grid → lat-lon: provide the negative of the grid angle.

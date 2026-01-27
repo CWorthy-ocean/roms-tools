@@ -7,7 +7,11 @@ import gcm_filters
 import numpy as np
 import xarray as xr
 
-from roms_tools.datasets.lat_lon_datasets import ETOPO5Dataset, SRTM15Dataset
+from roms_tools.datasets.lat_lon_datasets import (
+    EMODDataset,
+    ETOPO5Dataset,
+    SRTM15Dataset,
+)
 from roms_tools.regrid import LateralRegridToROMS
 from roms_tools.setup.utils import handle_boundaries
 
@@ -115,9 +119,12 @@ def _get_topography_data(source):
     elif source["name"] == "SRTM15":
         kwargs["filename"] = source["path"]
         data = SRTM15Dataset(**kwargs)
+    elif source["name"] == "EMOD":
+        kwargs["filename"] = source["path"]
+        data = EMODDataset(**kwargs)
     else:
         raise ValueError(
-            'Only "ETOPO5" and "SRTM15" are valid options for topography_source["name"].'
+            'Only "ETOPO5", "SRTM15" and "EMOD" are valid options for topography_source["name"].'
         )
 
     return data
@@ -147,6 +154,7 @@ def _make_raw_topography(
     data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
     # Enforce double precision to ensure reproducibility
     data.convert_to_float64()
+    data.apply_lateral_fill()
 
     if verbose:
         start_time = time.time()

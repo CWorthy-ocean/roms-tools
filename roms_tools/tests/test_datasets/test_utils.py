@@ -482,7 +482,7 @@ def test_get_time_type_unsupported_type():
 
 def test_get_time_type_invalid_input_type():
     da = xr.DataArray("not-an-array")
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         get_time_type(da)
 
 

@@ -131,11 +131,11 @@ class LatLonDataset:
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool = False
-    needs_lateral_fill: bool | None = True
+    needs_lateral_fill: bool = True
     use_dask: bool = False
     read_zarr: bool = False
     allow_flex_time: bool = False
-    apply_post_processing: bool | None = True
+    apply_post_processing: bool = True
 
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
     is_global: bool = field(init=False, repr=False)
@@ -1101,7 +1101,7 @@ class UnifiedDataset(LatLonDataset):
     attribute is set to `False`.
     """
 
-    needs_lateral_fill: bool | None = False
+    needs_lateral_fill: bool = False
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -1667,6 +1667,7 @@ class ETOPO5Dataset(LatLonDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
+    needs_lateral_fill: bool = False
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Assign lat and lon as coordinates.
@@ -1702,6 +1703,32 @@ class SRTM15Dataset(LatLonDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
+    needs_lateral_fill: bool = False
+
+
+@dataclass(kw_only=True)
+class EMODDataset(LatLonDataset):
+    """Represents topography data on the original grid from the EMOD dataset."""
+
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "elevation",
+        }
+    )
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    needs_lateral_fill: bool = True
+
+    def post_process(self) -> None:
+        """Assign land mask."""
+        mask = xr.where(
+            self.ds[self.var_names["topo"]].isnull(),
+            0,
+            1,
+        )
+
+        self.ds["mask"] = mask
 
 
 @dataclass
@@ -2429,6 +2456,7 @@ def choose_subdomain(
                 if lon_min - margin < 0:
                     lon_min += 360
                     lon_max += 360
+
     # Select the subdomain in longitude direction
     subdomain = subdomain.sel(
         **{

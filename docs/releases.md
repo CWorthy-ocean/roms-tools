@@ -1,10 +1,27 @@
 # Release notes
 
-## v3.4.0 (unreleased)
+## v3.5.0 (unreleased)
+
+### New Features
+
+### Breaking Changes
+
+### Internal Changes
+
+* Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))
+
+### Documentation
+
+### Bugfixes
+
+
+## v3.4.0
 
 ### New Features
 
 * Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
+* Partition `eta_u` and `xi_v` dimension if present ([#526](https://github.com/CWorthy-ocean/roms-tools/pull/526))
+* Add support for EMOD bathymetry ([#531](https://github.com/CWorthy-ocean/roms-tools/pull/531))
 
 ### Breaking Changes
 
@@ -15,14 +32,11 @@
 * Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
 * `LateralFill`: enforce correct dimension order for mask and input arrays ([#517](https://github.com/CWorthy-ocean/roms-tools/pull/517))
 * Refactor `rotate_velocities` and staggered interpolation ([#527](https://github.com/CWorthy-ocean/roms-tools/pull/527))
-* Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))
-
-### Documentation
 
 ### Bugfixes
 
 * Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
-
+* Improve robustness of `Grid.update_topography` for externally generated grids ([#523](https://github.com/CWorthy-ocean/roms-tools/pull/523))
 
 ## v3.3.0
 

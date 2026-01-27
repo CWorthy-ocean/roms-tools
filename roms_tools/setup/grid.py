@@ -208,7 +208,8 @@ class Grid:
         hmin: float | None = None,
         verbose: bool = False,
     ) -> None:
-        """Update the grid dataset with processed topography.
+        """
+        Update the grid dataset with processed topography.
 
         This method performs the following operations:
 
@@ -220,29 +221,45 @@ class Grid:
         Parameters
         ----------
         topography_source : dict, optional
-            A dictionary specifying the source of the topography data. The dictionary should
-            contain the following keys:
-            - "name" (str): The name of the topography data source (e.g., "SRTM15").
-            - "path" (Union[str, Path): The path to the raw data file.
+            Dictionary specifying the topography data source with keys:
+
+            - ``"name"`` (str): Name of the topography dataset (e.g. ``"SRTM15"``)
+            - ``"path"`` (str or pathlib.Path): Path to the raw data file
 
             If not provided, `topography_source` will remain unchanged (i.e., the existing value will not be overwritten).
 
         hmin : float, optional
-            The minimum ocean depth (in meters).
+            Minimum ocean depth in meters.
             If not provided, `hmin` will remain unchanged (i.e., the existing value will not be overwritten).
 
         verbose : bool, optional
-            If True, the method will print detailed information about the grid generation process,
-            including the timing of each step. Defaults to False.
+            If True, print detailed information about the processing steps and timing.
+            Defaults to False.
 
         Returns
         -------
         None
-            This method updates the internal dataset (`self.ds`) in place by adding or overwriting the
-            topography variable. It does not return any value.
+            Updates ``self.ds`` in place.
         """
-        topography_source = topography_source or self.topography_source
-        hmin = hmin or self.hmin
+        if topography_source is None:
+            topography_source = self.topography_source
+
+        if hmin is None:
+            hmin = self.hmin
+
+        # This can only happen for externally generated grids read via Grid.from_file()
+        if topography_source is None:
+            raise ValueError(
+                "Topography source information is not available. "
+                "Please provide `topography_source` explicitly when calling "
+                "`update_topography()`."
+            )
+        # This can only happen for externally generated grids read via Grid.from_file()
+        if hmin is None:
+            raise ValueError(
+                "Minimal ocean depth is not available. "
+                "Please provide `hmin` explicitly when calling `update_topography()`."
+            )
 
         name = topography_source["name"]  # type: ignore[index]
 

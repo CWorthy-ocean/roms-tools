@@ -18,7 +18,12 @@ from roms_tools.datasets.utils import (
     validate_start_end_time,
 )
 from roms_tools.fill import LateralFill
-from roms_tools.utils import load_data, wrap_longitudes
+from roms_tools.utils import (
+    get_dask_chunks,
+    load_data,
+    rotate_velocities,
+    wrap_longitudes,
+)
 from roms_tools.vertical_coordinate import (
     compute_depth_coordinates,
 )
@@ -663,6 +668,43 @@ class ROMSDataset:
                 filler = lateral_fillers.get(var_horiz_dims)
                 if filler is not None:
                     self.ds[var_name] = filler.apply(var)
+
+    def rotate_velocities_to_east_and_north(
+        self,
+        velocity_pairs: tuple[tuple[str, str], ...] = (("u", "v"),),
+    ) -> None:
+        """
+        Rotate model-grid velocity components to earth-relative east/north directions.
+
+        Parameters
+        ----------
+        velocity_pairs : tuple of (str, str), optional
+            Pairs of velocity variable keys (as used in ``self.var_names``) to rotate,
+            e.g. ("u", "v") or ("ubar", "vbar"). By default, only the 3D velocities
+            ("u", "v") are rotated.
+        """
+        if self.var_names is None:
+            return
+
+        angle = -self.grid.ds["angle"]
+
+        for u_key, v_key in velocity_pairs:
+            if u_key not in self.var_names or v_key not in self.var_names:
+                continue
+
+            u_name = self.var_names[u_key]
+            v_name = self.var_names[v_key]
+
+            self.ds[u_name], self.ds[v_name] = rotate_velocities(
+                self.ds[u_name],
+                self.ds[v_name],
+                angle,
+                interpolate_before=True,
+            )
+
+        if self.use_dask:
+            chunks = get_dask_chunks(self.dim_names)
+            self.ds = self.ds.chunk(chunks)
 
 
 def choose_subdomain(

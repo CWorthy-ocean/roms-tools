@@ -19,12 +19,14 @@ from roms_tools.setup.utils import (
     extract_single_value,
     gc_dist,
     get_target_coords,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
     pop_grid_data,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets
+from roms_tools.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    save_datasets,
+)
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
 
 

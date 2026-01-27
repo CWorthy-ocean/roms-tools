@@ -8,6 +8,8 @@
 
 ### Internal Changes
 
+* Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))
+
 ### Documentation
 
 ### Bugfixes

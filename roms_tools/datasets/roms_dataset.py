@@ -710,6 +710,8 @@ class ROMSDataset:
 
         if self.use_dask:
             chunks = get_dask_chunks(self.dim_names)
+            # Only keep chunks for dimensions that exist in the dataset
+            chunks = {dim: size for dim, size in chunks.items() if dim in self.ds.dims}
             self.ds = self.ds.chunk(chunks)
 
 

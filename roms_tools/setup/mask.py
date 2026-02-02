@@ -172,3 +172,143 @@ def add_velocity_masks(ds):
     ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
 
     return ds
+
+
+def fill_narrow_passages(
+    ds: xr.Dataset,
+    mask_var: str = "mask_rho",
+    max_iterations: int = 10,
+    connectivity: int = 4,
+    min_region_fraction: float = 0.1,
+    inplace: bool = False,
+) -> xr.Dataset:
+    """Fill narrow passages and holes in a ROMS mask.
+
+    This function performs two main operations:
+    1. Fills narrow 1-pixel passages in both north-south and east-west directions
+    2. Fills holes by keeping only the largest connected region (unless a region
+       is larger than a specified fraction of the domain)
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Input dataset containing the mask variable.
+    mask_var : str, optional
+        Name of the mask variable in the dataset. Default is "mask_rho".
+    max_iterations : int, optional
+        Maximum number of iterations for filling narrow passages. Default is 10.
+    connectivity : int, optional
+        Connectivity for connected component labeling. Use 4 for 4-connectivity
+        (north, south, east, west) or 8 for 8-connectivity (includes diagonals).
+        Default is 4.
+    min_region_fraction : float, optional
+        Minimum fraction of domain size for a region to be preserved when filling
+        holes. Regions smaller than this fraction will be removed unless they are
+        the largest region. Default is 0.1 (10%).
+    inplace : bool, optional
+        If True, modify the dataset in place. If False, return a new dataset.
+        Default is False.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with the modified mask. If `inplace=True`, returns the same
+        dataset object.
+
+    Notes
+    -----
+    The function first ensures mask values are non-negative (negative values are
+    set to 0). Then it iteratively removes 1-pixel wide passages in both
+    north-south and east-west directions. Finally, it identifies connected
+    regions and keeps only the largest one, unless another region exceeds the
+    minimum region fraction threshold.
+
+    Examples
+    --------
+    >>> import xarray as xr
+    >>> ds = xr.open_dataset("grid.nc")
+    >>> ds_filled = fill_narrow_passages(ds)
+    >>> ds_filled.to_netcdf("grid_filled.nc")
+    """
+    # Ensure we have the mask variable
+    if mask_var not in ds.variables:
+        raise ValueError(f"Mask variable '{mask_var}' not found in dataset.")
+
+    # Get mask and ensure it's non-negative
+    mask = ds[mask_var].values.copy()
+    mask[mask < 0] = 0
+
+    # Fill narrow passages
+    for it in range(max_iterations):
+        # Fill 1-pixel passages in north-south direction
+        fill = mask.copy()
+        fill[1:, :] = fill[1:, :] + mask[:-1, :]
+        fill[:-1, :] = fill[:-1, :] + mask[1:, :]
+        fill[mask < 1] = 0
+
+        nf = np.sum(fill == 1)
+        if nf > 0:
+            logger.info(f"Filling: {nf} points in 1-pixel NS passages (iteration {it+1})")
+            mask[fill == 1] = 0
+        else:
+            break
+
+        # Fill 1-pixel passages in east-west direction
+        fill = mask.copy()
+        fill[:, 1:] = fill[:, 1:] + mask[:, :-1]
+        fill[:, :-1] = fill[:, :-1] + mask[:, 1:]
+        fill[mask < 1] = 0
+
+        nf = np.sum(fill == 1)
+        if nf > 0:
+            logger.info(f"Filling: {nf} points in 1-pixel EW passages (iteration {it+1})")
+            mask[fill == 1] = 0
+        else:
+            break
+
+    logger.info("Filling holes")
+
+    # Create structure for connected component labeling
+    if connectivity == 4:
+        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+    elif connectivity == 8:
+        structure = np.ones((3, 3), dtype=int)
+    else:
+        raise ValueError("connectivity must be 4 or 8")
+
+    # Label connected regions
+    reg, nreg = label(mask, structure=structure)
+
+    # Find the largest region
+    lint = 0  # size of largest region
+    lreg = 0  # number of largest region
+    for i in range(1, nreg + 1):
+        region_size = np.sum(reg == i)
+        if region_size > lint:
+            lreg = i
+            lint = region_size
+
+    # Remove all regions except the largest one (unless they exceed min_region_fraction)
+    ny, nx = mask.shape
+    domain_size = nx * ny
+
+    for ireg in range(1, nreg + 1):
+        if ireg != lreg:
+            region_size = np.sum(reg == ireg)
+            if region_size > domain_size * min_region_fraction:
+                logger.warning(
+                    f"Region {ireg} is large ({region_size} points, "
+                    f"{100*region_size/domain_size:.1f}% of domain). Preserving it."
+                )
+            else:
+                mask[reg == ireg] = 0
+
+    # Update the dataset
+    if inplace:
+        ds[mask_var].values[:] = mask
+        result = ds
+    else:
+        result = ds.copy(deep=False)
+        result[mask_var].values[:] = mask
+
+    return result

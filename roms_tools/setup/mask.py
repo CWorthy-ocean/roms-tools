@@ -16,6 +16,8 @@ from roms_tools.utils import (
     interpolate_from_rho_to_v,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
     """Adds a land/water mask to the dataset at rho-points.

@@ -5,6 +5,15 @@ from pathlib import Path
 import pytest
 import xarray as xr
 
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
+
+skip_xesmf = pytest.mark.skipif(
+    xesmf is None, reason="xesmf required for ROMS regridding"
+)
+
 
 @pytest.mark.parametrize(
     "forcing_fixture",
@@ -14,6 +23,7 @@ import xarray as xr
         "tidal_forcing",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
@@ -59,6 +69,7 @@ def test_save_results(
         "tidal_forcing",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
@@ -93,13 +104,17 @@ def test_check_results(
     [
         "tidal_forcing",
         "initial_conditions_with_bgc_from_climatology",
+        "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
         "bgc_surface_forcing",
         "bgc_surface_forcing_from_climatology",
+        "bgc_surface_forcing_from_unified_climatology",
         "boundary_forcing",
         "bgc_boundary_forcing_from_climatology",
+        "bgc_boundary_forcing_from_unified_climatology",
     ],
 )
 def test_dask_vs_no_dask(

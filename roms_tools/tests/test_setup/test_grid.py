@@ -840,30 +840,35 @@ def test_fill_narrow_passages():
         N=3,
     )
 
+    # Get the actual shape of mask_rho (grid adds boundary cells, so it's nx+2, ny+2)
+    mask_shape = grid.ds["mask_rho"].shape
+    eta_rho_size, xi_rho_size = mask_shape
+
     # Create a mask with narrow 1-pixel land passages
     # Start with all water (0)
-    mask = np.zeros((15, 15), dtype=np.int32)
+    mask = np.zeros(mask_shape, dtype=np.int32)
 
     # Create a narrow 1-pixel land passage in north-south direction
     # A land cell with water above and below (vertically isolated)
-    mask[7, 7] = 1  # land cell
+    # Account for boundary cells: indices are shifted by 1
+    mask[8, 8] = 1  # land cell (7+1, 7+1)
     # Ensure water above and below
-    mask[6, 7] = 0  # water above
-    mask[8, 7] = 0  # water below
+    mask[7, 8] = 0  # water above
+    mask[9, 8] = 0  # water below
 
     # Create a narrow 1-pixel land passage in east-west direction
     # A land cell with water left and right (horizontally isolated)
-    mask[10, 10] = 1  # land cell
+    mask[11, 11] = 1  # land cell (10+1, 10+1)
     # Ensure water left and right
-    mask[10, 9] = 0  # water left
-    mask[10, 11] = 0  # water right
+    mask[11, 10] = 0  # water left
+    mask[11, 12] = 0  # water right
 
     # Set the mask in the grid
     grid.ds["mask_rho"].values[:] = mask
 
     # Verify the narrow land passages exist before filling
-    assert mask[7, 7] == 1, "NS land passage should exist before filling"
-    assert mask[10, 10] == 1, "EW land passage should exist before filling"
+    assert mask[8, 8] == 1, "NS land passage should exist before filling"
+    assert mask[11, 11] == 1, "EW land passage should exist before filling"
 
     # Save original mask for comparison
     mask_before = grid.ds.mask_rho.values.copy()
@@ -875,8 +880,8 @@ def test_fill_narrow_passages():
     mask_after = grid.ds.mask_rho.values.copy()
 
     # Verify that the narrow land passages were removed (converted to water)
-    assert mask_after[7, 7] == 0, "NS land passage should be removed"
-    assert mask_after[10, 10] == 0, "EW land passage should be removed"
+    assert mask_after[8, 8] == 0, "NS land passage should be removed"
+    assert mask_after[11, 11] == 0, "EW land passage should be removed"
 
     # Verify that the mask changed
     assert np.any(mask_before != mask_after), "Mask should have changed after filling"
@@ -900,14 +905,18 @@ def test_fill_narrow_passages_hole_filling():
         N=3,
     )
 
+    # Get the actual shape of mask_rho (grid adds boundary cells, so it's nx+2, ny+2)
+    mask_shape = grid.ds["mask_rho"].shape
+
     # Create a mask with a large land region and a small isolated land region
-    mask = np.zeros((20, 20), dtype=np.int32)  # Start with all water (0)
+    mask = np.zeros(mask_shape, dtype=np.int32)  # Start with all water (0)
 
     # Create a large land region (1) - this should be preserved as the largest region
-    mask[5:15, 5:15] = 1
+    # Account for boundary cells: indices are shifted by 1
+    mask[6:16, 6:16] = 1  # (5+1:15+1, 5+1:15+1)
 
     # Create a small isolated land region (1) - this should be removed
-    mask[2:4, 2:4] = 1  # Small 2x2 isolated region
+    mask[3:5, 3:5] = 1  # Small 2x2 isolated region (2+1:4+1, 2+1:4+1)
 
     # Set the mask in the grid
     grid.ds["mask_rho"].values[:] = mask
@@ -916,7 +925,7 @@ def test_fill_narrow_passages_hole_filling():
     mask_before = grid.ds.mask_rho.values.copy()
 
     # Verify the small isolated region exists before filling
-    assert mask_before[2:4, 2:4].all() == 1, "Small isolated region should exist before filling"
+    assert mask_before[3:5, 3:5].all() == 1, "Small isolated region should exist before filling"
 
     # Fill narrow passages with a small min_region_fraction
     # The small isolated region should be removed, but the large land region should be preserved
@@ -926,10 +935,10 @@ def test_fill_narrow_passages_hole_filling():
     mask_after = grid.ds.mask_rho.values.copy()
 
     # Verify that the small isolated region was removed (converted to water)
-    assert mask_after[2:4, 2:4].all() == 0, "Small isolated region should be removed"
+    assert mask_after[3:5, 3:5].all() == 0, "Small isolated region should be removed"
 
     # Verify that the large land region is still there
-    assert (mask_after[5:15, 5:15] == 1).all(), "Large land region should be preserved"
+    assert (mask_after[6:16, 6:16] == 1).all(), "Large land region should be preserved"
 
     # Verify that the mask changed
     assert np.any(mask_before != mask_after), "Mask should have changed after filling"

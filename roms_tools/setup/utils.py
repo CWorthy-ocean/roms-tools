@@ -3,6 +3,7 @@ import logging
 import time
 import typing
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -17,7 +18,6 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
-from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -966,46 +966,6 @@ def get_target_coords(
     return target_coords
 
 
-def rotate_velocities(
-    u: xr.DataArray, v: xr.DataArray, angle: xr.DataArray, interpolate: bool = True
-) -> tuple[xr.DataArray, xr.DataArray]:
-    """Rotate and optionally interpolate velocity components to align with grid
-    orientation.
-
-    Parameters
-    ----------
-    u : xarray.DataArray
-        Zonal (east-west) velocity component at u-points.
-    v : xarray.DataArray
-        Meridional (north-south) velocity component at v-points.
-    angle : xarray.DataArray
-        Grid angle values for rotation.
-    interpolate : bool, optional
-        If True, interpolates rotated velocities to grid points (default is True).
-
-    Returns
-    -------
-    tuple of xarray.DataArray
-        Rotated velocity components (u_rot, v_rot).
-
-    Notes
-    -----
-    - Rotation formulas:
-      - u_rot = u * cos(angle) + v * sin(angle)
-      - v_rot = v * cos(angle) - u * sin(angle)
-    """
-    # Rotate velocities to grid orientation
-    u_rot = u * np.cos(angle) + v * np.sin(angle)
-    v_rot = v * np.cos(angle) - u * np.sin(angle)
-
-    # Interpolate to u- and v-points
-    if interpolate:
-        u_rot = interpolate_from_rho_to_u(u_rot)
-        v_rot = interpolate_from_rho_to_v(v_rot)
-
-    return u_rot, v_rot
-
-
 def compute_barotropic_velocity(
     vel: xr.DataArray, interface_depth: xr.DataArray
 ) -> xr.DataArray:
@@ -1365,142 +1325,262 @@ def write_to_yaml(yaml_data, filepath: str | Path) -> None:
         )
 
 
+def serialize_paths(value: Any) -> Any:
+    """Recursively convert Path objects to strings."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, list):
+        return [serialize_paths(v) for v in value]
+    if isinstance(value, dict):
+        return {k: serialize_paths(v) for k, v in value.items()}
+    return value
+
+
+def normalize_paths(value: Any) -> Any:
+    """Recursively convert path-like strings back to Path objects.
+
+    Heuristic: strings containing '/' or ending with '.nc' are treated as paths.
+    """
+    if isinstance(value, str):
+        return Path(value) if "/" in value or value.endswith(".nc") else value
+    if isinstance(value, list):
+        return [normalize_paths(v) for v in value]
+    if isinstance(value, dict):
+        return {k: normalize_paths(v) for k, v in value.items()}
+    return value
+
+
+def serialize_datetime(value: datetime | list[datetime] | Any) -> Any:
+    """Convert datetime or list of datetimes to ISO 8601 strings."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list) and all(isinstance(v, datetime) for v in value):
+        return [v.isoformat() for v in value]
+    return value
+
+
+def deserialize_datetime(
+    value: str | list[str] | datetime | Any,
+) -> datetime | list[datetime] | Any:
+    """Convert ISO 8601 string(s) to datetime object(s).
+
+    Returns:
+        datetime if input is string,
+        list of datetime if input is list of strings,
+        original value if parsing fails or input is already datetime.
+    """
+    if isinstance(value, list):
+        result: list[datetime | Any] = []
+        for v in value:
+            try:
+                result.append(datetime.fromisoformat(str(v)))
+            except ValueError:
+                result.append(v)
+        return result
+
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return value
+
+    return value
+
+
+def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Serialize a source or BGC source dictionary for YAML or JSON output.
+
+    This function performs the following transformations:
+    - Converts any `Path` objects (including nested lists or dicts) to strings.
+    - Serializes any nested `Grid` objects using `serialize_grid`.
+    - Creates a deep copy of the input dictionary to avoid modifying the original.
+
+    Parameters
+    ----------
+    src : dict[str, Any] | None
+        The source or BGC source dictionary to serialize. Keys typically include:
+        - "path": path(s) to files
+        - "grid": a Grid object
+
+    Returns
+    -------
+    dict[str, Any] | None
+        A serialized dictionary suitable for saving to YAML or JSON, with:
+        - Paths converted to strings
+        - Nested Grid objects serialized
+        Returns `None` if input `src` is `None`.
+    """
+    if src is None:
+        return None
+
+    src = deepcopy(src)
+
+    # Serialize paths
+    if "path" in src:
+        src["path"] = serialize_paths(src["path"])
+
+    # Serialize nested grid
+    if "grid" in src and src["grid"] is not None:
+        src["grid"] = serialize_grid(src["grid"])
+
+    return src
+
+
+def deserialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Deserialize a source / bgc_source dictionary.
+
+    Converts string paths back to Path objects.
+
+    Parameters
+    ----------
+    src : dict[str, Any] | None
+        Serialized source or bgc_source dictionary.
+
+    Returns
+    -------
+    dict[str, Any] | None
+        Dictionary with paths converted to Path objects.
+    """
+    if src is None:
+        return None
+
+    src = deepcopy(src)
+
+    # Deserialize paths
+    if "path" in src:
+        src["path"] = normalize_paths(src["path"])
+
+    return src
+
+
+def serialize_grid(grid_obj: Any) -> dict[str, Any]:
+    """Serialize a Grid object to a dictionary, excluding non-serializable attributes."""
+    return pop_grid_data(asdict(grid_obj))
+
+
+def pop_grid_data(grid_data: dict[str, Any]) -> dict[str, Any]:
+    """Remove non-serializable or unnecessary keys from a Grid dictionary.
+
+    Removes 'ds', 'straddle', and 'verbose' keys if present.
+
+    Parameters
+    ----------
+    grid_data : dict
+        Dictionary representation of a Grid object.
+
+    Returns
+    -------
+    dict
+        Cleaned dictionary suitable for serialization.
+    """
+    for key in ("ds", "straddle", "verbose"):
+        grid_data.pop(key, None)
+    return grid_data
+
+
 def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     """Serialize a forcing object (including its grid) into a dictionary.
 
-    This function serializes a dataclass object (forcing_object) and its associated
-    `grid` attribute into a dictionary. It omits fields like `grid` and `ds`
-    that are not serializable or meant to be excluded.
+    This function serializes a forcing object (dataclass or pydantic model),
+    including its associated grid(s), into a dictionary suitable for YAML output.
 
-    The function also converts datetime fields to ISO format strings for proper
-    serialization.
+    - Top-level grids (`grid`, `parent_grid`) are serialized consistently
+    - Nested grids inside `source` and `bgc_source` are also serialized
+    - Datetime objects are converted to ISO strings
+    - Path objects are converted to strings
 
     Parameters
     ----------
     forcing_object : object
-        The object that contains the forcing data, typically a dataclass with attributes
-        such as `grid`, `start_time`, `end_time`, etc.
+        A dataclass or pydantic model representing a forcing configuration.
     exclude : list[str], optional
-        List of keys to exclude from the serialized output. Defaults to empty list. The field "ds" is always excluded by default.
+        List of field names to exclude from serialization. The fields
+        "grid", "parent_grid", and "ds" are always excluded.
 
     Returns
     -------
     dict
+        Serialized representation of the forcing object.
     """
-    # Serialize Grid data
+    exclude_list = exclude or []
+    exclude_set: set[str] = {"grid", "parent_grid", "ds", *exclude_list}
+
+    # --- Serialize top-level grid(s) ---
+    yaml_data = {}
+
     if hasattr(forcing_object, "grid") and forcing_object.grid is not None:
-        grid_data = asdict(forcing_object.grid)
-        grid_yaml_data = {"Grid": pop_grid_data(grid_data)}
-    elif hasattr(forcing_object, "parent_grid"):
-        grid_data = asdict(forcing_object.parent_grid)
-        grid_yaml_data = {"ParentGrid": pop_grid_data(grid_data)}
+        yaml_data["Grid"] = serialize_grid(forcing_object.grid)
 
-    # Ensure Paths are Strings
-    def ensure_paths_are_strings(obj, key):
-        attr = getattr(obj, key, None)
-        if attr is not None and "path" in attr:
-            paths = attr["path"]
-            if isinstance(paths, list):
-                attr["path"] = [str(p) if isinstance(p, Path) else p for p in paths]
-            elif isinstance(paths, Path):
-                attr["path"] = str(paths)
-            elif isinstance(paths, dict):
-                for key, path in paths.items():
-                    attr["path"][key] = str(path)
+    if (
+        hasattr(forcing_object, "parent_grid")
+        and forcing_object.parent_grid is not None
+    ):
+        yaml_data["ParentGrid"] = serialize_grid(forcing_object.parent_grid)
 
-    ensure_paths_are_strings(forcing_object, "source")
-    ensure_paths_are_strings(forcing_object, "bgc_source")
-
-    # Prepare Forcing Data
-    forcing_data = {}
+    # --- Collect forcing fields ---
     if isinstance(forcing_object, BaseModel):
-        field_names = forcing_object.model_fields
+        field_names = forcing_object.model_fields.keys()
     elif is_dataclass(forcing_object):
-        field_names = [field.name for field in fields(forcing_object)]
+        field_names = [f.name for f in fields(forcing_object)]
     else:
-        raise TypeError("Forcing object is not a dataclass or pydantic model")
+        raise TypeError("Forcing object must be a dataclass or pydantic model")
 
-    if exclude is None:
-        exclude = []
-    exclude = ["grid", "parent_grid", "ds", *exclude]
+    forcing_data = {}
 
-    filtered_field_names = [param for param in field_names if param not in exclude]
+    for name in field_names:
+        if name in exclude_set:
+            continue
 
-    for field_name in filtered_field_names:
-        # Retrieve the value of each field using getattr
-        value = getattr(forcing_object, field_name)
+        value = getattr(forcing_object, name)
 
-        # If the field is a datetime object, convert it to ISO format
-        if isinstance(value, datetime):
-            value = value.isoformat()
-        # Convert list of datetimes to list of ISO strings
-        elif isinstance(value, list) and all(isinstance(v, datetime) for v in value):
-            value = [v.isoformat() for v in value]
+        if name in {"source", "bgc_source"}:
+            forcing_data[name] = serialize_source_dict(value)
+            continue
 
-        # Add the field and its value to the forcing_data dictionary
-        forcing_data[field_name] = value
+        value = serialize_datetime(value)
+        value = serialize_paths(value)
 
-    # Combine Grid and Forcing Data into a single dictionary for the final YAML content
-    yaml_data = {
-        **grid_yaml_data,  # Add the grid data to the final YAML structure
-        forcing_object.__class__.__name__: forcing_data,  # Include the serialized forcing object data
-    }
+        forcing_data[name] = value
+
+    # --- Final YAML structure ---
+    yaml_data[forcing_object.__class__.__name__] = forcing_data
 
     return yaml_data
 
 
-def pop_grid_data(grid_data):
-    grid_data.pop("ds", None)  # Remove 'ds' attribute (non-serializable)
-    grid_data.pop("straddle", None)
-    grid_data.pop("verbose", None)
-
-    return grid_data
-
-
 def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
-    """Extract the configuration data for a given forcing object from a YAML file.
+    """Load configuration for a forcing object from a YAML file.
 
-    This function reads a YAML file, searches for the configuration data associated
-    with the class name of the forcing object, and returns the configuration data
-    as a dictionary. The dictionary contains the forcing parameters extracted from
-    the YAML file, with any date fields converted from ISO format.
+    Searches for a dictionary keyed by the class name of `forcing_object` and
+    returns it, converting:
+    - ISO-format date strings to `datetime` objects
+    - Path-like strings back to `Path` objects
+    - `source` and `bgc_source` nested dictionaries back to proper Grid objects
 
     Parameters
     ----------
-    filepath : Union[str, Path]
-        The path to the YAML file from which the parameters will be read.
-    forcing_object : Type
-        The class type (e.g., TidalForcing) whose configuration data is to be loaded
-        from the YAML file. The class name is used to locate the relevant data in
-        the YAML structure.
+    forcing_object : type
+        The class type whose configuration to load (e.g., `TidalForcing`).
+    filepath : str | Path
+        Path to the YAML file containing the configuration.
 
     Returns
     -------
-    dict
-        A dictionary containing the forcing parameters extracted from the YAML file.
-        This dictionary contains key-value pairs where the keys are the parameter
-        names, and the values are the corresponding values from the YAML file.
-        Any date fields are converted from ISO format if necessary.
+    dict[str, Any]
+        Dictionary of configuration parameters with dates, paths, and nested grids restored.
 
     Raises
     ------
     ValueError
-        If no configuration for the specified class name is found in the YAML file.
+        If no configuration for the specified class is found in the YAML file.
     """
-    # Ensure filepath is a Path object
     filepath = Path(filepath)
-
-    # Read the entire file content
-    with filepath.open("r") as file:
-        file_content = file.read()
-
-    # Split the content into YAML documents
-    documents = list(yaml.safe_load_all(file_content))
+    with filepath.open("r") as f:
+        documents = list(yaml.safe_load_all(f))
 
     forcing_data = None
     forcing_object_name = forcing_object.__name__
 
-    # Process the YAML documents to find the forcing data for the given object
     for doc in documents:
         if doc is None:
             continue
@@ -1513,21 +1593,19 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
             f"No {forcing_object_name} configuration found in the YAML file."
         )
 
-    # Convert any date fields from ISO format if necessary
+    # Convert ISO date strings to datetime objects
     for key, value in forcing_data.items():
-        forcing_data[key] = _convert_from_iso_format(value)
+        forcing_data[key] = deserialize_datetime(value)
 
-    # Return the forcing data as a dictionary
+    # Convert path-like strings back to Path objects
+    forcing_data = normalize_paths(forcing_data)
+
+    # Deserialize source and bgc_source nested dictionaries
+    for key in ["source", "bgc_source"]:
+        if key in forcing_data:
+            forcing_data[key] = deserialize_source_dict(forcing_data[key])
+
     return forcing_data
-
-
-def _convert_from_iso_format(value):
-    try:
-        # Return the parsed datetime object if successful
-        return datetime.fromisoformat(str(value))
-    except ValueError:
-        # Return None or raise an exception if parsing fails
-        return value
 
 
 def handle_boundaries(field):

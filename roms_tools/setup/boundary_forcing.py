@@ -32,7 +32,6 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     nan_check,
-    rotate_velocities,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -40,6 +39,7 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    rotate_velocities,
     save_datasets,
     transpose_dimensions,
 )
@@ -273,7 +273,7 @@ class BoundaryForcing:
                         processed_fields["u"],
                         processed_fields["v"],
                         angle,
-                        interpolate=True,
+                        interpolate_after=True,
                     )
                     if self.adjust_depth_for_sea_surface_height:
                         zeta_u = interpolate_from_rho_to_u(zeta_vector)

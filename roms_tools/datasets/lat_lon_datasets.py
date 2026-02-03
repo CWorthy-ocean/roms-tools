@@ -131,11 +131,11 @@ class LatLonDataset:
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool = False
-    needs_lateral_fill: bool | None = True
+    needs_lateral_fill: bool = True
     use_dask: bool = False
     read_zarr: bool = False
     allow_flex_time: bool = False
-    apply_post_processing: bool | None = True
+    apply_post_processing: bool = True
 
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
     is_global: bool = field(init=False, repr=False)
@@ -661,6 +661,18 @@ class LatLonDataset:
         if "depth" in self.dim_names:
             self.ds = extrapolate_deepest_to_bottom(self.ds, self.dim_names["depth"])
 
+    def rotate_velocities_to_east_and_north(self) -> None:
+        """
+        Rotate velocity components to east/north directions.
+
+        For lat-lon datasets, velocity components are already defined in
+        earth-relative east/north coordinates. Therefore, no rotation is
+        required and this method is a no-op.
+        This method is provided for API compatibility with ROMSDataset,
+        where an explicit rotation using the grid angle is necessary.
+        """
+        return None
+
     @classmethod
     def from_ds(cls, original_dataset: LatLonDataset, ds: xr.Dataset) -> LatLonDataset:
         """Substitute the internal dataset of a LatLonDataset object with a new xarray
@@ -1089,7 +1101,7 @@ class UnifiedDataset(LatLonDataset):
     attribute is set to `False`.
     """
 
-    needs_lateral_fill: bool | None = False
+    needs_lateral_fill: bool = False
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -1655,6 +1667,7 @@ class ETOPO5Dataset(LatLonDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
+    needs_lateral_fill: bool = False
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Assign lat and lon as coordinates.
@@ -1690,6 +1703,32 @@ class SRTM15Dataset(LatLonDataset):
     dim_names: dict[str, str] = field(
         default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
     )
+    needs_lateral_fill: bool = False
+
+
+@dataclass(kw_only=True)
+class EMODDataset(LatLonDataset):
+    """Represents topography data on the original grid from the EMOD dataset."""
+
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "topo": "elevation",
+        }
+    )
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {"longitude": "lon", "latitude": "lat"}
+    )
+    needs_lateral_fill: bool = True
+
+    def post_process(self) -> None:
+        """Assign land mask."""
+        mask = xr.where(
+            self.ds[self.var_names["topo"]].isnull(),
+            0,
+            1,
+        )
+
+        self.ds["mask"] = mask
 
 
 @dataclass
@@ -2417,6 +2456,7 @@ def choose_subdomain(
                 if lon_min - margin < 0:
                     lon_min += 360
                     lon_max += 360
+
     # Select the subdomain in longitude direction
     subdomain = subdomain.sel(
         **{

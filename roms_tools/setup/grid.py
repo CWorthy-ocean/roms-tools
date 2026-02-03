@@ -1,3 +1,4 @@
+import copy
 import importlib.metadata
 import logging
 import re
@@ -19,12 +20,14 @@ from roms_tools.setup.utils import (
     extract_single_value,
     gc_dist,
     get_target_coords,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
     pop_grid_data,
     write_to_yaml,
 )
-from roms_tools.utils import save_datasets
+from roms_tools.utils import (
+    interpolate_from_rho_to_u,
+    interpolate_from_rho_to_v,
+    save_datasets,
+)
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
 
 
@@ -206,7 +209,8 @@ class Grid:
         hmin: float | None = None,
         verbose: bool = False,
     ) -> None:
-        """Update the grid dataset with processed topography.
+        """
+        Update the grid dataset with processed topography.
 
         This method performs the following operations:
 
@@ -218,29 +222,45 @@ class Grid:
         Parameters
         ----------
         topography_source : dict, optional
-            A dictionary specifying the source of the topography data. The dictionary should
-            contain the following keys:
-            - "name" (str): The name of the topography data source (e.g., "SRTM15").
-            - "path" (Union[str, Path): The path to the raw data file.
+            Dictionary specifying the topography data source with keys:
+
+            - ``"name"`` (str): Name of the topography dataset (e.g. ``"SRTM15"``)
+            - ``"path"`` (str or pathlib.Path): Path to the raw data file
 
             If not provided, `topography_source` will remain unchanged (i.e., the existing value will not be overwritten).
 
         hmin : float, optional
-            The minimum ocean depth (in meters).
+            Minimum ocean depth in meters.
             If not provided, `hmin` will remain unchanged (i.e., the existing value will not be overwritten).
 
         verbose : bool, optional
-            If True, the method will print detailed information about the grid generation process,
-            including the timing of each step. Defaults to False.
+            If True, print detailed information about the processing steps and timing.
+            Defaults to False.
 
         Returns
         -------
         None
-            This method updates the internal dataset (`self.ds`) in place by adding or overwriting the
-            topography variable. It does not return any value.
+            Updates ``self.ds`` in place.
         """
-        topography_source = topography_source or self.topography_source
-        hmin = hmin or self.hmin
+        if topography_source is None:
+            topography_source = self.topography_source
+
+        if hmin is None:
+            hmin = self.hmin
+
+        # This can only happen for externally generated grids read via Grid.from_file()
+        if topography_source is None:
+            raise ValueError(
+                "Topography source information is not available. "
+                "Please provide `topography_source` explicitly when calling "
+                "`update_topography()`."
+            )
+        # This can only happen for externally generated grids read via Grid.from_file()
+        if hmin is None:
+            raise ValueError(
+                "Minimal ocean depth is not available. "
+                "Please provide `hmin` explicitly when calling `update_topography()`."
+            )
 
         name = topography_source["name"]  # type: ignore[index]
 
@@ -1248,6 +1268,17 @@ class Grid:
         z_centers = np.round(z_centers, 2)
 
         return z_centers, z_faces
+
+    def copy_with_ds(self, ds: xr.Dataset) -> "Grid":
+        """
+        Return a copy of this Grid with the given Dataset.
+
+        Grid metadata is preserved; only the backing xarray Dataset
+        is replaced. The original Grid is not modified.
+        """
+        new = copy.copy(self)  # shallow copy of metadata
+        new.ds = ds
+        return new
 
 
 def _rotate(coords, rot):

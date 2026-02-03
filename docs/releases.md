@@ -1,11 +1,34 @@
 # Release notes
 
-## v3.4.0 (unreleased)
+## v3.6.0 (unreleased)
+
+### New Features
+
+* Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
+
+### Breaking Changes
+
+### Internal Changes
+
+* Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
+
+### Documentation
+
+### Bugfixes
+
+## v3.5.0
+
+### New Features
+
+* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
+
+## v3.4.0
 
 ### New Features
 
 * Default boundary selection respects land-only boundaries for `BoundaryForcing` and `ChildGrid` ([#504](https://github.com/CWorthy-ocean/roms-tools/pull/504))
-* Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
+* Partition `eta_u` and `xi_v` dimension if present ([#526](https://github.com/CWorthy-ocean/roms-tools/pull/526))
+* Add support for EMOD bathymetry ([#531](https://github.com/CWorthy-ocean/roms-tools/pull/531))
 
 ### Breaking Changes
 
@@ -16,14 +39,12 @@
 
 * Introduce `ROMSDataset` class analogous to `LatLonDataset` ([#507](https://github.com/CWorthy-ocean/roms-tools/pull/507))
 * `LateralFill`: enforce correct dimension order for mask and input arrays ([#517](https://github.com/CWorthy-ocean/roms-tools/pull/517))
-* Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
-
-### Documentation
+* Refactor `rotate_velocities` and staggered interpolation ([#527](https://github.com/CWorthy-ocean/roms-tools/pull/527))
 
 ### Bugfixes
 
 * Allow negative tracer flux values for `CDRForcing` ([#510](https://github.com/CWorthy-ocean/roms-tools/pull/510))
-
+* Improve robustness of `Grid.update_topography` for externally generated grids ([#523](https://github.com/CWorthy-ocean/roms-tools/pull/523))
 
 ## v3.3.0
 

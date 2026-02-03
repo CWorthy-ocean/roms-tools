@@ -10,7 +10,7 @@
 
 ## Overview
 
-A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://github.com/CESR-lab/ucla-roms) simulation with or without [MARBL biogeochemistry](https://marbl-ecosys.github.io/versions/latest_release/index.html).
+A suite of Python tools for setting up and analyzing a [UCLA-ROMS](https://github.com/CWorthy-ocean/ucla-roms) simulation with or without [MARBL biogeochemistry](https://marbl-ecosys.github.io/versions/latest_release/index.html).
 
 ## Installation
 
@@ -98,5 +98,4 @@ We also accept contributions in the form of Pull Requests.
 
 ## See also
 
-- [ROMS source code](https://github.com/CESR-lab/ucla-roms)
 - [C-Star](https://github.com/CWorthy-ocean/C-Star)

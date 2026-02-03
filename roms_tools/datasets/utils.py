@@ -36,9 +36,21 @@ def extrapolate_deepest_to_bottom(ds: xr.Dataset, depth_dim: str) -> xr.Dataset:
 
 
 def convert_to_float64(ds: xr.Dataset) -> xr.Dataset:
-    """Convert all non-mask data variables to float64.
+    """Convert all data variables in the dataset to float64.
 
-    Variables whose names start with ``"mask_"`` are left unchanged.
+    This method updates the dataset by converting all of its data variables to the
+    `float64` data type, ensuring consistency for numerical operations that require
+    high precision. Variables whose names start with ``"mask_"`` are left unchanged.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Input dataset
+
+    Returns
+    -------
+    xr.Dataset:
+        Input dataset with data variables converted to double precision.
     """
     dtype_map = {
         name: ("float64" if not name.startswith("mask_") else var.dtype)
@@ -412,7 +424,13 @@ def get_time_type(data_array: xr.DataArray) -> str:
     TypeError
         If the values in the DataArray are not of type numpy.ndarray or list.
     """
-    # List of cftime datetime types
+    values = data_array.values
+
+    # 1. numpy datetime64 (any precision)
+    if np.issubdtype(values.dtype, np.datetime64):
+        return "datetime"
+
+    # 2. cftime objects
     cftime_types = (
         cftime.DatetimeNoLeap,
         cftime.DatetimeJulian,
@@ -420,22 +438,17 @@ def get_time_type(data_array: xr.DataArray) -> str:
         cftime.Datetime360Day,
         cftime.DatetimeProlepticGregorian,
     )
-
-    values = data_array.values
-
-    # numpy datetime64
-    if values.dtype == "datetime64[ns]":
-        return "datetime"
-
-    # cftime objects (stored as object dtype)
-    if any(isinstance(value, cftime_types) for value in values):
+    if values.dtype == object and any(isinstance(v, cftime_types) for v in values):
         return "cftime"
 
-    # integer time axis
+    # 3. integer axis
     if np.issubdtype(values.dtype, np.integer):
         return "int"
 
-    raise ValueError("Unsupported data type for time values in input dataset.")
+    raise ValueError(
+        f"Unsupported data type for time values: {values.dtype}. "
+        "Expected datetime64, cftime objects, or integer."
+    )
 
 
 def convert_cftime_to_datetime(data_array: np.ndarray) -> np.ndarray:

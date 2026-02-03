@@ -28,13 +28,13 @@ from roms_tools.setup.utils import (
     group_dataset,
     min_dist_to_land,
     nan_check,
-    rotate_velocities,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
 )
 from roms_tools.utils import (
     interpolate_from_climatology,
+    rotate_velocities,
     save_datasets,
     transpose_dimensions,
 )
@@ -201,7 +201,6 @@ class SurfaceForcing:
                 processed_fields["uwnd"],
                 processed_fields["vwnd"],
                 target_coords["angle"],
-                interpolate=False,
             )
 
         if self.type == "physics":

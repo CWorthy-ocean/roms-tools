@@ -123,16 +123,19 @@ Here, $\zeta(x,y,t)$ is the time-varying sea surface height, and $h(x,y)$ is the
 
 Example plots of the vertical stretching functions and layer depths can be found [here](grid.ipynb#The-vertical-coordinate-system).
 
-`ROMS-Tools` executes steps 1 and 2 during the grid generation process, when an instance of the {py:obj}`roms_tools.Grid` class is created. Step 3 is executed when needed, during the creation of the initial conditions and boundary forcing.
+`ROMS-Tools` executes steps 1 and 2 during grid generation, when an instance of the {py:obj}`roms_tools.Grid` class is created.
+Step 3 is executed only when needed, during the creation of initial conditions and boundary forcing.
+Depending on the dataset, either the actual sea surface height or a flat sea surface height ($\zeta(x,y,t)=0$) is used.
 
-During step 3, `ROMS-Tools` handles sea surface height (SSH) based on the value of `adjust_depth_for_sea_surface_height`:
+**Actual sea surface height** ($\zeta \not\equiv 0$), consistent with measuring elevation above the bottom:
 
-* If `adjust_depth_for_sea_surface_height = False` (default), a constant sea surface height is assumed: $\zeta(x,y,t) = 0$.
-* If `adjust_depth_for_sea_surface_height = True`, the depth calculations account for spatial and temporal variations in SSH.
+- Initial conditions derived from an outer-nest ROMS simulation (used for both target and source vertical coordinates).
 
-Setting `adjust_depth_for_sea_surface_height = True` increases the complexity in the depth coordinate generation, as depths become time-dependent. While this approach may seem more accurate, its effectiveness depends on how source datasets (e.g., GLORYS) define their depth coordinates. It is often unclear whether these datasets measure depth relative to the surface (consistent with `adjust_depth_for_sea_surface_height = False`) or elevation above the bottom (consistent with `adjust_depth_for_sea_surface_height = True`). Given this uncertainty and the unclear benefit of adjusting for sea surface height variations, the default setting is `adjust_depth_for_sea_surface_height = False` for simplicity.
+**Flat sea surface height** ($\zeta \equiv 0$), consistent with measuring depth relative to the surface:
 
+- Initial and boundary conditions derived from external datasets such as GLORYS or BGC data from hybrid model-obs sources.
 
+For most external datasets, it is unclear whether depth values are relative to the surface or above the bottom, and not all datasets include sea surface height. To avoid inconsistencies, `ROMS-Tools` defaults to a flat sea surface ($\zeta \equiv 0$) when using external data.
 
 ## Tidal Forcing
 
@@ -164,9 +167,9 @@ For practical examples, see [this notebook](tides.ipynb).
 
 ## Surface Forcing
 
-The surface forcing data is sourced from **ERA5** (for meteorological forcing) and **CESM** (for biogeochemical surface forcing). The data is regridded onto the ROMS grid via the following steps:
+The surface forcing data is sourced from **ERA5** (for meteorological forcing) and **CESM** or observational/model-based sources (for biogeochemical surface forcing). The data is regridded onto the ROMS grid via the following steps:
 
-1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the ERA5/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in skewed values at certain ocean points in the ROMS grid that the ERA5/CESM data considers land. Surface forcing over land differs significantly from surface forcing over the ocean, making the horizontal land fill essential.
+1. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the ERA5, CESM, and observational grids may have land masks that differ from the ROMS grid, especially when their resolutions vary. Without applying the horizontal fill, land mask discrepancies could result in skewed values at certain ocean points in the ROMS grid that the ERA5, CESM or observational data considers land. Surface forcing over land differs significantly from surface forcing over the ocean, making the horizontal land fill essential.
 2. **Horizontal Regridding**: The horizontally filled surface forcing data is then regridded onto the ROMS grid using **linear** interpolation.
 
 ```{note}
@@ -202,24 +205,28 @@ For practical examples, see [this notebook](surface_forcing.ipynb).
 
 ## Initial Conditions
 
-The initial conditions data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields). The data is regridded onto the ROMS grid via the following steps:
+The initial conditions data is sourced from either external or internal data:
+
+- **External data**:
+  - GLORYS (for physical fields)
+  - CESM or observational/model-based sources (for biogeochemical fields)
+- **Internal data**: outer-nest ROMS
+
+The data is then regridded onto the ROMS grid through the following steps:
 
 1. **Extrapolation to Depth**: Values are extrapolated to depth by propagating the deepest available value down to the bottom.
-2. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the GLORYS/CESM and ROMS grids may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in NaN values at certain ocean points in the ROMS grid that the GLORYS/CESM data considers land.
-3. **Horizontal Regridding**: The horizontally filled initial conditions data is then regridded onto the ROMS grid using **linear** interpolation.
+2. **Horizontal Land Fill**: Ocean values are extended into land areas using a horizontal fill process based on a [multigrid method](#multigrid-method-for-filling-land-values). This step is crucial because the source data grids and the ROMS target grid may have differing land masks, especially when their resolutions differ. Without applying the horizontal fill, land mask discrepancies could result in NaN values at ocean points that are water in the ROMS grid but marked as land in the GLORYS, CESM, observational, or outer-nest ROMS data.
+3. **Rotation of Ocean Velocities and Interpolation (for internal ROMS data only)**: If the source data comes from an outer-nest ROMS, velocities are rotated to east and north directions and interpolated to rho-points (cell centers). This step can be skipped for external data, as it is already aligned on a latitude-longitude grid and provided at grid centers.
+4. **Horizontal Regridding**: The horizontally filled initial conditions data is then regridded onto the ROMS grid using **linear** interpolation.
 
 ```{note}
 The ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-during both steps 1 and 2, rather than as a vector field. This approach could potentially introduce artifacts.
 ```
 
-4. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid to align with its orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
-5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points. To compute the depth in the terrain-following vertical coordinate, `ROMS-Tools` handles sea surface height (SSH) based on the value of `adjust_depth_for_sea_surface_height` (see also [this section](#vertical-coordinate-system)):
-
-* If `adjust_depth_for_sea_surface_height = False` (default), a constant sea surface height is assumed: $\zeta(x,y,t) = 0$.
-* If `adjust_depth_for_sea_surface_height = True`, the depth calculations account for spatial and temporal variations in SSH.a
-
-6. **Computation of barotropic velocities**: To obtain the barotropic velocities, the rotated and regridded velocities are vertically integrated.
-7. **Zero vertical velocities**: The initial condition for the vertical velocity `w` is set to zero.
+5. **Rotation of Ocean Velocities**: The ocean velocity components are rotated onto the ROMS grid to align with its orientation. The rotated velocities are then interpolated from rho-points to u- and v-points.
+6. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from the source depth levels to the terrain-following vertical coordinate used in ROMS. For outer-nest ROMS source data, the source depths are terrain-following; for external data, the source depths are constant.
+7. **Computation of barotropic velocities**: To obtain the barotropic velocities, the rotated and regridded velocities are vertically integrated.
+8. **Zero vertical velocities**: The initial condition for the vertical velocity `w` is set to zero.
 
 As a result of these processes, the following fields are produced on the ROMS grid:
 
@@ -274,7 +281,7 @@ For practical examples, see [this notebook](initial_conditions.ipynb).
 
 ## Boundary Forcing
 
-The boundary forcing data is sourced from **GLORYS** (for physical fields) and **CESM** (for biogeochemical fields).
+The boundary forcing data is sourced from **GLORYS** (for physical fields) and **CESM** or observational/model-based sources (for biogeochemical fields).
 
 1. **Extrapolation to Depth**: Values are extrapolated to depth by propagating the deepest available value down to the bottom.
 
@@ -300,10 +307,7 @@ Option A is faster and the default choice. Option B is more thorough but slower,
 In both Option A and B the ocean velocity components are treated as two independent scalar fields-—zonal and meridional components—-, rather than as a vector field. This approach could potentially introduce artifacts.
 ```
 
-5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points. To compute the depth in the terrain-following vertical coordinate, `ROMS-Tools` handles sea surface height (SSH) based on the value of `adjust_depth_for_sea_surface_height` (see also [this section](#vertical-coordinate-system)):
-
-* If `adjust_depth_for_sea_surface_height = False` (default), a constant sea surface height is assumed: $\zeta(x,y,t) = 0$.
-* If `adjust_depth_for_sea_surface_height = True`, the depth calculations account for spatial and temporal variations in SSH.
+5. **Vertical Regridding**: The horizontally regridded fields are then vertically regridded from constant depth levels to the terrain-following vertical coordinate used in ROMS. Note that the vertical regridding of the velocities is performed at u- and v-points.
 
 6. **Computation of barotropic velocities**: To obtain the barotropic velocities, the rotated and regridded velocities are vertically integrated.
 
@@ -380,18 +384,19 @@ For practical examples, see [this notebook](river_forcing.ipynb).
 
 Before the horizontal regridding step, `ROMS-Tools` performs a horizontal land fill to extend ocean values into land areas. The horizontal land fill is done by iteratively solving a Poisson equation using a lateral diffusion approach. For this, `ROMS-Tools` uses an algebraic multigrid (AMG) method implemented with the [pyamg](https://pyamg.readthedocs.io/en/latest/) package {cite}`pyamg2023`.
 
-Below are a few examples illustrating how the horizontal land fill looks in practice, using the ERA5, TPXO, and GLORYS data.
+Below are a few examples illustrating how the horizontal land fill looks in practice, using ERA5, TPXO, GLORYS, and ROMS data.
 
 ![AMG method for ERA5 data](images/AMG_ERA5.png)
 ![AMG method for TPXO data](images/AMG_TPXO.png)
 ![AMG method for GLORYS data](images/AMG_GLORYS.png)
+![AMG method for ROMS data](images/AMG_ROMS.png)
 
 The timings in the respective right panel reflect the following:
 ```
 (time to set up the solver) + (time to perform a horizontal fill on a single horizontal slice)
 ```
 Note that the setup time is only required once, as the solver is based on a fixed land mask. Once set up, the same solver can be used for multiple horizontal levels and across multiple time steps.
-Note that the timings increase from top to bottom due to the increasing resolution: ERA5 (1/4$^\circ$), TPXO (1/6$^\circ$), and GLORYS (1/12$^\circ$).
+Note that the timings increase from top to bottom due to the increasing resolution: ERA5 (1/4$^\circ$, 12,000 grid points), TPXO (1/6$^\circ$, 18,000 grid points), and GLORYS (1/12$^\circ$, 36,000 grid points), ROMS (3km, 2,163,252 grid points).
 
 ```{note}
 While the AMG method is highly efficient, the timing can still accumulate over many time slices and vertical levels. To minimize unnecessary calculations, `ROMS-Tools` limits the horizontal land fill to a small area surrounding the target ROMS domain. However, a buffer zone around the target ROMS domain needs to be included to avoid edge artifacts from the horizontal fill near the boundaries (see [this issue](https://github.com/CWorthy-ocean/roms-tools/issues/153) for more details).
@@ -400,5 +405,8 @@ Two factors have to be balanced:
 - A smaller margin leads to more efficient computations.
 - A larger margin provides more accurate fill results by avoiding boundary effects.
 
-As a compromise, `ROMS-Tools` uses 20 buffer points for the margin. For example, in the case of ERA5, this results in a margin of 20 * 0.25$^\circ$ = 5$^\circ$.
+As a compromise, `ROMS-Tools` uses 20 buffer points for the margin. For example:
+
+- In the case of ERA5, this corresponds to a margin of 20 x 0.25$^\circ$ = 5$^\circ$.
+- In the case of a 3 km ROMS grid, this corresponds to a margin of 20 x 3 km = 60 km.
 ```

@@ -250,7 +250,9 @@ def fill_narrow_passages(
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            logger.info(f"Filling: {nf} points in 1-pixel NS passages (iteration {it+1})")
+            logger.info(
+                f"Filling: {nf} points in 1-pixel NS passages (iteration {it + 1})"
+            )
             mask[fill == 1] = 0
         else:
             break
@@ -263,7 +265,9 @@ def fill_narrow_passages(
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            logger.info(f"Filling: {nf} points in 1-pixel EW passages (iteration {it+1})")
+            logger.info(
+                f"Filling: {nf} points in 1-pixel EW passages (iteration {it + 1})"
+            )
             mask[fill == 1] = 0
         else:
             break
@@ -300,7 +304,7 @@ def fill_narrow_passages(
             if region_size > domain_size * min_region_fraction:
                 logger.warning(
                     f"Region {ireg} is large ({region_size} points, "
-                    f"{100*region_size/domain_size:.1f}% of domain). Preserving it."
+                    f"{100 * region_size / domain_size:.1f}% of domain). Preserving it."
                 )
             else:
                 mask[reg == ireg] = 0

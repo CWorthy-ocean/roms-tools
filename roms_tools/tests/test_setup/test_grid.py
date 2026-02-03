@@ -925,7 +925,9 @@ def test_fill_narrow_passages_hole_filling():
     mask_before = grid.ds.mask_rho.values.copy()
 
     # Verify the small isolated region exists before filling
-    assert mask_before[3:5, 3:5].all() == 1, "Small isolated region should exist before filling"
+    assert mask_before[3:5, 3:5].all() == 1, (
+        "Small isolated region should exist before filling"
+    )
 
     # Fill narrow passages with a small min_region_fraction
     # The small isolated region should be removed, but the large land region should be preserved

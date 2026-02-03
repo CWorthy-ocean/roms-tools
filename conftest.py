@@ -432,6 +432,45 @@ def initial_conditions_with_unified_bgc_from_climatology(
 
 
 @pytest.fixture(scope="session")
+def initial_conditions_from_roms(
+    use_dask: bool,
+) -> InitialConditions:
+    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    fname_restart = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(1998, 1, 6),
+        source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
+        bgc_source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def initial_conditions_from_roms_without_bgc(
+    use_dask: bool,
+) -> InitialConditions:
+    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    fname_restart = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(1998, 1, 6),
+        source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
     """Fixture for creating a BoundaryForcing object."""
     fname1 = Path(download_test_data("GLORYS_NA_20120101.nc"))

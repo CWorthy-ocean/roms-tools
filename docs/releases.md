@@ -1,6 +1,6 @@
 # Release notes
 
-## v3.5.0 (unreleased)
+## v3.6.0 (unreleased)
 
 ### New Features
 
@@ -14,6 +14,11 @@
 
 ### Bugfixes
 
+## v3.5.0
+
+### New Features
+
+* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
 
 ## v3.4.0
 

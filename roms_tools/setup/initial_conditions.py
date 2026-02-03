@@ -23,7 +23,6 @@ from roms_tools.regrid import (
     LateralRegridFromROMS,
     LateralRegridToROMS,
     VerticalRegrid,
-    VerticalRegridToROMS,
 )
 from roms_tools.setup.utils import (
     RawDataSource,
@@ -98,10 +97,6 @@ class InitialConditions:
         - If True: allows a +24h search window after `ini_time` and selects the closest available
           time entry within that window. Raises a ValueError if none are found.
 
-    horizontal_chunk_size : int, optional
-        The chunk size used for horizontal partitioning for the vertical regridding when `use_dask = True`. Defaults to 50.
-        A larger number results in a bigger memory footprint but faster computations.
-        A smaller number results in a smaller memory footprint but slower computations.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
@@ -148,9 +143,6 @@ class InitialConditions:
     """Whether to handle ini_time flexibly."""
     use_dask: bool = False
     """Whether to use dask for processing."""
-    horizontal_chunk_size: int = 50
-    """The chunk size used for horizontal partitioning for the vertical regridding when
-    `use_dask = True`."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
 
@@ -396,7 +388,7 @@ class InitialConditions:
                 ds_tmp = xr.Dataset(
                     {filtered_vars[0]: processed_fields[filtered_vars[0]]}
                 )
-                vertical_regrid = VerticalRegrid(ds_tmp)
+                vertical_regrid = VerticalRegrid(ds_tmp, source_dim="s_rho")
 
                 for var_name in filtered_vars:
                     if var_name in processed_fields:
@@ -412,20 +404,20 @@ class InitialConditions:
                         )
             else:
                 # LatLonDataset: create a regrid object for all variables
-                vertical_regrid_to_roms = VerticalRegridToROMS(
-                    self.ds_depth_coords[f"layer_depth_{location}"],
-                    data.ds[data.dim_names["depth"]],
+                vertical_regrid = VerticalRegrid(
+                    data.ds, source_dim=data.dim_names["depth"]
                 )
 
                 for var_name in filtered_vars:
                     if var_name not in processed_fields:
                         continue
-                    field = processed_fields[var_name]
-                    if getattr(self, "use_dask", False):
-                        field = field.chunk(
-                            _set_dask_chunks(location, self.horizontal_chunk_size)
-                        )
-                    processed_fields[var_name] = vertical_regrid_to_roms.apply(field)
+                    processed_fields[var_name] = vertical_regrid.apply(
+                        processed_fields[var_name],
+                        source_depth_coords=data.ds[data.dim_names["depth"]],
+                        target_depth_coords=self.ds_depth_coords[
+                            f"layer_depth_{location}"
+                        ],
+                    )
 
         return processed_fields
 
@@ -693,12 +685,6 @@ class InitialConditions:
                 if isinstance(zeta, xr.DataArray):
                     zeta = interpolate_from_rho_to_v(zeta)
 
-            if self.use_dask:
-                h = h.chunk(_set_dask_chunks(location, self.horizontal_chunk_size))
-                if isinstance(zeta, xr.DataArray):
-                    zeta = zeta.chunk(
-                        _set_dask_chunks(location, self.horizontal_chunk_size)
-                    )
             depth = compute_depth(zeta, h, self.grid.ds.attrs["hc"], Cs, sigma)
             self.ds_depth_coords[key] = depth
 

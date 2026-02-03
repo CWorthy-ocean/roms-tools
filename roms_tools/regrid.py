@@ -134,175 +134,11 @@ class LateralRegridFromROMS:
         return regridded
 
 
-class VerticalRegridToROMS:
-    """Interpolates data onto new vertical (depth) coordinates.
-
-    Parameters
-    ----------
-    target_depth_coords : xarray.DataArray
-        Depth coordinates for the target grid.
-    source_depth_coords : xarray.DataArray
-        Depth coordinates for the source grid.
-    """
-
-    def __init__(self, target_depth_coords, source_depth_coords):
-        """Initialize regridding factors for interpolation.
-
-        Parameters
-        ----------
-        target_depth_coords : xarray.DataArray
-            Depth coordinates for the target grid.
-        source_depth_coords : xarray.DataArray
-            Depth coordinates for the source grid.
-
-        Attributes
-        ----------
-        coeff : xarray.Dataset
-            Dataset containing:
-            - `is_below` : Boolean mask for depths just below target.
-            - `is_above` : Boolean mask for depths just above target.
-            - `upper_mask`, `lower_mask` : Masks for valid interpolation bounds.
-            - `factor` : Weight for blending values between levels.
-        """
-        self.depth_dim = source_depth_coords.dims[0]
-        source_depth = source_depth_coords
-        dims = {"dim": self.depth_dim}
-
-        dlev = source_depth - target_depth_coords
-        is_below = dlev == dlev.where(dlev >= 0).min(**dims)
-        is_above = dlev == dlev.where(dlev <= 0).max(**dims)
-        p_below = dlev.where(is_below).sum(**dims)
-        p_above = -dlev.where(is_above).sum(**dims)
-        denominator = p_below + p_above
-        denominator = denominator.where(denominator > 1e-6, 1e-6)
-        factor = p_below / denominator
-
-        upper_mask = is_above.sum(**dims) > 0
-        lower_mask = is_below.sum(**dims) > 0
-
-        self.coeff = xr.Dataset(
-            {
-                "is_below": is_below,
-                "is_above": is_above,
-                "upper_mask": upper_mask,
-                "lower_mask": lower_mask,
-                "factor": factor,
-            }
-        )
-
-    def apply(self, da, fill_nans=True):
-        """Interpolates the variable onto the new depth grid using precomputed
-        coefficients for linear interpolation between layers.
-
-        Parameters
-        ----------
-        da : xarray.DataArray
-            The input data to be regridded along the depth dimension. This should be
-            an array with the same depth coordinates as the original grid.
-        fill_nans : bool, optional
-            Whether to fill NaN values in the regridded data. If True (default),
-            forward-fill and backward-fill are applied along the 's_rho' dimension to
-            ensure there are no NaNs after interpolation.
-
-        Returns
-        -------
-        xarray.DataArray
-            The regridded data array, interpolated onto the new depth grid. NaN values
-            are replaced if `fill_nans=True`, with extrapolation allowed at the surface
-            and bottom layers to minimize gaps.
-        """
-        dims = {"dim": self.depth_dim}
-
-        da_below = da.where(self.coeff["is_below"]).sum(**dims)
-        da_above = da.where(self.coeff["is_above"]).sum(**dims)
-
-        result = da_below + (da_above - da_below) * self.coeff["factor"]
-        if fill_nans:
-            result = result.where(self.coeff["upper_mask"], da.isel({dims["dim"]: 0}))
-            result = result.where(self.coeff["lower_mask"], da.isel({dims["dim"]: -1}))
-        else:
-            result = result.where(self.coeff["upper_mask"]).where(
-                self.coeff["lower_mask"]
-            )
-
-        return result
-
-
-class VerticalRegridFromROMS:
-    """A class for regridding data from the ROMS vertical coordinate system to target
-    depth levels.
-
-    This class uses the `xgcm` package to perform the transformation from the ROMS depth coordinates to
-    a user-defined set of target depth levels. It assumes that the input dataset `ds` contains the necessary
-    vertical coordinate information (`s_rho`).
-
-    Attributes
-    ----------
-    grid : xgcm.Grid
-        The grid object used for regridding, initialized with the given dataset `ds`.
-    """
-
-    def __init__(self, ds):
-        """Initializes the `VerticalRegridFromROMS` object by creating an `xgcm.Grid`
-        instance.
-
-        Parameters
-        ----------
-        ds : xarray.Dataset
-            The dataset containing the ROMS output data, which must include the vertical coordinate `s_rho`.
-        """
-        self.grid = xgcm.Grid(
-            ds,
-            coords={"s_rho": {"center": "s_rho"}},
-            periodic=False,
-            autoparse_metadata=False,
-        )
-
-    def apply(self, da, depth_coords, target_depth_levels, mask_edges=True):
-        """Applies vertical regridding from ROMS to the specified target depth levels.
-
-        This method transforms the input data array `da` from the ROMS vertical coordinate (`s_rho`)
-        to a set of target depth levels defined by `target_depth_levels`.
-
-        Parameters
-        ----------
-        da : xarray.DataArray
-            The data array containing the ROMS output field to be regridded. It must have a vertical
-            dimension corresponding to `s_rho`.
-
-        depth_coords : array-like
-            The depth coordinates of the input data array `da` (typically the `s_rho` coordinate in ROMS).
-
-        target_depth_levels : array-like
-            The target depth levels to which the input data `da` will be regridded.
-
-        mask_edges: bool, optional
-            If activated, target values outside the range of depth_coords are masked with nan. Defaults to True.
-
-        Returns
-        -------
-        xarray.DataArray
-            A new `xarray.DataArray` containing the regridded data at the specified target depth levels.
-        """
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
-            transformed = self.grid.transform(
-                da,
-                "s_rho",
-                target_depth_levels,
-                target_data=depth_coords,
-                mask_edges=mask_edges,
-            )
-
-        return transformed
-
-
 class VerticalRegrid:
-    """Regrid ROMS variables along the vertical, using spatially varying coordinates.
+    """Regrid ROMS variables along the vertical.
 
-    This class uses the `xgcm` package to transform data from a ROMS vertical coordinate
-    system (`s_rho`) to a user-defined set of target depth levels, where both the source
-    and target coordinates can vary spatially (i.e., 2D fields in horizontal space).
+    This class uses the `xgcm` package. Both the source and target coordinates can vary spatially
+    (i.e., they can be 3D fields).
 
     Attributes
     ----------
@@ -310,28 +146,30 @@ class VerticalRegrid:
         The XGCM grid object used for vertical regridding, initialized with the input dataset `ds`.
     """
 
-    def __init__(self, ds: "xr.Dataset"):
+    def __init__(self, ds: "xr.Dataset", source_dim: str):
         """Initialize the VerticalRegrid object with a ROMS dataset.
 
         Parameters
         ----------
         ds : xarray.Dataset
-            The ROMS dataset containing the vertical coordinate `s_rho` and the variable(s)
-            to be regridded.
+            A ROMS source dataset containing the vertical coordinate `s_rho`.
+        source_dim : str
+            Name of the vertical source dimension in the dataset.
         """
         self.grid = xgcm.Grid(
             ds,
-            coords={"s_rho": {"center": "s_rho"}},
+            coords={source_dim: {"center": source_dim}},
             periodic=False,
             autoparse_metadata=False,
         )
+        self.source_dim = source_dim
 
     def apply(
         self,
         da: "xr.DataArray",
         source_depth_coords: "xr.DataArray",
         target_depth_coords: "xr.DataArray",
-        mask_edges: bool = True,
+        mask_edges: bool = False,
     ) -> "xr.DataArray":
         """Regrid a ROMS variable from source vertical coordinates to target vertical coordinates.
 
@@ -341,32 +179,38 @@ class VerticalRegrid:
         Parameters
         ----------
         da : xarray.DataArray
-            The data array to regrid. Must have a vertical dimension corresponding to `s_rho`.
+            The data array to regrid. Must have a vertical dimension corresponding to `self.source_dim.
 
-        source_depth_coords : array-like (1D or 2D)
+        source_depth_coords : array-like (1D or 3D)
             Depth coordinates of the source data. Can be a 1D array (same for all horizontal points)
-            or a 2D array (varying in horizontal space).
+            or a 3D array (e.g., terrain-following coordinate).
 
-        target_depth_coords : array-like (1D or 2D)
-            Desired depth coordinates of the regridded data. Can also be 1D or 2D.
+        target_depth_coords : array-like (1D or 3D)
+            Desired depth coordinates of the regridded data. Can also be 1D or 3D.
 
         mask_edges : bool, optional
             If True, target values outside the range of source depth coordinates are masked with NaN.
-            Defaults to True.
+            Defaults to False.
 
         Returns
         -------
         xarray.DataArray
             A new `DataArray` containing the regridded variable at the target depth coordinates.
         """
+        target_dim = None
+        dims = ["s_w", "s_rho"]
+        for dim in dims:
+            if dim in target_depth_coords.dims:
+                target_dim = dim
+
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="xgcm")
             transformed = self.grid.transform(
                 da,
-                "s_rho",
+                self.source_dim,
                 target=target_depth_coords,
                 target_data=source_depth_coords,
-                target_dim="s_rho",
+                target_dim=target_dim,
                 mask_edges=mask_edges,
             )
 

@@ -119,7 +119,7 @@ class Grid:
     mask_shapefile: str | Path | None = None
     """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
     close_narrow_channels: bool = False
-    """Whether to close narrow water channels and fill small lakes in the mask. 
+    """Whether to close narrow water channels and fill small lakes in the mask.
     Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND. Default is False."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""

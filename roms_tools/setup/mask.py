@@ -176,7 +176,7 @@ def add_velocity_masks(ds):
     return ds
 
 
-def fill_narrow_passages(
+def _close_narrow_channels(
     ds: xr.Dataset,
     mask_var: str = "mask_rho",
     max_iterations: int = 10,
@@ -184,7 +184,7 @@ def fill_narrow_passages(
     min_region_fraction: float = 0.1,
     inplace: bool = False,
 ) -> xr.Dataset:
-    """Fill narrow passages and holes in a ROMS mask.
+    """Close narrow channels and holes in a ROMS mask (internal function).
 
     This function performs two main operations:
     1. Fills narrow 1-pixel passages in both north-south and east-west directions
@@ -198,7 +198,7 @@ def fill_narrow_passages(
     mask_var : str, optional
         Name of the mask variable in the dataset. Default is "mask_rho".
     max_iterations : int, optional
-        Maximum number of iterations for filling narrow passages. Default is 10.
+        Maximum number of iterations for closing narrow channels. Default is 10.
     connectivity : int, optional
         Connectivity for connected component labeling. Use 4 for 4-connectivity
         (north, south, east, west) or 8 for 8-connectivity (includes diagonals).
@@ -229,7 +229,7 @@ def fill_narrow_passages(
     --------
     >>> import xarray as xr
     >>> ds = xr.open_dataset("grid.nc")
-    >>> ds_filled = fill_narrow_passages(ds)
+    >>> ds_filled = _close_narrow_channels(ds)
     >>> ds_filled.to_netcdf("grid_filled.nc")
     """
     # Ensure we have the mask variable
@@ -240,7 +240,7 @@ def fill_narrow_passages(
     mask = ds[mask_var].values.copy()
     mask[mask < 0] = 0
 
-    # Fill narrow passages
+    # Close narrow channels
     for it in range(max_iterations):
         # Fill 1-pixel passages in north-south direction
         fill = mask.copy()
@@ -251,7 +251,7 @@ def fill_narrow_passages(
         nf = np.sum(fill == 1)
         if nf > 0:
             logger.info(
-                f"Filling: {nf} points in 1-pixel NS passages (iteration {it + 1})"
+                f"Closing: {nf} points in 1-pixel NS channels (iteration {it + 1})"
             )
             mask[fill == 1] = 0
         else:
@@ -266,7 +266,7 @@ def fill_narrow_passages(
         nf = np.sum(fill == 1)
         if nf > 0:
             logger.info(
-                f"Filling: {nf} points in 1-pixel EW passages (iteration {it + 1})"
+                f"Closing: {nf} points in 1-pixel EW channels (iteration {it + 1})"
             )
             mask[fill == 1] = 0
         else:

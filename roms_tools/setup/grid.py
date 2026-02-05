@@ -12,7 +12,7 @@ from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import plot
-from roms_tools.setup.mask import add_mask, add_velocity_masks, fill_narrow_passages
+from roms_tools.setup.mask import add_mask, add_velocity_masks, _close_narrow_channels
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     Timed,
@@ -69,6 +69,9 @@ class Grid:
         The default is "ETOPO5", which does not require a path.
     mask_shapefile: str | Path | None, optional
         Path to a custom shapefile to use to determine the land mask; if None, use NaturalEarth 10m.
+    close_narrow_channels : bool, optional
+        Whether to close narrow channels and fill holes in the mask after it is generated.
+        The default is False.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
@@ -115,6 +118,8 @@ class Grid:
     """Dictionary specifying the source of the topography data."""
     mask_shapefile: str | Path | None = None
     """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
+    close_narrow_channels: bool = False
+    """Whether to close narrow channels and fill holes in the mask. Default is False."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
@@ -183,6 +188,9 @@ class Grid:
         stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
         Earth 10m) is used. The operation is optionally timed and logged.
 
+        If `close_narrow_channels` is True, narrow channels and holes will be closed
+        after the mask is generated.
+
         Parameters
         ----------
         mask_shapefile : str or Path, optional
@@ -202,72 +210,20 @@ class Grid:
             self.ds = ds
             self.mask_shapefile = mask_shapefile
 
-    def fill_narrow_passages(
-        self,
-        mask_var: str = "mask_rho",
-        max_iterations: int = 10,
-        connectivity: int = 4,
-        min_region_fraction: float = 0.1,
-        verbose: bool = False,
-    ) -> None:
-        """Fill narrow passages and holes in the ROMS mask.
-
-        This method performs two main operations:
-        1. Fills narrow 1-pixel passages in both north-south and east-west directions
-        2. Fills holes by keeping only the largest connected region (unless a region
-           is larger than a specified fraction of the domain)
-
-        After filling, the velocity masks (mask_u and mask_v) are automatically
-        updated to reflect the changes in mask_rho.
-
-        Parameters
-        ----------
-        mask_var : str, optional
-            Name of the mask variable in the dataset. Default is "mask_rho".
-        max_iterations : int, optional
-            Maximum number of iterations for filling narrow passages. Default is 10.
-        connectivity : int, optional
-            Connectivity for connected component labeling. Use 4 for 4-connectivity
-            (north, south, east, west) or 8 for 8-connectivity (includes diagonals).
-            Default is 4.
-        min_region_fraction : float, optional
-            Minimum fraction of domain size for a region to be preserved when filling
-            holes. Regions smaller than this fraction will be removed unless they are
-            the largest region. Default is 0.1 (10%).
-        verbose : bool, optional
-            If True, prints timing and progress information. Default is False.
-
-        Returns
-        -------
-        None
-            Updates the `self.ds` attribute in place with the modified mask.
-
-        Notes
-        -----
-        The function first ensures mask values are non-negative (negative values are
-        set to 0). Then it iteratively removes 1-pixel wide passages in both
-        north-south and east-west directions. Finally, it identifies connected
-        regions and keeps only the largest one, unless another region exceeds the
-        minimum region fraction threshold.
-
-        Examples
-        --------
-        >>> grid = Grid(nx=100, ny=100, size_x=50, size_y=50, center_lon=-20, center_lat=64)
-        >>> grid.fill_narrow_passages()
-        """
-        with Timed("=== Filling narrow passages and holes ===", verbose=verbose):
-            ds = fill_narrow_passages(
-                self.ds,
-                mask_var=mask_var,
-                max_iterations=max_iterations,
-                connectivity=connectivity,
-                min_region_fraction=min_region_fraction,
-                inplace=True,
-            )
-            # Update velocity masks after modifying mask_rho
-            if mask_var == "mask_rho":
+        # Close narrow channels if requested
+        if self.close_narrow_channels:
+            with Timed("=== Closing narrow channels and holes ===", verbose=verbose):
+                ds = _close_narrow_channels(
+                    self.ds,
+                    mask_var="mask_rho",
+                    max_iterations=10,
+                    connectivity=4,
+                    min_region_fraction=0.1,
+                    inplace=True,
+                )
+                # Update velocity masks after modifying mask_rho
                 ds = add_velocity_masks(ds)
-            self.ds = ds
+                self.ds = ds
 
     def update_topography(
         self,

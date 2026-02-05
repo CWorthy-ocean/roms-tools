@@ -19,6 +19,7 @@ from roms_tools.constants import (
     UPPER_BOUND_THETA_S,
 )
 from roms_tools.datasets.download import download_test_data
+from roms_tools.setup.mask import _close_narrow_channels, add_velocity_masks
 from roms_tools.setup.topography import _compute_rfactor
 
 try:
@@ -826,9 +827,9 @@ def test_update_mask():
     )
 
 
-def test_fill_narrow_passages():
-    """Test that fill_narrow_passages removes 1-pixel wide land passages."""
-    # Create a small grid
+def test_close_narrow_channels():
+    """Test that close_narrow_channels removes 1-pixel wide land passages."""
+    # Create a small grid with close_narrow_channels=False to avoid closing during init
     grid = Grid(
         nx=15,
         ny=15,
@@ -838,6 +839,7 @@ def test_fill_narrow_passages():
         center_lat=64,
         rot=0,
         N=3,
+        close_narrow_channels=False,
     )
 
     # Get the actual shape of mask_rho (grid adds boundary cells, so it's nx+2, ny+2)
@@ -866,17 +868,26 @@ def test_fill_narrow_passages():
     # Set the mask in the grid
     grid.ds["mask_rho"].values[:] = mask
 
-    # Verify the narrow land passages exist before filling
-    assert mask[8, 8] == 1, "NS land passage should exist before filling"
-    assert mask[11, 11] == 1, "EW land passage should exist before filling"
+    # Verify the narrow land passages exist before closing
+    assert mask[8, 8] == 1, "NS land passage should exist before closing"
+    assert mask[11, 11] == 1, "EW land passage should exist before closing"
 
     # Save original mask for comparison
     mask_before = grid.ds.mask_rho.values.copy()
 
-    # Fill narrow passages
-    grid.fill_narrow_passages()
+    # Close narrow channels directly (as update_mask would do)
+    grid.ds = _close_narrow_channels(
+        grid.ds,
+        mask_var="mask_rho",
+        max_iterations=10,
+        connectivity=4,
+        min_region_fraction=0.1,
+        inplace=True,
+    )
+    # Update velocity masks after modifying mask_rho
+    grid.ds = add_velocity_masks(grid.ds)
 
-    # Get the mask after filling
+    # Get the mask after closing
     mask_after = grid.ds.mask_rho.values.copy()
 
     # Verify that the narrow land passages were removed (converted to water)
@@ -884,16 +895,16 @@ def test_fill_narrow_passages():
     assert mask_after[11, 11] == 0, "EW land passage should be removed"
 
     # Verify that the mask changed
-    assert np.any(mask_before != mask_after), "Mask should have changed after filling"
+    assert np.any(mask_before != mask_after), "Mask should have changed after closing"
 
     # Verify that velocity masks were updated
     assert "mask_u" in grid.ds.variables
     assert "mask_v" in grid.ds.variables
 
 
-def test_fill_narrow_passages_hole_filling():
-    """Test that fill_narrow_passages removes small isolated regions while preserving large ones."""
-    # Create a small grid
+def test_close_narrow_channels_hole_filling():
+    """Test that close_narrow_channels removes small isolated regions while preserving large ones."""
+    # Create a small grid with close_narrow_channels=False to avoid closing during init
     grid = Grid(
         nx=20,
         ny=20,
@@ -903,6 +914,7 @@ def test_fill_narrow_passages_hole_filling():
         center_lat=64,
         rot=0,
         N=3,
+        close_narrow_channels=False,
     )
 
     # Get the actual shape of mask_rho (grid adds boundary cells, so it's nx+2, ny+2)
@@ -924,16 +936,25 @@ def test_fill_narrow_passages_hole_filling():
     # Save original mask
     mask_before = grid.ds.mask_rho.values.copy()
 
-    # Verify the small isolated region exists before filling
+    # Verify the small isolated region exists before closing
     assert mask_before[3:5, 3:5].all() == 1, (
-        "Small isolated region should exist before filling"
+        "Small isolated region should exist before closing"
     )
 
-    # Fill narrow passages with a small min_region_fraction
+    # Close narrow channels directly (as update_mask would do)
     # The small isolated region should be removed, but the large land region should be preserved
-    grid.fill_narrow_passages(min_region_fraction=0.05)
+    grid.ds = _close_narrow_channels(
+        grid.ds,
+        mask_var="mask_rho",
+        max_iterations=10,
+        connectivity=4,
+        min_region_fraction=0.1,
+        inplace=True,
+    )
+    # Update velocity masks after modifying mask_rho
+    grid.ds = add_velocity_masks(grid.ds)
 
-    # Get the mask after filling
+    # Get the mask after closing
     mask_after = grid.ds.mask_rho.values.copy()
 
     # Verify that the small isolated region was removed (converted to water)
@@ -943,7 +964,7 @@ def test_fill_narrow_passages_hole_filling():
     assert (mask_after[6:16, 6:16] == 1).all(), "Large land region should be preserved"
 
     # Verify that the mask changed
-    assert np.any(mask_before != mask_after), "Mask should have changed after filling"
+    assert np.any(mask_before != mask_after), "Mask should have changed after closing"
 
 
 # Boundary tests

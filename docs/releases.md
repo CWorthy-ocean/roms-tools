@@ -4,6 +4,8 @@
 
 ### New Features
 
+* Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
+
 ### Breaking Changes
 
 ### Internal Changes
@@ -16,7 +18,7 @@
 
 ### New Features
 
-* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
+* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([#513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
 
 ## v3.4.0
 

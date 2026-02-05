@@ -13,7 +13,7 @@ from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import plot
-from roms_tools.setup.mask import add_mask, add_velocity_masks
+from roms_tools.setup.mask import _close_narrow_channels, add_mask, add_velocity_masks
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     Timed,
@@ -70,6 +70,9 @@ class Grid:
         The default is "ETOPO5", which does not require a path.
     mask_shapefile: str | Path | None, optional
         Path to a custom shapefile to use to determine the land mask; if None, use NaturalEarth 10m.
+    close_narrow_channels : bool, optional
+        Whether to close narrow water channels and fill small lakes in the mask after it is generated.
+        Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND. The default is False.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
@@ -116,6 +119,9 @@ class Grid:
     """Dictionary specifying the source of the topography data."""
     mask_shapefile: str | Path | None = None
     """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
+    close_narrow_channels: bool = False
+    """Whether to close narrow water channels and fill small lakes in the mask.
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND. Default is False."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
@@ -174,7 +180,10 @@ class Grid:
                 )
 
     def update_mask(
-        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+        self,
+        mask_shapefile: str | Path | None = None,
+        verbose: bool = False,
+        close_narrow_channels: bool | None = None,
     ) -> None:
         """
         Update the land mask of the current grid dataset.
@@ -184,6 +193,11 @@ class Grid:
         stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
         Earth 10m) is used. The operation is optionally timed and logged.
 
+        If `close_narrow_channels` is True (either from the parameter or from
+        `self.close_narrow_channels`), narrow water channels will be closed and small
+        lakes will be filled after the mask is generated.
+        Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
+
         Parameters
         ----------
         mask_shapefile : str or Path, optional
@@ -191,6 +205,9 @@ class Grid:
             the default Natural Earth 10m coastline dataset is used.
         verbose : bool, default False
             If True, prints timing and progress information.
+        close_narrow_channels : bool, optional
+            Whether to close narrow water channels and fill small lakes. If `None`, uses
+            the value from `self.close_narrow_channels`. Default is `None`.
 
         Returns
         -------
@@ -202,6 +219,28 @@ class Grid:
             ds = add_mask(self.ds, shapefile=mask_shapefile)
             self.ds = ds
             self.mask_shapefile = mask_shapefile
+
+        # Determine if we should close narrow channels
+        should_close = (
+            close_narrow_channels
+            if close_narrow_channels is not None
+            else self.close_narrow_channels
+        )
+
+        # Close narrow channels if requested
+        if should_close:
+            ds = _close_narrow_channels(
+                self.ds,
+                mask_var="mask_rho",
+                max_iterations=10,
+                connectivity=4,
+                min_region_fraction=0.1,
+                inplace=True,
+                verbose=verbose,
+            )
+            # Update velocity masks after modifying mask_rho
+            ds = add_velocity_masks(ds)
+            self.ds = ds
 
     def update_topography(
         self,

@@ -19,6 +19,7 @@ from roms_tools.constants import (
     UPPER_BOUND_THETA_S,
 )
 from roms_tools.datasets.download import download_test_data
+from roms_tools.setup.mask import _close_narrow_channels, add_velocity_masks
 from roms_tools.setup.topography import _compute_rfactor
 
 try:
@@ -824,6 +825,182 @@ def test_update_mask():
     assert abs(mask_new - mask_orig).max() == 1, (
         "Mask should change after update_mask()"
     )
+
+
+def test_close_narrow_channels():
+    """Test that close_narrow_channels closes 1-pixel wide water channels.
+
+    Creates a mask with a vertical line of ocean, a small lake connected by a narrow
+    channel.
+    All narrow channels should be closed by the algorithm and the lake should be filled in.
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
+    """
+    # Create a small grid with close_narrow_channels=False to avoid closing during init
+    grid = Grid(
+        nx=15,
+        ny=15,
+        size_x=100,
+        size_y=100,
+        center_lon=-20,
+        center_lat=64,
+        rot=0,
+        N=3,
+        close_narrow_channels=False,
+    )
+
+    # Get the actual shape of mask_rho (grid adds boundary cells, so it's nx+2, ny+2)
+    mask_shape = grid.ds["mask_rho"].shape
+
+    # Start with all land (0 = land)
+    mask = np.zeros(mask_shape, dtype=np.int32)
+
+    # Create a single vertical line of ocean (1 = water)
+    # This creates narrow water channels on either side that should be closed
+
+    # Single vertical line
+    line_xi = 8
+    top_eta = 5
+    bottom_eta = 10
+
+    mask[top_eta : bottom_eta + 1, line_xi] = 1  # Single vertical line (ocean)
+
+    # Set the entire lower half of the mask to ocean
+    mid_point = mask_shape[0] // 2
+    mask[mid_point:, :] = 1  # Lower half is all ocean
+
+    # Create a small lake in the upper half, connected to the ocean by a narrow channel
+    lake_eta_start = 3
+    lake_eta_end = 5
+    lake_xi_start = 4
+    lake_xi_end = 6
+    mask[lake_eta_start : lake_eta_end + 1, lake_xi_start : lake_xi_end + 1] = 1  # Small lake
+
+    # Create a narrow channel connecting the lake to the vertical ocean line
+    # The channel is 1 cell wide at xi=7, connecting from the lake to the vertical line
+    channel_eta = 4  # Middle of the lake vertically
+    mask[channel_eta, lake_xi_end : line_xi] = 1  # Narrow channel connecting lake to ocean
+
+    # This creates narrow water channels at xi=7 and xi=9 
+    # The channels are one cell wide and should be closed by the algorithm
+    # Also, the narrow channel connecting the lake to the ocean should be closed
+
+    # Set the mask in the grid
+    grid.ds["mask_rho"].values[:] = mask
+
+    # Verify the narrow water channels exist before closing
+    assert mask[6, 7] == 1, "Narrow water channel should exist at [6, 7]"
+    assert mask[6, 9] == 1, "Narrow water channel should exist at [6, 9]"
+    assert mask[4, 7] == 1, "Narrow channel connecting lake should exist at [4, 7]"
+
+    # Save original mask for comparison
+    mask_before = grid.ds.mask_rho.values.copy()
+
+    # Close narrow channels directly (as update_mask would do)
+    grid.ds = _close_narrow_channels(
+        grid.ds,
+        mask_var="mask_rho",
+        max_iterations=10,
+        connectivity=4,
+        min_region_fraction=0.1,
+        inplace=True,
+    )
+    # Update velocity masks after modifying mask_rho
+    grid.ds = add_velocity_masks(grid.ds)
+
+    # Get the mask after closing
+    mask_after = grid.ds.mask_rho.values.copy()
+
+    # Verify that the narrow water channels were closed (converted to land)
+    assert mask_after[6, 7] == 0, (
+        "Narrow water channel at [6, 7] should be closed (converted to land)"
+    )
+    assert mask_after[6, 9] == 0, (
+        "Narrow water channel at [6, 9] should be closed (converted to land)"
+    )
+    assert mask_after[4, 7] == 0, (
+        "Narrow channel connecting lake at [4, 7] should be closed (converted to land)"
+    )
+
+    # Verify that the mask changed
+    assert np.any(mask_before != mask_after), "Mask should have changed after closing"
+
+    # Verify that velocity masks were updated
+    assert "mask_u" in grid.ds.variables
+    assert "mask_v" in grid.ds.variables
+
+
+def test_close_narrow_channels_hole_filling():
+    """Test that close_narrow_channels fills small lakes while preserving large ocean regions.
+
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
+    """
+    # Create a small grid with close_narrow_channels=False to avoid closing during init
+    grid = Grid(
+        nx=20,
+        ny=20,
+        size_x=100,
+        size_y=100,
+        center_lon=-20,
+        center_lat=64,
+        rot=0,
+        N=3,
+        close_narrow_channels=False,
+    )
+
+    # Get the actual shape of mask_rho
+    mask_shape = grid.ds["mask_rho"].shape
+
+    # Create a mask with a large ocean region and a small isolated lake (water region)
+    mask = np.zeros(mask_shape, dtype=np.int32)  # Start with all land (0)
+
+    # Create a large ocean region (1) - this should be preserved as the largest region
+    # Account for boundary cells: indices are shifted by 1
+    mask[6:16, 6:16] = 1  # Large ocean region (5+1:15+1, 5+1:15+1)
+
+    # Create a small isolated lake (water region, 1) - this should be filled (converted to land)
+    mask[3:5, 3:5] = 1  # Small 2x2 isolated lake (2+1:4+1, 2+1:4+1)
+
+    # Set the mask in the grid
+    grid.ds["mask_rho"].values[:] = mask
+
+    # Save original mask
+    mask_before = grid.ds.mask_rho.values.copy()
+
+    # Verify the small isolated lake exists before closing
+    assert mask_before[3:5, 3:5].all() == 1, (
+        "Small isolated lake should exist before closing"
+    )
+
+    # Close narrow channels directly (as update_mask would do)
+    # The small isolated lake should be filled (converted to land), but the large ocean region should be preserved
+    grid.ds = _close_narrow_channels(
+        grid.ds,
+        mask_var="mask_rho",
+        max_iterations=10,
+        connectivity=4,
+        min_region_fraction=0.1,
+        inplace=True,
+    )
+    # Update velocity masks after modifying mask_rho
+    grid.ds = add_velocity_masks(grid.ds)
+
+    # Get the mask after closing
+    mask_after = grid.ds.mask_rho.values.copy()
+
+    # Verify that the small isolated lake was filled (converted to land)
+    assert mask_after[3:5, 3:5].all() == 0, (
+        "Small isolated lake should be filled (converted to land)"
+    )
+
+    # Verify that the large ocean region was preserved
+    assert mask_after[6:16, 6:16].sum() == 100, "Large ocean region should be preserved"
+
+    # Verify that the mask changed
+    assert np.any(mask_before != mask_after), "Mask should have changed after closing"
+
+    # Verify that velocity masks were updated
+    assert "mask_u" in grid.ds.variables
+    assert "mask_v" in grid.ds.variables
 
 
 # Boundary tests

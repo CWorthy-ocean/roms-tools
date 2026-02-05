@@ -70,8 +70,8 @@ class Grid:
     mask_shapefile: str | Path | None, optional
         Path to a custom shapefile to use to determine the land mask; if None, use NaturalEarth 10m.
     close_narrow_channels : bool, optional
-        Whether to close narrow channels and fill holes in the mask after it is generated.
-        The default is False.
+        Whether to close narrow water channels and fill small lakes in the mask after it is generated.
+        Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND. The default is False.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
@@ -119,7 +119,8 @@ class Grid:
     mask_shapefile: str | Path | None = None
     """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
     close_narrow_channels: bool = False
-    """Whether to close narrow channels and fill holes in the mask. Default is False."""
+    """Whether to close narrow water channels and fill small lakes in the mask. 
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND. Default is False."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
@@ -192,8 +193,9 @@ class Grid:
         Earth 10m) is used. The operation is optionally timed and logged.
 
         If `close_narrow_channels` is True (either from the parameter or from
-        `self.close_narrow_channels`), narrow channels and holes will be closed
-        after the mask is generated.
+        `self.close_narrow_channels`), narrow water channels will be closed and small
+        lakes will be filled after the mask is generated.
+        Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
 
         Parameters
         ----------
@@ -203,7 +205,7 @@ class Grid:
         verbose : bool, default False
             If True, prints timing and progress information.
         close_narrow_channels : bool, optional
-            Whether to close narrow channels and fill holes. If `None`, uses
+            Whether to close narrow water channels and fill small lakes. If `None`, uses
             the value from `self.close_narrow_channels`. Default is `None`.
 
         Returns

@@ -111,20 +111,21 @@ def _add_coastlines_metadata(
 
 
 def _fill_enclosed_basins(mask) -> np.ndarray:
-    """Fills enclosed basins in the mask with land (value = 1).
+    """Fills enclosed basins in the mask with land (value = 0).
 
     This function identifies the largest connected region in the mask, which is assumed to represent
-    the land, and sets all other regions to water (value = 0).
+    the main ocean, and sets all other water regions to land (value = 1).
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
 
     Parameters
     ----------
     mask : np.ndarray
-        A binary array representing the land/water mask (land = 1, water = 0).
+        A binary array representing the land/water mask (1 = ocean/water, 0 = land).
 
     Returns
     -------
     np.ndarray
-        The modified mask with enclosed basins filled with land (1).
+        The modified mask with enclosed basins (small lakes) filled with land (0).
     """
     # Label connected regions in the mask
     reg, nreg = label(mask)
@@ -185,12 +186,14 @@ def _close_narrow_channels(
     inplace: bool = False,
     verbose: bool = False,
 ) -> xr.Dataset:
-    """Close narrow channels and holes in a ROMS mask (internal function).
+    """Close narrow channels and fill small lakes in a ROMS mask (internal function).
 
     This function performs two main operations:
-    1. Fills narrow 1-pixel passages in both north-south and east-west directions
-    2. Fills holes by keeping only the largest connected region (unless a region
-       is larger than a specified fraction of the domain)
+    1. Closes narrow 1-pixel wide channels of water (ocean) by converting them to land
+    2. Fills small lakes (isolated water regions) by converting them to land, while
+       preserving the largest connected ocean region
+
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
 
     Parameters
     ----------
@@ -206,7 +209,7 @@ def _close_narrow_channels(
         Default is 4.
     min_region_fraction : float, optional
         Minimum fraction of domain size for a region to be preserved when filling
-        holes. Regions smaller than this fraction will be removed unless they are
+        small lakes. Regions smaller than this fraction will be removed unless they are
         the largest region. Default is 0.1 (10%).
     inplace : bool, optional
         If True, modify the dataset in place. If False, return a new dataset.
@@ -224,10 +227,11 @@ def _close_narrow_channels(
     Notes
     -----
     The function first ensures mask values are non-negative (negative values are
-    set to 0). Then it iteratively removes 1-pixel wide passages in both
-    north-south and east-west directions. Finally, it identifies connected
-    regions and keeps only the largest one, unless another region exceeds the
-    minimum region fraction threshold.
+    set to 0). Then it iteratively closes 1-pixel wide water channels in both
+    north-south and east-west directions by converting them to land (1 -> 0).
+    Finally, it identifies connected ocean regions and keeps only the largest one,
+    converting smaller isolated water regions (lakes) to land, unless another region
+    exceeds the minimum region fraction threshold.
 
     Examples
     --------

@@ -171,8 +171,9 @@ class ChildGrid(Grid):
         verbose : bool, default False
             If True, prints timing and progress information.
         close_narrow_channels : bool, optional
-            Whether to close narrow channels and fill holes. If `None`, uses
+            Whether to close narrow water channels and fill small lakes. If `None`, uses
             the value from `self.close_narrow_channels`. Default is `None`.
+            Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
 
         Returns
         -------

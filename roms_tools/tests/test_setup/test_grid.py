@@ -828,7 +828,12 @@ def test_update_mask():
 
 
 def test_close_narrow_channels():
-    """Test that close_narrow_channels removes 1-pixel wide land passages."""
+    """Test that close_narrow_channels closes 1-pixel wide water channels.
+    
+    Creates an H-shaped land mask where the distance between the two vertical
+    legs is one grid cell, creating a narrow water channel that should be closed.
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
+    """
     # Create a small grid with close_narrow_channels=False to avoid closing during init
     grid = Grid(
         nx=15,
@@ -844,33 +849,35 @@ def test_close_narrow_channels():
 
     # Get the actual shape of mask_rho (grid adds boundary cells, so it's nx+2, ny+2)
     mask_shape = grid.ds["mask_rho"].shape
-    eta_rho_size, xi_rho_size = mask_shape
 
-    # Create a mask with narrow 1-pixel land passages
-    # Start with all water (0)
-    mask = np.zeros(mask_shape, dtype=np.int32)
+    # Start with all ocean (1 = water)
+    mask = np.ones(mask_shape, dtype=np.int32)
 
-    # Create a narrow 1-pixel land passage in north-south direction
-    # A land cell with water above and below (vertically isolated)
-    # Account for boundary cells: indices are shifted by 1
-    mask[8, 8] = 1  # land cell (7+1, 7+1)
-    # Ensure water above and below
-    mask[7, 8] = 0  # water above
-    mask[9, 8] = 0  # water below
-
-    # Create a narrow 1-pixel land passage in east-west direction
-    # A land cell with water left and right (horizontally isolated)
-    mask[11, 11] = 1  # land cell (10+1, 10+1)
-    # Ensure water left and right
-    mask[11, 10] = 0  # water left
-    mask[11, 12] = 0  # water right
+    # Create an H-shaped land mask (0 = land)
+    # The H has two vertical legs and one horizontal bar connecting them
+    # The distance between the two vertical legs is one grid cell
+    
+    # Left vertical leg of H
+    left_xi = 7
+    right_xi = 9  # One cell to the right of left leg
+    top_eta = 5
+    bottom_eta = 10
+    mid_eta = 7  # Where the horizontal bar connects
+    
+    mask[top_eta:bottom_eta+1, left_xi] = 0  # Left leg
+    mask[top_eta:bottom_eta+1, right_xi] = 0  # Right leg
+    mask[mid_eta, left_xi:right_xi+1] = 0  # Horizontal bar connecting them
+    
+    # This creates narrow water channels at xi=8 (between the legs)
+    # The channels are one cell wide and should be closed by the algorithm
+    # Specifically, the water at xi=8, eta=6 and eta=8 (above and below the horizontal bar)
 
     # Set the mask in the grid
     grid.ds["mask_rho"].values[:] = mask
 
-    # Verify the narrow land passages exist before closing
-    assert mask[8, 8] == 1, "NS land passage should exist before closing"
-    assert mask[11, 11] == 1, "EW land passage should exist before closing"
+    # Verify the narrow water channels exist before closing
+    assert mask[6, 8] == 1, "Narrow water channel should exist above horizontal bar"
+    assert mask[8, 8] == 1, "Narrow water channel should exist below horizontal bar"
 
     # Save original mask for comparison
     mask_before = grid.ds.mask_rho.values.copy()
@@ -890,9 +897,9 @@ def test_close_narrow_channels():
     # Get the mask after closing
     mask_after = grid.ds.mask_rho.values.copy()
 
-    # Verify that the narrow land passages were removed (converted to water)
-    assert mask_after[8, 8] == 0, "NS land passage should be removed"
-    assert mask_after[11, 11] == 0, "EW land passage should be removed"
+    # Verify that the narrow water channels were closed (converted to land)
+    assert mask_after[6, 8] == 0, "Narrow water channel above bar should be closed (converted to land)"
+    assert mask_after[8, 8] == 0, "Narrow water channel below bar should be closed (converted to land)"
 
     # Verify that the mask changed
     assert np.any(mask_before != mask_after), "Mask should have changed after closing"
@@ -903,7 +910,10 @@ def test_close_narrow_channels():
 
 
 def test_close_narrow_channels_hole_filling():
-    """Test that close_narrow_channels removes small isolated regions while preserving large ones."""
+    """Test that close_narrow_channels fills small lakes while preserving large ocean regions.
+    
+    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
+    """
     # Create a small grid with close_narrow_channels=False to avoid closing during init
     grid = Grid(
         nx=20,
@@ -917,18 +927,18 @@ def test_close_narrow_channels_hole_filling():
         close_narrow_channels=False,
     )
 
-    # Get the actual shape of mask_rho (grid adds boundary cells, so it's nx+2, ny+2)
+    # Get the actual shape of mask_rho
     mask_shape = grid.ds["mask_rho"].shape
 
-    # Create a mask with a large land region and a small isolated land region
-    mask = np.zeros(mask_shape, dtype=np.int32)  # Start with all water (0)
+    # Create a mask with a large ocean region and a small isolated lake (water region)
+    mask = np.zeros(mask_shape, dtype=np.int32)  # Start with all land (0)
 
-    # Create a large land region (1) - this should be preserved as the largest region
+    # Create a large ocean region (1) - this should be preserved as the largest region
     # Account for boundary cells: indices are shifted by 1
-    mask[6:16, 6:16] = 1  # (5+1:15+1, 5+1:15+1)
+    mask[6:16, 6:16] = 1  # Large ocean region (5+1:15+1, 5+1:15+1)
 
-    # Create a small isolated land region (1) - this should be removed
-    mask[3:5, 3:5] = 1  # Small 2x2 isolated region (2+1:4+1, 2+1:4+1)
+    # Create a small isolated lake (water region, 1) - this should be filled (converted to land)
+    mask[3:5, 3:5] = 1  # Small 2x2 isolated lake (2+1:4+1, 2+1:4+1)
 
     # Set the mask in the grid
     grid.ds["mask_rho"].values[:] = mask
@@ -936,13 +946,13 @@ def test_close_narrow_channels_hole_filling():
     # Save original mask
     mask_before = grid.ds.mask_rho.values.copy()
 
-    # Verify the small isolated region exists before closing
+    # Verify the small isolated lake exists before closing
     assert mask_before[3:5, 3:5].all() == 1, (
-        "Small isolated region should exist before closing"
+        "Small isolated lake should exist before closing"
     )
 
     # Close narrow channels directly (as update_mask would do)
-    # The small isolated region should be removed, but the large land region should be preserved
+    # The small isolated lake should be filled (converted to land), but the large ocean region should be preserved
     grid.ds = _close_narrow_channels(
         grid.ds,
         mask_var="mask_rho",
@@ -957,14 +967,18 @@ def test_close_narrow_channels_hole_filling():
     # Get the mask after closing
     mask_after = grid.ds.mask_rho.values.copy()
 
-    # Verify that the small isolated region was removed (converted to water)
-    assert mask_after[3:5, 3:5].all() == 0, "Small isolated region should be removed"
+    # Verify that the small isolated lake was filled (converted to land)
+    assert mask_after[3:5, 3:5].all() == 0, "Small isolated lake should be filled (converted to land)"
 
-    # Verify that the large land region is still there
-    assert (mask_after[6:16, 6:16] == 1).all(), "Large land region should be preserved"
+    # Verify that the large ocean region was preserved
+    assert mask_after[6:16, 6:16].sum() == 100, "Large ocean region should be preserved"
 
     # Verify that the mask changed
     assert np.any(mask_before != mask_after), "Mask should have changed after closing"
+
+    # Verify that velocity masks were updated
+    assert "mask_u" in grid.ds.variables
+    assert "mask_v" in grid.ds.variables
 
 
 # Boundary tests

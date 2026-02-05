@@ -12,7 +12,7 @@ from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import plot
-from roms_tools.setup.mask import add_mask, add_velocity_masks, _close_narrow_channels
+from roms_tools.setup.mask import _close_narrow_channels, add_mask, add_velocity_masks
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     Timed,

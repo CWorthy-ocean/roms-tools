@@ -146,7 +146,10 @@ class ChildGrid(Grid):
         )
 
     def update_mask(
-        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+        self,
+        mask_shapefile: str | Path | None = None,
+        verbose: bool = False,
+        close_narrow_channels: bool | None = None,
     ) -> None:
         """
         Update the child grid mask and ensure consistency with the parent grid.
@@ -167,6 +170,9 @@ class ChildGrid(Grid):
             a default coastline dataset is used.
         verbose : bool, default False
             If True, prints timing and progress information.
+        close_narrow_channels : bool, optional
+            Whether to close narrow channels and fill holes. If `None`, uses
+            the value from `self.close_narrow_channels`. Default is `None`.
 
         Returns
         -------
@@ -174,7 +180,11 @@ class ChildGrid(Grid):
             Updates the internal datasets (``self.ds`` and ``self.ds_nesting``) in place,
             modifying the mask and ensuring consistent parent-child boundary mapping.
         """
-        super().update_mask(mask_shapefile=mask_shapefile, verbose=verbose)
+        super().update_mask(
+            mask_shapefile=mask_shapefile,
+            verbose=verbose,
+            close_narrow_channels=close_narrow_channels,
+        )
         self._map_child_boundaries_onto_parent_grid_indices(verbose=verbose)
         self._modify_child_mask(verbose=verbose)
 

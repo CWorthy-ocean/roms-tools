@@ -60,14 +60,7 @@ class ChildGrid(Grid):
     parent_grid: Grid
     """The parent grid object, providing the reference for the child topography
     and mask of the child grid."""
-    boundaries: dict[str, bool] = field(
-        default_factory=lambda: {
-            "south": True,
-            "east": True,
-            "north": True,
-            "west": True,
-        }
-    )
+    boundaries: dict[str, bool] | None = None
     """Specifies which child grid boundaries (south, east, north, west) should be
     adjusted for topography/mask and included in `ds_nesting`."""
     metadata: dict[str, Any] = field(
@@ -132,7 +125,7 @@ class ChildGrid(Grid):
     def _modify_child_mask(self, verbose: bool = False) -> None:
         """Adjust child grid mask to align with the parent grid."""
         self._apply_child_modification(
-            modifier=lambda p, c: modify_child_mask(p, c, self.boundaries),
+            modifier=lambda p, c: modify_child_mask(p, c, self.boundaries),  # type: ignore[arg-type]
             modifier_name="mask",
             verbose=verbose,
         )

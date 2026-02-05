@@ -178,7 +178,10 @@ class Grid:
                 )
 
     def update_mask(
-        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+        self,
+        mask_shapefile: str | Path | None = None,
+        verbose: bool = False,
+        close_narrow_channels: bool | None = None,
     ) -> None:
         """
         Update the land mask of the current grid dataset.
@@ -188,7 +191,8 @@ class Grid:
         stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
         Earth 10m) is used. The operation is optionally timed and logged.
 
-        If `close_narrow_channels` is True, narrow channels and holes will be closed
+        If `close_narrow_channels` is True (either from the parameter or from
+        `self.close_narrow_channels`), narrow channels and holes will be closed
         after the mask is generated.
 
         Parameters
@@ -198,6 +202,9 @@ class Grid:
             the default Natural Earth 10m coastline dataset is used.
         verbose : bool, default False
             If True, prints timing and progress information.
+        close_narrow_channels : bool, optional
+            Whether to close narrow channels and fill holes. If `None`, uses
+            the value from `self.close_narrow_channels`. Default is `None`.
 
         Returns
         -------
@@ -210,20 +217,27 @@ class Grid:
             self.ds = ds
             self.mask_shapefile = mask_shapefile
 
+        # Determine if we should close narrow channels
+        should_close = (
+            close_narrow_channels
+            if close_narrow_channels is not None
+            else self.close_narrow_channels
+        )
+
         # Close narrow channels if requested
-        if self.close_narrow_channels:
-            with Timed("=== Closing narrow channels and holes ===", verbose=verbose):
-                ds = _close_narrow_channels(
-                    self.ds,
-                    mask_var="mask_rho",
-                    max_iterations=10,
-                    connectivity=4,
-                    min_region_fraction=0.1,
-                    inplace=True,
-                )
-                # Update velocity masks after modifying mask_rho
-                ds = add_velocity_masks(ds)
-                self.ds = ds
+        if should_close:
+            ds = _close_narrow_channels(
+                self.ds,
+                mask_var="mask_rho",
+                max_iterations=10,
+                connectivity=4,
+                min_region_fraction=0.1,
+                inplace=True,
+                verbose=verbose,
+            )
+            # Update velocity masks after modifying mask_rho
+            ds = add_velocity_masks(ds)
+            self.ds = ds
 
     def update_topography(
         self,

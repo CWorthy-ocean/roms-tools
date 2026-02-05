@@ -183,6 +183,7 @@ def _close_narrow_channels(
     connectivity: int = 4,
     min_region_fraction: float = 0.1,
     inplace: bool = False,
+    verbose: bool = False,
 ) -> xr.Dataset:
     """Close narrow channels and holes in a ROMS mask (internal function).
 
@@ -210,6 +211,9 @@ def _close_narrow_channels(
     inplace : bool, optional
         If True, modify the dataset in place. If False, return a new dataset.
         Default is False.
+    verbose : bool, optional
+        If True, prints detailed progress information. If False, only logs
+        a single line "Closing narrow channels". Default is False.
 
     Returns
     -------
@@ -240,6 +244,12 @@ def _close_narrow_channels(
     mask = ds[mask_var].values.copy()
     mask[mask < 0] = 0
 
+    # Log that we're closing narrow channels (only one line unless verbose)
+    if not verbose:
+        logger.info("Closing narrow channels")
+    else:
+        logger.info("=== Closing narrow channels and holes ===")
+
     # Close narrow channels
     for it in range(max_iterations):
         # Fill 1-pixel passages in north-south direction
@@ -250,9 +260,10 @@ def _close_narrow_channels(
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            logger.info(
-                f"Closing: {nf} points in 1-pixel NS channels (iteration {it + 1})"
-            )
+            if verbose:
+                logger.info(
+                    f"Closing: {nf} points in 1-pixel NS channels (iteration {it + 1})"
+                )
             mask[fill == 1] = 0
         else:
             break
@@ -265,14 +276,16 @@ def _close_narrow_channels(
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            logger.info(
-                f"Closing: {nf} points in 1-pixel EW channels (iteration {it + 1})"
-            )
+            if verbose:
+                logger.info(
+                    f"Closing: {nf} points in 1-pixel EW channels (iteration {it + 1})"
+                )
             mask[fill == 1] = 0
         else:
             break
 
-    logger.info("Filling holes")
+    if verbose:
+        logger.info("Filling holes")
 
     # Create structure for connected component labeling
     if connectivity == 4:
@@ -302,10 +315,11 @@ def _close_narrow_channels(
         if ireg != lreg:
             region_size = np.sum(reg == ireg)
             if region_size > domain_size * min_region_fraction:
-                logger.warning(
-                    f"Region {ireg} is large ({region_size} points, "
-                    f"{100 * region_size / domain_size:.1f}% of domain). Preserving it."
-                )
+                if verbose:
+                    logger.warning(
+                        f"Region {ireg} is large ({region_size} points, "
+                        f"{100 * region_size / domain_size:.1f}% of domain). Preserving it."
+                    )
             else:
                 mask[reg == ireg] = 0
 

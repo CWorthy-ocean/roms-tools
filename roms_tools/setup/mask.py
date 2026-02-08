@@ -248,11 +248,9 @@ def _close_narrow_channels(
     mask = ds[mask_var].values.copy()
     mask[mask < 0] = 0
 
-    # Log that we're closing narrow channels (only one line unless verbose)
-    if not verbose:
-        logger.info("Closing narrow channels")
-    else:
-        logger.info("=== Closing narrow channels and holes ===")
+    # Log that we're closing narrow channels (only when verbose)
+    if verbose:
+        logger.info("Filling narrow channels and small lakes")
 
     # Close narrow channels
     for it in range(max_iterations):

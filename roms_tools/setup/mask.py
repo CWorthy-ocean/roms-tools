@@ -262,10 +262,6 @@ def _close_narrow_channels(
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            if verbose:
-                logger.info(
-                    f"Closing: {nf} points in 1-pixel NS channels (iteration {it + 1})"
-                )
             mask[fill == 1] = 0
         else:
             break
@@ -278,16 +274,9 @@ def _close_narrow_channels(
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            if verbose:
-                logger.info(
-                    f"Closing: {nf} points in 1-pixel EW channels (iteration {it + 1})"
-                )
             mask[fill == 1] = 0
         else:
             break
-
-    if verbose:
-        logger.info("Filling holes")
 
     # Create structure for connected component labeling
     if connectivity == 4:
@@ -317,11 +306,8 @@ def _close_narrow_channels(
         if ireg != lreg:
             region_size = np.sum(reg == ireg)
             if region_size > domain_size * min_region_fraction:
-                if verbose:
-                    logger.warning(
-                        f"Region {ireg} is large ({region_size} points, "
-                        f"{100 * region_size / domain_size:.1f}% of domain). Preserving it."
-                    )
+                # Large region preserved, but don't log it
+                pass
             else:
                 mask[reg == ireg] = 0
 

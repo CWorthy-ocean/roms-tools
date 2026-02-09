@@ -5,6 +5,7 @@
 ### New Features
 
 * Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
+* `ChildGrid` now infers open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 
 ### Breaking Changes
 

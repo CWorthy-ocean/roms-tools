@@ -11,6 +11,8 @@
 
 ### Internal Changes
 
+* Regression tests for `ChildGrid` ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
+
 ### Documentation
 
 ### Bugfixes

@@ -19,13 +19,6 @@ from roms_tools.utils import wrap_longitudes
 
 
 @pytest.fixture()
-def big_grid():
-    return Grid(
-        nx=5, ny=7, center_lon=-23, center_lat=61, rot=20, size_x=1800, size_y=2400
-    )
-
-
-@pytest.fixture()
 def small_grid():
     return Grid(
         nx=10, ny=10, center_lon=-23, center_lat=61, rot=-20, size_x=500, size_y=500
@@ -49,21 +42,6 @@ def big_grid_that_straddles():
 @pytest.fixture()
 def small_grid_that_straddles():
     return Grid(nx=10, ny=10, center_lon=0, center_lat=61, rot=0, size_x=50, size_y=200)
-
-
-@pytest.fixture()
-def child_grid_with_bgc(big_grid):
-    return ChildGrid(
-        parent_grid=big_grid,
-        nx=10,
-        ny=10,
-        center_lon=-23,
-        center_lat=61,
-        rot=-20,
-        size_x=500,
-        size_y=500,
-        metadata={"include_bgc": True},
-    )
 
 
 @pytest.fixture()

@@ -20,6 +20,7 @@ skip_xesmf = pytest.mark.skipif(
     [
         "grid",
         "grid_that_straddles_dateline",
+        "child_grid_with_bgc",
         "tidal_forcing",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
@@ -66,6 +67,7 @@ def test_save_results(
     [
         "grid",
         "grid_that_straddles_dateline",
+        "child_grid_with_bgc",
         "tidal_forcing",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",

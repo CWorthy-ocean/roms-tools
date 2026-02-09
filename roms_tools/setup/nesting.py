@@ -64,13 +64,7 @@ class ChildGrid(Grid):
     boundaries: dict[str, bool] | None = None
     """Specifies which child grid boundaries (south, east, north, west) should be
     adjusted for topography/mask and included in `ds_nesting`."""
-    metadata: dict[str, Any] = field(
-        default_factory=lambda: {
-            "prefix": "child",
-            "period": 3600.0,
-            "include_bgc": False,
-        }
-    )
+    metadata: dict[str, Any] = field(default_factory=dict)
     """Dictionary configuring the boundary nesting process."""
     verbose: bool = False
     """Whether to print grid generation steps with timing."""
@@ -88,6 +82,15 @@ class ChildGrid(Grid):
             "=== Mapping the child grid boundary points onto the indices of the parent grid ===",
             verbose=verbose,
         ):
+            # Default metadata
+            defaults = {
+                "prefix": "child",
+                "period": 3600.0,
+                "include_bgc": False,
+            }
+            # Merge user metadata on top of defaults
+            self.metadata = {**defaults, **self.metadata}
+
             self.boundaries = check_and_set_boundaries(
                 self.boundaries, self.ds.mask_rho
             )

@@ -301,6 +301,8 @@ class ROMSOutput(ROMSDataset):
             return dz.astype(np.float32)
 
         def _rotate_velocities(ds: xr.Dataset) -> xr.Dataset:
+            # Use -angle here to transform model (xi/eta) → lat-lon coordinates
+            # (whereas angle would transform lat-lon → model)
             angle = -self.grid.ds["angle"]
             for u_name, v_name in VELOCITY_PAIRS:
                 if u_name in ds.data_vars and v_name in ds.data_vars:

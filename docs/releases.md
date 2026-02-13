@@ -19,6 +19,8 @@
 
 ### Bugfixes
 
+* Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))
+
 ## v3.5.0
 
 ### New Features

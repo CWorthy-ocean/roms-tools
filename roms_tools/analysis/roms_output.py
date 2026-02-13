@@ -1,4 +1,6 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Final
 
 import numpy as np
 import xarray as xr
@@ -11,8 +13,7 @@ from roms_tools.regrid import LateralRegridFromROMS, VerticalRegrid
 from roms_tools.utils import (
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,
-    interpolate_from_rho_to_u,
-    interpolate_from_rho_to_v,
+    rotate_velocities,
 )
 
 
@@ -214,138 +215,172 @@ class ROMSOutput(ROMSDataset):
             cmap_name=cmap_name,
         )
 
-    def regrid(self, var_names=None, horizontal_resolution=None, depth_levels=None):
+    def regrid(
+        self,
+        var_names: Sequence[str] | None = None,
+        horizontal_resolution: float | None = None,
+        depth_levels: xr.DataArray | np.ndarray | Sequence[float] | None = None,
+    ) -> xr.Dataset:
         """Regrid the dataset both horizontally and vertically.
 
-        This method selects the specified variables, interpolates them onto a lat-lon-z horizontal grid. The horizontal target resolution and vertical target depth levels are either specified or inferred dynamically.
+        This method selects the specified variables, interpolates them onto a
+        lat-lon-depth grid, and rotates velocity components to east/north
+        directions when required.
 
         Parameters
         ----------
-        var_names : list of str, optional
-            List of variable names to be regridded. If None, all variables in the dataset
-            are used.
+        var_names : sequence of str, optional
+            Variables to regrid. If None, all variables in the dataset are used.
         horizontal_resolution : float, optional
             Target horizontal resolution in degrees. If None, the nominal horizontal resolution is inferred from the grid.
-        depth_levels : xarray.DataArray, numpy.ndarray, list, optional
+        depth_levels : xarray.DataArray, numpy.ndarray, sequence, optional
             Target depth levels. If None, depth levels are determined dynamically.
-            If provided as a list or numpy array, it is safely converted to an `xarray.DataArray`.
 
         Returns
         -------
-        xarray.Dataset
+        xr.Dataset
             The regridded dataset.
         """
-        if var_names is None:
-            var_names = list(self.ds.data_vars)
+        VELOCITY_PAIRS: Final[list[tuple[str, str]]] = [
+            ("u", "v"),
+            ("ubar", "vbar"),
+            ("u_slow", "v_slow"),
+        ]
 
-        # Check that all var_names exist in self.ds
-        missing_vars = [var for var in var_names if var not in self.ds.data_vars]
-        if missing_vars:
-            raise ValueError(
-                f"The following variables are not found in the dataset: {', '.join(missing_vars)}"
+        def _select_variables(var_names: Sequence[str] | None) -> xr.Dataset:
+            requested: set[str] = set(var_names or self.ds.data_vars)
+
+            # bidirectional map
+            DEPENDENCY_MAP: Final[dict[str, str]] = {k: v for k, v in VELOCITY_PAIRS}
+            DEPENDENCY_MAP.update({v: k for k, v in VELOCITY_PAIRS})
+
+            required: set[str] = set(requested)
+            for var in requested:
+                if var in DEPENDENCY_MAP:
+                    required.add(DEPENDENCY_MAP[var])
+
+            missing = required - set(self.ds.data_vars)
+            if missing:
+                raise ValueError(f"Variables not found: {', '.join(sorted(missing))}")
+
+            return self.ds[list(required)].copy()
+
+        def _prepare_horizontal_grid() -> dict[str, xr.DataArray]:
+            lat = self.grid.ds["lat_rho"]
+            lon = self.grid.ds["lon_rho"]
+            if self.grid.straddle:
+                lon = xr.where(lon > 180, lon - 360, lon)
+
+            hres = horizontal_resolution or infer_nominal_horizontal_resolution(
+                self.grid.ds
             )
-
-        # Retain only the variables in var_names and drop others
-        ds = self.ds[var_names]
-
-        # Prepare lateral regrid
-        lat_deg = self.grid.ds["lat_rho"]
-        lon_deg = self.grid.ds["lon_rho"]
-        if self.grid.straddle:
-            lon_deg = xr.where(lon_deg > 180, lon_deg - 360, lon_deg)
-
-        if horizontal_resolution is None:
-            horizontal_resolution = infer_nominal_horizontal_resolution(self.grid.ds)
-        lons = generate_coordinate_range(
-            lon_deg.min().values, lon_deg.max().values, horizontal_resolution
-        )
-        lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
-        lats = generate_coordinate_range(
-            lat_deg.min().values, lat_deg.max().values, horizontal_resolution
-        )
-        lats = xr.DataArray(lats, dims=["lat"], attrs={"units": "°N"})
-        target_coords = {"lat": lats, "lon": lons}
-
-        # Prepare vertical regrid
-        if depth_levels is None:
-            depth_levels, _ = self.grid._compute_exponential_depth_levels()
-
-        # Ensure depth_levels is an xarray.DataArray
-        if not isinstance(depth_levels, xr.DataArray):
-            depth_levels = xr.DataArray(
-                np.asarray(depth_levels),
-                dims=["depth"],
-                attrs={"long_name": "Depth", "units": "m"},
+            lons = xr.DataArray(
+                generate_coordinate_range(float(lon.min()), float(lon.max()), hres),
+                dims=["lon"],
+                attrs={"units": "°E"},
             )
+            lats = xr.DataArray(
+                generate_coordinate_range(float(lat.min()), float(lat.max()), hres),
+                dims=["lat"],
+                attrs={"units": "°N"},
+            )
+            return {"lon": lons, "lat": lats}
 
-        depth_levels = depth_levels.astype(np.float32)
+        def _prepare_vertical_grid() -> xr.DataArray:
+            if depth_levels is None:
+                dz, _ = self.grid._compute_exponential_depth_levels()
+            else:
+                dz = depth_levels
 
-        # Initialize list to hold regridded datasets
-        regridded_datasets = []
-
-        for loc, dims in [
-            ("rho", ("eta_rho", "xi_rho")),
-            ("u", ("eta_rho", "xi_u")),
-            ("v", ("eta_v", "xi_rho")),
-        ]:
-            var_names_loc = [
-                var_name
-                for var_name in var_names
-                if all(dim in ds[var_name].dims for dim in dims)
-            ]
-            if var_names_loc:
-                ds_loc = (
-                    ds[var_names_loc]
-                    .rename({f"lat_{loc}": "lat", f"lon_{loc}": "lon"})
-                    .where(self.grid.ds[f"mask_{loc}"])
+            if not isinstance(dz, xr.DataArray):
+                dz = xr.DataArray(
+                    np.asarray(dz, dtype=np.float32),
+                    dims=["depth"],
+                    attrs={"long_name": "Depth", "units": "m"},
                 )
-                self._get_depth_coordinates(depth_type="layer", locations=[loc])
-                layer_depth_loc = self.ds_depth_coords[f"layer_depth_{loc}"]
-                h_loc = self.grid.ds.h
-                if loc == "u":
-                    h_loc = interpolate_from_rho_to_u(h_loc)
-                elif loc == "v":
-                    h_loc = interpolate_from_rho_to_v(h_loc)
+            return dz.astype(np.float32)
 
-                # Exclude the horizontal boundary cells since diagnostic variables may contain zeros there
-                ds_loc = ds_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
-                layer_depth_loc = layer_depth_loc.isel(
-                    {dims[0]: slice(1, -1), dims[1]: slice(1, -1)}
-                )
-                h_loc = h_loc.isel({dims[0]: slice(1, -1), dims[1]: slice(1, -1)})
+        def _rotate_velocities(ds: xr.Dataset) -> xr.Dataset:
+            # Use -angle here to transform model (xi/eta) → lat-lon coordinates
+            # (whereas angle would transform lat-lon → model)
+            angle = -self.grid.ds["angle"]
+            for u_name, v_name in VELOCITY_PAIRS:
+                if u_name in ds.data_vars and v_name in ds.data_vars:
+                    u_attrs = ds[u_name].attrs
+                    v_attrs = ds[v_name].attrs
 
-                # Lateral regridding
-                lateral_regrid = LateralRegridFromROMS(ds_loc, target_coords)
-                ds_loc = lateral_regrid.apply(ds_loc)
-                layer_depth_loc = lateral_regrid.apply(layer_depth_loc)
-                h_loc = lateral_regrid.apply(h_loc)
-                # Vertical regridding
-                if "s_rho" in ds_loc.dims:
-                    vertical_regrid = VerticalRegrid(ds_loc, source_dim="s_rho")
-                    for var_name in var_names_loc:
-                        if "s_rho" in ds_loc[var_name].dims:
-                            attrs = ds_loc[var_name].attrs
-                            regridded = vertical_regrid.apply(
-                                ds_loc[var_name],
-                                source_depth_coords=layer_depth_loc,
-                                target_depth_coords=depth_levels,
-                                mask_edges=False,
-                            )
-                            regridded = regridded.where(regridded.depth < h_loc)
-                            ds_loc[var_name] = regridded
-                            ds_loc[var_name].attrs = attrs
+                    u_rot, v_rot = rotate_velocities(
+                        ds[u_name], ds[v_name], angle, interpolate_before=True
+                    )
+                    ds[u_name] = u_rot
+                    ds[v_name] = v_rot
 
-                    ds_loc = ds_loc.assign_coords({"depth": depth_levels})
-
-                # Collect regridded dataset for merging
-                regridded_datasets.append(ds_loc)
-
-        # Merge all regridded datasets
-        if regridded_datasets:
-            ds = xr.merge(regridded_datasets)
-
-            ds["time"].attrs = {"long_name": "Time"}
-            ds["lon"].attrs = {"long_name": "Longitude", "units": "Degrees East"}
-            ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}
+                    # Copy attributes and indicate original long name
+                    ds[u_name].attrs.update(
+                        {
+                            "long_name": f"{u_attrs['long_name']}, rotated to zonal component",
+                            "units": u_attrs["units"],
+                        }
+                    )
+                    ds[v_name].attrs.update(
+                        {
+                            "long_name": f"{v_attrs['long_name']}, rotated to meridional component",
+                            "units": v_attrs["units"],
+                        }
+                    )
 
             return ds
+
+        # -------------------------------
+        # Main regrid workflow
+        # -------------------------------
+        ds = _select_variables(var_names)
+        target_coords = _prepare_horizontal_grid()
+        depth_levels = _prepare_vertical_grid()
+
+        # Rotate velocities first
+        ds = _rotate_velocities(ds)
+
+        # Rename coordinates
+        ds = ds.rename({"lat_rho": "lat", "lon_rho": "lon"}).where(
+            self.grid.ds.mask_rho
+        )
+
+        # Compute source depth coordinates
+        self._get_depth_coordinates(depth_type="layer", locations=["rho"])
+        layer_depth = self.ds_depth_coords["layer_depth_rho"]
+        h = self.grid.ds["h"]
+
+        # Exclude boundary cells
+        ds = ds.isel(eta_rho=slice(1, -1), xi_rho=slice(1, -1))
+        layer_depth = layer_depth.isel(eta_rho=slice(1, -1), xi_rho=slice(1, -1))
+        h = h.isel(eta_rho=slice(1, -1), xi_rho=slice(1, -1))
+
+        # Lateral regridding
+        lateral_regrid = LateralRegridFromROMS(ds, target_coords)
+        ds = lateral_regrid.apply(ds)
+        layer_depth = lateral_regrid.apply(layer_depth)
+        h = lateral_regrid.apply(h)
+
+        # Vertical regridding
+        if "s_rho" in ds.dims:
+            vertical_regrid = VerticalRegrid(ds, source_dim="s_rho")
+            for var in var_names or ds.data_vars:
+                if "s_rho" in ds[var].dims:
+                    attrs = ds[var].attrs
+                    regridded = vertical_regrid.apply(
+                        ds[var],
+                        source_depth_coords=layer_depth,
+                        target_depth_coords=depth_levels,
+                        mask_edges=False,
+                    )
+                    ds[var] = regridded.where(regridded.depth < h)
+                    ds[var].attrs = attrs
+            ds = ds.assign_coords({"depth": depth_levels})
+
+        # Final attributes
+        ds["time"].attrs = {"long_name": "Time"}
+        ds["lon"].attrs = {"long_name": "Longitude", "units": "Degrees East"}
+        ds["lat"].attrs = {"long_name": "Latitude", "units": "Degrees North"}
+
+        return ds

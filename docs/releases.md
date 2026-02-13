@@ -4,12 +4,15 @@
 
 ### New Features
 
+* Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
+* `ChildGrid` now infers open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 * Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 
 ### Breaking Changes
 
 ### Internal Changes
 
+* Regression tests for `ChildGrid` ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 * Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 
 ### Documentation
@@ -20,7 +23,7 @@
 
 ### New Features
 
-* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
+* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([#513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
 
 ## v3.4.0
 

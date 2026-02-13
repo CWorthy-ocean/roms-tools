@@ -19,13 +19,6 @@ from roms_tools.utils import wrap_longitudes
 
 
 @pytest.fixture()
-def big_grid():
-    return Grid(
-        nx=5, ny=7, center_lon=-23, center_lat=61, rot=20, size_x=1800, size_y=2400
-    )
-
-
-@pytest.fixture()
 def small_grid():
     return Grid(
         nx=10, ny=10, center_lon=-23, center_lat=61, rot=-20, size_x=500, size_y=500
@@ -52,20 +45,6 @@ def small_grid_that_straddles():
 
 
 @pytest.fixture()
-def child_grid(big_grid):
-    return ChildGrid(
-        parent_grid=big_grid,
-        nx=10,
-        ny=10,
-        center_lon=-23,
-        center_lat=61,
-        rot=-20,
-        size_x=500,
-        size_y=500,
-    )
-
-
-@pytest.fixture()
 def child_grid_that_straddles(big_grid_that_straddles):
     return ChildGrid(
         parent_grid=big_grid_that_straddles,
@@ -76,6 +55,21 @@ def child_grid_that_straddles(big_grid_that_straddles):
         rot=0,
         size_x=50,
         size_y=200,
+        metadata={"prefix": "child"},
+    )
+
+
+@pytest.fixture()
+def child_grid_with_eastern_boundary_closed(big_grid):
+    return ChildGrid(
+        parent_grid=big_grid,
+        nx=10,
+        ny=10,
+        center_lon=-23,
+        center_lat=65,
+        rot=-20,
+        size_x=200,
+        size_y=100,
     )
 
 
@@ -370,12 +364,18 @@ class TestModifyChid:
 
 class TestNesting:
     @pytest.mark.parametrize(
-        "child_grid_fixture",
-        ["child_grid", "child_grid_that_straddles"],
+        "fixture_name, include_bgc, expected_r_vars",
+        [
+            ("child_grid_with_bgc", True, "zeta, temp, salt, bgc"),
+            ("child_grid_that_straddles", False, "zeta, temp, salt"),
+        ],
     )
-    def test_successful_initialization(self, child_grid_fixture, request):
-        child_grid = request.getfixturevalue(child_grid_fixture)
+    def test_successful_initialization(
+        self, request, fixture_name, include_bgc, expected_r_vars
+    ):
+        child_grid = request.getfixturevalue(fixture_name)
 
+        # Basic metadata + structure checks
         assert child_grid.boundaries == {
             "south": True,
             "east": True,
@@ -384,31 +384,32 @@ class TestNesting:
         }
         assert child_grid.metadata["prefix"] == "child"
         assert child_grid.metadata["period"] == 3600.0
+        assert child_grid.metadata["include_bgc"] is include_bgc
         assert isinstance(child_grid.ds, xr.Dataset)
         assert isinstance(child_grid.ds_nesting, xr.Dataset)
 
+        # Nesting dataset checks
         ds = child_grid.ds_nesting
         for direction in ["south", "east", "north", "west"]:
             for location in ["r", "u", "v"]:
-                assert f"child_{direction}_{location}" in ds.data_vars
-                assert (
-                    ds[f"child_{direction}_{location}"].attrs["output_period"] == 3600.0
-                )
+                varname = f"child_{direction}_{location}"
+                assert varname in ds.data_vars
+                assert ds[varname].attrs["output_period"] == 3600.0
+
                 if location == "r":
-                    assert (
-                        ds[f"child_{direction}_{location}"].attrs["output_vars"]
-                        == "zeta, temp, salt"
-                    )
+                    assert ds[varname].attrs["output_vars"] == expected_r_vars
                 elif location == "u":
-                    assert (
-                        ds[f"child_{direction}_{location}"].attrs["output_vars"]
-                        == "ubar, u, up"
-                    )
+                    assert ds[varname].attrs["output_vars"] == "ubar, u, up"
                 elif location == "v":
-                    assert (
-                        ds[f"child_{direction}_{location}"].attrs["output_vars"]
-                        == "vbar, v, vp"
-                    )
+                    assert ds[varname].attrs["output_vars"] == "vbar, v, vp"
+
+    def test_default_boundaries(self, child_grid_with_eastern_boundary_closed):
+        assert child_grid_with_eastern_boundary_closed.boundaries == {
+            "south": True,
+            "east": False,
+            "north": True,
+            "west": True,
+        }
 
     @pytest.mark.parametrize(
         "big_grid_fixture, small_grid_fixture",
@@ -499,7 +500,7 @@ class TestNesting:
 
     @pytest.mark.parametrize(
         "child_grid_fixture",
-        ["child_grid", "child_grid_that_straddles"],
+        ["child_grid_with_bgc", "child_grid_that_straddles"],
     )
     def test_plot(self, child_grid_fixture, request):
         """Test plot method."""
@@ -509,12 +510,12 @@ class TestNesting:
         child_grid.plot_nesting()
         child_grid.plot_nesting(with_dim_names=True)
 
-    def test_save(self, child_grid, tmp_path):
+    def test_save(self, child_grid_with_bgc, tmp_path):
         """Test save methods."""
         for file_str in ["test_grid", "test_grid.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-                saved_filenames = child_grid.save(filepath)
+                saved_filenames = child_grid_with_bgc.save(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
                 assert saved_filenames == [filepath]
@@ -525,7 +526,7 @@ class TestNesting:
         for file_str in ["test_nesting", "test_nesting.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-                saved_filenames = child_grid.save_nesting(filepath)
+                saved_filenames = child_grid_with_bgc.save_nesting(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
                 assert saved_filenames == [filepath]
@@ -541,7 +542,7 @@ class TestNesting:
         ):
             ChildGrid.from_file(filepath="some_file.nc")
 
-    def test_roundtrip_yaml(self, child_grid, tmp_path):
+    def test_roundtrip_yaml(self, child_grid_with_bgc, tmp_path):
         """Test that creating a ChildGrid object, saving its parameters to yaml file,
         and re-opening yaml file creates the same object.
         """
@@ -551,25 +552,25 @@ class TestNesting:
             tmp_path / file_str,
             str(tmp_path / file_str),
         ]:  # test for Path object and str
-            child_grid.to_yaml(filepath)
+            child_grid_with_bgc.to_yaml(filepath)
 
             child_grid_from_file = ChildGrid.from_yaml(filepath)
 
-            assert child_grid == child_grid_from_file
+            assert child_grid_with_bgc == child_grid_from_file
 
             filepath = Path(filepath)
             filepath.unlink()
 
-    def test_files_have_same_hash(self, child_grid, tmp_path):
+    def test_files_have_same_hash(self, child_grid_with_bgc, tmp_path):
         yaml_filepath = tmp_path / "test_yaml.yaml"
         filepath1 = tmp_path / "test1.nc"
         filepath2 = tmp_path / "test2.nc"
         grid_filepath1 = tmp_path / "grid_test1.nc"
         grid_filepath2 = tmp_path / "grid_test2.nc"
 
-        child_grid.to_yaml(yaml_filepath)
-        child_grid.save(grid_filepath1)
-        child_grid.save_nesting(filepath1)
+        child_grid_with_bgc.to_yaml(yaml_filepath)
+        child_grid_with_bgc.save(grid_filepath1)
+        child_grid_with_bgc.save_nesting(filepath1)
 
         child_grid_from_file = ChildGrid.from_yaml(yaml_filepath)
         child_grid_from_file.save(grid_filepath2)

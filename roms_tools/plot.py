@@ -8,7 +8,7 @@ import xarray as xr
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
+from roms_tools.regrid import LateralRegridFromROMS, VerticalRegrid
 from roms_tools.utils import (
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,
@@ -1098,10 +1098,15 @@ def plot(
     if depth is not None:
         ds = xr.Dataset()
         ds["s_rho"] = field["s_rho"]
-        vertical_regrid = VerticalRegridFromROMS(ds)
+        vertical_regrid = VerticalRegrid(ds, source_dim="s_rho")
         # Save attributes before vertical regridding
         attrs = field.attrs
-        field = vertical_regrid.apply(field, layer_depth, np.array([depth])).squeeze()
+        field = vertical_regrid.apply(
+            field,
+            source_depth_coords=layer_depth,
+            target_depth_coords=xr.DataArray(np.array([depth]), dims=["depth"]),
+        ).squeeze()
+
         # Reset attributes
         field.attrs = attrs
         title = title + f", depth = {depth}m"

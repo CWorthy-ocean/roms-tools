@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.regrid import VerticalRegrid, VerticalRegridToROMS
+from roms_tools.regrid import VerticalRegrid
 
 try:
     import xesmf  # type: ignore
@@ -88,28 +88,8 @@ def test_lateral_regrid_import_error():
 
 
 # Vertical regridding
-def vertical_regridder(depth_values, layer_depth_rho_values):
-    class DataContainer:
-        """Mock class for holding data and dimension names."""
-
-        def __init__(self, ds):
-            self.ds = ds
-            self.dim_names = {"depth": "depth"}
-
-    class Grid:
-        """Mock class representing the grid object with layer depth information."""
-
-        def __init__(self, ds):
-            self.ds = ds
-
-    target_depth = xr.DataArray(data=layer_depth_rho_values, dims=["s_rho"])
-    source_depth = xr.DataArray(data=depth_values, dims=["depth"])
-
-    return VerticalRegridToROMS(target_depth, source_depth)
-
-
 @pytest.mark.parametrize(
-    "depth_values, layer_depth_rho_values, temp_data",
+    "source_depth_values, target_depth_values, temp_data",
     [
         ([5, 50, 100, 150], [130, 100, 70, 30, 10], [30, 25, 10, 2]),
         ([5, 50, 100, 150], [130, 100, 70, 30, 2], [30, 25, 10, 2]),
@@ -117,23 +97,89 @@ def vertical_regridder(depth_values, layer_depth_rho_values):
         ([5, 50, 100, 150], [200, 100, 70, 30, 1], [30, 25, 10, 2]),
     ],
 )
-def test_vertical_regrid(request, depth_values, layer_depth_rho_values, temp_data):
-    vertical_regrid = vertical_regridder(
-        depth_values=depth_values, layer_depth_rho_values=layer_depth_rho_values
-    )
-    data = xr.Dataset({"temp_data": (["depth"], temp_data)})
+def test_vertical_regrid_from_depth_to_1d_roms(
+    source_depth_values, target_depth_values, temp_data
+):
+    ds = xr.Dataset({"temp": (["depth"], temp_data)})
+    vertical_regrid = VerticalRegrid(ds, source_dim="depth")
 
-    # without filling in NaNs
-    regridded = vertical_regrid.apply(data.temp_data, fill_nans=False)
+    source_depth_coords = xr.DataArray(source_depth_values, dims="depth")
+    target_depth_coords = xr.DataArray(target_depth_values, dims="s_rho")
+
+    # with masked edges
+    regridded = vertical_regrid.apply(
+        ds["temp"],
+        source_depth_coords=source_depth_coords,
+        target_depth_coords=target_depth_coords,
+        mask_edges=True,
+    )
     expected = np.interp(
-        layer_depth_rho_values, depth_values, temp_data, left=np.nan, right=np.nan
+        target_depth_values, source_depth_values, temp_data, left=np.nan, right=np.nan
     )
     assert np.allclose(expected, regridded.data, equal_nan=True)
 
-    # with filling in NaNs
-    regridded = vertical_regrid.apply(data.temp_data, fill_nans=True)
-    expected = np.interp(layer_depth_rho_values, depth_values, temp_data)
+    # without masked edges
+    regridded = vertical_regrid.apply(
+        ds["temp"],
+        source_depth_coords=source_depth_coords,
+        target_depth_coords=target_depth_coords,
+        mask_edges=False,
+    )
+    expected = np.interp(target_depth_values, source_depth_values, temp_data)
     assert np.allclose(expected, regridded.data, equal_nan=True)
+
+
+def test_vertical_regrid_from_depth_to_3d_roms():
+    source_depth_values = np.array([5, 50, 100, 150])
+    temp_data = np.array([30, 25, 10, 2])
+
+    s_rho = 4
+    eta = 2
+    xi = 3
+
+    # Source dataset: 1D in depth
+    ds = xr.Dataset(
+        {
+            "temp": (["depth"], temp_data),
+        }
+    )
+    vertical_regrid = VerticalRegrid(ds, source_dim="depth")
+
+    source_depth_coords = xr.DataArray(
+        source_depth_values,
+        dims=["depth"],
+    )
+
+    # Spatially varying 3D target depths (s_rho, eta, xi)
+    base_depths = np.array([130, 100, 70, 30])[:, None, None]
+    perturbation = np.linspace(0, 10, eta * xi).reshape(eta, xi)
+    target_depth_coords = xr.DataArray(
+        base_depths + perturbation,
+        dims=["s_rho", "eta", "xi"],
+    )
+
+    # Apply regridding
+    regridded = vertical_regrid.apply(
+        ds["temp"],
+        source_depth_coords=source_depth_coords,
+        target_depth_coords=target_depth_coords,
+        mask_edges=True,
+    )
+    regridded = regridded.transpose("s_rho", "eta", "xi")
+
+    # Expected: interp at each (eta, xi)
+    expected = np.empty((s_rho, eta, xi))
+    for j in range(eta):
+        for i in range(xi):
+            expected[:, j, i] = np.interp(
+                target_depth_coords[:, j, i],
+                source_depth_values,
+                temp_data,
+                left=np.nan,
+                right=np.nan,
+            )
+
+    assert np.allclose(regridded.data, expected, equal_nan=True)
 
 
 # Test VerticalRegrid
@@ -203,7 +249,7 @@ def test_vertical_regrid_2d_depths_different_vertical_levels():
     )
 
     # --- regrid ---
-    regridder = VerticalRegrid(ds)
+    regridder = VerticalRegrid(ds, source_dim="s_rho")
     out = regridder.apply(
         temp_data,
         source_depth_coords=source_depth,
@@ -247,7 +293,7 @@ def test_vertical_regrid_mask_edges():
         coords={"s_rho": s_rho},
     )
 
-    regridder = VerticalRegrid(ds)
+    regridder = VerticalRegrid(ds, source_dim="s_rho")
     out = regridder.apply(data, source_depth, target_depth, mask_edges=True)
 
     assert np.isnan(out[0])

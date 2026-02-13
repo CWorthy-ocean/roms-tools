@@ -53,6 +53,7 @@ class ChildGrid(Grid):
 
         - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
         - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
+        - `"include_bgc"` (bool): Whether to include BGC variables in boundary outputs. Defaults to `False`.
     verbose: bool, optional
         Indicates whether to print grid generation steps with timing. Defaults to False.
     """
@@ -60,19 +61,10 @@ class ChildGrid(Grid):
     parent_grid: Grid
     """The parent grid object, providing the reference for the child topography
     and mask of the child grid."""
-    boundaries: dict[str, bool] = field(
-        default_factory=lambda: {
-            "south": True,
-            "east": True,
-            "north": True,
-            "west": True,
-        }
-    )
+    boundaries: dict[str, bool] | None = None
     """Specifies which child grid boundaries (south, east, north, west) should be
     adjusted for topography/mask and included in `ds_nesting`."""
-    metadata: dict[str, Any] = field(
-        default_factory=lambda: {"prefix": "child", "period": 3600.0}
-    )
+    metadata: dict[str, Any] = field(default_factory=dict)
     """Dictionary configuring the boundary nesting process."""
     verbose: bool = False
     """Whether to print grid generation steps with timing."""
@@ -90,6 +82,15 @@ class ChildGrid(Grid):
             "=== Mapping the child grid boundary points onto the indices of the parent grid ===",
             verbose=verbose,
         ):
+            # Default metadata
+            defaults = {
+                "prefix": "child",
+                "period": 3600.0,
+                "include_bgc": False,
+            }
+            # Merge user metadata on top of defaults
+            self.metadata = {**defaults, **self.metadata}
+
             self.boundaries = check_and_set_boundaries(
                 self.boundaries, self.ds.mask_rho
             )
@@ -104,6 +105,7 @@ class ChildGrid(Grid):
                 self.boundaries,
                 self.metadata["prefix"],
                 self.metadata["period"],
+                self.metadata["include_bgc"],
             )
 
             self.ds_nesting = ds_nesting
@@ -132,7 +134,7 @@ class ChildGrid(Grid):
     def _modify_child_mask(self, verbose: bool = False) -> None:
         """Adjust child grid mask to align with the parent grid."""
         self._apply_child_modification(
-            modifier=lambda p, c: modify_child_mask(p, c, self.boundaries),
+            modifier=lambda p, c: modify_child_mask(p, c, self.boundaries),  # type: ignore[arg-type]
             modifier_name="mask",
             verbose=verbose,
         )
@@ -387,6 +389,7 @@ def map_child_boundaries_onto_parent_grid_indices(
     boundaries: dict = {"south": True, "east": True, "north": True, "west": True},
     prefix: str = "child",
     period: float = 3600.0,
+    include_bgc: bool = False,
     update_land_indices: bool = True,
 ):
     """Maps child grid boundary points onto absolute indices of the parent grid.
@@ -417,6 +420,9 @@ def map_child_boundaries_onto_parent_grid_indices(
     period : float, optional
         The output period (in seconds) to be assigned to the mapped boundary indices.
         Defaults to `3600.0` (1 hour).
+
+    include_bgc: bool, optional
+        Whether to include BGC variables in the boundary outputs.
 
     update_land_indices : bool, optional
         If `True`, updates indices that fall on land in the parent grid to nearby ocean points.
@@ -479,7 +485,10 @@ def map_child_boundaries_onto_parent_grid_indices(
                         f"{grid_location}-points of {direction}ern child boundary mapped onto parent (absolute) grid indices"
                     )
                     ds[var_name].attrs["units"] = "non-dimensional"
-                    ds[var_name].attrs["output_vars"] = "zeta, temp, salt"
+                    if include_bgc:
+                        ds[var_name].attrs["output_vars"] = "zeta, temp, salt, bgc"
+                    else:
+                        ds[var_name].attrs["output_vars"] = "zeta, temp, salt"
                 else:
                     angle_child = child_grid_ds[names["angle"]].isel(
                         **bdry_coords[direction]

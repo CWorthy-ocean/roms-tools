@@ -9,6 +9,7 @@ import pytest
 
 from roms_tools import (
     BoundaryForcing,
+    ChildGrid,
     Grid,
     InitialConditions,
     RiverForcing,
@@ -278,6 +279,28 @@ def tiny_rotated_grid() -> Grid:
         theta_s=5.0,  # surface control parameter
         theta_b=2.0,  # bottom control parameter
         hc=250.0,  # critical depth
+    )
+
+
+@pytest.fixture(scope="session")
+def big_grid() -> Grid:
+    return Grid(
+        nx=5, ny=7, center_lon=-23, center_lat=61, rot=20, size_x=1800, size_y=2400
+    )
+
+
+@pytest.fixture(scope="session")
+def child_grid_with_bgc(big_grid):
+    return ChildGrid(
+        parent_grid=big_grid,
+        nx=10,
+        ny=10,
+        center_lon=-23,
+        center_lat=61,
+        rot=-20,
+        size_x=500,
+        size_y=500,
+        metadata={"include_bgc": True},
     )
 
 

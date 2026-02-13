@@ -324,7 +324,15 @@ def test_cftime_conversion(monkeypatch):
 
 def test_time_range_selection():
     times = np.array(
-        ["2024-01-01", "2024-01-02", "2024-01-05", "2024-01-10"], dtype="datetime64[ns]"
+        [
+            "2024-01-01",
+            "2024-01-02",
+            "2024-01-05",
+            "2024-01-07",
+            "2024-01-08",
+            "2024-01-10",
+        ],
+        dtype="datetime64[ns]",
     )
     ds = make_time_dataset(times)
 
@@ -337,11 +345,11 @@ def test_time_range_selection():
     )
 
     # Should include:
-    # - closest before start: 2024-01-02
-    # - records inside strict range: 2024-01-05
-    # - closest after end: 2024-01-10
+    # - closest strictly before start: 2024-01-01
+    # - records inside strict range: 2024-01-02, 2024-01-05, 2024-01-07
+    # - closest strictly after end: 2024-01-08
     expected_times = np.array(
-        ["2024-01-02", "2024-01-05", "2024-01-10"],
+        ["2024-01-01", "2024-01-02", "2024-01-05", "2024-01-07", "2024-01-08"],
         dtype="datetime64[ns]",
     )
 
@@ -357,11 +365,11 @@ def test_range_selection_missing_before(caplog):
             ds,
             "time",
             "time",
-            datetime(2024, 1, 1),
+            datetime(2024, 1, 5),
             datetime(2024, 1, 12),
         )
 
-    assert "No records found at or before the start_time" in caplog.text
+    assert "No records found before the start_time" in caplog.text
     # Should fallback to first record
     assert out["time"].values[0] == np.datetime64("2024-01-05")
 
@@ -376,10 +384,10 @@ def test_range_selection_missing_after(caplog):
             "time",
             "time",
             datetime(2024, 1, 1),
-            datetime(2024, 1, 10),
+            datetime(2024, 1, 2),
         )
 
-    assert "No records found at or after the end_time" in caplog.text
+    assert "No records found after the end_time" in caplog.text
     assert out["time"].values[-1] == np.datetime64("2024-01-02")
 
 

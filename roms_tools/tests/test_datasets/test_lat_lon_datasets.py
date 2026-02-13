@@ -122,6 +122,7 @@ def non_global_dataset():
         (
             "global_dataset",
             [
+                np.datetime64("2022-01-01T00:00:00"),
                 np.datetime64("2022-01-02T00:00:00"),
                 np.datetime64("2022-01-03T00:00:00"),
                 np.datetime64("2022-01-04T00:00:00"),
@@ -139,11 +140,13 @@ def non_global_dataset():
         (
             "global_dataset_with_multiple_times_per_day",
             [
+                np.datetime64("2022-01-01T12:00:00"),
                 np.datetime64("2022-01-02T00:00:00"),
                 np.datetime64("2022-01-02T12:00:00"),
                 np.datetime64("2022-01-03T00:00:00"),
                 np.datetime64("2022-01-03T12:00:00"),
                 np.datetime64("2022-01-04T00:00:00"),
+                np.datetime64("2022-01-04T12:00:00"),
             ],
         ),
     ],
@@ -272,7 +275,7 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert "No records found at or before the start_time" in caplog.text
+    assert "No records found before the start_time" in caplog.text
 
     with caplog.at_level(logging.WARNING):
         start_time = datetime(2024, 1, 1)
@@ -286,7 +289,7 @@ def test_warnings_times(global_dataset, tmp_path, caplog, use_dask):
             use_dask=use_dask,
         )
     # Verify the warning message in the log
-    assert "No records found at or after the end_time" in caplog.text
+    assert "No records found after the end_time" in caplog.text
 
 
 def test_from_ds(global_dataset, global_dataset_with_noon_times, use_dask, tmp_path):

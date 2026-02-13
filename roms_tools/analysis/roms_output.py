@@ -9,7 +9,7 @@ from matplotlib.axes import Axes
 from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
 from roms_tools.datasets.roms_dataset import ROMSDataset
 from roms_tools.plot import plot, plot_uptake_efficiency
-from roms_tools.regrid import LateralRegridFromROMS, VerticalRegridFromROMS
+from roms_tools.regrid import LateralRegridFromROMS, VerticalRegrid
 from roms_tools.utils import (
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,
@@ -364,12 +364,15 @@ class ROMSOutput(ROMSDataset):
 
         # Vertical regridding
         if "s_rho" in ds.dims:
-            vertical_regrid = VerticalRegridFromROMS(ds)
+            vertical_regrid = VerticalRegrid(ds, source_dim="s_rho")
             for var in var_names or ds.data_vars:
                 if "s_rho" in ds[var].dims:
                     attrs = ds[var].attrs
                     regridded = vertical_regrid.apply(
-                        ds[var], layer_depth, depth_levels, mask_edges=False
+                        ds[var],
+                        source_depth_coords=layer_depth,
+                        target_depth_coords=depth_levels,
+                        mask_edges=False,
                     )
                     ds[var] = regridded.where(regridded.depth < h)
                     ds[var].attrs = attrs

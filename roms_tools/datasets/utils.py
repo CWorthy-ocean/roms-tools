@@ -198,9 +198,9 @@ def select_relevant_times(
     This function supports two main use cases:
 
     1. **Time range selection (start_time + end_time provided):**
-       - Returns all records strictly between `start_time` and `end_time`.
-       - Ensures at least one record at or before `start_time` and one record at or
-         after `end_time` are included, even if they fall outside the strict range.
+       - Returns all records between `start_time` and `end_time`.
+       - Ensures at least one record before `start_time` and one record
+         after `end_time` are included.
 
     2. **Initial condition selection (start_time provided, end_time=None):**
        - Delegates to `_select_initial_time`, which reduces the dataset to exactly one
@@ -298,25 +298,25 @@ def select_relevant_times(
     if climatology:
         return ds
 
-    # Identify records before or at start_time
-    before_start = ds[time_coord] <= np.datetime64(start_time)
+    # Identify records before start_time
+    before_start = ds[time_coord] < np.datetime64(start_time)
     if before_start.any():
         closest_before_start = ds[time_coord].where(before_start, drop=True)[-1]
     else:
-        logging.warning(f"No records found at or before the start_time: {start_time}.")
+        logging.warning(f"No records found before the start_time: {start_time}.")
         closest_before_start = ds[time_coord][0]
 
-    # Identify records after or at end_time
-    after_end = ds[time_coord] >= np.datetime64(end_time)
+    # Identify records after end_time
+    after_end = ds[time_coord] > np.datetime64(end_time)
     if after_end.any():
         closest_after_end = ds[time_coord].where(after_end, drop=True).min()
     else:
-        logging.warning(f"No records found at or after the end_time: {end_time}.")
+        logging.warning(f"No records found after the end_time: {end_time}.")
         closest_after_end = ds[time_coord].max()
 
     # Select records within the time range and add the closest before/after
-    within_range = (ds[time_coord] > np.datetime64(start_time)) & (
-        ds[time_coord] < np.datetime64(end_time)
+    within_range = (ds[time_coord] > closest_before_start) & (
+        ds[time_coord] < closest_after_end
     )
     selected_times = ds[time_coord].where(
         within_range

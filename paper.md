@@ -71,8 +71,10 @@ Model setup requires initialization and time-dependent forcing from oceanic and 
 Existing tools within the ocean modeling ecosystem do not fully address these challenges for ROMS-MARBL or ROMS users. While legacy MATLAB-based scripts developed at UCLA [@ucla-matlab] and Python packages such as `pyroms` [@pyroms] provide critical functionality, both rely on low-level, manually coordinated steps that limit reproducibility, maintainability, and accessibility. Moreover, frameworks developed for other ocean models cannot be directly applied to ROMS due to fundamental differences in grid geometry, vertical coordinates, and model input requirements. As a result, users lack a modern, integrated framework for reproducible model setup and analysis that is specifically designed for ROMS and ROMS-MARBL.
 
 `ROMS-Tools` was developed to fill this gap. It is an open-source Python framework designed for researchers and practitioners who run ROMS or ROMS-MARBL regional ocean simulations, including users in physical oceanography, marine biogeochemistry, and ocean-based CDR applications. Current capabilities are fully compatible with UCLA-ROMS [@ucla-roms; @ucla-roms-cworthy], with potential support for other ROMS implementations, such as Rutgers ROMS [@rutgers-roms], in the future.
-`ROMS-Tools` supports large input and output datasets via parallel computation with `dask` [@dask], making workflows scalable from laptops to high-performance computing clusters.
+The package handles large input and output datasets via parallel computation with `dask` [@dask], making workflows scalable from laptops to high-performance computing clusters. Built-in visualization tools enable quick inspection of regional grids as well as model input and output fields. For example, \autoref{fig:example} shows surface initial conditions for a California Current System simulation at 5 km horizontal resolution, generated and visualized directly using `ROMS-Tools`.
 By lowering technical barriers and improving transparency and reproducibility, `ROMS-Tools` enables more efficient model development, facilitates scientific collaboration, and supports applications such as verification of marine carbon removal strategies.
+
+![Surface initial conditions for the California Current System created and visualized with `ROMS-Tools`. Left: potential temperature. Right: grid-aligned horizontal velocity in $\xi$-direction. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
 
 # State of the Field
 
@@ -82,45 +84,6 @@ Tools from other modeling communities cannot be directly applied to ROMS because
 
 Legacy MATLAB preprocessing scripts developed at UCLA [@ucla-matlab] encapsulate decades of expertise in configuring regional ocean models, but require users to edit source code directly, making workflows error-prone, difficult to reproduce, and challenging to extend to new datasets or applications. `ROMS-Tools` provides a modern, open-source Python implementation of these scripts, retaining core algorithms while offering high-level APIs, automated intermediate steps, and explicit workflow state management via YAML. This object-oriented design improves reproducibility, reduces user errors, and supports extensibility, while leveraging modern Python tools such as `xarray` and `dask`. In some cases, `ROMS-Tools` diverges from the original MATLAB implementation to incorporate improved methods or better integrate with the Python ecosystem.
 
-# Overview of ROMS-Tools Functionality
-
-`ROMS-Tools` provides a comprehensive workflow for generating, processing, and analyzing ROMS-MARBL model inputs and outputs, as detailed below.
-
-## Input Data and Preprocessing
-
-`ROMS-Tools` generates the following input files for ROMS-MARBL:
-
-1. **Model Grid**: Customizable, curvilinear, and orthogonal grid designed to maintain a nearly uniform horizontal resolution across the domain. The grid is rotatable to align with coastlines and features a terrain-following vertical coordinate.
-2. **Bathymetry**: Derived from **SRTM15** [@tozer_global_2019].
-3. **Land Mask**: Inferred from coastlines provided by **Natural Earth** or the Global Self-consistent, Hierarchical, High-resolution Geography (**GSHHG**) Database [@wessel_global_1996].
-4. **Physical Ocean Conditions**:  Initial and open boundary conditions for sea surface height, temperature, salinity, and velocities derived from the 1/12° Global Ocean Physics Reanalysis (**GLORYS**) [@jean-michel_copernicus_2021].
-5. **BGC Ocean Conditions**: Initial and open boundary conditions for dissolved inorganic carbon, alkalinity, and other biogeochemical tracers from Community Earth System Model (**CESM**) output [@yeager_2022] or hybrid observational-model sources [@garcia2019woa; @lauvset_new_2016; @huang_data-driven_2022; @yang_global_2020; @yeager_2022].
-6. **Meteorological forcing**: Wind, radiation, precipitation, and air temperature/humidity processed from the global 1/4° ECMWF Reanalysis v5 (**ERA5**) [@hersbach_era5_2020] with optional corrections for radiation bias and coastal wind.
-7. **BGC surface forcing**: Partial pressure of carbon dioxide, as well as iron, dust, and nitrogen deposition from **CESM** output [@yeager_2022] or hybrid observational-model sources [@landschutzer_decadal_2016; @kok_improved_2021; @hamilton_earth_2022; @yeager_2022].
-8. **Tidal Forcing:** Tidal potential, elevation, and velocities derived from **TPXO** [@egbert_efficient_2002] including self-attraction and loading (SAL) corrections.
-9. **River Forcing:** Freshwater runoff derived from **Dai & Trenberth** [@dai_estimates_2002] or user-provided custom files.
-10. **CDR Forcing**: User-defined interventions that inject BGC tracers at point sources or as larger-scale Gaussian perturbations to simulate CDR interventions. The CDR forcing is prescribed as volume and tracer fluxes (e.g., alkalinity for ocean alkalinity enhancement, iron for iron fertilization, or other BGC constituents).  Users can control the magnitude, spatial footprint, and temporal evolution, allowing flexible representation of CDR interventions.
-
-Some source datasets are accessed automatically by `ROMS-Tools`, including Natural Earth, Dai & Trenberth runoff, and ERA5 meteorology, while users must manually download SRTM15, GSHHG, GLORYS, the BGC datasets, and TPXO tidal files. Although these are the datasets currently supported, the modular design of `ROMS-Tools` makes it straightforward to add new source datasets in the future.
-
-To generate the model inputs, `ROMS-Tools` automates several intermediate processing steps, including:
-
-* **Bathymetry processing**: The bathymetry is smoothed in two stages, first across the entire model domain and then locally in areas with steep slopes, to ensure local steepness ratios do not exceed a prescribed threshold in order to reduce pressure-gradient errors. A minimum depth is enforced to prevent water levels from becoming negative during large tidal excursions.
-* **Mask definition**: The land-sea mask is generated by comparing the ROMS grid’s horizontal coordinates with a coastline dataset using the `regionmask` package [@hauser_regionmaskregionmask_2024]. Enclosed basins are subsequently filled with land.
-* **Land value handling**: Land values are filled via an algebraic multigrid method using `pyamg` [@pyamg2023] prior to horizontal regridding. This extends ocean values into land areas to reconcile discrepancies between source data and ROMS land masks, ensuring that no NaNs or land-originating values contaminate ocean grid cells.
-* **Regridding**: Ocean and atmospheric fields are horizontally and vertically regridded from standard latitude-longitude-depth grids to the model’s curvilinear grid with a terrain-following vertical coordinate using `xarray` [@hoyer2017xarray] and `xgcm` [@xgcm]. Velocities are rotated to align with the curvilinear ROMS grid.
-* **Longitude conventions**: `ROMS-Tools` handles differences in longitude conventions, converting between [-180°, 180°] and [0°, 360°] as needed.
-* **River locations**: Rivers that fall within the model domain are automatically identified and relocated to the nearest coastal grid cell. Rivers that need to be shifted manually or span multiple cells can be configured by the user.
-* **Data streaming**: ERA5 atmospheric data can be accessed directly from the cloud, removing the need for users to pre-download large datasets locally. Similar streaming capabilities may be implemented for other datasets in the future.
-
-Users can quickly design and visualize regional grids and inspect all input fields with built-in plotting utilities. An example of surface initial conditions generated for a California Current System simulation at 5 km horizontal grid spacing is shown in \autoref{fig:example}.
-
-![Surface initial conditions for the California Current System created with `ROMS-Tools` from GLORYS. Left: potential temperature. Right: grid-aligned horizontal velocity in $\xi$-direction. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
-
-
-## Postprocessing and Analysis
-
-`ROMS-Tools` supports postprocessing and analysis of ROMS-MARBL output, including regridding from the native curvilinear, terrain-following grid to a standard latitude-longitude-depth grid using `xesmf` [@xesmf], with built-in plotting for both grid types. The analysis layer also includes specialized utilities for evaluating carbon dioxide removal (CDR) interventions, such as generating carbon uptake and efficiency curves.
 
 # Software Design
 
@@ -148,7 +111,7 @@ Internally, `ROMS-Tools` follows a **layered, modular architecture**. Low-level 
 
 # Research Impact Statement
 
-`ROMS-Tools` is used by two primary research communities. First, regional ocean modelers use it to generate reproducible input datasets for ROMS simulations; external users include researchers at **PNNL**, **WHOI**, and **UCLA**. Second, researchers in the ocean-based carbon dioxide removal (CDR) community use `ROMS-Tools` to configure reproducible ROMS–MARBL simulations of climate intervention scenarios, with adopters including **[C]Worthy**, **Carbon to Sea**, **Ebb Carbon**, and **SCCWRP**.
+`ROMS-Tools` is used by two primary research communities. First, regional ocean modelers use it to generate reproducible input datasets for ROMS simulations; external users include researchers at **PNNL**, **WHOI**, **Stanford University**, and **UCLA**. Second, researchers in the ocean-based carbon dioxide removal (CDR) community use `ROMS-Tools` to configure reproducible ROMS–MARBL simulations of climate intervention scenarios, with adopters including **[C]Worthy**, **Carbon to Sea**, **Ebb Carbon**, and **SCCWRP**.
 All of these groups have contacted the developers directly or engaged with the project through GitHub or offline discussions. Several manuscripts from these communities are currently in preparation.
 
 Beyond standalone use, ROMS-Tools is integrated into broader scientific workflows, including C-Star [@cstar], an open-source platform under development to provide scientifically credible monitoring, reporting, and verification (MRV) for the emerging marine carbon market.

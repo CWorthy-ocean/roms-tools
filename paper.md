@@ -74,7 +74,7 @@ Existing tools within the ocean modeling ecosystem do not fully address these ch
 The package handles large input and output datasets via parallel computation with `dask` [@dask], making workflows scalable from laptops to high-performance computing clusters. Built-in visualization tools enable quick inspection of regional grids as well as model input and output fields. For example, \autoref{fig:example} shows surface initial conditions for a California Current System simulation at 5 km horizontal resolution, generated and visualized directly using `ROMS-Tools`.
 By lowering technical barriers and improving transparency and reproducibility, `ROMS-Tools` enables more efficient model development, facilitates scientific collaboration, and supports applications such as verification of marine carbon removal strategies.
 
-![Surface initial conditions for the California Current System created and visualized with `ROMS-Tools` from GLORYS. Left: potential temperature. Right: grid-aligned horizontal velocity in $\xi$-direction. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
+![Surface initial conditions for the California Current System created and visualized with `ROMS-Tools`. Left: potential temperature. Right: grid-aligned horizontal velocity in $\xi$-direction. Shown for January 1, 2000.\label{fig:example}](docs/images/ics_from_glorys.png){ width=100% }
 
 # State of the Field
 

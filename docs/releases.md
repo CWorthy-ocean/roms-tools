@@ -17,6 +17,8 @@
 
 ### Documentation
 
+* Move "overview of ROMS-Tools functionality" section from paper to docs ([#554](https://github.com/CWorthy-ocean/roms-tools/pull/554))
+
 ### Bugfixes
 
 * Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))

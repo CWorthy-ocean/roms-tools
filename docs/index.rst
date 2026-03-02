@@ -3,27 +3,6 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-.. image:: https://img.shields.io/conda/vn/conda-forge/roms-tools.svg
-   :target: https://anaconda.org/conda-forge/roms-tools
-
-.. image:: https://img.shields.io/pypi/v/roms-tools.svg
-   :target: https://pypi.org/project/roms-tools/
-
-.. image:: https://github.com/CWorthy-ocean/roms-tools/actions/workflows/tests.yaml/badge.svg
-   :target: https://github.com/CWorthy-ocean/roms-tools/actions/workflows/tests.yaml?query=branch%3Amain
-
-.. image:: https://codecov.io/gh/CWorthy-ocean/roms-tools/graph/badge.svg?token=5S1oNu39xE
-   :target: https://codecov.io/gh/CWorthy-ocean/roms-tools
-
-.. image:: https://readthedocs.org/projects/roms-tools/badge/?version=latest
-   :target: https://roms-tools.readthedocs.io/en/latest/?badge=latest
-
-.. image:: https://img.shields.io/pypi/pyversions/roms-tools
-   :target: https://img.shields.io/pypi/pyversions/roms-tools
-
-.. image:: https://static.pepy.tech/personalized-badge/roms-tools?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads
-   :target: https://pepy.tech/projects/roms-tools
-
 
 ROMS-Tools: Reproducible Preprocessing and Analysis for Regional Ocean Modeling with ROMS
 ==========================================================================================

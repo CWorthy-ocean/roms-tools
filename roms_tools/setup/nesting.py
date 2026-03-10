@@ -807,7 +807,7 @@ def modify_child_mask(
     child_mask = (
         alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated
     )
-    child_grid_ds["mask_rho"] = xr.where(child_mask >= 0.5, 1, 0)
+    child_grid_ds["mask_rho"] = xr.where(child_mask >= 0.5, 1, 0).astype("int32")
 
     return child_grid_ds
 

@@ -15,6 +15,7 @@
 * Regression tests for `ChildGrid` ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 * Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 * Enforce `int32` type on `ChildGrid` mask ([#559](https://github.com/CWorthy-ocean/roms-tools/pull/559))
+* Enforce `regionmask>=0.11.0` to address `AttributeError` on import for earlier versions ([#564](https://github.com/CWorthy-ocean/roms-tools/pull/564))
 
 ### Documentation
 

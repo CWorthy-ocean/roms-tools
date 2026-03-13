@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 import yaml
+import os
 from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
@@ -120,6 +121,8 @@ class Grid:
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
     """Whether to print grid generation steps with timing."""
+    filepath: str | Path | None = None
+    """Location of file read in by ROMS-Tools. Included if using externally-generated grid"""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -813,6 +816,9 @@ class Grid:
 
         grid.mask_shapefile = mask_shapefile
 
+        # Store filepath. Use to load externally generated grids
+        grid.filepath = os.path.abspath(filepath)
+
         return grid
 
     def to_yaml(self, filepath: str | Path) -> None:
@@ -826,6 +832,12 @@ class Grid:
         """
         data = asdict(self)
         data = pop_grid_data(data)
+
+        # If parameters needed for ROMS-Tools replication are missing, store only filepath
+        # Only if externally-generated grid
+        if any(data[k] is None for k in ['size_x','size_y','topography_source','hmin']):
+            data = {'filepath' : data['filepath']}
+
         forcing_dict = {self.__class__.__name__: data}
 
         write_to_yaml(forcing_dict, filepath)

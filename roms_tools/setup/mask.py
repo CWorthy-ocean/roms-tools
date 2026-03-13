@@ -80,8 +80,6 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
         "units": "land/water (0/1)",
     }
 
-    ds = add_velocity_masks(ds)
-
     return ds
 
 
@@ -115,7 +113,6 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
 
     This function identifies the largest connected region in the mask, which is assumed to represent
     the main ocean, and sets all other water regions to land (value = 1).
-    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
 
     Parameters
     ----------
@@ -181,19 +178,13 @@ def _close_narrow_channels(
     ds: xr.Dataset,
     mask_var: str = "mask_rho",
     max_iterations: int = 10,
-    connectivity: int = 4,
-    min_region_fraction: float = 0.1,
     inplace: bool = False,
     verbose: bool = False,
 ) -> xr.Dataset:
-    """Close narrow channels and fill small lakes in a ROMS mask (internal function).
+    """Close narrow channels in a ROMS mask (internal function).
 
-    This function performs two main operations:
-    1. Closes narrow 1-pixel wide channels of water (ocean) by converting them to land
-    2. Fills small lakes (isolated water regions) by converting them to land, while
-       preserving the largest connected ocean region
-
-    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
+    This function closes narrow 1-pixel wide channels of water (ocean) by converting
+    them to land.
 
     Parameters
     ----------
@@ -207,10 +198,7 @@ def _close_narrow_channels(
         Connectivity for connected component labeling. Use 4 for 4-connectivity
         (north, south, east, west) or 8 for 8-connectivity (includes diagonals).
         Default is 4.
-    min_region_fraction : float, optional
-        Minimum fraction of domain size for a region to be preserved when filling
-        small lakes. Regions smaller than this fraction will be removed unless they are
-        the largest region. Default is 0.1 (10%).
+
     inplace : bool, optional
         If True, modify the dataset in place. If False, return a new dataset.
         Default is False.
@@ -226,12 +214,8 @@ def _close_narrow_channels(
 
     Notes
     -----
-    The function first ensures mask values are non-negative (negative values are
-    set to 0). Then it iteratively closes 1-pixel wide water channels in both
+    The function iteratively closes 1-pixel wide water channels in both
     north-south and east-west directions by converting them to land (1 -> 0).
-    Finally, it identifies connected ocean regions and keeps only the largest one,
-    converting smaller isolated water regions (lakes) to land, unless another region
-    exceeds the minimum region fraction threshold.
 
     Examples
     --------
@@ -244,13 +228,12 @@ def _close_narrow_channels(
     if mask_var not in ds.variables:
         raise ValueError(f"Mask variable '{mask_var}' not found in dataset.")
 
-    # Get mask and ensure it's non-negative
+    # Get mask
     mask = ds[mask_var].values.copy()
-    mask[mask < 0] = 0
 
     # Log that we're closing narrow channels (only when verbose)
     if verbose:
-        logger.info("Filling narrow channels and small lakes")
+        logger.info("Closing narrow channels")
 
     # Close narrow channels
     for it in range(max_iterations):
@@ -278,38 +261,8 @@ def _close_narrow_channels(
         else:
             break
 
-    # Create structure for connected component labeling
-    if connectivity == 4:
-        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
-    elif connectivity == 8:
-        structure = np.ones((3, 3), dtype=int)
-    else:
-        raise ValueError("connectivity must be 4 or 8")
-
-    # Label connected regions
-    reg, nreg = label(mask, structure=structure)
-
-    # Find the largest region
-    lint = 0  # size of largest region
-    lreg = 0  # number of largest region
-    for i in range(1, nreg + 1):
-        region_size = np.sum(reg == i)
-        if region_size > lint:
-            lreg = i
-            lint = region_size
-
-    # Remove all regions except the largest one (unless they exceed min_region_fraction)
-    ny, nx = mask.shape
-    domain_size = nx * ny
-
-    for ireg in range(1, nreg + 1):
-        if ireg != lreg:
-            region_size = np.sum(reg == ireg)
-            if region_size > domain_size * min_region_fraction:
-                # Large region preserved, but don't log it
-                pass
-            else:
-                mask[reg == ireg] = 0
+    # Fill enclosed basins (small lakes/holes)
+    mask = _fill_enclosed_basins(mask)
 
     # Update the dataset
     if inplace:

@@ -70,8 +70,8 @@ class Grid:
     mask_shapefile: str | Path | None, optional
         Path to a custom shapefile to use to determine the land mask; if None, use NaturalEarth 10m.
     close_narrow_channels : bool, optional
-        Whether to close narrow water channels and fill small lakes in the mask after it is generated.
-        Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND. The default is False.
+        Whether to close narrow water channels in the mask after it is generated.
+        The default is False.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
@@ -119,8 +119,8 @@ class Grid:
     mask_shapefile: str | Path | None = None
     """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
     close_narrow_channels: bool = False
-    """Whether to close narrow water channels and fill small lakes in the mask.
-    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND. Default is False."""
+    """Whether to close narrow water channels in the mask.
+    Default is False."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
@@ -181,8 +181,8 @@ class Grid:
     def update_mask(
         self,
         mask_shapefile: str | Path | None = None,
-        verbose: bool = False,
         close_narrow_channels: bool | None = None,
+        verbose: bool = False,
     ) -> None:
         """
         Update the land mask of the current grid dataset.
@@ -192,21 +192,19 @@ class Grid:
         stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
         Earth 10m) is used. The operation is optionally timed and logged.
 
-        If `close_narrow_channels` is True (either from the parameter or from
-        `self.close_narrow_channels`), narrow water channels will be closed and small
+        If `close_narrow_channels` is True, narrow water channels will be closed and small
         lakes will be filled after the mask is generated.
-        Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
 
         Parameters
         ----------
         mask_shapefile : str or Path, optional
             Path to a coastal shapefile to derive the land mask. If `None`,
             the default Natural Earth 10m coastline dataset is used.
+        close_narrow_channels : bool, optional
+            Whether to close narrow water channels. If `None`, uses
+            the value from `self.close_narrow_channels`. Default is `None`.
         verbose : bool, default False
             If True, prints timing and progress information.
-        close_narrow_channels : bool, optional
-            Whether to close narrow water channels and fill small lakes. If `None`, uses
-            the value from `self.close_narrow_channels`. Default is `None`.
 
         Returns
         -------
@@ -215,8 +213,7 @@ class Grid:
 
         """
         with Timed("=== Deriving the mask from coastlines ===", verbose=verbose):
-            ds = add_mask(self.ds, shapefile=mask_shapefile)
-            self.ds = ds
+            add_mask(self.ds, shapefile=mask_shapefile)
             self.mask_shapefile = mask_shapefile
 
         # Determine if we should close narrow channels
@@ -228,18 +225,16 @@ class Grid:
 
         # Close narrow channels if requested
         if should_close:
-            ds = _close_narrow_channels(
+            _close_narrow_channels(
                 self.ds,
                 mask_var="mask_rho",
                 max_iterations=10,
-                connectivity=4,
-                min_region_fraction=0.1,
                 inplace=True,
                 verbose=verbose,
             )
-            # Update velocity masks after modifying mask_rho
-            ds = add_velocity_masks(ds)
-            self.ds = ds
+        
+        # Update velocity masks after modifying mask_rho
+        add_velocity_masks(self.ds)
 
     def update_topography(
         self,

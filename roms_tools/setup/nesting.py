@@ -148,8 +148,8 @@ class ChildGrid(Grid):
     def update_mask(
         self,
         mask_shapefile: str | Path | None = None,
-        verbose: bool = False,
         close_narrow_channels: bool | None = None,
+        verbose: bool = False,
     ) -> None:
         """
         Update the child grid mask and ensure consistency with the parent grid.
@@ -163,17 +163,19 @@ class ChildGrid(Grid):
            extend outside the parent grid.
         3. Adjusts the child mask to ensure consistency with the parent mask.
 
+        If `close_narrow_channels` is True, narrow water channels will be closed and small
+        lakes will be filled after the mask is generated.
+
         Parameters
         ----------
         mask_shapefile : str or Path, optional
             Path to a coastal shapefile used to derive the land mask. If ``None``,
             a default coastline dataset is used.
+        close_narrow_channels : bool, optional
+            Whether to close narrow water channels. If `None`, uses
+            the value from `self.close_narrow_channels`. Default is `None`.
         verbose : bool, default False
             If True, prints timing and progress information.
-        close_narrow_channels : bool, optional
-            Whether to close narrow water channels and fill small lakes. If `None`, uses
-            the value from `self.close_narrow_channels`. Default is `None`.
-            Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
 
         Returns
         -------
@@ -183,8 +185,8 @@ class ChildGrid(Grid):
         """
         super().update_mask(
             mask_shapefile=mask_shapefile,
-            verbose=verbose,
             close_narrow_channels=close_narrow_channels,
+            verbose=verbose,
         )
         self._map_child_boundaries_onto_parent_grid_indices(verbose=verbose)
         self._modify_child_mask(verbose=verbose)

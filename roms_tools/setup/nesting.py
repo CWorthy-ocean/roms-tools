@@ -364,23 +364,23 @@ class ChildGrid(Grid):
 
         return parent_grid_ds, child_grid_ds
 
-    @classmethod
-    def from_file(
-        cls,
-        filepath: str | Path,
-        theta_s: float | None = None,
-        theta_b: float | None = None,
-        hc: float | None = None,
-        N: int | None = None,
-        verbose: bool = False,
-    ) -> "ChildGrid":
-        """This method is disabled in this subclass.
-
-        .. noindex::
-        """
-        raise NotImplementedError(
-            "The 'from_file' method is disabled in this subclass."
-        )
+    # @classmethod
+    # def from_file(
+    #     cls,
+    #     filepath: str | Path,
+    #     theta_s: float | None = None,
+    #     theta_b: float | None = None,
+    #     hc: float | None = None,
+    #     N: int | None = None,
+    #     verbose: bool = False,
+    # ) -> "ChildGrid":
+    #     """This method is disabled in this subclass.
+    #
+    #     .. noindex::
+    #     """
+    #     raise NotImplementedError(
+    #         "The 'from_file' method is disabled in this subclass."
+    #     )
 
 
 def map_child_boundaries_onto_parent_grid_indices(

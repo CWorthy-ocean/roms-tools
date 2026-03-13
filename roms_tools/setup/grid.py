@@ -89,28 +89,28 @@ class Grid:
         If you try to create a grid with domain size larger than 25000 km.
     """
 
-    nx: int
+    nx: int | None = None
     """Number of grid points in the x-direction."""
-    ny: int
+    ny: int | None = None
     """Number of grid points in the y-direction."""
-    size_x: float
+    size_x: float | None = None
     """Domain size in the x-direction (in kilometers)."""
-    size_y: float
+    size_y: float | None = None
     """Domain size in the y-direction (in kilometers)."""
-    center_lon: float
+    center_lon: float | None = None
     """Longitude of grid center."""
-    center_lat: float
+    center_lat: float | None = None
     """Latitude of grid center."""
     rot: float = 0
     """Rotation of grid x-direction from lines of constant latitude, measured in
     degrees."""
-    N: int = 100
+    N: int | None = None
     """The number of vertical levels."""
-    theta_s: float = 5.0
+    theta_s: float | None = None
     """The surface control parameter."""
-    theta_b: float = 2.0
+    theta_b: float | None = None
     """The bottom control parameter."""
-    hc: float = 300.0
+    hc: float | None = None
     """The critical depth (in meters)."""
     topography_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the topography data."""
@@ -120,6 +120,7 @@ class Grid:
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
     """Whether to print grid generation steps with timing."""
+    filename: str | Path | None = None
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -128,37 +129,61 @@ class Grid:
     """Whether the grid straddles the dateline."""
 
     def __post_init__(self):
-        self._input_checks()
+        # TODO: add checks that raises error if you supply both a filename
+        # and the nx/ny/etc. args; only allow one or the other
+        if self.filename is not None:
+            self = self.from_file(
+                filepath=self.filename,
+                theta_s=self.theta_s,
+                theta_b=self.theta_b,
+                hc=self.hc,
+                N=self.N,
+                verbose=self.verbose,
+            )
+        else:
+            # assign defaults here for non-required params; need Nones in the above section
+            self.N = self.N or 100
+            self.theta_s = self.theta_s or 5.0
+            self.theta_b = self.theta_b or 2.0
+            self.hc = self.hc or 300.0
 
-        # Horizontal grid
-        self._create_horizontal_grid()
+            self._input_checks()
 
-        # Check if the Greenwich meridian goes through the domain.
-        self._straddle()
+            # Horizontal grid
+            self._create_horizontal_grid()
 
-        # Mask
-        self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
+            # Check if the Greenwich meridian goes through the domain.
+            self._straddle()
 
-        # Coarsen the dataset if needed
-        self._coarsen()
+            # Mask
+            self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
 
-        # Topography
-        self.update_topography(
-            topography_source=self.topography_source,
-            hmin=self.hmin,
-            verbose=self.verbose,
-        )
+            # Coarsen the dataset if needed
+            self._coarsen()
 
-        # Vertical coordinate system
-        self.update_vertical_coordinate(
-            N=self.N,
-            theta_s=self.theta_s,
-            theta_b=self.theta_b,
-            hc=self.hc,
-            verbose=self.verbose,
-        )
+            # Topography
+            self.update_topography(
+                topography_source=self.topography_source,
+                hmin=self.hmin,
+                verbose=self.verbose,
+            )
+
+            # Vertical coordinate system
+            self.update_vertical_coordinate(
+                N=self.N,
+                theta_s=self.theta_s,
+                theta_b=self.theta_b,
+                hc=self.hc,
+                verbose=self.verbose,
+            )
 
     def _input_checks(self):
+        for var in ("nx", "ny", "size_x", "size_y", "center_lon", "center_lat"):
+            if getattr(self, var) is None:
+                raise ValueError(
+                    f"{var} is required unless loading from an existing grid."
+                )
+
         if self.topography_source is None:
             self.topography_source = {"name": "ETOPO5"}
 
@@ -597,6 +622,7 @@ class Grid:
         hc: float | None = None,
         N: int | None = None,
         verbose: bool = False,
+        **kwargs,
     ) -> "Grid":
         """Create a Grid instance from an existing file.
 
@@ -824,6 +850,8 @@ class Grid:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
+        # TODO add code here to write filename if self.filename...
+
         data = asdict(self)
         data = pop_grid_data(data)
         forcing_dict = {self.__class__.__name__: data}

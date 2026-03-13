@@ -534,6 +534,7 @@ class TestNesting:
                 # Clean up the .nc file
                 filepath.unlink()
 
+    # TODO: change this test to check desired behavior
     def test_disabled_from_file_method(self):
         """Test that parent from_file method is indeed disabled."""
         with pytest.raises(

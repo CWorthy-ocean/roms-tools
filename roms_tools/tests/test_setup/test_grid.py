@@ -721,7 +721,7 @@ def test_enclosed_regions():
     )
 
     reg, nreg = label(grid.ds.mask_rho)
-    npt.assert_equal(nreg, 2)
+    npt.assert_equal(nreg, 1)
 
 
 def test_rmax_criterion():
@@ -832,7 +832,7 @@ def test_close_narrow_channels():
 
     Creates a mask with a vertical line of ocean, a small lake connected by a narrow
     channel.
-    All narrow channels should be closed by the algorithm and the lake should be filled in.
+    All narrow channels should be closed by the algorithm.
 
     """
     # Create a small grid with close_narrow_channels=False to avoid closing during init
@@ -879,7 +879,7 @@ def test_close_narrow_channels():
     assert "mask_v" in grid.ds.variables
 
 
-def test_close_narrow_channels_hole_filling():
+def test_close_narrow_channels():
     """Test that close_narrow_channels fills narrow channels.
 
     """

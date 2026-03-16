@@ -232,7 +232,7 @@ class Grid:
                 inplace=True,
                 verbose=verbose,
             )
-        
+
         # Update velocity masks after modifying mask_rho
         add_velocity_masks(self.ds)
 

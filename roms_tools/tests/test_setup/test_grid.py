@@ -833,7 +833,7 @@ def test_close_narrow_channels():
     Creates a mask with a vertical line of ocean, a small lake connected by a narrow
     channel.
     All narrow channels should be closed by the algorithm and the lake should be filled in.
-    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
+
     """
     # Create a small grid with close_narrow_channels=False to avoid closing during init
     grid = Grid(
@@ -865,8 +865,6 @@ def test_close_narrow_channels():
         grid.ds,
         mask_var="mask_rho",
         max_iterations=10,
-        connectivity=4,
-        min_region_fraction=0.1,
         inplace=True,
     )
     grid.ds = add_velocity_masks(grid.ds)
@@ -929,8 +927,6 @@ def test_close_narrow_channels_hole_filling():
         grid.ds,
         mask_var="mask_rho",
         max_iterations=10,
-        connectivity=4,
-        min_region_fraction=0.1,
         inplace=True,
     )
     # Update velocity masks after modifying mask_rho

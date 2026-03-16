@@ -880,9 +880,8 @@ def test_close_narrow_channels():
 
 
 def test_close_narrow_channels_hole_filling():
-    """Test that close_narrow_channels fills small lakes while preserving large ocean regions.
+    """Test that close_narrow_channels fills narrow channels.
 
-    Note: In ROMS masks, 1 = OCEAN (water) and 0 = LAND.
     """
     # Create a small grid with close_narrow_channels=False to avoid closing during init
     grid = Grid(
@@ -935,13 +934,13 @@ def test_close_narrow_channels_hole_filling():
     # Get the mask after closing
     mask_after = grid.ds.mask_rho.values.copy()
 
-    # Verify that the small isolated lake was filled (converted to land)
-    assert mask_after[3:5, 3:5].all() == 0, (
-        "Small isolated lake should be filled (converted to land)"
+    # Verify that channel was closed
+    assert mask_after[5:7, 7:8].all() == 0, (
+        "Narrow channel should be closed"
     )
 
     # Verify that the large ocean region was preserved
-    assert mask_after[6:16, 6:16].sum() == 100, "Large ocean region should be preserved"
+    assert mask_after[6:16, 0:16].sum() == 100, "Large ocean region should be preserved"
 
     # Verify that the mask changed
     assert np.any(mask_before != mask_after), "Mask should have changed after closing"

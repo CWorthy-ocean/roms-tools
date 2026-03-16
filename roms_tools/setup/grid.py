@@ -916,7 +916,11 @@ class Grid:
 
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
-        return cls(**grid_data, verbose=verbose)
+
+        if len(grid_data)==1 and next(iter(grid_data))=="filepath":
+            return cls.from_file(grid_data["filepath"])
+        else:
+            return cls(**grid_data, verbose=verbose)
 
     def __repr__(self) -> str:
         """Return a string representation of the object with non-None attributes,

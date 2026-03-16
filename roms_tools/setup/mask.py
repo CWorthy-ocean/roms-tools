@@ -129,14 +129,14 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
     # Find the largest region
     lint = 0
     lreg = 0
-    for ireg in range(nreg):
+    for ireg in range(1, nreg + 1):
         int_ = np.sum(reg == ireg)
         if int_ > lint and mask[reg == ireg].sum() > 0:
             lreg = ireg
             lint = int_
 
     # Remove regions other than the largest one
-    for ireg in range(nreg):
+    for ireg in range(1, nreg + 1):
         if ireg != lreg:
             mask[reg == ireg] = 0
 

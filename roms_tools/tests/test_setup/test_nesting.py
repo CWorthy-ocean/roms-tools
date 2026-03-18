@@ -364,14 +364,43 @@ class TestModifyChid:
 
 class TestNesting:
     @pytest.mark.parametrize(
-        "fixture_name, include_bgc, expected_r_vars",
+        "fixture_name, include_bgc, include_pressure_fluxes, expected_r_vars, expected_u_vars, expected_v_vars",
         [
-            ("child_grid_with_bgc", True, "zeta, temp, salt, bgc"),
-            ("child_grid_that_straddles", False, "zeta, temp, salt"),
+            (
+                "child_grid_with_bgc",
+                True,
+                False,
+                "zeta, temp, salt, bgc",
+                "ubar, u",
+                "vbar, v",
+            ),
+            (
+                "child_grid_that_straddles",
+                False,
+                False,
+                "zeta, temp, salt",
+                "ubar, u",
+                "vbar, v",
+            ),
+            (
+                "child_grid_with_pflx",
+                False,
+                True,
+                "zeta, temp, salt",
+                "ubar, u, up",
+                "vbar, v, vp",
+            ),
         ],
     )
     def test_successful_initialization(
-        self, request, fixture_name, include_bgc, expected_r_vars
+        self,
+        request,
+        fixture_name,
+        include_bgc,
+        include_pressure_fluxes,
+        expected_r_vars,
+        expected_u_vars,
+        expected_v_vars,
     ):
         child_grid = request.getfixturevalue(fixture_name)
 
@@ -399,9 +428,9 @@ class TestNesting:
                 if location == "r":
                     assert ds[varname].attrs["output_vars"] == expected_r_vars
                 elif location == "u":
-                    assert ds[varname].attrs["output_vars"] == "ubar, u, up"
+                    assert ds[varname].attrs["output_vars"] == expected_u_vars
                 elif location == "v":
-                    assert ds[varname].attrs["output_vars"] == "vbar, v, vp"
+                    assert ds[varname].attrs["output_vars"] == expected_v_vars
 
     def test_default_boundaries(self, child_grid_with_eastern_boundary_closed):
         assert child_grid_with_eastern_boundary_closed.boundaries == {

@@ -305,6 +305,21 @@ def child_grid_with_bgc(big_grid):
 
 
 @pytest.fixture(scope="session")
+def child_grid_with_pflx(big_grid):
+    return ChildGrid(
+        parent_grid=big_grid,
+        nx=10,
+        ny=10,
+        center_lon=-23,
+        center_lat=61,
+        rot=-20,
+        size_x=500,
+        size_y=500,
+        metadata={"include_pressure_fluxes": True},
+    )
+
+
+@pytest.fixture(scope="session")
 def tidal_forcing(use_dask: bool) -> TidalForcing:
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20

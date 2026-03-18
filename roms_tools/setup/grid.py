@@ -3,7 +3,7 @@ import importlib.metadata
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import xarray as xr
@@ -27,6 +27,9 @@ from roms_tools.utils import (
     save_datasets,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
+
+if TYPE_CHECKING:
+    from nesting import ChildGrid
 
 
 @dataclass(kw_only=True)
@@ -134,7 +137,7 @@ class Grid:
         # TODO: add checks that raises error if you supply both a filename
         #  and the nx/ny/etc. args; only allow one or the other
         if self.filename is not None:
-            self = Grid.from_file(
+            self = self._from_file(
                 filepath=self.filename,
                 theta_s=self.theta_s,
                 theta_b=self.theta_b,
@@ -622,7 +625,7 @@ class Grid:
         return saved_filenames
 
     @classmethod
-    def from_file(
+    def _from_file(
         cls,
         filepath: str | Path,
         theta_s: float | None = None,
@@ -631,7 +634,7 @@ class Grid:
         N: int | None = None,
         verbose: bool = False,
         **kwargs,
-    ) -> "Grid":
+    ) -> "Grid | ChildGrid":
         """Create a Grid instance from an existing file.
 
         Parameters
@@ -732,23 +735,27 @@ class Grid:
                         "but they are inconsistent with the provided theta_s, theta_b, hc, and N."
                     )
 
-        # TODO: swap this clause with the next one
+        elif all(attr in grid.ds.attrs for attr in ["theta_s", "theta_b", "hc"]):
+            if prior_Cs_r is None or prior_Cs_w is None:
+                theta_s = grid.ds.attrs["theta_s"].item()
+                theta_b = grid.ds.attrs["theta_b"].item()
+                hc = grid.ds.attrs["hc"].item()
+                N = len(grid.ds.s_rho)
+
+                grid.update_vertical_coordinate(
+                    N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=True
+                )
+
         # Case: user did not provide vertical coordinate parameters
-        elif prior_Cs_r is None or prior_Cs_w is None:
-            logging.warning("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
+        else:
+            logging.warning(
+                "Vertical coordinates (Cs_r, Cs_w) not found in grid file and were not provided, using defaults."
+            )
 
             # Use fallback parameters
             grid.update_vertical_coordinate(
                 N=100, theta_s=5.0, theta_b=2.0, hc=300.0, verbose=True
             )
-
-        # Final fallback: get vertical coordinate parameters from attributes if available
-        else:
-            if not all(attr in grid.ds.attrs for attr in ["theta_s", "theta_b", "hc"]):
-                raise ValueError(
-                    "Missing vertical coordinate attributes in grid file: "
-                    "'theta_s', 'theta_b', or 'hc'."
-                )
 
         # Assign vertical coordinate metadata
         grid.theta_s = grid.ds.attrs["theta_s"].item()

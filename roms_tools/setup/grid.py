@@ -188,12 +188,9 @@ class Grid:
         Update the land mask of the current grid dataset.
 
         This method generates a land mask based on the provided coastline
-        shapefile, fills enclosed basins with lands and updates the dataset
-        stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
+        shapefile, optionally closes narrows channels, fills enclosed basins with lands,
+        and updates the dataset stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
         Earth 10m) is used. The operation is optionally timed and logged.
-
-        If `close_narrow_channels` is True, narrow water channels will be closed and small
-        lakes will be filled after the mask is generated.
 
         Parameters
         ----------

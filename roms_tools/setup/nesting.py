@@ -156,15 +156,14 @@ class ChildGrid(Grid):
 
         This method performs the following steps:
 
-        1. Derives the child mask from the provided ``mask_shapefile`` (or from the
-           default Natural Earth 10m coastline if ``None``).
-        2. Updates the mapping of child boundaries to parent-grid indices.
+        1. Infer child mask from coastlines
+        2. Close narrow channels if requested
+        3. Fill enclosed basins
+        4. Updates the mapping of child boundaries to parent-grid indices.
            This mapping depends on the updated mask, since masked (land) points may
            extend outside the parent grid.
-        3. Adjusts the child mask to ensure consistency with the parent mask.
-
-        If `close_narrow_channels` is True, narrow water channels will be closed and small
-        lakes will be filled after the mask is generated.
+        5. Adjusts the child mask to ensure consistency with the parent mask.
+        6. Update dataset stored in `self.ds`.
 
         Parameters
         ----------

@@ -54,6 +54,7 @@ class ChildGrid(Grid):
         - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
         - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
         - `"include_bgc"` (bool): Whether to include BGC variables in boundary outputs. Defaults to `False`.
+        - `"include_pressure_fluxes"` (bool): Whether to include baroclinic pressure fluxes in boundary outputs. Defaults to `False`.
     verbose: bool, optional
         Indicates whether to print grid generation steps with timing. Defaults to False.
     """
@@ -87,6 +88,7 @@ class ChildGrid(Grid):
                 "prefix": "child",
                 "period": 3600.0,
                 "include_bgc": False,
+                "include_pressure_fluxes": False,
             }
             # Merge user metadata on top of defaults
             self.metadata = {**defaults, **self.metadata}
@@ -106,6 +108,7 @@ class ChildGrid(Grid):
                 self.metadata["prefix"],
                 self.metadata["period"],
                 self.metadata["include_bgc"],
+                self.metadata["include_pressure_fluxes"],
             )
 
             self.ds_nesting = ds_nesting
@@ -390,6 +393,7 @@ def map_child_boundaries_onto_parent_grid_indices(
     prefix: str = "child",
     period: float = 3600.0,
     include_bgc: bool = False,
+    include_pressure_fluxes: bool = False,
     update_land_indices: bool = True,
 ):
     """Maps child grid boundary points onto absolute indices of the parent grid.
@@ -423,6 +427,9 @@ def map_child_boundaries_onto_parent_grid_indices(
 
     include_bgc: bool, optional
         Whether to include BGC variables in the boundary outputs.
+
+    include_pressure_fluxes: bool, optional
+        Whether to include baroclinic pressure fluxes in the boundary outputs.
 
     update_land_indices : bool, optional
         If `True`, updates indices that fall on land in the parent grid to nearby ocean points.
@@ -500,9 +507,13 @@ def map_child_boundaries_onto_parent_grid_indices(
                     ds[var_name].attrs["units"] = "non-dimensional and radian"
 
                     if grid_location == "u":
-                        ds[var_name].attrs["output_vars"] = "ubar, u, up"
+                        ds[var_name].attrs["output_vars"] = (
+                            "ubar, u, up" if include_pressure_fluxes else "ubar, u"
+                        )
                     elif grid_location == "v":
-                        ds[var_name].attrs["output_vars"] = "vbar, v, vp"
+                        ds[var_name].attrs["output_vars"] = (
+                            "vbar, v, vp" if include_pressure_fluxes else "vbar, v"
+                        )
 
                 ds[var_name].attrs["output_period"] = period
 

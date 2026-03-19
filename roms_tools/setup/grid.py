@@ -12,7 +12,7 @@ from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
 from roms_tools.plot import plot
-from roms_tools.setup.mask import _close_narrow_channels, add_mask, add_velocity_masks
+from roms_tools.setup.mask import add_mask, add_velocity_masks
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     Timed,
@@ -142,7 +142,11 @@ class Grid:
         self._straddle()
 
         # Mask
-        self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
+        self.update_mask(
+            mask_shapefile=self.mask_shapefile,
+            close_narrow_channels=self.close_narrow_channels,
+            verbose=self.verbose,
+        )
 
         # Coarsen the dataset if needed
         self._coarsen()
@@ -187,10 +191,12 @@ class Grid:
         """
         Update the land mask of the current grid dataset.
 
-        This method generates a land mask based on the provided coastline
-        shapefile, optionally closes narrows channels, fills enclosed basins with lands,
-        and updates the dataset stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
-        Earth 10m) is used. The operation is optionally timed and logged.
+        The following steps are executed:
+
+        1. Infer mask from coastlines
+        2. Close narrow channels if requested
+        3. Fill enclosed basins
+        4. Update dataset stored in `self.ds`.
 
         Parameters
         ----------
@@ -209,26 +215,22 @@ class Grid:
             Updates the `self.ds` attribute in place with the new mask.
 
         """
-        with Timed("=== Deriving the mask from coastlines ===", verbose=verbose):
-            add_mask(self.ds, shapefile=mask_shapefile)
-            self.mask_shapefile = mask_shapefile
-
         # Determine if we should close narrow channels
         should_close = (
             close_narrow_channels
             if close_narrow_channels is not None
             else self.close_narrow_channels
         )
-
-        # Close narrow channels if requested
-        if should_close:
-            _close_narrow_channels(
+        with Timed("=== Making the mask ===", verbose=verbose):
+            ds = add_mask(
                 self.ds,
-                mask_var="mask_rho",
-                max_iterations=10,
-                inplace=True,
+                shapefile=mask_shapefile,
+                close_narrow_channels=should_close,
                 verbose=verbose,
             )
+            self.ds = ds
+            self.mask_shapefile = mask_shapefile
+            self.close_narrow_channels = should_close
 
         # Update velocity masks after modifying mask_rho
         add_velocity_masks(self.ds)

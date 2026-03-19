@@ -1,4 +1,5 @@
 import logging
+import time
 import warnings
 from pathlib import Path
 
@@ -16,11 +17,19 @@ from roms_tools.utils import (
     interpolate_from_rho_to_v,
 )
 
-logger = logging.getLogger(__name__)
 
-
-def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
+def add_mask(
+    ds: xr.Dataset,
+    shapefile: str | Path | None = None,
+    close_narrow_channels: bool = False,
+    verbose: bool = False,
+) -> xr.Dataset:
     """Adds a land/water mask to the dataset at rho-points.
+
+    These are the steps:
+    1. Infer mask from coastlines
+    2. Close narrow channels if requested
+    3. Fill enclosed basins
 
     Parameters
     ----------
@@ -30,12 +39,21 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
     shapefile: str or Path | None
         Path to a coastal shapefile to determine the land mask. If None, NaturalEarth 10m is used.
 
+    close_narrow_channels : bool, optional
+        Whether to close narrow water channels in the mask after it is generated.
+        The default is False.
+
+    verbose: bool, optional
+        Indicates whether to print mask generation steps with timing. Defaults to False.
+
     Returns
     -------
     xarray.Dataset
         The original dataset with an added 'mask_rho' variable, representing land/water mask.
     """
-    # Suppress specific warning
+    # Infer mask from coastlines
+    if verbose:
+        start_time = time.time()
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="No gridpoint belongs to any region.*"
@@ -68,9 +86,33 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
             mask = land_mask.isnull()
 
     ds = _add_coastlines_metadata(ds, shapefile)
+    if verbose:
+        logging.info(
+            f"Inferring the mask from coastlines: {time.time() - start_time:.3f} seconds"
+        )
+
+    # Close narrow channels if requested
+    if close_narrow_channels:
+        if verbose:
+            start_time = time.time()
+        _close_narrow_channels(
+            mask,
+            max_iterations=10,
+        )
+        if verbose:
+            logging.info(
+                "Closing narrow channels: {time.time() - start_time:.3f} seconds"
+            )
 
     # fill enclosed basins with land
+    if verbose:
+        start_time = time.time()
     mask = _fill_enclosed_basins(mask.values)
+    if verbose:
+        logging.info(
+            "Filling enclosed basins with land: {time.time() - start_time:.3f} seconds"
+        )
+
     # adjust mask boundaries by copying values from adjacent cells
     mask = handle_boundaries(mask)
 
@@ -108,7 +150,7 @@ def _add_coastlines_metadata(
     return ds
 
 
-def _fill_enclosed_basins(mask) -> np.ndarray:
+def _fill_enclosed_basins(mask: np.ndarray) -> np.ndarray:
     """Fills enclosed basins in the mask with land (value = 0).
 
     This function identifies the largest connected region in the mask, which is assumed to represent
@@ -143,7 +185,7 @@ def _fill_enclosed_basins(mask) -> np.ndarray:
     return mask
 
 
-def add_velocity_masks(ds):
+def add_velocity_masks(ds: xr.Dataset) -> xr.Dataset:
     """Adds velocity masks for u- and v-points based on the rho-point mask.
 
     This function generates masks for u- and v-points by interpolating the rho-point land/water mask.
@@ -175,12 +217,9 @@ def add_velocity_masks(ds):
 
 
 def _close_narrow_channels(
-    ds: xr.Dataset,
-    mask_var: str = "mask_rho",
+    mask: xr.DataArray,
     max_iterations: int = 10,
-    inplace: bool = False,
-    verbose: bool = False,
-) -> xr.Dataset:
+) -> xr.DataArray:
     """Close narrow channels in a ROMS mask (internal function).
 
     This function closes narrow 1-pixel wide channels of water (ocean) by converting
@@ -188,53 +227,21 @@ def _close_narrow_channels(
 
     Parameters
     ----------
-    ds : xarray.Dataset
-        Input dataset containing the mask variable.
-    mask_var : str, optional
-        Name of the mask variable in the dataset. Default is "mask_rho".
+    mask : xarray.DataArray
+        Input mask.
     max_iterations : int, optional
         Maximum number of iterations for closing narrow channels. Default is 10.
-    connectivity : int, optional
-        Connectivity for connected component labeling. Use 4 for 4-connectivity
-        (north, south, east, west) or 8 for 8-connectivity (includes diagonals).
-        Default is 4.
-
-    inplace : bool, optional
-        If True, modify the dataset in place. If False, return a new dataset.
-        Default is False.
-    verbose : bool, optional
-        If True, prints detailed progress information. If False, only logs
-        a single line "Closing narrow channels". Default is False.
 
     Returns
     -------
-    xarray.Dataset
-        Dataset with the modified mask. If `inplace=True`, returns the same
-        dataset object.
+    xarray.DataArray
+        The modified mask.
 
     Notes
     -----
     The function iteratively closes 1-pixel wide water channels in both
     north-south and east-west directions by converting them to land (1 -> 0).
-
-    Examples
-    --------
-    >>> import xarray as xr
-    >>> ds = xr.open_dataset("grid.nc")
-    >>> ds_filled = _close_narrow_channels(ds)
-    >>> ds_filled.to_netcdf("grid_filled.nc")
     """
-    # Ensure we have the mask variable
-    if mask_var not in ds.variables:
-        raise ValueError(f"Mask variable '{mask_var}' not found in dataset.")
-
-    # Get mask
-    mask = ds[mask_var].values.copy()
-
-    # Log that we're closing narrow channels (only when verbose)
-    if verbose:
-        logger.info("Closing narrow channels")
-
     # Close narrow channels
     for it in range(max_iterations):
         # Fill 1-pixel passages in north-south direction
@@ -261,15 +268,4 @@ def _close_narrow_channels(
         else:
             break
 
-    # Fill enclosed basins (small lakes/holes)
-    mask = _fill_enclosed_basins(mask)
-
-    # Update the dataset
-    if inplace:
-        ds[mask_var].values[:] = mask
-        result = ds
-    else:
-        result = ds.copy(deep=False)
-        result[mask_var].values[:] = mask
-
-    return result
+    return mask

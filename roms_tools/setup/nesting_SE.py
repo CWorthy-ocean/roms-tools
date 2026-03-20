@@ -920,3 +920,73 @@ def compute_boundary_distance(
     alpha = xr.DataArray(alpha, dims=("eta_rho", "xi_rho"))
 
     return alpha
+
+def make_edata(parent_grid: Grid,
+               child_grid: Grid,
+               metadata: dict,
+               filepath: str | Path,
+               boundaries: dict | None = None,
+               update: bool = False,
+               verbose: bool = False
+) -> xr.Dataset:
+
+    """Maps child grid boundary points onto absolute indices of the parent grid, and saves the
+    nesting information to netCDF4 files.
+
+    Parameters
+    ----------
+    parent_grid : Grid
+        The parent grid object, providing the reference for the topography and mask of the child grid.
+    child_grid : Grid
+        The child grid whose boundaries will be mapped onto the parent grid. 
+    metadata : Dict[str, Any]
+        Dictionary configuring the boundary nesting process, including:
+
+        - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
+        - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
+        - `"include_bgc"` (bool): Whether to include BGC variables in boundary outputs. Defaults to `False`.
+    filepath : Union[str, Path]
+        The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
+    boundaries : Dict[str, bool] | None
+        Specifies which child grid boundaries ('south', 'east', 'north', 'west') should be adjusted for topography/mask
+        and included in `ds_nesting`. If not provided, valid (non-land) boundaries are enabled automatically.
+    update : bool
+        The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
+    verbose : bool, optional
+        Indicates whether to print nesting steps with timing. Defaults to False.
+    Returns
+    -------
+    List[Path]
+        A list of `Path` objects for the saved files. Each element in the list corresponds to a file that was saved.
+    """
+    with Timed(
+        "=== Mapping the child grid boundary points onto the indices of the parent grid ===",
+        verbose=verbose,
+    ):
+        # Default metadata
+        defaults = {
+            "prefix": "child",
+            "period": 3600.0,
+            "include_bgc": False,
+        }
+        # Merge user metadata on top of defaults
+        metadata = {**defaults, **metadata}
+
+        boundaries = check_and_set_boundaries(
+            boundaries, child_grid.ds.mask_rho
+        )
+
+        # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
+        parent_grid_ds, child_grid_ds = self._prepare_grid_datasets()
+
+        # Map child boundaries onto parent grid indices
+        ds_nesting = map_child_boundaries_onto_parent_grid_indices(
+            parent_grid_ds,
+            child_grid_ds,
+            self.boundaries,
+            self.metadata["prefix"],
+            self.metadata["period"],
+            self.metadata["include_bgc"],
+        )
+
+        self.ds_nesting = ds_nesting

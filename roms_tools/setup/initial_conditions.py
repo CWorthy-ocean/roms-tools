@@ -526,12 +526,23 @@ class InitialConditions:
 
         else:
             self.adjust_depth_for_sea_surface_height = False
+
+            # TODO: Evaluate whether this chunking strategy improves performance
+            # performance gains/losses may also differ for GLORYS vs. BGC dataset
+            chunks = {"time": 1}
+
+            # Alternative: chunks=None (current behavior), which results in
+            # {"lat": -1, "lon": -1, "time": 1}.
+            # Using {"time": 1} may reduce memory usage, but could introduce
+            # computational overhead due to rechunking later on.
+
             data = data_type(
                 filename=source_dict["path"],  # type: ignore
                 start_time=self.ini_time,
                 climatology=source_dict["climatology"],  # type: ignore
                 allow_flex_time=self.allow_flex_time,
                 use_dask=self.use_dask,
+                chunks=chunks,
             )
 
         return data

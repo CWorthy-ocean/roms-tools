@@ -324,6 +324,14 @@ class SurfaceForcing:
         }
 
         if self.type == "physics":
+            # TODO: Evaluate whether this chunking strategy improves performance
+            chunks = {"time": 1}
+
+            # Alternative: chunks=None (current behavior), which results in
+            # {"lat": -1, "lon": -1, "time": 1}.
+            # Using {"time": 1} may reduce memory usage, but could introduce
+            # computational overhead due to rechunking later on.
+
             if self.source["name"] == "ERA5":
                 if str(self.source["path"]).startswith("gs://") or str(
                     self.source["path"]
@@ -332,9 +340,9 @@ class SurfaceForcing:
                         raise ValueError(
                             "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
                         )
-                    data = ERA5ARCODataset(**data_dict)
+                    data = ERA5ARCODataset(**data_dict, chunks=chunks)
                 else:
-                    data = ERA5Dataset(**data_dict)
+                    data = ERA5Dataset(**data_dict, chunks=chunks)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'

@@ -495,12 +495,22 @@ class BoundaryForcing:
         if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
+        # TODO: Evaluate whether this chunking strategy improves performance
+        # performance gains/losses may also differ for GLORYS vs. BGC dataset
+        chunks = {"time": 1}
+
+        # Alternative: chunks=None (current behavior), which results in
+        # {"lat": -1, "lon": -1, "time": 1}.
+        # Using {"time": 1} may reduce memory usage, but could introduce
+        # computational overhead due to rechunking later on.
+
         return data_type(
             filename=self.source["path"],
             start_time=self.start_time,
             end_time=self.end_time,
             climatology=self.source["climatology"],  # type: ignore[arg-type]
             use_dask=self.use_dask,
+            chunks=chunks,
         )
 
     def _set_variable_info(self, data):

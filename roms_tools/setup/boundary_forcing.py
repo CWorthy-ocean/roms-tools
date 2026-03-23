@@ -200,6 +200,13 @@ class BoundaryForcing:
                     buffer_points=3,
                     return_copy=True,
                 )
+                bdry_data.ds = bdry_data.ds.rechunk(
+                    {
+                        bdry_data.dim_names["latitude"]: -1,
+                        bdry_data.dim_names["longitude"]: -1,
+                        bdry_data.dim_names["depth"]: -1,
+                    }
+                )
 
                 if not self.apply_2d_horizontal_fill:
                     # Enforce double precision to ensure reproducibility
@@ -216,6 +223,7 @@ class BoundaryForcing:
                 ]
 
                 # lateral regridding of vector fields
+
                 if filtered_vars:
                     lon = target_coords["lon"].isel(
                         **self.bdry_coords["vector"][direction]

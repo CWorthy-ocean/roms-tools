@@ -626,6 +626,10 @@ class LatLonDataset:
         point to the same variable in the dataset.
         """
         if self.needs_lateral_fill:
+            self.ds = self.ds.rechunk(
+                {self.dim_names["latitude"]: -1, self.dim_names["lonitude"]: -1}
+            )
+
             lateral_fill = LateralFill(
                 self.ds["mask"],
                 (self.dim_names["latitude"], self.dim_names["longitude"]),

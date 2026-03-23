@@ -627,7 +627,7 @@ class LatLonDataset:
         """
         if self.needs_lateral_fill:
             self.ds = self.ds.chunk(
-                {self.dim_names["latitude"]: -1, self.dim_names["lonitude"]: -1}
+                {self.dim_names["latitude"]: -1, self.dim_names["longitude"]: -1}
             )
 
             lateral_fill = LateralFill(

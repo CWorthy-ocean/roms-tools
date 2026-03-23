@@ -174,7 +174,7 @@ def align_grids(
     topography_source: dict | None = None,
     hmin: float | None = None,
     verbose: bool = False,
-)->"Grid":
+)->Grid:
 
     boundaries = check_and_set_boundaries(
         boundaries, child_grid.ds.mask_rho
@@ -218,7 +218,7 @@ def align_grids(
         modifier: Callable,
         modifier_name: str,
         verbose: bool = False,
-    ):
+    ) -> xr.Dataset:
 
         """Shared logic for modifying child mask/topography."""
         with Timed(f"=== Modifying the child {modifier_name} ===", verbose=verbose):
@@ -291,11 +291,15 @@ def make_edata(
     verbose: bool = False,
 )->xr.Dataset:
 
+    boundaries = check_and_set_boundaries(
+        boundaries, child_grid.ds.mask_rho
+    )
+
     def _map_child_boundaries_onto_parent_grid_indices(
         parent_grid: Grid,
         child_grid: Grid,
+        boundaries: dict[str, bool] | None = None,
         metadata: dict | None = None,
-        boundaries: dict | None = None,
         verbose: bool = False
     ):
         """Maps child grid boundary points onto absolute indices of the parent grid."""
@@ -314,10 +318,6 @@ def make_edata(
                 metadata = {}
 
             metadata = {**defaults, **metadata}
-
-            boundaries = check_and_set_boundaries(
-                boundaries, child_grid.ds.mask_rho
-            )
 
             # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
             parent_grid_ds, child_grid_ds = prepare_grid_datasets(parent_grid, child_grid)
@@ -367,10 +367,10 @@ def make_edata(
 
 
     # Map child onto parent
-    ds_nesting = _map_child_boundaries_onto_parent_grid_indices(parent_grid, child_grid, boundaries, metadata, verbose)
+    ds_nesting = _map_child_boundaries_onto_parent_grid_indices(parent_grid, child_grid, boundaries=boundaries,metadata=metadata, verbose)
 
     # Save the nesting file and return nesting dataset
-    save_nesting(ds_nesting, filepath)
+    files = save_nesting(ds_nesting, filepath)
 
     return ds_nesting
 

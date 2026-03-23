@@ -101,6 +101,10 @@ class LatLonDataset:
         Only used when `end_time` is None. Has no effect otherwise.
     apply_post_processing: bool
         Indicates whether to post-process the dataset for futher use. Defaults to True.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None.
 
     Attributes
     ----------
@@ -138,6 +142,7 @@ class LatLonDataset:
     apply_post_processing: bool = True
 
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
+    chunks: dict[str, int] | None = None
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -204,6 +209,7 @@ class LatLonDataset:
             use_dask=self.use_dask,
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
+            chunks=self.chunks,
         )
 
         return ds

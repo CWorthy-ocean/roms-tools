@@ -200,7 +200,7 @@ class BoundaryForcing:
                     buffer_points=3,
                     return_copy=True,
                 )
-                bdry_data.ds = bdry_data.ds.rechunk(
+                bdry_data.ds = bdry_data.ds.chunk(
                     {
                         bdry_data.dim_names["latitude"]: -1,
                         bdry_data.dim_names["longitude"]: -1,

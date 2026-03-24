@@ -9,6 +9,7 @@ import pytest
 
 from roms_tools import (
     BoundaryForcing,
+    ChildGrid,
     Grid,
     InitialConditions,
     RiverForcing,
@@ -281,7 +282,6 @@ def tiny_rotated_grid() -> Grid:
     )
 
 
-@pytest.fixture(scope="session")
 def grid_with_closed_channels() -> Grid:
     return Grid(
         nx=3,
@@ -293,6 +293,43 @@ def grid_with_closed_channels() -> Grid:
         rot=20,
         N=3,
         close_narrow_channels=True,
+    )
+
+
+@pytest.fixture(scope="session")
+def big_grid() -> Grid:
+    return Grid(
+        nx=5, ny=7, center_lon=-23, center_lat=61, rot=20, size_x=1800, size_y=2400
+    )
+
+
+@pytest.fixture(scope="session")
+def child_grid_with_bgc(big_grid):
+    return ChildGrid(
+        parent_grid=big_grid,
+        nx=10,
+        ny=10,
+        center_lon=-23,
+        center_lat=61,
+        rot=-20,
+        size_x=500,
+        size_y=500,
+        metadata={"include_bgc": True},
+    )
+
+
+@pytest.fixture(scope="session")
+def child_grid_with_pflx(big_grid):
+    return ChildGrid(
+        parent_grid=big_grid,
+        nx=10,
+        ny=10,
+        center_lon=-23,
+        center_lat=61,
+        rot=-20,
+        size_x=500,
+        size_y=500,
+        metadata={"include_pressure_fluxes": True},
     )
 
 
@@ -442,6 +479,45 @@ def initial_conditions_with_unified_bgc_from_climatology(
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
         bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def initial_conditions_from_roms(
+    use_dask: bool,
+) -> InitialConditions:
+    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    fname_restart = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(1998, 1, 6),
+        source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
+        bgc_source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def initial_conditions_from_roms_without_bgc(
+    use_dask: bool,
+) -> InitialConditions:
+    grid = Grid(nx=5, ny=5, center_lon=-120, center_lat=34, size_x=100, size_y=100, N=3)
+
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    fname_restart = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+
+    return InitialConditions(
+        grid=grid,
+        ini_time=datetime(1998, 1, 6),
+        source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
         use_dask=use_dask,
     )
 

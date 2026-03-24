@@ -14,12 +14,21 @@ from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     UnifiedBGCDataset,
 )
+from roms_tools.setup.initial_conditions import _set_required_vars
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
 try:
     import copernicusmarine  # type: ignore
 except ImportError:
     copernicusmarine = None
+try:
+    import xesmf  # type: ignore
+except ImportError:
+    xesmf = None
+
+skip_xesmf = pytest.mark.skipif(
+    xesmf is None, reason="xesmf required for ROMS regridding"
+)
 
 
 @pytest.fixture
@@ -48,6 +57,7 @@ def example_grid():
         "initial_conditions_with_bgc",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms_without_bgc", marks=skip_xesmf),
     ],
 )
 def test_initial_conditions_creation_with_nondefault_glorys_dataset(
@@ -55,15 +65,7 @@ def test_initial_conditions_creation_with_nondefault_glorys_dataset(
 ):
     """Test the creation of the InitialConditions object."""
     ic = request.getfixturevalue(ic_fixture)
-
-    assert ic.ini_time == datetime(2021, 6, 29)
-    assert ic.source == {
-        "name": "GLORYS",
-        "path": Path(download_test_data("GLORYS_coarse_test_data.nc")),
-        "climatology": False,
-    }
     assert hasattr(ic.ds, "adjust_depth_for_sea_surface_height")
-    assert ic.ds.attrs["adjust_depth_for_sea_surface_height"] == "False"
     assert isinstance(ic.ds, xr.Dataset)
     assert ic.ds.coords["ocean_time"].attrs["units"] == "seconds"
     expected_vars = {"temp", "salt", "u", "v", "zeta", "ubar", "vbar"}
@@ -171,12 +173,12 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
         "initial_conditions_with_bgc",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_initial_condition_creation_with_bgc(ic_fixture, request):
     """Test the creation of the BoundaryForcing object."""
     ic = request.getfixturevalue(ic_fixture)
-
     expected_bgc_variables = [
         "PO4",
         "NO3",
@@ -214,6 +216,88 @@ def test_initial_condition_creation_with_bgc(ic_fixture, request):
 
     for var in expected_bgc_variables:
         assert var in ic.ds
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_initial_conditions_raises_on_regridded_nans(use_dask):
+    """Raise ValueError if regridded ROMS fields contain NaNs due to grid mismatch."""
+    parent_grid = Grid(
+        center_lon=-120, center_lat=30, nx=8, ny=13, size_x=3000, size_y=4000, rot=32
+    )
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    # create grid that is not entirely contained in the parent grid
+    grid_params = {
+        "nx": 5,
+        "ny": 5,
+        "center_lon": -128,
+        "center_lat": 9,
+        "size_x": 100,
+        "size_y": 100,
+    }
+    grid = Grid(**grid_params)
+
+    with pytest.raises(ValueError, match="NaN values found in regridded field."):
+        InitialConditions(
+            grid=grid,
+            ini_time=datetime(1998, 1, 6),
+            source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
+            use_dask=use_dask,
+            bgc_source={
+                "name": "ROMS",
+                "grid": parent_grid,
+                "path": restart_file,
+            },
+        )
+
+
+@pytest.mark.skipif(xesmf is None, reason="xesmf required")
+def test_initial_conditions_unchanged_when_parent_and_child_grids_match(use_dask):
+    grid_params = {
+        "nx": 8,
+        "ny": 13,
+        "center_lon": -120,
+        "center_lat": 30,
+        "size_x": 3000,
+        "size_y": 4000,
+        "rot": 32,
+    }
+    parent_grid = Grid(**grid_params)
+    grid = Grid(**grid_params)
+
+    restart_file = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    ds = xr.open_dataset(restart_file)
+
+    ic = InitialConditions(
+        grid=grid,
+        ini_time=datetime(1998, 1, 6),
+        source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
+        use_dask=use_dask,
+    )
+
+    mask = grid.ds.mask_rho
+
+    # For scalar fields (temp, salt, zeta), values should be preserved exactly
+    # when parent and child grids are identical.
+    #
+    # NOTE:
+    # Velocity variables (u, v) are excluded here because their initialization
+    # involves multiple non-exact operations:
+    #   - interpolation from staggered (u/v) points to rho-points,
+    #   - rotation between grid-relative and earth-relative coordinates,
+    #   - interpolation back to staggered grids.
+    #
+    # These steps are not mathematically invertible and introduce small
+    # numerical differences throughout the domain (not only at boundaries),
+    # so bitwise or near-bitwise agreement cannot be expected.
+    for var_name in ["temp", "salt", "zeta"]:
+        restart_values = ds[var_name].isel(time=1).where(mask).values
+        ic_values = ic.ds[var_name].squeeze().where(mask).values
+
+        assert np.allclose(
+            ic_values,
+            restart_values,
+            equal_nan=True,
+        ), f"{var_name} values changed during initialization"
 
 
 # Test initialization with missing 'name' in source
@@ -259,8 +343,8 @@ def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
 def test_initial_conditions_missing_ini_time(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
     with pytest.raises(
-        ValueError,
-        match="`ini_time` must be a valid datetime object and cannot be None.",
+        TypeError,
+        match="`ini_time` must be a datetime object",
     ):
         InitialConditions(
             grid=example_grid,
@@ -413,6 +497,7 @@ def test_computed_missing_optional_fields(
     [
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_initial_conditions_plot(initial_conditions_fixture, request):
@@ -460,6 +545,7 @@ def test_initial_conditions_plot(initial_conditions_fixture, request):
         "initial_conditions",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
@@ -487,6 +573,7 @@ def test_initial_conditions_save(initial_conditions_fixture, request, tmp_path):
         "initial_conditions",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask):
@@ -519,6 +606,8 @@ def test_roundtrip_yaml(initial_conditions_fixture, request, tmp_path, use_dask)
         "initial_conditions",
         "initial_conditions_with_bgc_from_climatology",
         "initial_conditions_with_unified_bgc_from_climatology",
+        pytest.param("initial_conditions_from_roms_without_bgc", marks=skip_xesmf),
+        pytest.param("initial_conditions_from_roms", marks=skip_xesmf),
     ],
 )
 def test_files_have_same_hash(initial_conditions_fixture, request, tmp_path, use_dask):
@@ -585,3 +674,31 @@ def test_from_yaml_missing_initial_conditions(tmp_path, use_dask):
 
         yaml_filepath = Path(yaml_filepath)
         yaml_filepath.unlink()
+
+
+# Test _set_required_vars
+
+
+def test_default_var_type():
+    vars_map = _set_required_vars()
+    # Default is "physics"
+    expected_keys = {"zeta", "temp", "salt", "u", "v"}
+    assert set(vars_map.keys()) == expected_keys
+    # Values should match keys
+    for key, val in vars_map.items():
+        assert key == val
+
+
+def test_bgc_var_type():
+    vars_map = _set_required_vars("bgc")
+    # Check a few expected keys exist
+    expected_keys = {"PO4", "NO3", "SiO3", "NH4", "Fe", "DIC", "spChl", "zooC"}
+    assert expected_keys.issubset(vars_map.keys())
+    # Values should match keys
+    for key, val in vars_map.items():
+        assert key == val
+
+
+def test_invalid_var_type():
+    with pytest.raises(ValueError, match="Unsupported var_type"):
+        _set_required_vars("invalid_type")

@@ -344,8 +344,18 @@ def test_regrid_specific_variables(roms_output_fixture, request):
     assert isinstance(ds_regridded, xr.Dataset)
     assert set(ds_regridded.data_vars) == set(var_names)
 
-    ds = roms_output.regrid(var_names=[])
-    assert ds is None
+    var_names = ["temp", "salt", "u"]
+    ds_regridded = roms_output.regrid(var_names=var_names)
+    assert isinstance(ds_regridded, xr.Dataset)
+    # Expect 'v' to be included automatically with 'u'
+    expected_vars = set([*var_names, "v"])
+    assert set(ds_regridded.data_vars) == expected_vars
+
+    ds_regridded = roms_output.regrid(var_names=[])
+    assert isinstance(ds_regridded, xr.Dataset)
+    assert "lat" in ds_regridded.coords
+    assert "lon" in ds_regridded.coords
+    assert set(ds_regridded.data_vars) == set(roms_output.ds.data_vars)
 
 
 @pytest.mark.parametrize(
@@ -359,9 +369,7 @@ def test_regrid_specific_variables(roms_output_fixture, request):
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
 def test_regrid_missing_variable_raises_error(roms_output_fixture, request):
     roms_output = request.getfixturevalue(roms_output_fixture)
-    with pytest.raises(
-        ValueError, match="The following variables are not found in the dataset"
-    ):
+    with pytest.raises(ValueError, match="Variables not found"):
         roms_output.regrid(var_names=["fake_variable"])
 
 

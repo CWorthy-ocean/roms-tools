@@ -1,17 +1,36 @@
 # Release notes
 
-## v3.5.0 (unreleased)
+## v3.6.0 (unreleased)
 
 ### New Features
+
+* `ChildGrid` now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
+* Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
+* `ChildGrid` now infers open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
+* Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 
 ### Breaking Changes
 
 ### Internal Changes
 
+* Regression tests for `ChildGrid` ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
+* Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
+* Enforce `int32` type on `ChildGrid` mask ([#559](https://github.com/CWorthy-ocean/roms-tools/pull/559))
+* Ensure `regionmask>=0.11.0` in `pyproject.toml` ([#565](https://github.com/CWorthy-ocean/roms-tools/pull/565))
+
 ### Documentation
+
+* Move "overview of ROMS-Tools functionality" section from paper to docs ([#554](https://github.com/CWorthy-ocean/roms-tools/pull/554))
 
 ### Bugfixes
 
+* Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))
+
+## v3.5.0
+
+### New Features
+
+* Initialize inner-nest initial conditions from outer-nest ROMS restart file ([#513](https://github.com/CWorthy-ocean/roms-tools/pull/513/files))
 
 ## v3.4.0
 
@@ -24,6 +43,7 @@
 ### Breaking Changes
 
 * Remove user-facing control of SSH-adjusted depth coordinates (`adjust_depth_for_sea_surface_height` parameter) for `InitialConditions` and `BoundaryForcing`, enforcing consistent and physically sensible defaults ([#514](https://github.com/CWorthy-ocean/roms-tools/pull/514))
+* Remove `horizontal_chunk_size` parameter from `InitialConditions`; the new vertical regridding scheme is sufficiently memory-efficient without it ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 
 ### Internal Changes
 

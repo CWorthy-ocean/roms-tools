@@ -25,6 +25,7 @@ from roms_tools.utils import (
     interpolate_from_v_to_rho,
     load_data,
     rotate_velocities,
+    wrap_longitudes,
 )
 
 
@@ -325,6 +326,57 @@ def test_interpolate_from_real_climatology(use_dask):
 
     interpolated_field = interpolate_from_climatology(field, "time", "time", era5_times)
     assert len(interpolated_field.time) == len(era5_times)
+
+
+def test_wrap_longitudes_staggered():
+    # Dimensions
+    eta_rho, xi_rho, xi_u = 3, 4, 5
+    eta_v = 2
+
+    # Create 2D coordinates
+    lon_rho = xr.DataArray(
+        np.linspace(0, 360, eta_rho * xi_rho).reshape(eta_rho, xi_rho),
+        dims=("eta_rho", "xi_rho"),
+        attrs={"units": "degrees_east"},
+    )
+    lon_u = xr.DataArray(
+        np.linspace(-190, 190, eta_rho * xi_u).reshape(eta_rho, xi_u),
+        dims=("eta_rho", "xi_u"),
+        attrs={"units": "degrees_east"},
+    )
+    lon_v = xr.DataArray(
+        np.linspace(-180, 180, eta_v * xi_rho).reshape(eta_v, xi_rho),
+        dims=("eta_v", "xi_rho"),
+        attrs={"units": "degrees_east"},
+    )
+
+    # Dummy variables
+    ds = xr.Dataset(
+        {
+            "dummy_rho": (("eta_rho", "xi_rho"), np.zeros((eta_rho, xi_rho))),
+            "dummy_u": (("eta_rho", "xi_u"), np.zeros((eta_rho, xi_u))),
+            "dummy_v": (("eta_v", "xi_rho"), np.zeros((eta_v, xi_rho))),
+        },
+        coords={"lon_rho": lon_rho, "lon_u": lon_u, "lon_v": lon_v},
+    )
+
+    # Wrap to [-180, 180]
+    ds_wrapped = wrap_longitudes(ds, straddle=True)
+
+    # Check values: all >180 should be shifted
+    assert ds_wrapped.lon_rho.max().values <= 180
+    assert ds_wrapped.lon_u.max().values <= 180
+    assert ds_wrapped.lon_v.max().values <= 180
+
+    # Wrap to [0, 360]
+    ds_wrapped2 = wrap_longitudes(ds, straddle=False)
+    assert ds_wrapped2.lon_rho.min().values >= 0
+    assert ds_wrapped2.lon_u.min().values >= 0
+    assert ds_wrapped2.lon_v.min().values >= 0
+
+    # Check attributes preserved
+    for name in ["lon_rho", "lon_u", "lon_v"]:
+        assert ds.coords[name].attrs == ds_wrapped.coords[name].attrs
 
 
 # test _interpolate_generic and its wrappers

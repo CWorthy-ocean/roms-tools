@@ -2,6 +2,10 @@
 source = ["roms_tools"]
 omit = [
     "roms_tools/tests/*",
+    "docs/*",
+    "ci/*",
+    "paper*",
+    ".github/*",
     "**/__init__.py",
 ]
 branch = true

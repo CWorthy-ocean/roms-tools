@@ -78,13 +78,15 @@ def add_mask(
             # Use Natural Earth 10m land polygons if no shapefile is provided
             land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
             land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
-            mask = land_mask.isnull().astype(int)
+            mask = land_mask.isnull()
 
     ds = _add_coastlines_metadata(ds, shapefile)
     if verbose:
         logging.info(
             f"Inferring the mask from coastlines: {time.time() - start_time:.3f} seconds"
         )
+
+    mask = mask.astype(int)  # convert from bool to int
 
     # Close narrow channels if requested
     if close_narrow_channels:

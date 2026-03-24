@@ -248,11 +248,11 @@ def _close_narrow_channels(
         fill = mask.copy()
         fill[1:, :] = fill[1:, :] + mask[:-1, :]
         fill[:-1, :] = fill[:-1, :] + mask[1:, :]
-        fill[mask < 1] = 0
+        fill.values[mask.values < 1] = 0
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            mask[fill == 1] = 0
+            mask.values[fill.values == 1] = 0
         else:
             break
 
@@ -260,11 +260,11 @@ def _close_narrow_channels(
         fill = mask.copy()
         fill[:, 1:] = fill[:, 1:] + mask[:, :-1]
         fill[:, :-1] = fill[:, :-1] + mask[:, 1:]
-        fill[mask < 1] = 0
+        fill.values[mask.values < 1] = 0
 
         nf = np.sum(fill == 1)
         if nf > 0:
-            mask[fill == 1] = 0
+            mask.values[fill.values == 1] = 0
         else:
             break
 

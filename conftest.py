@@ -282,6 +282,7 @@ def tiny_rotated_grid() -> Grid:
     )
 
 
+@pytest.fixture(scope="session")
 def grid_with_closed_channels() -> Grid:
     return Grid(
         nx=3,

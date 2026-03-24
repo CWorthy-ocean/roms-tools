@@ -880,7 +880,16 @@ def test_close_narrow_channels():
     assert "mask_v" in grid.ds.variables
 
 
+def _assert_closing_only(grid, grid_closed):
+    """Assert that closing narrow channels only removes points, never adds."""
+    assert grid_closed.ds.mask_rho.any(), "Mask should not be all zeros"
+    diff = grid.ds.mask_rho - grid_closed.ds.mask_rho
+    assert (diff >= 0).all(), "Filling should only close points, never open them"
+    assert (diff > 0).any(), "At least one point should have been closed"
+
+
 def test_close_narrow_channel_integration():
+    # Grid with ETOPO5 bathy
     kwargs = {
         "nx": 15,
         "ny": 15,
@@ -891,12 +900,25 @@ def test_close_narrow_channel_integration():
         "rot": 0,
         "N": 3,
     }
-    grid = Grid(**kwargs)
-    grid_with_closed_channels = Grid(**kwargs, close_narrow_channels=True)
+    _assert_closing_only(Grid(**kwargs), Grid(**kwargs, close_narrow_channels=True))
 
-    diff = grid.ds.mask_rho - grid_with_closed_channels.ds.mask_rho
-    assert (diff >= 0).all(), "Filling should only close points, never open them"
-    assert (diff > 0).any(), "At least one point should have been closed"
+    # Grid with GSHHS bathy
+    kwargs = {
+        "nx": 80,
+        "ny": 40,
+        "size_x": 40,
+        "size_y": 20,
+        "center_lon": -21.76,
+        "center_lat": 64.325,
+        "rot": 0,
+        "N": 3,
+    }
+    for ext in ["dbf", "prj", "shx"]:
+        download_test_data(f"GSHHS_l_L1.{ext}")
+    shapefile = download_test_data("GSHHS_l_L1.shp")
+
+    kwargs["mask_shapefile"] = shapefile
+    _assert_closing_only(Grid(**kwargs), Grid(**kwargs, close_narrow_channels=True))
 
 
 # Boundary tests

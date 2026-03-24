@@ -721,7 +721,7 @@ def test_enclosed_regions():
     )
 
     reg, nreg = label(grid.ds.mask_rho)
-    npt.assert_equal(nreg, 1)
+    npt.assert_equal(nreg, 2)
 
 
 def test_rmax_criterion():

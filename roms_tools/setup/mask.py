@@ -154,7 +154,7 @@ def _fill_enclosed_basins(mask: np.ndarray) -> np.ndarray:
     """Fills enclosed basins in the mask with land (value = 0).
 
     This function identifies the largest connected region in the mask, which is assumed to represent
-    the main ocean, and sets all other water regions to land (value = 1).
+    the ocean, and sets all other water regions to land.
 
     Parameters
     ----------
@@ -171,14 +171,14 @@ def _fill_enclosed_basins(mask: np.ndarray) -> np.ndarray:
     # Find the largest region
     lint = 0
     lreg = 0
-    for ireg in range(1, nreg + 1):
+    for ireg in range(nreg):
         int_ = np.sum(reg == ireg)
         if int_ > lint and mask[reg == ireg].sum() > 0:
             lreg = ireg
             lint = int_
 
     # Remove regions other than the largest one
-    for ireg in range(1, nreg + 1):
+    for ireg in range(nreg):
         if ireg != lreg:
             mask[reg == ireg] = 0
 

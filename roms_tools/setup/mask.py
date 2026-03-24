@@ -83,7 +83,7 @@ def add_mask(
             # Use Natural Earth 10m land polygons if no shapefile is provided
             land = regionmask.defined_regions.natural_earth_v5_0_0.land_10
             land_mask = land.mask(ds["lon_rho"], ds["lat_rho"])
-            mask = land_mask.isnull()
+            mask = land_mask.isnull().astype(int)
 
     ds = _add_coastlines_metadata(ds, shapefile)
     if verbose:

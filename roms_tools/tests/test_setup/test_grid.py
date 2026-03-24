@@ -19,7 +19,7 @@ from roms_tools.constants import (
     UPPER_BOUND_THETA_S,
 )
 from roms_tools.datasets.download import download_test_data
-from roms_tools.setup.mask import _close_narrow_channels, add_velocity_masks
+from roms_tools.setup.mask import _close_narrow_channels
 from roms_tools.setup.topography import _compute_rfactor
 
 try:
@@ -859,17 +859,12 @@ def test_close_narrow_channels():
     mask[4, 6:8] = 1  # Narrow channel connecting lake to ocean
 
     grid.ds["mask_rho"].values[:] = mask
-    mask_before = grid.ds.mask_rho.values.copy()
+    mask_before = grid.ds.mask_rho.copy()
 
-    grid.ds = _close_narrow_channels(
-        grid.ds,
-        mask_var="mask_rho",
+    mask_after = _close_narrow_channels(
+        grid.ds["mask_rho"],
         max_iterations=10,
-        inplace=True,
     )
-    grid.ds = add_velocity_masks(grid.ds)
-
-    mask_after = grid.ds.mask_rho.values.copy()
 
     assert mask_after[6, 7] == 0, "Narrow channel at [6, 7] should be closed"
     assert mask_after[6, 9] == 0, "Narrow channel at [6, 9] should be closed"

@@ -103,6 +103,7 @@ def add_mask(
             logging.info(
                 "Closing narrow channels: {time.time() - start_time:.3f} seconds"
             )
+    ds.attrs["close_narrow_channels"] = str(close_narrow_channels)
 
     # fill enclosed basins with land
     if verbose:

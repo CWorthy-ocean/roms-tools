@@ -845,6 +845,13 @@ class Grid:
 
         grid.mask_shapefile = mask_shapefile
 
+        if "close_narrow_channels" in ds.attrs:
+            close_narrow_channels = ds.attrs["close_narrow_channels"].lower() == "true"
+        else:
+            close_narrow_channels = None
+
+        grid.close_narrow_channels = close_narrow_channels
+
         return grid
 
     def to_yaml(self, filepath: str | Path) -> None:

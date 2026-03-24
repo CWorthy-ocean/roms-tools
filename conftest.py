@@ -282,6 +282,21 @@ def tiny_rotated_grid() -> Grid:
 
 
 @pytest.fixture(scope="session")
+def grid_with_closed_channels() -> Grid:
+    return Grid(
+        nx=3,
+        ny=3,
+        size_x=10,
+        size_y=10,
+        center_lon=-17,
+        center_lat=60,
+        rot=20,
+        N=3,
+        close_narrow_channels=True,
+    )
+
+
+@pytest.fixture(scope="session")
 def tidal_forcing(use_dask: bool) -> TidalForcing:
     grid = Grid(
         nx=3, ny=3, size_x=1500, size_y=1500, center_lon=235, center_lat=25, rot=-20

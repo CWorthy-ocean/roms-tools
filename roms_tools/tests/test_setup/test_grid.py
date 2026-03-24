@@ -224,6 +224,7 @@ def test_coords_relation(grid_fixture, request):
         "grid_that_straddles_180_degree_meridian_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_successful_initialization_with_topography(grid_fixture, request):
@@ -366,6 +367,7 @@ def test_grid_straddle_crosses_meridian():
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
@@ -402,6 +404,7 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_roundtrip_yaml(grid_fixture, tmp_path, request):
@@ -435,6 +438,7 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
@@ -466,6 +470,7 @@ def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_files_have_same_hash(grid_fixture, tmp_path, request):
@@ -870,8 +875,28 @@ def test_close_narrow_channels():
     assert mask_after[6, 9] == 0, "Narrow channel at [6, 9] should be closed"
     assert mask_after[4, 7] == 0, "Lake channel at [4, 7] should be closed"
     assert np.any(mask_before != mask_after), "Mask should have changed"
+    assert mask_after.any(), "Mask should not be all zeros"
     assert "mask_u" in grid.ds.variables
     assert "mask_v" in grid.ds.variables
+
+
+def test_close_narrow_channel_integration():
+    kwargs = {
+        "nx": 15,
+        "ny": 15,
+        "size_x": 100,
+        "size_y": 100,
+        "center_lon": -22,
+        "center_lat": 64,
+        "rot": 0,
+        "N": 3,
+    }
+    grid = Grid(**kwargs)
+    grid_with_closed_channels = Grid(**kwargs, close_narrow_channels=True)
+
+    diff = grid.ds.mask_rho - grid_with_closed_channels.ds.mask_rho
+    assert (diff >= 0).all(), "Filling should only close points, never open them"
+    assert (diff > 0).any(), "At least one point should have been closed"
 
 
 # Boundary tests

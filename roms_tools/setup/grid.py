@@ -126,9 +126,6 @@ class Grid:
     filename: str | Path | None = None
     """An external file to load instead of generating the grid from params"""
 
-    # TODO: consider adding a "load_clean" param that forces us to JUST load and do nothing else.
-    # we may want to ask if this is actually needed before implementing
-
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -136,8 +133,6 @@ class Grid:
     """Whether the grid straddles the dateline."""
 
     def __post_init__(self):
-        # TODO: add checks that raises error if you supply both a filename
-        #  and the nx/ny/etc. args; only allow one or the other
         if self.filename is not None:
             # Check to confirm other parameters are not provided with filename
             min_param = {"rot", "hmin", "verbose", "filename"}
@@ -159,7 +154,7 @@ class Grid:
             self.__dict__.update(loaded.__dict__)
 
         else:
-            # assign defaults here for non-required params; need Nones in the above section
+            # assign defaults here for non-required params
             self.N = self.N or 100
             self.theta_s = self.theta_s or 5.0
             self.theta_b = self.theta_b or 2.0
@@ -168,36 +163,32 @@ class Grid:
             self._input_checks()
 
             # Horizontal grid
-            # todo don't do this for external file
             self._create_horizontal_grid()
 
             # Check if the Greenwich meridian goes through the domain.
             self._straddle()
 
             # Mask
-            # todo don't do this for external file
             self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
 
             # Coarsen the dataset if needed
             self._coarsen()
 
             # Topography
-            # todo don't do this for external file
             self.update_topography(
                 topography_source=self.topography_source,
                 hmin=self.hmin,
                 verbose=self.verbose,
             )
 
-        # Vertical coordinate system
-
-        self.update_vertical_coordinate(
-            N=self.N,
-            theta_s=self.theta_s,
-            theta_b=self.theta_b,
-            hc=self.hc,
-            verbose=self.verbose,
-        )
+            # Vertical coordinate system
+            self.update_vertical_coordinate(
+                N=self.N,
+                theta_s=self.theta_s,
+                theta_b=self.theta_b,
+                hc=self.hc,
+                verbose=self.verbose,
+            )
 
     def _input_checks(self):
         for var in ("nx", "ny", "size_x", "size_y", "center_lon", "center_lat"):
@@ -453,6 +444,9 @@ class Grid:
         - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
         """
         # todo check for these keys
+        # NOTE: THERE IS ALREADY A CHECK FOR ALL OR NONE TO DO COARSEN UNDER FROM_FILE
+        # THERE'S NO CHECK IN THE post_init, but presumably, we need the coarsening to happen then. 
+        # i.e. this check may be unecessary unless we want individual checks:
         d = {
             "angle": "angle_coarse",
             "mask_rho": "mask_coarse",
@@ -460,9 +454,12 @@ class Grid:
             "lon_rho": "lon_coarse",
         }
 
+        # Only coarsen variables that have not yet been coarsened
+        vars_coarsen = [(k,v) for k,v in d.items() if v not in self.ds]
+
         ds = self.ds
 
-        for fine_var, coarse_var in d.items():
+        for fine_var, coarse_var in vars_coarsen:
             fine_field = ds[fine_var]
             if self.straddle and fine_var == "lon_rho":
                 fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
@@ -481,7 +478,7 @@ class Grid:
 
         ds["mask_coarse"] = xr.where(ds["mask_coarse"] > 0.5, 1, 0).astype(np.int32)
 
-        for fine_var, coarse_var in d.items():
+        for fine_var, coarse_var in vars_coarsen:
             long_name = ds[fine_var].attrs.get(
                 "long_name", ds[fine_var].attrs.get("Long_name", "")
             )
@@ -892,12 +889,7 @@ class Grid:
         # If parameters needed for ROMS-Tools replication are missing, store only filepath
         # Only if externally-generated grid
         if any(data[k] is None for k in ['size_x','size_y','topography_source','hmin']):
-            #### THIS CASE NEEDS TO BE HANDLED: from_yaml(with just filepath), to_yaml(missing filepath)
-            if data['filename'] is None:
-                raise ValueError("""Please use ROMS-Tools to load the grid from the NetCDF
-                file to write to YAML""")
-            else:
-                data = {'filename' : os.path.abspath(data['filename'])}
+            data = {'filename' : os.path.abspath(data['filename'])}
         elif 'filename' in data:
             del data['filename']
 
@@ -980,10 +972,7 @@ class Grid:
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
 
-        if len(grid_data)==1 and next(iter(grid_data))=="filename":
-            return cls._from_file(grid_data["filename"], verbose=verbose)
-        else:
-            return cls(**grid_data, verbose=verbose)
+        return cls(**grid_data, verbose=verbose)
 
     def __repr__(self) -> str:
         """Return a string representation of the object with non-None attributes,

@@ -9,7 +9,6 @@ import xarray as xr
 from scipy.interpolate import griddata, interp1d
 
 from roms_tools import Grid
-#from roms_tools.plot import plot_nesting
 from roms_tools.setup.topography import clip_depth
 from roms_tools.setup.utils import (
     Timed,

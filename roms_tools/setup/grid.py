@@ -17,6 +17,7 @@ from roms_tools.setup.mask import add_mask, add_velocity_masks
 from roms_tools.setup.topography import add_topography
 from roms_tools.setup.utils import (
     Timed,
+    extract_single_value,
     gc_dist,
     get_target_coords,
     pop_grid_data,
@@ -138,7 +139,15 @@ class Grid:
         # TODO: add checks that raises error if you supply both a filename
         #  and the nx/ny/etc. args; only allow one or the other
         if self.filename is not None:
-            self = self._from_file(
+            # Check to confirm other parameters are not provided with filename
+            min_param = {"rot", "hmin", "verbose", "filename"}
+            param_provided = [k for k, v in vars(self).items() if v is not None]
+            extra = set(param_provided) - min_param
+            if extra:
+                raise ValueError(f"Unexpected parameter included with `filename`: {extra}.\n" +
+                    f" Either `filename` or (`nx`, `ny`, `size_x`, `size_y`, `center_lon`, `center_lat`) are accepted.")
+
+            loaded = type(self)._from_file(
                 filepath=self.filename,
                 theta_s=self.theta_s,
                 theta_b=self.theta_b,
@@ -146,6 +155,9 @@ class Grid:
                 N=self.N,
                 verbose=self.verbose,
             )
+
+            self.__dict__.update(loaded.__dict__)
+
         else:
             # assign defaults here for non-required params; need Nones in the above section
             self.N = self.N or 100
@@ -153,29 +165,29 @@ class Grid:
             self.theta_b = self.theta_b or 2.0
             self.hc = self.hc or 300.0
 
-        self._input_checks()
+            self._input_checks()
 
-        # Horizontal grid
-        # todo don't do this for external file
-        self._create_horizontal_grid()
+            # Horizontal grid
+            # todo don't do this for external file
+            self._create_horizontal_grid()
 
-        # Check if the Greenwich meridian goes through the domain.
-        self._straddle()
+            # Check if the Greenwich meridian goes through the domain.
+            self._straddle()
 
-        # Mask
-        # todo don't do this for external file
-        self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
+            # Mask
+            # todo don't do this for external file
+            self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
 
-        # Coarsen the dataset if needed
-        self._coarsen()
+            # Coarsen the dataset if needed
+            self._coarsen()
 
-        # Topography
-        # todo don't do this for external file
-        self.update_topography(
-            topography_source=self.topography_source,
-            hmin=self.hmin,
-            verbose=self.verbose,
-        )
+            # Topography
+            # todo don't do this for external file
+            self.update_topography(
+                topography_source=self.topography_source,
+                hmin=self.hmin,
+                verbose=self.verbose,
+            )
 
         # Vertical coordinate system
 
@@ -188,26 +200,25 @@ class Grid:
         )
 
     def _input_checks(self):
-        if not self.filename:
-            for var in ("nx", "ny", "size_x", "size_y", "center_lon", "center_lat"):
-                if getattr(self, var) is None:
-                    raise ValueError(
-                        f"{var} is required unless loading from an existing grid."
-                    )
-
-            if self.topography_source is None:
-                self.topography_source = {"name": "ETOPO5"}
-
-            if "name" not in self.topography_source:
+        for var in ("nx", "ny", "size_x", "size_y", "center_lon", "center_lat"):
+            if getattr(self, var) is None:
                 raise ValueError(
-                    "`topography_source` must include a 'name' key specifying the data source."
+                    f"{var} is required unless loading from an existing grid."
                 )
 
-            if self.topography_source["name"] != "ETOPO5":
-                if "path" not in self.topography_source:
-                    raise ValueError(
-                        "`topography_source` must include a 'path' key when the 'name' is not 'ETOPO5'."
-                    )
+        if self.topography_source is None:
+            self.topography_source = {"name": "ETOPO5"}
+
+        if "name" not in self.topography_source:
+            raise ValueError(
+                "`topography_source` must include a 'name' key specifying the data source."
+            )
+
+        if self.topography_source["name"] != "ETOPO5":
+            if "path" not in self.topography_source:
+                raise ValueError(
+                    "`topography_source` must include a 'path' key when the 'name' is not 'ETOPO5'."
+                )
 
     def update_mask(
         self, mask_shapefile: str | Path | None = None, verbose: bool = False
@@ -635,7 +646,7 @@ class Grid:
         N: int | None = None,
         verbose: bool = False,
         **kwargs,
-    ) -> "Grid | ChildGrid":
+    ) -> "Grid":
         """Create a Grid instance from an existing file.
 
         Parameters
@@ -764,6 +775,87 @@ class Grid:
         grid.hc = grid.ds.attrs["hc"].item()
         grid.N = len(grid.ds.s_rho)
 
+        # Manually set the remaining attributes by extracting parameters from dataset
+        grid.nx = ds.sizes["xi_rho"] - 2
+        grid.ny = ds.sizes["eta_rho"] - 2
+        if "center_lon" in ds.attrs:
+            center_lon = float(ds.attrs["center_lon"])
+        elif "tra_lon" in ds:
+            center_lon = float(extract_single_value(ds["tra_lon"]))
+        elif "title" in ds.attrs:
+            match = re.search(r"Lon:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
+            if match:
+                center_lon = float(match.group(1))
+            else:
+                raise ValueError(
+                    "Could not extract 'center_lon' from title attribute. "
+                    "Expected format: '... Lon: <value> ...'"
+                )
+        elif self.filename is not None:
+            center_lon = None
+        else:
+            raise ValueError(
+                "Missing grid information: 'center_lon' attribute, 'tra_lon' variable, or 'Lon:' in 'title' attribute "
+                "must be present in the dataset."
+            )
+        grid.center_lon = center_lon
+
+        if "center_lat" in ds.attrs:
+            center_lat = float(ds.attrs["center_lat"])
+        elif "tra_lat" in ds:
+            center_lat = float(extract_single_value(ds["tra_lat"]))
+        elif "title" in ds.attrs:
+            match = re.search(r"Lat:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
+            if match:
+                center_lat = float(match.group(1))
+            else:
+                raise ValueError(
+                    "Could not extract 'center_lat' from title attribute. "
+                    "Expected format: '... Lon: <value> ...'"
+                )
+        elif self.filename is not None:
+            center_lat = None
+        else:
+            raise ValueError(
+                "Missing grid information: 'center_lat' attribute, 'tra_lat' variable, or 'Lat:' in 'title' attribute "
+                "must be present in the dataset."
+            )
+        grid.center_lat = center_lat
+
+        if "rot" in ds.attrs:
+            rot = float(ds.attrs["rot"])
+        elif "rotate" in ds:
+            rot = float(extract_single_value(ds["rotate"]))
+        elif "title" in ds.attrs:
+            match = re.search(r"rotate:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
+            if match:
+                rot = float(match.group(1))
+            else:
+                raise ValueError(
+                    "Could not extract 'rot' from title attribute. "
+                    "Expected format: '... rotate: <value> ...'"
+                )
+        elif self.filename is not None:
+            rot= None
+        else:
+            raise ValueError(
+                "Missing grid information: 'rot' attribute, 'rotate' variable, or 'rotate:' in 'title' attribute "
+                "must be present in the dataset."
+            )
+        grid.rot = rot
+
+        for attr in [
+            "size_x",
+            "size_y",
+            "hmin",
+        ]:
+            if attr in ds.attrs:
+                value = float(ds.attrs[attr])
+            else:
+                value = None
+
+            object.__setattr__(grid, attr, value)
+
         if "topography_source_name" in ds.attrs:
             if "topography_source_path" in ds.attrs:
                 topo_source = {
@@ -783,9 +875,6 @@ class Grid:
 
         grid.mask_shapefile = mask_shapefile
 
-        # Store filepath. Use to load externally generated grids
-        grid.filepath = os.path.abspath(filepath)
-
         return grid
 
     def to_yaml(self, filepath: str | Path) -> None:
@@ -797,15 +886,20 @@ class Grid:
         filepath : Union[str, Path]
             The path to the YAML file where the parameters will be saved.
         """
-        # TODO add code here to write filename if self.filename...
-
         data = asdict(self)
         data = pop_grid_data(data)
 
         # If parameters needed for ROMS-Tools replication are missing, store only filepath
         # Only if externally-generated grid
         if any(data[k] is None for k in ['size_x','size_y','topography_source','hmin']):
-            data = {'filepath' : data['filepath']}
+            #### THIS CASE NEEDS TO BE HANDLED: from_yaml(with just filepath), to_yaml(missing filepath)
+            if data['filename'] is None:
+                raise ValueError("""Please use ROMS-Tools to load the grid from the NetCDF
+                file to write to YAML""")
+            else:
+                data = {'filename' : os.path.abspath(data['filename'])}
+        elif 'filename' in data:
+            del data['filename']
 
         forcing_dict = {self.__class__.__name__: data}
 
@@ -886,8 +980,8 @@ class Grid:
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
 
-        if len(grid_data)==1 and next(iter(grid_data))=="filepath":
-            return cls.from_file(grid_data["filepath"])
+        if len(grid_data)==1 and next(iter(grid_data))=="filename":
+            return cls._from_file(grid_data["filename"], verbose=verbose)
         else:
             return cls(**grid_data, verbose=verbose)
 

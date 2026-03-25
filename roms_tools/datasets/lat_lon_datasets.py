@@ -548,6 +548,7 @@ class LatLonDataset:
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
+        reset_chunking = False
     ) -> xr.Dataset | LatLonDataset | None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -601,6 +602,12 @@ class LatLonDataset:
                 [self.dim_names["latitude"], self.dim_names["longitude"]]
             ]
             return coords_ds
+
+        # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
+        if reset_chunking:
+            subdomain = subdomain.chunk({self.dim_names["latitude"]: -1, self.dim_names["longitude"]: -1})            
+            if "depth" in self.dim_names:
+                subdomain = subdomain.chunk({self.dim_names["depth"]: -1})               
 
         if return_copy:
             return LatLonDataset.from_ds(self, subdomain)

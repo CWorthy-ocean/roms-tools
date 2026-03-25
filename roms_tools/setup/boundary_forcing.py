@@ -153,6 +153,7 @@ class BoundaryForcing:
         if self.apply_2d_horizontal_fill:
             data.choose_subdomain(
                 target_coords,
+                reset_chunking=True,
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
@@ -199,6 +200,7 @@ class BoundaryForcing:
                     bdry_target_coords,
                     buffer_points=3,
                     return_copy=True,
+                    reset_chunking=True,
                 )
                 bdry_data.ds = bdry_data.ds.chunk(
                     {

@@ -192,6 +192,7 @@ class InitialConditions:
         data = self._get_data(forcing_type=type)
         data.choose_subdomain(
             target_coords,
+            reset_chunking=True,
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
@@ -304,6 +305,7 @@ class InitialConditions:
                 data.ds_depth_coords,
                 data.grid.ds,
                 target_coords,
+                reset_chunking=True,
             )
 
             # Regrid all rho variables

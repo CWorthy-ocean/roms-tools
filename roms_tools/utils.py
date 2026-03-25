@@ -151,7 +151,7 @@ def _get_ds_combine_base_params() -> dict[str, str]:
     }
 
 
-def get_dask_chunks(dim_names: dict[str, str]) -> dict[str, int]:
+def get_dask_chunks(dim_names: dict[str, str], no_time: bool = False) -> dict[str, int]:
     """Return the default dask chunks for ROMS datasets.
 
     Parameters
@@ -184,7 +184,7 @@ def get_dask_chunks(dim_names: dict[str, str]) -> dict[str, int]:
 
     if "depth" in dim_names:
         chunks[dim_names["depth"]] = -1
-    if "time" in dim_names:
+    if "time" in dim_names and not no_time:
         chunks[dim_names["time"]] = 1
     if "ntides" in dim_names:
         chunks[dim_names["ntides"]] = 1

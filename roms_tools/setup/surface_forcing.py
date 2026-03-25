@@ -324,7 +324,7 @@ class SurfaceForcing:
         }
 
         if self.type == "physics":
-            # TODO: Evaluate whether this chunking strategy improves performance
+            # Leave initial chunking to dask for efficient sliced reading from file
             chunks = {"time": 1}
 
             # Alternative: chunks=None (current behavior), which results in

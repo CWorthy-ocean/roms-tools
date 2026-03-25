@@ -529,8 +529,7 @@ class InitialConditions:
         else:
             self.adjust_depth_for_sea_surface_height = False
 
-            # TODO: Evaluate whether this chunking strategy improves performance
-            # performance gains/losses may also differ for GLORYS vs. BGC dataset
+            # Leave initial chunking to dask for efficient sliced reading from file
             chunks = {"time": 1}
 
             # Alternative: chunks=None (current behavior), which results in

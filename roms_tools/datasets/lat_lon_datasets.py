@@ -548,7 +548,7 @@ class LatLonDataset:
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
-        reset_chunking = False
+        reset_chunking=False,
     ) -> xr.Dataset | LatLonDataset | None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -594,6 +594,7 @@ class LatLonDataset:
             target_coords=target_coords,
             buffer_points=buffer_points,
             use_dask=self.use_dask,
+            reset_chunking=reset_chunking,
         )
 
         if return_coords_only:
@@ -602,12 +603,6 @@ class LatLonDataset:
                 [self.dim_names["latitude"], self.dim_names["longitude"]]
             ]
             return coords_ds
-
-        # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
-        if reset_chunking:
-            subdomain = subdomain.chunk({self.dim_names["latitude"]: -1, self.dim_names["longitude"]: -1})            
-            if "depth" in self.dim_names:
-                subdomain = subdomain.chunk({self.dim_names["depth"]: -1})               
 
         if return_copy:
             return LatLonDataset.from_ds(self, subdomain)
@@ -2373,6 +2368,7 @@ def choose_subdomain(
     target_coords: Mapping[str, Any],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
     use_dask: bool = False,
+    reset_chunking: bool = False,
 ) -> xr.Dataset:
     """
     Select a subdomain from an xarray Dataset based on target coordinates,
@@ -2499,6 +2495,12 @@ def choose_subdomain(
         subdomain[dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
     else:
         subdomain[dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
+
+    # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
+    if reset_chunking:
+        chunks = get_dask_chunks(subdomain.dims, no_time=True)
+        chunks_ds = {dim: size for dim, size in chunks.items() if dim in subdomain.dims}
+        subdomain = subdomain.chunk(chunks_ds)
 
     return subdomain
 

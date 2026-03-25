@@ -552,6 +552,7 @@ class ROMSDataset:
         self,
         target_coords: dict[str, Any],
         buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
+        reset_chunking: bool = False,
     ) -> None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -578,12 +579,20 @@ class ROMSDataset:
             If the selected latitude or longitude range does not intersect with the dataset.
         """
         subdomain = choose_subdomain(
-            self.ds, self.grid.ds, target_coords, buffer_points
+            self.ds,
+            self.grid.ds,
+            target_coords,
+            buffer_points,
+            reset_chunking=reset_chunking,
         )
         self.ds = subdomain
 
         subdomain_grid_ds = choose_subdomain(
-            self.grid.ds, self.grid.ds, target_coords, buffer_points
+            self.grid.ds,
+            self.grid.ds,
+            target_coords,
+            buffer_points,
+            reset_chunking=reset_chunking,
         )
 
         self.grid = self.grid.copy_with_ds(subdomain_grid_ds)
@@ -719,6 +728,7 @@ def choose_subdomain(
     ds_grid: xr.Dataset,
     target_coords: dict[str, Any],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
+    reset_chunking: bool = False,
 ):
     """Selects a subdomain from the xarray Dataset based on specified target
     coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -830,6 +840,12 @@ def choose_subdomain(
                 "eta_v": slice(first_eta, last_eta),
             }
         )
+
+    # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
+    if reset_chunking:
+        chunks = get_dask_chunks(ds.dims, no_time=True)
+        chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}
+        ds = ds.chunk(chunks_ds)
 
     return ds
 

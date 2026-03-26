@@ -324,13 +324,8 @@ class SurfaceForcing:
         }
 
         if self.type == "physics":
-            # Leave initial chunking to dask for efficient sliced reading from file
+            # Leave initial spatialchunking to dask for efficient sliced reading from file
             chunks = {"time": 1}
-
-            # Alternative: chunks=None (current behavior), which results in
-            # {"lat": -1, "lon": -1, "time": 1}.
-            # Using {"time": 1} may reduce memory usage, but could introduce
-            # computational overhead due to rechunking later on.
 
             if self.source["name"] == "ERA5":
                 if str(self.source["path"]).startswith("gs://") or str(

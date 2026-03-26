@@ -151,7 +151,9 @@ def _get_ds_combine_base_params() -> dict[str, str]:
     }
 
 
-def get_dask_chunks(dim_names: dict[str, str], no_time: bool = False) -> dict[str, int]:
+def get_dask_chunks(
+    dim_names: dict[str, str], time_chunking: bool = True
+) -> dict[str, int]:
     """Return the default dask chunks for ROMS datasets.
 
     Parameters
@@ -184,7 +186,7 @@ def get_dask_chunks(dim_names: dict[str, str], no_time: bool = False) -> dict[st
 
     if "depth" in dim_names:
         chunks[dim_names["depth"]] = -1
-    if "time" in dim_names and not no_time:
+    if "time" in dim_names and time_chunking:
         chunks[dim_names["time"]] = 1
     if "ntides" in dim_names:
         chunks[dim_names["ntides"]] = 1
@@ -195,6 +197,7 @@ def get_dask_chunks(dim_names: dict[str, str], no_time: bool = False) -> dict[st
 def _load_data_dask(
     filenames: list[str],
     dim_names: dict[str, str],
+    time_chunking: bool = True,
     decode_times: bool = True,
     decode_timedelta: bool = True,
     read_zarr: bool = True,
@@ -240,7 +243,7 @@ def _load_data_dask(
 
     """
     if chunks is None:
-        chunks = get_dask_chunks(dim_names)
+        chunks = get_dask_chunks(dim_names, time_chunking)
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -359,6 +362,7 @@ def load_data(
     filename: str | Path | list[str | Path],
     dim_names: dict[str, str] | None = None,
     use_dask: bool = False,
+    time_chunking: bool = True,
     decode_times: bool = True,
     decode_timedelta: bool = True,
     force_combine_nested: bool = False,
@@ -379,6 +383,10 @@ def load_data(
         For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
     use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    time_chunking : bool, optional
+        If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
+        If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
+        Defaults to True.
     decode_times: bool, optional
         If True, decode times encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
@@ -432,6 +440,7 @@ def load_data(
         ds = _load_data_dask(
             match_result.matches,
             dim_names,
+            time_chunking,
             decode_times,
             decode_timedelta,
             read_zarr,

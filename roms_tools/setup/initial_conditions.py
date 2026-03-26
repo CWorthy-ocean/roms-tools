@@ -529,13 +529,8 @@ class InitialConditions:
         else:
             self.adjust_depth_for_sea_surface_height = False
 
-            # Leave initial chunking to dask for efficient sliced reading from file
+            # Leave initial spatialchunking to dask for efficient sliced reading from file
             chunks = {"time": 1}
-
-            # Alternative: chunks=None (current behavior), which results in
-            # {"lat": -1, "lon": -1, "time": 1}.
-            # Using {"time": 1} may reduce memory usage, but could introduce
-            # computational overhead due to rechunking later on.
 
             data = data_type(
                 filename=source_dict["path"],  # type: ignore

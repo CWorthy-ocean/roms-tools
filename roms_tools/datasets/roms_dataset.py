@@ -843,7 +843,8 @@ def choose_subdomain(
 
     # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
     if reset_chunking:
-        chunks = get_dask_chunks(ds.dims, no_time=True)
+        dim_names = {dim: dim for dim in ds.dims}
+        chunks = get_dask_chunks(dim_names, time_chunking=False)
         chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}
         ds = ds.chunk(chunks_ds)
 

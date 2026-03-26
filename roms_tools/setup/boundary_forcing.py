@@ -202,13 +202,6 @@ class BoundaryForcing:
                     return_copy=True,
                     reset_chunking=True,
                 )
-                bdry_data.ds = bdry_data.ds.chunk(
-                    {
-                        bdry_data.dim_names["latitude"]: -1,
-                        bdry_data.dim_names["longitude"]: -1,
-                        bdry_data.dim_names["depth"]: -1,
-                    }
-                )
 
                 if not self.apply_2d_horizontal_fill:
                     # Enforce double precision to ensure reproducibility
@@ -505,13 +498,8 @@ class BoundaryForcing:
         if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
-        # Leave initial chunking to dask for efficient sliced reading from file
+        # Leave initial spatial chunking to dask for efficient sliced reading from file
         chunks = {"time": 1}
-
-        # Alternative: chunks=None (current behavior), which results in
-        # {"lat": -1, "lon": -1, "time": 1}.
-        # Using {"time": 1} may reduce memory usage, but could introduce
-        # computational overhead due to rechunking later on.
 
         return data_type(
             filename=self.source["path"],

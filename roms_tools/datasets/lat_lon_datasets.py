@@ -548,7 +548,7 @@ class LatLonDataset:
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
-        reset_chunking=False,
+        reset_chunking: bool = False,
     ) -> xr.Dataset | LatLonDataset | None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -572,6 +572,8 @@ class LatLonDataset:
         verbose : bool, optional
             If True, print message if dataset is concatenated along longitude dimension.
             Defaults to False.
+        reset_chunking : bool
+            Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
 
         Returns
         -------
@@ -2388,6 +2390,8 @@ def choose_subdomain(
         Number of grid points to extend beyond the target coordinates.
     use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is processed eagerly. Defaults to False.
+    reset_chunking : bool
+        Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
 
     Returns
     -------
@@ -2494,7 +2498,9 @@ def choose_subdomain(
 
     # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
     if reset_chunking:
-        chunks = get_dask_chunks(subdomain.dims, no_time=True)
+        chunks = get_dask_chunks(
+            dict(dim_names), time_chunking=False
+        )  # ensure possible Mapping is converted to dict
         chunks_ds = {dim: size for dim, size in chunks.items() if dim in subdomain.dims}
         subdomain = subdomain.chunk(chunks_ds)
 

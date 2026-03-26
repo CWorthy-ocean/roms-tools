@@ -13,8 +13,6 @@ from roms_tools.setup.utils import (
     check_and_set_boundaries,
     get_boundary_coords,
 )
-
-#    to_dict,
 from roms_tools.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,

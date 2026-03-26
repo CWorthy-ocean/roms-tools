@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -30,9 +30,6 @@ from roms_tools.utils import (
     save_datasets,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass(kw_only=True)
@@ -811,7 +808,7 @@ class Grid:
             else:
                 raise ValueError(
                     "Could not extract 'center_lat' from title attribute. "
-                    "Expected format: '... Lon: <value> ...'"
+                    "Expected format: '... Lat: <value> ...'"
                 )
         elif filename is not None:
             center_lat = None

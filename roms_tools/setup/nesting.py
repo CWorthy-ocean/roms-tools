@@ -191,7 +191,7 @@ def align_grids(
 def make_edata(
     parent_grid: Grid,
     child_grid: Grid,
-    filepath: str,
+    filepath: str | None,
     prefix: str = 'child',
     period: float = 3600.0,
     include_bgc: bool = False,
@@ -219,6 +219,7 @@ def make_edata(
         The child grid dataset containing longitude, latitude, mask, and angle variables.
     filepath : Union[str, Path]
         The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
+        If `None` is provided, the dataset will not be saved. Defaults to `None`.
     prefix : str
         Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
     period : float
@@ -310,7 +311,8 @@ def make_edata(
                      child_grid, boundaries, prefix, period, include_bgc, verbose)
 
     # Save the nesting file and return nesting dataset
-    save_nesting(ds_nesting, filepath)
+    if filepath is not None:
+        save_nesting(ds_nesting, filepath)
 
     return ds_nesting
 

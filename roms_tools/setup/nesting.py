@@ -192,7 +192,9 @@ def make_edata(
     parent_grid: Grid,
     child_grid: Grid,
     filepath: str,
-    metadata: dict[str, Any] | None = None,
+    prefix: str = 'child',
+    period: float = 3600.0,
+    include_bgc: bool = False,
     boundaries: dict | None = None,
     verbose: bool = False,
 )->xr.Dataset:
@@ -217,12 +219,12 @@ def make_edata(
         The child grid dataset containing longitude, latitude, mask, and angle variables.
     filepath : Union[str, Path]
         The base path and filename for the output files. The filenames will include the specified path and the `.nc` extension.
-    metadata : Dict[str, Any]
-        Dictionary configuring the boundary nesting process, including:
-
-        - `"prefix"` (str): Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
-        - `"period"` (float): Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
-        - `"include_bgc"` (bool): Whether to include BGC variables in boundary outputs. Defaults to `False`.
+    prefix : str
+        Prefix for variable names in `ds_nesting`. Defaults to `"child"`.
+    period : float
+        Temporal resolution for boundary outputs in seconds. Defaults to 3600 (hourly).
+    include_bgc : bool
+        Whether to include BGC variables in boundary outputs. Defaults to `False`.
     boundaries : dict, optional
         A dictionary specifying which child boundaries should be mapped onto the parent grid.
         Keys should be `"south"`, `"east"`, `"north"`, and `"west"`, with boolean values
@@ -247,7 +249,9 @@ def make_edata(
         parent_grid: Grid,
         child_grid: Grid,
         boundaries: dict[str, bool] | None = None,
-        metadata: dict | None = None,
+        prefix: str = 'child',
+        period: float = 3600.0,
+        include_bgc: bool = False,
         verbose: bool = False
     ) -> xr.Dataset:
         """Maps child grid boundary points onto absolute indices of the parent grid."""
@@ -255,17 +259,6 @@ def make_edata(
             "=== Mapping the child grid boundary points onto the indices of the parent grid ===",
             verbose=verbose,
         ):
-            # Default metadata
-            defaults = {
-                "prefix": "child",
-                "period": 3600.0,
-                "include_bgc": False,
-            }
-            # Merge user metadata on top of defaults
-            if metadata is None:
-                metadata = {}
-
-            metadata = {**defaults, **metadata}
 
             # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
             parent_grid_ds, child_grid_ds = _prepare_grid_datasets(parent_grid, child_grid)
@@ -275,9 +268,9 @@ def make_edata(
                 parent_grid_ds,
                 child_grid_ds,
                 boundaries,
-                metadata["prefix"],
-                metadata["period"],
-                metadata["include_bgc"],
+                prefix,
+                period,
+                include_bgc,
             )
 
             return ds_nesting
@@ -314,7 +307,7 @@ def make_edata(
 
     # Map child onto parent
     ds_nesting = _map_child_boundaries_onto_parent_grid_indices(parent_grid,
-                     child_grid, boundaries, metadata, verbose)
+                     child_grid, boundaries, prefix, period, include_bgc, verbose)
 
     # Save the nesting file and return nesting dataset
     save_nesting(ds_nesting, filepath)

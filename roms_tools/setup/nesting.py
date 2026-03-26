@@ -308,7 +308,7 @@ def make_edata(
         dataset_list = [ds_nesting]
         output_filenames = [str(filepath)]
 
-        saved_filenames = save_datasets(dataset_list, output_filenames)
+        save_datasets(dataset_list, output_filenames)
 
     # Map child onto parent
     ds_nesting = _map_child_boundaries_onto_parent_grid_indices(

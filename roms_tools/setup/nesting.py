@@ -138,7 +138,7 @@ def align_grids(
         return child_grid_ds
 
 
-    def modify_child_mask_mod(
+    def _modify_child_mask(
         parent_grid: Grid,
         child_grid: Grid,
         boundaries: dict[str, bool],
@@ -154,7 +154,7 @@ def align_grids(
         return child_grid
 
 
-    def modify_child_topography_mod(
+    def _modify_child_topography(
         parent_grid: Grid,
         child_grid: Grid,
         boundaries: dict[str, bool],
@@ -179,11 +179,11 @@ def align_grids(
 
     # Call Grid update_mask, then modify the child mask:
     child_grid.update_mask(mask_shapefile=mask_shapefile, verbose=verbose)
-    child_grid = modify_child_mask_mod(parent_grid, child_grid, boundaries, verbose=verbose)
+    child_grid = _modify_child_mask(parent_grid, child_grid, boundaries, verbose=verbose)
 
     # Call Grid update_topography, then modify the child topography:
     child_grid.update_topography(topography_source=topography_source, hmin=child_grid.hmin, verbose=verbose)
-    child_grid = modify_child_topography_mod(parent_grid, child_grid, boundaries, child_grid.hmin, verbose=verbose)
+    child_grid = _modify_child_topography(parent_grid, child_grid, boundaries, child_grid.hmin, verbose=verbose)
 
     return child_grid
 

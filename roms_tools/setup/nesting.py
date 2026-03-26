@@ -252,12 +252,12 @@ def make_edata(
     def _map_child_boundaries_onto_parent_grid_indices(
         parent_grid: Grid,
         child_grid: Grid,
-        boundaries: dict[str, bool] | None = None,
+        boundaries: dict[str, bool],
         prefix: str = "child",
         period: float = 3600.0,
         include_bgc: bool = False,
         include_pressure_fluxes: bool = False,
-        verbose: bool = False
+        verbose: bool = False,
     ) -> xr.Dataset:
         """Maps child grid boundary points onto absolute indices of the parent grid."""
         with Timed(
@@ -277,7 +277,7 @@ def make_edata(
                 prefix,
                 period,
                 include_bgc,
-                include_pressure_fluxes
+                include_pressure_fluxes,
             )
 
             return ds_nesting
@@ -673,7 +673,12 @@ def _interpolate_indices(
 def map_child_boundaries_onto_parent_grid_indices(
     parent_grid_ds: xr.Dataset,
     child_grid_ds: xr.Dataset,
-    boundaries: dict = {"south": True, "east": True, "north": True, "west": True},
+    boundaries: dict[str, bool] = {
+        "south": True,
+        "east": True,
+        "north": True,
+        "west": True,
+    },
     prefix: str = "child",
     period: float = 3600.0,
     include_bgc: bool = False,

@@ -166,17 +166,20 @@ def _fill_enclosed_basins(mask: np.ndarray) -> np.ndarray:
     """
     # Label connected regions in the mask
     reg, nreg = label(mask)
+    if nreg == 0:
+        return mask
     # Find the largest region
     lint = 0
     lreg = 0
-    for ireg in range(nreg):
+    # scipy.ndimage.label uses 0 for background and 1..nreg for components
+    for ireg in range(1, nreg + 1):
         int_ = np.sum(reg == ireg)
         if int_ > lint and mask[reg == ireg].sum() > 0:
             lreg = ireg
             lint = int_
 
     # Remove regions other than the largest one
-    for ireg in range(nreg):
+    for ireg in range(1, nreg + 1):
         if ireg != lreg:
             mask[reg == ireg] = 0
 

@@ -146,7 +146,7 @@ class Grid:
                 )
 
             loaded = type(self)._from_file(
-                filepath=self.filename,
+                filename=self.filename,
                 theta_s=self.theta_s,
                 theta_b=self.theta_b,
                 hc=self.hc,
@@ -639,7 +639,7 @@ class Grid:
     @classmethod
     def _from_file(
         cls,
-        filepath: str | Path,
+        filename: str | Path,
         theta_s: float | None = None,
         theta_b: float | None = None,
         hc: float | None = None,
@@ -651,7 +651,7 @@ class Grid:
 
         Parameters
         ----------
-        filepath : Union[str, Path]
+        filename : Union[str, Path]
             Path to the file containing the grid information.
         theta_s : float, optional
             Surface stretching parameter for vertical coordinate.
@@ -679,7 +679,7 @@ class Grid:
             )
 
         # Load the dataset from the file
-        ds = xr.open_dataset(filepath)
+        ds = xr.open_dataset(filename)
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
             ds = add_velocity_masks(ds)
@@ -791,7 +791,7 @@ class Grid:
                     "Could not extract 'center_lon' from title attribute. "
                     "Expected format: '... Lon: <value> ...'"
                 )
-        elif filepath is not None:
+        elif filename is not None:
             center_lon = None
         else:
             raise ValueError(
@@ -813,7 +813,7 @@ class Grid:
                     "Could not extract 'center_lat' from title attribute. "
                     "Expected format: '... Lon: <value> ...'"
                 )
-        elif filepath is not None:
+        elif filename is not None:
             center_lat = None
         else:
             raise ValueError(
@@ -835,7 +835,7 @@ class Grid:
                     "Could not extract 'rot' from title attribute. "
                     "Expected format: '... rotate: <value> ...'"
                 )
-        elif filepath is not None:
+        elif filename is not None:
             rot = 0
         else:
             raise ValueError(

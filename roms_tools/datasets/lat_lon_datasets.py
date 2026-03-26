@@ -628,7 +628,6 @@ class LatLonDataset:
         point to the same variable in the dataset.
         """
         if self.needs_lateral_fill:
-
             lateral_fill = LateralFill(
                 self.ds["mask"],
                 (self.dim_names["latitude"], self.dim_names["longitude"]),

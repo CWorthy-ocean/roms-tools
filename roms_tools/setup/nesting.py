@@ -89,7 +89,7 @@ def align_grids(
         boundaries, child_grid.ds.mask_rho
     )
     # Include needed functions
-    def finalize_grid_datasets(
+    def _finalize_grid_datasets(
         parent_grid_ds: xr.Dataset,
         child_grid_ds: xr.Dataset
     ) -> tuple[xr.Dataset, xr.Dataset]:
@@ -115,7 +115,7 @@ def align_grids(
         return parent_grid_ds, child_grid_ds
 
 
-    def apply_child_modification(
+    def _apply_child_modification(
         parent_grid: Grid,
         child_grid: Grid,
         modifier: Callable,
@@ -125,13 +125,13 @@ def align_grids(
         """Shared logic for modifying child mask/topography."""
         with Timed(f"=== Modifying the child {modifier_name} ===", verbose=verbose):
             # Prepare datasets (fix dateline)
-            parent_grid_ds, child_grid_ds = prepare_grid_datasets(parent_grid, child_grid)
+            parent_grid_ds, child_grid_ds = _prepare_grid_datasets(parent_grid, child_grid)
 
             # Apply modification function
             child_grid_ds = modifier(parent_grid_ds, child_grid_ds)
 
             # Restore longitudes to 0-360
-            _, child_grid_ds = finalize_grid_datasets(
+            _, child_grid_ds = _finalize_grid_datasets(
                 parent_grid_ds, child_grid_ds
             )
 
@@ -145,7 +145,7 @@ def align_grids(
         verbose: bool = False
     ) -> "Grid":
         """Adjust child grid mask to align with the parent grid."""
-        child_grid.ds = apply_child_modification(parent_grid, child_grid,
+        child_grid.ds = _apply_child_modification(parent_grid, child_grid,
             modifier=lambda p, c: modify_child_mask(p, c, boundaries),  # type: ignore[arg-type]
             modifier_name="mask",
             verbose=verbose,
@@ -162,7 +162,7 @@ def align_grids(
         verbose: bool = False
     ) -> "Grid":
         """Adjust child grid topography to align with the parent grid."""
-        child_grid.ds = apply_child_modification(parent_grid, child_grid,
+        child_grid.ds = _apply_child_modification(parent_grid, child_grid,
             modifier=lambda p, c: modify_child_topography(p, c, boundaries, hmin),
             modifier_name="topography",
             verbose=verbose,
@@ -268,7 +268,7 @@ def make_edata(
             metadata = {**defaults, **metadata}
 
             # Prepare parent and child grid datasets by adjusting longitudes for dateline crossing
-            parent_grid_ds, child_grid_ds = prepare_grid_datasets(parent_grid, child_grid)
+            parent_grid_ds, child_grid_ds = _prepare_grid_datasets(parent_grid, child_grid)
 
             # Map child boundaries onto parent grid indices
             ds_nesting = map_child_boundaries_onto_parent_grid_indices(
@@ -322,7 +322,7 @@ def make_edata(
     return ds_nesting
 
 
-def prepare_grid_datasets(
+def _prepare_grid_datasets(
     parent_grid: Grid,
     child_grid: Grid,
 )-> tuple[xr.Dataset, xr.Dataset]:

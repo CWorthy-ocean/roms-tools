@@ -85,7 +85,7 @@ def align_grids(
     def _check_child_outside_parent(
         parent_grid_ds: xr.Dataset,
         child_grid_ds: xr.Dataset,
-        boundaries = dict[str, bool]
+        boundaries=dict[str, bool],
     ):
         """Interpolate the parent indices to the child grid boundary.
 
@@ -118,10 +118,6 @@ def align_grids(
                         "angle": f"angle_{grid_location}",
                     }
                     bdry_coords = bdry_coords_dict[grid_location]
-                    if grid_location == "rho":
-                        suffix = "r"
-                    else:
-                        suffix = grid_location
 
                     lon_child = child_grid_ds[names["longitude"]].isel(
                         **bdry_coords[direction]
@@ -130,11 +126,10 @@ def align_grids(
                         **bdry_coords[direction]
                     )
 
-                    mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
+                    mask_child = child_grid_ds[names["mask"]].isel(
+                        **bdry_coords[direction]
+                    )
 
-                    #-, - = _interpolate_indices(
-                    #    parent_grid.ds, lon_child, lat_child, mask_child, direction
-                    #)
                     i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
                     i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
 
@@ -151,13 +146,25 @@ def align_grids(
                     j_parent, i_parent = np.meshgrid(j_parent.values, i_parent.values)
 
                     # Flatten the input coordinates and indices for griddata
-                    points = np.column_stack((lon_parent.values.ravel(), lat_parent.values.ravel()))
+                    points = np.column_stack(
+                        (lon_parent.values.ravel(), lat_parent.values.ravel())
+                    )
                     i_parent_flat = i_parent.ravel()
                     j_parent_flat = j_parent.ravel()
 
                     # Interpolate the i and j indices
-                    i = griddata(points, i_parent_flat, (lon_child.values, lat_child.values), method="linear")
-                    j = griddata(points, j_parent_flat, (lon_child.values, lat_child.values), method="linear")
+                    i = griddata(
+                        points,
+                        i_parent_flat,
+                        (lon_child.values, lat_child.values),
+                        method="linear",
+                    )
+                    j = griddata(
+                        points,
+                        j_parent_flat,
+                        (lon_child.values, lat_child.values),
+                        method="linear",
+                    )
 
                     i = xr.DataArray(i, dims=lon_child.dims)
                     j = xr.DataArray(j, dims=lon_child.dims)
@@ -260,9 +267,7 @@ def align_grids(
     ## NOTE: modify_child_topography and _mask were originally nested under the childGrid version of
     # update_topography and update_mask, which called the Grid method and then the child method
 
-    boundaries = check_and_set_boundaries(
-        boundaries, child_grid.ds.mask_rho
-    )
+    boundaries = check_and_set_boundaries(boundaries, child_grid.ds.mask_rho)
 
     _check_child_outside_parent(parent_grid.ds, child_grid.ds, boundaries)
 

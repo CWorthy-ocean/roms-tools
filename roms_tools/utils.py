@@ -162,11 +162,6 @@ def get_dask_chunks(
         Dictionary specifying the names of dimensions in the dataset.
         - For lat-lon datasets, provide keys "latitude" and "longitude" (and optionally "depth" and "time").
         - For ROMS datasets, the default ROMS dimensions are assumed ("eta_rho", "xi_rho", "s_rho", etc.).
-    time_chunking : bool, optional
-        Whether to chunk along the time dimension.
-        - True: chunk time dimension with size 1 (useful for processing large time-series data with Dask).
-        - False: do not explicitly chunk time; Dask will use default auto-chunking.
-        Defaults to True.
 
     Returns
     -------
@@ -207,6 +202,7 @@ def _load_data_dask(
     decode_timedelta: bool = True,
     read_zarr: bool = True,
     load_kwargs: dict[str, str] | None = None,
+    chunks: dict[str, int] | None = None,
 ) -> xr.Dataset:
     """Load dataset from the specified file using Dask.
 
@@ -219,10 +215,6 @@ def _load_data_dask(
         Dictionary specifying the names of dimensions in the dataset.
         Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
         For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
-    time_chunking : bool, optional
-        If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
-        If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
-        Defaults to True.
     decode_times: bool, optional
         If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.
@@ -232,6 +224,10 @@ def _load_data_dask(
     read_zarr: bool, optional
         If True, use the zarr engine to read the dataset, and don't use mfdataset.
         Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None.
 
     Returns
     -------
@@ -246,7 +242,8 @@ def _load_data_dask(
         If a list of files is provided but dim_names["time"] is not available or use_dask=False.
 
     """
-    chunks = get_dask_chunks(dim_names, time_chunking)
+    if chunks is None:
+        chunks = get_dask_chunks(dim_names, time_chunking)
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -371,6 +368,7 @@ def load_data(
     force_combine_nested: bool = False,
     read_zarr: bool = False,
     ds_loader_fn: Callable[[], xr.Dataset] | None = None,
+    chunks: dict[str, int] | None = None,
 ):
     """Load dataset from the specified file.
 
@@ -401,6 +399,10 @@ def load_data(
     read_zarr: bool, optional
         If True, use the zarr engine to read the dataset, and don't use mfdataset.
         Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None.
 
     Returns
     -------
@@ -443,6 +445,7 @@ def load_data(
             decode_timedelta,
             read_zarr,
             load_kwargs,
+            chunks,
         )
     else:
         ds_list = []

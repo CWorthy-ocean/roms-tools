@@ -8,6 +8,7 @@
 * Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
 * `ChildGrid` now infers open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 * Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
+* Potential memory savings and speedup for reading of optimally-chunked netcdf source data files in `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` ([#572](https://github.com/CWorthy-ocean/roms-tools/pull/572))
 
 ### Breaking Changes
 

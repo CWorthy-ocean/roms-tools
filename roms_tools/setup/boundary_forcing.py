@@ -153,6 +153,7 @@ class BoundaryForcing:
         if self.apply_2d_horizontal_fill:
             data.choose_subdomain(
                 target_coords,
+                reset_chunking=True,
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
@@ -199,6 +200,7 @@ class BoundaryForcing:
                     bdry_target_coords,
                     buffer_points=3,
                     return_copy=True,
+                    reset_chunking=True,
                 )
 
                 if not self.apply_2d_horizontal_fill:
@@ -216,6 +218,7 @@ class BoundaryForcing:
                 ]
 
                 # lateral regridding of vector fields
+
                 if filtered_vars:
                     lon = target_coords["lon"].isel(
                         **self.bdry_coords["vector"][direction]
@@ -495,12 +498,16 @@ class BoundaryForcing:
         if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
+        # Leave initial spatial chunking to dask for efficient sliced reading from file
+        chunks = {"time": 1}
+
         return data_type(
             filename=self.source["path"],
             start_time=self.start_time,
             end_time=self.end_time,
             climatology=self.source["climatology"],  # type: ignore[arg-type]
             use_dask=self.use_dask,
+            chunks=chunks,
         )
 
     def _set_variable_info(self, data):

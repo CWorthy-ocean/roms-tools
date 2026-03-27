@@ -192,6 +192,7 @@ class InitialConditions:
         data = self._get_data(forcing_type=type)
         data.choose_subdomain(
             target_coords,
+            reset_chunking=True,
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
@@ -304,6 +305,7 @@ class InitialConditions:
                 data.ds_depth_coords,
                 data.grid.ds,
                 target_coords,
+                reset_chunking=True,
             )
 
             # Regrid all rho variables
@@ -526,12 +528,17 @@ class InitialConditions:
 
         else:
             self.adjust_depth_for_sea_surface_height = False
+
+            # Leave initial spatialchunking to dask for efficient sliced reading from file
+            chunks = {"time": 1}
+
             data = data_type(
                 filename=source_dict["path"],  # type: ignore
                 start_time=self.ini_time,
                 climatology=source_dict["climatology"],  # type: ignore
                 allow_flex_time=self.allow_flex_time,
                 use_dask=self.use_dask,
+                chunks=chunks,
             )
 
         return data

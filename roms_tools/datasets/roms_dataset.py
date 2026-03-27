@@ -246,7 +246,6 @@ class ROMSDataset:
             use_dask=self.use_dask,
             decode_times=False,
             decode_timedelta=False,
-            time_chunking=True,
             force_combine_nested=True,
         )
 
@@ -553,6 +552,7 @@ class ROMSDataset:
         self,
         target_coords: dict[str, Any],
         buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
+        reset_chunking: bool = False,
     ) -> None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -567,6 +567,8 @@ class ROMSDataset:
         buffer_points : int
             The number of grid points to extend beyond the specified latitude and longitude
             ranges when selecting the subdomain. Defaults to 20.
+        reset_chunking : bool
+            Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
 
         Returns
         -------
@@ -579,12 +581,20 @@ class ROMSDataset:
             If the selected latitude or longitude range does not intersect with the dataset.
         """
         subdomain = choose_subdomain(
-            self.ds, self.grid.ds, target_coords, buffer_points
+            self.ds,
+            self.grid.ds,
+            target_coords,
+            buffer_points,
+            reset_chunking=reset_chunking,
         )
         self.ds = subdomain
 
         subdomain_grid_ds = choose_subdomain(
-            self.grid.ds, self.grid.ds, target_coords, buffer_points
+            self.grid.ds,
+            self.grid.ds,
+            target_coords,
+            buffer_points,
+            reset_chunking=reset_chunking,
         )
 
         self.grid = self.grid.copy_with_ds(subdomain_grid_ds)
@@ -720,6 +730,7 @@ def choose_subdomain(
     ds_grid: xr.Dataset,
     target_coords: dict[str, Any],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
+    reset_chunking: bool = False,
 ):
     """Selects a subdomain from the xarray Dataset based on specified target
     coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -738,6 +749,8 @@ def choose_subdomain(
     buffer_points : int
         The number of grid points to extend beyond the specified latitude and longitude
         ranges when selecting the subdomain. Defaults to 20.
+    reset_chunking : bool
+        Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
 
     Returns
     -------
@@ -831,6 +844,14 @@ def choose_subdomain(
                 "eta_v": slice(first_eta, last_eta),
             }
         )
+
+    # if subsequent operations require this entire chunk, and dask if currently used,
+    # reset the chunking to load the rest of the dataset
+    if reset_chunking and ds.chunks is not None:
+        dim_names = {dim: dim for dim in ds.dims}
+        chunks = get_dask_chunks(dim_names, time_chunking=False)
+        chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}
+        ds = ds.chunk(chunks_ds)
 
     return ds
 

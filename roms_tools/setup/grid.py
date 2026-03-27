@@ -1,14 +1,15 @@
 import copy
 import importlib.metadata
 import logging
+import os
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import xarray as xr
 import yaml
-import os
 from matplotlib.axes import Axes
 
 from roms_tools.constants import MAXIMUM_GRID_SIZE, R_EARTH
@@ -29,9 +30,6 @@ from roms_tools.utils import (
     save_datasets,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
-
-if TYPE_CHECKING:
-    from nesting import ChildGrid
 
 
 @dataclass(kw_only=True)
@@ -139,11 +137,13 @@ class Grid:
             param_provided = [k for k, v in vars(self).items() if v is not None]
             extra = set(param_provided) - min_param
             if extra:
-                raise ValueError(f"Unexpected parameter included with `filename`: {extra}.\n" +
-                    f" Either `filename` or (`nx`, `ny`, `size_x`, `size_y`, `center_lon`, `center_lat`) are accepted.")
+                raise ValueError(
+                    f"Unexpected parameter included with `filename`: {extra}.\n"
+                    + " Either `filename` or (`nx`, `ny`, `size_x`, `size_y`, `center_lon`, `center_lat`) are accepted."
+                )
 
             loaded = type(self)._from_file(
-                filepath=self.filename,
+                filename=self.filename,
                 theta_s=self.theta_s,
                 theta_b=self.theta_b,
                 hc=self.hc,
@@ -445,7 +445,7 @@ class Grid:
         """
         # todo check for these keys
         # NOTE: THERE IS ALREADY A CHECK FOR ALL OR NONE TO DO COARSEN UNDER FROM_FILE
-        # THERE'S NO CHECK IN THE post_init, but presumably, we need the coarsening to happen then. 
+        # THERE'S NO CHECK IN THE post_init, but presumably, we need the coarsening to happen then.
         # i.e. this check may be unecessary unless we want individual checks:
         d = {
             "angle": "angle_coarse",
@@ -455,7 +455,7 @@ class Grid:
         }
 
         # Only coarsen variables that have not yet been coarsened
-        vars_coarsen = [(k,v) for k,v in d.items() if v not in self.ds]
+        vars_coarsen = [(k, v) for k, v in d.items() if v not in self.ds]
 
         ds = self.ds
 
@@ -636,7 +636,7 @@ class Grid:
     @classmethod
     def _from_file(
         cls,
-        filepath: str | Path,
+        filename: str | Path,
         theta_s: float | None = None,
         theta_b: float | None = None,
         hc: float | None = None,
@@ -648,7 +648,7 @@ class Grid:
 
         Parameters
         ----------
-        filepath : Union[str, Path]
+        filename : Union[str, Path]
             Path to the file containing the grid information.
         theta_s : float, optional
             Surface stretching parameter for vertical coordinate.
@@ -676,7 +676,7 @@ class Grid:
             )
 
         # Load the dataset from the file
-        ds = xr.open_dataset(filepath)
+        ds = xr.open_dataset(filename)
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
             ds = add_velocity_masks(ds)
@@ -788,7 +788,7 @@ class Grid:
                     "Could not extract 'center_lon' from title attribute. "
                     "Expected format: '... Lon: <value> ...'"
                 )
-        elif self.filename is not None:
+        elif filename is not None:
             center_lon = None
         else:
             raise ValueError(
@@ -808,9 +808,9 @@ class Grid:
             else:
                 raise ValueError(
                     "Could not extract 'center_lat' from title attribute. "
-                    "Expected format: '... Lon: <value> ...'"
+                    "Expected format: '... Lat: <value> ...'"
                 )
-        elif self.filename is not None:
+        elif filename is not None:
             center_lat = None
         else:
             raise ValueError(
@@ -832,8 +832,8 @@ class Grid:
                     "Could not extract 'rot' from title attribute. "
                     "Expected format: '... rotate: <value> ...'"
                 )
-        elif self.filename is not None:
-            rot= None
+        elif filename is not None:
+            rot = 0
         else:
             raise ValueError(
                 "Missing grid information: 'rot' attribute, 'rotate' variable, or 'rotate:' in 'title' attribute "
@@ -888,10 +888,12 @@ class Grid:
 
         # If parameters needed for ROMS-Tools replication are missing, store only filepath
         # Only if externally-generated grid
-        if any(data[k] is None for k in ['size_x','size_y','topography_source','hmin']):
-            data = {'filename' : os.path.abspath(data['filename'])}
-        elif 'filename' in data:
-            del data['filename']
+        if any(
+            data[k] is None for k in ["size_x", "size_y", "topography_source", "hmin"]
+        ):
+            data = {"filename": os.path.abspath(data["filename"])}
+        elif "filename" in data:
+            del data["filename"]
 
         forcing_dict = {self.__class__.__name__: data}
 

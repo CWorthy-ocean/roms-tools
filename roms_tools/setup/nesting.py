@@ -410,7 +410,14 @@ def make_edata(
 
     # Map child onto parent
     ds_nesting = _map_child_boundaries_onto_parent_grid_indices(
-        parent_grid, child_grid, boundaries, prefix, period, include_bgc, verbose
+        parent_grid,
+        child_grid,
+        boundaries,
+        prefix,
+        period,
+        include_bgc,
+        include_pressure_fluxes,
+        verbose,
     )
 
     # Save the nesting file and return nesting dataset
@@ -649,7 +656,7 @@ def modify_child_topography(
     return child_grid_ds
 
 
-def _interpolate_indices(
+def interpolate_indices(
     parent_grid_ds: xr.Dataset,
     lon: xr.DataArray,
     lat: xr.DataArray,
@@ -863,7 +870,7 @@ def map_child_boundaries_onto_parent_grid_indices(
 
                 mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
 
-                i_eta, i_xi = _interpolate_indices(
+                i_eta, i_xi = interpolate_indices(
                     parent_grid_ds, lon_child, lat_child, mask_child, direction
                 )
 

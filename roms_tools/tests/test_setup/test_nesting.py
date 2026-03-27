@@ -6,10 +6,12 @@ import pytest
 import xarray as xr
 
 from conftest import calculate_file_hash
-from roms_tools import ChildGrid, Grid
+from roms_tools import Grid
 from roms_tools.setup.nesting import (
+    align_grids,
     compute_boundary_distance,
     interpolate_indices,
+    make_edata,
     map_child_boundaries_onto_parent_grid_indices,
     modify_child_mask,
     modify_child_topography,
@@ -46,8 +48,7 @@ def small_grid_that_straddles():
 
 @pytest.fixture()
 def child_grid_that_straddles(big_grid_that_straddles):
-    return ChildGrid(
-        parent_grid=big_grid_that_straddles,
+    child_grid = Grid(
         nx=10,
         ny=10,
         center_lon=0,
@@ -55,14 +56,16 @@ def child_grid_that_straddles(big_grid_that_straddles):
         rot=0,
         size_x=50,
         size_y=200,
-        metadata={"prefix": "child"},
     )
+    child_grid = align_grids(big_grid_that_straddles, child_grid)
+    make_edata(big_grid_that_straddles, child_grid, prefix="child")
+
+    return child_grid
 
 
 @pytest.fixture()
 def child_grid_with_eastern_boundary_closed(big_grid):
-    return ChildGrid(
-        parent_grid=big_grid,
+    child_grid = Grid(
         nx=10,
         ny=10,
         center_lon=-23,
@@ -71,6 +74,12 @@ def child_grid_with_eastern_boundary_closed(big_grid):
         size_x=200,
         size_y=100,
     )
+    child_grid = align_grids(big_grid, child_grid)
+    make_edata(
+        big_grid,
+        child_grid,
+    )
+    return child_grid
 
 
 class TestInterpolateIndices:
@@ -453,15 +462,10 @@ class TestNesting:
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
-        import dataclasses
-
-        params = dataclasses.asdict(small_grid)
-        del params["ds"], params["straddle"]
-
         with pytest.raises(
             ValueError, match="boundary of the child grid lie outside the parent grid"
         ):
-            ChildGrid(parent_grid=big_grid, **params)
+            small_grid = align_grids(big_grid, small_grid)
 
     def test_no_error_if_land_child_points_beyond_parent_grid(self):
         # coarse resolution Pacific domain
@@ -476,21 +480,21 @@ class TestNesting:
         )
 
         # California Current System domain, where some land points extend beyond Pacific domain
-        child_grid_parameters = {
-            "nx": 50,
-            "ny": 50,
-            "size_x": 2688,
-            "size_y": 5280,
-            "center_lat": 39.6,
-            "center_lon": -134.5,
-            "rot": 33.3,
-        }
+        child_grid = Grid(
+            nx=50,
+            ny=50,
+            size_x=2688,
+            size_y=5280,
+            center_lat=39.6,
+            center_lon=-134.5,
+            rot=33.3,
+       ) 
 
-        child_grid = ChildGrid(
-            **child_grid_parameters,
-            parent_grid=parent_grid,
-            boundaries={"north": True, "west": True, "south": True, "east": False},
-        )
+       child_grid = align_grids(
+                        parent_grid,
+                        child_grid,
+                        boundaries={"north": True, "west": True, "south": True, "east": False}
+                    )
         assert isinstance(child_grid.ds, xr.Dataset)
 
     def test_no_error_if_child_boundary_entirely_on_land(self):
@@ -504,28 +508,29 @@ class TestNesting:
             rot=0,
         )
 
-        child_grid_parameters = {
-            "nx": 5,
-            "ny": 5,
-            "size_x": 100,
-            "size_y": 100,
-            "center_lon": -4.1,
-            "center_lat": 52.36,
+        child_grid = Grid(
+            nx=5,
+            ny=5,
+            size_x=100,
+            size_y=100,
+            center_lon=-4.1,
+            center_lat=52.36,
         }
 
-        child_grid = ChildGrid(
-            **child_grid_parameters,
-            parent_grid=parent_grid,
-            boundaries={
-                "south": True,
-                "east": True,
-                "north": True,
-                "west": True,
-            },
-        )
+       child_grid = align_grids(
+                        parent_grid,
+                        child_grid,
+                        boundaries={
+                            "south": True,
+                            "east": True,
+                            "north": True,
+                            "west": True,
+                        },
+                    )
+        ds_nesting = make_edata(parent_grid, child_grid)
 
         assert isinstance(child_grid.ds, xr.Dataset)
-        assert isinstance(child_grid.ds_nesting, xr.Dataset)
+        assert isinstance(ds_nesting, xr.Dataset)
 
     @pytest.mark.parametrize(
         "child_grid_fixture",
@@ -563,17 +568,8 @@ class TestNesting:
                 # Clean up the .nc file
                 filepath.unlink()
 
-    # TODO: change this test to check desired behavior
-    def test_disabled_from_file_method(self):
-        """Test that parent from_file method is indeed disabled."""
-        with pytest.raises(
-            NotImplementedError,
-            match="The 'from_file' method is disabled in this subclass.",
-        ):
-            ChildGrid.from_file(filepath="some_file.nc")
-
     def test_roundtrip_yaml(self, child_grid_with_bgc, tmp_path):
-        """Test that creating a ChildGrid object, saving its parameters to yaml file,
+        """Test that creating a child Grid object, saving its parameters to yaml file,
         and re-opening yaml file creates the same object.
         """
         # Create a temporary filepath using the tmp_path fixture
@@ -584,7 +580,7 @@ class TestNesting:
         ]:  # test for Path object and str
             child_grid_with_bgc.to_yaml(filepath)
 
-            child_grid_from_file = ChildGrid.from_yaml(filepath)
+            child_grid_from_file = Grid.from_yaml(filepath)
 
             assert child_grid_with_bgc == child_grid_from_file
 
@@ -602,7 +598,7 @@ class TestNesting:
         child_grid_with_bgc.save(grid_filepath1)
         child_grid_with_bgc.save_nesting(filepath1)
 
-        child_grid_from_file = ChildGrid.from_yaml(yaml_filepath)
+        child_grid_from_file = Grid.from_yaml(yaml_filepath)
         child_grid_from_file.save(grid_filepath2)
         child_grid_from_file.save_nesting(filepath2)
 

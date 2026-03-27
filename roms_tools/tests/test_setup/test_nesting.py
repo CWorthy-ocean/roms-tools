@@ -488,12 +488,12 @@ class TestNesting:
             center_lat=39.6,
             center_lon=-134.5,
             rot=33.3,
-        ) 
+        )
 
         child_grid = align_grids(
             parent_grid,
             child_grid,
-            boundaries={"north": True, "west": True, "south": True, "east": False}
+            boundaries={"north": True, "west": True, "south": True, "east": False},
         )
         assert isinstance(child_grid.ds, xr.Dataset)
 

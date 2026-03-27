@@ -28,6 +28,8 @@
   
 * Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region.
 
+* Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region. ([#577](https://github.com/CWorthy-ocean/roms-tools/pull/577))
+
 ## v3.5.0
 
 ### New Features

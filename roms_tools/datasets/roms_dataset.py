@@ -567,6 +567,8 @@ class ROMSDataset:
         buffer_points : int
             The number of grid points to extend beyond the specified latitude and longitude
             ranges when selecting the subdomain. Defaults to 20.
+        reset_chunking : bool
+            Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
 
         Returns
         -------
@@ -747,6 +749,8 @@ def choose_subdomain(
     buffer_points : int
         The number of grid points to extend beyond the specified latitude and longitude
         ranges when selecting the subdomain. Defaults to 20.
+    reset_chunking : bool
+        Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
 
     Returns
     -------
@@ -841,8 +845,9 @@ def choose_subdomain(
             }
         )
 
-    # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
-    if reset_chunking:
+    # if subsequent operations require this entire chunk, and dask if currently used,
+    # reset the chunking to load the rest of the dataset
+    if reset_chunking and ds.chunks is not None:
         dim_names = {dim: dim for dim in ds.dims}
         chunks = get_dask_chunks(dim_names, time_chunking=False)
         chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}

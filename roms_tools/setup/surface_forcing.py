@@ -324,9 +324,6 @@ class SurfaceForcing:
         }
 
         if self.type == "physics":
-            # Leave initial spatialchunking to dask for efficient sliced reading from file
-            chunks = {"time": 1}
-
             if self.source["name"] == "ERA5":
                 if str(self.source["path"]).startswith("gs://") or str(
                     self.source["path"]
@@ -335,9 +332,9 @@ class SurfaceForcing:
                         raise ValueError(
                             "Cloud-based ERA5 access requires `use_dask=True`. Please enable Dask by setting `use_dask=True`."
                         )
-                    data = ERA5ARCODataset(**data_dict, chunks=chunks)
+                    data = ERA5ARCODataset(**data_dict)
                 else:
-                    data = ERA5Dataset(**data_dict, chunks=chunks)
+                    data = ERA5Dataset(**data_dict)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'

@@ -218,6 +218,13 @@ def test_latlon_with_depth_and_time():
     assert result == expected
 
 
+def test_latlon_with_time_chunking_false():
+    dim_names = {"latitude": "lat", "longitude": "lon", "time": "t"}
+    expected = {"lat": -1, "lon": -1}
+    result = get_dask_chunks(dim_names, time_chunking=False)
+    assert result == expected
+
+
 def test_roms_default_chunks():
     dim_names = {}
     expected_keys = {"eta_rho", "eta_v", "xi_rho", "xi_u", "s_rho"}
@@ -240,6 +247,12 @@ def test_roms_with_ntides():
     dim_names = {"ntides": "nt"}
     result = get_dask_chunks(dim_names)
     assert result["nt"] == 1
+
+
+def test_time_chunking_false_roms():
+    dim_names = {"time": "ocean_time"}
+    result = get_dask_chunks(dim_names, time_chunking=False)
+    assert "ocean_time" not in result
 
 
 # test interpolate_from_climatology

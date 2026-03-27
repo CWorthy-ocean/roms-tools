@@ -2497,7 +2497,7 @@ def choose_subdomain(
         subdomain[dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
 
     # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
-    if reset_chunking:
+    if reset_chunking and subdomain.chunks is not None:
         chunks = get_dask_chunks(
             dict(dim_names), time_chunking=False
         )  # ensure possible Mapping is converted to dict

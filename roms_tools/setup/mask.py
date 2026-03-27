@@ -1,4 +1,5 @@
 import logging
+import time
 import warnings
 from pathlib import Path
 
@@ -12,8 +13,18 @@ from roms_tools.setup.utils import handle_boundaries
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 
-def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
+def add_mask(
+    ds: xr.Dataset,
+    shapefile: str | Path | None = None,
+    close_narrow_channels: bool = False,
+    verbose: bool = False,
+) -> xr.Dataset:
     """Adds a land/water mask to the dataset at rho-points.
+
+    These are the steps:
+    1. Infer mask from coastlines
+    2. Close narrow channels if requested
+    3. Fill enclosed basins
 
     Parameters
     ----------
@@ -23,12 +34,21 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
     shapefile: str or Path | None
         Path to a coastal shapefile to determine the land mask. If None, NaturalEarth 10m is used.
 
+    close_narrow_channels : bool, optional
+        Whether to close narrow water channels in the mask after it is generated.
+        The default is False.
+
+    verbose: bool, optional
+        Indicates whether to print mask generation steps with timing. Defaults to False.
+
     Returns
     -------
     xarray.Dataset
         The original dataset with an added 'mask_rho' variable, representing land/water mask.
     """
-    # Suppress specific warning
+    # Infer mask from coastlines
+    if verbose:
+        start_time = time.time()
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="No gridpoint belongs to any region.*"
@@ -61,9 +81,36 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
             mask = land_mask.isnull()
 
     ds = _add_coastlines_metadata(ds, shapefile)
+    if verbose:
+        logging.info(
+            f"Inferring the mask from coastlines: {time.time() - start_time:.3f} seconds"
+        )
+
+    mask = mask.astype(int)  # convert from bool to int
+
+    # Close narrow channels if requested
+    if close_narrow_channels:
+        if verbose:
+            start_time = time.time()
+        _close_narrow_channels(
+            mask,
+            max_iterations=10,
+        )
+        if verbose:
+            logging.info(
+                "Closing narrow channels: {time.time() - start_time:.3f} seconds"
+            )
+    ds.attrs["close_narrow_channels"] = str(close_narrow_channels)
 
     # fill enclosed basins with land
+    if verbose:
+        start_time = time.time()
     mask = _fill_enclosed_basins(mask.values)
+    if verbose:
+        logging.info(
+            "Filling enclosed basins with land: {time.time() - start_time:.3f} seconds"
+        )
+
     # adjust mask boundaries by copying values from adjacent cells
     mask = handle_boundaries(mask)
 
@@ -72,8 +119,6 @@ def add_mask(ds: xr.Dataset, shapefile: str | Path | None = None) -> xr.Dataset:
         "long_name": "Mask at rho-points",
         "units": "land/water (0/1)",
     }
-
-    ds = add_velocity_masks(ds)
 
     return ds
 
@@ -103,42 +148,45 @@ def _add_coastlines_metadata(
     return ds
 
 
-def _fill_enclosed_basins(mask) -> np.ndarray:
-    """Fills enclosed basins in the mask with land (value = 1).
+def _fill_enclosed_basins(mask: np.ndarray) -> np.ndarray:
+    """Fills enclosed basins in the mask with land (value = 0).
 
     This function identifies the largest connected region in the mask, which is assumed to represent
-    the land, and sets all other regions to water (value = 0).
+    the ocean, and sets all other water regions to land.
 
     Parameters
     ----------
     mask : np.ndarray
-        A binary array representing the land/water mask (land = 1, water = 0).
+        A binary array representing the land/water mask (1 = ocean/water, 0 = land).
 
     Returns
     -------
     np.ndarray
-        The modified mask with enclosed basins filled with land (1).
+        The modified mask with enclosed basins (small lakes) filled with land (0).
     """
     # Label connected regions in the mask
     reg, nreg = label(mask)
+    if nreg == 0:
+        return mask
     # Find the largest region
     lint = 0
     lreg = 0
-    for ireg in range(nreg):
+    # scipy.ndimage.label uses 0 for background and 1..nreg for components
+    for ireg in range(1, nreg + 1):
         int_ = np.sum(reg == ireg)
         if int_ > lint and mask[reg == ireg].sum() > 0:
             lreg = ireg
             lint = int_
 
     # Remove regions other than the largest one
-    for ireg in range(nreg):
+    for ireg in range(1, nreg + 1):
         if ireg != lreg:
             mask[reg == ireg] = 0
 
     return mask
 
 
-def add_velocity_masks(ds):
+def add_velocity_masks(ds: xr.Dataset) -> xr.Dataset:
     """Adds velocity masks for u- and v-points based on the rho-point mask.
 
     This function generates masks for u- and v-points by interpolating the rho-point land/water mask.
@@ -167,3 +215,58 @@ def add_velocity_masks(ds):
     ds["mask_v"].attrs = {"long_name": "Mask at v-points", "units": "land/water (0/1)"}
 
     return ds
+
+
+def _close_narrow_channels(
+    mask: xr.DataArray,
+    max_iterations: int = 10,
+) -> xr.DataArray:
+    """Close narrow channels in a ROMS mask (internal function).
+
+    This function closes narrow 1-pixel wide channels of water (ocean) by converting
+    them to land.
+
+    Parameters
+    ----------
+    mask : xarray.DataArray
+        Input mask.
+    max_iterations : int, optional
+        Maximum number of iterations for closing narrow channels. Default is 10.
+
+    Returns
+    -------
+    xarray.DataArray
+        The modified mask.
+
+    Notes
+    -----
+    The function iteratively closes 1-pixel wide water channels in both
+    north-south and east-west directions by converting them to land (1 -> 0).
+    """
+    # Close narrow channels
+    for it in range(max_iterations):
+        # Fill 1-pixel passages in north-south direction
+        fill = mask.copy()
+        fill[1:, :] = fill[1:, :] + mask[:-1, :]
+        fill[:-1, :] = fill[:-1, :] + mask[1:, :]
+        fill.values[mask.values < 1] = 0
+
+        nf = np.sum(fill == 1)
+        if nf > 0:
+            mask.values[fill.values == 1] = 0
+        else:
+            break
+
+        # Fill 1-pixel passages in east-west direction
+        fill = mask.copy()
+        fill[:, 1:] = fill[:, 1:] + mask[:, :-1]
+        fill[:, :-1] = fill[:, :-1] + mask[:, 1:]
+        fill.values[mask.values < 1] = 0
+
+        nf = np.sum(fill == 1)
+        if nf > 0:
+            mask.values[fill.values == 1] = 0
+        else:
+            break
+
+    return mask

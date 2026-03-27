@@ -70,6 +70,9 @@ class Grid:
         The default is "ETOPO5", which does not require a path.
     mask_shapefile: str | Path | None, optional
         Path to a custom shapefile to use to determine the land mask; if None, use NaturalEarth 10m.
+    close_narrow_channels : bool, optional
+        Whether to close narrow water channels in the mask after it is generated.
+        The default is False.
     hmin : float, optional
        The minimum ocean depth (in meters). The default is 5.0.
     N : int, optional
@@ -116,6 +119,9 @@ class Grid:
     """Dictionary specifying the source of the topography data."""
     mask_shapefile: str | Path | None = None
     """Path to a custom shapefile to use to determine the landmask; if None, use NaturalEarth 10m."""
+    close_narrow_channels: bool = False
+    """Whether to close narrow water channels in the mask.
+    Default is False."""
     hmin: float = 5.0
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
@@ -137,7 +143,11 @@ class Grid:
         self._straddle()
 
         # Mask
-        self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
+        self.update_mask(
+            mask_shapefile=self.mask_shapefile,
+            close_narrow_channels=self.close_narrow_channels,
+            verbose=self.verbose,
+        )
 
         # Coarsen the dataset if needed
         self._coarsen()
@@ -174,21 +184,29 @@ class Grid:
                 )
 
     def update_mask(
-        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+        self,
+        mask_shapefile: str | Path | None = None,
+        close_narrow_channels: bool | None = None,
+        verbose: bool = False,
     ) -> None:
         """
         Update the land mask of the current grid dataset.
 
-        This method generates a land mask based on the provided coastline
-        shapefile, fills enclosed basins with lands and updates the dataset
-        stored in `self.ds`. If no shapefile is provided, a default dataset (Natural
-        Earth 10m) is used. The operation is optionally timed and logged.
+        The following steps are executed:
+
+        1. Infer mask from coastlines
+        2. Close narrow channels if requested
+        3. Fill enclosed basins
+        4. Update dataset stored in `self.ds`.
 
         Parameters
         ----------
         mask_shapefile : str or Path, optional
             Path to a coastal shapefile to derive the land mask. If `None`,
             the default Natural Earth 10m coastline dataset is used.
+        close_narrow_channels : bool, optional
+            Whether to close narrow water channels. If `None`, uses
+            the value from `self.close_narrow_channels`. Default is `None`.
         verbose : bool, default False
             If True, prints timing and progress information.
 
@@ -198,10 +216,25 @@ class Grid:
             Updates the `self.ds` attribute in place with the new mask.
 
         """
-        with Timed("=== Deriving the mask from coastlines ===", verbose=verbose):
-            ds = add_mask(self.ds, shapefile=mask_shapefile)
+        # Determine if we should close narrow channels
+        should_close = (
+            close_narrow_channels
+            if close_narrow_channels is not None
+            else self.close_narrow_channels
+        )
+        with Timed("=== Making the mask ===", verbose=verbose):
+            ds = add_mask(
+                self.ds,
+                shapefile=mask_shapefile,
+                close_narrow_channels=should_close,
+                verbose=verbose,
+            )
             self.ds = ds
             self.mask_shapefile = mask_shapefile
+            self.close_narrow_channels = should_close
+
+        # Update velocity masks after modifying mask_rho
+        add_velocity_masks(self.ds)
 
     def update_topography(
         self,
@@ -812,6 +845,13 @@ class Grid:
             mask_shapefile = None
 
         grid.mask_shapefile = mask_shapefile
+
+        if "close_narrow_channels" in ds.attrs:
+            close_narrow_channels = ds.attrs["close_narrow_channels"].lower() == "true"
+        else:
+            close_narrow_channels = None
+
+        grid.close_narrow_channels = close_narrow_channels
 
         return grid
 

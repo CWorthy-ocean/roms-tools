@@ -283,6 +283,21 @@ def tiny_rotated_grid() -> Grid:
 
 
 @pytest.fixture(scope="session")
+def grid_with_closed_channels() -> Grid:
+    return Grid(
+        nx=3,
+        ny=3,
+        size_x=10,
+        size_y=10,
+        center_lon=-17,
+        center_lat=60,
+        rot=20,
+        N=3,
+        close_narrow_channels=True,
+    )
+
+
+@pytest.fixture(scope="session")
 def big_grid() -> Grid:
     return Grid(
         nx=5, ny=7, center_lon=-23, center_lat=61, rot=20, size_x=1800, size_y=2400

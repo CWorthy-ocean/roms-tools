@@ -151,25 +151,33 @@ class ChildGrid(Grid):
         )
 
     def update_mask(
-        self, mask_shapefile: str | Path | None = None, verbose: bool = False
+        self,
+        mask_shapefile: str | Path | None = None,
+        close_narrow_channels: bool | None = None,
+        verbose: bool = False,
     ) -> None:
         """
         Update the child grid mask and ensure consistency with the parent grid.
 
         This method performs the following steps:
 
-        1. Derives the child mask from the provided ``mask_shapefile`` (or from the
-           default Natural Earth 10m coastline if ``None``).
-        2. Updates the mapping of child boundaries to parent-grid indices.
+        1. Infer child mask from coastlines
+        2. Close narrow channels if requested
+        3. Fill enclosed basins
+        4. Updates the mapping of child boundaries to parent-grid indices.
            This mapping depends on the updated mask, since masked (land) points may
            extend outside the parent grid.
-        3. Adjusts the child mask to ensure consistency with the parent mask.
+        5. Adjusts the child mask to ensure consistency with the parent mask.
+        6. Update dataset stored in `self.ds`.
 
         Parameters
         ----------
         mask_shapefile : str or Path, optional
             Path to a coastal shapefile used to derive the land mask. If ``None``,
             a default coastline dataset is used.
+        close_narrow_channels : bool, optional
+            Whether to close narrow water channels. If `None`, uses
+            the value from `self.close_narrow_channels`. Default is `None`.
         verbose : bool, default False
             If True, prints timing and progress information.
 
@@ -179,7 +187,11 @@ class ChildGrid(Grid):
             Updates the internal datasets (``self.ds`` and ``self.ds_nesting``) in place,
             modifying the mask and ensuring consistent parent-child boundary mapping.
         """
-        super().update_mask(mask_shapefile=mask_shapefile, verbose=verbose)
+        super().update_mask(
+            mask_shapefile=mask_shapefile,
+            close_narrow_channels=close_narrow_channels,
+            verbose=verbose,
+        )
         self._map_child_boundaries_onto_parent_grid_indices(verbose=verbose)
         self._modify_child_mask(verbose=verbose)
 

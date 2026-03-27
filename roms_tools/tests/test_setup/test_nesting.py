@@ -488,13 +488,13 @@ class TestNesting:
             center_lat=39.6,
             center_lon=-134.5,
             rot=33.3,
-       ) 
+        ) 
 
-       child_grid = align_grids(
-                        parent_grid,
-                        child_grid,
-                        boundaries={"north": True, "west": True, "south": True, "east": False}
-                    )
+        child_grid = align_grids(
+            parent_grid,
+            child_grid,
+            boundaries={"north": True, "west": True, "south": True, "east": False}
+        )
         assert isinstance(child_grid.ds, xr.Dataset)
 
     def test_no_error_if_child_boundary_entirely_on_land(self):
@@ -515,18 +515,18 @@ class TestNesting:
             size_y=100,
             center_lon=-4.1,
             center_lat=52.36,
-        }
+        )
 
-       child_grid = align_grids(
-                        parent_grid,
-                        child_grid,
-                        boundaries={
-                            "south": True,
-                            "east": True,
-                            "north": True,
-                            "west": True,
-                        },
-                    )
+        child_grid = align_grids(
+            parent_grid,
+            child_grid,
+            boundaries={
+                "south": True,
+                "east": True,
+                "north": True,
+                "west": True,
+            },
+        )
         ds_nesting = make_edata(parent_grid, child_grid)
 
         assert isinstance(child_grid.ds, xr.Dataset)

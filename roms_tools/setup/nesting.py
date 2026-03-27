@@ -85,9 +85,97 @@ def align_grids(
         Updates the internal dataset (``child_grid.ds``) in place, modifying the mask
          and topography, and ensuring consistent parent-child boundary mapping.
     """
-    boundaries = check_and_set_boundaries(
-        boundaries, child_grid.ds.mask_rho
-    )
+
+    def _check_child_outside_parent(
+        parent_grid_ds: xr.Dataset,
+        child_grid_ds: xr.Dataset,
+        boundaries = dict[str, bool]
+    ):
+        """Interpolate the parent indices to the child grid boundary.
+
+        Uses the parent grid ``lon_rho``/``lat_rho`` coordinates to compute
+        fractional i/j indices at child-boundary longitude/latitude points using
+        linear interpolation. The function verifies that all ocean child points
+        (based on ``mask``) lie within the parent grid and gives ValueError if
+        child wet points exist outside of the parent domain.
+
+        Parameters
+        ----------
+        parent_grid_ds : xarray.Dataset
+            Grid information of parent grid.
+        child_grid_ds : xarray.Dataset
+            Grid information of child grid.
+        boundaries : dict[str, bool]
+            Indicator for whether each boundaries is open (True) or closed (False)
+            Used for generating informative warnings or errors.
+        """
+        bdry_coords_dict = get_boundary_coords()
+
+        # Check if child wet points lie outside parent boundaries
+        for direction in ["south", "east", "north", "west"]:
+            if boundaries[direction]:
+                for grid_location in ["rho", "u", "v"]:
+                    names = {
+                        "latitude": f"lat_{grid_location}",
+                        "longitude": f"lon_{grid_location}",
+                        "mask": f"mask_{grid_location}",
+                        "angle": f"angle_{grid_location}",
+                    }
+                    bdry_coords = bdry_coords_dict[grid_location]
+                    if grid_location == "rho":
+                        suffix = "r"
+                    else:
+                        suffix = grid_location
+
+                    lon_child = child_grid_ds[names["longitude"]].isel(
+                        **bdry_coords[direction]
+                    )
+                    lat_child = child_grid_ds[names["latitude"]].isel(
+                        **bdry_coords[direction]
+                    )
+
+                    mask_child = child_grid_ds[names["mask"]].isel(**bdry_coords[direction])
+
+                    #-, - = _interpolate_indices(
+                    #    parent_grid.ds, lon_child, lat_child, mask_child, direction
+                    #)
+                    i_eta = np.arange(-0.5, len(parent_grid_ds.eta_rho) + -0.5, 1)
+                    i_xi = np.arange(-0.5, len(parent_grid_ds.xi_rho) + -0.5, 1)
+
+                    parent_grid_ds = parent_grid_ds.assign_coords(
+                        i_eta=("eta_rho", i_eta)
+                    ).assign_coords(i_xi=("xi_rho", i_xi))
+
+                    lon_parent = parent_grid_ds.lon_rho
+                    lat_parent = parent_grid_ds.lat_rho
+                    i_parent = parent_grid_ds.i_eta
+                    j_parent = parent_grid_ds.i_xi
+
+                    # Create meshgrid
+                    j_parent, i_parent = np.meshgrid(j_parent.values, i_parent.values)
+
+                    # Flatten the input coordinates and indices for griddata
+                    points = np.column_stack((lon_parent.values.ravel(), lat_parent.values.ravel()))
+                    i_parent_flat = i_parent.ravel()
+                    j_parent_flat = j_parent.ravel()
+
+                    # Interpolate the i and j indices
+                    i = griddata(points, i_parent_flat, (lon_child.values, lat_child.values), method="linear")
+                    j = griddata(points, j_parent_flat, (lon_child.values, lat_child.values), method="linear")
+
+                    i = xr.DataArray(i, dims=lon_child.dims)
+                    j = xr.DataArray(j, dims=lon_child.dims)
+
+                    # Check whether ocean child points fall outside the parent grid
+                    if (
+                        i.where(mask_child, other=0.0).isnull().any()
+                        or j.where(mask_child, other=0.0).isnull().any()
+                    ):
+                        raise ValueError(
+                            f"Some wet points on the {direction}ern boundary of the child grid lie "
+                            "outside the parent grid. Please use a larger parent grid or a smaller child grid."
+                        )
+
     # Include needed functions
     def _finalize_grid_datasets(
         parent_grid_ds: xr.Dataset,
@@ -176,6 +264,12 @@ def align_grids(
 
     ## NOTE: modify_child_topography and _mask were originally nested under the childGrid version of
     # update_topography and update_mask, which called the Grid method and then the child method
+
+    boundaries = check_and_set_boundaries(
+        boundaries, child_grid.ds.mask_rho
+    )
+
+    _check_child_outside_parent(parent_grid.ds, child_grid.ds, boundaries)
 
     # Call Grid update_mask, then modify the child mask:
     child_grid.update_mask(mask_shapefile=mask_shapefile, verbose=verbose)

@@ -1,6 +1,7 @@
 import copy
 import importlib.metadata
 import logging
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -89,28 +90,28 @@ class Grid:
         If you try to create a grid with domain size larger than 25000 km.
     """
 
-    nx: int
+    nx: int | None = None
     """Number of grid points in the x-direction."""
-    ny: int
+    ny: int | None = None
     """Number of grid points in the y-direction."""
-    size_x: float
+    size_x: float | None = None
     """Domain size in the x-direction (in kilometers)."""
-    size_y: float
+    size_y: float | None = None
     """Domain size in the y-direction (in kilometers)."""
-    center_lon: float
+    center_lon: float | None = None
     """Longitude of grid center."""
-    center_lat: float
+    center_lat: float | None = None
     """Latitude of grid center."""
     rot: float = 0
     """Rotation of grid x-direction from lines of constant latitude, measured in
     degrees."""
-    N: int = 100
+    N: int | None = None
     """The number of vertical levels."""
-    theta_s: float = 5.0
+    theta_s: float | None = None
     """The surface control parameter."""
-    theta_b: float = 2.0
+    theta_b: float | None = None
     """The bottom control parameter."""
-    hc: float = 300.0
+    hc: float | None = None
     """The critical depth (in meters)."""
     topography_source: dict[str, str | Path | list[str | Path]] | None = None
     """Dictionary specifying the source of the topography data."""
@@ -120,6 +121,8 @@ class Grid:
     """The minimum ocean depth (in meters)."""
     verbose: bool = False
     """Whether to print grid generation steps with timing."""
+    filename: str | Path | None = None
+    """An external file to load instead of generating the grid from params"""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -128,37 +131,72 @@ class Grid:
     """Whether the grid straddles the dateline."""
 
     def __post_init__(self):
-        self._input_checks()
+        if self.filename is not None:
+            # Check to confirm other parameters are not provided with filename
+            min_param = {"rot", "hmin", "verbose", "filename"}
+            param_provided = [k for k, v in vars(self).items() if v is not None]
+            extra = set(param_provided) - min_param
+            if extra:
+                raise ValueError(
+                    f"Unexpected parameter included with `filename`: {extra}.\n"
+                    + " Either `filename` or (`nx`, `ny`, `size_x`, `size_y`, `center_lon`, `center_lat`) are accepted."
+                )
 
-        # Horizontal grid
-        self._create_horizontal_grid()
+            loaded = type(self)._from_file(
+                filename=self.filename,
+                theta_s=self.theta_s,
+                theta_b=self.theta_b,
+                hc=self.hc,
+                N=self.N,
+                verbose=self.verbose,
+            )
 
-        # Check if the Greenwich meridian goes through the domain.
-        self._straddle()
+            self.__dict__.update(loaded.__dict__)
 
-        # Mask
-        self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
+        else:
+            # assign defaults here for non-required params
+            self.N = self.N or 100
+            self.theta_s = self.theta_s or 5.0
+            self.theta_b = self.theta_b or 2.0
+            self.hc = self.hc or 300.0
 
-        # Coarsen the dataset if needed
-        self._coarsen()
+            self._input_checks()
 
-        # Topography
-        self.update_topography(
-            topography_source=self.topography_source,
-            hmin=self.hmin,
-            verbose=self.verbose,
-        )
+            # Horizontal grid
+            self._create_horizontal_grid()
 
-        # Vertical coordinate system
-        self.update_vertical_coordinate(
-            N=self.N,
-            theta_s=self.theta_s,
-            theta_b=self.theta_b,
-            hc=self.hc,
-            verbose=self.verbose,
-        )
+            # Check if the Greenwich meridian goes through the domain.
+            self._straddle()
+
+            # Mask
+            self.update_mask(mask_shapefile=self.mask_shapefile, verbose=self.verbose)
+
+            # Coarsen the dataset if needed
+            self._coarsen()
+
+            # Topography
+            self.update_topography(
+                topography_source=self.topography_source,
+                hmin=self.hmin,
+                verbose=self.verbose,
+            )
+
+            # Vertical coordinate system
+            self.update_vertical_coordinate(
+                N=self.N,
+                theta_s=self.theta_s,
+                theta_b=self.theta_b,
+                hc=self.hc,
+                verbose=self.verbose,
+            )
 
     def _input_checks(self):
+        for var in ("nx", "ny", "size_x", "size_y", "center_lon", "center_lat"):
+            if getattr(self, var) is None:
+                raise ValueError(
+                    f"{var} is required unless loading from an existing grid."
+                )
+
         if self.topography_source is None:
             self.topography_source = {"name": "ETOPO5"}
 
@@ -405,6 +443,10 @@ class Grid:
         - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
         - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
         """
+        # todo check for these keys
+        # NOTE: THERE IS ALREADY A CHECK FOR ALL OR NONE TO DO COARSEN UNDER FROM_FILE
+        # THERE'S NO CHECK IN THE post_init, but presumably, we need the coarsening to happen then.
+        # i.e. this check may be unecessary unless we want individual checks:
         d = {
             "angle": "angle_coarse",
             "mask_rho": "mask_coarse",
@@ -412,9 +454,12 @@ class Grid:
             "lon_rho": "lon_coarse",
         }
 
+        # Only coarsen variables that have not yet been coarsened
+        vars_coarsen = [(k, v) for k, v in d.items() if v not in self.ds]
+
         ds = self.ds
 
-        for fine_var, coarse_var in d.items():
+        for fine_var, coarse_var in vars_coarsen:
             fine_field = ds[fine_var]
             if self.straddle and fine_var == "lon_rho":
                 fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
@@ -433,7 +478,7 @@ class Grid:
 
         ds["mask_coarse"] = xr.where(ds["mask_coarse"] > 0.5, 1, 0).astype(np.int32)
 
-        for fine_var, coarse_var in d.items():
+        for fine_var, coarse_var in vars_coarsen:
             long_name = ds[fine_var].attrs.get(
                 "long_name", ds[fine_var].attrs.get("Long_name", "")
             )
@@ -589,20 +634,21 @@ class Grid:
         return saved_filenames
 
     @classmethod
-    def from_file(
+    def _from_file(
         cls,
-        filepath: str | Path,
+        filename: str | Path,
         theta_s: float | None = None,
         theta_b: float | None = None,
         hc: float | None = None,
         N: int | None = None,
         verbose: bool = False,
+        **kwargs,
     ) -> "Grid":
         """Create a Grid instance from an existing file.
 
         Parameters
         ----------
-        filepath : Union[str, Path]
+        filename : Union[str, Path]
             Path to the file containing the grid information.
         theta_s : float, optional
             Surface stretching parameter for vertical coordinate.
@@ -630,7 +676,7 @@ class Grid:
             )
 
         # Load the dataset from the file
-        ds = xr.open_dataset(filepath)
+        ds = xr.open_dataset(filename)
 
         if not all(mask in ds for mask in ["mask_u", "mask_v"]):
             ds = add_velocity_masks(ds)
@@ -698,22 +744,27 @@ class Grid:
                         "but they are inconsistent with the provided theta_s, theta_b, hc, and N."
                     )
 
+        elif all(attr in grid.ds.attrs for attr in ["theta_s", "theta_b", "hc"]):
+            if prior_Cs_r is None or prior_Cs_w is None:
+                theta_s = grid.ds.attrs["theta_s"].item()
+                theta_b = grid.ds.attrs["theta_b"].item()
+                hc = grid.ds.attrs["hc"].item()
+                N = len(grid.ds.s_rho)
+
+                grid.update_vertical_coordinate(
+                    N=N, theta_s=theta_s, theta_b=theta_b, hc=hc, verbose=True
+                )
+
         # Case: user did not provide vertical coordinate parameters
-        elif prior_Cs_r is None or prior_Cs_w is None:
-            logging.warning("Vertical coordinates (Cs_r, Cs_w) not found in grid file.")
+        else:
+            logging.warning(
+                "Vertical coordinates (Cs_r, Cs_w) not found in grid file and were not provided, using defaults."
+            )
 
             # Use fallback parameters
             grid.update_vertical_coordinate(
                 N=100, theta_s=5.0, theta_b=2.0, hc=300.0, verbose=True
             )
-
-        # Final fallback: get vertical coordinate parameters from attributes if available
-        else:
-            if not all(attr in grid.ds.attrs for attr in ["theta_s", "theta_b", "hc"]):
-                raise ValueError(
-                    "Missing vertical coordinate attributes in grid file: "
-                    "'theta_s', 'theta_b', or 'hc'."
-                )
 
         # Assign vertical coordinate metadata
         grid.theta_s = grid.ds.attrs["theta_s"].item()
@@ -737,12 +788,15 @@ class Grid:
                     "Could not extract 'center_lon' from title attribute. "
                     "Expected format: '... Lon: <value> ...'"
                 )
+        elif filename is not None:
+            center_lon = None
         else:
             raise ValueError(
                 "Missing grid information: 'center_lon' attribute, 'tra_lon' variable, or 'Lon:' in 'title' attribute "
                 "must be present in the dataset."
             )
         grid.center_lon = center_lon
+
         if "center_lat" in ds.attrs:
             center_lat = float(ds.attrs["center_lat"])
         elif "tra_lat" in ds:
@@ -754,14 +808,17 @@ class Grid:
             else:
                 raise ValueError(
                     "Could not extract 'center_lat' from title attribute. "
-                    "Expected format: '... Lon: <value> ...'"
+                    "Expected format: '... Lat: <value> ...'"
                 )
+        elif filename is not None:
+            center_lat = None
         else:
             raise ValueError(
                 "Missing grid information: 'center_lat' attribute, 'tra_lat' variable, or 'Lat:' in 'title' attribute "
                 "must be present in the dataset."
             )
         grid.center_lat = center_lat
+
         if "rot" in ds.attrs:
             rot = float(ds.attrs["rot"])
         elif "rotate" in ds:
@@ -775,6 +832,8 @@ class Grid:
                     "Could not extract 'rot' from title attribute. "
                     "Expected format: '... rotate: <value> ...'"
                 )
+        elif filename is not None:
+            rot = 0
         else:
             raise ValueError(
                 "Missing grid information: 'rot' attribute, 'rotate' variable, or 'rotate:' in 'title' attribute "
@@ -826,6 +885,16 @@ class Grid:
         """
         data = asdict(self)
         data = pop_grid_data(data)
+
+        # If parameters needed for ROMS-Tools replication are missing, store only filepath
+        # Only if externally-generated grid
+        if any(
+            data[k] is None for k in ["size_x", "size_y", "topography_source", "hmin"]
+        ):
+            data = {"filename": os.path.abspath(data["filename"])}
+        elif "filename" in data:
+            del data["filename"]
+
         forcing_dict = {self.__class__.__name__: data}
 
         write_to_yaml(forcing_dict, filepath)
@@ -904,6 +973,7 @@ class Grid:
 
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
+
         return cls(**grid_data, verbose=verbose)
 
     def __repr__(self) -> str:

@@ -9,7 +9,6 @@ import pytest
 
 from roms_tools import (
     BoundaryForcing,
-    ChildGrid,
     Grid,
     InitialConditions,
     RiverForcing,
@@ -26,6 +25,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCDataset,
     UnifiedBGCSurfaceDataset,
 )
+from roms_tools.setup.nesting import align_grids, make_edata
 
 
 class SkippableOptions(enum.StrEnum):
@@ -291,8 +291,7 @@ def big_grid() -> Grid:
 
 @pytest.fixture(scope="session")
 def child_grid_with_bgc(big_grid):
-    return ChildGrid(
-        parent_grid=big_grid,
+    child_grid = Grid(
         nx=10,
         ny=10,
         center_lon=-23,
@@ -300,14 +299,16 @@ def child_grid_with_bgc(big_grid):
         rot=-20,
         size_x=500,
         size_y=500,
-        metadata={"include_bgc": True},
     )
+    child_grid = align_grids(big_grid, child_grid)
+    make_edata(big_grid, child_grid, include_bgc=True)
+
+    return child_grid
 
 
 @pytest.fixture(scope="session")
 def child_grid_with_pflx(big_grid):
-    return ChildGrid(
-        parent_grid=big_grid,
+    child_grid = Grid(
         nx=10,
         ny=10,
         center_lon=-23,
@@ -315,8 +316,11 @@ def child_grid_with_pflx(big_grid):
         rot=-20,
         size_x=500,
         size_y=500,
-        metadata={"include_pressure_fluxes": True},
     )
+    child_grid = align_grids(big_grid, child_grid)
+    make_edata(big_grid, child_grid, include_pressure_fluxes=True)
+
+    return child_grid
 
 
 @pytest.fixture(scope="session")

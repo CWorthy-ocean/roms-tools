@@ -36,6 +36,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
 )
 from roms_tools.utils import (
+    dataset_using_dask,
     get_dask_chunks,
     get_pkg_error_msg,
     has_gcsfs,
@@ -573,7 +574,8 @@ class LatLonDataset:
             If True, print message if dataset is concatenated along longitude dimension.
             Defaults to False.
         reset_chunking : bool
-            Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
+            Optionally set the dask chunking of the dataset to tell dask that full (non-time)
+            dimensions are required for subsequent operations. Defaults to False.
 
         Returns
         -------
@@ -2391,8 +2393,8 @@ def choose_subdomain(
     use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is processed eagerly. Defaults to False.
     reset_chunking : bool
-        Optionally set the dask chunking of the dataset to load full (non-time) dimensions. Defaults to False.
-
+            Optionally set the dask chunking of the dataset to tell dask that full (non-time)
+            dimensions are required for subsequent operations. Defaults to False.
     Returns
     -------
     xr.Dataset
@@ -2496,8 +2498,9 @@ def choose_subdomain(
     else:
         subdomain[dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
 
-    # if subsequent operations require this entire chunk, reset the chunking to load the rest of the dataset
-    if reset_chunking and subdomain.chunks is not None:
+    # if subsequent operations require this entire chunk, and dask if currently used,
+    # reset the chunking to load the rest of the dataset
+    if reset_chunking and dataset_using_dask(subdomain):
         chunks = get_dask_chunks(
             dict(dim_names), time_chunking=False
         )  # ensure possible Mapping is converted to dict

@@ -151,6 +151,25 @@ def _get_ds_combine_base_params() -> dict[str, str]:
     }
 
 
+def dataset_using_dask(ds: xr.Dataset, first_var_only: bool = True) -> bool:
+    """Return True if the dataset is using dask, without needing dask to check.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset to check.
+    first_var_only: bool
+        If True, check only the first variable in the dataset.
+        If False, check all variables in the dataset.
+        Defaults to True.
+    """
+    if first_var_only:
+        var_name = next(iter(ds.data_vars))
+        return ds[var_name].chunks is not None
+    else:
+        return any(ds[var].chunks is not None for var in ds.data_vars)
+
+
 def get_dask_chunks(
     dim_names: dict[str, str], time_chunking: bool = True
 ) -> dict[str, int]:

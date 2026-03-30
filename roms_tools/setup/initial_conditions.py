@@ -529,7 +529,7 @@ class InitialConditions:
         else:
             self.adjust_depth_for_sea_surface_height = False
 
-            # Leave initial spatialchunking to dask for efficient sliced reading from file
+            # Leave initial spatial chunking to dask for efficient sliced reading from file
             chunks = {"time": 1}
 
             data = data_type(

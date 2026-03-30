@@ -181,6 +181,10 @@ def get_dask_chunks(
         Dictionary specifying the names of dimensions in the dataset.
         - For lat-lon datasets, provide keys "latitude" and "longitude" (and optionally "depth" and "time").
         - For ROMS datasets, the default ROMS dimensions are assumed ("eta_rho", "xi_rho", "s_rho", etc.).
+    time_chunking : bool, optional
+        If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
+        If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
+        Defaults to True.
 
     Returns
     -------
@@ -234,6 +238,10 @@ def _load_data_dask(
         Dictionary specifying the names of dimensions in the dataset.
         Required only for lat-lon datasets to map dimension names like "latitude" and "longitude".
         For ROMS datasets, this parameter can be omitted, as default ROMS dimensions ("eta_rho", "xi_rho", "s_rho") are assumed.
+    time_chunking : bool, optional
+        If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
+        If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
+        Defaults to True.
     decode_times: bool, optional
         If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
         Defaults to True.

@@ -291,7 +291,7 @@ def align_grids(
 def make_edata(
     parent_grid: Grid,
     child_grid: Grid,
-    filepath: str | None,
+    filepath: str | None = None,
     prefix: str = "child",
     period: float = 3600.0,
     include_bgc: bool = False,
@@ -597,7 +597,10 @@ def modify_child_mask(
     child_mask = (
         alpha * child_grid_ds["mask_rho"] + (1 - alpha) * mask_parent_interpolated
     )
+    attrs = child_grid_ds["mask_rho"].attrs
+
     child_grid_ds["mask_rho"] = xr.where(child_mask >= 0.5, 1, 0).astype("int32")
+    child_grid_ds["mask_rho"].attrs = attrs
 
     return child_grid_ds
 
@@ -646,12 +649,14 @@ def modify_child_topography(
     alpha = compute_boundary_distance(child_grid_ds["mask_rho"], boundaries)
 
     # update child topography to be weighted sum between original child and interpolated parent
+    attrs = child_grid_ds["h"].attrs
     child_grid_ds["h"] = (
         alpha * child_grid_ds["h"] + (1 - alpha) * h_parent_interpolated
     )
 
     # Clip depth on modified child topography
     child_grid_ds["h"] = clip_depth(child_grid_ds["h"], hmin)
+    child_grid_ds["h"].attrs = attrs
 
     return child_grid_ds
 

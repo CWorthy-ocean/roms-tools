@@ -708,7 +708,7 @@ def test_plot_vertical_coordinate():
 
 
 def test_enclosed_regions():
-    """Test that there are only two connected regions, one dry and one wet."""
+    """Test that there is only one connected wet region after basin filling."""
     grid = Grid(
         nx=100,
         ny=100,
@@ -720,7 +720,7 @@ def test_enclosed_regions():
     )
 
     reg, nreg = label(grid.ds.mask_rho)
-    npt.assert_equal(nreg, 2)
+    npt.assert_equal(nreg, 1)
 
 
 def test_rmax_criterion():

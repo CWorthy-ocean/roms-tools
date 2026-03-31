@@ -1,10 +1,10 @@
+import ast
 import logging
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
-import ast
 from scipy.interpolate import griddata, interp1d
 
 from roms_tools import Grid
@@ -110,12 +110,13 @@ def align_grids(
 
         # TODO this needs to be rethought. longitudinal wrapping is done when both the
         # parent and child cross the prime meridian
-        _straddle = ast.literal_eval(parent_grid_ds.straddle) and ast.literal_eval(child_grid_ds.straddle)
+        _straddle = ast.literal_eval(parent_grid_ds.straddle) and ast.literal_eval(
+            child_grid_ds.straddle
+        )
 
         if _straddle:
             parent_grid_ds = wrap_longitudes(parent_grid_ds, straddle=True)
             child_grid_ds = wrap_longitudes(child_grid_ds, straddle=True)
-            print('It did the wrapper')
 
         # Check if child wet points lie outside parent boundaries
         for direction in ["south", "east", "north", "west"]:

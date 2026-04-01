@@ -77,8 +77,8 @@ Utilities
 .. autosummary::
    :toctree: generated/
 
-   roms_tools.nesting.align_grids
-   roms_tools.nesting.make_edata
+   roms_tools.setup.nesting.align_grids
+   roms_tools.setup.nesting.make_edata
    roms_tools.tiling.partition.partition_netcdf
    roms_tools.tiling.join.join_netcdf
    roms_tools.plot.plot

@@ -4,6 +4,9 @@
 
 ### New Features
 
+* `From_yaml` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
+* `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
+* `ChildGrid` is deprecated and rather both a child and parent grid are created using `Grid` and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)). The following 2 features are still preserved in the 2 functions.
 * `ChildGrid` now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
 * Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
 * `ChildGrid` now infers open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
@@ -13,6 +16,9 @@
 
 ### Internal Changes
 
+* A function to create a dict from a `Grid` obj ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
+* A function to check if child wet points are outside the parent ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
+* `ChildGrid` tests were adapted to the new framework ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Regression tests for `ChildGrid` ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 * Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 * Enforce `int32` type on `ChildGrid` mask ([#559](https://github.com/CWorthy-ocean/roms-tools/pull/559))
@@ -20,6 +26,7 @@
 
 ### Documentation
 
+* Nesting notebook is updated to match refactoring of `ChildGrid` to `Grid` objects. ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Move "overview of ROMS-Tools functionality" section from paper to docs ([#554](https://github.com/CWorthy-ocean/roms-tools/pull/554))
 
 ### Bugfixes

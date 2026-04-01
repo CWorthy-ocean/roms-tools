@@ -11,6 +11,7 @@ from roms_tools.datasets.roms_dataset import ROMSDataset
 from roms_tools.plot import plot, plot_uptake_efficiency
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegrid
 from roms_tools.utils import (
+    dataset_using_dask,
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,
     rotate_velocities,

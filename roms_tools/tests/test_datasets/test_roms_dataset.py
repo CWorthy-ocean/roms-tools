@@ -741,3 +741,66 @@ def test_choose_subdomain_then_compute_depth_coordinates(use_dask):
     rd.choose_subdomain(target_coords, buffer_points=1)
 
     rd._get_depth_coordinates(locations=["rho", "u", "v"])
+
+
+def test_initial_slice_bounds_eta_xi_subset(use_dask):
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+    path = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    full = ROMSDataset(grid=grid, path=path, use_dask=use_dask)
+    sub = ROMSDataset(
+        grid=grid,
+        path=path,
+        use_dask=use_dask,
+        initial_slice_bounds={"eta_rho": (5, 15), "xi_rho": (7, 25)},
+    )
+    assert sub.ds.sizes["eta_rho"] == 11
+    assert sub.ds.sizes["xi_rho"] == 19
+    assert sub.ds.sizes["eta_rho"] < full.ds.sizes["eta_rho"]
+    assert sub.ds.sizes["xi_rho"] < full.ds.sizes["xi_rho"]
+
+
+def test_initial_slice_bounds_lat_lon_matches_grid_index_bounds(use_dask):
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+    path = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    lat = grid.ds.lat_rho.values
+    lon = grid.ds.lon_rho.values
+    lat_lo, lat_hi = float(np.quantile(lat, 0.15)), float(np.quantile(lat, 0.85))
+    lon_lo, lon_hi = float(np.quantile(lon, 0.15)), float(np.quantile(lon, 0.85))
+    idx = grid.rho_index_bounds_from_latlon_bounds(
+        {"latitude": (lat_lo, lat_hi), "longitude": (lon_lo, lon_hi)}
+    )
+    geo = ROMSDataset(
+        grid=grid,
+        path=path,
+        use_dask=use_dask,
+        initial_slice_bounds={
+            "latitude": (lat_lo, lat_hi),
+            "longitude": (lon_lo, lon_hi),
+        },
+    )
+    n_eta = idx["eta_rho"][1] - idx["eta_rho"][0] + 1
+    n_xi = idx["xi_rho"][1] - idx["xi_rho"][0] + 1
+    assert geo.ds.sizes["eta_rho"] == n_eta
+    assert geo.ds.sizes["xi_rho"] == n_xi
+
+
+def test_initial_slice_bounds_invalid_keys():
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid.from_file(fname_grid)
+    path = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
+    with pytest.raises(ValueError, match="geographic keys"):
+        ROMSDataset(
+            grid=grid,
+            path=path,
+            use_dask=True,
+            initial_slice_bounds={"latitude": (0.0, 1.0)},
+        )
+    with pytest.raises(ValueError, match="rho index dimension"):
+        ROMSDataset(
+            grid=grid,
+            path=path,
+            use_dask=True,
+            initial_slice_bounds={"ocean_time": (0, 1)},
+        )

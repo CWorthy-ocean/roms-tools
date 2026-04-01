@@ -101,6 +101,13 @@ class SurfaceForcing:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading data via dask. One form is supported
+        for initial conditions, geographic bounds:
+
+        - Geographic bounds: ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}``
+          in degrees. 
+
 
     Examples
     --------
@@ -137,6 +144,8 @@ class SurfaceForcing:
     """Whether to use dask for processing."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -321,6 +330,7 @@ class SurfaceForcing:
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
             "use_dask": self.use_dask,
+            "initial_slice_bounds": self.initial_slice_bounds,
         }
 
         if self.type == "physics":

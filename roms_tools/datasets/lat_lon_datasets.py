@@ -146,6 +146,8 @@ class LatLonDataset:
     chunks: dict[str, int] | None = None
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
+    initial_slice_bounds: dict[str, tuple[int, int]] | None = None
+    """Optional initial bounding slice of the dataset to load, which can make the loading faster."""
 
     def __post_init__(self) -> None:
         """Perform post-initialization processing.
@@ -211,6 +213,7 @@ class LatLonDataset:
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
+            initial_slice_bounds=self.initial_slice_bounds,
         )
 
         return ds

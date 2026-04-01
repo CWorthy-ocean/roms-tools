@@ -4,10 +4,11 @@ import logging
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 import xarray as xr
+from scipy.spatial import cKDTree
 import yaml
 from matplotlib.axes import Axes
 
@@ -26,9 +27,25 @@ from roms_tools.setup.utils import (
 from roms_tools.utils import (
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
+    normalize_longitude,
     save_datasets,
 )
 from roms_tools.vertical_coordinate import compute_depth_coordinates, sigma_stretch
+
+
+class RhoIndexBounds(TypedDict):
+    """Index ranges along ROMS rho dimensions."""
+
+    eta_rho: tuple[int, int]
+    xi_rho: tuple[int, int]
+
+
+def _lon_array_for_bounds(lon: np.ndarray, straddle: bool) -> np.ndarray:
+    """Put longitudes in the same convention as :func:`normalize_longitude`."""
+    lon = np.asarray(lon, dtype=np.float64) % 360.0
+    if straddle:
+        return np.where(lon > 180.0, lon - 360.0, lon)
+    return lon
 
 
 @dataclass(kw_only=True)
@@ -157,6 +174,8 @@ class Grid:
             hc=self.hc,
             verbose=self.verbose,
         )
+
+        self._clear_rho_ckdtree_cache()
 
     def _input_checks(self):
         if self.topography_source is None:
@@ -813,6 +832,8 @@ class Grid:
 
         grid.mask_shapefile = mask_shapefile
 
+        grid._clear_rho_ckdtree_cache()
+
         return grid
 
     def to_yaml(self, filepath: str | Path) -> None:
@@ -1269,6 +1290,148 @@ class Grid:
 
         return z_centers, z_faces
 
+    def _clear_rho_ckdtree_cache(self) -> None:
+        self._rho_ckdtree = None
+        self._rho_ckdtree_shape: tuple[int, int] | None = None
+
+    def build_rho_ckdtree(self, *, rebuild: bool = False) -> None:
+        """Build and cache a :class:`scipy.spatial.cKDTree` over rho-point geometry.
+
+        Tree points are unit-sphere Cartesian coordinates derived from ``lat_rho`` and
+        ``lon_rho``, so nearest-neighbor queries follow great-circle distance on the
+        sphere. Indices map to ``eta_rho`` (row) and ``xi_rho`` (column) in row-major
+        (C) order.
+
+        Parameters
+        ----------
+        rebuild : bool, optional
+            If True, replace an existing cached tree. Default False.
+        """
+        if getattr(self, "_rho_ckdtree", None) is not None and not rebuild:
+            return
+
+        lat = np.asarray(self.ds["lat_rho"].values, dtype=np.float64)
+        lon = np.asarray(self.ds["lon_rho"].values, dtype=np.float64)
+        if lat.ndim != 2 or lon.shape != lat.shape:
+            raise ValueError("`lat_rho` and `lon_rho` must be 2D arrays of equal shape.")
+        ny, nx = lat.shape
+        lat_r = np.deg2rad(lat.ravel())
+        lon_r = np.deg2rad(lon.ravel())
+        x = np.cos(lat_r) * np.cos(lon_r)
+        y = np.cos(lat_r) * np.sin(lon_r)
+        z = np.sin(lat_r)
+        pts = np.column_stack([x, y, z])
+        self._rho_ckdtree = cKDTree(pts)
+        self._rho_ckdtree_shape = (ny, nx)
+
+    def nearest_rho_indices(
+        self,
+        lat: float | np.ndarray,
+        lon: float | np.ndarray,
+    ) -> tuple[int, int] | tuple[np.ndarray, np.ndarray]:
+        """Return ``(eta_rho, xi_rho)`` indices of the nearest rho point to each query.
+
+        Uses the cached tree from :meth:`build_rho_ckdtree`.
+
+        Parameters
+        ----------
+        lat : float or array-like
+            Latitude in degrees north.
+        lon : float or array-like
+            Longitude in degrees (any convention; spherical position uses standard
+            radian mapping from latitude and longitude).
+
+        Returns
+        -------
+        tuple
+            Scalar query: ``(eta_rho, xi_rho)`` as ints. Array query: two arrays of
+            indices with the broadcast shape of ``lat`` and ``lon``.
+        """
+        self.build_rho_ckdtree()
+        assert self._rho_ckdtree is not None and self._rho_ckdtree_shape is not None
+        ny, nx = self._rho_ckdtree_shape
+
+        lat_a = np.asarray(lat, dtype=np.float64)
+        lon_a = np.asarray(lon, dtype=np.float64)
+        if lat_a.shape != lon_a.shape:
+            raise ValueError("`lat` and `lon` must have the same shape.")
+        scalar = lat_a.ndim == 0
+        lat_r = np.deg2rad(lat_a.ravel())
+        lon_r = np.deg2rad(lon_a.ravel())
+        qx = np.cos(lat_r) * np.cos(lon_r)
+        qy = np.cos(lat_r) * np.sin(lon_r)
+        qz = np.sin(lat_r)
+        qpts = np.column_stack([qx, qy, qz])
+        _, idx = self._rho_ckdtree.query(qpts)
+        eta = (idx // nx).reshape(lat_a.shape)
+        xi = (idx % nx).reshape(lat_a.shape)
+        if scalar:
+            return int(eta), int(xi)
+        return eta, xi
+
+    def rho_index_bounds_from_latlon_bounds(
+        self,
+        bounds: dict[str, tuple[float, float]],
+    ) -> RhoIndexBounds:
+        """Map a geographic rectangle to index bounds on ``eta_rho`` and ``xi_rho``.
+
+        A rho point is included if its latitude lies in the latitude interval and its
+        longitude lies in the longitude interval. Longitudes are compared after
+        normalizing to the same convention as :func:`~roms_tools.utils.normalize_longitude`
+        for this grid's :attr:`straddle` flag. If ``min_longitude > max_longitude``, the
+        interval is treated as crossing the dateline (union of
+        ``[min, 180]`` and ``[-180, max]`` in straddle convention).
+
+        Parameters
+        ----------
+        bounds : dict
+            Must contain keys ``"latitude"`` and ``"longitude"``, each a
+            ``(min, max)`` pair in degrees.
+
+        Returns
+        -------
+        dict
+            ``{"eta_rho": (i0, i1), "xi_rho": (j0, j1)}`` inclusive index ranges covering
+            all rho points inside the geographic box.
+
+        Raises
+        ------
+        ValueError
+            If no rho point lies inside the bounds.
+        """
+        if "latitude" not in bounds or "longitude" not in bounds:
+            raise ValueError(
+                'bounds must include "latitude" and "longitude" keys, each (min, max) in degrees.'
+            )
+        min_lat, max_lat = bounds["latitude"]
+        min_lon, max_lon = bounds["longitude"]
+        if min_lat > max_lat:
+            min_lat, max_lat = max_lat, min_lat
+
+        lat = np.asarray(self.ds["lat_rho"].values, dtype=np.float64)
+        lon = np.asarray(self.ds["lon_rho"].values, dtype=np.float64)
+        lat_ok = (lat >= min_lat) & (lat <= max_lat)
+
+        lon_cmp = _lon_array_for_bounds(lon, self.straddle)
+        min_lon_n = normalize_longitude(float(min_lon), self.straddle)
+        max_lon_n = normalize_longitude(float(max_lon), self.straddle)
+
+        if min_lon_n <= max_lon_n:
+            lon_ok = (lon_cmp >= min_lon_n) & (lon_cmp <= max_lon_n)
+        else:
+            lon_ok = (lon_cmp >= min_lon_n) | (lon_cmp <= max_lon_n)
+
+        inside = lat_ok & lon_ok
+        if not np.any(inside):
+            raise ValueError(
+                "No rho points fall inside the given latitude/longitude bounds."
+            )
+        eta_idx, xi_idx = np.where(inside)
+        return {
+            "eta_rho": (int(eta_idx.min()), int(eta_idx.max())),
+            "xi_rho": (int(xi_idx.min()), int(xi_idx.max())),
+        }
+
     def copy_with_ds(self, ds: xr.Dataset) -> "Grid":
         """
         Return a copy of this Grid with the given Dataset.
@@ -1278,6 +1441,7 @@ class Grid:
         """
         new = copy.copy(self)  # shallow copy of metadata
         new.ds = ds
+        new._clear_rho_ckdtree_cache()
         return new
 
 

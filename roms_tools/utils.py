@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
 from typing import TypeAlias
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -217,6 +218,57 @@ def get_dask_chunks(
     return chunks
 
 
+class DaskInitalSliceLoader:
+    def __init__(self,     
+        filenames: list[str],
+        decode_times: bool = True,
+        decode_timedelta: bool = True,
+        chunks: dict[str, int] | None = None,
+        initial_slice_bounds: dict[str, tuple[int, int]] | None = None,
+        kwargs: dict[str, str] | None = None,
+    ):
+        """
+        slice_config: dict of {'dim_name': (min, max)}
+        e.g., {'eta_rho': (100, 200), 'xi_rho': (150, 250)}
+        """
+        # 1. Convert your (min, max) tuples into slice objects
+        self.selectors = {
+            dim: slice(bounds[0], bounds[1]) 
+            for dim, bounds in (initial_slice_bounds or {}).items()
+        }
+        
+        # 2. Use partial to "pre-load" the selectors into our method
+        # This creates a function that only takes 'ds' as an argument
+        prep_func = partial(self._apply_slices, selectors=self.selectors)
+        
+        # 3. Open the dataset
+        self.ds = xr.open_mfdataset(
+            filenames,
+            decode_times=decode_times,
+            decode_timedelta=decode_timedelta,
+            chunks=chunks,
+            preprocess=prep_func,
+            #engine='netcdf4'  # Ensures we use the C-library for the strided read, maybe not needed
+            **kwargs,
+        )
+
+    @staticmethod
+    def _apply_slices(ds, selectors):
+        """
+        The method passed to 'preprocess'.
+        It checks which dimensions exist in the current file before slicing.
+        """
+        # Intersection: only use keys that exist in the current file's dimensions
+        # This prevents 'KeyError' if some files have different dim names
+        active_selectors = {k: v for k, v in selectors.items() if k in ds.dims}
+        
+        if active_selectors:
+            # The ** operator unpacks the dict into keyword arguments for .sel()
+            return ds.sel(**active_selectors)
+        
+        return ds
+
+
 def _load_data_dask(
     filenames: list[str],
     dim_names: dict[str, str],
@@ -226,6 +278,7 @@ def _load_data_dask(
     read_zarr: bool = True,
     load_kwargs: dict[str, str] | None = None,
     chunks: dict[str, int] | None = None,
+    initial_slice_bounds: dict[str, tuple[int, int]] | None = None,
 ) -> xr.Dataset:
     """Load dataset from the specified file using Dask.
 
@@ -290,13 +343,23 @@ def _load_data_dask(
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
-        return xr.open_mfdataset(
-            filenames,
-            decode_times=decode_times,
-            decode_timedelta=decode_timedelta,
-            chunks=chunks,
-            **kwargs,
-        )
+        if initial_slice_bounds is not None:
+            return DaskInitalSliceLoader(
+                filenames,
+                decode_times=decode_times,
+                decode_timedelta=decode_timedelta,
+                chunks=chunks,
+                initial_slice_bounds=initial_slice_bounds,
+                kwargs=kwargs,
+            ).ds
+        else:
+            return xr.open_mfdataset(
+                filenames,
+                decode_times=decode_times,
+                decode_timedelta=decode_timedelta,
+                chunks=chunks,
+                **kwargs,
+            )
 
 
 def _check_load_data_dask(use_dask: bool) -> None:
@@ -396,6 +459,7 @@ def load_data(
     read_zarr: bool = False,
     ds_loader_fn: Callable[[], xr.Dataset] | None = None,
     chunks: dict[str, int] | None = None,
+    initial_slice_bounds: dict[str, tuple[int, int]] | None = None,
 ):
     """Load dataset from the specified file.
 
@@ -473,6 +537,7 @@ def load_data(
             read_zarr,
             load_kwargs,
             chunks,
+            initial_slice_bounds
         )
     else:
         ds_list = []

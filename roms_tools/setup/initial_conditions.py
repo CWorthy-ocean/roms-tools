@@ -101,6 +101,23 @@ class InitialConditions:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading. Two forms are supported:
+
+        - Index bounds on rho dimensions: keys are the dataset dimension names for rho
+          points (usually ``"eta_rho"`` and ``"xi_rho"``, i.e. ``dim_names`` values),
+          values are inclusive ``(min_index, max_index)`` tuples.
+
+        - Geographic bounds: ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}``
+          in degrees. Indices are computed with
+          :meth:`~roms_tools.setup.grid.Grid.rho_index_bounds_from_latlon_bounds` on
+          ``self.grid`` and then passed as rho index bounds above.
+
+        Subsetting requires rho dimensions to use index-like coordinates so that
+        :meth:`xarray.Dataset.sel` can select along ``eta_rho`` / ``xi_rho`` (typical ROMS
+        NetCDF output). When ``initial_slice_bounds`` is set, the loaded dataset may be
+        smaller than ``grid.ds`` along rho horizontal dimensions; the grid object is
+        unchanged.
 
     Examples
     --------
@@ -145,6 +162,9 @@ class InitialConditions:
     """Whether to use dask for processing."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    """Optional initial bounding slice when loading source data (Dask). For ROMS sources,
+    may be rho index bounds or ``latitude`` / ``longitude`` pairs (see :class:`~roms_tools.datasets.roms_dataset.ROMSDataset`)."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -524,6 +544,7 @@ class InitialConditions:
                 allow_flex_time=self.allow_flex_time,
                 adjust_depth_for_sea_surface_height=True,
                 use_dask=self.use_dask,
+                initial_slice_bounds=self.initial_slice_bounds,
             )
 
         else:
@@ -539,6 +560,7 @@ class InitialConditions:
                 allow_flex_time=self.allow_flex_time,
                 use_dask=self.use_dask,
                 chunks=chunks,
+                initial_slice_bounds=self.initial_slice_bounds,
             )
 
         return data

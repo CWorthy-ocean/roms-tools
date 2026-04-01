@@ -455,6 +455,58 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
         )
 
 
+def test_initial_slice_bounds_lat_lon_subset(global_dataset, tmp_path, use_dask):
+    filepath = tmp_path / "test_initial_slice.nc"
+    global_dataset.to_netcdf(filepath)
+
+    full = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+    )
+    sub = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+        initial_slice_bounds={
+            "latitude": (-10, 10),
+            "longitude": (30, 40),
+        },
+    )
+
+    if use_dask:
+        assert sub.ds.sizes["latitude"] == 21
+        assert sub.ds.sizes["longitude"] == 11
+        assert sub.ds.sizes["latitude"] < full.ds.sizes["latitude"]
+        assert sub.ds.sizes["longitude"] < full.ds.sizes["longitude"]
+    else:
+        # load_data applies initial_slice_bounds only in the dask open_mfdataset path.
+        assert sub.ds.sizes["latitude"] == full.ds.sizes["latitude"]
+        assert sub.ds.sizes["longitude"] == full.ds.sizes["longitude"]
+
+
+def test_initial_slice_bounds_invalid_keys_are_ignored(global_dataset, tmp_path, use_dask):
+    filepath = tmp_path / "test_initial_slice_invalid.nc"
+    global_dataset.to_netcdf(filepath)
+
+    full = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+    )
+    out = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+        initial_slice_bounds={
+            "not_a_dim": (0, 10),
+        },
+    )
+
+    assert out.ds.sizes["latitude"] == full.ds.sizes["latitude"]
+    assert out.ds.sizes["longitude"] == full.ds.sizes["longitude"]
+
+
 def test_era5_correction_match_subdomain(use_dask):
     data = ERA5Correction(use_dask=use_dask)
     lats = data.ds.latitude[10:20]

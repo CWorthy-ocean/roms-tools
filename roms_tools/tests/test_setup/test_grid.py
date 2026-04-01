@@ -19,6 +19,7 @@ from roms_tools.constants import (
     UPPER_BOUND_THETA_S,
 )
 from roms_tools.datasets.download import download_test_data
+from roms_tools.setup.mask import _close_narrow_channels
 from roms_tools.setup.topography import _compute_rfactor
 
 try:
@@ -223,6 +224,7 @@ def test_coords_relation(grid_fixture, request):
         "grid_that_straddles_180_degree_meridian_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_successful_initialization_with_topography(grid_fixture, request):
@@ -365,6 +367,7 @@ def test_grid_straddle_crosses_meridian():
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
@@ -401,6 +404,7 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_roundtrip_yaml(grid_fixture, tmp_path, request):
@@ -434,6 +438,7 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
@@ -465,6 +470,7 @@ def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
         "grid_that_straddles_dateline_with_global_srtm15_data",
         "grid_with_gshhs_coastlines",
         "grid_with_emod_data",
+        "grid_with_closed_channels",
     ],
 )
 def test_files_have_same_hash(grid_fixture, tmp_path, request):
@@ -824,6 +830,95 @@ def test_update_mask():
     assert abs(mask_new - mask_orig).max() == 1, (
         "Mask should change after update_mask()"
     )
+
+
+def test_close_narrow_channels():
+    """Test that close_narrow_channels closes 1-pixel wide water channels.
+
+    Creates a mask with a vertical line of ocean, a small lake connected by a narrow
+    channel.
+    All narrow channels should be closed by the algorithm.
+
+    """
+    # Create a small grid with close_narrow_channels=False to avoid closing during init
+    grid = Grid(
+        nx=15,
+        ny=15,
+        size_x=100,
+        size_y=100,
+        center_lon=-20,
+        center_lat=64,
+        rot=0,
+        N=3,
+        close_narrow_channels=False,
+    )
+
+    mask_shape = grid.ds["mask_rho"].shape
+    mask = np.zeros(mask_shape, dtype=np.int32)
+
+    # Create test mask: vertical ocean line, lower half ocean, small lake with narrow channel
+    line_xi = 8
+    mask[5:11, line_xi] = 1
+    mask[mask_shape[0] // 2 :, :] = 1
+    mask[3:6, 4:7] = 1  # Small lake
+    mask[4, 6:8] = 1  # Narrow channel connecting lake to ocean
+
+    grid.ds["mask_rho"].values[:] = mask
+    mask_before = grid.ds.mask_rho.copy()
+
+    mask_after = _close_narrow_channels(
+        grid.ds["mask_rho"],
+        max_iterations=10,
+    )
+
+    assert mask_after[6, 7] == 0, "Narrow channel at [6, 7] should be closed"
+    assert mask_after[6, 9] == 0, "Narrow channel at [6, 9] should be closed"
+    assert mask_after[4, 7] == 0, "Lake channel at [4, 7] should be closed"
+    assert np.any(mask_before != mask_after), "Mask should have changed"
+    assert mask_after.any(), "Mask should not be all zeros"
+    assert "mask_u" in grid.ds.variables
+    assert "mask_v" in grid.ds.variables
+
+
+def _assert_closing_only(grid, grid_closed):
+    """Assert that closing narrow channels only removes points, never adds."""
+    assert grid_closed.ds.mask_rho.any(), "Mask should not be all zeros"
+    diff = grid.ds.mask_rho - grid_closed.ds.mask_rho
+    assert (diff >= 0).all(), "Filling should only close points, never open them"
+    assert (diff > 0).any(), "At least one point should have been closed"
+
+
+def test_close_narrow_channel_integration():
+    # Grid with ETOPO5 bathy
+    kwargs = {
+        "nx": 15,
+        "ny": 15,
+        "size_x": 100,
+        "size_y": 100,
+        "center_lon": -22,
+        "center_lat": 64,
+        "rot": 0,
+        "N": 3,
+    }
+    _assert_closing_only(Grid(**kwargs), Grid(**kwargs, close_narrow_channels=True))
+
+    # Grid with GSHHS bathy
+    kwargs = {
+        "nx": 80,
+        "ny": 40,
+        "size_x": 40,
+        "size_y": 20,
+        "center_lon": -21.76,
+        "center_lat": 64.325,
+        "rot": 0,
+        "N": 3,
+    }
+    for ext in ["dbf", "prj", "shx"]:
+        download_test_data(f"GSHHS_l_L1.{ext}")
+    shapefile = download_test_data("GSHHS_l_L1.shp")
+
+    kwargs["mask_shapefile"] = shapefile
+    _assert_closing_only(Grid(**kwargs), Grid(**kwargs, close_narrow_channels=True))
 
 
 # Boundary tests

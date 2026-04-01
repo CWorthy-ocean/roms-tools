@@ -874,15 +874,8 @@ class Grid:
 
         return grid
 
-    def to_yaml(self, filepath: str | Path) -> None:
-        """Export the parameters of the class to a YAML file, including the version of
-        roms-tools.
-
-        Parameters
-        ----------
-        filepath : Union[str, Path]
-            The path to the YAML file where the parameters will be saved.
-        """
+    def grid_to_dict(self) -> dict:
+        """Put all grid parameters into a dictionary."""
         data = asdict(self)
         data = pop_grid_data(data)
 
@@ -894,6 +887,22 @@ class Grid:
             data = {"filename": os.path.abspath(data["filename"])}
         elif "filename" in data:
             del data["filename"]
+
+        return data
+
+    def to_yaml(self, filepath: str | Path) -> None:
+        """Export the parameters of the class to a YAML file, including the version of
+        roms-tools.
+
+        Parameters
+        ----------
+        filepath : Union[str, Path]
+            The path to the YAML file where the parameters will be saved.
+        """
+        data = self.grid_to_dict()
+
+        if "parent_info" in self.__dict__:
+            data["parent_info"] = self.__dict__["parent_info"]
 
         forcing_dict = {self.__class__.__name__: data}
 
@@ -973,6 +982,18 @@ class Grid:
 
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
+
+        if "parent_info" in grid_data:
+            from roms_tools.setup.nesting import align_grids
+
+            parent_grid = cls(**grid_data.pop("parent_info"), verbose=verbose)
+            child_grid = cls(**grid_data, verbose=verbose)
+
+            logging.disable()
+            child_grid = align_grids(parent_grid, child_grid, verbose=False)
+            logging.disable(logging.NOTSET)
+
+            return child_grid
 
         return cls(**grid_data, verbose=verbose)
 

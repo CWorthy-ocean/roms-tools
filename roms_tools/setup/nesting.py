@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import griddata, interp1d
 
-from roms_tools import Grid
+from roms_tools.setup.grid import Grid
 from roms_tools.setup.topography import clip_depth
 from roms_tools.setup.utils import (
     Timed,
@@ -108,8 +108,7 @@ def align_grids(
         """
         bdry_coords_dict = get_boundary_coords()
 
-        # TODO this needs to be rethought. longitudinal wrapping is done when both the
-        # parent and child cross the prime meridian
+        # Longitudinal wrapping is done when both the parent and child cross the prime meridian
         _straddle = ast.literal_eval(parent_grid_ds.straddle) and ast.literal_eval(
             child_grid_ds.straddle
         )
@@ -161,30 +160,19 @@ def align_grids(
                         (lon_parent.values.ravel(), lat_parent.values.ravel())
                     )
                     i_parent_flat = i_parent.ravel()
-                    j_parent_flat = j_parent.ravel()
 
-                    # Interpolate the i and j indices
+                    # Interpolate the i indices (both i,j should return the same)
                     i = griddata(
                         points,
                         i_parent_flat,
                         (lon_child.values, lat_child.values),
                         method="linear",
                     )
-                    j = griddata(
-                        points,
-                        j_parent_flat,
-                        (lon_child.values, lat_child.values),
-                        method="linear",
-                    )
 
                     i = xr.DataArray(i, dims=lon_child.dims)
-                    j = xr.DataArray(j, dims=lon_child.dims)
 
                     # Check whether ocean child points fall outside the parent grid
-                    if (
-                        i.where(mask_child, other=0.0).isnull().any()
-                        or j.where(mask_child, other=0.0).isnull().any()
-                    ):
+                    if i.where(mask_child, other=0.0).isnull().any():
                         raise ValueError(
                             f"Some wet points on the {direction}ern boundary of the child grid lie "
                             "outside the parent grid. Please use a larger parent grid or a smaller child grid."
@@ -272,12 +260,6 @@ def align_grids(
 
         return child_grid
 
-    ## NOTE: update_mask was originally called before _map_child_boundaries_onto_parent_grid_indices and
-    # then modify_child_mask, if not called in that order, a check is need for boundaries. see git issue.
-
-    ## NOTE: modify_child_topography and _mask were originally nested under the childGrid version of
-    # update_topography and update_mask, which called the Grid method and then the child method
-
     boundaries = check_and_set_boundaries(boundaries, child_grid.ds.mask_rho)
 
     _check_child_outside_parent(parent_grid.ds, child_grid.ds, boundaries)
@@ -295,6 +277,8 @@ def align_grids(
     child_grid = _modify_child_topography(
         parent_grid, child_grid, boundaries, child_grid.hmin, verbose=verbose
     )
+
+    child_grid.parent_info = parent_grid.grid_to_dict()
 
     return child_grid
 

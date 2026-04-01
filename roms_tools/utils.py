@@ -1156,11 +1156,6 @@ def wrap_longitudes(ds: xr.Dataset, straddle: bool) -> xr.Dataset:
         A new dataset with adjusted longitude coordinates.
     """
     lon_coords = ["lon_rho", "lon_u", "lon_v"]
-    ds_coords = {
-        name: coord.copy()
-        for name, coord in ds.coords.items()
-        if name not in lon_coords
-    }
 
     for lon_name in lon_coords:
         if lon_name not in ds.coords:
@@ -1180,8 +1175,6 @@ def wrap_longitudes(ds: xr.Dataset, straddle: bool) -> xr.Dataset:
 
         # reassign explicitly as a coordinate
         ds = ds.assign_coords({lon_name: lon_wrapped})
-
-    ds = ds.assign_coords(ds_coords)
 
     return ds
 

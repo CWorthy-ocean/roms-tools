@@ -108,10 +108,8 @@ def align_grids(
         """
         bdry_coords_dict = get_boundary_coords()
 
-        # Longitudinal wrapping is done when both the parent and child cross the prime meridian
-        _straddle = ast.literal_eval(parent_grid_ds.straddle) and ast.literal_eval(
-            child_grid_ds.straddle
-        )
+        # Longitudinal wrapping is done if the parent crosses the prime meridian
+        _straddle = ast.literal_eval(parent_grid_ds.straddle)
 
         if _straddle:
             parent_grid_ds = wrap_longitudes(parent_grid_ds, straddle=True)

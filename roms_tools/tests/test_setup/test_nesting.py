@@ -599,32 +599,21 @@ class TestNesting:
             filepath.unlink()
 
     ### NEED TO FINISH BUT TO_YAML FROM_YAML DOESN'T WORK FOR CHILD GRIDS (altered boundaries)
-    ### also need to decide if we have a function to read nesting data (only writes right now)
     def test_files_have_same_hash(self, child_grid_with_bgc, tmp_path):
         yaml_filepath = tmp_path / "test_yaml.yaml"
-        # filepath1 = tmp_path / "test1.nc"
-        # filepath2 = tmp_path / "test2.nc"
         grid_filepath1 = tmp_path / "grid_test1.nc"
         grid_filepath2 = tmp_path / "grid_test2.nc"
 
         child_grid_with_bgc.to_yaml(yaml_filepath)
         child_grid_with_bgc.save(grid_filepath1)
-        # child_grid_with_bgc.save_nesting(filepath1)
 
         child_grid_from_file = Grid.from_yaml(yaml_filepath)
         child_grid_from_file.save(grid_filepath2)
-        # child_grid_from_file.save_nesting(filepath2)
-
-        # hash1 = calculate_file_hash(filepath1)
-        # hash2 = calculate_file_hash(filepath2)
-        # assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 
         hash1 = calculate_file_hash(grid_filepath1)
         hash2 = calculate_file_hash(grid_filepath2)
         assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 
         yaml_filepath.unlink()
-        # filepath1.unlink()
-        # filepath2.unlink()
         grid_filepath1.unlink()
         grid_filepath2.unlink()

@@ -98,7 +98,7 @@ def add_mask(
         )
         if verbose:
             logging.info(
-                "Closing narrow channels: {time.time() - start_time:.3f} seconds"
+                f"Closing narrow channels: {time.time() - start_time:.3f} seconds"
             )
     ds.attrs["close_narrow_channels"] = str(close_narrow_channels)
 
@@ -108,7 +108,7 @@ def add_mask(
     mask = _fill_enclosed_basins(mask.values)
     if verbose:
         logging.info(
-            "Filling enclosed basins with land: {time.time() - start_time:.3f} seconds"
+            f"Filling enclosed basins with land: {time.time() - start_time:.3f} seconds"
         )
 
     # adjust mask boundaries by copying values from adjacent cells

@@ -60,14 +60,6 @@ CDR Forcing
    roms_tools.TracerPerturbation
    roms_tools.CDRForcing
 
-Nesting
---------------------
-
-.. autosummary::
-   :toctree: generated/
-
-   roms_tools.ChildGrid
-
 Analyzing ROMS output
 ----------------------
 
@@ -85,6 +77,8 @@ Utilities
 .. autosummary::
    :toctree: generated/
 
+   roms_tools.nesting.align_grids
+   roms_tools.nesting.make_edata
    roms_tools.tiling.partition.partition_netcdf
    roms_tools.tiling.join.join_netcdf
    roms_tools.plot.plot

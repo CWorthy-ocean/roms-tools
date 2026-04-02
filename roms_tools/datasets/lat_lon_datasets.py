@@ -36,6 +36,7 @@ from roms_tools.setup.utils import (
     get_target_coords,
 )
 from roms_tools.utils import (
+    dataset_using_dask,
     get_dask_chunks,
     get_pkg_error_msg,
     has_gcsfs,
@@ -101,6 +102,10 @@ class LatLonDataset:
         Only used when `end_time` is None. Has no effect otherwise.
     apply_post_processing: bool
         Indicates whether to post-process the dataset for futher use. Defaults to True.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None.
 
     Attributes
     ----------
@@ -138,6 +143,7 @@ class LatLonDataset:
     apply_post_processing: bool = True
 
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
+    chunks: dict[str, int] | None = None
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -204,6 +210,7 @@ class LatLonDataset:
             use_dask=self.use_dask,
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
+            chunks=self.chunks,
         )
 
         return ds
@@ -542,6 +549,7 @@ class LatLonDataset:
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
+        reset_chunking: bool = False,
     ) -> xr.Dataset | LatLonDataset | None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -565,6 +573,9 @@ class LatLonDataset:
         verbose : bool, optional
             If True, print message if dataset is concatenated along longitude dimension.
             Defaults to False.
+        reset_chunking : bool
+            Optionally set the dask chunking of the dataset to tell dask that full (non-time)
+            dimensions are required for subsequent operations. Defaults to False.
 
         Returns
         -------
@@ -587,6 +598,7 @@ class LatLonDataset:
             target_coords=target_coords,
             buffer_points=buffer_points,
             use_dask=self.use_dask,
+            reset_chunking=reset_chunking,
         )
 
         if return_coords_only:
@@ -2356,6 +2368,7 @@ def choose_subdomain(
     target_coords: Mapping[str, Any],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
     use_dask: bool = False,
+    reset_chunking: bool = False,
 ) -> xr.Dataset:
     """
     Select a subdomain from an xarray Dataset based on target coordinates,
@@ -2379,7 +2392,9 @@ def choose_subdomain(
         Number of grid points to extend beyond the target coordinates.
     use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is processed eagerly. Defaults to False.
-
+    reset_chunking : bool
+            Optionally set the dask chunking of the dataset to tell dask that full (non-time)
+            dimensions are required for subsequent operations. Defaults to False.
     Returns
     -------
     xr.Dataset
@@ -2482,6 +2497,15 @@ def choose_subdomain(
         subdomain[dim_names["longitude"]] = xr.where(lon > 180, lon - 360, lon)
     else:
         subdomain[dim_names["longitude"]] = xr.where(lon < 0, lon + 360, lon)
+
+    # if subsequent operations require this entire chunk, and dask if currently used,
+    # reset the chunking to load the rest of the dataset
+    if reset_chunking and dataset_using_dask(subdomain):
+        chunks = get_dask_chunks(
+            dict(dim_names), time_chunking=False
+        )  # ensure possible Mapping is converted to dict
+        chunks_ds = {dim: size for dim, size in chunks.items() if dim in subdomain.dims}
+        subdomain = subdomain.chunk(chunks_ds)
 
     return subdomain
 

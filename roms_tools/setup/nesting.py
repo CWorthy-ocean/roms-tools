@@ -268,6 +268,9 @@ def align_grids(
         parent_grid, child_grid, boundaries, verbose=verbose
     )
 
+    # re-coarsen new mask
+    child_grid._coarsen()
+
     # Call Grid update_topography, then modify the child topography:
     child_grid.update_topography(
         topography_source=topography_source, hmin=child_grid.hmin, verbose=verbose

@@ -422,6 +422,9 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
 
         grid_from_file = Grid.from_yaml(filepath)
 
+        # null out filename for comparison
+        grid.filename = None
+
         assert grid == grid_from_file
         xr.testing.assert_equal(grid.ds, grid_from_file.ds)
 

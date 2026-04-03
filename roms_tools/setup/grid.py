@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 import xarray as xr
@@ -769,71 +769,38 @@ class Grid:
         # Manually set the remaining attributes by extracting parameters from dataset
         grid.nx = ds.sizes["xi_rho"] - 2
         grid.ny = ds.sizes["eta_rho"] - 2
-        if "center_lon" in ds.attrs:
-            center_lon = float(ds.attrs["center_lon"])
-        elif "tra_lon" in ds:
-            center_lon = float(extract_single_value(ds["tra_lon"]))
-        elif "title" in ds.attrs:
-            match = re.search(r"Lon:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
-            if match:
-                center_lon = float(match.group(1))
-            else:
-                raise ValueError(
-                    "Could not extract 'center_lon' from title attribute. "
-                    "Expected format: '... Lon: <value> ...'"
-                )
-        elif filename is not None:
-            center_lon = None
-        else:
-            raise ValueError(
-                "Missing grid information: 'center_lon' attribute, 'tra_lon' variable, or 'Lon:' in 'title' attribute "
-                "must be present in the dataset."
-            )
-        grid.center_lon = center_lon
 
-        if "center_lat" in ds.attrs:
-            center_lat = float(ds.attrs["center_lat"])
-        elif "tra_lat" in ds:
-            center_lat = float(extract_single_value(ds["tra_lat"]))
-        elif "title" in ds.attrs:
-            match = re.search(r"Lat:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
-            if match:
-                center_lat = float(match.group(1))
-            else:
-                raise ValueError(
-                    "Could not extract 'center_lat' from title attribute. "
-                    "Expected format: '... Lat: <value> ...'"
-                )
-        elif filename is not None:
-            center_lat = None
-        else:
-            raise ValueError(
-                "Missing grid information: 'center_lat' attribute, 'tra_lat' variable, or 'Lat:' in 'title' attribute "
-                "must be present in the dataset."
-            )
-        grid.center_lat = center_lat
+        _T = TypeVar("_T")
 
-        if "rot" in ds.attrs:
-            rot = float(ds.attrs["rot"])
-        elif "rotate" in ds:
-            rot = float(extract_single_value(ds["rotate"]))
-        elif "title" in ds.attrs:
-            match = re.search(r"rotate:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"])
-            if match:
-                rot = float(match.group(1))
-            else:
-                raise ValueError(
-                    "Could not extract 'rot' from title attribute. "
-                    "Expected format: '... rotate: <value> ...'"
+        def _get_value_from_file(
+            attr_name: str, var_name: str, title_key: str, default: _T
+        ) -> float | _T:
+            if attr_name in ds.attrs:
+                return float(ds.attrs[attr_name])
+            if var_name in ds:
+                return float(extract_single_value(ds[var_name]))
+            if "title" in ds.attrs:
+                match = re.search(
+                    rf"{title_key}:\s*(-?\d+(?:\.\d+)?)", ds.attrs["title"]
                 )
-        elif filename is not None:
-            rot = 0
-        else:
+                if match:
+                    return float(match.group(1))
+                else:
+                    raise ValueError(
+                        f"Could not extract '{attr_name}' from title attribute. "
+                        f"Expected format: '... {title_key} <value> ...'"
+                    )
+            if filename is not None:
+                return default
+
             raise ValueError(
-                "Missing grid information: 'rot' attribute, 'rotate' variable, or 'rotate:' in 'title' attribute "
-                "must be present in the dataset."
+                f"Missing grid information: '{attr_name}' attribute, '{var_name}' variable, or "
+                f"'{title_key}' in 'title' attribute must be present in the dataset."
             )
-        grid.rot = rot
+
+        grid.center_lon = _get_value_from_file("center_lon", "tra_lon", "Lon", None)
+        grid.center_lat = _get_value_from_file("center_lat", "tra_lat", "Lat", None)
+        grid.rot = _get_value_from_file("rot", "rotate", "rotate", 0)
 
         for attr in [
             "size_x",

@@ -59,7 +59,8 @@ notebooks = [
     "copernicusmarine",
     "gdown",
     "ipykernel",
-    "jupyter"
+    "jupyter",
+    "jupytext",
 ]
 
 [project.urls]

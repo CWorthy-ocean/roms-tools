@@ -129,15 +129,22 @@ class Grid:
     ROMS."""
     straddle: bool = field(init=False, repr=False)
     """Whether the grid straddles the dateline."""
-    _parent_info: dict[str, Any] = field(init=False, repr=False)
-    """Store information about a parent grid that this grid was aligned to (via align_grids) for future recreation."""
+    # parent_info: dict | None = field(default = None, init=False, repr=False)
 
     def __post_init__(self):
         if self.filename is not None:
+            conflicting_params = {
+                "nx",
+                "ny",
+                "size_x",
+                "size_y",
+                "center_lon",
+                "center_lat",
+            }
             # Check to confirm other parameters are not provided with filename
-            min_param = {"rot", "hmin", "verbose", "filename"}
             param_provided = [k for k, v in vars(self).items() if v is not None]
-            extra = set(param_provided) - min_param
+
+            extra = set(param_provided).intersection(conflicting_params)
             if extra:
                 raise ValueError(
                     f"Unexpected parameter included with `filename`: {extra}.\n"
@@ -191,6 +198,8 @@ class Grid:
                 hc=self.hc,
                 verbose=self.verbose,
             )
+
+            self.parent_info = None
 
     def _input_checks(self):
         for var in ("nx", "ny", "size_x", "size_y", "center_lon", "center_lat"):
@@ -944,10 +953,11 @@ class Grid:
         if grid_data is None:
             raise ValueError("No Grid configuration found in the YAML file.")
 
-        if "parent_info" in grid_data:
+        parent_info = grid_data.pop("parent_info", None)
+        if parent_info:
             from roms_tools.setup.nesting import align_grids
 
-            parent_grid = cls(**grid_data.pop("parent_info"), verbose=verbose)
+            parent_grid = cls(**parent_info, verbose=verbose)
             child_grid = cls(**grid_data, verbose=verbose)
 
             logging.disable()

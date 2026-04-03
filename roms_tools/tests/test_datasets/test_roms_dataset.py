@@ -21,7 +21,7 @@ except ImportError:
 @pytest.fixture
 def roms_dataset_from_restart_file(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Single file
     return ROMSDataset(
@@ -34,7 +34,7 @@ def roms_dataset_from_restart_file(use_dask):
 @pytest.fixture
 def roms_dataset_from_restart_file_adjusted_for_zeta(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Single file
     return ROMSDataset(
@@ -76,7 +76,7 @@ def test_load_model_output_file(roms_dataset_fixture, request):
 @pytest.fixture
 def roms_dataset_from_two_restart_files(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # List of files
     file1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
@@ -90,7 +90,7 @@ def test_load_model_output_file_list(roms_dataset_from_two_restart_files):
 
 def test_load_model_output_with_wildcard(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Download at least two files, so these will be found within the pooch directory
     Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
@@ -105,7 +105,7 @@ def test_load_model_output_with_wildcard(use_dask):
 
 def test_invalid_path(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Non-existent file
     with pytest.raises(FileNotFoundError):
@@ -137,7 +137,7 @@ def test_check_consistency_data_grid(use_dask):
 
 def test_set_correct_model_reference_date(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     output = ROMSDataset(
         grid=grid,
@@ -149,7 +149,7 @@ def test_set_correct_model_reference_date(use_dask):
 
 def test_model_reference_date_mismatch(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Create a ROMSDataset with a specified model_reference_date
     model_ref_date = datetime(2020, 1, 1)
@@ -198,7 +198,7 @@ def test_model_reference_date_no_metadata(use_dask, tmp_path, caplog):
 
     # Load grid and test data
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
     fname = download_test_data("eastpac25km_rst.19980106000000.nc")
 
     # Test 1: Ocean time attribute 'long_name' is missing
@@ -214,7 +214,7 @@ def test_model_reference_date_no_metadata(use_dask, tmp_path, caplog):
 
 def test_compute_depth_coordinates(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
 
     for adjust_depth_for_sea_surface_height in [True, False]:
@@ -241,7 +241,7 @@ def test_missing_zeta_gets_raised(use_dask):
     """
     # Load the grid
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Load the ROMS output
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
@@ -267,7 +267,7 @@ def test_missing_zeta_gets_raised(use_dask):
 
 def test_check_vertical_coordinate_mismatch(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     output = ROMSDataset(grid=grid, path=fname_restart1, use_dask=use_dask)
@@ -295,7 +295,7 @@ def test_check_vertical_coordinate_mismatch(use_dask):
 
 def test_that_coordinates_and_masks_are_added(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     fname_restart1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
     output = ROMSDataset(grid=grid, path=fname_restart1, use_dask=use_dask)
@@ -640,7 +640,7 @@ def test_choose_subdomain_with(big_params, small_params):
 
 def test_choose_subdomain_dataset_and_grid(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     roms_dataset = ROMSDataset(
         grid=grid,
@@ -690,7 +690,7 @@ def test_choose_subdomain_dataset_and_grid(use_dask):
 
 def test_choose_subdomain_does_not_mutate_shared_grid(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     rd1 = ROMSDataset(
         grid=grid,
@@ -720,7 +720,7 @@ def test_choose_subdomain_does_not_mutate_shared_grid(use_dask):
 
 def test_choose_subdomain_then_compute_depth_coordinates(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     rd = ROMSDataset(
         grid=grid,

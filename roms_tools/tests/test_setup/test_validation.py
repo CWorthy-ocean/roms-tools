@@ -91,7 +91,7 @@ def test_check_results(
     get_test_data_path: Callable[[str], Path],
 ) -> None:
     fname = get_test_data_path(forcing_fixture)
-    expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False)
+    expected_forcing_ds = xr.open_zarr(fname, decode_timedelta=False).compute()
     forcing = request.getfixturevalue(forcing_fixture)
 
     # Set small tolerance because some fields like NOx, NHy have values order 1e-12

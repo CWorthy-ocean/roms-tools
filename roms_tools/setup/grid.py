@@ -129,6 +129,8 @@ class Grid:
     ROMS."""
     straddle: bool = field(init=False, repr=False)
     """Whether the grid straddles the dateline."""
+    _parent_info: dict[str, Any] = field(init=False, repr=False)
+    """Store information about a parent grid that this grid was aligned to (via align_grids) for future recreation."""
 
     def __post_init__(self):
         if self.filename is not None:
@@ -443,10 +445,6 @@ class Grid:
         - `angle` -> `angle_coarse`: Angle between the xi axis and true east.
         - `mask_rho` -> `mask_coarse`: Land/sea mask at rho points.
         """
-        # todo check for these keys
-        # NOTE: THERE IS ALREADY A CHECK FOR ALL OR NONE TO DO COARSEN UNDER FROM_FILE
-        # THERE'S NO CHECK IN THE post_init, but presumably, we need the coarsening to happen then.
-        # i.e. this check may be unecessary unless we want individual checks:
         d = {
             "angle": "angle_coarse",
             "mask_rho": "mask_coarse",
@@ -454,12 +452,9 @@ class Grid:
             "lon_rho": "lon_coarse",
         }
 
-        # Only coarsen variables that have not yet been coarsened
-        vars_coarsen = [(k, v) for k, v in d.items() if v not in self.ds]
-
         ds = self.ds
 
-        for fine_var, coarse_var in vars_coarsen:
+        for fine_var, coarse_var in d.items():
             fine_field = ds[fine_var]
             if self.straddle and fine_var == "lon_rho":
                 fine_field = xr.where(fine_field > 180, fine_field - 360, fine_field)
@@ -478,7 +473,7 @@ class Grid:
 
         ds["mask_coarse"] = xr.where(ds["mask_coarse"] > 0.5, 1, 0).astype(np.int32)
 
-        for fine_var, coarse_var in vars_coarsen:
+        for fine_var, coarse_var in d.items():
             long_name = ds[fine_var].attrs.get(
                 "long_name", ds[fine_var].attrs.get("Long_name", "")
             )
@@ -641,7 +636,6 @@ class Grid:
         theta_b: float | None = None,
         hc: float | None = None,
         N: int | None = None,
-        verbose: bool = False,
         **kwargs,
     ) -> "Grid":
         """Create a Grid instance from an existing file.

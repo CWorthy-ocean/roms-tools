@@ -276,7 +276,7 @@ def align_grids(
         parent_grid, child_grid, boundaries, child_grid.hmin, verbose=verbose
     )
 
-    child_grid.parent_info = parent_grid.grid_to_dict()
+    child_grid._parent_info = parent_grid.grid_to_dict()
 
     return child_grid
 

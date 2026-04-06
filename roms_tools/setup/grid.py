@@ -960,10 +960,11 @@ class Grid:
             parent_grid = cls(**parent_info, verbose=verbose)
             child_grid = cls(**grid_data, verbose=verbose)
 
-            logging.disable()
+            logging.info("Recreating parent grid and aligning...")
+            logging.disable(logging.INFO)
             child_grid = align_grids(parent_grid, child_grid, verbose=False)
             logging.disable(logging.NOTSET)
-
+            logging.info("Grid alignment complete.")
             return child_grid
 
         return cls(**grid_data, verbose=verbose)

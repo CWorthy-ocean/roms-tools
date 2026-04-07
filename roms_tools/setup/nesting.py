@@ -161,43 +161,6 @@ def _apply_child_modification(
     return child_grid_ds
 
 
-def _modify_child_mask(
-    parent_grid: Grid,
-    child_grid: Grid,
-    boundaries: dict[str, bool],
-    verbose: bool = False,
-) -> "Grid":
-    """Adjust child grid mask to align with the parent grid."""
-    child_grid.ds = _apply_child_modification(
-        parent_grid,
-        child_grid,
-        modifier=lambda p, c: modify_child_mask(p, c, boundaries),  # type: ignore[arg-type]
-        modifier_name="mask",
-        verbose=verbose,
-    )
-
-    return child_grid
-
-
-def _modify_child_topography(
-    parent_grid: Grid,
-    child_grid: Grid,
-    boundaries: dict[str, bool],
-    hmin: float,
-    verbose: bool = False,
-) -> "Grid":
-    """Adjust child grid topography to align with the parent grid."""
-    child_grid.ds = _apply_child_modification(
-        parent_grid,
-        child_grid,
-        modifier=lambda p, c: modify_child_topography(p, c, boundaries, hmin),
-        modifier_name="topography",
-        verbose=verbose,
-    )
-
-    return child_grid
-
-
 def align_grids(
     parent_grid: Grid,
     child_grid: Grid,
@@ -264,8 +227,12 @@ def align_grids(
 
     # Call Grid update_mask, then modify the child mask:
     child_grid.update_mask(mask_shapefile=mask_shapefile, verbose=verbose)
-    child_grid = _modify_child_mask(
-        parent_grid, child_grid, boundaries, verbose=verbose
+    child_grid.ds = _apply_child_modification(
+        parent_grid,
+        child_grid,
+        modifier=lambda p, c: modify_child_mask(p, c, boundaries),  # type: ignore[arg-type]
+        modifier_name="mask",
+        verbose=verbose,
     )
 
     # re-coarsen new mask
@@ -277,8 +244,12 @@ def align_grids(
         hmin=hmin or child_grid.hmin,
         verbose=verbose,
     )
-    child_grid = _modify_child_topography(
-        parent_grid, child_grid, boundaries, hmin or child_grid.hmin, verbose=verbose
+    child_grid.ds = _apply_child_modification(
+        parent_grid,
+        child_grid,
+        modifier=lambda p, c: modify_child_topography(p, c, boundaries, hmin),
+        modifier_name="topography",
+        verbose=verbose,
     )
 
     child_grid.parent_info = parent_grid.grid_to_dict()

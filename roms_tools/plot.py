@@ -185,7 +185,7 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
 
     ax.legend(loc="best")
 
-    plt.show()
+    return fig
 
 
 def section_plot(

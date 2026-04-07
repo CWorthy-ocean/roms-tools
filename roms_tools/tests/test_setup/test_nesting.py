@@ -46,7 +46,14 @@ def big_grid_that_straddles():
 @pytest.fixture()
 def big_grid_that_wraps():
     return Grid(
-        nx=5, ny=7, center_lon=10, center_lat=61, rot=20, size_x=18000, size_y=2400
+        nx=5, ny=7, center_lon=0, center_lat=61, rot=20, size_x=18000, size_y=2400
+    )
+
+
+@pytest.fixture()
+def big_grid_that_wraps_other_side():
+    return Grid(
+        nx=5, ny=7, center_lon=180, center_lat=61, rot=20, size_x=18000, size_y=2400
     )
 
 
@@ -104,7 +111,7 @@ def child_grid_that_straddles_big_wrap_grid(big_grid_that_wraps):
 
 
 @pytest.fixture()
-def child_grid_that_straddles_other_side_big_wrap_grid(big_grid_that_wraps):
+def child_grid_that_straddles_other_side_big_wrap_grid(big_grid_that_wraps_other_side):
     child_grid = Grid(
         nx=10,
         ny=10,
@@ -114,14 +121,16 @@ def child_grid_that_straddles_other_side_big_wrap_grid(big_grid_that_wraps):
         size_x=50,
         size_y=200,
     )
-    child_grid = align_grids(big_grid_that_wraps, child_grid)
-    make_edata(big_grid_that_wraps, child_grid, prefix="child")
+    child_grid = align_grids(big_grid_that_wraps_other_side, child_grid)
+    make_edata(big_grid_that_wraps_other_side, child_grid, prefix="child")
 
     return child_grid
 
 
 @pytest.fixture()
-def child_grid_that_straddles2(big_grid_that_straddles_other_side):
+def child_grid_that_straddles_with_opposite_big_grid(
+    big_grid_that_straddles_other_side,
+):
     child_grid = Grid(
         nx=10,
         ny=10,
@@ -186,6 +195,41 @@ def child_grid_with_eastern_boundary_closed(big_grid):
     make_edata(
         big_grid,
         child_grid,
+    )
+    return child_grid
+
+
+@pytest.fixture()
+def p_new_grid():
+    p_new_grid = Grid(
+        nx=5,
+        ny=7,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,  # 10
+        center_lat=61,
+        rot=20,
+        N=200,
+    )
+    return p_new_grid
+
+
+@pytest.fixture()
+def c_new_grid(p_new_grid):
+    c_new_grid = Grid(
+        nx=10,
+        ny=10,
+        size_x=500,
+        size_y=500,
+        center_lon=0,
+        center_lat=61,
+        rot=-20,
+        N=100,
+    )
+    child_grid = align_grids(p_new_grid, c_new_grid)
+    make_edata(
+        p_new_grid,
+        c_new_grid,
     )
     return child_grid
 
@@ -493,6 +537,15 @@ class TestNesting:
                 "vbar, v",
             ),
             (
+                "c_new_grid",
+                "p_new_grid",
+                False,
+                False,
+                "zeta, temp, salt",
+                "ubar, u",
+                "vbar, v",
+            ),
+            (
                 "child_grid_that_straddles",
                 "big_grid_that_straddles",
                 False,
@@ -521,7 +574,7 @@ class TestNesting:
             ),
             (
                 "child_grid_that_straddles_other_side_big_wrap_grid",
-                "big_grid_that_wraps",
+                "big_grid_that_wraps_other_side",
                 False,
                 False,
                 "zeta, temp, salt",
@@ -529,7 +582,7 @@ class TestNesting:
                 "vbar, v",
             ),
             (
-                "child_grid_that_straddles2",
+                "child_grid_that_straddles_with_opposite_big_grid",
                 "big_grid_that_straddles_other_side",
                 False,
                 False,

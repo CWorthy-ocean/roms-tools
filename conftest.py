@@ -302,7 +302,6 @@ def child_grid_with_bgc(big_grid):
     )
     child_grid = align_grids(big_grid, child_grid)
     make_edata(big_grid, child_grid, include_bgc=True)
-
     return child_grid
 
 

@@ -11,6 +11,11 @@
 * Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
 * `ChildGrid` now infers open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 * Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
+<<<<<<< chunked-latlon-dataset
+* Potential memory savings and speedup for reading of optimally-chunked netcdf source data files in `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` ([#572](https://github.com/CWorthy-ocean/roms-tools/pull/572))
+=======
+* Option to automatically close narrow 1-cell water channels during mask generation via `Grid.update_mask(close_narrow_channels=True)` or `Grid(close_narrow_channels=True)`; integrated into the standard mask workflow
+>>>>>>> main
 
 ### Breaking Changes
 
@@ -23,15 +28,22 @@
 * Consolidate vertical regridding objects ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 * Enforce `int32` type on `ChildGrid` mask ([#559](https://github.com/CWorthy-ocean/roms-tools/pull/559))
 * Ensure `regionmask>=0.11.0` in `pyproject.toml` ([#565](https://github.com/CWorthy-ocean/roms-tools/pull/565))
+* Integrate narrow-channel closing directly into `Grid.update_mask()` (internal `_close_narrow_channels`), iterating north–south and east–west up to 10 passes
 
 ### Documentation
 
 * Nesting notebook is updated to match refactoring of `ChildGrid` to `Grid` objects. ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Move "overview of ROMS-Tools functionality" section from paper to docs ([#554](https://github.com/CWorthy-ocean/roms-tools/pull/554))
+* Document `close_narrow_channels` option in `Grid` and `update_mask()`; update notebook examples
 
 ### Bugfixes
 
 * Rotate ROMS velocities before regridding ([#522](https://github.com/CWorthy-ocean/roms-tools/pull/522))
+
+* Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region.
+
+* Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region. ([#577](https://github.com/CWorthy-ocean/roms-tools/pull/577))
+* Fix timer logging messages during mask generation so durations render correctly when closing narrow channels and filling enclosed basins
 
 ## v3.5.0
 

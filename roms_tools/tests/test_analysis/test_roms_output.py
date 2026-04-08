@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -457,11 +458,12 @@ def roms_output_with_cdr_vars(roms_output_from_two_restart_files):
 
 
 def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
-    roms_output_with_cdr_vars.cdr_metrics()
-    assert hasattr(roms_output_with_cdr_vars, "ds_cdr")
+    with patch("matplotlib.pyplot.show"):
+        roms_output_with_cdr_vars.cdr_metrics()
+        assert hasattr(roms_output_with_cdr_vars, "ds_cdr")
 
-    ds_cdr = roms_output_with_cdr_vars.ds_cdr
+        ds_cdr = roms_output_with_cdr_vars.ds_cdr
 
-    # Check presence of both efficiency variables
-    assert "cdr_efficiency" in ds_cdr
-    assert "cdr_efficiency_from_delta_diff" in ds_cdr
+        # Check presence of both efficiency variables
+        assert "cdr_efficiency" in ds_cdr
+        assert "cdr_efficiency_from_delta_diff" in ds_cdr

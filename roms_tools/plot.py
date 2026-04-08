@@ -1318,3 +1318,4 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     # Format x-axis as YYYY-MM-DD
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
     fig.autofmt_xdate()
+    plt.show()

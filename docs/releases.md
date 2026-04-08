@@ -1,23 +1,21 @@
 # Release notes
 
-## v3.6.0 (unreleased)
+## v4.0.0 (unreleased)
+
+### Breaking Changes
+* `from_file` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
+* The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).
 
 ### New Features
 
-* `From_yaml` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
-* `ChildGrid` is deprecated and rather both a child and parent grid are created using `Grid` and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)). The following 2 features are still preserved in the 2 functions.
-* `ChildGrid` now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
+* Nesting now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
 * Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
-* `ChildGrid` now infers open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
+* Nesting operations now infer open boundaries from the mask by default and supports optional BGC boundary outputs via metadata ([#550](https://github.com/CWorthy-ocean/roms-tools/pull/550))
 * Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
-<<<<<<< chunked-latlon-dataset
 * Potential memory savings and speedup for reading of optimally-chunked netcdf source data files in `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` ([#572](https://github.com/CWorthy-ocean/roms-tools/pull/572))
-=======
 * Option to automatically close narrow 1-cell water channels during mask generation via `Grid.update_mask(close_narrow_channels=True)` or `Grid(close_narrow_channels=True)`; integrated into the standard mask workflow
->>>>>>> main
 
-### Breaking Changes
 
 ### Internal Changes
 

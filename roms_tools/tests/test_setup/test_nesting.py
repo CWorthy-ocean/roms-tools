@@ -1,4 +1,5 @@
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,8 @@ from conftest import calculate_file_hash
 from roms_tools import Grid
 from roms_tools.plot import plot_nesting
 from roms_tools.setup.nesting import (
+    _check_child_outside_parent,
+    _prepare_grid_datasets,
     align_grids,
     compute_boundary_distance,
     interpolate_indices,
@@ -18,7 +21,7 @@ from roms_tools.setup.nesting import (
     modify_child_mask,
     modify_child_topography,
 )
-from roms_tools.setup.utils import get_boundary_coords
+from roms_tools.setup.utils import check_and_set_boundaries, get_boundary_coords
 from roms_tools.utils import wrap_longitudes
 
 
@@ -37,220 +40,56 @@ def baby_grid():
 
 
 @pytest.fixture()
-def big_grid_that_straddles():
+def big_grid_that_straddles0():
     return Grid(
-        nx=5, ny=7, center_lon=10, center_lat=61, rot=20, size_x=1800, size_y=2400
+        nx=5, ny=7, center_lon=0, center_lat=61, rot=20, size_x=1800, size_y=2400
     )
 
 
 @pytest.fixture()
-def big_grid_that_wraps():
-    return Grid(
-        nx=5, ny=7, center_lon=0, center_lat=61, rot=20, size_x=18000, size_y=2400
-    )
-
-
-@pytest.fixture()
-def big_grid_that_wraps_other_side():
-    return Grid(
-        nx=5, ny=7, center_lon=180, center_lat=61, rot=20, size_x=18000, size_y=2400
-    )
-
-
-@pytest.fixture()
-def big_grid_that_straddles_other_side():
+def big_grid_that_straddles180():
     return Grid(
         nx=5, ny=7, center_lon=180, center_lat=61, rot=20, size_x=1800, size_y=2400
     )
 
 
 @pytest.fixture()
-def small_grid_that_straddles():
+def small_grid_that_straddles0():
     return Grid(nx=10, ny=10, center_lon=0, center_lat=61, rot=0, size_x=50, size_y=200)
 
 
 @pytest.fixture()
-def small_grid_that_straddles_other_side():
+def small_grid_that_straddles180():
     return Grid(
         nx=10, ny=10, center_lon=180, center_lat=61, rot=0, size_x=50, size_y=200
     )
 
 
-@pytest.fixture()
-def child_grid_that_straddles(big_grid_that_straddles):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=0,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-    )
-    child_grid = align_grids(big_grid_that_straddles, child_grid)
-    make_edata(big_grid_that_straddles, child_grid, prefix="child")
+@pytest.mark.parametrize(
+    "parent_name,child_name,context",
+    [
+        ("big_grid_that_straddles0", "small_grid_that_straddles0", nullcontext()),
+        (
+            "big_grid_that_straddles0",
+            "small_grid_that_straddles180",
+            pytest.raises(ValueError),
+        ),
+        (
+            "big_grid_that_straddles180",
+            "small_grid_that_straddles0",
+            pytest.raises(ValueError),
+        ),
+        ("big_grid_that_straddles180", "small_grid_that_straddles180", nullcontext()),
+    ],
+)
+def test_check_child_inside_parent(request, parent_name, child_name, context):
+    parent = request.getfixturevalue(parent_name)
+    child = request.getfixturevalue(child_name)
+    boundaries = check_and_set_boundaries(None, child.ds.mask_rho)
+    parent_grid_ds, child_grid_ds = _prepare_grid_datasets(parent, child)
 
-    return child_grid
-
-
-@pytest.fixture()
-def child_grid_that_straddles_big_wrap_grid(big_grid_that_wraps):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=0,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-    )
-    child_grid = align_grids(big_grid_that_wraps, child_grid)
-    make_edata(big_grid_that_wraps, child_grid, prefix="child")
-
-    return child_grid
-
-
-@pytest.fixture()
-def child_grid_that_straddles_other_side_big_wrap_grid(big_grid_that_wraps):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=180,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-    )
-    child_grid = align_grids(big_grid_that_wraps, child_grid)
-    make_edata(big_grid_that_wraps, child_grid, prefix="child")
-
-    return child_grid
-
-
-@pytest.fixture()
-def child_grid_that_straddles_other_side_big_wrap_grid_other_side(
-    big_grid_that_wraps_other_side,
-):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=180,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-    )
-    child_grid = align_grids(big_grid_that_wraps_other_side, child_grid)
-    make_edata(big_grid_that_wraps_other_side, child_grid, prefix="child")
-
-    return child_grid
-
-
-@pytest.fixture()
-def child_grid_that_straddles_with_opposite_big_grid(
-    big_grid_that_straddles_other_side,
-):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=0,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-    )
-    child_grid = align_grids(big_grid_that_straddles_other_side, child_grid)
-    make_edata(big_grid_that_straddles_other_side, child_grid, prefix="child")
-
-    return child_grid
-
-
-@pytest.fixture()
-def child_grid_that_straddles_other_side(big_grid_that_straddles):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=180,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-    )
-    child_grid = align_grids(big_grid_that_straddles, child_grid)
-    make_edata(big_grid_that_straddles, child_grid, prefix="child")
-
-    return child_grid
-
-
-@pytest.fixture()
-def both_grids_that_straddles_other_side(big_grid_that_straddles_other_side):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=180,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-    )
-    child_grid = align_grids(big_grid_that_straddles_other_side, child_grid)
-    make_edata(big_grid_that_straddles_other_side, child_grid, prefix="child")
-
-    return child_grid
-
-
-@pytest.fixture()
-def child_grid_with_eastern_boundary_closed(big_grid):
-    child_grid = Grid(
-        nx=10,
-        ny=10,
-        center_lon=-23,
-        center_lat=65,
-        rot=-20,
-        size_x=200,
-        size_y=100,
-    )
-    child_grid = align_grids(big_grid, child_grid)
-    make_edata(
-        big_grid,
-        child_grid,
-    )
-    return child_grid
-
-
-@pytest.fixture()
-def p_new_grid():
-    p_new_grid = Grid(
-        nx=5,
-        ny=7,
-        size_x=1800,
-        size_y=2400,
-        center_lon=180,  # 10
-        center_lat=61,
-        rot=20,
-        N=200,
-    )
-    return p_new_grid
-
-
-@pytest.fixture()
-def c_new_grid(p_new_grid):
-    c_new_grid = Grid(
-        nx=10,
-        ny=10,
-        size_x=500,
-        size_y=500,
-        center_lon=0,
-        center_lat=61,
-        rot=-20,
-        N=100,
-    )
-    child_grid = align_grids(p_new_grid, c_new_grid)
-    make_edata(
-        p_new_grid,
-        c_new_grid,
-    )
-    return child_grid
+    with context:
+        _check_child_outside_parent(parent_grid_ds, child_grid_ds, boundaries)
 
 
 class TestInterpolateIndices:
@@ -258,7 +97,7 @@ class TestInterpolateIndices:
         "grid",
         [
             "big_grid",
-            "big_grid_that_straddles",
+            "big_grid_that_straddles0",
         ],
     )
     def test_correct_indices_of_same_grid(self, grid, caplog, request):
@@ -307,7 +146,8 @@ class TestInterpolateIndices:
         "big_grid_fixture, small_grid_fixture",
         [
             ("big_grid", "small_grid"),
-            ("big_grid_that_straddles", "small_grid_that_straddles"),
+            ("big_grid_that_straddles0", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles180", "small_grid_that_straddles180"),
         ],
     )
     def test_indices_are_within_range_of_parent_grid(
@@ -366,7 +206,8 @@ class TestMapChildBoundaries:
         "big_grid_fixture, small_grid_fixture",
         [
             ("big_grid", "small_grid"),
-            ("big_grid_that_straddles", "small_grid_that_straddles"),
+            ("big_grid_that_straddles0", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles180", "small_grid_that_straddles180"),
         ],
     )
     def test_updated_indices_map_to_wet_points(
@@ -404,7 +245,8 @@ class TestMapChildBoundaries:
         "big_grid_fixture, small_grid_fixture",
         [
             ("big_grid", "small_grid"),
-            ("big_grid_that_straddles", "small_grid_that_straddles"),
+            ("big_grid_that_straddles0", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles180", "small_grid_that_straddles180"),
         ],
     )
     def test_indices_are_monotonically_increasing(
@@ -544,11 +386,9 @@ class TestModifyChid:
 
 class TestNesting:
     @pytest.mark.parametrize(
-        "fixture_name_child, fixture_name_parent, include_bgc, include_pressure_fluxes, expected_r_vars, expected_u_vars, expected_v_vars",
+        "include_bgc, include_pressure_fluxes, expected_r_vars, expected_u_vars, expected_v_vars",
         [
             (
-                "child_grid_with_bgc",
-                "big_grid",
                 True,
                 False,
                 "zeta, temp, salt, bgc",
@@ -556,8 +396,6 @@ class TestNesting:
                 "vbar, v",
             ),
             (
-                "c_new_grid",
-                "p_new_grid",
                 False,
                 False,
                 "zeta, temp, salt",
@@ -565,92 +403,33 @@ class TestNesting:
                 "vbar, v",
             ),
             (
-                "child_grid_that_straddles",
-                "big_grid_that_straddles",
-                False,
-                False,
-                "zeta, temp, salt",
-                "ubar, u",
-                "vbar, v",
-            ),
-            (
-                "child_grid_that_straddles_other_side",
-                "big_grid_that_straddles",
-                False,
-                False,
-                "zeta, temp, salt",
-                "ubar, u",
-                "vbar, v",
-            ),
-            (
-                "child_grid_that_straddles_big_wrap_grid",
-                "big_grid_that_wraps",
-                False,
-                False,
-                "zeta, temp, salt",
-                "ubar, u",
-                "vbar, v",
-            ),
-            (
-                "child_grid_that_straddles_other_side_big_wrap_grid",
-                "big_grid_that_wraps",
-                False,
-                False,
-                "zeta, temp, salt",
-                "ubar, u",
-                "vbar, v",
-            ),
-            (
-                "child_grid_that_straddles_other_side_big_wrap_grid_other_side",
-                "big_grid_that_wraps_other_side",
-                False,
-                False,
-                "zeta, temp, salt",
-                "ubar, u",
-                "vbar, v",
-            ),
-            (
-                "child_grid_that_straddles_with_opposite_big_grid",
-                "big_grid_that_straddles_other_side",
-                False,
-                False,
-                "zeta, temp, salt",
-                "ubar, u",
-                "vbar, v",
-            ),
-            (
-                "both_grids_that_straddles_other_side",
-                "big_grid_that_straddles_other_side",
-                False,
-                False,
-                "zeta, temp, salt",
-                "ubar, u",
-                "vbar, v",
-            ),
-            (
-                "child_grid_with_pflx",
-                "big_grid",
                 False,
                 True,
                 "zeta, temp, salt",
                 "ubar, u, up",
                 "vbar, v, vp",
             ),
+            (
+                True,
+                True,
+                "zeta, temp, salt, bgc",
+                "ubar, u, up",
+                "vbar, v, vp",
+            ),
         ],
     )
-    def test_successful_initialization(
+    def test_make_edata_options(
         self,
-        request,
-        fixture_name_child,
-        fixture_name_parent,
+        big_grid,
+        small_grid,
         include_bgc,
         include_pressure_fluxes,
         expected_r_vars,
         expected_u_vars,
         expected_v_vars,
     ):
-        child_grid = request.getfixturevalue(fixture_name_child)
-        parent_grid = request.getfixturevalue(fixture_name_parent)
+        child_grid = small_grid
+        parent_grid = big_grid
 
         ds_nesting = make_edata(
             parent_grid,
@@ -659,7 +438,6 @@ class TestNesting:
             include_pressure_fluxes=include_pressure_fluxes,
         )
 
-        ### NEED TO ADD A TEST TO COMPARE STDERR CALL FOR BOUNDARIES. correctly assigning open/closed.
         # Basic metadata + structure checks
         assert isinstance(child_grid.ds, xr.Dataset)
         assert isinstance(ds_nesting, xr.Dataset)
@@ -679,13 +457,11 @@ class TestNesting:
                 elif location == "v":
                     assert ds[varname].attrs["output_vars"] == expected_v_vars
 
-    ### MIGHT NEED TO ADD A CHECK TO MAKE SURE DEFAULT BOUNDARIES ARE USED. check_and_set_boundaries fnct.
-
     @pytest.mark.parametrize(
         "big_grid_fixture, small_grid_fixture",
         [
-            ("big_grid", "small_grid_that_straddles"),
-            ("big_grid_that_straddles", "small_grid"),
+            ("big_grid", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles0", "small_grid"),
         ],
     )
     def test_error_if_child_grid_beyond_parent_grid(
@@ -697,7 +473,7 @@ class TestNesting:
         with pytest.raises(
             ValueError, match="boundary of the child grid lie outside the parent grid"
         ):
-            small_grid = align_grids(big_grid, small_grid)
+            align_grids(big_grid, small_grid)
 
     def test_no_error_if_land_child_points_beyond_parent_grid(self):
         # coarse resolution Pacific domain
@@ -768,10 +544,10 @@ class TestNesting:
         "child_grid_fixture, parent_grid_fixture",
         [
             (
-                "child_grid_with_bgc",
+                "small_grid",
                 "big_grid",
             ),
-            ("child_grid_that_straddles", "big_grid_that_straddles"),
+            ("small_grid_that_straddles0", "big_grid_that_straddles0"),
         ],
     )
     def test_plot(self, child_grid_fixture, parent_grid_fixture, request):

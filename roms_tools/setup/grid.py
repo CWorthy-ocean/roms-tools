@@ -168,8 +168,6 @@ class Grid:
             self.__dict__.update(loaded.__dict__)
 
         else:
-            if self.center_lon > 180:
-                self.center_lon = self.center_lon - 360
             # assign defaults here for non-required params
             self.N = self.N or 100
             self.theta_s = self.theta_s or 5.0

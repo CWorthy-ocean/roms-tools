@@ -111,7 +111,26 @@ def child_grid_that_straddles_big_wrap_grid(big_grid_that_wraps):
 
 
 @pytest.fixture()
-def child_grid_that_straddles_other_side_big_wrap_grid(big_grid_that_wraps_other_side):
+def child_grid_that_straddles_other_side_big_wrap_grid(big_grid_that_wraps):
+    child_grid = Grid(
+        nx=10,
+        ny=10,
+        center_lon=180,
+        center_lat=61,
+        rot=0,
+        size_x=50,
+        size_y=200,
+    )
+    child_grid = align_grids(big_grid_that_wraps, child_grid)
+    make_edata(big_grid_that_wraps, child_grid, prefix="child")
+
+    return child_grid
+
+
+@pytest.fixture()
+def child_grid_that_straddles_other_side_big_wrap_grid_other_side(
+    big_grid_that_wraps_other_side,
+):
     child_grid = Grid(
         nx=10,
         ny=10,
@@ -574,6 +593,15 @@ class TestNesting:
             ),
             (
                 "child_grid_that_straddles_other_side_big_wrap_grid",
+                "big_grid_that_wraps",
+                False,
+                False,
+                "zeta, temp, salt",
+                "ubar, u",
+                "vbar, v",
+            ),
+            (
+                "child_grid_that_straddles_other_side_big_wrap_grid_other_side",
                 "big_grid_that_wraps_other_side",
                 False,
                 False,

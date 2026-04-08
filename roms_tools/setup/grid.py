@@ -129,7 +129,6 @@ class Grid:
     ROMS."""
     straddle: bool = field(init=False, repr=False)
     """Whether the grid straddles the dateline."""
-    # parent_info: dict | None = field(default = None, init=False, repr=False)
 
     def __post_init__(self):
         if self.filename is not None:

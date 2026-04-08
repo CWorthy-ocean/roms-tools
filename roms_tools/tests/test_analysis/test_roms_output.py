@@ -456,7 +456,6 @@ def roms_output_with_cdr_vars(roms_output_from_two_restart_files):
     return roms_output_from_two_restart_files
 
 
-@pytest.mark.skip
 def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
     roms_output_with_cdr_vars.cdr_metrics()
     assert hasattr(roms_output_with_cdr_vars, "ds_cdr")

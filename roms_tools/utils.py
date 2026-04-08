@@ -1206,7 +1206,6 @@ def wrap_longitudes(ds: xr.Dataset, straddle: bool) -> xr.Dataset:
         # reassign explicitly as a coordinate
         ds = ds.assign_coords({lon_name: lon_wrapped})
 
-        # ds = ds.pad({lon_name: (1,1)}, "wrap")
     return ds
 
 

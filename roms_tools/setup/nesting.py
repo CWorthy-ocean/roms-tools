@@ -1,4 +1,3 @@
-import ast
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -68,7 +67,8 @@ def align_grids(
     """
     boundaries = check_and_set_boundaries(boundaries, child_grid.ds.mask_rho)
 
-    _check_child_outside_parent(parent_grid.ds, child_grid.ds, boundaries)
+    parent_grid_ds, child_grid_ds = _prepare_grid_datasets(parent_grid, child_grid)
+    _check_child_outside_parent(parent_grid_ds, child_grid_ds, boundaries)
 
     # Call Grid update_mask, then modify the child mask:
     child_grid.ds = _apply_child_modification(
@@ -260,13 +260,6 @@ def _check_child_outside_parent(
         Used for generating informative warnings or errors.
     """
     bdry_coords_dict = get_boundary_coords()
-
-    # Longitudinal wrapping is done if the parent crosses the prime meridian
-    _straddle = ast.literal_eval(parent_grid_ds.straddle)
-
-    if _straddle:
-        parent_grid_ds = wrap_longitudes(parent_grid_ds, straddle=True)
-        child_grid_ds = wrap_longitudes(child_grid_ds, straddle=True)
 
     # Check if child wet points lie outside parent boundaries
     for direction in ["south", "east", "north", "west"]:

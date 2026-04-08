@@ -168,6 +168,8 @@ class Grid:
             self.__dict__.update(loaded.__dict__)
 
         else:
+            if self.center_lon > 180:
+                self.center_lon = self.center_lon - 360
             # assign defaults here for non-required params
             self.N = self.N or 100
             self.theta_s = self.theta_s or 5.0
@@ -1059,6 +1061,7 @@ class Grid:
             # make sure lons are in [0, 360] range
             for lon in ["lon", "lonu", "lonv", "lonq"]:
                 coords[lon][coords[lon] < 0] = coords[lon][coords[lon] < 0] + 2 * np.pi
+                # coords[lon][coords[lon] > 2 * np.pi] = coords[lon][coords[lon] > 2 * np.pi] - 2 * np.pi
 
             ds = self._create_grid_ds(coords)
 

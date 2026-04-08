@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +18,7 @@ except ImportError:
 @pytest.fixture
 def roms_output_from_restart_file(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Single file
     return ROMSOutput(
@@ -30,7 +31,7 @@ def roms_output_from_restart_file(use_dask):
 @pytest.fixture
 def roms_output_from_restart_file_adjusted_for_zeta(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # Single file
     return ROMSOutput(
@@ -58,7 +59,7 @@ def roms_output_from_restart_file_with_straddling_grid(use_dask):
 @pytest.fixture
 def roms_output_from_two_restart_files(use_dask):
     fname_grid = Path(download_test_data("epac25km_grd.nc"))
-    grid = Grid.from_file(fname_grid)
+    grid = Grid(filename=fname_grid)
 
     # List of files
     file1 = Path(download_test_data("eastpac25km_rst.19980106000000.nc"))
@@ -457,11 +458,12 @@ def roms_output_with_cdr_vars(roms_output_from_two_restart_files):
 
 
 def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
-    roms_output_with_cdr_vars.cdr_metrics()
-    assert hasattr(roms_output_with_cdr_vars, "ds_cdr")
+    with patch("matplotlib.pyplot.show"):
+        roms_output_with_cdr_vars.cdr_metrics()
+        assert hasattr(roms_output_with_cdr_vars, "ds_cdr")
 
-    ds_cdr = roms_output_with_cdr_vars.ds_cdr
+        ds_cdr = roms_output_with_cdr_vars.ds_cdr
 
-    # Check presence of both efficiency variables
-    assert "cdr_efficiency" in ds_cdr
-    assert "cdr_efficiency_from_delta_diff" in ds_cdr
+        # Check presence of both efficiency variables
+        assert "cdr_efficiency" in ds_cdr
+        assert "cdr_efficiency_from_delta_diff" in ds_cdr

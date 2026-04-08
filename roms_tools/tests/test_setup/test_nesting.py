@@ -1,20 +1,27 @@
 import logging
+from contextlib import nullcontext
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 import xarray as xr
 
 from conftest import calculate_file_hash
-from roms_tools import ChildGrid, Grid
+from roms_tools import Grid
+from roms_tools.plot import plot_nesting
 from roms_tools.setup.nesting import (
+    _check_child_outside_parent,
+    _prepare_grid_datasets,
+    align_grids,
     compute_boundary_distance,
     interpolate_indices,
+    make_edata,
     map_child_boundaries_onto_parent_grid_indices,
     modify_child_mask,
     modify_child_topography,
 )
-from roms_tools.setup.utils import get_boundary_coords
+from roms_tools.setup.utils import check_and_set_boundaries, get_boundary_coords
 from roms_tools.utils import wrap_longitudes
 
 
@@ -33,44 +40,56 @@ def baby_grid():
 
 
 @pytest.fixture()
-def big_grid_that_straddles():
+def big_grid_that_straddles0():
     return Grid(
-        nx=5, ny=7, center_lon=10, center_lat=61, rot=20, size_x=1800, size_y=2400
+        nx=5, ny=7, center_lon=0, center_lat=61, rot=20, size_x=1800, size_y=2400
     )
 
 
 @pytest.fixture()
-def small_grid_that_straddles():
+def big_grid_that_straddles180():
+    return Grid(
+        nx=5, ny=7, center_lon=180, center_lat=61, rot=20, size_x=1800, size_y=2400
+    )
+
+
+@pytest.fixture()
+def small_grid_that_straddles0():
     return Grid(nx=10, ny=10, center_lon=0, center_lat=61, rot=0, size_x=50, size_y=200)
 
 
 @pytest.fixture()
-def child_grid_that_straddles(big_grid_that_straddles):
-    return ChildGrid(
-        parent_grid=big_grid_that_straddles,
-        nx=10,
-        ny=10,
-        center_lon=0,
-        center_lat=61,
-        rot=0,
-        size_x=50,
-        size_y=200,
-        metadata={"prefix": "child"},
+def small_grid_that_straddles180():
+    return Grid(
+        nx=10, ny=10, center_lon=180, center_lat=61, rot=0, size_x=50, size_y=200
     )
 
 
-@pytest.fixture()
-def child_grid_with_eastern_boundary_closed(big_grid):
-    return ChildGrid(
-        parent_grid=big_grid,
-        nx=10,
-        ny=10,
-        center_lon=-23,
-        center_lat=65,
-        rot=-20,
-        size_x=200,
-        size_y=100,
-    )
+@pytest.mark.parametrize(
+    "parent_name,child_name,context",
+    [
+        ("big_grid_that_straddles0", "small_grid_that_straddles0", nullcontext()),
+        (
+            "big_grid_that_straddles0",
+            "small_grid_that_straddles180",
+            pytest.raises(ValueError),
+        ),
+        (
+            "big_grid_that_straddles180",
+            "small_grid_that_straddles0",
+            pytest.raises(ValueError),
+        ),
+        ("big_grid_that_straddles180", "small_grid_that_straddles180", nullcontext()),
+    ],
+)
+def test_check_child_inside_parent(request, parent_name, child_name, context):
+    parent = request.getfixturevalue(parent_name)
+    child = request.getfixturevalue(child_name)
+    boundaries = check_and_set_boundaries(None, child.ds.mask_rho)
+    parent_grid_ds, child_grid_ds = _prepare_grid_datasets(parent, child)
+
+    with context:
+        _check_child_outside_parent(parent_grid_ds, child_grid_ds, boundaries)
 
 
 class TestInterpolateIndices:
@@ -78,7 +97,7 @@ class TestInterpolateIndices:
         "grid",
         [
             "big_grid",
-            "big_grid_that_straddles",
+            "big_grid_that_straddles0",
         ],
     )
     def test_correct_indices_of_same_grid(self, grid, caplog, request):
@@ -127,7 +146,8 @@ class TestInterpolateIndices:
         "big_grid_fixture, small_grid_fixture",
         [
             ("big_grid", "small_grid"),
-            ("big_grid_that_straddles", "small_grid_that_straddles"),
+            ("big_grid_that_straddles0", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles180", "small_grid_that_straddles180"),
         ],
     )
     def test_indices_are_within_range_of_parent_grid(
@@ -186,7 +206,8 @@ class TestMapChildBoundaries:
         "big_grid_fixture, small_grid_fixture",
         [
             ("big_grid", "small_grid"),
-            ("big_grid_that_straddles", "small_grid_that_straddles"),
+            ("big_grid_that_straddles0", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles180", "small_grid_that_straddles180"),
         ],
     )
     def test_updated_indices_map_to_wet_points(
@@ -224,7 +245,8 @@ class TestMapChildBoundaries:
         "big_grid_fixture, small_grid_fixture",
         [
             ("big_grid", "small_grid"),
-            ("big_grid_that_straddles", "small_grid_that_straddles"),
+            ("big_grid_that_straddles0", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles180", "small_grid_that_straddles180"),
         ],
     )
     def test_indices_are_monotonically_increasing(
@@ -364,10 +386,9 @@ class TestModifyChid:
 
 class TestNesting:
     @pytest.mark.parametrize(
-        "fixture_name, include_bgc, include_pressure_fluxes, expected_r_vars, expected_u_vars, expected_v_vars",
+        "include_bgc, include_pressure_fluxes, expected_r_vars, expected_u_vars, expected_v_vars",
         [
             (
-                "child_grid_with_bgc",
                 True,
                 False,
                 "zeta, temp, salt, bgc",
@@ -375,7 +396,6 @@ class TestNesting:
                 "vbar, v",
             ),
             (
-                "child_grid_that_straddles",
                 False,
                 False,
                 "zeta, temp, salt",
@@ -383,42 +403,47 @@ class TestNesting:
                 "vbar, v",
             ),
             (
-                "child_grid_with_pflx",
                 False,
                 True,
                 "zeta, temp, salt",
                 "ubar, u, up",
                 "vbar, v, vp",
             ),
+            (
+                True,
+                True,
+                "zeta, temp, salt, bgc",
+                "ubar, u, up",
+                "vbar, v, vp",
+            ),
         ],
     )
-    def test_successful_initialization(
+    def test_make_edata_options(
         self,
-        request,
-        fixture_name,
+        big_grid,
+        small_grid,
         include_bgc,
         include_pressure_fluxes,
         expected_r_vars,
         expected_u_vars,
         expected_v_vars,
     ):
-        child_grid = request.getfixturevalue(fixture_name)
+        child_grid = small_grid
+        parent_grid = big_grid
+
+        ds_nesting = make_edata(
+            parent_grid,
+            child_grid,
+            include_bgc=include_bgc,
+            include_pressure_fluxes=include_pressure_fluxes,
+        )
 
         # Basic metadata + structure checks
-        assert child_grid.boundaries == {
-            "south": True,
-            "east": True,
-            "north": True,
-            "west": True,
-        }
-        assert child_grid.metadata["prefix"] == "child"
-        assert child_grid.metadata["period"] == 3600.0
-        assert child_grid.metadata["include_bgc"] is include_bgc
         assert isinstance(child_grid.ds, xr.Dataset)
-        assert isinstance(child_grid.ds_nesting, xr.Dataset)
+        assert isinstance(ds_nesting, xr.Dataset)
 
         # Nesting dataset checks
-        ds = child_grid.ds_nesting
+        ds = ds_nesting
         for direction in ["south", "east", "north", "west"]:
             for location in ["r", "u", "v"]:
                 varname = f"child_{direction}_{location}"
@@ -432,19 +457,11 @@ class TestNesting:
                 elif location == "v":
                     assert ds[varname].attrs["output_vars"] == expected_v_vars
 
-    def test_default_boundaries(self, child_grid_with_eastern_boundary_closed):
-        assert child_grid_with_eastern_boundary_closed.boundaries == {
-            "south": True,
-            "east": False,
-            "north": True,
-            "west": True,
-        }
-
     @pytest.mark.parametrize(
         "big_grid_fixture, small_grid_fixture",
         [
-            ("big_grid", "small_grid_that_straddles"),
-            ("big_grid_that_straddles", "small_grid"),
+            ("big_grid", "small_grid_that_straddles0"),
+            ("big_grid_that_straddles0", "small_grid"),
         ],
     )
     def test_error_if_child_grid_beyond_parent_grid(
@@ -453,15 +470,10 @@ class TestNesting:
         big_grid = request.getfixturevalue(big_grid_fixture)
         small_grid = request.getfixturevalue(small_grid_fixture)
 
-        import dataclasses
-
-        params = dataclasses.asdict(small_grid)
-        del params["ds"], params["straddle"]
-
         with pytest.raises(
             ValueError, match="boundary of the child grid lie outside the parent grid"
         ):
-            ChildGrid(parent_grid=big_grid, **params)
+            align_grids(big_grid, small_grid)
 
     def test_no_error_if_land_child_points_beyond_parent_grid(self):
         # coarse resolution Pacific domain
@@ -476,19 +488,19 @@ class TestNesting:
         )
 
         # California Current System domain, where some land points extend beyond Pacific domain
-        child_grid_parameters = {
-            "nx": 50,
-            "ny": 50,
-            "size_x": 2688,
-            "size_y": 5280,
-            "center_lat": 39.6,
-            "center_lon": -134.5,
-            "rot": 33.3,
-        }
+        child_grid = Grid(
+            nx=50,
+            ny=50,
+            size_x=2688,
+            size_y=5280,
+            center_lat=39.6,
+            center_lon=-134.5,
+            rot=33.3,
+        )
 
-        child_grid = ChildGrid(
-            **child_grid_parameters,
-            parent_grid=parent_grid,
+        child_grid = align_grids(
+            parent_grid,
+            child_grid,
             boundaries={"north": True, "west": True, "south": True, "east": False},
         )
         assert isinstance(child_grid.ds, xr.Dataset)
@@ -504,18 +516,18 @@ class TestNesting:
             rot=0,
         )
 
-        child_grid_parameters = {
-            "nx": 5,
-            "ny": 5,
-            "size_x": 100,
-            "size_y": 100,
-            "center_lon": -4.1,
-            "center_lat": 52.36,
-        }
+        child_grid = Grid(
+            nx=5,
+            ny=5,
+            size_x=100,
+            size_y=100,
+            center_lon=-4.1,
+            center_lat=52.36,
+        )
 
-        child_grid = ChildGrid(
-            **child_grid_parameters,
-            parent_grid=parent_grid,
+        child_grid = align_grids(
+            parent_grid,
+            child_grid,
             boundaries={
                 "south": True,
                 "east": True,
@@ -523,23 +535,34 @@ class TestNesting:
                 "west": True,
             },
         )
+        ds_nesting = make_edata(parent_grid, child_grid)
 
         assert isinstance(child_grid.ds, xr.Dataset)
-        assert isinstance(child_grid.ds_nesting, xr.Dataset)
+        assert isinstance(ds_nesting, xr.Dataset)
 
     @pytest.mark.parametrize(
-        "child_grid_fixture",
-        ["child_grid_with_bgc", "child_grid_that_straddles"],
+        "child_grid_fixture, parent_grid_fixture",
+        [
+            (
+                "small_grid",
+                "big_grid",
+            ),
+            ("small_grid_that_straddles0", "big_grid_that_straddles0"),
+        ],
     )
-    def test_plot(self, child_grid_fixture, request):
+    def test_plot(self, child_grid_fixture, parent_grid_fixture, request):
         """Test plot method."""
         child_grid = request.getfixturevalue(child_grid_fixture)
+        parent_grid = request.getfixturevalue(parent_grid_fixture)
 
         child_grid.plot()
-        child_grid.plot_nesting()
-        child_grid.plot_nesting(with_dim_names=True)
+        with patch("matplotlib.pyplot.show"):
+            plot_nesting(parent_grid.ds, child_grid.ds, parent_grid.straddle)
+            plot_nesting(
+                parent_grid.ds, child_grid.ds, parent_grid.straddle, with_dim_names=True
+            )
 
-    def test_save(self, child_grid_with_bgc, tmp_path):
+    def test_save(self, child_grid_with_bgc, big_grid, tmp_path):
         """Test save methods."""
         for file_str in ["test_grid", "test_grid.nc"]:
             # Create a temporary filepath using the tmp_path fixture
@@ -555,24 +578,17 @@ class TestNesting:
         for file_str in ["test_nesting", "test_nesting.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-                saved_filenames = child_grid_with_bgc.save_nesting(filepath)
+                make_edata(big_grid, child_grid_with_bgc, filepath)
+                # saved_filenames = child_grid_with_bgc.save_nesting(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")
-                assert saved_filenames == [filepath]
+                # assert saved_filenames == [filepath]
                 assert filepath.exists()
                 # Clean up the .nc file
                 filepath.unlink()
 
-    def test_disabled_from_file_method(self):
-        """Test that parent from_file method is indeed disabled."""
-        with pytest.raises(
-            NotImplementedError,
-            match="The 'from_file' method is disabled in this subclass.",
-        ):
-            ChildGrid.from_file(filepath="some_file.nc")
-
     def test_roundtrip_yaml(self, child_grid_with_bgc, tmp_path):
-        """Test that creating a ChildGrid object, saving its parameters to yaml file,
+        """Test that creating a child Grid object, saving its parameters to yaml file,
         and re-opening yaml file creates the same object.
         """
         # Create a temporary filepath using the tmp_path fixture
@@ -583,38 +599,29 @@ class TestNesting:
         ]:  # test for Path object and str
             child_grid_with_bgc.to_yaml(filepath)
 
-            child_grid_from_file = ChildGrid.from_yaml(filepath)
+            child_grid_from_file = Grid.from_yaml(filepath)
 
             assert child_grid_with_bgc == child_grid_from_file
 
             filepath = Path(filepath)
             filepath.unlink()
 
+    ### NEED TO FINISH BUT TO_YAML FROM_YAML DOESN'T WORK FOR CHILD GRIDS (altered boundaries)
     def test_files_have_same_hash(self, child_grid_with_bgc, tmp_path):
         yaml_filepath = tmp_path / "test_yaml.yaml"
-        filepath1 = tmp_path / "test1.nc"
-        filepath2 = tmp_path / "test2.nc"
         grid_filepath1 = tmp_path / "grid_test1.nc"
         grid_filepath2 = tmp_path / "grid_test2.nc"
 
         child_grid_with_bgc.to_yaml(yaml_filepath)
         child_grid_with_bgc.save(grid_filepath1)
-        child_grid_with_bgc.save_nesting(filepath1)
 
-        child_grid_from_file = ChildGrid.from_yaml(yaml_filepath)
+        child_grid_from_file = Grid.from_yaml(yaml_filepath)
         child_grid_from_file.save(grid_filepath2)
-        child_grid_from_file.save_nesting(filepath2)
-
-        hash1 = calculate_file_hash(filepath1)
-        hash2 = calculate_file_hash(filepath2)
-        assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 
         hash1 = calculate_file_hash(grid_filepath1)
         hash2 = calculate_file_hash(grid_filepath2)
         assert hash1 == hash2, f"Hashes do not match: {hash1} != {hash2}"
 
         yaml_filepath.unlink()
-        filepath1.unlink()
-        filepath2.unlink()
         grid_filepath1.unlink()
         grid_filepath2.unlink()

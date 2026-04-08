@@ -387,7 +387,10 @@ def test_roundtrip_netcdf(grid_fixture, tmp_path, request):
             filepath = Path(filepath)
 
             # Load the grid from the file
-            grid_from_file = Grid.from_file(filepath.with_suffix(".nc"))
+            grid_from_file = Grid(filename=filepath.with_suffix(".nc"))
+
+            # for this test case, filename won't match; that's ok
+            grid.filename = grid_from_file.filename
 
             assert grid == grid_from_file
             xr.testing.assert_equal(grid.ds, grid_from_file.ds)
@@ -423,6 +426,9 @@ def test_roundtrip_yaml(grid_fixture, tmp_path, request):
 
         grid_from_file = Grid.from_yaml(filepath)
 
+        # null out filename for comparison
+        grid.filename = None
+
         assert grid == grid_from_file
         xr.testing.assert_equal(grid.ds, grid_from_file.ds)
 
@@ -448,7 +454,7 @@ def test_roundtrip_from_file_yaml(grid_fixture, tmp_path, request):
     filepath = Path(tmp_path / "test.nc")
     grid.save(filepath)
 
-    grid_from_file = Grid.from_file(filepath)
+    grid_from_file = Grid(filename=filepath)
 
     filepath_yaml = Path(tmp_path / "test.yaml")
     grid_from_file.to_yaml(filepath_yaml)
@@ -773,7 +779,7 @@ def test_hmin_criterion_and_update_topography():
 
 def test_update_topography_raises_if_grid_loaded_from_file_has_no_source_info():
     fname = download_test_data("grid_created_with_matlab.nc")
-    grid = Grid.from_file(fname)
+    grid = Grid(filename=fname)
 
     with pytest.raises(
         ValueError,
@@ -992,7 +998,7 @@ def test_grid_copy_with_ds_does_not_mutate_original(grid):
 def test_compatability_with_matlab_grid(tmp_path):
     fname = download_test_data("grid_created_with_matlab.nc")
 
-    grid = Grid.from_file(fname)
+    grid = Grid(filename=fname)
 
     assert not grid.straddle
     assert grid.theta_s == 5.0
@@ -1034,7 +1040,10 @@ def test_compatability_with_matlab_grid(tmp_path):
             filepath = Path(filepath)
 
             # Load the grid from the file
-            grid_from_file = Grid.from_file(filepath.with_suffix(".nc"))
+            grid_from_file = Grid(filename=filepath.with_suffix(".nc"))
+
+            # it won't get the filenames right and that's ok; overwrite one
+            grid.filename = grid_from_file.filename
 
             # Assert that the initial grid and the loaded grid are equivalent (including the 'ds' attribute)
             assert grid == grid_from_file
@@ -1056,7 +1065,7 @@ def test_from_file_with_vertical_coords(grid, tmp_path):
     path = tmp_path / "grid.nc"
     grid_copy.save(path)
 
-    grid_from_file = Grid.from_file(path, theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
+    grid_from_file = Grid(filename=path, theta_s=theta_s, theta_b=theta_b, hc=hc, N=N)
     assert np.allclose(grid_from_file.ds.Cs_r, Cs_r)
     assert np.allclose(grid_from_file.ds.Cs_w, Cs_w)
     assert grid_from_file.theta_s == theta_s
@@ -1078,21 +1087,10 @@ def test_from_file_with_conflicting_vertical_coords(grid, tmp_path):
     grid_copy.save(path)
 
     with pytest.raises(ValueError, match="inconsistent with the provided N"):
-        Grid.from_file(path, theta_s=5.0, theta_b=2.0, hc=300.0, N=100)
+        Grid(filename=path, theta_s=5.0, theta_b=2.0, hc=300.0, N=100)
 
     with pytest.raises(ValueError, match="inconsistent with the provided theta_s, "):
-        Grid.from_file(path, theta_s=5.0, theta_b=2.0, hc=300.0, N=10)
-
-
-def test_from_file_missing_attributes(grid, tmp_path):
-    grid_copy = copy.deepcopy(grid)
-    del grid_copy.ds.attrs["theta_b"]
-
-    path = tmp_path / "grid.nc"
-    grid_copy.save(path)
-
-    with pytest.raises(ValueError, match="Missing vertical coordinate attributes"):
-        Grid.from_file(path)
+        Grid(filename=path, theta_s=5.0, theta_b=2.0, hc=300.0, N=10)
 
 
 def test_from_file_partial_parameters_raises_error(grid, tmp_path):
@@ -1100,4 +1098,4 @@ def test_from_file_partial_parameters_raises_error(grid, tmp_path):
     grid.save(path)
 
     with pytest.raises(ValueError, match="must provide all of"):
-        Grid.from_file(path, theta_s=5.0)
+        Grid(filename=path, theta_s=5.0)

@@ -557,9 +557,9 @@ class TestNesting:
 
         child_grid.plot()
         with patch("matplotlib.pyplot.show"):
-            plot_nesting(parent_grid.ds, child_grid.ds, parent_grid.straddle)
+            plot_nesting(parent_grid, child_grid)
             plot_nesting(
-                parent_grid.ds, child_grid.ds, parent_grid.straddle, with_dim_names=True
+                parent_grid, child_grid, parent_grid.straddle, with_dim_names=True
             )
 
     def test_save(self, child_grid_with_bgc, big_grid, tmp_path):

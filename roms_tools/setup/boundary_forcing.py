@@ -113,6 +113,11 @@ class BoundaryForcing:
         NetCDF output). When ``initial_slice_bounds`` is set, the loaded dataset may be
         smaller than ``grid.ds`` along rho horizontal dimensions; the grid object is
         unchanged.
+    chunks : dict[str, int], optional
+        Optional Dask chunk sizes passed to
+        :class:`~roms_tools.datasets.lat_lon_datasets.LatLonDataset` subclasses when
+        loading with ``use_dask=True``. If ``None``, each dataset class applies its own
+        defaults.
 
     Examples
     --------
@@ -149,6 +154,8 @@ class BoundaryForcing:
     """Whether to skip validation checks in the processed data."""
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
+    chunks: dict[str, int] | None = None
+    """Optional Dask chunk sizes for lat/lon boundary-forcing sources."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -517,15 +524,13 @@ class BoundaryForcing:
         if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
-        # Leave initial spatial chunking to dask for efficient sliced reading from file
-        chunks = {"time": 1}
-
         return data_type(
             filename=self.source["path"],
             start_time=self.start_time,
             end_time=self.end_time,
             climatology=self.source["climatology"],  # type: ignore[arg-type]
             use_dask=self.use_dask,
+            chunks=self.chunks,
             initial_slice_bounds=self.initial_slice_bounds,
         )
 

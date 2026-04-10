@@ -111,6 +111,7 @@ class LatLonDataset:
         :func:`~roms_tools.utils.get_dask_chunks` using that lateral size (and may still be overridden here).
         Otherwise defaults to ``None`` (loader uses :func:`~roms_tools.utils.get_dask_chunks` with
         ``lateral_chunk=-1`` when ``use_dask=True``).
+        Defaults to None.
 
     Attributes
     ----------

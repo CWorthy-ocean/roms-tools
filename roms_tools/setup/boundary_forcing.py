@@ -517,6 +517,9 @@ class BoundaryForcing:
         if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
+        # Leave initial spatial chunking to dask for efficient sliced reading from file
+        chunks = {"time": 1}
+
         return data_type(
             filename=self.source["path"],
             start_time=self.start_time,

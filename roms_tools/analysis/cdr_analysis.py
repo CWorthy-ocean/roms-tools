@@ -8,9 +8,11 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
     """
     Compute Carbon Dioxide Removal (CDR) metrics from model output.
 
-    Calculates CDR uptake efficiency using two methods:
-      1. Flux-based: from area-integrated CO2 flux differences.
-      2. DIC difference-based: from volume-integrated DIC differences.
+    Calculates CDR uptake efficiency and total carbon uptake using two methods:
+      1. Flux-based: from area-integrated CO2 flux differences (time-cumulative
+         for uptake).
+      2. DIC difference-based: from volume-integrated DIC differences (same
+         spatial integrals as efficiency, without normalizing by the source).
 
     Copies selected tracer and flux variables and computes grid cell areas
     and averaging window durations.
@@ -32,6 +34,8 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         - 'area', 'window_length'
         - copied flux/tracer variables
         - 'cdr_efficiency' and 'cdr_efficiency_from_delta_diff' (dimensionless)
+        - 'cdr_carbon_uptake_from_flux' (cumulative flux-based uptake)
+        - 'cdr_carbon_uptake_from_dic_difference' (DIC-difference-based uptake)
 
     Raises
     ------
@@ -135,6 +139,34 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         units="nondimensional",
         description="Carbon Dioxide Removal efficiency computed using volume-integrated DIC differences",
     )
+
+    ds_cdr["cdr_carbon_uptake_from_flux"] = flux
+    ds_cdr["cdr_carbon_uptake_from_flux"].attrs.update(
+        long_name="CDR carbon uptake (cumulative flux differences)",
+        description=(
+            "Time-cumulative carbon uptake from area-integrated CO2 flux "
+            "differences (scenario minus reference), same quantity as the "
+            "numerator of flux-based efficiency before dividing by the source"
+        ),
+    )
+    if "units" in ds["FG_CO2"].attrs:
+        ds_cdr["cdr_carbon_uptake_from_flux"].attrs["units"] = ds["FG_CO2"].attrs[
+            "units"
+        ]
+
+    ds_cdr["cdr_carbon_uptake_from_dic_difference"] = diff_DIC
+    ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs.update(
+        long_name="CDR carbon uptake (from DIC differences)",
+        description=(
+            "Volume-integrated DIC difference (scenario minus reference); "
+            "same quantity as the numerator of DIC-based efficiency before "
+            "dividing by the source"
+        ),
+    )
+    if "units" in ds["hDIC"].attrs:
+        ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs["units"] = ds[
+            "hDIC"
+        ].attrs["units"]
 
     return ds_cdr
 

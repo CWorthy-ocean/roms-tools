@@ -52,6 +52,8 @@ class ROMSOutput(ROMSDataset):
           - Grid cell area
           - Selected tracer and flux variables
           - Uptake efficiency computed from flux differences and DIC differences
+          - Total carbon uptake from the same flux and DIC constructions (not
+            normalized by the alkalinity/DIC source)
         """
         if not hasattr(self, "ds_cdr"):
             # Compute metrics and store

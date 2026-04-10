@@ -72,6 +72,8 @@ def test_compute_cdr_metrics_outputs(
         "hDIC_ALT_CO2",
         "cdr_efficiency",
         "cdr_efficiency_from_delta_diff",
+        "cdr_carbon_uptake_from_flux",
+        "cdr_carbon_uptake_from_dic_difference",
     ]:
         assert var in ds_cdr
 
@@ -80,6 +82,26 @@ def test_compute_cdr_metrics_outputs(
 
     # Window length should be 1 everywhere
     assert np.all(ds_cdr["window_length"].values == 1)
+
+    # Uptake variables are the efficiency numerators (efficiency × cumulative source)
+    cumulative_source = (
+        (
+            (minimal_ds["ALK_source"] - minimal_ds["DIC_source"]).sum(
+                dim=["s_rho", "eta_rho", "xi_rho"]
+            )
+            * ds_cdr["window_length"]
+        )
+        .cumsum(dim="time")
+        .compute()
+    )
+    np.testing.assert_allclose(
+        ds_cdr["cdr_carbon_uptake_from_flux"],
+        ds_cdr["cdr_efficiency"] * cumulative_source,
+    )
+    np.testing.assert_allclose(
+        ds_cdr["cdr_carbon_uptake_from_dic_difference"],
+        ds_cdr["cdr_efficiency_from_delta_diff"] * cumulative_source,
+    )
 
 
 def test_missing_variable_in_ds(

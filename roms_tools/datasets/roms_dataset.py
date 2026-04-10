@@ -80,16 +80,11 @@ class ROMSDataset:
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
     initial_slice_bounds : dict, optional
-        Optional horizontal subset to apply when loading. Two forms are supported:
+        Optional horizontal subset to apply when loading. 
 
         - Index bounds on rho dimensions: keys are the dataset dimension names for rho
           points (usually ``"eta_rho"`` and ``"xi_rho"``, i.e. ``dim_names`` values),
           values are inclusive ``(min_index, max_index)`` tuples.
-
-        - Geographic bounds: ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}``
-          in degrees. Indices are computed with
-          :meth:`~roms_tools.setup.grid.Grid.rho_index_bounds_from_latlon_bounds` on
-          ``self.grid`` and then passed as rho index bounds above.
 
         Subsetting requires rho dimensions to use index-like coordinates so that
         :meth:`xarray.Dataset.sel` can select along ``eta_rho`` / ``xi_rho`` (typical ROMS
@@ -127,7 +122,7 @@ class ROMSDataset:
     adjust_depth_for_sea_surface_height: bool | None = False
     """Whether to account for sea surface height variations when computing depth
     coordinates."""
-    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    initial_slice_bounds: dict[str, tuple[int , int]] | None = None
     """Optional rho horizontal subset at load time (index or lat/lon bounds)."""
 
     ds: xr.Dataset = field(init=False, repr=False)
@@ -200,7 +195,7 @@ class ROMSDataset:
                 f"dataset ({eta}={ds_eta}, {xi}={ds_xi})."
             )
 
-    def _resolve_initial_slice_bounds_for_load(
+    def _resolve_rho_index_bounds(
         self,
     ) -> dict[str, tuple[int, int]] | None:
         """Turn ``initial_slice_bounds`` into index bounds on file dimension names."""
@@ -213,31 +208,8 @@ class ROMSDataset:
         rho_dim_names = {eta_name, xi_name}
 
         keys = set(b)
-        if "latitude" in keys or "longitude" in keys:
-            if keys != {"latitude", "longitude"}:
-                raise ValueError(
-                    "initial_slice_bounds with geographic keys must be exactly "
-                    "'latitude' and 'longitude'."
-                )
-            lat_b = b["latitude"]
-            lon_b = b["longitude"]
-            idx = self.grid.rho_index_bounds_from_latlon_bounds(
-                {
-                    "latitude": (float(lat_b[0]), float(lat_b[1])),
-                    "longitude": (float(lon_b[0]), float(lon_b[1])),
-                }
-            )
-            return {
-                eta_name: idx["eta_rho"],
-                xi_name: idx["xi_rho"],
-            }
 
-        if not keys <= rho_dim_names:
-            raise ValueError(
-                "initial_slice_bounds must be either {'latitude': ..., 'longitude': ...} "
-                f"or a subset of rho index dimension names {sorted(rho_dim_names)}; "
-                f"got {sorted(keys)}."
-            )
+        # TODO: Potentially impellent geographic bounds -> ROMS grid index bounds 
 
         out: dict[str, tuple[int, int]] = {}
         for dim in keys:
@@ -330,7 +302,7 @@ class ROMSDataset:
 
     def load_data(self) -> xr.Dataset:
         """Load the ROMS data."""
-        resolved = self._resolve_initial_slice_bounds_for_load()
+        resolved = self._resolve_rho_index_bounds()
         ds = load_data(
             filename=self.path,
             dim_names={"time": "time"},

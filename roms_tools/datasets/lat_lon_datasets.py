@@ -52,6 +52,8 @@ GLORYS_GLOBAL_GRID_PATH = (
 DEFAULT_NR_BUFFER_POINTS = (
     20  # Default number of buffer points for subdomain selection.
 )
+# Default lateral chunk size for Dask-backed LatLonDataset subclasses (latitude/longitude).
+_DEFAULT_LAT_LON_LATERAL_CHUNK = 50
 # Balances performance and accuracy:
 # - Too many points → more expensive computations
 # - Too few points → potential boundary artifacts when lateral refill is performed
@@ -105,7 +107,10 @@ class LatLonDataset:
     chunks : dict[str, int], optional
         Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
         If provided, these chunks override the default chunking scheme when ``use_dask=True``.
-        Defaults to None.
+        If ``None`` and the concrete class sets ``_default_lateral_dask_chunk``, defaults are built with
+        :func:`~roms_tools.utils.get_dask_chunks` using that lateral size (and may still be overridden here).
+        Otherwise defaults to ``None`` (loader uses :func:`~roms_tools.utils.get_dask_chunks` with
+        ``lateral_chunk=-1`` when ``use_dask=True``).
 
     Attributes
     ----------
@@ -144,6 +149,7 @@ class LatLonDataset:
 
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
     chunks: dict[str, int] | None = None
+    _default_lateral_dask_chunk: ClassVar[int | None] = None
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
@@ -159,6 +165,10 @@ class LatLonDataset:
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
         validate_start_end_time(self.start_time, self.end_time)
+        if self.chunks is None:
+            lateral = type(self)._default_lateral_dask_chunk
+            if lateral is not None:
+                self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
         ds = self.load_data()
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
@@ -752,6 +762,8 @@ class TPXODataset(LatLonDataset):
         The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
     """
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     filename: str
     grid_filename: str
     location: str
@@ -944,6 +956,8 @@ class TPXODataset(LatLonDataset):
 class GLORYSDataset(LatLonDataset):
     """Represents GLORYS data on original grid."""
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "temp": "thetao",
@@ -1099,7 +1113,13 @@ class GLORYSDefaultDataset(GLORYSDataset):
             coordinates_selection_method="outside",
             chunk_size_limit=-1,
         )
-        chunks = get_dask_chunks(self.dim_names)
+        chunks = (
+            self.chunks
+            if self.chunks is not None
+            else get_dask_chunks(
+                self.dim_names, lateral_chunk=_DEFAULT_LAT_LON_LATERAL_CHUNK
+            )
+        )
         ds = ds.chunk(chunks)
 
         return ds
@@ -1115,6 +1135,8 @@ class UnifiedDataset(LatLonDataset):
     and since the dataset does not contain a mask, the `needs_lateral_fill`
     attribute is set to `False`.
     """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     needs_lateral_fill: bool = False
 
@@ -1258,6 +1280,8 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
 @dataclass(kw_only=True)
 class CESMDataset(LatLonDataset):
     """Represents CESM data on original grid."""
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -1466,6 +1490,8 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 class ERA5Dataset(LatLonDataset):
     """Represents ERA5 data on original grid."""
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "uwnd": "u10",
@@ -1594,6 +1620,8 @@ class ERA5Correction(LatLonDataset):
     radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
     """
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     filename: str = field(
         default_factory=lambda: download_correction_data("SSR_correction.nc")
     )
@@ -1673,6 +1701,8 @@ class ERA5Correction(LatLonDataset):
 class ETOPO5Dataset(LatLonDataset):
     """Represents topography data on the original grid from the ETOPO5 dataset."""
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
     var_names: dict[str, str] = field(
         default_factory=lambda: {
@@ -1710,6 +1740,8 @@ class ETOPO5Dataset(LatLonDataset):
 class SRTM15Dataset(LatLonDataset):
     """Represents topography data on the original grid from the SRTM15 dataset."""
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "topo": "z",
@@ -1724,6 +1756,8 @@ class SRTM15Dataset(LatLonDataset):
 @dataclass(kw_only=True)
 class EMODDataset(LatLonDataset):
     """Represents topography data on the original grid from the EMOD dataset."""
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {

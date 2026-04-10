@@ -106,7 +106,7 @@ class SurfaceForcing:
         for initial conditions, geographic bounds:
 
         - Geographic bounds: ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}``
-          in degrees. 
+          in degrees.
 
 
     Examples

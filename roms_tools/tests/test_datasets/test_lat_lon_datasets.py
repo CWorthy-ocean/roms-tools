@@ -475,8 +475,13 @@ def test_initial_slice_bounds_lat_lon_subset(global_dataset, tmp_path, use_dask)
     )
 
     if use_dask:
-        assert sub.ds.sizes["latitude"] == 21
-        assert sub.ds.sizes["longitude"] == 11
+        # Match inclusive label selection (same idea as sel(latitude=slice(lo, hi))).
+        lat = global_dataset["latitude"].values
+        lon = global_dataset["longitude"].values
+        expected_lat = int(((lat >= -10) & (lat <= 10)).sum())
+        expected_lon = int(((lon >= 30) & (lon <= 40)).sum())
+        assert sub.ds.sizes["latitude"] == expected_lat
+        assert sub.ds.sizes["longitude"] == expected_lon
         assert sub.ds.sizes["latitude"] < full.ds.sizes["latitude"]
         assert sub.ds.sizes["longitude"] < full.ds.sizes["longitude"]
     else:
@@ -485,7 +490,9 @@ def test_initial_slice_bounds_lat_lon_subset(global_dataset, tmp_path, use_dask)
         assert sub.ds.sizes["longitude"] == full.ds.sizes["longitude"]
 
 
-def test_initial_slice_bounds_invalid_keys_are_ignored(global_dataset, tmp_path, use_dask):
+def test_initial_slice_bounds_invalid_keys_are_ignored(
+    global_dataset, tmp_path, use_dask
+):
     filepath = tmp_path / "test_initial_slice_invalid.nc"
     global_dataset.to_netcdf(filepath)
 

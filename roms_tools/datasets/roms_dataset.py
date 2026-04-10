@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import xarray as xr
@@ -37,6 +37,7 @@ DEFAULT_NR_BUFFER_POINTS = (
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
 # This default will be applied consistently across all datasets requiring lateral fill.
+_DEFAULT_ROMS_LATERAL_DASK_CHUNK = 50
 
 
 @dataclass(kw_only=True)
@@ -79,18 +80,11 @@ class ROMSDataset:
         Defaults to `False`.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
-    initial_slice_bounds : dict, optional
-        Optional horizontal subset to apply when loading. 
-
-        - Index bounds on rho dimensions: keys are the dataset dimension names for rho
-          points (usually ``"eta_rho"`` and ``"xi_rho"``, i.e. ``dim_names`` values),
-          values are inclusive ``(min_index, max_index)`` tuples.
-
-        Subsetting requires rho dimensions to use index-like coordinates so that
-        :meth:`xarray.Dataset.sel` can select along ``eta_rho`` / ``xi_rho`` (typical ROMS
-        NetCDF output). When ``initial_slice_bounds`` is set, the loaded dataset may be
-        smaller than ``grid.ds`` along rho horizontal dimensions; the grid object is
-        unchanged.
+    chunks : dict[str, int], optional
+        Dask chunk sizes passed to :func:`~roms_tools.utils.load_data` when ``use_dask=True``.
+        If ``None`` and the class sets ``_default_lateral_dask_chunk``, defaults are built with
+        :func:`~roms_tools.utils.get_dask_chunks` using ``self.dim_names`` and that lateral size.
+        If both are ``None``, the loader uses ``get_dask_chunks`` with ``lateral_chunk=-1``.
     """
 
     path: str | Path | list[str | Path]
@@ -122,14 +116,20 @@ class ROMSDataset:
     adjust_depth_for_sea_surface_height: bool | None = False
     """Whether to account for sea surface height variations when computing depth
     coordinates."""
-    initial_slice_bounds: dict[str, tuple[int , int]] | None = None
-    """Optional rho horizontal subset at load time (index or lat/lon bounds)."""
+    chunks: dict[str, int] | None = None
+    """Optional Dask chunk sizes for loading ROMS output when ``use_dask=True``."""
+    _default_lateral_dask_chunk: ClassVar[int | None] = _DEFAULT_ROMS_LATERAL_DASK_CHUNK
+    """If set on a class, used to build ``chunks`` when the caller passes ``chunks=None``."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing the ROMS output."""
 
     def __post_init__(self):
         validate_start_end_time(self.start_time, self.end_time)
+        if self.chunks is None:
+            lateral = type(self)._default_lateral_dask_chunk
+            if lateral is not None:
+                self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
         ds = self.load_data()
         self._check_consistency_data_grid(ds)
 
@@ -174,59 +174,12 @@ class ROMSDataset:
         ds_eta = ds.sizes.get(eta)
         ds_xi = ds.sizes.get(xi)
 
-        if self.initial_slice_bounds is not None:
-            if ds_eta is None or ds_xi is None:
-                raise ValueError(
-                    f"Dataset missing rho dimensions for grid check: "
-                    f"expected {eta!r} and {xi!r} in dataset dims."
-                )
-            if ds_eta > grid_eta or ds_xi > grid_xi:
-                raise ValueError(
-                    f"Inconsistent dataset dimensions after subset: "
-                    f"dataset ({eta}={ds_eta}, {xi}={grid_xi}) cannot be larger than "
-                    f"grid ({eta}={grid_eta}, {xi}={grid_xi})."
-                )
-            return
-
         if grid_eta != ds_eta or grid_xi != ds_xi:
             raise ValueError(
                 f"Inconsistent dataset dimensions: "
                 f"grid ({eta}={grid_eta}, {xi}={grid_xi}), "
                 f"dataset ({eta}={ds_eta}, {xi}={ds_xi})."
             )
-
-    def _resolve_rho_index_bounds(
-        self,
-    ) -> dict[str, tuple[int, int]] | None:
-        """Turn ``initial_slice_bounds`` into index bounds on file dimension names."""
-        b = self.initial_slice_bounds
-        if not b:
-            return None
-
-        eta_name = self.dim_names["eta_rho"]
-        xi_name = self.dim_names["xi_rho"]
-        rho_dim_names = {eta_name, xi_name}
-
-        keys = set(b)
-
-        # TODO: Potentially impellent geographic bounds -> ROMS grid index bounds 
-
-        out: dict[str, tuple[int, int]] = {}
-        for dim in keys:
-            pair = b[dim]
-            if (
-                not isinstance(pair, tuple)
-                or len(pair) != 2
-                or not all(isinstance(x, (int, np.integer)) for x in pair)
-            ):
-                raise ValueError(
-                    f"initial_slice_bounds[{dim!r}] must be a pair of integer indices."
-                )
-            lo, hi = int(pair[0]), int(pair[1])
-            if lo > hi:
-                lo, hi = hi, lo
-            out[dim] = (lo, hi)
-        return out
 
     def _set_default_var_names(self, ds: xr.Dataset) -> None:
         """
@@ -302,27 +255,15 @@ class ROMSDataset:
 
     def load_data(self) -> xr.Dataset:
         """Load the ROMS data."""
-        resolved = self._resolve_rho_index_bounds()
-        ds = load_data(
+        return load_data(
             filename=self.path,
-            dim_names={"time": "time"},
+            dim_names=self.dim_names,
             use_dask=self.use_dask,
             decode_times=False,
             decode_timedelta=False,
             force_combine_nested=True,
-            initial_slice_bounds=resolved if self.use_dask else None,
+            chunks=self.chunks,
         )
-
-        if resolved is not None and not self.use_dask:
-            isel_kw = {
-                dim: slice(bounds[0], bounds[1] + 1)
-                for dim, bounds in resolved.items()
-                if dim in ds.dims
-            }
-            if isel_kw:
-                ds = ds.isel(**isel_kw)
-
-        return ds
 
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
         """

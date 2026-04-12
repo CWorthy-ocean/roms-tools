@@ -36,6 +36,7 @@ DEFAULT_NR_BUFFER_POINTS = (
 # - Too many points → more expensive computations
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
+
 # This default will be applied consistently across all datasets requiring lateral fill.
 _DEFAULT_ROMS_LATERAL_DASK_CHUNK = 50
 

@@ -53,13 +53,14 @@ GLORYS_GLOBAL_GRID_PATH = (
 DEFAULT_NR_BUFFER_POINTS = (
     20  # Default number of buffer points for subdomain selection.
 )
-# Default lateral chunk size for Dask-backed LatLonDataset subclasses (latitude/longitude).
-_DEFAULT_LAT_LON_LATERAL_CHUNK = 50
 # Balances performance and accuracy:
 # - Too many points → more expensive computations
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
 # This default will be applied consistently across all datasets requiring lateral fill.
+
+# Default lateral chunk size for Dask-backed LatLonDataset subclasses (latitude/longitude).
+_DEFAULT_LAT_LON_LATERAL_CHUNK = 50
 
 
 @dataclass(kw_only=True)

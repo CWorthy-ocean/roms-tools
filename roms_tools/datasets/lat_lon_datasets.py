@@ -42,6 +42,7 @@ from roms_tools.utils import (
     has_gcsfs,
     interpolate_cyclic_time,
     load_data,
+    unchunk_dask,
 )
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
@@ -1648,7 +1649,9 @@ class ERA5Correction(LatLonDataset):
 
         super().__post_init__()
 
-    def match_subdomain(self, target_coords: dict[str, Any]) -> None:
+    def match_subdomain(
+        self, target_coords: dict[str, Any], reset_chunking: bool = False
+    ) -> None:
         """
         Selects a subdomain from the dataset matching the specified coordinates.
 
@@ -1661,6 +1664,10 @@ class ERA5Correction(LatLonDataset):
         target_coords : dict[str, Any]
             A dictionary containing the target latitude and longitude values to select.
             Expected keys: "lat" and "lon", each mapped to a DataArray of coordinates.
+
+        reset_chunking : bool
+            Optionally set the dask chunking of the dataset to tell dask that full (non-time)
+            dimensions are required for subsequent operations. Defaults to False.
 
         Raises
         ------
@@ -1695,6 +1702,10 @@ class ERA5Correction(LatLonDataset):
             raise ValueError(
                 "The correction dataset does not contain all specified longitude values."
             )
+
+        if self.use_dask and reset_chunking:
+            subdomain = unchunk_dask(subdomain, self.dim_names)
+
         self.ds = subdomain
 
 
@@ -2539,11 +2550,7 @@ def choose_subdomain(
     # if subsequent operations require this entire chunk, and dask if currently used,
     # reset the chunking to load the rest of the dataset
     if reset_chunking and dataset_using_dask(subdomain):
-        chunks = get_dask_chunks(
-            dict(dim_names), time_chunking=False
-        )  # ensure possible Mapping is converted to dict
-        chunks_ds = {dim: size for dim, size in chunks.items() if dim in subdomain.dims}
-        subdomain = subdomain.chunk(chunks_ds)
+        subdomain = unchunk_dask(subdomain, dict(dim_names))
 
     return subdomain
 

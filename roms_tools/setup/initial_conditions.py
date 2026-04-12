@@ -318,6 +318,7 @@ class InitialConditions:
                 data.grid.ds,
                 target_coords,
                 reset_chunking=True,
+                dim_names=data.dim_names,
             )
 
             # Regrid all rho variables

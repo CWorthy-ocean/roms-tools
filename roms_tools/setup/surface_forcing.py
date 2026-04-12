@@ -107,7 +107,10 @@ class SurfaceForcing:
 
         - Geographic bounds: ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}``
           in degrees.
-
+    chunks : dict[str, int], optional
+        Dask chunk sizes passed to
+        :class:`~roms_tools.datasets.lat_lon_datasets.LatLonDataset` subclasses when
+        loading with ``use_dask=True``. Pass ``None`` to default to no chunking along non-time dimensions.
 
     Examples
     --------
@@ -146,6 +149,8 @@ class SurfaceForcing:
     """Whether to skip validation checks in the processed data."""
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
+    chunks: dict[str, int] | None = None
+    """Dask chunk sizes for lat/lon surface-forcing sources; default None."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -155,6 +160,7 @@ class SurfaceForcing:
 
     def __post_init__(self):
         self._input_checks()
+
         data = self._get_data()
 
         if self.coarse_grid_mode == "always":
@@ -180,8 +186,11 @@ class SurfaceForcing:
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords
 
+        # Unifies chunking on the *source* lat/lon grid (data.ds). Output self.ds is
+        # built later from regridded processed_fields, so its chunks follow regrid ops.
         data.choose_subdomain(
             target_coords,
+            reset_chunking=True,
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
@@ -330,6 +339,7 @@ class SurfaceForcing:
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
             "use_dask": self.use_dask,
+            "chunks": self.chunks,
             "initial_slice_bounds": self.initial_slice_bounds,
         }
 
@@ -459,7 +469,7 @@ class SurfaceForcing:
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
-        correction_data.match_subdomain(coords_correction)
+        correction_data.match_subdomain(coords_correction, reset_chunking=True)
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 

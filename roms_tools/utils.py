@@ -225,6 +225,27 @@ def get_dask_chunks(
     return chunks
 
 
+def unchunk_dask(
+    ds: xr.Dataset, dim_names: dict[str, str], time_chunking: bool = True
+) -> xr.Dataset:
+    """Reset the dask chunks for a dataset so unchunk geographic dimensions.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset to unchunk.
+    dim_names : dict[str, str]
+        Dictionary specifying the names of dimensions in the dataset, with standardized dims as keys.
+    time_chunking : bool, optional
+        If True, the time dimension will be chunked = 1.
+    """
+    if dataset_using_dask(ds):
+        chunks = get_dask_chunks(dim_names, time_chunking)
+        chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}
+        return ds.chunk(chunks_ds)
+    return ds
+
+
 class DaskInitalSliceLoader:
     """Load dataset from the specified file using Dask with initial slice bounds. Abstracted in
     into a class to use `partial` to pre-load the selectors into the method passed to `preprocess`

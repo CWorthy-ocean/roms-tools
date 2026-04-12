@@ -151,7 +151,9 @@ def _make_raw_topography(
     xr.DataArray
         The regridded topography data with the sign flipped (bathymetry positive).
     """
-    data.choose_subdomain(target_coords, buffer_points=3, verbose=verbose)
+    data.choose_subdomain(
+        target_coords, buffer_points=3, reset_chunking=True, verbose=verbose
+    )
     # Enforce double precision to ensure reproducibility
     data.convert_to_float64()
     data.apply_lateral_fill()

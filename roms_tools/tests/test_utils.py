@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -7,8 +8,10 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from roms_tools import Grid
 from roms_tools.datasets.download import download_test_data
-from roms_tools.datasets.lat_lon_datasets import ERA5Correction
+from roms_tools.datasets.lat_lon_datasets import ERA5Correction, GLORYSDataset
+from roms_tools.datasets.roms_dataset import ROMSDataset
 from roms_tools.utils import (
     _interpolate_generic,
     _path_list_from_input,
@@ -25,6 +28,7 @@ from roms_tools.utils import (
     interpolate_from_v_to_rho,
     load_data,
     rotate_velocities,
+    unchunk_dask,
     wrap_longitudes,
 )
 
@@ -606,3 +610,78 @@ def test_rotate_velocities_roundtrip(sample_velocities_centered):
 
     np.testing.assert_allclose(u.values, u_back.values)
     np.testing.assert_allclose(v.values, v_back.values)
+
+
+def _assert_single_full_chunk(da: xr.DataArray, dim: str) -> None:
+    """Assert dim is chunked like ``get_dask_chunks`` lateral ``-1`` after ``ds.chunk``.
+
+    ``ds.chunk({dim: -1})`` does not leave ``-1`` in ``da.chunks``; Dask normalizes it
+    to a single partition whose **length** equals the dimension size. So we check
+    ``len(chunks_along) == 1`` (one partition along the axis), not chunk **size** 1;
+    we also require that partition's size ``== da.sizes[dim]`` (full extent).
+    """
+    assert da.chunks is not None, "expected a dask-backed array"
+    axis = da.get_axis_num(dim)
+    chunks_along = da.chunks[axis]
+    assert len(chunks_along) == 1, f"{dim}: expected one chunk, got {chunks_along}"
+    assert chunks_along[0] == da.sizes[dim], (
+        f"{dim}: chunk {chunks_along[0]} != dim size {da.sizes[dim]}"
+    )
+
+
+@pytest.mark.skipif(not has_dask(), reason="dask not installed")
+def test_unchunk_dask_glorys_test_data():
+    """After unchunk_dask, lat/lon use one full chunk (-1 semantics from get_dask_chunks)."""
+    fname = Path(download_test_data("GLORYS_test_data.nc"))
+    data = GLORYSDataset(
+        filename=fname,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2013, 1, 1),
+        climatology=False,
+        use_dask=True,
+    )
+    lat = data.dim_names["latitude"]
+    lon = data.dim_names["longitude"]
+    tdim = data.dim_names["time"]
+    # Deliberately split lateral dims so unchunk_dask effect is visible
+    ds = data.ds.chunk(
+        {
+            lat: max(1, data.ds.sizes[lat] // 4),
+            lon: max(1, data.ds.sizes[lon] // 4),
+            tdim: 1,
+        }
+    )
+    var = data.var_names["temp"]
+    assert len(ds[var].chunks[ds[var].get_axis_num(lat)]) > 1
+
+    out = unchunk_dask(ds, data.dim_names, time_chunking=True)
+    _assert_single_full_chunk(out[var], lat)
+    _assert_single_full_chunk(out[var], lon)
+
+
+@pytest.mark.skipif(not has_dask(), reason="dask not installed")
+def test_unchunk_dask_roms_restart_test_data():
+    """After unchunk_dask, eta_rho (and xi_rho) use one full chunk for ROMS layout."""
+    fname_grid = Path(download_test_data("epac25km_grd.nc"))
+    grid = Grid(filename=fname_grid)
+    roms = ROMSDataset(
+        grid=grid,
+        path=Path(download_test_data("eastpac25km_rst.19980106000000.nc")),
+        use_dask=True,
+    )
+    eta = roms.dim_names["eta_rho"]
+    xi = roms.dim_names["xi_rho"]
+    tdim = roms.dim_names["time"]
+    ds = roms.ds.chunk(
+        {
+            eta: max(1, roms.ds.sizes[eta] // 3),
+            xi: max(1, roms.ds.sizes[xi] // 3),
+            tdim: 1,
+        }
+    )
+    da = ds["temp"]
+    assert len(da.chunks[da.get_axis_num(eta)]) > 1
+
+    out = unchunk_dask(ds, roms.dim_names, time_chunking=True)
+    _assert_single_full_chunk(out["temp"], eta)
+    _assert_single_full_chunk(out["temp"], xi)

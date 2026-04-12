@@ -19,10 +19,10 @@ from roms_tools.datasets.utils import (
 )
 from roms_tools.fill import LateralFill
 from roms_tools.utils import (
-    dataset_using_dask,
     get_dask_chunks,
     load_data,
     rotate_velocities,
+    unchunk_dask,
     wrap_longitudes,
 )
 from roms_tools.vertical_coordinate import (
@@ -599,9 +599,9 @@ class ROMSDataset:
             self.ds,
             self.grid.ds,
             target_coords,
+            self.dim_names,
             buffer_points,
             reset_chunking=reset_chunking,
-            dim_names=self.dim_names,
         )
         self.ds = subdomain
 
@@ -609,9 +609,9 @@ class ROMSDataset:
             self.grid.ds,
             self.grid.ds,
             target_coords,
+            self.dim_names,  # grid dimensions may not be the same as the dataset dimensions
             buffer_points,
-            reset_chunking=reset_chunking,
-            dim_names=self.dim_names,
+            reset_chunking=False,  # grids should not be chunked
         )
 
         self.grid = self.grid.copy_with_ds(subdomain_grid_ds)
@@ -735,20 +735,18 @@ class ROMSDataset:
                 interpolate_before=True,
             )
 
+        # unchunk geographic dimensions seems to be necessary here
         if self.use_dask:
-            chunks = get_dask_chunks(self.dim_names)
-            # Only keep chunks for dimensions that exist in the dataset
-            chunks = {dim: size for dim, size in chunks.items() if dim in self.ds.dims}
-            self.ds = self.ds.chunk(chunks)
+            self.ds = unchunk_dask(self.ds, self.dim_names)
 
 
 def choose_subdomain(
     ds: xr.Dataset,
     ds_grid: xr.Dataset,
     target_coords: dict[str, Any],
+    dim_names: dict[str, str],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
     reset_chunking: bool = False,
-    dim_names: dict[str, str] | None = None,
 ):
     """Selects a subdomain from the xarray Dataset based on specified target
     coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -868,11 +866,8 @@ def choose_subdomain(
 
     # if subsequent operations require this entire chunk, and dask if currently used,
     # reset the chunking to load the rest of the dataset
-    if reset_chunking and dataset_using_dask(ds):
-        dims = {} if dim_names is None else dim_names  # catch possible None
-        chunks = get_dask_chunks(dims, time_chunking=False)
-        chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}
-        ds = ds.chunk(chunks_ds)
+    if reset_chunking:
+        ds = unchunk_dask(ds, dict(dim_names))
 
     return ds
 

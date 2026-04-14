@@ -65,6 +65,20 @@ def small_grid_that_straddles180():
     )
 
 
+@pytest.fixture()
+def small_grid_that_straddles0_large_lon():
+    return Grid(
+        nx=10, ny=10, center_lon=720, center_lat=61, rot=0, size_x=50, size_y=200
+    )
+
+
+@pytest.fixture()
+def small_grid_that_straddles0_large_negative_lon():
+    return Grid(
+        nx=10, ny=10, center_lon=-720, center_lat=61, rot=0, size_x=50, size_y=200
+    )
+
+
 @pytest.mark.parametrize(
     "parent_name,child_name,context",
     [
@@ -90,6 +104,24 @@ def test_check_child_inside_parent(request, parent_name, child_name, context):
 
     with context:
         _check_child_outside_parent(parent_grid_ds, child_grid_ds, boundaries)
+
+
+@pytest.mark.parametrize(
+    "grid",
+    [
+        "small_grid_that_straddles0_large_lon",
+        "small_grid_that_straddles0_large_negative_lon",
+    ],
+)
+def test_check_straddle_lon_range(request, grid):
+    grid = request.getfixturevalue(grid)
+
+    expected_lon_rho_min = 0.0
+    expected_lon_rho_max = 360.0
+
+    assert grid.ds["lon_rho"].min() >= expected_lon_rho_min
+    assert grid.ds["lon_rho"].max() <= expected_lon_rho_max
+    assert grid.straddle
 
 
 class TestInterpolateIndices:

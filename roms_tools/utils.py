@@ -187,9 +187,8 @@ def get_dask_chunks(
         If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
         Defaults to True.
     lateral_chunk : int, optional
-        The chunk size for the lateral dimensions.
-        Defaults to -1.
-        If -1, the chunk size will be determined by the data.
+        The chunk size for the lateral dimensions. Defaults to -1.
+        If -1, the chunk size will be determined by the data (e.g. the entire DataArray dimension is one chunk).
         If a positive integer, the chunk size will be set to the specified value.
 
     Returns
@@ -246,97 +245,43 @@ def unchunk_dask(
     return ds
 
 
-class DaskInitalSliceLoader:
-    """Load dataset from the specified file using Dask with initial slice bounds. Abstracted in
-    into a class to use `partial` to pre-load the selectors into the method passed to `preprocess`
-    in xarray.open_mfdataset().
+def _apply_slices(ds, selectors, use_isel: bool = False):
     """
+    The method passed to 'preprocess'.
+    It checks which dimensions exist in the current file before slicing.
+    """
+    # Intersection: only use keys that exist in the current file's dimensions
+    # This prevents 'KeyError' if some files have different dim names
+    active_selectors = {k: v for k, v in selectors.items() if k in ds.dims}
 
-    def __init__(
-        self,
-        filenames: list[str],
-        decode_times: bool = True,
-        decode_timedelta: bool = True,
-        chunks: dict[str, int] | None = None,
-        initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
-        initial_slice_bounds_use_isel: bool = False,
-        kwargs: dict[str, str] | None = None,
-    ):
-        """Load dataset from the specified file using Dask with initial slice bounds.
+    if active_selectors:
+        if use_isel:
+            return ds.isel(**active_selectors)
+        return ds.sel(**active_selectors)
 
-        Parameters
-        ----------
-        filenames : list[str]
-            The paths to the data file(s).
-        decode_times: bool, optional
-            If True, decode times and timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
-            Defaults to True.
-        decode_timedelta: bool, optional
-            If True, decode timedeltas encoded in the standard NetCDF datetime format into datetime objects. Otherwise, leave them encoded as numbers.
-            Defaults to True.
-        chunks : dict[str, int], optional
-            Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
-            If provided, these chunks override the default chunking scheme when ``use_dask=True``.
-            Defaults to None.
-        initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None | None = None,
-            Optional horizontal subset to apply when loading.
-            - Index bounds on dimensions: keys are the dataset dimension names for rho
-            points (usually ``"eta_rho"`` and ``"xi_rho"``, or ``"latitide"`` and ``"longitude"``),
-            values are inclusive ``(min_index, max_index)`` tuples.
-        initial_slice_bounds_use_isel : bool, optional
-            If True, apply bounds with :meth:`xarray.Dataset.isel` using half-open
-            slices ``slice(lo, hi + 1)`` so ``(lo, hi)`` are inclusive integer indices
-            (ROMS rho dimensions). If False (default), use :meth:`xarray.Dataset.sel`
-            with ``slice(lo, hi)`` (lat/lon label selection).
-        kwargs: dict[str, str] | None = None,
-            xarray open_mfdataset kwargs.
-        """
-        self._use_isel_for_initial_slice = initial_slice_bounds_use_isel
-        bounds = initial_slice_bounds or {}
-        if initial_slice_bounds_use_isel:
-            self.selectors = {
-                dim: slice(int(pair[0]), int(pair[1]) + 1)
-                for dim, pair in bounds.items()
-            }
-        else:
-            self.selectors = {
-                # type checkers failing here (wants only int), but slice can actually take any type
-                dim: slice(pair[0], pair[1])  # type: ignore[arg-type]
-                for dim, pair in bounds.items()  # type: ignore[arg-type]
-            }
+    return ds
 
-        prep_func = partial(
-            self._apply_slices,
-            selectors=self.selectors,
-            use_isel=self._use_isel_for_initial_slice,
-        )
 
-        # 3. Open the dataset
-        self.ds = xr.open_mfdataset(
-            filenames,
-            decode_times=decode_times,
-            decode_timedelta=decode_timedelta,
-            chunks=chunks,
-            preprocess=prep_func,
-            **kwargs,
-        )
+def _get_ds_preprocessor(initial_slice_bounds, initial_slice_bounds_use_isel):
+    bounds = initial_slice_bounds or {}
+    if initial_slice_bounds_use_isel:
+        selectors = {
+            dim: slice(int(pair[0]), int(pair[1]) + 1) for dim, pair in bounds.items()
+        }
+    else:
+        selectors = {
+            # type checkers failing here (wants only int), but slice can actually take any type
+            dim: slice(pair[0], pair[1])  # type: ignore[arg-type]
+            for dim, pair in bounds.items()  # type: ignore[arg-type]
+        }
 
-    @staticmethod
-    def _apply_slices(ds, selectors, use_isel: bool = False):
-        """
-        The method passed to 'preprocess'.
-        It checks which dimensions exist in the current file before slicing.
-        """
-        # Intersection: only use keys that exist in the current file's dimensions
-        # This prevents 'KeyError' if some files have different dim names
-        active_selectors = {k: v for k, v in selectors.items() if k in ds.dims}
+    prep_func = partial(
+        _apply_slices,
+        selectors=selectors,
+        use_isel=initial_slice_bounds_use_isel,
+    )
 
-        if active_selectors:
-            if use_isel:
-                return ds.isel(**active_selectors)
-            return ds.sel(**active_selectors)
-
-        return ds
+    return prep_func
 
 
 def _load_data_dask(
@@ -422,24 +367,20 @@ def _load_data_dask(
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
-        if initial_slice_bounds is not None:
-            return DaskInitalSliceLoader(
-                filenames,
-                decode_times=decode_times,
-                decode_timedelta=decode_timedelta,
-                chunks=chunks,
-                initial_slice_bounds=initial_slice_bounds,
-                initial_slice_bounds_use_isel=initial_slice_bounds_use_isel,
-                kwargs=kwargs,
-            ).ds
-        else:
-            return xr.open_mfdataset(
-                filenames,
-                decode_times=decode_times,
-                decode_timedelta=decode_timedelta,
-                chunks=chunks,
-                **kwargs,
-            )
+
+        preprocessor = (
+            _get_ds_preprocessor(initial_slice_bounds, initial_slice_bounds_use_isel)
+            if initial_slice_bounds is not None
+            else None
+        )
+        return xr.open_mfdataset(
+            filenames,
+            decode_times=decode_times,
+            decode_timedelta=decode_timedelta,
+            chunks=chunks,
+            preprocess=preprocessor,
+            **kwargs,
+        )
 
 
 def _check_load_data_dask(use_dask: bool) -> None:

@@ -97,20 +97,19 @@ class SurfaceForcing:
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None (default chunking is used).
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading with dask. Only Geographic bounds are supported:
+         ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}`` in degrees. The
+         bounds are applied to the dataset before reading the underlying datasets to reduce memory usage.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
-    initial_slice_bounds : dict, optional
-        Optional horizontal subset to apply when loading data via dask. One form is supported
-        for initial conditions, geographic bounds:
 
-        - Geographic bounds: ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}``
-          in degrees.
-    chunks : dict[str, int], optional
-        Dask chunk sizes passed to
-        :class:`~roms_tools.datasets.lat_lon_datasets.LatLonDataset` subclasses when
-        loading with ``use_dask=True``. Pass ``None`` to default to no chunking along non-time dimensions.
 
     Examples
     --------
@@ -145,12 +144,12 @@ class SurfaceForcing:
     """Reference date for the model."""
     use_dask: bool = False
     """Whether to use dask for processing."""
-    bypass_validation: bool = False
-    """Whether to skip validation checks in the processed data."""
-    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
-    """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     chunks: dict[str, int] | None = None
     """Dask chunk sizes for lat/lon surface-forcing sources; default None."""
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
+    bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -190,7 +189,7 @@ class SurfaceForcing:
         # built later from regridded processed_fields, so its chunks follow regrid ops.
         data.choose_subdomain(
             target_coords,
-            reset_chunking=True,
+            unchunk_lateral_dims=True,
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
@@ -469,7 +468,7 @@ class SurfaceForcing:
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
-        correction_data.match_subdomain(coords_correction, reset_chunking=True)
+        correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 

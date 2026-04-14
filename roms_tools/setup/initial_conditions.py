@@ -90,6 +90,16 @@ class InitialConditions:
         The reference date for the model. Defaults to January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``. Dimensions must
+        match the underlying dataset, e.g. for ROMS restart files, the dimensions must be "eta_rho", etc.
+        Defaults to None (default chunking is used).
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading with dask. Only Geographic bounds are supported:
+         ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}`` in degrees. The
+         bounds are applied to the dataset before reading the underlying datasets to reduce memory usage.
+         Not used for ROMS restart or other datasets sources.
     allow_flex_time: bool, optional
         Controls how strictly `ini_time` is handled:
 
@@ -101,14 +111,8 @@ class InitialConditions:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
-    initial_slice_bounds : dict, optional
-        Optional horizontal subset when loading lat/lon forcing datasets (e.g. GLORYS)
-        with Dask. Not used for ROMS restart sources.
-    chunks : dict[str, int], optional
-        Optional Dask chunk sizes when loading with ``use_dask=True``: passed to
-        :class:`~roms_tools.datasets.lat_lon_datasets.LatLonDataset` subclasses for lat/lon sources
-        and to :class:`~roms_tools.datasets.roms_dataset.ROMSDataset` for ROMS restart sources.
-        If ``None``, each dataset class applies its own defaults.
+
+
 
     Examples
     --------
@@ -151,13 +155,12 @@ class InitialConditions:
     """Whether to handle ini_time flexibly."""
     use_dask: bool = False
     """Whether to use dask for processing."""
-    bypass_validation: bool = False
-    """Whether to skip validation checks in the processed data."""
-    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
-    """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     chunks: dict[str, int] | None = None
     """Optional Dask chunk sizes for lat/lon and ROMS-restart initial-condition sources."""
-
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
+    bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -204,7 +207,7 @@ class InitialConditions:
         data = self._get_data(forcing_type=type)
         data.choose_subdomain(
             target_coords,
-            reset_chunking=True,
+            unchunk_lateral_dims=True,
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
@@ -317,7 +320,7 @@ class InitialConditions:
                 data.ds_depth_coords,
                 data.grid.ds,
                 target_coords,
-                reset_chunking=True,
+                unchunk_lateral_dims=True,
                 dim_names=data.dim_names,
             )
 

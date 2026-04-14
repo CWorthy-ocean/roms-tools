@@ -92,32 +92,19 @@ class BoundaryForcing:
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None (default chunking is used).
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading with dask. Only Geographic bounds are supported:
+         ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}`` in degrees. The
+         bounds are applied to the dataset before reading the underlying datasets to reduce memory usage.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
-    initial_slice_bounds : dict, optional
-        Optional horizontal subset to apply when loading. Two forms are supported:
 
-        - Index bounds on rho dimensions: keys are the dataset dimension names for rho
-          points (usually ``"eta_rho"`` and ``"xi_rho"``, i.e. ``dim_names`` values),
-          values are inclusive ``(min_index, max_index)`` tuples.
-
-        - Geographic bounds: ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}``
-          in degrees. Indices are computed with
-          :meth:`~roms_tools.setup.grid.Grid.rho_index_bounds_from_latlon_bounds` on
-          ``self.grid`` and then passed as rho index bounds above.
-
-        Subsetting requires rho dimensions to use index-like coordinates so that
-        :meth:`xarray.Dataset.sel` can select along ``eta_rho`` / ``xi_rho`` (typical ROMS
-        NetCDF output). When ``initial_slice_bounds`` is set, the loaded dataset may be
-        smaller than ``grid.ds`` along rho horizontal dimensions; the grid object is
-        unchanged.
-    chunks : dict[str, int], optional
-        Optional Dask chunk sizes passed to
-        :class:`~roms_tools.datasets.lat_lon_datasets.LatLonDataset` subclasses when
-        loading with ``use_dask=True``. If ``None``, each dataset class applies its own
-        defaults.
 
     Examples
     --------
@@ -150,12 +137,12 @@ class BoundaryForcing:
     """Reference date for the model."""
     use_dask: bool = False
     """Whether to use dask for processing."""
-    bypass_validation: bool = False
-    """Whether to skip validation checks in the processed data."""
-    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
-    """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     chunks: dict[str, int] | None = None
     """Optional Dask chunk sizes for lat/lon boundary-forcing sources."""
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
+    bypass_validation: bool = False
+    """Whether to skip validation checks in the processed data."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -179,7 +166,7 @@ class BoundaryForcing:
         if self.apply_2d_horizontal_fill:
             data.choose_subdomain(
                 target_coords,
-                reset_chunking=True,
+                unchunk_lateral_dims=True,
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
@@ -226,7 +213,7 @@ class BoundaryForcing:
                     bdry_target_coords,
                     buffer_points=3,
                     return_copy=True,
-                    reset_chunking=True,
+                    unchunk_lateral_dims=True,
                 )
 
                 if not self.apply_2d_horizontal_fill:

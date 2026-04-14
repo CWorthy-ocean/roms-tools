@@ -567,7 +567,7 @@ class ROMSDataset:
         self,
         target_coords: dict[str, Any],
         buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
-        reset_chunking: bool = False,
+        unchunk_lateral_dims: bool = False,
     ) -> None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -582,7 +582,7 @@ class ROMSDataset:
         buffer_points : int
             The number of grid points to extend beyond the specified latitude and longitude
             ranges when selecting the subdomain. Defaults to 20.
-        reset_chunking : bool
+        unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.
 
@@ -602,7 +602,7 @@ class ROMSDataset:
             target_coords,
             self.dim_names,
             buffer_points,
-            reset_chunking=reset_chunking,
+            unchunk_lateral_dims=unchunk_lateral_dims,
         )
         self.ds = subdomain
 
@@ -612,7 +612,7 @@ class ROMSDataset:
             target_coords,
             self.dim_names,  # grid dimensions may not be the same as the dataset dimensions
             buffer_points,
-            reset_chunking=False,  # grids should not be chunked
+            unchunk_lateral_dims=False,  # grids should not be chunked
         )
 
         self.grid = self.grid.copy_with_ds(subdomain_grid_ds)
@@ -747,7 +747,7 @@ def choose_subdomain(
     target_coords: dict[str, Any],
     dim_names: dict[str, str],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
-    reset_chunking: bool = False,
+    unchunk_lateral_dims: bool = False,
 ):
     """Selects a subdomain from the xarray Dataset based on specified target
     coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -766,12 +766,12 @@ def choose_subdomain(
     buffer_points : int
         The number of grid points to extend beyond the specified latitude and longitude
         ranges when selecting the subdomain. Defaults to 20.
-    reset_chunking : bool
+    unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.
     dim_names: dict[str, str] = None
         Dictionary mapping logical dimension names to dataset dimension names.
-        Only used if reset_chunking is True. Defaults to None.
+        Only used if unchunk_lateral_dims is True. Defaults to None.
     Returns
     -------
     xr.Dataset
@@ -867,7 +867,7 @@ def choose_subdomain(
 
     # if subsequent operations require this entire chunk, and dask if currently used,
     # reset the chunking to load the rest of the dataset
-    if reset_chunking:
+    if unchunk_lateral_dims:
         ds = unchunk_dask(ds, dict(dim_names))
 
     return ds

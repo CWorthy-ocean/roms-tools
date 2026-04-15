@@ -236,6 +236,13 @@ class SurfaceForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
+        rad_vars = ["swrad", "lwrad"]
+
+        ds = ds.assign_coords(rad_time=ds["time"] - 30 / 60 / 24)
+
+        for var in rad_vars:
+            ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
+
         self.ds = ds
 
     def _input_checks(self):

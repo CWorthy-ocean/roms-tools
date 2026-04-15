@@ -3,6 +3,7 @@ import pytest
 import xarray as xr
 
 from roms_tools.fill import LateralFill
+from roms_tools.utils import unchunk_dask
 
 
 @pytest.mark.parametrize(
@@ -17,6 +18,7 @@ from roms_tools.fill import LateralFill
 )
 def test_lateral_fill_no_nans(data_fixture, request):
     data = request.getfixturevalue(data_fixture)
+    data.ds = unchunk_dask(data.ds, data.dim_names)
     lateral_fill = LateralFill(
         data.ds["mask"],
         (data.dim_names["latitude"], data.dim_names["longitude"]),
@@ -38,6 +40,9 @@ def test_lateral_fill_no_nans(data_fixture, request):
 
 
 def test_lateral_fill_correct_order_of_magnitude(coarsened_cesm_bgc_data):
+    coarsened_cesm_bgc_data.ds = unchunk_dask(
+        coarsened_cesm_bgc_data.ds, coarsened_cesm_bgc_data.dim_names
+    )
     lateral_fill = LateralFill(
         coarsened_cesm_bgc_data.ds["mask"],
         (
@@ -76,6 +81,7 @@ def test_lateral_fill_correct_order_of_magnitude(coarsened_cesm_bgc_data):
 )
 def test_lateral_fill_reproducibility(data_fixture, request):
     data = request.getfixturevalue(data_fixture)
+    data.ds = unchunk_dask(data.ds, data.dim_names)
     lateral_fill0 = LateralFill(
         data.ds["mask"],
         (data.dim_names["latitude"], data.dim_names["longitude"]),

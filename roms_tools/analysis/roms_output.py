@@ -14,6 +14,7 @@ from roms_tools.utils import (
     generate_coordinate_range,
     infer_nominal_horizontal_resolution,
     rotate_velocities,
+    unchunk_dask,
 )
 
 
@@ -355,6 +356,10 @@ class ROMSOutput(ROMSDataset):
         ds = ds.isel(eta_rho=slice(1, -1), xi_rho=slice(1, -1))
         layer_depth = layer_depth.isel(eta_rho=slice(1, -1), xi_rho=slice(1, -1))
         h = h.isel(eta_rho=slice(1, -1), xi_rho=slice(1, -1))
+
+        # unchunk geographic dimensions before regridding
+        if self.use_dask:
+            ds = unchunk_dask(ds, self.dim_names)
 
         # Lateral regridding
         lateral_regrid = LateralRegridFromROMS(ds, target_coords)

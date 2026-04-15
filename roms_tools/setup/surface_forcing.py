@@ -236,15 +236,19 @@ class SurfaceForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        # Create time dimension shifted 30 minutes earlier
-        ds = ds.assign_coords(rad_time=ds["time"] - 30 / 60 / 24)
-        ds.rad_time.attrs["long_name"] = "relative time: days since 2000-01-01 00:00:00"
-        ds.rad_time.attrs["units"] = "days"
+        if self.type == "physics":
+            # Create time dimension shifted 30 minutes earlier
+            ds = ds.assign_coords(rad_time=ds["time"] - 30 / 60 / 24)
+            ds.rad_time.attrs["long_name"] = (
+                "relative time: days since 2000-01-01 00:00:00"
+            )
+            ds.rad_time.attrs["units"] = "days"
 
-        # Assign shifted time dimenstion to radiation variables
-        rad_vars = ["swrad", "lwrad"]
-        for var in rad_vars:
-            ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
+            # Assign shifted time dimenstion to radiation variables
+
+            rad_vars = ["swrad", "lwrad"]
+            for var in rad_vars:
+                ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
 
         self.ds = ds
 

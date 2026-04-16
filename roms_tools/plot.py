@@ -121,7 +121,7 @@ def plot_2d_horizontal_field(
     return fig
 
 
-def plot_nesting(parent_grid, child_grid, parent_straddle=None, with_dim_names=False):
+def plot_nesting(parent_grid, child_grid, with_dim_names=False):
     """Plots nested parent and child grids with boundary overlays and grid masking.
 
     Parameters
@@ -130,9 +130,6 @@ def plot_nesting(parent_grid, child_grid, parent_straddle=None, with_dim_names=F
         The parent grid object with a dataset containing `lon_rho`, `lat_rho`, and `mask_rho` variables.
     child_grid : Grid
         The child grid object with a dataset containing `lon_rho` and `lat_rho` variables.
-    parent_straddle : bool
-        Whether the parent grid straddles the 180-degree meridian. If True, longitudes
-        greater than 180° are wrapped to the -180° to 180° range.
     with_dim_names : bool, optional
         Whether to include dimension names in the plotted grid boundaries. Defaults to False.
 
@@ -148,8 +145,7 @@ def plot_nesting(parent_grid, child_grid, parent_straddle=None, with_dim_names=F
     child_lon_deg = child_grid.ds["lon_rho"]
     child_lat_deg = child_grid.ds["lat_rho"]
 
-    if parent_straddle is None:
-        parent_straddle = parent_grid.straddle
+    parent_straddle = parent_grid.straddle
 
     if parent_straddle:
         parent_lon_deg = xr.where(

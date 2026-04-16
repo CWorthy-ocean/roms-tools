@@ -455,6 +455,65 @@ def test_check_dataset(global_dataset, tmp_path, use_dask):
         )
 
 
+def test_initial_slice_bounds_lat_lon_subset(global_dataset, tmp_path, use_dask):
+    filepath = tmp_path / "test_initial_slice.nc"
+    global_dataset.to_netcdf(filepath)
+
+    full = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+    )
+    sub = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+        initial_slice_bounds={
+            "latitude": (-10, 10),
+            "longitude": (30, 40),
+        },
+    )
+
+    if use_dask:
+        # Match inclusive label selection (same idea as sel(latitude=slice(lo, hi))).
+        lat = global_dataset["latitude"].values
+        lon = global_dataset["longitude"].values
+        expected_lat = int(((lat >= -10) & (lat <= 10)).sum())
+        expected_lon = int(((lon >= 30) & (lon <= 40)).sum())
+        assert sub.ds.sizes["latitude"] == expected_lat
+        assert sub.ds.sizes["longitude"] == expected_lon
+        assert sub.ds.sizes["latitude"] < full.ds.sizes["latitude"]
+        assert sub.ds.sizes["longitude"] < full.ds.sizes["longitude"]
+    else:
+        # load_data applies initial_slice_bounds only in the dask open_mfdataset path.
+        assert sub.ds.sizes["latitude"] == full.ds.sizes["latitude"]
+        assert sub.ds.sizes["longitude"] == full.ds.sizes["longitude"]
+
+
+def test_initial_slice_bounds_invalid_keys_are_ignored(
+    global_dataset, tmp_path, use_dask
+):
+    filepath = tmp_path / "test_initial_slice_invalid.nc"
+    global_dataset.to_netcdf(filepath)
+
+    full = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+    )
+    out = LatLonDataset(
+        filename=filepath,
+        var_names={"var": "var"},
+        use_dask=use_dask,
+        initial_slice_bounds={
+            "not_a_dim": (0, 10),
+        },
+    )
+
+    assert out.ds.sizes["latitude"] == full.ds.sizes["latitude"]
+    assert out.ds.sizes["longitude"] == full.ds.sizes["longitude"]
+
+
 def test_era5_correction_match_subdomain(use_dask):
     data = ERA5Correction(use_dask=use_dask)
     lats = data.ds.latitude[10:20]

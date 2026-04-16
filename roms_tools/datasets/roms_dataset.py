@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import xarray as xr
@@ -19,10 +19,10 @@ from roms_tools.datasets.utils import (
 )
 from roms_tools.fill import LateralFill
 from roms_tools.utils import (
-    dataset_using_dask,
     get_dask_chunks,
     load_data,
     rotate_velocities,
+    unchunk_dask,
     wrap_longitudes,
 )
 from roms_tools.vertical_coordinate import (
@@ -36,7 +36,9 @@ DEFAULT_NR_BUFFER_POINTS = (
 # - Too many points → more expensive computations
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
+
 # This default will be applied consistently across all datasets requiring lateral fill.
+_DEFAULT_ROMS_LATERAL_DASK_CHUNK = 50
 
 
 @dataclass(kw_only=True)
@@ -79,6 +81,11 @@ class ROMSDataset:
         Defaults to `False`.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    chunks : dict[str, int], optional
+        Dask chunk sizes passed to :func:`~roms_tools.utils.load_data` when ``use_dask=True``.
+        If ``None`` and the class sets ``_default_lateral_dask_chunk``, defaults are built with
+        :func:`~roms_tools.utils.get_dask_chunks` using ``self.dim_names`` and that lateral size.
+        If both are ``None``, the loader uses ``get_dask_chunks`` with ``lateral_chunk=-1``.
     """
 
     path: str | Path | list[str | Path]
@@ -110,12 +117,20 @@ class ROMSDataset:
     adjust_depth_for_sea_surface_height: bool | None = False
     """Whether to account for sea surface height variations when computing depth
     coordinates."""
+    chunks: dict[str, int] | None = None
+    """Optional Dask chunk sizes for loading ROMS output when ``use_dask=True``."""
+    _default_lateral_dask_chunk: ClassVar[int | None] = _DEFAULT_ROMS_LATERAL_DASK_CHUNK
+    """If set on a class, used to build ``chunks`` when the caller passes ``chunks=None``."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing the ROMS output."""
 
     def __post_init__(self):
         validate_start_end_time(self.start_time, self.end_time)
+        if self.chunks is None:
+            lateral = type(self)._default_lateral_dask_chunk
+            if lateral is not None:
+                self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
         ds = self.load_data()
         self._check_consistency_data_grid(ds)
 
@@ -241,16 +256,15 @@ class ROMSDataset:
 
     def load_data(self) -> xr.Dataset:
         """Load the ROMS data."""
-        ds = load_data(
+        return load_data(
             filename=self.path,
-            dim_names={"time": "time"},
+            dim_names=self.dim_names,
             use_dask=self.use_dask,
             decode_times=False,
             decode_timedelta=False,
             force_combine_nested=True,
+            chunks=self.chunks,
         )
-
-        return ds
 
     def select_relevant_fields(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -553,7 +567,7 @@ class ROMSDataset:
         self,
         target_coords: dict[str, Any],
         buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
-        reset_chunking: bool = False,
+        unchunk_lateral_dims: bool = False,
     ) -> None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -568,7 +582,7 @@ class ROMSDataset:
         buffer_points : int
             The number of grid points to extend beyond the specified latitude and longitude
             ranges when selecting the subdomain. Defaults to 20.
-        reset_chunking : bool
+        unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.
 
@@ -586,9 +600,9 @@ class ROMSDataset:
             self.ds,
             self.grid.ds,
             target_coords,
+            self.dim_names,
             buffer_points,
-            reset_chunking=reset_chunking,
-            dim_names=self.dim_names,
+            unchunk_lateral_dims=unchunk_lateral_dims,
         )
         self.ds = subdomain
 
@@ -596,9 +610,9 @@ class ROMSDataset:
             self.grid.ds,
             self.grid.ds,
             target_coords,
+            self.dim_names,  # grid dimensions may not be the same as the dataset dimensions
             buffer_points,
-            reset_chunking=reset_chunking,
-            dim_names=self.dim_names,
+            unchunk_lateral_dims=False,  # grids should not be chunked
         )
 
         self.grid = self.grid.copy_with_ds(subdomain_grid_ds)
@@ -722,20 +736,18 @@ class ROMSDataset:
                 interpolate_before=True,
             )
 
+        # unchunk geographic dimensions seems to be necessary here
         if self.use_dask:
-            chunks = get_dask_chunks(self.dim_names)
-            # Only keep chunks for dimensions that exist in the dataset
-            chunks = {dim: size for dim, size in chunks.items() if dim in self.ds.dims}
-            self.ds = self.ds.chunk(chunks)
+            self.ds = unchunk_dask(self.ds, self.dim_names)
 
 
 def choose_subdomain(
     ds: xr.Dataset,
     ds_grid: xr.Dataset,
     target_coords: dict[str, Any],
+    dim_names: dict[str, str],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
-    reset_chunking: bool = False,
-    dim_names: dict[str, str] | None = None,
+    unchunk_lateral_dims: bool = False,
 ):
     """Selects a subdomain from the xarray Dataset based on specified target
     coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -754,12 +766,12 @@ def choose_subdomain(
     buffer_points : int
         The number of grid points to extend beyond the specified latitude and longitude
         ranges when selecting the subdomain. Defaults to 20.
-    reset_chunking : bool
+    unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.
     dim_names: dict[str, str] = None
         Dictionary mapping logical dimension names to dataset dimension names.
-        Only used if reset_chunking is True. Defaults to None.
+        Only used if unchunk_lateral_dims is True. Defaults to None.
     Returns
     -------
     xr.Dataset
@@ -855,11 +867,8 @@ def choose_subdomain(
 
     # if subsequent operations require this entire chunk, and dask if currently used,
     # reset the chunking to load the rest of the dataset
-    if reset_chunking and dataset_using_dask(ds):
-        dims = {} if dim_names is None else dim_names  # catch possible None
-        chunks = get_dask_chunks(dims, time_chunking=False)
-        chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}
-        ds = ds.chunk(chunks_ds)
+    if unchunk_lateral_dims:
+        ds = unchunk_dask(ds, dict(dim_names))
 
     return ds
 

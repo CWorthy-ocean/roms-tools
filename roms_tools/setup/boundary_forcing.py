@@ -92,10 +92,19 @@ class BoundaryForcing:
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None (default chunking is used).
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading with dask. Only Geographic bounds are supported:
+         ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}`` in degrees. The
+         bounds are applied to the dataset before reading the underlying datasets to reduce memory usage.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+
 
     Examples
     --------
@@ -128,6 +137,10 @@ class BoundaryForcing:
     """Reference date for the model."""
     use_dask: bool = False
     """Whether to use dask for processing."""
+    chunks: dict[str, int] | None = None
+    """Optional Dask chunk sizes for lat/lon boundary-forcing sources."""
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
 
@@ -153,7 +166,7 @@ class BoundaryForcing:
         if self.apply_2d_horizontal_fill:
             data.choose_subdomain(
                 target_coords,
-                reset_chunking=True,
+                unchunk_lateral_dims=True,
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
@@ -200,7 +213,7 @@ class BoundaryForcing:
                     bdry_target_coords,
                     buffer_points=3,
                     return_copy=True,
-                    reset_chunking=True,
+                    unchunk_lateral_dims=True,
                 )
 
                 if not self.apply_2d_horizontal_fill:
@@ -498,16 +511,14 @@ class BoundaryForcing:
         if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
-        # Leave initial spatial chunking to dask for efficient sliced reading from file
-        chunks = {"time": 1}
-
         return data_type(
             filename=self.source["path"],
             start_time=self.start_time,
             end_time=self.end_time,
             climatology=self.source["climatology"],  # type: ignore[arg-type]
             use_dask=self.use_dask,
-            chunks=chunks,
+            chunks=self.chunks,
+            initial_slice_bounds=self.initial_slice_bounds,
         )
 
     def _set_variable_info(self, data):

@@ -1280,6 +1280,24 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
 
 
 @dataclass(kw_only=True)
+class UnifiedRestoringSurfaceDataset(UnifiedDataset):
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"salt": "salt"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "salt": "salt",
+        }
+    )
+
+    climatology: bool = True
+
+
+@dataclass(kw_only=True)
 class CESMDataset(LatLonDataset):
     """Represents CESM data on original grid."""
 

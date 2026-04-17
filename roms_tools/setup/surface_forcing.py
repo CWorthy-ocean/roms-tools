@@ -15,6 +15,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Dataset,
     LatLonDataset,
     UnifiedBGCSurfaceDataset,
+    UnifiedRestoringSurfaceDataset,
 )
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
@@ -389,7 +390,7 @@ class SurfaceForcing:
 
         elif self.type == "restoring":
             if self.source["name"] == "UNIFIED":
-                data = UnifiedBGCSurfaceDataset(**data_dict)
+                data = UnifiedRestoringSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
                     'Only "UNIFIED" is a valid option for source["name"] when type is "restoring".'
@@ -460,6 +461,16 @@ class SurfaceForcing:
             ):
                 variable_info[var_name] = default_info
                 if var_name == "pco2_air":
+                    variable_info[var_name] = {**default_info, "validate": True}
+                else:
+                    variable_info[var_name] = {**default_info, "validate": False}
+        elif self.type == "restoring":
+            variable_info = {}
+            for var_name in list(data.var_names.keys()) + list(
+                data.opt_var_names.keys()
+            ):
+                variable_info[var_name] = default_info
+                if var_name == "salt":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
@@ -608,6 +619,10 @@ class SurfaceForcing:
                 "dust_time",
                 "nox_time",
                 "nhy_time",
+            ]
+        elif self.type == "restoring":
+            time_coords = [
+                "salt_time",
             ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})

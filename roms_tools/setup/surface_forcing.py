@@ -22,6 +22,7 @@ from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
+    compute_missing_surface_restoring_variables,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -77,6 +78,7 @@ class SurfaceForcing:
 
           - "physics": for physical atmospheric forcing.
           - "bgc": for biogeochemical forcing.
+          - "restoring": for restoring forces.
 
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is True.
@@ -85,6 +87,10 @@ class SurfaceForcing:
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
         This applies an exponential decay to wind magnitude near the coast, based on
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
+
+    restoring_forces : dict[str], optional
+        Specifies which variables to apply restoring forces to. Currently only salinity is supported:
+        ```['salinity',]```
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -138,6 +144,8 @@ class SurfaceForcing:
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
+    restoring_forces: list[str] | None = None
+    """The variables to create the restoring forces for."""
     coarse_grid_mode: str = "auto"
     """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -170,7 +178,12 @@ class SurfaceForcing:
             use_coarse_grid = self._determine_coarse_grid_usage(data)
         self.use_coarse_grid = use_coarse_grid
 
-        opt_file = "bulk_frc.opt" if self.type == "physics" else "bgc.opt"
+        if self.type == "physics":
+            opt_file = "bulk_frc.opt"
+        elif self.type == "bgc":
+            opt_file = "bgc.opt"
+        elif self.type == "restoring":
+            opt_file = "ISTHERERESTORINGOPTFILE"
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
 
@@ -236,6 +249,11 @@ class SurfaceForcing:
         if self.type == "bgc":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
 
+        if self.type == "restoring":
+            processed_fields = compute_missing_surface_restoring_variables(
+                processed_fields
+            )
+
         # Reorder dimensions
         for var_name in processed_fields:
             processed_fields[var_name] = transpose_dimensions(
@@ -269,8 +287,8 @@ class SurfaceForcing:
             )
 
         # Validate the 'type' parameter
-        if self.type not in ["physics", "bgc"]:
-            raise ValueError("`type` must be either 'physics' or 'bgc'.")
+        if self.type not in ["physics", "bgc", "restoring"]:
+            raise ValueError("`type` must be either 'physics', 'bgc', or 'restoring'.")
 
         # Ensure 'source' dictionary contains required keys
         if "name" not in self.source:
@@ -367,6 +385,14 @@ class SurfaceForcing:
             else:
                 raise ValueError(
                     'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
+                )
+
+        elif self.type == "restoring":
+            if self.source["name"] == "UNIFIED":
+                data = UnifiedBGCSurfaceDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "UNIFIED" is a valid option for source["name"] when type is "restoring".'
                 )
 
         return data

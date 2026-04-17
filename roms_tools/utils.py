@@ -359,7 +359,7 @@ def _load_data_dask(
         if read_zarr:
             # zarr data is always chunked, so we remove any dask chunks except time to let
             # dask inherit the zarr intrinsic chunking. Otherwise conflicting/non-aligned
-            # chunking causes errors. 
+            # chunking causes errors.
             # TODO: Possibly refactor this into defaults for zarr datasets; perhaps there is
             # some situation where we want to impose dask chunks on zarr datasets?
             chunks = {dim_names["time"]: 1}

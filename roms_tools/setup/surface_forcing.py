@@ -89,7 +89,7 @@ class SurfaceForcing:
         This applies an exponential decay to wind magnitude near the coast, based on
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
 
-    restoring_forces : dict[str], optional
+    restoring_forces : list[str], optional
         Specifies which variables to apply restoring forces to. Currently only salinity is supported:
         ```['salinity',]```
 

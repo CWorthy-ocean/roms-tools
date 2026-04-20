@@ -1058,8 +1058,7 @@ class Grid:
 
             # make sure lons are in [0, 360] range
             for lon in ["lon", "lonu", "lonv", "lonq"]:
-                coords[lon][coords[lon] < 0] = coords[lon][coords[lon] < 0] + 2 * np.pi
-                # coords[lon][coords[lon] > 2 * np.pi] = coords[lon][coords[lon] > 2 * np.pi] - 2 * np.pi
+                coords[lon] = coords[lon] % (2 * np.pi)
 
             ds = self._create_grid_ds(coords)
 

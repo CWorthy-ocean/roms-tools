@@ -471,6 +471,10 @@ class SurfaceForcing:
             ):
                 variable_info[var_name] = default_info
                 if var_name == "salt":
+                    if "depth" in data.ds["salt"].dims:
+                        data.ds["salt"] = data.ds["salt"].sel(depth=0)
+                        data.ds = data.ds.drop_dims("depth")
+                        del data.dim_names["depth"]
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}

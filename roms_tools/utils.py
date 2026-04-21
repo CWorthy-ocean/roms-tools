@@ -359,16 +359,16 @@ def _load_data_dask(
         if read_zarr:
             # zarr data is always chunked, so we remove any dask chunks except time to let
             # dask inherit the zarr intrinsic chunking. Otherwise conflicting/non-aligned
-            # chunking causes errors.
-            # TODO: Possibly refactor this into defaults for zarr datasets; perhaps there is
+            # chunking causes errors. Testing with {'time': 1} chunks works, but is slower
+            # than passing None.
+            # TODO: Possibly refactor this into defaults for zarr-based datasets; perhaps there is
             # some situation where we want to impose dask chunks on zarr datasets?
-            chunks = {dim_names["time"]: 1}
 
             return xr.open_zarr(
                 filenames[0],
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
-                chunks=chunks,
+                chunks=None,
                 consolidated=None,
                 storage_options={"token": "anon"},
             )

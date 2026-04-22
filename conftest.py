@@ -854,6 +854,37 @@ def bgc_surface_forcing_from_unified_climatology(use_dask: bool) -> SurfaceForci
 
 
 @pytest.fixture(scope="session")
+def restoring_surface_forcing_from_unified_climatology(
+    use_dask: bool,
+) -> SurfaceForcing:
+    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
+
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
+        type="restoring",
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
 def river_forcing() -> RiverForcing:
     """Fixture for creating a RiverForcing object from the global Dai river dataset."""
     grid = Grid(

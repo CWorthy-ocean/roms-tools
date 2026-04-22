@@ -395,6 +395,7 @@ def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, cap
         ("ERA5", "ERA5_regional_test_data.nc", "physics", False),
         ("CESM_REGRIDDED", "CESM_surface_global_test_data_climatology.nc", "bgc", True),
         ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", True),
+        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", True),
     ],
 )
 def test_nans_filled_in(
@@ -513,6 +514,46 @@ def test_surface_forcing_creation(
     assert not sfc_forcing.use_coarse_grid
     assert sfc_forcing.ds.attrs["source"] == expected_name
     for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
+        assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
+
+
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture, expected_name, expected_climatology, expected_fname",
+    [
+        (
+            "restoring_surface_forcing_from_unified_climatology",
+            "UNIFIED",
+            True,
+            Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
+        ),
+    ],
+)
+def test_surface_forcing_creation_restoring(
+    sfc_forcing_fixture, expected_name, expected_climatology, expected_fname, request
+):
+    """Test the creation and initialization of the SurfaceForcing object with BGC.
+
+    Verifies that the SurfaceForcing object is properly created with correct attributes.
+    Ensures that expected variables are present in the dataset and that attributes match
+    the given configurations.
+    """
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+
+    assert sfc_forcing.ds is not None
+    for var_name in ["salt"]:
+        assert var_name in sfc_forcing.ds
+
+    assert sfc_forcing.start_time == datetime(2020, 2, 1)
+    assert sfc_forcing.end_time == datetime(2020, 2, 1)
+    assert sfc_forcing.type == "restoring"
+    assert sfc_forcing.source == {
+        "name": expected_name,
+        "path": expected_fname,
+        "climatology": expected_climatology,
+    }
+    assert not sfc_forcing.use_coarse_grid
+    assert sfc_forcing.ds.attrs["source"] == expected_name
+    for time_coord in ["salt_time"]:
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
 

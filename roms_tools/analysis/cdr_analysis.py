@@ -3,6 +3,41 @@ import logging
 import numpy as np
 import xarray as xr
 
+# Molar mass of CO2 (kg mol^-1), ~44.01 g mol^-1 (IUPAC-style value for conversions).
+_MOLAR_MASS_CO2_KG_PER_MOL = 44.01e-3
+
+
+def _native_carbon_amount_to_tonnes_co2_scale(units: str | None) -> float:
+    """
+    Scale factor from integrated ROMS-style DIC carbon amounts to tonnes CO2.
+
+    For each mole of DIC carbon counted in the flux or inventory difference, we
+    assign one mole of CO2 (air-sea CO2 exchange bookkeeping), then convert to
+    mass using the molar mass of CO2:
+
+        tonnes CO2 = n_C (mol) * M_CO2 (kg mol^-1) / (1000 kg tonne^-1)
+
+    ``n_C`` is obtained from the native amount (e.g. mmol) using metadata units
+    when present; missing units default to mmol (typical ROMS BGC).
+    """
+    mol_per_native = _native_dic_amount_to_mol_multiplier(units)
+    kg_co2_per_native = mol_per_native * _MOLAR_MASS_CO2_KG_PER_MOL
+    return kg_co2_per_native / 1000.0
+
+
+def _native_dic_amount_to_mol_multiplier(units: str | None) -> float:
+    """Convert one native unit of DIC carbon inventory to moles carbon."""
+    if units is None:
+        return 1e-3
+    u = units.strip().lower().replace(" ", "").replace("µ", "u")
+    if u.startswith("mmol") or "mmol/" in u:
+        return 1e-3
+    if u.startswith("umol") or "umol/" in u or "micromol" in u:
+        return 1e-6
+    if (u.startswith("mol") or u.startswith("mole")) and not u.startswith("mmol"):
+        return 1.0
+    return 1e-3
+
 
 def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
     """
@@ -11,8 +46,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
     Calculates CDR uptake efficiency and total carbon uptake using two methods:
       1. Flux-based: from area-integrated CO2 flux differences (time-cumulative
          for uptake).
-      2. DIC difference-based: from volume-integrated DIC differences (same
-         spatial integrals as efficiency, without normalizing by the source).
+      2. DIC difference-based: from volume-integrated DIC differences
 
     Copies selected tracer and flux variables and computes grid cell areas
     and averaging window durations.
@@ -33,9 +67,9 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         Dataset containing:
         - 'area', 'window_length'
         - copied flux/tracer variables
-        - 'cdr_efficiency' and 'cdr_efficiency_from_delta_diff' (dimensionless)
-        - 'cdr_carbon_uptake_from_flux' (cumulative flux-based uptake)
-        - 'cdr_carbon_uptake_from_dic_difference' (DIC-difference-based uptake)
+        - 'cdr_efficiency_from_flux' and 'cdr_efficiency_from_DIC_difference' (dimensionless)
+        - 'cdr_carbon_uptake_from_flux' (cumulative flux-based uptake, tonnes CO2)
+        - 'cdr_carbon_uptake_from_dic_difference' (DIC-difference-based uptake, tonnes CO2)
 
     Raises
     ------
@@ -47,6 +81,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         "avg_begin_time",
         "avg_end_time",
         "ALK_source",
+        "DIC_source",
         "FG_CO2",
         "FG_ALT_CO2",
         "hDIC",
@@ -126,47 +161,52 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
 
     _validate_uptake_efficiency(uptake_efficiency_flux, uptake_efficiency_diff)
 
+    flux_units = ds["FG_CO2"].attrs.get("units")
+    hdic_units = ds["hDIC"].attrs.get("units")
+    flux_tonnes_co2 = flux * _native_carbon_amount_to_tonnes_co2_scale(flux_units)
+    diff_dic_tonnes_co2 = diff_DIC * _native_carbon_amount_to_tonnes_co2_scale(
+        hdic_units
+    )
+
     # Store results with metadata
-    ds_cdr["cdr_efficiency"] = uptake_efficiency_flux
-    ds_cdr["cdr_efficiency"].attrs.update(
+    ds_cdr["cdr_efficiency_from_flux"] = uptake_efficiency_flux
+    ds_cdr["cdr_efficiency_from_flux"].attrs.update(
         long_name="CDR uptake efficiency (from flux differences)",
         units="nondimensional",
         description="Carbon Dioxide Removal efficiency computed using area-integrated CO2 flux differences",
     )
-    ds_cdr["cdr_efficiency_from_delta_diff"] = uptake_efficiency_diff
-    ds_cdr["cdr_efficiency_from_delta_diff"].attrs.update(
+    ds_cdr["cdr_efficiency_from_DIC_difference"] = uptake_efficiency_diff
+    ds_cdr["cdr_efficiency_from_DIC_difference"].attrs.update(
         long_name="CDR uptake efficiency (from DIC differences)",
         units="nondimensional",
         description="Carbon Dioxide Removal efficiency computed using volume-integrated DIC differences",
     )
 
-    ds_cdr["cdr_carbon_uptake_from_flux"] = flux
+    ds_cdr["cdr_carbon_uptake_from_flux"] = flux_tonnes_co2
     ds_cdr["cdr_carbon_uptake_from_flux"].attrs.update(
         long_name="CDR carbon uptake (cumulative flux differences)",
+        units="tonnes CO2",
         description=(
-            "Time-cumulative carbon uptake from area-integrated CO2 flux "
-            "differences (scenario minus reference), same quantity as the "
-            "numerator of flux-based efficiency before dividing by the source"
+            "Time-cumulative CO2 uptake mass from area-integrated CO2 flux "
+            "differences (scenario minus reference), converted from native DIC "
+            "carbon units using FG_CO2 units metadata when present (otherwise "
+            "mmol is assumed). Same quantity as the numerator of flux-based "
+            "efficiency before dividing by the source, expressed as tonnes CO2."
         ),
     )
-    if "units" in ds["FG_CO2"].attrs:
-        ds_cdr["cdr_carbon_uptake_from_flux"].attrs["units"] = ds["FG_CO2"].attrs[
-            "units"
-        ]
 
-    ds_cdr["cdr_carbon_uptake_from_dic_difference"] = diff_DIC
+    ds_cdr["cdr_carbon_uptake_from_dic_difference"] = diff_dic_tonnes_co2
     ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs.update(
         long_name="CDR carbon uptake (from DIC differences)",
+        units="tonnes CO2",
         description=(
-            "Volume-integrated DIC difference (scenario minus reference); "
-            "same quantity as the numerator of DIC-based efficiency before "
-            "dividing by the source"
+            "CO2-equivalent mass from the volume-integrated DIC difference "
+            "(scenario minus reference), converted from native DIC carbon units "
+            "using hDIC units metadata when present (otherwise mmol is assumed). "
+            "Same quantity as the numerator of DIC-based efficiency before "
+            "dividing by the source, expressed as tonnes CO2."
         ),
     )
-    if "units" in ds["hDIC"].attrs:
-        ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs["units"] = ds[
-            "hDIC"
-        ].attrs["units"]
 
     return ds_cdr
 

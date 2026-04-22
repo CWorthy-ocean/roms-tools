@@ -59,7 +59,7 @@ class Ensemble:
         Parameters
         ----------
         ds : xr.Dataset
-            Dataset containing a "cdr_efficiency" variable and "time" coordinate.
+            Dataset containing a "cdr_efficiency_from_flux" variable and "time" coordinate.
 
         Returns
         -------
@@ -71,7 +71,7 @@ class Ensemble:
         ValueError
             If 'time' coordinate is missing or there are no valid efficiency values.
         """
-        eff = ds["cdr_efficiency"]
+        eff = ds["cdr_efficiency_from_flux"]
 
         # Check that time coordinate exists
         if "time" in eff.coords:

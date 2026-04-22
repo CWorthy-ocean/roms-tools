@@ -16,7 +16,10 @@ def create_member_ds() -> xr.Dataset:
     """Simple Dataset for testing."""
     times = np.array(["2000-01-01", "2000-01-02", "2000-01-03"], dtype="datetime64[ns]")
     ds = xr.Dataset(
-        {"cdr_efficiency": ("time", [0.1, 0.2, 0.3]), "abs_time": ("time", times)},
+        {
+            "cdr_efficiency_from_flux": ("time", [0.1, 0.2, 0.3]),
+            "abs_time": ("time", times),
+        },
         coords={"time": times},
     )
     return ds
@@ -41,7 +44,7 @@ def varied_members() -> dict[str, xr.Dataset]:
     )
     ds1 = xr.Dataset(
         {
-            "cdr_efficiency": ("time", [np.nan, 0.2, 0.3, 0.4, 0.5]),
+            "cdr_efficiency_from_flux": ("time", [np.nan, 0.2, 0.3, 0.4, 0.5]),
             "abs_time": ("time", times1),
         },
         coords={"time": times1},
@@ -53,7 +56,7 @@ def varied_members() -> dict[str, xr.Dataset]:
     )
     ds2 = xr.Dataset(
         {
-            "cdr_efficiency": ("time", [np.nan, np.nan, 0.6, 0.8]),
+            "cdr_efficiency_from_flux": ("time", [np.nan, np.nan, 0.6, 0.8]),
             "abs_time": ("time", times2),
         },
         coords={"time": times2},
@@ -64,7 +67,10 @@ def varied_members() -> dict[str, xr.Dataset]:
         ["1999-12-31", "2000-01-01", "2000-01-02"], dtype="datetime64[ns]"
     )
     ds3 = xr.Dataset(
-        {"cdr_efficiency": ("time", [0.05, 0.15, 0.25]), "abs_time": ("time", times3)},
+        {
+            "cdr_efficiency_from_flux": ("time", [0.05, 0.15, 0.25]),
+            "abs_time": ("time", times3),
+        },
         coords={"time": times3},
     )
 
@@ -90,7 +96,7 @@ def test_extract_efficiency_missing_time() -> None:
     """Test that _extract_efficiency raises an error if 'time' is missing."""
     times = np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[ns]")
     ds = xr.Dataset(
-        {"cdr_efficiency": ("time", [0.1, 0.2])},
+        {"cdr_efficiency_from_flux": ("time", [0.1, 0.2])},
         coords={"abs_time": times},  # Note: no 'time' coordinate
     )
 
@@ -192,7 +198,10 @@ def test_extract_efficiency_empty() -> None:
     # Dataset with all NaN
     times = np.array(["2000-01-01", "2000-01-02"], dtype="datetime64[ns]")
     ds = xr.Dataset(
-        {"cdr_efficiency": ("time", [np.nan, np.nan]), "abs_time": ("time", times)},
+        {
+            "cdr_efficiency_from_flux": ("time", [np.nan, np.nan]),
+            "abs_time": ("time", times),
+        },
         coords={"time": times},
     )
     ens = Ensemble.__new__(Ensemble)

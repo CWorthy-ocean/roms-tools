@@ -5,6 +5,7 @@ import pytest
 import xarray as xr
 
 from roms_tools.analysis.cdr_analysis import (
+    _native_carbon_amount_to_tonnes_co2_scale,
     _validate_source,
     _validate_uptake_efficiency,
     compute_cdr_metrics,
@@ -70,8 +71,8 @@ def test_compute_cdr_metrics_outputs(
         "FG_ALT_CO2",
         "hDIC",
         "hDIC_ALT_CO2",
-        "cdr_efficiency",
-        "cdr_efficiency_from_delta_diff",
+        "cdr_efficiency_from_flux",
+        "cdr_efficiency_from_DIC_difference",
         "cdr_carbon_uptake_from_flux",
         "cdr_carbon_uptake_from_dic_difference",
     ]:
@@ -83,7 +84,7 @@ def test_compute_cdr_metrics_outputs(
     # Window length should be 1 everywhere
     assert np.all(ds_cdr["window_length"].values == 1)
 
-    # Uptake variables are the efficiency numerators (efficiency × cumulative source)
+    # Uptake variables are the efficiency numerators (efficiency * cumulative source)
     cumulative_source = (
         (
             (minimal_ds["ALK_source"] - minimal_ds["DIC_source"]).sum(
@@ -94,13 +95,94 @@ def test_compute_cdr_metrics_outputs(
         .cumsum(dim="time")
         .compute()
     )
+    scale_flux = _native_carbon_amount_to_tonnes_co2_scale(
+        minimal_ds["FG_CO2"].attrs.get("units")
+    )
+    scale_dic = _native_carbon_amount_to_tonnes_co2_scale(
+        minimal_ds["hDIC"].attrs.get("units")
+    )
     np.testing.assert_allclose(
         ds_cdr["cdr_carbon_uptake_from_flux"],
-        ds_cdr["cdr_efficiency"] * cumulative_source,
+        ds_cdr["cdr_efficiency_from_flux"] * cumulative_source * scale_flux,
     )
     np.testing.assert_allclose(
         ds_cdr["cdr_carbon_uptake_from_dic_difference"],
-        ds_cdr["cdr_efficiency_from_delta_diff"] * cumulative_source,
+        ds_cdr["cdr_efficiency_from_DIC_difference"] * cumulative_source * scale_dic,
+    )
+    assert ds_cdr["cdr_carbon_uptake_from_flux"].attrs["units"] == "tonnes CO2"
+    assert (
+        ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs["units"] == "tonnes CO2"
+    )
+
+
+def test_carbon_uptake_tonnes_co2_analytic() -> None:
+    """Uptake (tonnes CO2) equals native mmol C times the mmol→tonnes CO2 scale."""
+    grid = xr.Dataset(
+        {
+            "pm": (("eta_rho", "xi_rho"), np.ones((1, 1))),
+            "pn": (("eta_rho", "xi_rho"), np.ones((1, 1))),
+        }
+    )
+    # One cell, area 1 m^2; FG diff 3 mmol m^-2 s^-1 for 1 s -> 3 mmol C integrated
+    ds = xr.Dataset(
+        {
+            "avg_begin_time": ("time", [0.0]),
+            "avg_end_time": ("time", [1.0]),
+            "ALK_source": (
+                ("time", "s_rho", "eta_rho", "xi_rho"),
+                np.ones((1, 1, 1, 1)),
+            ),
+            "DIC_source": (
+                ("time", "s_rho", "eta_rho", "xi_rho"),
+                -np.ones((1, 1, 1, 1)),
+            ),
+            "FG_CO2": (("time", "eta_rho", "xi_rho"), np.array([[5.0]])),
+            "FG_ALT_CO2": (("time", "eta_rho", "xi_rho"), np.array([[2.0]])),
+            "hDIC": (("time", "s_rho", "eta_rho", "xi_rho"), np.array([[[[10.0]]]])),
+            "hDIC_ALT_CO2": (
+                ("time", "s_rho", "eta_rho", "xi_rho"),
+                np.array([[[[7.0]]]]),
+            ),
+        },
+        coords={
+            "time": [0],
+            "s_rho": [0],
+            "eta_rho": [0],
+            "xi_rho": [0],
+        },
+    )
+    ds["FG_CO2"].attrs["units"] = "mmol/m^2/s"
+    ds["hDIC"].attrs["units"] = "mmol/m^2"
+
+    ds_cdr = compute_cdr_metrics(ds, grid)
+
+    native_mmol_flux = 3.0  # (5-2) * 1 m^2 * 1 s, one timestep cumsum
+    native_mmol_dic = 3.0  # (10-7) * 1 m^2 * one column
+
+    mmol_to_tonnes = _native_carbon_amount_to_tonnes_co2_scale("mmol/m^2/s")
+    assert np.isclose(
+        mmol_to_tonnes,
+        _native_carbon_amount_to_tonnes_co2_scale("mmol/m^2"),
+    )
+
+    expected_flux_tonnes = native_mmol_flux * mmol_to_tonnes
+    expected_dic_tonnes = native_mmol_dic * mmol_to_tonnes
+
+    np.testing.assert_allclose(
+        ds_cdr["cdr_carbon_uptake_from_flux"].values,
+        expected_flux_tonnes,
+        rtol=0,
+        atol=1e-15,
+    )
+    np.testing.assert_allclose(
+        ds_cdr["cdr_carbon_uptake_from_dic_difference"].values,
+        expected_dic_tonnes,
+        rtol=0,
+        atol=1e-15,
+    )
+    assert ds_cdr["cdr_carbon_uptake_from_flux"].attrs["units"] == "tonnes CO2"
+    assert (
+        ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs["units"] == "tonnes CO2"
     )
 
 
@@ -158,8 +240,8 @@ def test_efficiency_nan_when_zero_source(minimal_ds, minimal_grid_ds):
 
     ds_cdr = compute_cdr_metrics(ds, minimal_grid_ds)
 
-    eff_flux = ds_cdr["cdr_efficiency"].isel(time=0).item()
-    eff_diff = ds_cdr["cdr_efficiency_from_delta_diff"].isel(time=0).item()
+    eff_flux = ds_cdr["cdr_efficiency_from_flux"].isel(time=0).item()
+    eff_diff = ds_cdr["cdr_efficiency_from_DIC_difference"].isel(time=0).item()
 
     # Should be NaN, not inf
     assert np.isnan(eff_flux)

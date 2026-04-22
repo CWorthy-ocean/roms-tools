@@ -44,7 +44,8 @@ class ROMSOutput(ROMSDataset):
 
         If the CDR metrics dataset (`self.ds_cdr`) does not already exist,
         it computes the metrics using model output and grid information.
-        Afterwards, it generates a plot of the computed metrics.
+        Afterwards, it generates a figure titled "CO2 uptake and CDR efficiency"
+        with twin y-axes: dimensionless efficiency and CO2 uptake in tonnes CO2.
 
         Notes
         -----

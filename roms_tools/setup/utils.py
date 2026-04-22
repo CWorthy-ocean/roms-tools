@@ -1385,9 +1385,6 @@ def normalize_paths(value: Any) -> Any:
     Heuristic: strings containing '/' or ending with '.nc' are treated as paths.
     """
     if isinstance(value, str):
-        # if the path looks like a URL, don't make it a PosixPath, or it will strip out the double //
-        if "://" in value:
-            return value
         return Path(value) if "/" in value or value.endswith(".nc") else value
     if isinstance(value, list):
         return [normalize_paths(v) for v in value]

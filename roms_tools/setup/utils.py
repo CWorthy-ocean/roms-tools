@@ -578,7 +578,7 @@ def compute_missing_surface_restoring_variables(restoring_data):
                 restoring_data[var_name] = restoring_data[base_var] * factor
             else:
                 restoring_data[var_name] = factor * xr.ones_like(
-                    restoring_data["pco2_air"]
+                    restoring_data["salt"]
                 )
 
     return restoring_data

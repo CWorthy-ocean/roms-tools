@@ -91,7 +91,7 @@ class SurfaceForcing:
 
     restoring_forces : list[str], optional
         Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
-        ```['sss',]```
+        ```['sss',]```. Defaults to 'sss'.
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -146,7 +146,7 @@ class SurfaceForcing:
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
     restoring_forces: list[str] | None = None
-    """The variables to create the restoring forces for."""
+    """The variables to create the restoring forces for ["sss"]."""
     coarse_grid_mode: str = "auto"
     """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -184,17 +184,36 @@ class SurfaceForcing:
         elif self.type == "bgc":
             opt_file = "bgc.opt"
         elif self.type == "restoring":
-            opt_file = "ISTHERERESTORINGOPTFILE"
+            opt_file = "cppdefs.opt"
+            cppdefs_flags = set()
+            if self.restoring_forces is not None:
+                for var in self.restoring_forces:
+                    if var is "sss":
+                        cppdefs_flags.add("SFLX_CORR")
+                    if var is "sst":
+                        cppdefs_flags.add("QCORRECTION")
+            else:
+                self.restoring_forces = ["sss"]
+                cppdefs_flags.add("SFLX_CORR")
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
 
-        logging.info(
-            "Data will be interpolated onto the %s. "
-            "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
-            grid_desc,
-            interp_flag,
-            opt_file,
-        )
+        if self.type in ["physics", "bgc"]:
+             logging.info(
+                 "Data will be interpolated onto the %s. "
+                 "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
+                 grid_desc,
+                 interp_flag,
+                 opt_file,
+             )
+        elif self.type in ["restoring"]:
+             logging.info(
+                 "Restoring data being created for %s. "
+                 "Remember to define the following flags in your `%s` file: %s`.",
+                 self.restoring_forces,
+                 opt_file,
+                 cppdefs_flags,
+             )
 
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords

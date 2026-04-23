@@ -188,9 +188,9 @@ class SurfaceForcing:
             cppdefs_flags = set()
             if self.restoring_forces is not None:
                 for var in self.restoring_forces:
-                    if var is "sss":
+                    if var == "sss":
                         cppdefs_flags.add("SFLX_CORR")
-                    if var is "sst":
+                    if var == "sst":
                         cppdefs_flags.add("QCORRECTION")
             else:
                 self.restoring_forces = ["sss"]

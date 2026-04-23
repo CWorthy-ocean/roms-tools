@@ -565,9 +565,6 @@ def compute_missing_surface_restoring_variables(restoring_data):
     -----
     - If `salinity` is not part of the input dictionary, the are assigned constant values.
     """
-    #### NEED TO SEE IF WANT TO INCLUDE OPTION OF CESM WHICH DOESN'T HAVE SALINITY. NOTES ABOVE WOULD REFLECT THAT I THINK.
-    # Define the relationships for missing variables
-    ##### NEED TO FIX BELOW. IS IT SSS? SALINITY?
     variable_relations = {
         "sss": (None, 1.0),
     }

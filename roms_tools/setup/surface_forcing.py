@@ -319,7 +319,7 @@ class SurfaceForcing:
         # Check if restoring variables are accepted
         valid_vars = ["sss"]
         if self.restoring_forces:
-            for var in restoring_forces:
+            for var in self.restoring_forces:
                 if var not in valid_vars:
                     raise ValueError(
                         f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
@@ -479,12 +479,7 @@ class SurfaceForcing:
                 data.opt_var_names.keys()
             ):
                 variable_info[var_name] = default_info
-                if var_name == "sss":
-                    #### THIS IF BLOCK MIGHT NO LONGER BE NEEDED
-                    if "depth" in data.ds["sss"].dims:
-                        data.ds["sss"] = data.ds["sss"].sel(depth=0)
-                        data.ds = data.ds.drop_dims("depth")
-                        del data.dim_names["depth"]
+                if var_name == "salt":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
@@ -636,7 +631,7 @@ class SurfaceForcing:
             ]
         elif self.type == "restoring":
             time_coords = [
-                "sss_time",
+                "salt_time",
             ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})

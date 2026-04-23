@@ -234,10 +234,11 @@ class Ensemble:
         save_path: str | None = None,
     ) -> None:
         """
-        Plot ensemble CDR efficiency and CO2 uptake with dual y-axes.
+        Plot ensemble CDR efficiency and CO2 uptake in two subplots.
 
-        Left axis: individual member efficiency curves with ensemble mean ± standard
-        deviation. Right axis: ensemble-mean CO2 uptake ± standard deviation.
+        Both subplots show individual ensemble-member curves. When multiple members are
+        present, a shaded band highlights the spread between the lower and upper member
+        envelopes at each time.
 
         Parameters
         ----------
@@ -250,55 +251,59 @@ class Ensemble:
         None
             This method does not return any value. It generates and displays a plot.
         """
-        fig, ax_eff = plt.subplots(figsize=(9, 5))
-
-        time = self.ds.time.values / np.timedelta64(1, "D")  # converts to float days
-
-        # Individual ensemble members
-        for name in self.members.keys():
-            ax_eff.plot(time, self.ds[name], lw=1.8, alpha=0.8, label=name)
-
-        # Efficiency mean ± std
-        ax_eff.plot(
-            time, self.ds.ensemble_mean, color="black", lw=2.2, label="efficiency mean"
-        )
-        ax_eff.fill_between(
-            time,
-            self.ds.ensemble_mean - self.ds.ensemble_std,
-            self.ds.ensemble_mean + self.ds.ensemble_std,
-            color="gray",
-            alpha=0.2,
+        fig, (ax_eff, ax_uptake) = plt.subplots(
+            nrows=2, ncols=1, figsize=(9, 8), sharex=True
         )
 
-        ax_eff.set_xlabel("Time since release start [days]")
+        time = self.ds.time.values / np.timedelta64(1, "D")
+        member_names = list(self.members.keys())
+        colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+
+        # Plot member lines on both panels with matching colors.
+        for idx, name in enumerate(member_names):
+            color = colors[idx % len(colors)] if colors else None
+            ax_eff.plot(time, self.ds[name], lw=1.8, alpha=0.9, color=color, label=name)
+            ax_uptake.plot(
+                time,
+                self.ds[f"{name}_co2_uptake"],
+                lw=1.8,
+                alpha=0.9,
+                color=color,
+                label=name,
+            )
+
+        if len(member_names) > 1:
+            eff_stack = xr.concat([self.ds[name] for name in member_names], dim="member")
+            uptake_stack = xr.concat(
+                [self.ds[f"{name}_co2_uptake"] for name in member_names], dim="member"
+            )
+            ax_eff.fill_between(
+                time,
+                eff_stack.min(dim="member"),
+                eff_stack.max(dim="member"),
+                color="gray",
+                alpha=0.18,
+            )
+            ax_uptake.fill_between(
+                time,
+                uptake_stack.min(dim="member"),
+                uptake_stack.max(dim="member"),
+                color="C3",
+                alpha=0.12,
+            )
+
         ax_eff.set_ylabel("CDR efficiency")
+        ax_eff.set_title("CDR efficiency")
         ax_eff.grid()
+        ax_eff.legend(loc="best")
 
-        # Uptake mean ± std (right axis)
-        ax_uptake = ax_eff.twinx()
-        ax_uptake.plot(
-            time,
-            self.ds.ensemble_uptake_mean,
-            color="C3",
-            lw=2.2,
-            ls="--",
-            label=r"CO$_2$ uptake mean",
-        )
-        ax_uptake.fill_between(
-            time,
-            self.ds.ensemble_uptake_mean - self.ds.ensemble_uptake_std,
-            self.ds.ensemble_uptake_mean + self.ds.ensemble_uptake_std,
-            color="C3",
-            alpha=0.12,
-            label=r"CO$_2$ uptake ±1 std",
-        )
         ax_uptake.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
-
-        ax_eff.set_title(r"CO$_2$ uptake and CDR efficiency")
-
-        lines_eff, labels_eff = ax_eff.get_legend_handles_labels()
-        lines_uptake, labels_uptake = ax_uptake.get_legend_handles_labels()
-        ax_eff.legend(lines_eff + lines_uptake, labels_eff + labels_uptake, loc="best")
+        ax_uptake.set_xlabel("Time since release start [days]")
+        ax_uptake.set_title(r"CO$_2$ uptake")
+        ax_uptake.grid()
+        ax_uptake.legend(loc="best")
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        else:
+            plt.show()

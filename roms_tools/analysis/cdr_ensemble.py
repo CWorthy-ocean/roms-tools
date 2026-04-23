@@ -205,8 +205,8 @@ class Ensemble:
             the ensemble mean and standard deviation across members.
         """
         da = ds.to_dataarray("member")  # stack into (member, time)
-        ds["ensemble_mean"] = da.mean(dim="member")
-        ds["ensemble_std"] = da.std(dim="member")
+        ds["ensemble_efficiency_mean"] = da.mean(dim="member")
+        ds["ensemble_efficiency_std"] = da.std(dim="member")
         return ds
 
     def _compute_uptake_statistics(self, ds: xr.Dataset) -> xr.Dataset:
@@ -273,7 +273,9 @@ class Ensemble:
             )
 
         if len(member_names) > 1:
-            eff_stack = xr.concat([self.ds[name] for name in member_names], dim="member")
+            eff_stack = xr.concat(
+                [self.ds[name] for name in member_names], dim="member"
+            )
             uptake_stack = xr.concat(
                 [self.ds[f"{name}_co2_uptake"] for name in member_names], dim="member"
             )

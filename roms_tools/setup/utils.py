@@ -206,6 +206,7 @@ def get_variable_metadata():
             "flux_units": "degrees Celsius/s",
         },
         "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
+        "sss": {"long_name": "sea surface salinity", "units": "PSU"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -568,7 +569,7 @@ def compute_missing_surface_restoring_variables(restoring_data):
     # Define the relationships for missing variables
     ##### NEED TO FIX BELOW. IS IT SSS? SALINITY?
     variable_relations = {
-        "salt": (None, 1.0),
+        "sss": (None, 1.0),
     }
 
     # Fill in missing variables using the defined relationships
@@ -578,7 +579,7 @@ def compute_missing_surface_restoring_variables(restoring_data):
                 restoring_data[var_name] = restoring_data[base_var] * factor
             else:
                 restoring_data[var_name] = factor * xr.ones_like(
-                    restoring_data["salt"]
+                    restoring_data["sss"]
                 )
 
     return restoring_data

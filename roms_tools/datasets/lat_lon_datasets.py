@@ -1287,10 +1287,10 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             "latitude": "lat",
         }
     )
-    var_names: dict[str, str] = field(default_factory=lambda: {"salt": "salt"})
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "salt": "salt",
+            "sss": "salt",
         }
     )
 
@@ -1308,7 +1308,6 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             self.ds = self.ds.sel(depth=0)
             self.ds = self.ds.drop_vars("depth")
             del self.dim_names['depth']
-            #self.ds = self.ds.rename({'salt': 'sss'})
 
         mask = xr.where(
             self.ds["salt"].isnull().any(dim=self.dim_names["time"]),

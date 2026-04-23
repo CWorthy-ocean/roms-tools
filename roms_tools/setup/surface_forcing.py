@@ -498,7 +498,7 @@ class SurfaceForcing:
                 data.opt_var_names.keys()
             ):
                 variable_info[var_name] = default_info
-                if var_name == "salt":
+                if var_name == "sss":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
@@ -650,12 +650,15 @@ class SurfaceForcing:
             ]
         elif self.type == "restoring":
             time_coords = [
-                "salt_time",
+                "sss_time",
             ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
 
         if self.type == "bgc":
+            ds = ds.drop_vars(["time"])
+
+        if self.type == "restoring":
             ds = ds.drop_vars(["time"])
 
         variables_to_drop = ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]

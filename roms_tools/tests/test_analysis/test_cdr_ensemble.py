@@ -169,30 +169,32 @@ def test_compute_statistics(identical_members: dict[str, xr.Dataset]) -> None:
     aligned = ens._align_times(effs)
     ds_stats = ens._compute_statistics(aligned)
 
-    assert "ensemble_mean" in ds_stats.data_vars
-    assert "ensemble_std" in ds_stats.data_vars
+    assert "ensemble_efficiency_mean" in ds_stats.data_vars
+    assert "ensemble_efficiency_std" in ds_stats.data_vars
     n_time = len(ds_stats.time)
-    assert ds_stats.ensemble_mean.shape[0] == n_time
-    assert ds_stats.ensemble_std.shape[0] == n_time
+    assert ds_stats.ensemble_efficiency_mean.shape[0] == n_time
+    assert ds_stats.ensemble_efficiency_std.shape[0] == n_time
 
     # Ensemble mean should equal the member values
     first_member_name = next(iter(identical_members))
-    xr.testing.assert_allclose(ds_stats.ensemble_mean, ds_stats[first_member_name])
+    xr.testing.assert_allclose(
+        ds_stats.ensemble_efficiency_mean, ds_stats[first_member_name]
+    )
 
     # For identical members, std should be 0
-    np.testing.assert_allclose(ds_stats.ensemble_std.values, 0.0)
+    np.testing.assert_allclose(ds_stats.ensemble_efficiency_std.values, 0.0)
 
 
 def test_ensemble_post_init(identical_members: dict[str, xr.Dataset]) -> None:
     ens = Ensemble(identical_members)
     assert isinstance(ens.ds, xr.Dataset)
-    assert "ensemble_mean" in ens.ds.data_vars
-    assert "ensemble_std" in ens.ds.data_vars
+    assert "ensemble_efficiency_mean" in ens.ds.data_vars
+    assert "ensemble_efficiency_std" in ens.ds.data_vars
     assert "ensemble_uptake_mean" in ens.ds.data_vars
     assert "ensemble_uptake_std" in ens.ds.data_vars
     assert "member1_co2_uptake" in ens.ds.data_vars
     assert "member2_co2_uptake" in ens.ds.data_vars
-    np.testing.assert_allclose(ens.ds.ensemble_std.values, 0.0)
+    np.testing.assert_allclose(ens.ds.ensemble_efficiency_std.values, 0.0)
     np.testing.assert_allclose(ens.ds.ensemble_uptake_std.values, 0.0)
 
 

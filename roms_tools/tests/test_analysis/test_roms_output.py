@@ -468,4 +468,4 @@ def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
         assert "cdr_efficiency_from_flux" in ds_cdr
         assert "cdr_efficiency_from_DIC_difference" in ds_cdr
         assert "cdr_carbon_uptake_from_flux" in ds_cdr
-        assert "cdr_carbon_uptake_from_dic_difference" in ds_cdr
+        assert "cdr_carbon_uptake_from_DIC_difference" in ds_cdr

@@ -1270,16 +1270,16 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     """
     Plot CDR uptake efficiency and CO2 uptake mass over time.
 
-    Efficiency (dimensionless) is shown on the left y-axis; CO2 uptake in tonnes
-    of CO2 is shown on the right y-axis. Each axis carries flux-based and
-    DIC-difference-based estimates.
+    CDR efficiency is shown on the left y-axis; CO2 uptake in tonnes of CO2 is
+    shown on the right using matplotlib mathtext (subscript 2 on the axis
+    label). Each axis carries flux-based and DIC-difference-based estimates.
 
     Parameters
     ----------
     ds : xarray.Dataset
         Dataset containing ``time``, ``cdr_efficiency_from_flux``,
         ``cdr_efficiency_from_DIC_difference``, ``cdr_carbon_uptake_from_flux``, and
-        ``cdr_carbon_uptake_from_dic_difference``.
+        ``cdr_carbon_uptake_from_DIC_difference``.
 
     Raises
     ------
@@ -1295,7 +1295,7 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
         "cdr_efficiency_from_flux",
         "cdr_efficiency_from_DIC_difference",
         "cdr_carbon_uptake_from_flux",
-        "cdr_carbon_uptake_from_dic_difference",
+        "cdr_carbon_uptake_from_DIC_difference",
     ]
     for var in required_vars:
         if var not in ds or ds[var].size == 0:
@@ -1324,7 +1324,7 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
         lw=2,
         label="CDR efficiency (DIC difference)",
     )
-    ax_eff.set_ylabel("CDR efficiency (dimensionless)")
+    ax_eff.set_ylabel("CDR efficiency")
     ax_eff.grid()
 
     ax_mass = ax_eff.twinx()
@@ -1334,17 +1334,17 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
         color=c0,
         lw=2,
         ls="--",
-        label="CO2 uptake (flux)",
+        label=r"CO$_2$ uptake (flux)",
     )
     ax_mass.plot(
         times,
-        ds["cdr_carbon_uptake_from_dic_difference"],
+        ds["cdr_carbon_uptake_from_DIC_difference"],
         color=c1,
         lw=2,
         ls="--",
-        label="CO2 uptake (DIC difference)",
+        label=r"CO$_2$ uptake (DIC difference)",
     )
-    ax_mass.set_ylabel("CO2 uptake (tonnes CO2)")
+    ax_mass.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
 
     ax_eff.set_title("CO2 uptake and CDR efficiency")
 

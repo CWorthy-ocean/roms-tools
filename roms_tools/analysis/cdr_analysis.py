@@ -69,7 +69,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         - copied flux/tracer variables
         - 'cdr_efficiency_from_flux' and 'cdr_efficiency_from_DIC_difference' (dimensionless)
         - 'cdr_carbon_uptake_from_flux' (cumulative flux-based uptake, tonnes CO2)
-        - 'cdr_carbon_uptake_from_dic_difference' (DIC-difference-based uptake, tonnes CO2)
+        - 'cdr_carbon_uptake_from_DIC_difference' (DIC-difference-based uptake, tonnes CO2)
 
     Raises
     ------
@@ -195,8 +195,8 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         ),
     )
 
-    ds_cdr["cdr_carbon_uptake_from_dic_difference"] = diff_dic_tonnes_co2
-    ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs.update(
+    ds_cdr["cdr_carbon_uptake_from_DIC_difference"] = diff_dic_tonnes_co2
+    ds_cdr["cdr_carbon_uptake_from_DIC_difference"].attrs.update(
         long_name="CDR carbon uptake (from DIC differences)",
         units="tonnes CO2",
         description=(

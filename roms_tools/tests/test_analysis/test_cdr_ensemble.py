@@ -18,6 +18,7 @@ def create_member_ds() -> xr.Dataset:
     ds = xr.Dataset(
         {
             "cdr_efficiency_from_flux": ("time", [0.1, 0.2, 0.3]),
+            "cdr_carbon_uptake_from_flux": ("time", [1.0, 2.0, 3.0]),
             "abs_time": ("time", times),
         },
         coords={"time": times},
@@ -45,6 +46,7 @@ def varied_members() -> dict[str, xr.Dataset]:
     ds1 = xr.Dataset(
         {
             "cdr_efficiency_from_flux": ("time", [np.nan, 0.2, 0.3, 0.4, 0.5]),
+            "cdr_carbon_uptake_from_flux": ("time", [np.nan, 10.0, 15.0, 20.0, 25.0]),
             "abs_time": ("time", times1),
         },
         coords={"time": times1},
@@ -57,6 +59,7 @@ def varied_members() -> dict[str, xr.Dataset]:
     ds2 = xr.Dataset(
         {
             "cdr_efficiency_from_flux": ("time", [np.nan, np.nan, 0.6, 0.8]),
+            "cdr_carbon_uptake_from_flux": ("time", [np.nan, np.nan, 30.0, 40.0]),
             "abs_time": ("time", times2),
         },
         coords={"time": times2},
@@ -69,6 +72,7 @@ def varied_members() -> dict[str, xr.Dataset]:
     ds3 = xr.Dataset(
         {
             "cdr_efficiency_from_flux": ("time", [0.05, 0.15, 0.25]),
+            "cdr_carbon_uptake_from_flux": ("time", [5.0, 8.0, 12.0]),
             "abs_time": ("time", times3),
         },
         coords={"time": times3},
@@ -184,7 +188,12 @@ def test_ensemble_post_init(identical_members: dict[str, xr.Dataset]) -> None:
     assert isinstance(ens.ds, xr.Dataset)
     assert "ensemble_mean" in ens.ds.data_vars
     assert "ensemble_std" in ens.ds.data_vars
+    assert "ensemble_uptake_mean" in ens.ds.data_vars
+    assert "ensemble_uptake_std" in ens.ds.data_vars
+    assert "member1_co2_uptake" in ens.ds.data_vars
+    assert "member2_co2_uptake" in ens.ds.data_vars
     np.testing.assert_allclose(ens.ds.ensemble_std.values, 0.0)
+    np.testing.assert_allclose(ens.ds.ensemble_uptake_std.values, 0.0)
 
 
 def test_plot(identical_members: dict[str, xr.Dataset], tmp_path: Path) -> None:
@@ -200,6 +209,7 @@ def test_extract_efficiency_empty() -> None:
     ds = xr.Dataset(
         {
             "cdr_efficiency_from_flux": ("time", [np.nan, np.nan]),
+            "cdr_carbon_uptake_from_flux": ("time", [np.nan, np.nan]),
             "abs_time": ("time", times),
         },
         coords={"time": times},

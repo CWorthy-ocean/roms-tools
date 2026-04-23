@@ -23,17 +23,25 @@ class Ensemble:
     members: dict[str, str | xr.Dataset]
     """Dictionary mapping member names to CDR metrics."""
     ds: xr.Dataset = field(init=False)
-    """xarray Dataset containing aligned efficiencies for all ensemble members."""
+    """xarray Dataset containing aligned efficiency and CO2 uptake diagnostics."""
 
     def __post_init__(self):
         """
-        Loads datasets, extracts efficiencies, aligns times, stores in self.ds, and
-        plots ensemble curves.
+        Loads datasets, extracts efficiency and CO2 uptake, aligns times, computes
+        ensemble statistics, and stores in ``self.ds``.
         """
         datasets = self._load_members()
         effs = {name: self._extract_efficiency(ds) for name, ds in datasets.items()}
-        aligned = self._align_times(effs)
-        self.ds = self._compute_statistics(aligned)
+        uptakes = {name: self._extract_uptake(ds) for name, ds in datasets.items()}
+
+        aligned_eff = self._align_times(effs)
+        aligned_uptake = self._align_times(uptakes).rename_vars(
+            {name: f"{name}_co2_uptake" for name in uptakes}
+        )
+
+        self.ds = xr.merge(
+            [self._compute_statistics(aligned_eff), self._compute_uptake_statistics(aligned_uptake)]
+        )
 
     def _load_members(self) -> dict[str, xr.Dataset]:
         """
@@ -101,6 +109,50 @@ class Ensemble:
 
         return eff_rel
 
+    def _extract_uptake(self, ds: xr.Dataset) -> xr.DataArray:
+        """
+        Extracts CO2 uptake (flux-based) and reindexes to time since release start.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing a ``cdr_carbon_uptake_from_flux`` variable and ``time``
+            coordinate.
+
+        Returns
+        -------
+        xr.DataArray
+            CO2 uptake reindexed to a relative time axis in days since release start.
+
+        Raises
+        ------
+        ValueError
+            If 'time' coordinate is missing or there are no valid uptake values.
+        """
+        uptake = ds["cdr_carbon_uptake_from_flux"]
+
+        if "time" in uptake.coords:
+            abs_time = uptake.coords["time"]
+            uptake = uptake.drop_vars("time")
+        elif "time" in ds.data_vars:
+            abs_time = ds["time"]
+            uptake = uptake.drop_vars("time")
+        else:
+            raise ValueError(
+                "Dataset must contain a 'time' coordinate or data variable."
+            )
+
+        valid_mask = ~np.isnan(uptake.values)
+        if not valid_mask.any():
+            raise ValueError("No valid CO2 uptake values found in dataset.")
+
+        release_start = abs_time.values[valid_mask][0]
+        time_rel = (abs_time - release_start).astype("timedelta64[D]")
+        uptake_rel = uptake.assign_coords(time=time_rel)
+        uptake_rel.time.attrs["long_name"] = "time since release start"
+
+        return uptake_rel
+
     def _align_times(self, effs: dict[str, xr.DataArray]) -> xr.Dataset:
         """
         Align all ensemble members to a common time axis.
@@ -146,15 +198,35 @@ class Ensemble:
         ds["ensemble_std"] = da.std(dim="member")
         return ds
 
+    def _compute_uptake_statistics(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Computes ensemble statistics for CO2 uptake member series.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing aligned member uptake series.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset with additional variables ``ensemble_uptake_mean`` and
+            ``ensemble_uptake_std``.
+        """
+        da = ds.to_dataarray("member")
+        ds["ensemble_uptake_mean"] = da.mean(dim="member")
+        ds["ensemble_uptake_std"] = da.std(dim="member")
+        return ds
+
     def plot(
         self,
         save_path: str | None = None,
     ) -> None:
         """
-        Plots ensemble members with mean ± standard deviation shading.
+        Plot ensemble CDR efficiency and CO2 uptake with dual y-axes.
 
-        Displays individual member efficiency time series along with the ensemble
-        mean and ±1 standard deviation as a shaded region.
+        Left axis: individual member efficiency curves with ensemble mean ± standard
+        deviation. Right axis: ensemble-mean CO2 uptake ± standard deviation.
 
         Parameters
         ----------
@@ -167,29 +239,56 @@ class Ensemble:
         None
             This method does not return any value. It generates and displays a plot.
         """
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax_eff = plt.subplots(figsize=(9, 5))
 
         time = self.ds.time.values / np.timedelta64(1, "D")  # converts to float days
 
         # Individual ensemble members
         for name in self.members.keys():
-            ax.plot(time, self.ds[name], lw=2, label=name)
+            ax_eff.plot(time, self.ds[name], lw=1.8, alpha=0.8, label=name)
 
-        # Mean ± std
-        ax.plot(time, self.ds.ensemble_mean, color="black", lw=2, label="ensemble mean")
-        ax.fill_between(
+        # Efficiency mean ± std
+        ax_eff.plot(
+            time, self.ds.ensemble_mean, color="black", lw=2.2, label="efficiency mean"
+        )
+        ax_eff.fill_between(
             time,
             self.ds.ensemble_mean - self.ds.ensemble_std,
             self.ds.ensemble_mean + self.ds.ensemble_std,
             color="gray",
-            alpha=0.3,
+            alpha=0.2,
+            label="efficiency ±1 std",
         )
 
-        ax.set_xlabel("Time since release start [days]")
-        ax.set_ylabel("CDR Efficiency")
-        ax.set_title("Ensemble of interventions")
-        ax.legend()
-        ax.grid()
+        ax_eff.set_xlabel("Time since release start [days]")
+        ax_eff.set_ylabel("CDR efficiency")
+        ax_eff.grid()
+
+        # Uptake mean ± std (right axis)
+        ax_uptake = ax_eff.twinx()
+        ax_uptake.plot(
+            time,
+            self.ds.ensemble_uptake_mean,
+            color="C3",
+            lw=2.2,
+            ls="--",
+            label=r"CO$_2$ uptake mean",
+        )
+        ax_uptake.fill_between(
+            time,
+            self.ds.ensemble_uptake_mean - self.ds.ensemble_uptake_std,
+            self.ds.ensemble_uptake_mean + self.ds.ensemble_uptake_std,
+            color="C3",
+            alpha=0.12,
+            label=r"CO$_2$ uptake ±1 std",
+        )
+        ax_uptake.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
+
+        ax_eff.set_title("CO2 uptake and CDR efficiency")
+
+        lines_eff, labels_eff = ax_eff.get_legend_handles_labels()
+        lines_uptake, labels_uptake = ax_uptake.get_legend_handles_labels()
+        ax_eff.legend(lines_eff + lines_uptake, labels_eff + labels_uptake, loc="best")
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")

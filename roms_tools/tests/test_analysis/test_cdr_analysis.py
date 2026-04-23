@@ -74,7 +74,7 @@ def test_compute_cdr_metrics_outputs(
         "cdr_efficiency_from_flux",
         "cdr_efficiency_from_DIC_difference",
         "cdr_carbon_uptake_from_flux",
-        "cdr_carbon_uptake_from_dic_difference",
+        "cdr_carbon_uptake_from_DIC_difference",
     ]:
         assert var in ds_cdr
 
@@ -106,12 +106,12 @@ def test_compute_cdr_metrics_outputs(
         ds_cdr["cdr_efficiency_from_flux"] * cumulative_source * scale_flux,
     )
     np.testing.assert_allclose(
-        ds_cdr["cdr_carbon_uptake_from_dic_difference"],
+        ds_cdr["cdr_carbon_uptake_from_DIC_difference"],
         ds_cdr["cdr_efficiency_from_DIC_difference"] * cumulative_source * scale_dic,
     )
     assert ds_cdr["cdr_carbon_uptake_from_flux"].attrs["units"] == "tonnes CO2"
     assert (
-        ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs["units"] == "tonnes CO2"
+        ds_cdr["cdr_carbon_uptake_from_DIC_difference"].attrs["units"] == "tonnes CO2"
     )
 
 
@@ -175,14 +175,14 @@ def test_carbon_uptake_tonnes_co2_analytic() -> None:
         atol=1e-15,
     )
     np.testing.assert_allclose(
-        ds_cdr["cdr_carbon_uptake_from_dic_difference"].values,
+        ds_cdr["cdr_carbon_uptake_from_DIC_difference"].values,
         expected_dic_tonnes,
         rtol=0,
         atol=1e-15,
     )
     assert ds_cdr["cdr_carbon_uptake_from_flux"].attrs["units"] == "tonnes CO2"
     assert (
-        ds_cdr["cdr_carbon_uptake_from_dic_difference"].attrs["units"] == "tonnes CO2"
+        ds_cdr["cdr_carbon_uptake_from_DIC_difference"].attrs["units"] == "tonnes CO2"
     )
 
 

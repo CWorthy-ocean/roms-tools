@@ -480,6 +480,7 @@ class SurfaceForcing:
             ):
                 variable_info[var_name] = default_info
                 if var_name == "sss":
+                    #### THIS IF BLOCK MIGHT NO LONGER BE NEEDED
                     if "depth" in data.ds["sss"].dims:
                         data.ds["sss"] = data.ds["sss"].sel(depth=0)
                         data.ds = data.ds.drop_dims("depth")

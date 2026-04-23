@@ -90,8 +90,8 @@ class SurfaceForcing:
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
 
     restoring_forces : list[str], optional
-        Specifies which variables to apply restoring forces to. Currently only salinity is supported:
-        ```['salinity',]```
+        Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
+        ```['sss',]```
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -316,6 +316,15 @@ class SurfaceForcing:
                 f"`coarse_grid_mode` must be one of {valid_modes}, but got '{self.coarse_grid_mode}'."
             )
 
+        # Check if restoring variables are accepted
+        valid_vars = ["sss"]
+        if self.restoring_forces:
+            for var in restoring_forces:
+                if var not in valid_vars:
+                    raise ValueError(
+                        f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
+                    )
+
     def _determine_coarse_grid_usage(self, data):
         """Determine if coarse grid interpolation should be used based on the resolution
         of the dataset and the target grid.
@@ -470,9 +479,9 @@ class SurfaceForcing:
                 data.opt_var_names.keys()
             ):
                 variable_info[var_name] = default_info
-                if var_name == "salt":
-                    if "depth" in data.ds["salt"].dims:
-                        data.ds["salt"] = data.ds["salt"].sel(depth=0)
+                if var_name == "sss":
+                    if "depth" in data.ds["sss"].dims:
+                        data.ds["sss"] = data.ds["sss"].sel(depth=0)
                         data.ds = data.ds.drop_dims("depth")
                         del data.dim_names["depth"]
                     variable_info[var_name] = {**default_info, "validate": True}
@@ -626,7 +635,7 @@ class SurfaceForcing:
             ]
         elif self.type == "restoring":
             time_coords = [
-                "salt_time",
+                "sss_time",
             ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})

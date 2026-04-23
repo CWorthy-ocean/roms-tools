@@ -1287,14 +1287,38 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             "latitude": "lat",
         }
     )
-    var_names: dict[str, str] = field(default_factory=lambda: {"salt": "salt"})
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "salt": "salt",
+            "sss": "salt",
         }
     )
 
     climatology: bool = True
+    needs_lateral_fill: bool = True
+
+    def post_process(self) -> None:
+        """
+        Processes WOA2018 data values as follows:
+        - Reduce 3D field to surface values
+        - Apply a mask to the dataset based on locations of NaN values
+        """
+
+        if "depth" in self.dim_names:
+            self.ds = self.ds.sel(depth=0)
+            self.ds = self.ds.drop_vars("depth")
+            del self.dim_names['depth']
+            self.ds = self.ds.rename({'salt': 'sss'})
+
+        mask = xr.where(
+            self.ds["sss"]
+            .isel({self.dim_names["time"]: 0})
+            .isnull(),
+            0,
+            1,
+        )
+
+        self.ds["mask"] = mask
 
 
 @dataclass(kw_only=True)

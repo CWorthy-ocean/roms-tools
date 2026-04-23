@@ -1315,7 +1315,7 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
         ds["cdr_efficiency_from_flux"],
         color=c0,
         lw=2,
-        label="CDR efficiency (CO2 flux)",
+        label=r"CDR efficiency (CO$_2$ flux)",
     )
     ax_eff.plot(
         times,
@@ -1346,7 +1346,7 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     )
     ax_mass.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
 
-    ax_eff.set_title("CO2 uptake and CDR efficiency")
+    ax_eff.set_title(r"CO$_2$ uptake and CDR efficiency")
 
     lines_eff, labels_eff = ax_eff.get_legend_handles_labels()
     lines_mass, labels_mass = ax_mass.get_legend_handles_labels()

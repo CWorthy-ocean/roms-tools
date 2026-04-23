@@ -31,8 +31,12 @@ class Ensemble:
         ensemble statistics, and stores in ``self.ds``.
         """
         datasets = self._load_members()
-        effs = {name: self._extract_efficiency(ds) for name, ds in datasets.items()}
-        uptakes = {name: self._extract_uptake(ds) for name, ds in datasets.items()}
+        effs = {}
+        uptakes = {}
+        for name, ds in datasets.items():
+            release_start = self._get_release_start(ds)
+            effs[name] = self._extract_efficiency(ds, release_start=release_start)
+            uptakes[name] = self._extract_uptake(ds, release_start=release_start)
 
         aligned_eff = self._align_times(effs)
         aligned_uptake = self._align_times(uptakes).rename_vars(
@@ -40,7 +44,10 @@ class Ensemble:
         )
 
         self.ds = xr.merge(
-            [self._compute_statistics(aligned_eff), self._compute_uptake_statistics(aligned_uptake)]
+            [
+                self._compute_statistics(aligned_eff),
+                self._compute_uptake_statistics(aligned_uptake),
+            ]
         )
 
     def _load_members(self) -> dict[str, xr.Dataset]:
@@ -60,7 +67,26 @@ class Ensemble:
             for name, path in self.members.items()
         }
 
-    def _extract_efficiency(self, ds: xr.Dataset) -> xr.DataArray:
+    def _get_time_coord(self, da: xr.DataArray, ds: xr.Dataset) -> xr.DataArray:
+        """Return the absolute time coordinate for a member variable."""
+        if "time" in da.coords:
+            return da.coords["time"]
+        if "time" in ds.data_vars:
+            return ds["time"]
+        raise ValueError("Dataset must contain a 'time' coordinate or data variable.")
+
+    def _get_release_start(self, ds: xr.Dataset) -> np.datetime64:
+        """Infer release start from first valid efficiency value."""
+        eff = ds["cdr_efficiency_from_flux"]
+        abs_time = self._get_time_coord(eff, ds)
+        valid_mask = ~np.isnan(eff.values)
+        if not valid_mask.any():
+            raise ValueError("No valid efficiency values found in dataset.")
+        return abs_time.values[valid_mask][0]
+
+    def _extract_efficiency(
+        self, ds: xr.Dataset, release_start: np.datetime64 | None = None
+    ) -> xr.DataArray:
         """
         Extracts the CDR efficiency metric and reindex to time since release start.
 
@@ -81,24 +107,15 @@ class Ensemble:
         """
         eff = ds["cdr_efficiency_from_flux"]
 
-        # Check that time coordinate exists
-        if "time" in eff.coords:
-            abs_time = eff.coords["time"]
-            eff = eff.drop_vars("time")
-        elif "time" in ds.data_vars:
-            abs_time = ds["time"]
-            eff = eff.drop_vars("time")
-        else:
-            raise ValueError(
-                "Dataset must contain a 'time' coordinate or data variable."
-            )
+        abs_time = self._get_time_coord(eff, ds)
 
         # Drop NaNs to find first valid time
         valid_mask = ~np.isnan(eff.values)
         if not valid_mask.any():
             raise ValueError("No valid efficiency values found in dataset.")
 
-        release_start = abs_time.values[valid_mask][0]
+        if release_start is None:
+            release_start = abs_time.values[valid_mask][0]
 
         # Compute relative time in days
         time_rel = (abs_time - release_start).astype("timedelta64[D]")
@@ -109,7 +126,9 @@ class Ensemble:
 
         return eff_rel
 
-    def _extract_uptake(self, ds: xr.Dataset) -> xr.DataArray:
+    def _extract_uptake(
+        self, ds: xr.Dataset, release_start: np.datetime64 | None = None
+    ) -> xr.DataArray:
         """
         Extracts CO2 uptake (flux-based) and reindexes to time since release start.
 
@@ -131,22 +150,14 @@ class Ensemble:
         """
         uptake = ds["cdr_carbon_uptake_from_flux"]
 
-        if "time" in uptake.coords:
-            abs_time = uptake.coords["time"]
-            uptake = uptake.drop_vars("time")
-        elif "time" in ds.data_vars:
-            abs_time = ds["time"]
-            uptake = uptake.drop_vars("time")
-        else:
-            raise ValueError(
-                "Dataset must contain a 'time' coordinate or data variable."
-            )
+        abs_time = self._get_time_coord(uptake, ds)
 
         valid_mask = ~np.isnan(uptake.values)
         if not valid_mask.any():
             raise ValueError("No valid CO2 uptake values found in dataset.")
 
-        release_start = abs_time.values[valid_mask][0]
+        if release_start is None:
+            release_start = abs_time.values[valid_mask][0]
         time_rel = (abs_time - release_start).astype("timedelta64[D]")
         uptake_rel = uptake.assign_coords(time=time_rel)
         uptake_rel.time.attrs["long_name"] = "time since release start"
@@ -257,7 +268,6 @@ class Ensemble:
             self.ds.ensemble_mean + self.ds.ensemble_std,
             color="gray",
             alpha=0.2,
-            label="efficiency ±1 std",
         )
 
         ax_eff.set_xlabel("Time since release start [days]")
@@ -284,7 +294,7 @@ class Ensemble:
         )
         ax_uptake.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
 
-        ax_eff.set_title("CO2 uptake and CDR efficiency")
+        ax_eff.set_title(r"CO$_2$ uptake and CDR efficiency")
 
         lines_eff, labels_eff = ax_eff.get_legend_handles_labels()
         lines_uptake, labels_uptake = ax_uptake.get_legend_handles_labels()

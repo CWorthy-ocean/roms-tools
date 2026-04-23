@@ -136,8 +136,8 @@ def test_carbon_uptake_tonnes_co2_analytic() -> None:
                 ("time", "s_rho", "eta_rho", "xi_rho"),
                 -np.ones((1, 1, 1, 1)),
             ),
-            "FG_CO2": (("time", "eta_rho", "xi_rho"), np.array([[5.0]])),
-            "FG_ALT_CO2": (("time", "eta_rho", "xi_rho"), np.array([[2.0]])),
+            "FG_CO2": (("time", "eta_rho", "xi_rho"), np.array([[[5.0]]])),
+            "FG_ALT_CO2": (("time", "eta_rho", "xi_rho"), np.array([[[2.0]]])),
             "hDIC": (("time", "s_rho", "eta_rho", "xi_rho"), np.array([[[[10.0]]]])),
             "hDIC_ALT_CO2": (
                 ("time", "s_rho", "eta_rho", "xi_rho"),

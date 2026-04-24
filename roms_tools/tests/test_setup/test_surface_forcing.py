@@ -395,7 +395,7 @@ def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, cap
         ("ERA5", "ERA5_regional_test_data.nc", "physics", False),
         ("CESM_REGRIDDED", "CESM_surface_global_test_data_climatology.nc", "bgc", True),
         ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", True),
-        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", True),
+        ("WOA", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", True),
     ],
 )
 def test_nans_filled_in(
@@ -522,7 +522,7 @@ def test_surface_forcing_creation(
     [
         (
             "restoring_surface_forcing_from_unified_climatology",
-            "UNIFIED",
+            "WOA",
             True,
             Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
         ),
@@ -540,7 +540,7 @@ def test_surface_forcing_creation_restoring(
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     assert sfc_forcing.ds is not None
-    for var_name in ["salt"]:
+    for var_name in ["sss"]:
         assert var_name in sfc_forcing.ds
 
     assert sfc_forcing.start_time == datetime(2020, 2, 1)
@@ -553,7 +553,7 @@ def test_surface_forcing_creation_restoring(
     }
     assert not sfc_forcing.use_coarse_grid
     assert sfc_forcing.ds.attrs["source"] == expected_name
-    for time_coord in ["salt_time"]:
+    for time_coord in ["sss_time"]:
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
 

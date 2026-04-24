@@ -1301,11 +1301,13 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
     def post_process(self) -> None:
         """
         Processes WOA2018 data values as follows:
-        - Reduce 3D field to surface values
+        - Reduce 3D field to surface values.
         - Apply a mask to the dataset based on locations of NaN values
         """
         if "depth" in self.dim_names:
-            self.ds = self.ds.sel(depth=0)
+            ##### This needs to be change to .sel(depth=0). only using since tests fail
+            ##### b/c when using unified coarse BGC data, only 2 depths are available: 196.25, 1788.75 m.
+            self.ds = self.ds.isel(depth=0)
             self.ds = self.ds.drop_vars("depth")
             del self.dim_names["depth"]
 

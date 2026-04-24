@@ -872,12 +872,14 @@ def restoring_surface_forcing_from_unified_climatology(
     end_time = datetime(2020, 2, 1)
 
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    ##### TO USE ONCE roms-tools-test-data HAS APPROPRIATE FILE
+    # fname_bgc = Path(download_test_data("coarsened_WOA_restoring_dataset.nc"))
 
     return SurfaceForcing(
         grid=grid,
         start_time=start_time,
         end_time=end_time,
-        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
+        source={"name": "WOA", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="restoring",
         coarse_grid_mode="never",
         use_dask=use_dask,

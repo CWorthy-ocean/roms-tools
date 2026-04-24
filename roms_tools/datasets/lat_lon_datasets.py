@@ -1302,7 +1302,7 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
         """
         Processes WOA2018 data values as follows:
         - Reduce 3D field to surface values.
-        - Apply a mask to the dataset based on locations of NaN values
+        - Apply a mask to the dataset based on locations of NaN values.
         """
         if "depth" in self.dim_names:
             ##### This needs to be change to .sel(depth=0). only using since tests fail

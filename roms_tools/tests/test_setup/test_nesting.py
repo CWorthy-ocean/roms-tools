@@ -16,7 +16,7 @@ from roms_tools.setup.nesting import (
     align_grids,
     compute_boundary_distance,
     interpolate_indices,
-    make_edata,
+    make_nesting_info,
     map_child_boundaries_onto_parent_grid_indices,
     modify_child_mask,
     modify_child_topography,
@@ -450,7 +450,7 @@ class TestNesting:
             ),
         ],
     )
-    def test_make_edata_options(
+    def test_make_nesting_info_options(
         self,
         big_grid,
         small_grid,
@@ -463,7 +463,7 @@ class TestNesting:
         child_grid = small_grid
         parent_grid = big_grid
 
-        ds_nesting = make_edata(
+        ds_nesting = make_nesting_info(
             parent_grid,
             child_grid,
             include_bgc=include_bgc,
@@ -567,7 +567,7 @@ class TestNesting:
                 "west": True,
             },
         )
-        ds_nesting = make_edata(parent_grid, child_grid)
+        ds_nesting = make_nesting_info(parent_grid, child_grid)
 
         assert isinstance(child_grid.ds, xr.Dataset)
         assert isinstance(ds_nesting, xr.Dataset)
@@ -608,7 +608,7 @@ class TestNesting:
         for file_str in ["test_nesting", "test_nesting.nc"]:
             # Create a temporary filepath using the tmp_path fixture
             for filepath in [tmp_path / file_str, str(tmp_path / file_str)]:
-                make_edata(big_grid, child_grid_with_bgc, filepath)
+                make_nesting_info(big_grid, child_grid_with_bgc, filepath)
                 # saved_filenames = child_grid_with_bgc.save_nesting(filepath)
                 # Check if the .nc file was created
                 filepath = Path(filepath).with_suffix(".nc")

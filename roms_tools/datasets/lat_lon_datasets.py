@@ -1295,6 +1295,7 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
     )
 
     climatology: bool = True
+    #### A UnifiedDataset has needs_lateral_fill as False b/c Pierre did it in preprocess
     needs_lateral_fill: bool = True
 
     def post_process(self) -> None:
@@ -1303,11 +1304,10 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
         - Reduce 3D field to surface values
         - Apply a mask to the dataset based on locations of NaN values
         """
-
         if "depth" in self.dim_names:
             self.ds = self.ds.sel(depth=0)
             self.ds = self.ds.drop_vars("depth")
-            del self.dim_names['depth']
+            del self.dim_names["depth"]
 
         mask = xr.where(
             self.ds["salt"].isnull().any(dim=self.dim_names["time"]),

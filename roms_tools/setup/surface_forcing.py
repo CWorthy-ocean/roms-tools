@@ -199,21 +199,23 @@ class SurfaceForcing:
         interp_flag = 1 if use_coarse_grid else 0
 
         if self.type in ["physics", "bgc"]:
-             logging.info(
-                 "Data will be interpolated onto the %s. "
-                 "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
-                 grid_desc,
-                 interp_flag,
-                 opt_file,
-             )
+            logging.info(
+                "Data will be interpolated onto the %s. "
+                "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
+                grid_desc,
+                interp_flag,
+                opt_file,
+            )
         elif self.type in ["restoring"]:
-             logging.info(
-                 "Restoring data being created for %s. "
-                 "Remember to define the following flags in your `%s` file: %s`.",
-                 self.restoring_forces,
-                 opt_file,
-                 cppdefs_flags,
-             )
+            logging.info(
+                "Data will be interpolated onto the %s. "
+                "Restoring data being created for %s. "
+                "Remember to define the following flags in your `%s` file: %s`.",
+                grid_desc,
+                self.restoring_forces,
+                opt_file,
+                cppdefs_flags,
+            )
 
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords
@@ -417,11 +419,11 @@ class SurfaceForcing:
                 )
 
         elif self.type == "restoring":
-            if self.source["name"] == "UNIFIED":
+            if self.source["name"] == "WOA":
                 data = UnifiedRestoringSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "UNIFIED" is a valid option for source["name"] when type is "restoring".'
+                    'Only "WOA" is a valid option for source["name"] when type is "restoring".'
                 )
 
         return data

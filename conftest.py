@@ -25,7 +25,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCDataset,
     UnifiedBGCSurfaceDataset,
 )
-from roms_tools.setup.nesting import align_grids, make_edata
+from roms_tools.setup.nesting import align_grids, make_nesting_info
 
 
 class SkippableOptions(enum.StrEnum):
@@ -316,7 +316,7 @@ def child_grid_with_bgc(big_grid):
         size_y=500,
     )
     child_grid = align_grids(big_grid, child_grid)
-    make_edata(big_grid, child_grid, include_bgc=True)
+    make_nesting_info(big_grid, child_grid, include_bgc=True)
     return child_grid
 
 
@@ -332,7 +332,7 @@ def child_grid_with_pflx(big_grid):
         size_y=500,
     )
     child_grid = align_grids(big_grid, child_grid)
-    make_edata(big_grid, child_grid, include_pressure_fluxes=True)
+    make_nesting_info(big_grid, child_grid, include_pressure_fluxes=True)
 
     return child_grid
 

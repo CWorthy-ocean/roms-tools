@@ -249,6 +249,10 @@ class SurfaceForcing:
         if not self.bypass_validation:
             self._validate(ds)
 
+        # Shift radiation time for hourly ERA5 data
+        if self.type == "physics" and self.source["name"] == "ERA5":
+            ds = self._apply_rad_time(ds)
+
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
@@ -579,21 +583,6 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
-                # Create time dimension shifted 30 minutes earlier
-                ds = ds.assign_coords(rad_time=ds["time"] - np.timedelta64(30, "m"))
-                ds.rad_time.attrs["long_name"] = (
-                    "relative time: days since 2000-01-01 00:00:00"
-                )
-                ds.rad_time.attrs["units"] = "days"
-
-                # Assign shifted time dimenstion to radiation variables
-
-                rad_vars = ["swrad", "lwrad"]
-                for var in rad_vars:
-                    ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
-
-        if self.type == "physics":
-            if self.source["name"] == "ERA5":
                 time_coords = [
                     "time",
                     "rad_time",
@@ -646,6 +635,29 @@ class SurfaceForcing:
                 # all variables are at rho-points
                 mask = self.target_coords["mask"]
                 nan_check(ds[var_name].isel(time=0), mask)
+
+    def _apply_rad_time(self, ds):
+        """Shifts the short and long wave radiation time dimension by 30 minutes, and renames the 'time'
+        dimension to 'rad_time'. Done only for ERA5 data that is a time-average for hourly date.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to shift time for. ds must contain variables 'swrad' and 'lwrad'.
+
+        """
+        # Create time dimension shifted 30 minutes earlier
+        ds = ds.assign_coords(rad_time=ds["time"] - 30 / 60 / 24)
+        ds.rad_time.attrs["long_name"] = ds.time.attrs["long_name"]
+        ds.rad_time.attrs["units"] = ds.time.attrs["units"]
+
+        # Assign shifted time dimenstion to radiation variables
+
+        rad_vars = ["swrad", "lwrad"]
+        for var in rad_vars:
+            ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
+
+        return ds
 
     def _add_global_metadata(self, ds=None):
         if ds is None:

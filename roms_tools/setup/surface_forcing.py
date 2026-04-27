@@ -349,7 +349,8 @@ class SurfaceForcing:
         if self.type == "physics":
             if self.source["name"] == "ERA5":
                 # Add 1 hr since radiation time will shift by 1 hr
-                data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
+                if data_dict["end_time"] is not None:
+                    data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
                 if str(self.source["path"]).startswith("gs://") or str(
                     self.source["path"]
                 ).startswith("gcs://"):

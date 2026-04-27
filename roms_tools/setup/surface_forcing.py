@@ -1,7 +1,7 @@
 import importlib.metadata
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -253,20 +253,6 @@ class SurfaceForcing:
         for var_name in ds.data_vars:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
-        if self.type == "physics":
-            # Create time dimension shifted 30 minutes earlier
-            ds = ds.assign_coords(rad_time=ds["time"] - 30 / 60 / 24)
-            ds.rad_time.attrs["long_name"] = (
-                "relative time: days since 2000-01-01 00:00:00"
-            )
-            ds.rad_time.attrs["units"] = "days"
-
-            # Assign shifted time dimenstion to radiation variables
-
-            rad_vars = ["swrad", "lwrad"]
-            for var in rad_vars:
-                ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
-
         self.ds = ds
 
     def _input_checks(self):
@@ -358,6 +344,8 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
+                # Add 1 hr since radiation time will shift by 1 hr
+                self.start_time = self.start_time + timedelta(hours=1)
                 if str(self.source["path"]).startswith("gs://") or str(
                     self.source["path"]
                 ).startswith("gcs://"):
@@ -368,6 +356,8 @@ class SurfaceForcing:
                     data = ERA5ARCODataset(**data_dict)
                 else:
                     data = ERA5Dataset(**data_dict)
+                # Remove 1 hr to adjust to original
+                self.start_time = self.start_time - timedelta(hours=1)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'
@@ -588,7 +578,30 @@ class SurfaceForcing:
         )
 
         if self.type == "physics":
-            time_coords = ["time"]
+            if self.source["name"] == "ERA5":
+                # Create time dimension shifted 30 minutes earlier
+                ds = ds.assign_coords(rad_time=ds["time"] - np.timedelta64(30, "m"))
+                ds.rad_time.attrs["long_name"] = (
+                    "relative time: days since 2000-01-01 00:00:00"
+                )
+                ds.rad_time.attrs["units"] = "days"
+
+                # Assign shifted time dimenstion to radiation variables
+
+                rad_vars = ["swrad", "lwrad"]
+                for var in rad_vars:
+                    ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
+
+        if self.type == "physics":
+            if self.source["name"] == "ERA5":
+                time_coords = [
+                    "time",
+                    "rad_time",
+                ]
+            else:
+                time_coords = [
+                    "time",
+                ]
         elif self.type == "bgc":
             time_coords = [
                 "pco2_time",

@@ -349,7 +349,7 @@ class SurfaceForcing:
         if self.type == "physics":
             if self.source["name"] == "ERA5":
                 # Add 1 hr since radiation time will shift by 1 hr
-                self.end_time = self.end_time + timedelta(hours=1)
+                data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
                 if str(self.source["path"]).startswith("gs://") or str(
                     self.source["path"]
                 ).startswith("gcs://"):
@@ -360,8 +360,6 @@ class SurfaceForcing:
                     data = ERA5ARCODataset(**data_dict)
                 else:
                     data = ERA5Dataset(**data_dict)
-                # Remove 1 hr to adjust to original
-                self.end_time = self.end_time - timedelta(hours=1)
             else:
                 raise ValueError(
                     'Only "ERA5" is a valid option for source["name"] when type is "physics".'

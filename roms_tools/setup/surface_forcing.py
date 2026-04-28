@@ -190,8 +190,9 @@ class SurfaceForcing:
                 for var in self.restoring_forces:
                     if var == "sss":
                         cppdefs_flags.add("SFLX_CORR")
-                    if var == "sst":
-                        cppdefs_flags.add("QCORRECTION")
+                   # sea surface temp is not yet available for restoring
+                   # if var == "sst":
+                   #     cppdefs_flags.add("QCORRECTION")
             else:
                 self.restoring_forces = ["sss"]
                 cppdefs_flags.add("SFLX_CORR")

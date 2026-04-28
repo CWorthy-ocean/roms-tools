@@ -28,6 +28,7 @@
 * Enforce `int32` type on `ChildGrid` mask ([#559](https://github.com/CWorthy-ocean/roms-tools/pull/559))
 * Ensure `regionmask>=0.11.0` in `pyproject.toml` ([#565](https://github.com/CWorthy-ocean/roms-tools/pull/565))
 * Integrate narrow-channel closing directly into `Grid.update_mask()` (internal `_close_narrow_channels`), iterating north–south and east–west up to 10 passes
+* short and long wave radiation time is shifted 1/2 a timestep sooner and have a dim of `rad_time` ([#586](https://github.com/CWorthy-ocean/roms-tools/pull/586))
 
 ### Documentation
 

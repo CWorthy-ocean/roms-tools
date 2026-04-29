@@ -16,6 +16,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     LatLonDataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
+    WOARestoringSurfaceDataset,
 )
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
@@ -190,9 +191,6 @@ class SurfaceForcing:
                 for var in self.restoring_forces:
                     if var == "sss":
                         cppdefs_flags.add("SFLX_CORR")
-                   # sea surface temp is not yet available for restoring
-                   # if var == "sst":
-                   #     cppdefs_flags.add("QCORRECTION")
             else:
                 self.restoring_forces = ["sss"]
                 cppdefs_flags.add("SFLX_CORR")
@@ -207,7 +205,7 @@ class SurfaceForcing:
                 interp_flag,
                 opt_file,
             )
-        elif self.type in ["restoring"]:
+        elif self.type == "restoring":
             logging.info(
                 "Data will be interpolated onto the %s. "
                 "Restoring data being created for %s. "
@@ -421,10 +419,12 @@ class SurfaceForcing:
 
         elif self.type == "restoring":
             if self.source["name"] == "WOA":
+                data = WOARestoringSurfaceDataset(**data_dict)
+            elif self.source["name"] == "UNIFIED":
                 data = UnifiedRestoringSurfaceDataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "WOA" is a valid option for source["name"] when type is "restoring".'
+                    'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring".'
                 )
 
         return data

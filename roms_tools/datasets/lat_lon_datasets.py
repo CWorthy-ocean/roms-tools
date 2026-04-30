@@ -145,6 +145,7 @@ class LatLonDataset:
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool = False
+    has_encoded_times: bool = True  # todo add docstrings
     needs_lateral_fill: bool = True
     use_dask: bool = False
     chunks: dict[str, int] | None = None
@@ -171,14 +172,8 @@ class LatLonDataset:
             lateral = type(self)._default_lateral_dask_chunk
             if lateral is not None:
                 self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
-        try:
-            ds = self.load_data()
-        except ValueError as e:
-            msg = str(e)
-            if "decode time" in msg or "months since" in msg or "years since" in msg:
-                ds = self.load_data(decode_times=False)
-            else:
-                raise
+
+        ds = self.load_data()
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
@@ -210,7 +205,7 @@ class LatLonDataset:
         if self.apply_post_processing:
             self.post_process()
 
-    def load_data(self, decode_times: bool = True) -> xr.Dataset:
+    def load_data(self) -> xr.Dataset:
         """Load dataset from the specified file.
 
         Returns
@@ -229,7 +224,7 @@ class LatLonDataset:
             filename=self.filename,
             dim_names=self.dim_names,
             use_dask=self.use_dask,
-            decode_times=decode_times,
+            decode_times=self.has_encoded_times,
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
@@ -1149,6 +1144,8 @@ class WOADataset(LatLonDataset):
 
     needs_lateral_fill: bool = True
 
+    has_encoded_times: bool = False
+
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Ensure the dataset's time dimension is correctly defined and standardized.
@@ -1174,30 +1171,21 @@ class WOADataset(LatLonDataset):
             "depth": "depth",
         }
 
+        if "time" not in ds.dims:
+            raise ValueError("Expecting WOA data containing dimension of 'time'")
+
+        if len(ds["time"]) != 12:
+            raise ValueError(
+                "The WOA data must be climatological and contain a 'time' dimension of length 12."
+            )
         # Handle time dimension
-        if "time" in ds.dims:
-            if len(ds["time"]) == 12:
-                # Reassign dimension and convert from float64 days to timedelta
-#                ds = assign_dates_to_climatology(ds, "time")
+        ds = assign_dates_to_climatology(ds, "time")
 
-                ds = ds.assign_coords(
-                    time=[15.5, 45, 74.5, 105, 135.5, 166, 196, 227.5, 258, 288.5, 319, 349.5]
-                )
+        # Reassign dimension and convert from float64 days to timedelta
+        # todo use this function if we can
+        # todo set the magic cyclic_data metadata thing
 
-                self.dim_names["time"] = "time"
-                ds["time"] = xr.DataArray(
-                    (ds["time"].values * 86400 * 1e9).astype("timedelta64[ns]"),
-                    dims="time",
-                )
-            else:
-                raise ValueError(
-                    "The WOA data must be climatological and contain a 'time' dimension of length 12."
-                )
-        else:
-                raise ValueError(
-                    "Expecting WOA data containing dimension of 'time'"
-                )
-
+        # todo unrelated: add section to datasets on where/how to download WOA data
         return ds
 
 
@@ -1383,13 +1371,14 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             self.ds = self.ds.drop_vars("depth")
             del self.dim_names["depth"]
 
-   #     mask = xr.where(
-   #         self.ds["salt"].isnull().any(dim=self.dim_names["time"]),
-   #         0,
-   #         1,
-   #     )
 
-   #     self.ds["mask"] = mask
+#     mask = xr.where(
+#         self.ds["salt"].isnull().any(dim=self.dim_names["time"]),
+#         0,
+#         1,
+#     )
+
+#     self.ds["mask"] = mask
 
 
 @dataclass(kw_only=True)

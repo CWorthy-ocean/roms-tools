@@ -805,6 +805,7 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
         "bgc_surface_forcing",
         "bgc_surface_forcing_from_climatology",
         "bgc_surface_forcing_from_unified_climatology",
+        "restoring_surface_forcing",
     ],
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):

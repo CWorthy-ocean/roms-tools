@@ -542,46 +542,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
-def compute_missing_surface_restoring_variables(restoring_data):
-    """Fills in missing surface restoring variables in the input dictionary.
-
-    This function checks for missing surface restoring variables in the provided dictionary and
-    computes them based on predefined relationships with existing variables. The relationships
-    specify either a multiplication factor applied to an existing variable or a constant value
-    if no related variable is available. The resulting variables are added to the dictionary.
-
-    Parameters
-    ----------
-    restoring_data : dict
-        A dictionary containing surface restoring variables as xarray DataArrays.
-        Missing variables are computed and added to this dictionary.
-
-    Returns
-    -------
-    dict
-        The updated dictionary with missing surface restoring variables filled in.
-
-    Notes
-    -----
-    - If `salinity` is not part of the input dictionary, the are assigned constant values.
-    """
-    variable_relations = {
-        "sss": (None, 1.0),
-    }
-
-    # Fill in missing variables using the defined relationships
-    for var_name, (base_var, factor) in variable_relations.items():
-        if var_name not in restoring_data:
-            if base_var:
-                restoring_data[var_name] = restoring_data[base_var] * factor
-            else:
-                restoring_data[var_name] = factor * xr.ones_like(
-                    restoring_data["sss"]
-                )
-
-    return restoring_data
-
-
 def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",

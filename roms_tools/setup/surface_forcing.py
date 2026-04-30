@@ -24,7 +24,6 @@ from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
     compute_missing_surface_bgc_variables,
-    compute_missing_surface_restoring_variables,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -269,11 +268,6 @@ class SurfaceForcing:
 
         if self.type == "bgc":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
-
-        if self.type == "restoring":
-            processed_fields = compute_missing_surface_restoring_variables(
-                processed_fields
-            )
 
         # Reorder dimensions
         for var_name in processed_fields:

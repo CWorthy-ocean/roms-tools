@@ -186,9 +186,11 @@ class SurfaceForcing:
         elif self.type == "restoring":
             opt_file = "cppdefs.opt"
             cppdefs_flags = set()
+
             for var in self.restoring_forces:
                 if var == "sss":
                     cppdefs_flags.add("SFLX_CORR")
+
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
 
@@ -332,10 +334,11 @@ class SurfaceForcing:
 
         # Check if restoring variables are accepted
         if self.type == "restoring":
-            if self.restoring_forces is None:
+            if not self.restoring_forces:
                 raise ValueError(
                     "When type='restoring', `restoring_forces` must be defined."
                 )
+
             valid_vars = ["sss"]
             for var in self.restoring_forces:
                 if var not in valid_vars:

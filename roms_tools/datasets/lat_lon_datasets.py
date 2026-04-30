@@ -87,7 +87,7 @@ class LatLonDataset:
         Defaults to an empty dictionary.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
-    encoded_times : bool
+    has_encoded_times : bool
         Indicates whether the dataset has a time variable with units that are decodable. Defaults to True.
     needs_lateral_fill: bool, optional
         Indicates whether land values require lateral filling. If `True`, ocean values will be extended into land areas
@@ -147,7 +147,7 @@ class LatLonDataset:
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool = False
-    encoded_times: bool = True
+    has_encoded_times: bool = True
     needs_lateral_fill: bool = True
     use_dask: bool = False
     chunks: dict[str, int] | None = None
@@ -174,6 +174,7 @@ class LatLonDataset:
             lateral = type(self)._default_lateral_dask_chunk
             if lateral is not None:
                 self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
+
         ds = self.load_data()
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
@@ -225,7 +226,7 @@ class LatLonDataset:
             filename=self.filename,
             dim_names=self.dim_names,
             use_dask=self.use_dask,
-            decode_times=self.encoded_times,
+            decode_times=self.has_encoded_times,
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
@@ -1144,7 +1145,7 @@ class WOADataset(LatLonDataset):
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     needs_lateral_fill: bool = True
-    encoded_times: bool = False
+    has_encoded_times: bool = False
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:

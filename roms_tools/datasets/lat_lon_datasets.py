@@ -87,6 +87,8 @@ class LatLonDataset:
         Defaults to an empty dictionary.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
+    encoded_times : bool
+        Indicates whether the dataset has a time variable with units that are decodable. Defaults to True.
     needs_lateral_fill: bool, optional
         Indicates whether land values require lateral filling. If `True`, ocean values will be extended into land areas
         to replace NaNs or non-ocean values (such as atmospheric values in ERA5 data). If `False`, it is assumed that
@@ -145,6 +147,7 @@ class LatLonDataset:
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool = False
+    encoded_times: bool = True
     needs_lateral_fill: bool = True
     use_dask: bool = False
     chunks: dict[str, int] | None = None
@@ -171,14 +174,7 @@ class LatLonDataset:
             lateral = type(self)._default_lateral_dask_chunk
             if lateral is not None:
                 self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
-        try:
-            ds = self.load_data()
-        except ValueError as e:
-            msg = str(e)
-            if "decode time" in msg or "months since" in msg or "years since" in msg:
-                ds = self.load_data(decode_times=False)
-            else:
-                raise
+        ds = self.load_data()
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
 
@@ -210,7 +206,7 @@ class LatLonDataset:
         if self.apply_post_processing:
             self.post_process()
 
-    def load_data(self, decode_times: bool = True) -> xr.Dataset:
+    def load_data(self) -> xr.Dataset:
         """Load dataset from the specified file.
 
         Returns
@@ -229,7 +225,7 @@ class LatLonDataset:
             filename=self.filename,
             dim_names=self.dim_names,
             use_dask=self.use_dask,
-            decode_times=decode_times,
+            decode_times=self.encoded_times,
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
@@ -1141,24 +1137,25 @@ class WOADataset(LatLonDataset):
 
     Notes
     -----
-    No lateral filling is done so land points are nans. Thus the
-    `needs_lateral_fill` attribute is set to `True`.
+    No pre-processing is done so land points are nans. The `needs_lateral_fill` attribute is set to `True`.
+    Time units provided in WOA datasets are not decoded by xarray, so `decode_times` is set to `False` when reading data.
     """
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     needs_lateral_fill: bool = True
+    encoded_times: bool = False
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Ensure the dataset's time dimension is correctly defined and standardized.
 
-        This method verifies that the time dimension exists in the dataset and assigns it appropriately. If the "time" dimension is missing, the method attempts to assign an existing "time" or "month" dimension. If neither exists, it expands the dataset to include a "time" dimension with a size of one.
+        This method verifies that the time dimension exists in the dataset and assigns it appropriately.
 
         Returns
         -------
         ds : xr.Dataset
-            The xarray Dataset with the correct time dimension assigned or added.
+            The xarray Dataset with the 12 climatology times.
         """
         ds = ds.rename({"lon": "longitude", "lat": "latitude"})
         ds = ds.assign_coords(

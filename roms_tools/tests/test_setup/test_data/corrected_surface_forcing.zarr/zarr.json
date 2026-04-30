@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS surface forcing file created by ROMS-Tools",
-    "roms_tools_version": "2.6.1.dev52+gd44fe5da",
+    "roms_tools_version": "3.6.1.dev31+g34326e51e",
     "start_time": "2020-02-01 00:00:00",
     "end_time": "2020-02-02 00:00:00",
     "source": "ERA5",
@@ -16,7 +16,54 @@
     "kind": "inline",
     "must_understand": false,
     "metadata": {
-      "uwnd": {
+      "abs_time": {
+        "shape": [
+          2
+        ],
+        "data_type": "int32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "absolute time",
+          "units": "hours since 1900-01-01",
+          "calendar": "gregorian"
+        },
+        "dimension_names": [
+          "time"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "lwrad": {
         "shape": [
           2,
           7,
@@ -56,8 +103,61 @@
           }
         ],
         "attributes": {
-          "long_name": "10 meter wind in x-direction",
-          "units": "m/s",
+          "long_name": "downward long-wave (thermal) radiation",
+          "units": "W/m^2",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "rad_time",
+          "eta_rho",
+          "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "qair": {
+        "shape": [
+          2,
+          7,
+          7
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2,
+              7,
+              7
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "absolute humidity at 2m",
+          "units": "kg/kg",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -65,6 +165,53 @@
           "time",
           "eta_rho",
           "xi_rho"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "rad_time": {
+        "shape": [
+          2
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0.0,
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "long_name": "relative time: days since 2000-01-01 00:00:00",
+          "units": "days",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "rad_time"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -166,11 +313,10 @@
         "attributes": {
           "long_name": "downward short-wave (solar) radiation",
           "units": "W/m^2",
-          "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "time",
+          "rad_time",
           "eta_rho",
           "xi_rho"
         ],
@@ -178,54 +324,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "abs_time": {
-        "shape": [
-          2
-        ],
-        "data_type": "int32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              2
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "absolute time",
-          "units": "hours since 1900-01-01",
-          "calendar": "gregorian"
-        },
-        "dimension_names": [
-          "time"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "qair": {
+      "Tair": {
         "shape": [
           2,
           7,
@@ -265,8 +364,8 @@
           }
         ],
         "attributes": {
-          "long_name": "absolute humidity at 2m",
-          "units": "kg/kg",
+          "long_name": "air temperature at 2m",
+          "units": "degrees Celsius",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -326,7 +425,7 @@
         "node_type": "array",
         "storage_transformers": []
       },
-      "lwrad": {
+      "uwnd": {
         "shape": [
           2,
           7,
@@ -366,62 +465,8 @@
           }
         ],
         "attributes": {
-          "long_name": "downward long-wave (thermal) radiation",
-          "units": "W/m^2",
-          "coordinates": "abs_time",
-          "_FillValue": "AAAAAAAA+H8="
-        },
-        "dimension_names": [
-          "time",
-          "eta_rho",
-          "xi_rho"
-        ],
-        "zarr_format": 3,
-        "node_type": "array",
-        "storage_transformers": []
-      },
-      "Tair": {
-        "shape": [
-          2,
-          7,
-          7
-        ],
-        "data_type": "float32",
-        "chunk_grid": {
-          "name": "regular",
-          "configuration": {
-            "chunk_shape": [
-              2,
-              7,
-              7
-            ]
-          }
-        },
-        "chunk_key_encoding": {
-          "name": "default",
-          "configuration": {
-            "separator": "/"
-          }
-        },
-        "fill_value": 0.0,
-        "codecs": [
-          {
-            "name": "bytes",
-            "configuration": {
-              "endian": "little"
-            }
-          },
-          {
-            "name": "zstd",
-            "configuration": {
-              "level": 0,
-              "checksum": false
-            }
-          }
-        ],
-        "attributes": {
-          "long_name": "air temperature at 2m",
-          "units": "degrees Celsius",
+          "long_name": "10 meter wind in x-direction",
+          "units": "m/s",
           "coordinates": "abs_time",
           "_FillValue": "AAAAAAAA+H8="
         },

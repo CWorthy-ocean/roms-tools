@@ -98,7 +98,7 @@ def align_grids(
     return child_grid
 
 
-def make_edata(
+def make_nesting_info(
     parent_grid: Grid,
     child_grid: Grid,
     filepath: str | None = None,

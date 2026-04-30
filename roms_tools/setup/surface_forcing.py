@@ -92,7 +92,7 @@ class SurfaceForcing:
 
     restoring_forces : list[str], optional
         Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
-        ```['sss',]```. Defaults to 'sss'.
+        ```['sss',]```.
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -140,14 +140,14 @@ class SurfaceForcing:
     source: RawDataSource
     """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
-    """Specifies the type of forcing data ("physics", "bgc")."""
+    """Specifies the type of forcing data ("physics", "bgc", "restoring")."""
     correct_radiation: bool = True
     """Whether to correct shortwave radiation."""
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
     restoring_forces: list[str] | None = None
-    """The variables to create the restoring forces for ["sss"]."""
+    """The variables to create the restoring forces for."""
     coarse_grid_mode: str = "auto"
     """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)

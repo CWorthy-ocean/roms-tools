@@ -1178,25 +1178,15 @@ class WOADataset(LatLonDataset):
         if "time" in ds.dims:
             if len(ds["time"]) == 12:
                 # Reassign dimension and convert from float64 days to timedelta
-#                ds = assign_dates_to_climatology(ds, "time")
-
-                ds = ds.assign_coords(
-                    time=[15.5, 45, 74.5, 105, 135.5, 166, 196, 227.5, 258, 288.5, 319, 349.5]
-                )
+                ds = assign_dates_to_climatology(ds, "time")
 
                 self.dim_names["time"] = "time"
-                ds["time"] = xr.DataArray(
-                    (ds["time"].values * 86400 * 1e9).astype("timedelta64[ns]"),
-                    dims="time",
-                )
             else:
                 raise ValueError(
                     "The WOA data must be climatological and contain a 'time' dimension of length 12."
                 )
         else:
-                raise ValueError(
-                    "Expecting WOA data containing dimension of 'time'"
-                )
+            raise ValueError("Expecting WOA data containing dimension of 'time'")
 
         return ds
 
@@ -1377,19 +1367,9 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
         - Apply a mask to the dataset based on locations of NaN values.
         """
         if "depth" in self.dim_names:
-            ##### This needs to be change to .sel(depth=0). only using since tests fail
-            ##### b/c when using unified coarse BGC data, only 2 depths are available: 196.25, 1788.75 m.
-            self.ds = self.ds.isel(depth=0)
+            self.ds = self.ds.sel(depth=0)
             self.ds = self.ds.drop_vars("depth")
             del self.dim_names["depth"]
-
-   #     mask = xr.where(
-   #         self.ds["salt"].isnull().any(dim=self.dim_names["time"]),
-   #         0,
-   #         1,
-   #     )
-
-   #     self.ds["mask"] = mask
 
 
 @dataclass(kw_only=True)
@@ -1417,8 +1397,6 @@ class WOARestoringSurfaceDataset(WOADataset):
         - Apply a mask to the dataset based on locations of NaN values.
         """
         if "depth" in self.dim_names:
-            ##### This needs to be change to .sel(depth=0). only using since tests fail
-            ##### b/c when using unified coarse BGC data, only 2 depths are available: 196.25, 1788.75 m.
             self.ds = self.ds.sel(depth=0)
             self.ds = self.ds.drop_vars("depth")
             del self.dim_names["depth"]

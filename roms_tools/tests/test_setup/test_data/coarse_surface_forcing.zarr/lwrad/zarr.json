@@ -40,11 +40,10 @@
   "attributes": {
     "long_name": "downward long-wave (thermal) radiation",
     "units": "W/m^2",
-    "coordinates": "abs_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
-    "time",
+    "rad_time",
     "eta_rho",
     "xi_rho"
   ],

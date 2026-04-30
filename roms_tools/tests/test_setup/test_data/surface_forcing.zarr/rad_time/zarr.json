@@ -1,17 +1,13 @@
 {
   "shape": [
-    2,
-    4,
-    4
+    2
   ],
-  "data_type": "float32",
+  "data_type": "float64",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
       "chunk_shape": [
-        2,
-        4,
-        4
+        2
       ]
     }
   },
@@ -38,14 +34,12 @@
     }
   ],
   "attributes": {
-    "long_name": "downward short-wave (solar) radiation",
-    "units": "W/m^2",
+    "long_name": "relative time: days since 2000-01-01 00:00:00",
+    "units": "days",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
-    "rad_time",
-    "eta_rho",
-    "xi_rho"
+    "rad_time"
   ],
   "zarr_format": 3,
   "node_type": "array",

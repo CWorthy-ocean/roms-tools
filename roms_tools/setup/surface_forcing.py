@@ -806,7 +806,10 @@ class SurfaceForcing:
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in dataset.")
 
-        field = self.ds[var_name].isel(time=time)
+        if var_name in ["swrad", "lwrad"]:
+            field = self.ds[var_name].isel(rad_time=time)
+        else:
+            field = self.ds[var_name].isel(time=time)
 
         if self.use_dask:
             from dask.diagnostics import ProgressBar

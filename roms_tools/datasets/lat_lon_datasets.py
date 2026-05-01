@@ -1173,18 +1173,18 @@ class WOADataset(LatLonDataset):
         }
 
         # Handle time dimension
-        if "time" in ds.dims:
-            if len(ds["time"]) == 12:
-                # Reassign dimension and convert from float64 days to timedelta
-                ds = assign_dates_to_climatology(ds, "time")
-
-                self.dim_names["time"] = "time"
-            else:
-                raise ValueError(
-                    "The WOA data must be climatological and contain a 'time' dimension of length 12."
-                )
-        else:
+        if "time" not in ds.dims:
             raise ValueError("Expecting WOA data containing dimension of 'time'")
+
+        if len(ds["time"]) != 12:
+            raise ValueError(
+                "The WOA data must be climatological and contain a 'time' dimension of length 12."
+            )
+
+        # Reassign dimension and convert from float64 days to timedelta
+        ds = assign_dates_to_climatology(ds, "time")
+
+        self.dim_names["time"] = "time"
 
         return ds
 

@@ -994,7 +994,8 @@ def plot(
         field = field.isel(**slice_dict[loc])
 
     # Prepare figure title
-    if "rad_time" in field.coords:
+    if field.name in ["swrad", "lwrad"]:
+        # Handle variables that have shifted times
         time_removed = np.round((field.time.values - field.rad_time.values) * 24 * 60)
         formatted_time = np.datetime_as_string(
             field.abs_time.values - np.timedelta64(int(time_removed), "m"), unit="m"

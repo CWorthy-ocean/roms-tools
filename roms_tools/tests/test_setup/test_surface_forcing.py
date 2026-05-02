@@ -390,16 +390,17 @@ def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, cap
 
 
 @pytest.mark.parametrize(
-    "name, fname, type, climatology",
+    "name, fname, type, restoring_forces, climatology",
     [
-        ("ERA5", "ERA5_regional_test_data.nc", "physics", False),
-        ("CESM_REGRIDDED", "CESM_surface_global_test_data_climatology.nc", "bgc", True),
-        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", True),
-        ("WOA", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", True),
+        ("ERA5", "ERA5_regional_test_data.nc", "physics", None, False),
+        ("CESM_REGRIDDED", "CESM_surface_global_test_data_climatology.nc", "bgc", None, True),
+        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", None, True),
+        ("WOA", "WOA_2018_quarterDeg_coarsened.nc", "restoring", ['sss'],  True),
+        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", ['sss'], True),
     ],
 )
 def test_nans_filled_in(
-    grid_that_straddles_dateline, name, fname, type, climatology, use_dask
+    grid_that_straddles_dateline, name, fname, type, restoring_forces, climatology, use_dask
 ):
     """Test that the surface forcing fields contain no NaNs.
 
@@ -423,6 +424,7 @@ def test_nans_filled_in(
             end_time=end_time,
             source={"name": name, "path": fname, "climatology": climatology},
             type=type,
+            restoring_forces=restoring_forces,
             use_dask=use_dask,
         )
 
@@ -452,7 +454,7 @@ def test_time_attr_climatology(bgc_surface_forcing_fixture, request):
         )
     assert hasattr(bgc_surface_forcing.ds, "climatology")
 
-
+#### Is this test needed?
 def test_time_attr(bgc_surface_forcing):
     """Test that the 'cycle_length' attribute is not present in the time coordinate of
     the BGC dataset when not using climatology data.
@@ -463,6 +465,27 @@ def test_time_attr(bgc_surface_forcing):
             "cycle_length",
         )
     assert not hasattr(bgc_surface_forcing.ds, "climatology")
+
+
+@pytest.mark.parametrize(
+    "surface_forcing_fixture",
+    [
+        "restoring_surface_forcing_from_unified_climatology",
+        "restoring_surface_forcing_from_woa_climatology",
+
+    ],
+)
+def test_time_attr_climatology(surface_forcing_fixture, request):
+    """Test that the 'cycle_length' attribute is present in the time coordinate of the
+    restoring forces dataset when using climatology data.
+    """
+    restoring_surface_forcing = request.getfixturevalue(surface_forcing_fixture)
+    for time_coord in ["sss_time"]:
+        assert hasattr(
+            restoring_surface_forcing.ds[time_coord],
+            "cycle_length",
+        )
+    assert hasattr(restoring_surface_forcing.ds, "climatology")
 
 
 @pytest.mark.parametrize(
@@ -521,8 +544,14 @@ def test_surface_forcing_creation(
     "sfc_forcing_fixture, expected_name, expected_climatology, expected_fname",
     [
         (
-            "restoring_surface_forcing_from_unified_climatology",
+            "restoring_surface_forcing_from_woa_climatology",
             "WOA",
+            True,
+            Path(download_test_data("WOA_2018_quarterDeg_coarsened.nc")),
+        ),
+        (
+            "restoring_surface_forcing_from_unified_climatology",
+            "UNIFIED",
             True,
             Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
         ),
@@ -531,7 +560,7 @@ def test_surface_forcing_creation(
 def test_surface_forcing_creation_restoring(
     sfc_forcing_fixture, expected_name, expected_climatology, expected_fname, request
 ):
-    """Test the creation and initialization of the SurfaceForcing object with BGC.
+    """Test the creation and initialization of the SurfaceForcing object for restoring.
 
     Verifies that the SurfaceForcing object is properly created with correct attributes.
     Ensures that expected variables are present in the dataset and that attributes match
@@ -798,6 +827,44 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
 @pytest.mark.parametrize(
     "sfc_forcing_fixture",
     [
+        "restoring_surface_forcing_from_woa_climatology",
+        "restoring_surface_forcing_from_unified_climatology",
+    ],
+)
+def test_surface_forcing_restoring_plot(sfc_forcing_fixture, request):
+    """Test plot method."""
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+    sfc_forcing.plot(var_name="sss", time=0)
+
+
+def test_surface_forcing_restoring_save(restoring_surface_forcing_from_woa_climatology, tmp_path):
+    """Test save method."""
+    for file_str in ["test_sf", "test_sf.nc"]:
+        # Create a temporary filepath using the tmp_path fixture
+        for filepath in [
+            tmp_path / file_str,
+            str(tmp_path / file_str),
+        ]:  # test for Path object and str
+            # Test saving without grouping
+            saved_filenames = restoring_surface_forcing_from_woa_climatology.save(filepath, group=False)
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+            # Test saving with grouping
+            saved_filenames = restoring_surface_forcing_from_woa_climatology.save(filepath, group=True)
+            filepath_str = str(Path(filepath).with_suffix(""))
+            expected_filepath = Path(f"{filepath_str}_clim.nc")
+            assert saved_filenames == [expected_filepath]
+            assert expected_filepath.exists()
+            expected_filepath.unlink()
+
+
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
         "surface_forcing",
         "coarse_surface_forcing",
         "corrected_surface_forcing",
@@ -805,6 +872,8 @@ def test_surface_forcing_bgc_from_clim_save(sfc_forcing_fixture, tmp_path, reque
         "bgc_surface_forcing",
         "bgc_surface_forcing_from_climatology",
         "bgc_surface_forcing_from_unified_climatology",
+        "restoring_surface_forcing_from_unified_climatology",
+        "restoring_surface_forcing_from_woa_climatology",
     ],
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
@@ -889,6 +958,14 @@ def assert_roundtrip_hash_equal(
         ),
         (
             "bgc_surface_forcing_from_unified_climatology",
+            "clim",
+        ),
+        (
+            "restoring_surface_forcing_from_unified_climatology",
+            "clim",
+        ),
+        (
+            "restoring_surface_forcing_from_woa_climatology",
             "clim",
         ),
     ],

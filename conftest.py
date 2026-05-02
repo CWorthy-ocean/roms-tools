@@ -872,8 +872,38 @@ def restoring_surface_forcing_from_unified_climatology(
     end_time = datetime(2020, 2, 1)
 
     fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
-    ##### TO USE ONCE roms-tools-test-data HAS APPROPRIATE FILE
-    # fname_bgc = Path(download_test_data("coarsened_WOA_restoring_dataset.nc"))
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
+        type="restoring",
+        restoring_forces = ['sss'],
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def restoring_surface_forcing_from_woa_climatology(
+    use_dask: bool,
+) -> SurfaceForcing:
+    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
+
+    fname_bgc = Path(download_test_data("WOA_2018_quarterDeg_coarsened.nc"))
 
     return SurfaceForcing(
         grid=grid,
@@ -881,6 +911,7 @@ def restoring_surface_forcing_from_unified_climatology(
         end_time=end_time,
         source={"name": "WOA", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="restoring",
+        restoring_forces = ['sss'],
         coarse_grid_mode="never",
         use_dask=use_dask,
     )

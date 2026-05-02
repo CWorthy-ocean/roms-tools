@@ -393,14 +393,26 @@ def test_start_time_end_time_warning(grid_that_straddles_dateline, use_dask, cap
     "name, fname, type, restoring_forces, climatology",
     [
         ("ERA5", "ERA5_regional_test_data.nc", "physics", None, False),
-        ("CESM_REGRIDDED", "CESM_surface_global_test_data_climatology.nc", "bgc", None, True),
+        (
+            "CESM_REGRIDDED",
+            "CESM_surface_global_test_data_climatology.nc",
+            "bgc",
+            None,
+            True,
+        ),
         ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "bgc", None, True),
-        ("WOA", "WOA_2018_quarterDeg_coarsened.nc", "restoring", ['sss'],  True),
-        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", ['sss'], True),
+        ("WOA", "WOA_2018_quarterDeg_coarsened.nc", "restoring", ["sss"], True),
+        ("UNIFIED", "coarsened_UNIFIED_bgc_dataset.nc", "restoring", ["sss"], True),
     ],
 )
 def test_nans_filled_in(
-    grid_that_straddles_dateline, name, fname, type, restoring_forces, climatology, use_dask
+    grid_that_straddles_dateline,
+    name,
+    fname,
+    type,
+    restoring_forces,
+    climatology,
+    use_dask,
 ):
     """Test that the surface forcing fields contain no NaNs.
 
@@ -454,6 +466,7 @@ def test_time_attr_climatology(bgc_surface_forcing_fixture, request):
         )
     assert hasattr(bgc_surface_forcing.ds, "climatology")
 
+
 #### Is this test needed?
 def test_time_attr(bgc_surface_forcing):
     """Test that the 'cycle_length' attribute is not present in the time coordinate of
@@ -472,10 +485,9 @@ def test_time_attr(bgc_surface_forcing):
     [
         "restoring_surface_forcing_from_unified_climatology",
         "restoring_surface_forcing_from_woa_climatology",
-
     ],
 )
-def test_time_attr_climatology(surface_forcing_fixture, request):
+def test_time_attr_climatology_restoring(surface_forcing_fixture, request):
     """Test that the 'cycle_length' attribute is present in the time coordinate of the
     restoring forces dataset when using climatology data.
     """
@@ -837,7 +849,9 @@ def test_surface_forcing_restoring_plot(sfc_forcing_fixture, request):
     sfc_forcing.plot(var_name="sss", time=0)
 
 
-def test_surface_forcing_restoring_save(restoring_surface_forcing_from_woa_climatology, tmp_path):
+def test_surface_forcing_restoring_save(
+    restoring_surface_forcing_from_woa_climatology, tmp_path
+):
     """Test save method."""
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -846,7 +860,9 @@ def test_surface_forcing_restoring_save(restoring_surface_forcing_from_woa_clima
             str(tmp_path / file_str),
         ]:  # test for Path object and str
             # Test saving without grouping
-            saved_filenames = restoring_surface_forcing_from_woa_climatology.save(filepath, group=False)
+            saved_filenames = restoring_surface_forcing_from_woa_climatology.save(
+                filepath, group=False
+            )
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")
             assert saved_filenames == [expected_filepath]
@@ -854,7 +870,9 @@ def test_surface_forcing_restoring_save(restoring_surface_forcing_from_woa_clima
             expected_filepath.unlink()
 
             # Test saving with grouping
-            saved_filenames = restoring_surface_forcing_from_woa_climatology.save(filepath, group=True)
+            saved_filenames = restoring_surface_forcing_from_woa_climatology.save(
+                filepath, group=True
+            )
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_clim.nc")
             assert saved_filenames == [expected_filepath]

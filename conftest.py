@@ -879,7 +879,7 @@ def restoring_surface_forcing_from_unified_climatology(
         end_time=end_time,
         source={"name": "UNIFIED", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="restoring",
-        restoring_forces = ['sss'],
+        restoring_forces=["sss"],
         coarse_grid_mode="never",
         use_dask=use_dask,
     )
@@ -911,7 +911,7 @@ def restoring_surface_forcing_from_woa_climatology(
         end_time=end_time,
         source={"name": "WOA", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="restoring",
-        restoring_forces = ['sss'],
+        restoring_forces=["sss"],
         coarse_grid_mode="never",
         use_dask=use_dask,
     )

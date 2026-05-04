@@ -1053,7 +1053,7 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
 
     else:
         frac = np.exp(-((dist / release.hsc) ** 2))
-        distribution_2d = frac.where(frac > 1e-3, 0.0)
+        distribution_2d = frac.where(frac > 0.0, 0.0)
 
         # Mask out land
         distribution_2d = distribution_2d.where(grid.ds.mask_rho, 0.0)

@@ -261,6 +261,7 @@ class CDRForcingDatasetBuilder:
         ds["cdr_dep"] = ("ncdr", [r.depth for r in self.releases])
         ds["cdr_hsc"] = ("ncdr", [r.hsc for r in self.releases])
         ds["cdr_vsc"] = ("ncdr", [r.vsc for r in self.releases])
+        ds["cdr_interp"] = ("ncdr", [r.time_interpolation for r in self.releases])
         ds = ds.assign_coords(
             {"release_name": (["ncdr"], [r.name for r in self.releases])}
         )
@@ -439,14 +440,24 @@ class CDRForcing(BaseModel):
 
         data = self.ds["cdr_volume"]
 
-        self._plot_line(
-            data,
-            release_names,
-            start,
-            end,
-            title="Volume flux of release(s)",
-            ylabel=r"m$^3$/s",
-        )
+        if self.ds["cdr_interp"]:
+            self._plot_line(
+                data,
+                release_names,
+                start,
+                end,
+                title="Volume flux of release(s)",
+                ylabel=r"m$^3$/s",
+            )
+        else:
+            self._plot_step(
+                data,
+                release_names,
+                start,
+                end,
+                title="Volume flux of release(s)",
+                ylabel=r"m$^3$/s",
+            )
 
     def plot_tracer_concentration(
         self,
@@ -505,14 +516,24 @@ class CDRForcing(BaseModel):
         else:
             title = f"{tracer_name} concentration of release(s)"
 
-        self._plot_line(
-            data,
-            release_names,
-            start,
-            end,
-            title=title,
-            ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
-        )
+        if self.ds["cdr_interp"]:
+            self._plot_line(
+                data,
+                release_names,
+                start,
+                end,
+                title=title,
+                ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
+            )
+        else:
+            self._plot_step(
+                data,
+                release_names,
+                start,
+                end,
+                title=title,
+                ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
+            )
 
     def plot_tracer_flux(
         self,
@@ -566,17 +587,27 @@ class CDRForcing(BaseModel):
 
         title = f"{tracer_name} flux of release(s)"
 
-        self._plot_line(
-            data,
-            release_names,
-            start,
-            end,
-            title=title,
-            ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
-        )
+        if self.ds["cdr_interp"]:
+            self._plot_line(
+                data,
+                release_names,
+                start,
+                end,
+                title=title,
+                ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
+            )
+        else:
+            self._plot_step(
+                data,
+                release_names,
+                start,
+                end,
+                title=title,
+                ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
+            )
 
     def _plot_line(self, data, release_names, start, end, title="", ylabel=""):
-        """Plots a line graph for the specified releases and time range."""
+        """Plots a line graph for the specified releases and time range, interpolating between points."""
         valid_release_names = [r.name for r in self.releases]
         if len(valid_release_names) > MAX_DISTINCT_COLORS:
             colors = assign_category_colors(release_names)
@@ -587,6 +618,32 @@ class CDRForcing(BaseModel):
         for name in release_names:
             ncdr = np.where(self.ds["release_name"].values == name)[0].item()
             data.isel(ncdr=ncdr).plot(
+                ax=ax,
+                linewidth=2,
+                label=name,
+                color=colors[name],
+                marker="x",
+            )
+
+        if len(release_names) > 0:
+            ax.legend()
+
+        ax.set(title=title, ylabel=ylabel, xlabel="time")
+        ax.set_xlim([start, end])
+
+    def _plot_step(self, data, release_names, start, end, title="", ylabel=""):
+        """Plots a line graph for the specified releases and time range. No interpolation between points. A step-like plot is made by plotting a constant value until the next available point."""
+        valid_release_names = [r.name for r in self.releases]
+        if len(valid_release_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(release_names)
+        else:
+            colors = assign_category_colors(valid_release_names)
+
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+        for name in release_names:
+            ncdr = np.where(self.ds["release_name"].values == name)[0].item()
+            data.isel(ncdr=ncdr).plot.step(
+                where="post",
                 ax=ax,
                 linewidth=2,
                 label=name,

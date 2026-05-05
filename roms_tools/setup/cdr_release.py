@@ -226,6 +226,8 @@ class Release(BaseModel):
         Vertical scale (standard deviation) of the release in meters. Must be non-negative.
     times : list of datetime
         Time points of the release events. Must be strictly increasing and within the simulation window.
+    time_interpolation : bool, optional
+        Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
     """
 
     name: str
@@ -242,6 +244,8 @@ class Release(BaseModel):
     """Vertical scale (standard deviation) of the release in meters."""
     times: list[datetime]
     """Time points of the release events."""
+    time_interpolation: bool = False
+    """Whether to interpolate between prescribed tracer flux quantities."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
@@ -400,6 +404,9 @@ class VolumeRelease(Release):
 
         - "auto" (default): automatically set values to non-zero defaults
         - "zero": fill missing values with 0.0
+
+    time_interpolation : bool, optional
+        Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
     """
 
     times: list[datetime] = Field([])
@@ -586,6 +593,9 @@ class TracerPerturbation(Release):
         - Constant: `{"ALK": 2000.0, "DIC": 1900.0}`
         - Time-varying: `{"ALK": [2000.0, 2050.0, 2013.3], "DIC": [1900.0, 1920.0, 1910.2]}`
         - Mixed: `{"ALK": 2000.0, "DIC": [1900.0, 1920.0, 1910.2]}`
+
+    time_interpolation : bool, optional
+        Whether to interpolate between tracer flux quantities. True to interpolate, False for step-like release. Defaults to False.
     """
 
     times: list[datetime] = Field([])

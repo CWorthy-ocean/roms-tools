@@ -32,7 +32,7 @@ Preprocessing and Model Inputs
 
 .. note::
 
-   Some source datasets are accessed automatically by ``ROMS-Tools``, including Natural Earth, Dai & Trenberth runoff, and ERA5 meteorology, while users must manually download SRTM15, GSHHG, GLORYS, the BGC datasets, and TPXO tidal files. See the :doc:`datasets` page for download instructions. Although these are the datasets currently supported, the modular design of ``ROMS-Tools`` makes it straightforward to add new source datasets in the future.
+   Some source datasets are accessed automatically by ``ROMS-Tools``, while others must be downloaded manually. See the :doc:`datasets_overview` page for details. The datasets listed above represent current support, though the modular design of ``ROMS-Tools`` makes adding new source datasets straightforward.
 
 To generate the model inputs, ``ROMS-Tools`` automates several intermediate processing steps, including:
 

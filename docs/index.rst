@@ -56,7 +56,7 @@ Getting Started
       Install ROMS-Tools and set up your environment.
 
    .. grid-item-card:: Datasets
-      :link: datasets
+      :link: datasets_overview
       :link-type: doc
 
       :octicon:`stack;2em;sd-text-primary`
@@ -79,7 +79,7 @@ Getting Started
    features
    methods
    installation
-   datasets
+   datasets_overview
    examples
    contributing
    releases

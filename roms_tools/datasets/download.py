@@ -48,7 +48,7 @@ sal_data = pooch.create(
 pup_test_data = pooch.create(
     # Use the default cache folder for the operating system
     path=pooch.os_cache("roms-tools"),
-    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/unified_update_dep/",
+    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
     # The registry specifies the files that can be fetched
     registry={
         "GLORYS_test_data.nc": "648f88ec29c433bcf65f257c1fb9497bd3d5d3880640186336b10ed54f7129d2",

@@ -16,6 +16,7 @@
 * Memory savings and speedup for vertical regridding in `InitialConditions` and `BoundaryForcing` ([#528](https://github.com/CWorthy-ocean/roms-tools/pull/528))
 * Potential memory savings and speedup for reading of optimally-chunked netcdf source data files in `InitialConditions`, `BoundaryForcing`, and `SurfaceForcing` ([#572](https://github.com/CWorthy-ocean/roms-tools/pull/572))
 * Option to automatically close narrow 1-cell water channels during mask generation via `Grid.update_mask(close_narrow_channels=True)` or `Grid(close_narrow_channels=True)`; integrated into the standard mask workflow
+* New `type` is added to SurfaceForcing. `restoring` creates restoring forces files for ROMS ('sss' is the only option) ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 
 
 ### Internal Changes
@@ -29,13 +30,15 @@
 * Ensure `regionmask>=0.11.0` in `pyproject.toml` ([#565](https://github.com/CWorthy-ocean/roms-tools/pull/565))
 * Integrate narrow-channel closing directly into `Grid.update_mask()` (internal `_close_narrow_channels`), iterating north–south and east–west up to 10 passes
 * short and long wave radiation time is shifted 1/2 a timestep sooner and have a dim of `rad_time` ([#586](https://github.com/CWorthy-ocean/roms-tools/pull/586))
-* 2 checks added for a point source when plotting CDRForcing.plot_distribution(). Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
+* The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
+* 2 checks added for a point source when plotting `CDRForcing.plot_distribution()`. Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
 
 ### Documentation
 
 * Nesting notebook is updated to match refactoring of `ChildGrid` to `Grid` objects. ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Move "overview of ROMS-Tools functionality" section from paper to docs ([#554](https://github.com/CWorthy-ocean/roms-tools/pull/554))
 * Document `close_narrow_channels` option in `Grid` and `update_mask()`; update notebook examples
+* Both the surface forcing and datasets notebooks are updated to reflect `restoring` function and WOA data ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 
 ### Bugfixes
 

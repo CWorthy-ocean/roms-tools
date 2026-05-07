@@ -646,15 +646,9 @@ class SurfaceForcing:
 
         """
         # Create time dimension shifted 30 minutes earlier
-        ds = ds.assign_coords(rad_time=ds["time"] - 30 / 60 / 24)
+        ds = ds.assign_coords(rad_time=("time", ds["time"].values - 30 / 60 / 24))
         ds.rad_time.attrs["long_name"] = ds.time.attrs["long_name"]
         ds.rad_time.attrs["units"] = ds.time.attrs["units"]
-
-        # Assign shifted time dimenstion to radiation variables
-
-        rad_vars = ["swrad", "lwrad"]
-        for var in rad_vars:
-            ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
 
         return ds
 

@@ -40,7 +40,7 @@
   "attributes": {
     "long_name": "absolute humidity at 2m",
     "units": "kg/kg",
-    "coordinates": "abs_time",
+    "coordinates": "abs_time rad_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

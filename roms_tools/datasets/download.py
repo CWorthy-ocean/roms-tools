@@ -79,7 +79,7 @@ pup_test_data = pooch.create(
         "CESM_BGC_SURFACE_2012.nc": "3c4d156adca97909d0fac36bf50b99583ab37d8020d7a3e8511e92abf2331b38",
         "CESM_surface_global_test_data_climatology.nc": "a072757110c6f7b716a98f867688ef4195a5966741d2f368201ac24617254e35",
         "CESM_surface_global_test_data.nc": "874106ffbc8b1b220db09df1551bbb89d22439d795b4d1e5a24ee775e9a7bf6e",
-        "coarsened_UNIFIED_bgc_dataset.nc": "c5eaeca6f7640f2358afe5c46ace99ff4879948df8a778a2f21967de034f8d0a",
+        "coarsened_UNIFIED_bgc_dataset.nc": "sha256:1f1e4304a497587f75d8e4cd64913caec797a98daf07de4468a2f04d1f0bc165",
         "WOA_2018_quarterDeg_coarsened.nc": "sha256:673ce3c3a98bb386ccd899dbc23eeedf7d9a665b68ea52c96fd69829a4b929a7",
         "grid_created_with_matlab.nc": "fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d",
         "etopo5_coarsened_and_shifted.nc": "9a5cb4b38c779d22ddb0ad069b298b9722db34ca85a89273eccca691e89e6f96",

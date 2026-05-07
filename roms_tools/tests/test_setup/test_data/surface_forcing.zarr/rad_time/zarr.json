@@ -39,7 +39,7 @@
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
-    "rad_time"
+    "time"
   ],
   "zarr_format": 3,
   "node_type": "array",

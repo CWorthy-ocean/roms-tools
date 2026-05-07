@@ -28,6 +28,7 @@ extensions = [
     "sphinx.ext.mathjax",
     "nbsphinx",
     "sphinxcontrib.bibtex",
+    "sphinx_design",
 ]
 myst_enable_extensions = ["dollarmath", "amsmath"]
 

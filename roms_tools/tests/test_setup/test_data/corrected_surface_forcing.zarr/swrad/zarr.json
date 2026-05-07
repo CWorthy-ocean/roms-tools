@@ -40,10 +40,11 @@
   "attributes": {
     "long_name": "downward short-wave (solar) radiation",
     "units": "W/m^2",
+    "coordinates": "abs_time rad_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
-    "rad_time",
+    "time",
     "eta_rho",
     "xi_rho"
   ],

@@ -40,7 +40,7 @@
   "attributes": {
     "long_name": "air temperature at 2m",
     "units": "degrees Celsius",
-    "coordinates": "abs_time",
+    "coordinates": "abs_time rad_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

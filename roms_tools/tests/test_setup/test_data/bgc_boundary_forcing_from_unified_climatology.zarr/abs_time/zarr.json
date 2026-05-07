@@ -2,7 +2,7 @@
   "shape": [
     12
   ],
-  "data_type": "int64",
+  "data_type": "float64",
   "chunk_grid": {
     "name": "regular",
     "configuration": {
@@ -17,7 +17,7 @@
       "separator": "/"
     }
   },
-  "fill_value": 0,
+  "fill_value": 0.0,
   "codecs": [
     {
       "name": "bytes",
@@ -36,7 +36,8 @@
   "attributes": {
     "long_name": "absolute time",
     "units": "hours since 2000-01-16 12:00:00",
-    "calendar": "proleptic_gregorian"
+    "calendar": "proleptic_gregorian",
+    "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [
     "bry_time"

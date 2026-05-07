@@ -1041,7 +1041,8 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
         lon = xr.where(lon < 0, lon + 360, lon)
     dist = gc_dist(target_coords["lon"], target_coords["lat"], lon, release.lat)
 
-    if release.hsc == 0:
+    # Above X=27, python registers np.exp(-((X)**2) as 0. Treat as point release
+    if (release.hsc == 0) or ((dist.min().values / release.hsc) >= 27):
         # Find the indices of the closest grid cell
         indices = dist.argmin(dim=["eta_rho", "xi_rho"])
         eta_rho = indices["eta_rho"].values

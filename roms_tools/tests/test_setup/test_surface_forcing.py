@@ -581,7 +581,7 @@ def test_surface_forcing_creation_restoring(
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     assert sfc_forcing.ds is not None
-    for var_name in ["sss"]:
+    for var_name in sfc_forcing.restoring_forces:
         assert var_name in sfc_forcing.ds
 
     assert sfc_forcing.start_time == datetime(2020, 2, 1)

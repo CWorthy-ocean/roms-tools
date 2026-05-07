@@ -440,7 +440,7 @@ class CDRForcing(BaseModel):
 
         data = self.ds["cdr_volume"]
 
-        if self.ds["cdr_interp"]:
+        if all(self.ds["cdr_interp"]):
             self._plot_line(
                 data,
                 release_names,
@@ -449,7 +449,7 @@ class CDRForcing(BaseModel):
                 title="Volume flux of release(s)",
                 ylabel=r"m$^3$/s",
             )
-        else:
+        elif not any(self.ds["cdr_interp"]):
             self._plot_step(
                 data,
                 release_names,
@@ -457,6 +457,10 @@ class CDRForcing(BaseModel):
                 end,
                 title="Volume flux of release(s)",
                 ylabel=r"m$^3$/s",
+            )
+        else:
+            raise ValueError(
+                "plot_volume_flux is only supported when `time_interpolation` is True for all releases, or False for all releases."
             )
 
     def plot_tracer_concentration(
@@ -516,7 +520,7 @@ class CDRForcing(BaseModel):
         else:
             title = f"{tracer_name} concentration of release(s)"
 
-        if self.ds["cdr_interp"]:
+        if all(self.ds["cdr_interp"]):
             self._plot_line(
                 data,
                 release_names,
@@ -525,7 +529,7 @@ class CDRForcing(BaseModel):
                 title=title,
                 ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
             )
-        else:
+        elif not any(self.ds["cdr_interp"]):
             self._plot_step(
                 data,
                 release_names,
@@ -534,6 +538,11 @@ class CDRForcing(BaseModel):
                 title=title,
                 ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
             )
+        else:
+            raise ValueError(
+                "plot_tracer_concentration is only supported when `time_interpolation` is True for all releases, or False for all releases."
+            )
+
 
     def plot_tracer_flux(
         self,
@@ -587,7 +596,7 @@ class CDRForcing(BaseModel):
 
         title = f"{tracer_name} flux of release(s)"
 
-        if self.ds["cdr_interp"]:
+        if all(self.ds["cdr_interp"]):
             self._plot_line(
                 data,
                 release_names,
@@ -596,7 +605,7 @@ class CDRForcing(BaseModel):
                 title=title,
                 ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
             )
-        else:
+        elif not any(self.ds["cdr_interp"]):
             self._plot_step(
                 data,
                 release_names,
@@ -604,6 +613,10 @@ class CDRForcing(BaseModel):
                 end,
                 title=title,
                 ylabel=f"{self.ds['tracer_unit'].isel(ntracers=tracer_index).values.item()}",
+            )
+        else:
+            raise ValueError(
+                "plot_tracer_flux is only supported when `time_interpolation` is True for all releases, or False for all releases."
             )
 
     def _plot_line(self, data, release_names, start, end, title="", ylabel=""):

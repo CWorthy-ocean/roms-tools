@@ -105,10 +105,11 @@
         "attributes": {
           "long_name": "downward long-wave (thermal) radiation",
           "units": "W/m^2",
+          "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "rad_time",
+          "time",
           "eta_rho",
           "xi_rho"
         ],
@@ -158,7 +159,7 @@
         "attributes": {
           "long_name": "absolute humidity at 2m",
           "units": "kg/kg",
-          "coordinates": "abs_time",
+          "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -211,7 +212,7 @@
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "rad_time"
+          "time"
         ],
         "zarr_format": 3,
         "node_type": "array",
@@ -259,7 +260,7 @@
         "attributes": {
           "long_name": "total precipitation",
           "units": "cm/day",
-          "coordinates": "abs_time",
+          "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -313,10 +314,11 @@
         "attributes": {
           "long_name": "downward short-wave (solar) radiation",
           "units": "W/m^2",
+          "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
-          "rad_time",
+          "time",
           "eta_rho",
           "xi_rho"
         ],
@@ -366,7 +368,7 @@
         "attributes": {
           "long_name": "air temperature at 2m",
           "units": "degrees Celsius",
-          "coordinates": "abs_time",
+          "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -467,7 +469,7 @@
         "attributes": {
           "long_name": "10 meter wind in x-direction",
           "units": "m/s",
-          "coordinates": "abs_time",
+          "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -521,7 +523,7 @@
         "attributes": {
           "long_name": "10 meter wind in y-direction",
           "units": "m/s",
-          "coordinates": "abs_time",
+          "coordinates": "abs_time rad_time",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [

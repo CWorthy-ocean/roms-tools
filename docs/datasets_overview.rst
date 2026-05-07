@@ -51,6 +51,10 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - River Forcing
      - No (auto-downloaded)
      - `NCAR RDA <https://rda.ucar.edu/datasets/d551000/dataaccess/>`_
+   * - WOA
+     - Surface Restoring Forcing
+     - Yes
+     - `WOA, NOAA <https://www.ncei.noaa.gov/products/world-ocean-atlas>`_
 
 
 Manual Downloads
@@ -211,6 +215,36 @@ A unified biogeochemical climatology integrating multiple observational and mode
 :Available at: `Google Drive <https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq>`_
 
 For download instructions see :doc:`datasets`.
+
+
+WOA Salinity Data
+~~~~~~
+
+A collection of salinity (and other variables) means based on profile data from the World Ocean Database (WOD). The `s_an` variable provided is the 'Objectively analyzed mean fields for sea_water_salinity'.
+
+:Required for: Surface Forcing (Restoring Forces)
+:Available at: `NOAA website <https://www.ncei.noaa.gov/products/world-ocean-atlas>`_
+
+For download instructions see :doc:`datasets`.
+
+.. dropdown:: Required fields
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Field
+        - Description
+      * - ``time``
+        - Time
+      * - ``lat``
+        - Latitude (degrees north)
+      * - ``lon``
+        - Longitude (degrees east)
+      * - ``depth``
+        - Depth (m)
+      * - ``s_an``
+        - Objectively analyzed mean sea_water_salinity (PSU)
 
 
 Automatically Accessed

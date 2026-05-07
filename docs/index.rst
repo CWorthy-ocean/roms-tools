@@ -61,7 +61,7 @@ Getting Started
 
       :octicon:`stack;2em;sd-text-primary`
 
-      Which datasets ROMS-Tools requires, where to download them, and what fields are needed.
+      Which datasets ROMS-Tools supports, where to download them, and what fields are needed.
 
    .. grid-item-card:: Examples
       :link: examples

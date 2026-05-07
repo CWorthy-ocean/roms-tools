@@ -1043,13 +1043,25 @@ def _map_horizontal_gaussian(grid: Grid, release: Release):
 
     frac = np.exp(-((dist / release.hsc) ** 2))
 
-    # Treat as point source.
+    # Check if release will be a point source release
+    if release.hsc == 0:
+        pnt_src = True
+        log_reason = "Horizontal scale set to 0."
     # Above X=27, python registers np.exp(-((X)**2) as 0
-    if (
-        (release.hsc == 0)
-        or ((dist.min().values / release.hsc) >= 27)
-        or ((frac > 1e-3).sum() == 0)
-    ):
+    elif (dist.min().values / release.hsc) >= 27:
+        pnt_src = True
+        log_reason = "Horizontal scale << grid resolution."
+    elif (frac > 1e-3).sum() == 0:
+        pnt_src = True
+        log_reason = "Cell concentrations < 1e-3."
+    else:
+        pnt_src = False
+
+    if pnt_src:
+        logging.info(
+            "CDR release will be treated as a point-source release: %s. ",
+            log_reason,
+        )
         # Find the indices of the closest grid cell
         indices = dist.argmin(dim=["eta_rho", "xi_rho"])
         eta_rho = indices["eta_rho"].values

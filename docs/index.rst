@@ -98,5 +98,3 @@ References
 
 - :doc:`references`
 - :doc:`api`
-
-

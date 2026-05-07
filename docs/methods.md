@@ -1,4 +1,4 @@
-# Methodology
+# Methods
 
 The ROMS-Tools methodology closely follows the methods employed in the [UCLA MATLAB tools](https://github.com/nmolem/ucla-tools/tree/main).
 

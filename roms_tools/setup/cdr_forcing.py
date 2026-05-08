@@ -543,7 +543,6 @@ class CDRForcing(BaseModel):
                 "plot_tracer_concentration is only supported when `time_interpolation` is True for all releases, or False for all releases."
             )
 
-
     def plot_tracer_flux(
         self,
         tracer_name: str,

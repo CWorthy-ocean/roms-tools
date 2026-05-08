@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 
 import numpy as np
 import pandas as pd
-from scipy.interpolate import interp1d
 from annotated_types import Ge, Le
 from pydantic import (
     BaseModel,
@@ -18,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic_core.core_schema import ValidationInfo
+from scipy.interpolate import interp1d
 
 from roms_tools.setup.utils import (
     convert_to_relative_days,
@@ -246,7 +246,7 @@ class Release(BaseModel):
     times: list[datetime]
     """Time points of the release events."""
     time_interpolation: bool = False
-    """Whether to interpolate between prescribed tracer flux quantities."""
+    """Whether to interpolate between prescribed tracer flux quantities. True interpolate, False step-like release."""
 
     # this should be defined by subclasses
     release_type: ReleaseType
@@ -343,11 +343,19 @@ class Release(BaseModel):
             if self.time_interpolation:
                 interp_values = np.interp(
                     roms_time_stamps,
-                    convert_to_relative_days(self.times, model_reference_date) * 3600 * 24,
+                    convert_to_relative_days(self.times, model_reference_date)
+                    * 3600
+                    * 24,
                     series,
                 )
             else:
-                step_func = interp1d(convert_to_relative_days(self.times, model_reference_date) * 3600 * 24, series,  kind='previous')
+                step_func = interp1d(
+                    convert_to_relative_days(self.times, model_reference_date)
+                    * 3600
+                    * 24,
+                    series,
+                    kind="previous",
+                )
                 interp_values = step_func(roms_time_stamps)
             results[tracer] = np.sum(interp_values[:-1] * dt)
         return results

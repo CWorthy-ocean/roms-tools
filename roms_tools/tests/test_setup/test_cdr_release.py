@@ -443,7 +443,9 @@ class TestReleaseAccounting:
         else:
             raise ValueError(f"Unknown release type {release_type}")
 
-    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize(
+        "release_type", ["volume", "tracer", "volume_interp_off", "tracer_interp_off"]
+    )
     def test_constant_flux(self, release_type):
         """Case 0: constant fluxes."""
         flux = 2.0
@@ -453,12 +455,14 @@ class TestReleaseAccounting:
         result = vr._do_accounting(roms_stamps, self.start)
 
         expected = flux * (roms_stamps[-1] - roms_stamps[0])
-        if release_type == "volume":
+        if "volume" in release_type:
             expected *= conc
 
         assert result["DIC"] == pytest.approx(expected)
 
-    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize(
+        "release_type", ["volume", "tracer", "volume_interp_off", "tracer_interp_off"]
+    )
     def test_aligned_releases(self, release_type):
         """Case 1: release times exactly aligned with ROMS stamps."""
         # ROMS time step: 5 days (we want to cover the simulation time of 10 days exactly)
@@ -467,17 +471,17 @@ class TestReleaseAccounting:
         fluxes = [1, 3, 5]
         concs = [1, 2, 1]
 
-        if release_type == "volume":
+        if "volume" in release_type:
             r = self.make_release(
                 release_type, fluxes=fluxes, concentrations=concs, times=release_times
             )
-        elif release_type == "tracer":
+        elif "tracer" in release_type:
             r = self.make_release(release_type, fluxes=fluxes, times=release_times)
 
         # Expected calculation
         series = (
             np.array([f * c for f, c in zip(fluxes, concs)])
-            if release_type == "volume"
+            if "volume" in release_type
             else np.array(fluxes)
         )
         dt = np.diff(roms)
@@ -522,7 +526,9 @@ class TestReleaseAccounting:
         result = vr._do_accounting(roms, self.start)
         assert result["DIC"] == pytest.approx(expected)
 
-    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize(
+        "release_type", ["volume", "tracer", "volume_interp_off", "tracer_interp_off"]
+    )
     def test_raises_with_single_roms_timestamp(self, release_type):
         vr = self.make_release(release_type, fluxes=1.0, concentrations=1.0)
         roms_stamps = np.array([0.0])

@@ -1115,19 +1115,13 @@ class GLORYSDefaultDataset(GLORYSDataset):
         ds = copernicusmarine.open_dataset(
             self.dataset_name,
             start_datetime=self.start_time,
-            end_datetime=self.end_time,
+            end_datetime=self.end_time
+            if self.end_time is not None
+            else self.start_time,
             service="arco-geo-series",
             coordinates_selection_method="outside",
             chunk_size_limit=-1,
         )
-        chunks = (
-            self.chunks
-            if self.chunks is not None
-            else get_dask_chunks(
-                self.dim_names, lateral_chunk=_DEFAULT_LAT_LON_LATERAL_CHUNK
-            )
-        )
-        ds = ds.chunk(chunks)
 
         return ds
 

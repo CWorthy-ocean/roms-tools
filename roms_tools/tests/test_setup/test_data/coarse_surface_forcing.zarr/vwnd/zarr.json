@@ -40,7 +40,7 @@
   "attributes": {
     "long_name": "10 meter wind in y-direction",
     "units": "m/s",
-    "coordinates": "abs_time",
+    "coordinates": "abs_time rad_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

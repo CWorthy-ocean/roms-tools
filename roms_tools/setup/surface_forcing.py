@@ -15,6 +15,8 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Dataset,
     LatLonDataset,
     UnifiedBGCSurfaceDataset,
+    UnifiedRestoringSurfaceDataset,
+    WOARestoringSurfaceDataset,
 )
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
@@ -77,6 +79,7 @@ class SurfaceForcing:
 
           - "physics": for physical atmospheric forcing.
           - "bgc": for biogeochemical forcing.
+          - "restoring": for restoring forces.
 
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is True.
@@ -85,6 +88,10 @@ class SurfaceForcing:
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
         This applies an exponential decay to wind magnitude near the coast, based on
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
+
+    restoring_forces : list[str], optional
+        Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
+        ```['sss',]```.
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -132,12 +139,14 @@ class SurfaceForcing:
     source: RawDataSource
     """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
-    """Specifies the type of forcing data ("physics", "bgc")."""
+    """Specifies the type of forcing data ("physics", "bgc", "restoring")."""
     correct_radiation: bool = True
     """Whether to correct shortwave radiation."""
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
+    restoring_forces: list[str] | None = None
+    """The variables to create the restoring forces for."""
     coarse_grid_mode: str = "auto"
     """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)
@@ -170,17 +179,39 @@ class SurfaceForcing:
             use_coarse_grid = self._determine_coarse_grid_usage(data)
         self.use_coarse_grid = use_coarse_grid
 
-        opt_file = "bulk_frc.opt" if self.type == "physics" else "bgc.opt"
+        if self.type == "physics":
+            opt_file = "bulk_frc.opt"
+        elif self.type == "bgc":
+            opt_file = "bgc.opt"
+        elif self.type == "restoring":
+            opt_file = "cppdefs.opt"
+            cppdefs_flags = set()
+
+            for var in self.restoring_forces:
+                if var == "sss":
+                    cppdefs_flags.add("SFLX_CORR")
+
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
 
-        logging.info(
-            "Data will be interpolated onto the %s. "
-            "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
-            grid_desc,
-            interp_flag,
-            opt_file,
-        )
+        if self.type in ["physics", "bgc"]:
+            logging.info(
+                "Data will be interpolated onto the %s. "
+                "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
+                grid_desc,
+                interp_flag,
+                opt_file,
+            )
+        elif self.type == "restoring":
+            logging.info(
+                "Data will be interpolated onto the %s. "
+                "Restoring data being created for %s. "
+                "Remember to define the following flags in your `%s` file: %s`.",
+                grid_desc,
+                self.restoring_forces,
+                opt_file,
+                cppdefs_flags,
+            )
 
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords
@@ -273,8 +304,8 @@ class SurfaceForcing:
             )
 
         # Validate the 'type' parameter
-        if self.type not in ["physics", "bgc"]:
-            raise ValueError("`type` must be either 'physics' or 'bgc'.")
+        if self.type not in ["physics", "bgc", "restoring"]:
+            raise ValueError("`type` must be either 'physics', 'bgc', or 'restoring'.")
 
         # Ensure 'source' dictionary contains required keys
         if "name" not in self.source:
@@ -300,6 +331,20 @@ class SurfaceForcing:
             raise ValueError(
                 f"`coarse_grid_mode` must be one of {valid_modes}, but got '{self.coarse_grid_mode}'."
             )
+
+        # Check if restoring variables are accepted
+        if self.type == "restoring":
+            if not self.restoring_forces:
+                raise ValueError(
+                    "When type='restoring', `restoring_forces` must be defined."
+                )
+
+            valid_vars = ["sss"]
+            for var in self.restoring_forces:
+                if var not in valid_vars:
+                    raise ValueError(
+                        f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
+                    )
 
     def _determine_coarse_grid_usage(self, data):
         """Determine if coarse grid interpolation should be used based on the resolution
@@ -376,6 +421,16 @@ class SurfaceForcing:
                     'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
                 )
 
+        elif self.type == "restoring":
+            if self.source["name"] == "WOA":
+                data = WOARestoringSurfaceDataset(**data_dict)
+            elif self.source["name"] == "UNIFIED":
+                data = UnifiedRestoringSurfaceDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring".'
+                )
+
         return data
 
     def _get_correction_data(self):
@@ -441,6 +496,16 @@ class SurfaceForcing:
             ):
                 variable_info[var_name] = default_info
                 if var_name == "pco2_air":
+                    variable_info[var_name] = {**default_info, "validate": True}
+                else:
+                    variable_info[var_name] = {**default_info, "validate": False}
+        elif self.type == "restoring":
+            variable_info = {}
+            for var_name in list(data.var_names.keys()) + list(
+                data.opt_var_names.keys()
+            ):
+                variable_info[var_name] = default_info
+                if var_name == "sss":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
@@ -598,10 +663,17 @@ class SurfaceForcing:
                 "nox_time",
                 "nhy_time",
             ]
+        elif self.type == "restoring":
+            time_coords = [
+                "sss_time",
+            ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
 
         if self.type == "bgc":
+            ds = ds.drop_vars(["time"])
+
+        if self.type == "restoring":
             ds = ds.drop_vars(["time"])
 
         variables_to_drop = ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]
@@ -646,15 +718,9 @@ class SurfaceForcing:
 
         """
         # Create time dimension shifted 30 minutes earlier
-        ds = ds.assign_coords(rad_time=ds["time"] - 30 / 60 / 24)
+        ds = ds.assign_coords(rad_time=("time", ds["time"].values - 30 / 60 / 24))
         ds.rad_time.attrs["long_name"] = ds.time.attrs["long_name"]
         ds.rad_time.attrs["units"] = ds.time.attrs["units"]
-
-        # Assign shifted time dimenstion to radiation variables
-
-        rad_vars = ["swrad", "lwrad"]
-        for var in rad_vars:
-            ds[var] = ds[var].swap_dims({"time": "rad_time"}).drop_vars("time")
 
         return ds
 

@@ -87,6 +87,8 @@ class LatLonDataset:
         Defaults to an empty dictionary.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
+    has_encoded_times : bool
+        Indicates whether the dataset has a time variable with units that are decodable. Defaults to True.
     needs_lateral_fill: bool, optional
         Indicates whether land values require lateral filling. If `True`, ocean values will be extended into land areas
         to replace NaNs or non-ocean values (such as atmospheric values in ERA5 data). If `False`, it is assumed that
@@ -145,6 +147,7 @@ class LatLonDataset:
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool = False
+    has_encoded_times: bool = True
     needs_lateral_fill: bool = True
     use_dask: bool = False
     chunks: dict[str, int] | None = None
@@ -171,6 +174,7 @@ class LatLonDataset:
             lateral = type(self)._default_lateral_dask_chunk
             if lateral is not None:
                 self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
+
         ds = self.load_data()
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
@@ -222,6 +226,7 @@ class LatLonDataset:
             filename=self.filename,
             dim_names=self.dim_names,
             use_dask=self.use_dask,
+            decode_times=self.has_encoded_times,
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
@@ -1128,6 +1133,63 @@ class GLORYSDefaultDataset(GLORYSDataset):
 
 
 @dataclass(kw_only=True)
+class WOADataset(LatLonDataset):
+    """Represents World Ocean Atlas data on original grid.
+
+    Notes
+    -----
+    No pre-processing is done so land points are nans. The `needs_lateral_fill` attribute is set to `True`.
+    Time units provided in WOA datasets are not decoded by xarray, so `decode_times` is set to `False` when reading data.
+    """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
+    needs_lateral_fill: bool = True
+    has_encoded_times: bool = False
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method verifies that the time dimension exists in the dataset and assigns it appropriately.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with the 12 climatology times.
+        """
+        ds = ds.rename({"lon": "longitude", "lat": "latitude"})
+        ds = ds.assign_coords(
+            {
+                "latitude": ds["latitude"],
+                "longitude": ds["longitude"],
+            }
+        )
+
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "depth": "depth",
+        }
+
+        # Handle time dimension
+        if "time" not in ds.dims:
+            raise ValueError("Expecting WOA data containing dimension of 'time'")
+
+        if len(ds["time"]) != 12:
+            raise ValueError(
+                "The WOA data must be climatological and contain a 'time' dimension of length 12."
+            )
+
+        # Reassign dimension and convert from float64 days to timedelta
+        ds = assign_dates_to_climatology(ds, "time")
+
+        self.dim_names["time"] = "time"
+
+        return ds
+
+
+@dataclass(kw_only=True)
 class UnifiedDataset(LatLonDataset):
     """Represents unified BGC data on original grid.
 
@@ -1277,6 +1339,73 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
     )
 
     climatology: bool = True
+
+
+@dataclass(kw_only=True)
+class UnifiedRestoringSurfaceDataset(UnifiedDataset):
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sss": "salt",
+        }
+    )
+
+    climatology: bool = True
+
+    def post_process(self) -> None:
+        """
+        Processes WOA2018 data values as follows:
+        - Reduce 3D field to surface values.
+        - Apply a mask to the dataset based on locations of NaN values.
+        """
+        if "depth" in self.dim_names:
+            self.ds = self.ds.sel(depth=0)
+            self.ds = self.ds.drop_vars("depth")
+            del self.dim_names["depth"]
+
+
+@dataclass(kw_only=True)
+class WOARestoringSurfaceDataset(WOADataset):
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "s_an"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sss": "s_an",
+        }
+    )
+
+    climatology: bool = True
+
+    def post_process(self) -> None:
+        """
+        Processes WOA2018 data values as follows:
+        - Reduce 3D field to surface values.
+        - Apply a mask to the dataset based on locations of NaN values.
+        """
+        if "depth" in self.dim_names:
+            self.ds = self.ds.sel(depth=0)
+            self.ds = self.ds.drop_vars("depth")
+            del self.dim_names["depth"]
+
+        mask = xr.where(
+            self.ds["s_an"].isnull().any(dim=self.dim_names["time"]),
+            0,
+            1,
+        )
+
+        self.ds["mask"] = mask
 
 
 @dataclass(kw_only=True)

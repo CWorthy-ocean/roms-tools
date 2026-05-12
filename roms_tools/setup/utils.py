@@ -206,6 +206,7 @@ def get_variable_metadata():
             "flux_units": "degrees Celsius/s",
         },
         "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
+        "sss": {"long_name": "sea surface salinity", "units": "PSU"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},

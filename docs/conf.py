@@ -67,12 +67,3 @@ html_theme_options = {
     "repository_url": "https://github.com/CWorthy-ocean/roms-tools",
     "use_repository_button": True,
 }
-
-nbsphinx_prolog = """
-{% set docname = env.docname.split('/')[-1] %}
-
-.. div:: sd-text-right
-
-   :download:`⬇ Download this notebook <{{ docname }}.ipynb>`
-
-"""

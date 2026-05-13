@@ -385,7 +385,9 @@ class TestReleaseAccounting:
         self.start = datetime(2020, 1, 1)
         self.end = datetime(2020, 1, 11)  # 10 days later
 
-    def make_release(self, release_type, fluxes=None, concentrations=None, times=None):
+    def make_release(
+        self, release_type, fluxes=None, concentrations=None, times=None, interp=None
+    ):
         times = times or [self.start, self.end]
 
         if release_type == "volume":
@@ -397,7 +399,7 @@ class TestReleaseAccounting:
                 times=times,
                 volume_fluxes=Flux("volume", fluxes),
                 tracer_concentrations={"DIC": Concentration("DIC", concentrations)},
-                time_interpolation=True,
+                time_interpolation=interp,
             )
             vr._extend_to_endpoints(self.start, self.end)
             return vr
@@ -410,60 +412,34 @@ class TestReleaseAccounting:
                 depth=100.0,
                 times=times,
                 tracer_fluxes={"DIC": Flux("DIC", fluxes)},
-                time_interpolation=True,
-            )
-            tp._extend_to_endpoints(self.start, self.end)
-            return tp
-        elif release_type == "volume_interp_off":
-            vr = VolumeRelease(
-                name="test",
-                lat=0.0,
-                lon=0.0,
-                depth=100.0,
-                times=times,
-                volume_fluxes=Flux("volume", fluxes),
-                tracer_concentrations={"DIC": Concentration("DIC", concentrations)},
-                time_interpolation=False,
-            )
-            vr._extend_to_endpoints(self.start, self.end)
-            return vr
-
-        elif release_type == "tracer_interp_off":
-            tp = TracerPerturbation(
-                name="test",
-                lat=0.0,
-                lon=0.0,
-                depth=100.0,
-                times=times,
-                tracer_fluxes={"DIC": Flux("DIC", fluxes)},
-                time_interpolation=False,
+                time_interpolation=interp,
             )
             tp._extend_to_endpoints(self.start, self.end)
             return tp
         else:
             raise ValueError(f"Unknown release type {release_type}")
 
-    @pytest.mark.parametrize(
-        "release_type", ["volume", "tracer", "volume_interp_off", "tracer_interp_off"]
-    )
-    def test_constant_flux(self, release_type):
+    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize("interp", [False, True])
+    def test_constant_flux(self, release_type, interp):
         """Case 0: constant fluxes."""
         flux = 2.0
         conc = 3.0  # only used for VolumeRelease
-        vr = self.make_release(release_type, fluxes=flux, concentrations=conc)
+        vr = self.make_release(
+            release_type, fluxes=flux, concentrations=conc, interp=interp
+        )
         roms_stamps = np.array([0.0, 5.0, 10.0])
         result = vr._do_accounting(roms_stamps, self.start)
 
         expected = flux * (roms_stamps[-1] - roms_stamps[0])
-        if "volume" in release_type:
+        if release_type == "volume":
             expected *= conc
 
         assert result["DIC"] == pytest.approx(expected)
 
-    @pytest.mark.parametrize(
-        "release_type", ["volume", "tracer", "volume_interp_off", "tracer_interp_off"]
-    )
-    def test_aligned_releases(self, release_type):
+    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize("interp", [False, True])
+    def test_aligned_releases(self, release_type, interp):
         """Case 1: release times exactly aligned with ROMS stamps."""
         # ROMS time step: 5 days (we want to cover the simulation time of 10 days exactly)
         roms = np.array([0.0, 5.0, 10.0]) * 24 * 3600  # seconds
@@ -471,17 +447,23 @@ class TestReleaseAccounting:
         fluxes = [1, 3, 5]
         concs = [1, 2, 1]
 
-        if "volume" in release_type:
+        if release_type == "volume":
             r = self.make_release(
-                release_type, fluxes=fluxes, concentrations=concs, times=release_times
+                release_type,
+                fluxes=fluxes,
+                concentrations=concs,
+                times=release_times,
+                interp=interp,
             )
-        elif "tracer" in release_type:
-            r = self.make_release(release_type, fluxes=fluxes, times=release_times)
+        elif release_type == "tracer":
+            r = self.make_release(
+                release_type, fluxes=fluxes, times=release_times, interp=interp
+            )
 
         # Expected calculation
         series = (
             np.array([f * c for f, c in zip(fluxes, concs)])
-            if "volume" in release_type
+            if release_type == "volume"
             else np.array(fluxes)
         )
         dt = np.diff(roms)
@@ -490,10 +472,9 @@ class TestReleaseAccounting:
         result = r._do_accounting(roms, self.start)
         assert result["DIC"] == pytest.approx(expected)
 
-    @pytest.mark.parametrize(
-        "release_type", ["volume", "tracer", "volume_interp_off", "tracer_interp_off"]
-    )
-    def test_unaligned_releases(self, release_type):
+    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize("interp", [False, True])
+    def test_unaligned_releases(self, release_type, interp):
         """Case 2: release times unaligned with ROMS stamps."""
         # ROMS time step: 5 days (we want to cover the simulation time of 10 days exactly)
         roms = np.array([0.0, 2.5, 5.0, 7.5, 10.0]) * 24 * 3600  # seconds
@@ -502,21 +483,27 @@ class TestReleaseAccounting:
         fluxes = [1, 2, 3, 4, 5]
         concs = [1, 1.5, 2, 2.5, 1]
 
-        if "volume" in release_type:
+        if release_type == "volume":
             vr = self.make_release(
-                release_type, fluxes=fluxes, concentrations=concs, times=release_times
+                release_type,
+                fluxes=fluxes,
+                concentrations=concs,
+                times=release_times,
+                interp=interp,
             )
-        elif "tracer" in release_type:
-            vr = self.make_release(release_type, fluxes=fluxes, times=release_times)
+        elif release_type == "tracer":
+            vr = self.make_release(
+                release_type, fluxes=fluxes, times=release_times, interp=interp
+            )
 
         # Expected calculation
         series = (
             np.array([f * c for f, c in zip(fluxes, concs)])
-            if "volume" in release_type
+            if release_type == "volume"
             else np.array(fluxes)
         )
         dt = np.diff(roms)
-        if "interp_off" in release_type:
+        if not interp:
             step_func = interp1d(rel_release_times, series, kind="previous")
             interp = step_func(roms)
         else:
@@ -526,11 +513,12 @@ class TestReleaseAccounting:
         result = vr._do_accounting(roms, self.start)
         assert result["DIC"] == pytest.approx(expected)
 
-    @pytest.mark.parametrize(
-        "release_type", ["volume", "tracer", "volume_interp_off", "tracer_interp_off"]
-    )
-    def test_raises_with_single_roms_timestamp(self, release_type):
-        vr = self.make_release(release_type, fluxes=1.0, concentrations=1.0)
+    @pytest.mark.parametrize("release_type", ["volume", "tracer"])
+    @pytest.mark.parametrize("interp", [False, True])
+    def test_raises_with_single_roms_timestamp(self, release_type, interp):
+        vr = self.make_release(
+            release_type, fluxes=1.0, concentrations=1.0, interp=interp
+        )
         roms_stamps = np.array([0.0])
         with pytest.raises(ValueError, match="at least two ROMS time stamps"):
             vr._do_accounting(roms_stamps, self.start)

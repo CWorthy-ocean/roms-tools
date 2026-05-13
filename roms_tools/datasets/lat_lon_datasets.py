@@ -1119,19 +1119,12 @@ class GLORYSDefaultDataset(GLORYSDataset):
         #    },
         # )
 
-        bounds = self.initial_slice_bounds or {}
-        lat = bounds.get("latitude", (None, None))
-        lon = bounds.get("longitude", (None, None))
         ds = copernicusmarine.open_dataset(
             self.dataset_name,
             start_datetime=self.start_time,
             end_datetime=self.end_time
             if self.end_time is not None
             else self.start_time,
-            minimum_latitude=lat[0],
-            maximum_latitude=lat[1],
-            minimum_longitude=lon[0],
-            maximum_longitude=lon[1],
             service="arco-geo-series",
             coordinates_selection_method="outside",
             chunk_size_limit=-1,  # auto-chunks internally

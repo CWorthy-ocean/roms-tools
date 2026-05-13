@@ -178,6 +178,24 @@ class ReleaseCollector(RootModel):
         release_types = set(r.release_type for r in self.root)
         return release_types.pop()
 
+    @model_validator(mode="after")
+    def check_all_releases_same_time_interpolation(self):
+        """Ensure all releases use the same interpolation."""
+        interp_values = set(r.time_interpolation for r in self.root)
+        if len(interp_values) > 1:
+            raise ValueError(
+                "Not all releases have the same `time_interpolation`. "
+                "All releases must use either `time_interpolation=True` or "
+                "`time_interpolation=False`."
+            )
+        return self
+
+    @property
+    def time_interpolation(self) -> bool:
+        """Common time_interpolation setting across all releases."""
+        interp_values = set(r.time_interpolation for r in self.root)
+        return interp_values.pop()
+
 
 class CDRForcingDatasetBuilder:
     """Constructs the xarray `Dataset` to be saved as NetCDF."""
@@ -439,7 +457,10 @@ class CDRForcing(BaseModel):
 
         data = self.ds["cdr_volume"]
 
-        self._plot_line(
+        plotter = (
+            self._plot_line if self.releases.time_interpolation else self._plot_step
+        )
+        plotter(
             data,
             release_names,
             start,
@@ -505,7 +526,10 @@ class CDRForcing(BaseModel):
         else:
             title = f"{tracer_name} concentration of release(s)"
 
-        self._plot_line(
+        plotter = (
+            self._plot_line if self.releases.time_interpolation else self._plot_step
+        )
+        plotter(
             data,
             release_names,
             start,
@@ -566,7 +590,10 @@ class CDRForcing(BaseModel):
 
         title = f"{tracer_name} flux of release(s)"
 
-        self._plot_line(
+        plotter = (
+            self._plot_line if self.releases.time_interpolation else self._plot_step
+        )
+        plotter(
             data,
             release_names,
             start,
@@ -576,7 +603,7 @@ class CDRForcing(BaseModel):
         )
 
     def _plot_line(self, data, release_names, start, end, title="", ylabel=""):
-        """Plots a line graph for the specified releases and time range."""
+        """Plots a line graph for the specified releases and time range, interpolating between points."""
         valid_release_names = [r.name for r in self.releases]
         if len(valid_release_names) > MAX_DISTINCT_COLORS:
             colors = assign_category_colors(release_names)
@@ -587,6 +614,32 @@ class CDRForcing(BaseModel):
         for name in release_names:
             ncdr = np.where(self.ds["release_name"].values == name)[0].item()
             data.isel(ncdr=ncdr).plot(
+                ax=ax,
+                linewidth=2,
+                label=name,
+                color=colors[name],
+                marker="x",
+            )
+
+        if len(release_names) > 0:
+            ax.legend()
+
+        ax.set(title=title, ylabel=ylabel, xlabel="time")
+        ax.set_xlim([start, end])
+
+    def _plot_step(self, data, release_names, start, end, title="", ylabel=""):
+        """Plots a line graph for the specified releases and time range. No interpolation between points. A step-like plot is made by plotting a constant value until the next available point."""
+        valid_release_names = [r.name for r in self.releases]
+        if len(valid_release_names) > MAX_DISTINCT_COLORS:
+            colors = assign_category_colors(release_names)
+        else:
+            colors = assign_category_colors(valid_release_names)
+
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+        for name in release_names:
+            ncdr = np.where(self.ds["release_name"].values == name)[0].item()
+            data.isel(ncdr=ncdr).plot.step(
+                where="post",
                 ax=ax,
                 linewidth=2,
                 label=name,

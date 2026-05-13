@@ -31,6 +31,8 @@
 * Integrate narrow-channel closing directly into `Grid.update_mask()` (internal `_close_narrow_channels`), iterating north–south and east–west up to 10 passes
 * short and long wave radiation time is shifted 1/2 a timestep sooner and have a dim of `rad_time` ([#586](https://github.com/CWorthy-ocean/roms-tools/pull/586))
 * The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
+* When using the default of streaming from Copernicus for GLORYS output, the domain is now subset by the bounds of the domain to save read time. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
+
 
 ### Documentation
 

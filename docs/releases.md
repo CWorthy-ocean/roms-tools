@@ -33,6 +33,7 @@
 * The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 * When using the default of streaming from Copernicus for GLORYS output, the domain is now subset by the bounds of the domain to save read time. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
 
+* 2 checks added for a point source when plotting `CDRForcing.plot_distribution()`. Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
 
 ### Documentation
 

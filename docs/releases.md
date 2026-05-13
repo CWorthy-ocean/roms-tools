@@ -48,6 +48,7 @@
 
 * Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region. ([#577](https://github.com/CWorthy-ocean/roms-tools/pull/577))
 * Fix timer logging messages during mask generation so durations render correctly when closing narrow channels and filling enclosed basins
+* Fix for hanging when using the default of streaming from Copernicus for GLORYS output. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
 
 ## v3.5.0
 

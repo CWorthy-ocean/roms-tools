@@ -1088,6 +1088,13 @@ class GLORYSDefaultDataset(GLORYSDataset):
     def _load_from_copernicus(self) -> xr.Dataset:
         """Load a GLORYS dataset supporting streaming.
 
+        This reads in using zarr on the Copernicus Marine Data Store.
+        The impact of chunk_size_limit=-1 is to let the toolkit determine optimal chunking
+        based on the dataset and request parameters, which can help improve performance
+        when working with large datasets. So, this is dask-backed but does not use the
+        parameter _DEFAULT_LAT_LON_LATERAL_CHUNK for chunking, which does not work well
+        for streaming.
+
         Returns
         -------
         xr.Dataset
@@ -1112,15 +1119,22 @@ class GLORYSDefaultDataset(GLORYSDataset):
         #    },
         # )
 
+        bounds = self.initial_slice_bounds or {}
+        lat = bounds.get("latitude", (None, None))
+        lon = bounds.get("longitude", (None, None))
         ds = copernicusmarine.open_dataset(
             self.dataset_name,
             start_datetime=self.start_time,
             end_datetime=self.end_time
             if self.end_time is not None
             else self.start_time,
+            minimum_latitude=lat[0],
+            maximum_latitude=lat[1],
+            minimum_longitude=lon[0],
+            maximum_longitude=lon[1],
             service="arco-geo-series",
             coordinates_selection_method="outside",
-            chunk_size_limit=-1,
+            chunk_size_limit=-1,  # auto-chunks internally
         )
 
         return ds

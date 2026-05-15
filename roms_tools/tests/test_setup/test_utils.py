@@ -335,15 +335,22 @@ def test_compute_bgc_source_density_constant_TS():
     )
     phys_depth = xr.DataArray(
         np.array([10.0, 100.0, 500.0, 2000.0]),
-        dims=["depth"], coords={"depth": [10.0, 100.0, 500.0, 2000.0]},
+        dims=["depth"],
+        coords={"depth": [10.0, 100.0, 500.0, 2000.0]},
     )
     bgc_depth = xr.DataArray(
         np.array([20.0, 300.0, 1500.0]),
-        dims=["depth"], coords={"depth": [20.0, 300.0, 1500.0]},
+        dims=["depth"],
+        coords={"depth": [20.0, 300.0, 1500.0]},
     )
 
     result = _compute_bgc_source_density(
-        phys_temp, phys_salt, "depth", phys_depth, bgc_depth, "depth",
+        phys_temp,
+        phys_salt,
+        "depth",
+        phys_depth,
+        bgc_depth,
+        "depth",
     )
 
     # gsw.sigma0 is invariant in space for constant T/S; only the monotonicity
@@ -352,7 +359,10 @@ def test_compute_bgc_source_density_constant_TS():
     expected_base = gsw.sigma0(S_const, T_const)
     expected = expected_base + np.arange(n_bgc) * 1e-7
     np.testing.assert_allclose(
-        result.values[0, 0], expected, rtol=0.0, atol=1e-6,
+        result.values[0, 0],
+        expected,
+        rtol=0.0,
+        atol=1e-6,
     )
 
 
@@ -367,30 +377,34 @@ def test_compute_bgc_source_density_linear_TS_profile():
     phys_S = np.array([34.5, 34.8, 34.9, 35.0])
     bgc_depths = np.array([50.0, 250.0, 1200.0])
 
-    phys_temp = xr.DataArray(
-        phys_T.reshape(1, 1, -1), dims=["xi", "eta", "depth"]
-    )
-    phys_salt = xr.DataArray(
-        phys_S.reshape(1, 1, -1), dims=["xi", "eta", "depth"]
-    )
+    phys_temp = xr.DataArray(phys_T.reshape(1, 1, -1), dims=["xi", "eta", "depth"])
+    phys_salt = xr.DataArray(phys_S.reshape(1, 1, -1), dims=["xi", "eta", "depth"])
     phys_depth = xr.DataArray(
         phys_depths, dims=["depth"], coords={"depth": phys_depths}
     )
-    bgc_depth = xr.DataArray(
-        bgc_depths, dims=["depth"], coords={"depth": bgc_depths}
-    )
+    bgc_depth = xr.DataArray(bgc_depths, dims=["depth"], coords={"depth": bgc_depths})
 
     result = _compute_bgc_source_density(
-        phys_temp, phys_salt, "depth", phys_depth, bgc_depth, "depth",
+        phys_temp,
+        phys_salt,
+        "depth",
+        phys_depth,
+        bgc_depth,
+        "depth",
     )
 
     # Manual reference: compute density at phys depths with the same perturbation
     # the function adds, then linearly interpolate to BGC depths, then add the
     # BGC-depth perturbation.
-    phys_density_perturbed = gsw.sigma0(phys_S, phys_T) + np.arange(len(phys_depths)) * 1e-7
+    phys_density_perturbed = (
+        gsw.sigma0(phys_S, phys_T) + np.arange(len(phys_depths)) * 1e-7
+    )
     expected = np.interp(bgc_depths, phys_depths, phys_density_perturbed)
     expected = expected + np.arange(len(bgc_depths)) * 1e-7
 
     np.testing.assert_allclose(
-        result.values[0, 0], expected, rtol=1e-10, atol=1e-10,
+        result.values[0, 0],
+        expected,
+        rtol=1e-10,
+        atol=1e-10,
     )

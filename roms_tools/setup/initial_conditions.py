@@ -292,7 +292,11 @@ class InitialConditions:
             self._get_depth_coordinates(zeta, location, "layer")
 
         # Save physics T/S at source depth levels for density-based BGC interpolation
-        if type == "physics" and self.use_density_interpolation and isinstance(data, LatLonDataset):
+        if (
+            type == "physics"
+            and self.use_density_interpolation
+            and isinstance(data, LatLonDataset)
+        ):
             self._phys_depth_data = {
                 "temp": processed_fields["temp"],
                 "salt": processed_fields["salt"],
@@ -301,7 +305,9 @@ class InitialConditions:
             }
 
         # Vertical regridding
-        processed_fields = self._regrid_vertically(data, processed_fields, var_names, type=type)
+        processed_fields = self._regrid_vertically(
+            data, processed_fields, var_names, type=type
+        )
 
         # Compute barotropic velocities
         if "u" in var_names and "v" in var_names:
@@ -461,6 +467,7 @@ class InitialConditions:
                 )
 
                 if use_density:
+                    assert self._phys_depth_data is not None
                     source_density = _compute_bgc_source_density(
                         self._phys_depth_data["temp"],
                         self._phys_depth_data["salt"],

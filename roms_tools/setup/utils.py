@@ -582,10 +582,7 @@ def _compute_bgc_source_density(
 
     # xgcm.transform names the output dim after `target` (bgc_depth_coord),
     # but rename defensively in case the two arguments diverge.
-    if (
-        phys_depth_dim != bgc_depth_dim
-        and phys_depth_dim in source_density.dims
-    ):
+    if phys_depth_dim != bgc_depth_dim and phys_depth_dim in source_density.dims:
         source_density = source_density.rename({phys_depth_dim: bgc_depth_dim})
 
     # Add a small perturbation along the BGC depth dimension after interpolation,

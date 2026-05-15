@@ -22,10 +22,10 @@ from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegrid
 from roms_tools.setup.utils import (
     RawDataSource,
+    _compute_bgc_source_density,
     add_time_info_to_ds,
     check_and_set_boundaries,
     compute_barotropic_velocity,
-    _compute_bgc_source_density,
     compute_missing_bgc_variables,
     compute_potential_density,
     from_yaml,
@@ -86,9 +86,7 @@ def _interpolate_phys_to_bgc_time(
         phys_for_interp = phys_da.assign_coords(
             {time_dim: xr.DataArray(phys_doy, dims=[time_dim])}
         )
-        result = interpolate_cyclic_time(
-            phys_for_interp, time_dim, time_dim, bgc_doy
-        )
+        result = interpolate_cyclic_time(phys_for_interp, time_dim, time_dim, bgc_doy)
         return result.assign_coords({time_dim: bgc_time_coord.values})
 
     # Non-climatology: standard datetime64 linear interpolation
@@ -461,7 +459,8 @@ class BoundaryForcing:
                             time_dim = bdry_data.dim_names.get("time")
                             first_bgc = (
                                 processed_fields.get(filtered_vars[0])
-                                if filtered_vars else None
+                                if filtered_vars
+                                else None
                             )
                             if (
                                 first_bgc is not None
@@ -499,15 +498,16 @@ class BoundaryForcing:
                             # _interpolate_phys_to_bgc_time sees a real time axis.
                             temp_sigma = self.physics_forcing.ds[f"temp_{direction}"]
                             salt_sigma = self.physics_forcing.ds[f"salt_{direction}"]
-                            if bgc_time_coord is not None and "abs_time" in temp_sigma.coords:
-                                temp_sigma = (
-                                    temp_sigma.swap_dims({"bry_time": "abs_time"})
-                                    .rename({"abs_time": "time"})
-                                )
-                                salt_sigma = (
-                                    salt_sigma.swap_dims({"bry_time": "abs_time"})
-                                    .rename({"abs_time": "time"})
-                                )
+                            if (
+                                bgc_time_coord is not None
+                                and "abs_time" in temp_sigma.coords
+                            ):
+                                temp_sigma = temp_sigma.swap_dims(
+                                    {"bry_time": "abs_time"}
+                                ).rename({"abs_time": "time"})
+                                salt_sigma = salt_sigma.swap_dims(
+                                    {"bry_time": "abs_time"}
+                                ).rename({"abs_time": "time"})
                                 temp_sigma = _interpolate_phys_to_bgc_time(
                                     temp_sigma, "time", bgc_time_coord, bgc_climatology
                                 )

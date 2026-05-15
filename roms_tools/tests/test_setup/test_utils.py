@@ -9,8 +9,10 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
+    _compute_bgc_source_density,
     _infer_valid_boundaries_from_mask,
     check_and_set_boundaries,
+    compute_potential_density,
     get_target_coords,
     validate_names,
 )
@@ -295,3 +297,100 @@ def test_check_and_set_full_user_boundaries(simple_mask):
     result = check_and_set_boundaries(boundaries, simple_mask)
 
     assert result == boundaries  # unchanged
+
+
+# test compute_potential_density
+
+
+def test_compute_potential_density_known_value():
+    """Verify sigma-0 against a known seawater value (T=20°C, S=35 PSU → ~24.64 kg/m³)."""
+    temp = xr.DataArray([[20.0]])
+    salt = xr.DataArray([[35.0]])
+    result = compute_potential_density(temp, salt)
+    assert float(result.values.flat[0]) == pytest.approx(24.64, abs=0.1)
+
+
+def test_compute_potential_density_dask():
+    """Verify compute_potential_density returns a lazy dask-backed array."""
+    import dask.array as da
+
+    temp = xr.DataArray(da.from_array([[20.0]], chunks=(1, 1)))
+    salt = xr.DataArray(da.from_array([[35.0]], chunks=(1, 1)))
+    result = compute_potential_density(temp, salt)
+    assert result.chunks is not None
+
+
+def test_compute_bgc_source_density_constant_TS():
+    """For constant T/S, source density at each BGC depth equals sigma0(S,T) + monotonicity perturbation."""
+    import gsw
+
+    n_phys = 4
+    n_bgc = 3
+    T_const, S_const = 10.0, 35.0
+    phys_temp = xr.DataArray(
+        np.full((1, 1, n_phys), T_const), dims=["xi", "eta", "depth"]
+    )
+    phys_salt = xr.DataArray(
+        np.full((1, 1, n_phys), S_const), dims=["xi", "eta", "depth"]
+    )
+    phys_depth = xr.DataArray(
+        np.array([10.0, 100.0, 500.0, 2000.0]),
+        dims=["depth"], coords={"depth": [10.0, 100.0, 500.0, 2000.0]},
+    )
+    bgc_depth = xr.DataArray(
+        np.array([20.0, 300.0, 1500.0]),
+        dims=["depth"], coords={"depth": [20.0, 300.0, 1500.0]},
+    )
+
+    result = _compute_bgc_source_density(
+        phys_temp, phys_salt, "depth", phys_depth, bgc_depth, "depth",
+    )
+
+    # gsw.sigma0 is invariant in space for constant T/S; only the monotonicity
+    # perturbation along the BGC depth axis (added in _compute_bgc_source_density)
+    # should change the value across depth.
+    expected_base = gsw.sigma0(S_const, T_const)
+    expected = expected_base + np.arange(n_bgc) * 1e-7
+    np.testing.assert_allclose(
+        result.values[0, 0], expected, rtol=0.0, atol=1e-6,
+    )
+
+
+def test_compute_bgc_source_density_linear_TS_profile():
+    """Density at BGC depths is the interpolation of physics densities to BGC depths."""
+    import gsw
+
+    # Linear T/S profiles. Physics depths bracket the BGC depths so result is
+    # purely the linear interpolation in depth space (no extrapolation).
+    phys_depths = np.array([0.0, 100.0, 500.0, 2000.0])
+    phys_T = np.array([20.0, 15.0, 8.0, 2.0])
+    phys_S = np.array([34.5, 34.8, 34.9, 35.0])
+    bgc_depths = np.array([50.0, 250.0, 1200.0])
+
+    phys_temp = xr.DataArray(
+        phys_T.reshape(1, 1, -1), dims=["xi", "eta", "depth"]
+    )
+    phys_salt = xr.DataArray(
+        phys_S.reshape(1, 1, -1), dims=["xi", "eta", "depth"]
+    )
+    phys_depth = xr.DataArray(
+        phys_depths, dims=["depth"], coords={"depth": phys_depths}
+    )
+    bgc_depth = xr.DataArray(
+        bgc_depths, dims=["depth"], coords={"depth": bgc_depths}
+    )
+
+    result = _compute_bgc_source_density(
+        phys_temp, phys_salt, "depth", phys_depth, bgc_depth, "depth",
+    )
+
+    # Manual reference: compute density at phys depths with the same perturbation
+    # the function adds, then linearly interpolate to BGC depths, then add the
+    # BGC-depth perturbation.
+    phys_density_perturbed = gsw.sigma0(phys_S, phys_T) + np.arange(len(phys_depths)) * 1e-7
+    expected = np.interp(bgc_depths, phys_depths, phys_density_perturbed)
+    expected = expected + np.arange(len(bgc_depths)) * 1e-7
+
+    np.testing.assert_allclose(
+        result.values[0, 0], expected, rtol=1e-10, atol=1e-10,
+    )

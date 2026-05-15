@@ -8,6 +8,7 @@
 
 ### New Features
 
+* Density-space vertical interpolation for BGC tracers in `InitialConditions` and `BoundaryForcing` via new `use_density_interpolation` parameter (default `True`). For `BoundaryForcing`, pass the physics `BoundaryForcing` as `physics_forcing=` to activate ([#606](https://github.com/CWorthy-ocean/roms-tools/pull/606)).
 * `make_edata` changed to `make_nesting_info`
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Nesting now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
@@ -41,6 +42,7 @@
 * Document `close_narrow_channels` option in `Grid` and `update_mask()`; update notebook examples
 * Both the surface forcing and datasets notebooks are updated to reflect `restoring` function and WOA data ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 * The cdr notebook is updated to reflect interpolation option. Default is same as ROMS, no interpolation ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
+* Notebooks updated to document density-space BGC interpolation ([#606](https://github.com/CWorthy-ocean/roms-tools/pull/606))
 
 ### Bugfixes
 

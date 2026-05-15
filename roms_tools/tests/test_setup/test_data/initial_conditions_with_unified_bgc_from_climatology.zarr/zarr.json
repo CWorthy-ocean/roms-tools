@@ -1,7 +1,7 @@
 {
   "attributes": {
     "title": "ROMS initial conditions file created by ROMS-Tools",
-    "roms_tools_version": "3.6.1.dev26+g58d7c491b",
+    "roms_tools_version": "10000.dev355+g36bf2550d",
     "ini_time": "2021-06-29 00:00:00",
     "model_reference_date": "2000-01-01 00:00:00",
     "adjust_depth_for_sea_surface_height": "False",
@@ -20,7 +20,7 @@
         "shape": [
           1
         ],
-        "data_type": "float64",
+        "data_type": "int64",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
@@ -35,7 +35,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0.0,
+        "fill_value": 0,
         "codecs": [
           {
             "name": "bytes",
@@ -54,8 +54,7 @@
         "attributes": {
           "long_name": "absolute time",
           "units": "days since 2021-06-29 00:00:00",
-          "calendar": "proleptic_gregorian",
-          "_FillValue": "AAAAAAAA+H8="
+          "calendar": "proleptic_gregorian"
         },
         "dimension_names": [
           "ocean_time"

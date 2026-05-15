@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+import gsw
 import numba as nb
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
+from roms_tools.regrid import VerticalRegrid
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -496,6 +498,105 @@ def compute_missing_bgc_variables(bgc_data):
     bgc_data.pop("CHL", None)
 
     return bgc_data
+
+
+def compute_potential_density(
+    temp: "xr.DataArray", salt: "xr.DataArray"
+) -> "xr.DataArray":
+    """Compute sigma-0 potential density anomaly (kg/m³ - 1000) via TEOS-10 (gsw).
+
+    Wraps gsw.sigma0 with apply_ufunc for dask compatibility. Treats practical
+    salinity as Absolute Salinity and in-situ temperature as Conservative
+    Temperature — an approximation sufficient for density-coordinate interpolation.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        In-situ temperature (°C).
+    salt : xr.DataArray
+        Practical salinity (PSU).
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 (kg/m³ - 1000).
+    """
+    return xr.apply_ufunc(
+        gsw.sigma0,
+        salt,
+        temp,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+
+
+def _compute_bgc_source_density(
+    phys_temp: "xr.DataArray",
+    phys_salt: "xr.DataArray",
+    phys_depth_dim: str,
+    phys_depth_coord: "xr.DataArray",
+    bgc_depth_coord: "xr.DataArray",
+    bgc_depth_dim: str,
+) -> "xr.DataArray":
+    """Compute potential density at BGC source depth levels.
+
+    Computes sigma-0 from physics T/S at physics depth levels, adds a small
+    depth-index perturbation to guarantee strict monotonicity (matching the
+    reference MATLAB implementation), then interpolates to the BGC depth grid.
+
+    Parameters
+    ----------
+    phys_temp : xr.DataArray
+        Physics temperature at source depth levels.
+    phys_salt : xr.DataArray
+        Physics salinity at source depth levels.
+    phys_depth_dim : str
+        Name of the depth dimension in the physics dataset.
+    phys_depth_coord : xr.DataArray
+        Depth coordinate values of the physics dataset (1D, metres).
+    bgc_depth_coord : xr.DataArray
+        Depth coordinate values of the BGC dataset (1D, metres).
+    bgc_depth_dim : str
+        Name of the depth dimension in the BGC dataset.
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 at BGC depth levels.
+    """
+    density = compute_potential_density(phys_temp, phys_salt)
+
+    # Add small perturbation along depth to ensure strict monotonicity
+    n_depth = density.sizes[phys_depth_dim]
+    perturbation = xr.DataArray(np.arange(n_depth) * 1e-7, dims=[phys_depth_dim])
+    density = density + perturbation
+
+    # Regrid density from physics depth levels to BGC depth levels
+    ds_phys = xr.Dataset({phys_depth_dim: phys_depth_coord})
+    vertical_regrid = VerticalRegrid(ds_phys, source_dim=phys_depth_dim)
+    source_density = vertical_regrid.apply(
+        density,
+        source_depth_coords=phys_depth_coord,
+        target_depth_coords=bgc_depth_coord,
+    )
+
+    # xgcm.transform names the output dim after `target` (bgc_depth_coord),
+    # but rename defensively in case the two arguments diverge.
+    if (
+        phys_depth_dim != bgc_depth_dim
+        and phys_depth_dim in source_density.dims
+    ):
+        source_density = source_density.rename({phys_depth_dim: bgc_depth_dim})
+
+    # Add a small perturbation along the BGC depth dimension after interpolation,
+    # so the density profile xgcm uses as a source coordinate is strictly
+    # monotonic even where extrapolation flattens the original perturbation.
+    n_bgc_depth = source_density.sizes[bgc_depth_dim]
+    source_density = source_density + xr.DataArray(
+        np.arange(n_bgc_depth) * 1e-7, dims=[bgc_depth_dim]
+    )
+
+    return source_density
 
 
 def compute_missing_surface_bgc_variables(bgc_data):

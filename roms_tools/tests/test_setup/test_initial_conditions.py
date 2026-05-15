@@ -702,3 +702,61 @@ def test_bgc_var_type():
 def test_invalid_var_type():
     with pytest.raises(ValueError, match="Unsupported var_type"):
         _set_required_vars("invalid_type")
+
+
+# test density interpolation
+
+
+def test_ic_density_interpolation_saves_physics_attrs(
+    initial_conditions_with_unified_bgc_from_climatology,
+):
+    """Verify that density interpolation (default) saves physics depth-level T/S attributes."""
+    ic = initial_conditions_with_unified_bgc_from_climatology
+    assert ic.use_density_interpolation is True
+    assert ic._phys_depth_data is not None
+    assert {"temp", "salt", "depth_dim", "depth_coord"} <= ic._phys_depth_data.keys()
+
+
+def test_ic_bgc_vars_present_with_density_interpolation(
+    initial_conditions_with_unified_bgc_from_climatology,
+):
+    """BGC variables are present in the dataset when density interpolation is used."""
+    ic = initial_conditions_with_unified_bgc_from_climatology
+    assert ic.use_density_interpolation is True
+    for var in ["NO3", "DIC", "ALK", "O2", "PO4"]:
+        assert var in ic.ds
+
+
+def test_ic_density_vs_depth_interpolation(use_dask):
+    """Density-based and depth-based IC produce same shape/vars but (potentially) different values."""
+    grid = Grid(
+        nx=2,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+
+    common_kwargs = dict(
+        grid=grid,
+        ini_time=datetime(2021, 6, 29),
+        source={"path": fname, "name": "GLORYS"},
+        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        use_dask=use_dask,
+    )
+
+    ic_density = InitialConditions(**common_kwargs, use_density_interpolation=True)
+    ic_depth = InitialConditions(**common_kwargs, use_density_interpolation=False)
+
+    for var in ["NO3", "DIC", "ALK"]:
+        assert var in ic_density.ds
+        assert var in ic_depth.ds
+        assert ic_density.ds[var].shape == ic_depth.ds[var].shape

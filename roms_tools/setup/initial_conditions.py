@@ -26,8 +26,10 @@ from roms_tools.regrid import (
 )
 from roms_tools.setup.utils import (
     RawDataSource,
+    _compute_bgc_source_density,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
+    compute_potential_density,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
@@ -111,6 +113,17 @@ class InitialConditions:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+    use_density_interpolation : bool, optional
+        If True (default), BGC tracers are vertically interpolated in density space
+        rather than depth space. Density is computed from the physics source T/S
+        (via TEOS-10 sigma-0) and used as the vertical coordinate for interpolation,
+        preserving water-mass properties. Only applies when ``bgc_source`` is provided
+        and the physics source is a lat/lon dataset (not a ROMS restart). Falls back
+        to depth-based interpolation silently if physics T/S are unavailable.
+
+        Interpolation uses ``xgcm.Grid.transform`` with the linear method inside
+        the source density range and edge-value (nearest-neighbor) extrapolation
+        outside (``mask_edges=False``).
 
 
 
@@ -161,6 +174,8 @@ class InitialConditions:
     """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    use_density_interpolation: bool = True
+    """Whether to interpolate BGC tracers in density space rather than depth space."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -172,6 +187,9 @@ class InitialConditions:
     def __post_init__(self):
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
+
+        # Populated during physics processing if density interpolation is enabled
+        self._phys_depth_data: dict | None = None
 
         self._input_checks()
 
@@ -273,8 +291,17 @@ class InitialConditions:
         for location in ["rho", "u", "v"]:
             self._get_depth_coordinates(zeta, location, "layer")
 
+        # Save physics T/S at source depth levels for density-based BGC interpolation
+        if type == "physics" and self.use_density_interpolation and isinstance(data, LatLonDataset):
+            self._phys_depth_data = {
+                "temp": processed_fields["temp"],
+                "salt": processed_fields["salt"],
+                "depth_dim": data.dim_names["depth"],
+                "depth_coord": data.ds[data.dim_names["depth"]],
+            }
+
         # Vertical regridding
-        processed_fields = self._regrid_vertically(data, processed_fields, var_names)
+        processed_fields = self._regrid_vertically(data, processed_fields, var_names, type=type)
 
         # Compute barotropic velocities
         if "u" in var_names and "v" in var_names:
@@ -353,6 +380,7 @@ class InitialConditions:
         data: ROMSDataset | LatLonDataset,
         processed_fields: dict[str, xr.DataArray],
         var_names: dict[str, dict[str, str | bool]],
+        type: str = "physics",
     ) -> dict[str, xr.DataArray]:
         """
         Perform vertical regridding of 3D variables to the model's vertical grid.
@@ -426,16 +454,47 @@ class InitialConditions:
                     data.ds, source_dim=data.dim_names["depth"]
                 )
 
+                use_density = (
+                    type == "bgc"
+                    and self.use_density_interpolation
+                    and self._phys_depth_data is not None
+                )
+
+                if use_density:
+                    source_density = _compute_bgc_source_density(
+                        self._phys_depth_data["temp"],
+                        self._phys_depth_data["salt"],
+                        self._phys_depth_data["depth_dim"],
+                        self._phys_depth_data["depth_coord"],
+                        data.ds[data.dim_names["depth"]],
+                        data.dim_names["depth"],
+                    )
+                    target_density = compute_potential_density(
+                        processed_fields["temp"], processed_fields["salt"]
+                    )
+                    # Add small perturbation to target density to ensure monotonicity
+                    n_s = target_density.sizes["s_rho"]
+                    target_density = target_density + xr.DataArray(
+                        np.arange(n_s) * 1e-7, dims=["s_rho"]
+                    )
+
                 for var_name in filtered_vars:
                     if var_name not in processed_fields:
                         continue
-                    processed_fields[var_name] = vertical_regrid.apply(
-                        processed_fields[var_name],
-                        source_depth_coords=data.ds[data.dim_names["depth"]],
-                        target_depth_coords=self.ds_depth_coords[
-                            f"layer_depth_{location}"
-                        ],
-                    )
+                    if use_density:
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
+                            source_depth_coords=source_density,
+                            target_depth_coords=target_density,
+                        )
+                    else:
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
+                            source_depth_coords=data.ds[data.dim_names["depth"]],
+                            target_depth_coords=self.ds_depth_coords[
+                                f"layer_depth_{location}"
+                            ],
+                        )
 
         return processed_fields
 

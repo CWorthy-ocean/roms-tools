@@ -447,83 +447,13 @@ class BoundaryForcing:
                         )
 
                         if use_density:
-                            phys_data = self.physics_forcing._phys_bdry_depth_data[
-                                direction
-                            ]
-                            phys_temp = phys_data["temp"]
-                            phys_salt = phys_data["salt"]
-                            bgc_climatology = self.source["climatology"]
-
-                            # BGC tracers from any 3D BGC variable share the same
-                            # time axis; grab it from the first one.
-                            time_dim = bdry_data.dim_names.get("time")
-                            first_bgc = (
-                                processed_fields.get(filtered_vars[0])
-                                if filtered_vars
-                                else None
-                            )
-                            if (
-                                first_bgc is not None
-                                and time_dim
-                                and time_dim in first_bgc.dims
-                            ):
-                                bgc_time_coord = first_bgc[time_dim]
-                            else:
-                                bgc_time_coord = None
-
-                            if bgc_time_coord is not None and "time" in phys_temp.dims:
-                                phys_temp = _interpolate_phys_to_bgc_time(
-                                    phys_temp, "time", bgc_time_coord, bgc_climatology
+                            source_density, target_density = (
+                                self._compute_bgc_density_coords(
+                                    direction,
+                                    bdry_data,
+                                    processed_fields,
+                                    filtered_vars,
                                 )
-                                phys_salt = _interpolate_phys_to_bgc_time(
-                                    phys_salt, "time", bgc_time_coord, bgc_climatology
-                                )
-                            elif "time" in phys_temp.dims:
-                                # No BGC time found — collapse to mean as fallback
-                                phys_temp = phys_temp.mean("time")
-                                phys_salt = phys_salt.mean("time")
-
-                            source_density = _compute_bgc_source_density(
-                                phys_temp,
-                                phys_salt,
-                                phys_data["depth_dim"],
-                                phys_data["depth_coord"],
-                                bdry_data.ds[bdry_data.dim_names["depth"]],
-                                bdry_data.dim_names["depth"],
-                            )
-
-                            # Target density: physics sigma T/S interpolated to BGC time.
-                            # Physics BC stores both bry_time (float days since reference)
-                            # and abs_time (datetime64). We swap to the datetime64 view so
-                            # _interpolate_phys_to_bgc_time sees a real time axis.
-                            temp_sigma = self.physics_forcing.ds[f"temp_{direction}"]
-                            salt_sigma = self.physics_forcing.ds[f"salt_{direction}"]
-                            if (
-                                bgc_time_coord is not None
-                                and "abs_time" in temp_sigma.coords
-                            ):
-                                temp_sigma = temp_sigma.swap_dims(
-                                    {"bry_time": "abs_time"}
-                                ).rename({"abs_time": "time"})
-                                salt_sigma = salt_sigma.swap_dims(
-                                    {"bry_time": "abs_time"}
-                                ).rename({"abs_time": "time"})
-                                temp_sigma = _interpolate_phys_to_bgc_time(
-                                    temp_sigma, "time", bgc_time_coord, bgc_climatology
-                                )
-                                salt_sigma = _interpolate_phys_to_bgc_time(
-                                    salt_sigma, "time", bgc_time_coord, bgc_climatology
-                                )
-                            elif "bry_time" in temp_sigma.dims:
-                                temp_sigma = temp_sigma.mean("bry_time")
-                                salt_sigma = salt_sigma.mean("bry_time")
-
-                            target_density = compute_potential_density(
-                                temp_sigma, salt_sigma
-                            )
-                            n_s = target_density.sizes["s_rho"]
-                            target_density = target_density + xr.DataArray(
-                                np.arange(n_s) * 1e-7, dims=["s_rho"]
                             )
 
                         for var_name in filtered_vars:
@@ -582,6 +512,91 @@ class BoundaryForcing:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
+
+    def _compute_bgc_density_coords(
+        self,
+        direction: str,
+        bdry_data,
+        processed_fields: dict,
+        filtered_vars: list,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Build source/target density coordinates for BGC density-space interpolation.
+
+        Source density is computed from the physics BC's saved depth-level T/S and
+        regridded onto the BGC depth axis. Target density is computed from the
+        physics BC's sigma-level T/S, interpolated to the BGC time coordinate.
+
+        Both arrays include the small monotonicity perturbation that
+        ``vertical_regrid.apply`` requires for a strictly monotonic coordinate.
+        """
+        assert self.physics_forcing is not None
+        phys_data = self.physics_forcing._phys_bdry_depth_data[direction]
+        phys_temp, phys_salt = phys_data["temp"], phys_data["salt"]
+        bgc_climatology = bool(self.source["climatology"])
+
+        # The BGC time axis (if any) is shared across all 3D BGC vars; take it from
+        # the first one. dim_names["time"] gives the source-data convention name.
+        bgc_time_dim = bdry_data.dim_names.get("time")
+        first_bgc = processed_fields.get(filtered_vars[0]) if filtered_vars else None
+        bgc_time_coord = (
+            first_bgc[bgc_time_dim]
+            if first_bgc is not None
+            and bgc_time_dim in (first_bgc.dims if first_bgc is not None else ())
+            else None
+        )
+
+        def _align_time(da: xr.DataArray, time_dim: str) -> xr.DataArray:
+            """Align ``da``'s ``time_dim`` to the BGC time axis, or collapse it."""
+            if time_dim not in da.dims:
+                return da
+            if bgc_time_coord is not None:
+                return _interpolate_phys_to_bgc_time(
+                    da, time_dim, bgc_time_coord, bgc_climatology
+                )
+            return da.mean(time_dim)
+
+        # --- Source density: physics depth-level T/S → BGC depth axis ---
+        phys_temp = _align_time(phys_temp, "time")
+        phys_salt = _align_time(phys_salt, "time")
+        bgc_depth_dim = bdry_data.dim_names["depth"]
+        source_density = _compute_bgc_source_density(
+            phys_temp,
+            phys_salt,
+            phys_data["depth_dim"],
+            phys_data["depth_coord"],
+            bdry_data.ds[bgc_depth_dim],
+            bgc_depth_dim,
+        )
+
+        # --- Target density: physics sigma-level T/S, aligned to BGC time ---
+        # Physics BC dataset uses "bry_time" as the time dim with an "abs_time"
+        # datetime64 companion coord. Swap to the datetime view before time-aligning.
+        temp_sigma = self.physics_forcing.ds[f"temp_{direction}"]
+        salt_sigma = self.physics_forcing.ds[f"salt_{direction}"]
+        if "abs_time" in temp_sigma.coords:
+            temp_sigma = temp_sigma.swap_dims({"bry_time": "abs_time"}).rename(
+                {"abs_time": "time"}
+            )
+            salt_sigma = salt_sigma.swap_dims({"bry_time": "abs_time"}).rename(
+                {"abs_time": "time"}
+            )
+            temp_sigma = _align_time(temp_sigma, "time")
+            salt_sigma = _align_time(salt_sigma, "time")
+        else:
+            temp_sigma = _align_time(temp_sigma, "bry_time")
+            salt_sigma = _align_time(salt_sigma, "bry_time")
+
+        target_density = compute_potential_density(temp_sigma, salt_sigma)
+        # Add a small perturbation along the vertical dim to ensure monotonicity.
+        vertical_dim = next(d for d in target_density.dims if d.startswith("s_"))
+        n_s = target_density.sizes[vertical_dim]
+        target_density = target_density + xr.DataArray(
+            np.arange(n_s) * 1e-7, dims=[vertical_dim]
+        )
+        # xgcm.transform requires a single chunk along the target vertical dim.
+        target_density = target_density.chunk({vertical_dim: -1})
+
+        return source_density, target_density
 
     def _input_checks(self) -> None:
         """Validate and normalize user-provided input parameters."""

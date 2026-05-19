@@ -479,11 +479,16 @@ class InitialConditions:
                     target_density = compute_potential_density(
                         processed_fields["temp"], processed_fields["salt"]
                     )
-                    # Add small perturbation to target density to ensure monotonicity
-                    n_s = target_density.sizes["s_rho"]
-                    target_density = target_density + xr.DataArray(
-                        np.arange(n_s) * 1e-7, dims=["s_rho"]
+                    # Add a small perturbation along the vertical dim to ensure monotonicity.
+                    vertical_dim = next(
+                        d for d in target_density.dims if d.startswith("s_")
                     )
+                    n_s = target_density.sizes[vertical_dim]
+                    target_density = target_density + xr.DataArray(
+                        np.arange(n_s) * 1e-7, dims=[vertical_dim]
+                    )
+                    # xgcm.transform requires a single chunk along the target vertical dim.
+                    target_density = target_density.chunk({vertical_dim: -1})
 
                 for var_name in filtered_vars:
                     if var_name not in processed_fields:

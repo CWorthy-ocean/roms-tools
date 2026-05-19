@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
 from roms_tools.regrid import VerticalRegrid
+from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -521,13 +522,18 @@ def compute_potential_density(
     xr.DataArray
         Potential density anomaly sigma-0 (kg/m³ - 1000).
     """
-    return xr.apply_ufunc(
+    density = xr.apply_ufunc(
         gsw.sigma0,
         salt,
         temp,
         dask="parallelized",
         output_dtypes=[temp.dtype],
     )
+    density = transpose_dimensions(density)
+    density.name = "sigma0"
+    density.attrs["long_name"] = "potential density anomaly"
+    density.attrs["units"] = "kg/m^3 - 1000"
+    return density
 
 
 def _compute_bgc_source_density(
@@ -571,6 +577,9 @@ def _compute_bgc_source_density(
     perturbation = xr.DataArray(np.arange(n_depth) * 1e-7, dims=[phys_depth_dim])
     density = density + perturbation
 
+    # xgcm.transform requires a single chunk along the dim being transformed.
+    density = density.chunk({phys_depth_dim: -1})
+
     # Regrid density from physics depth levels to BGC depth levels
     ds_phys = xr.Dataset({phys_depth_dim: phys_depth_coord})
     vertical_regrid = VerticalRegrid(ds_phys, source_dim=phys_depth_dim)
@@ -579,11 +588,7 @@ def _compute_bgc_source_density(
         source_depth_coords=phys_depth_coord,
         target_depth_coords=bgc_depth_coord,
     )
-
-    # xgcm.transform names the output dim after `target` (bgc_depth_coord),
-    # but rename defensively in case the two arguments diverge.
-    if phys_depth_dim != bgc_depth_dim and phys_depth_dim in source_density.dims:
-        source_density = source_density.rename({phys_depth_dim: bgc_depth_dim})
+    source_density = transpose_dimensions(source_density)
 
     # Add a small perturbation along the BGC depth dimension after interpolation,
     # so the density profile xgcm uses as a source coordinate is strictly

@@ -46,6 +46,9 @@ DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
 
+DEFAULT_MBL_co2_PATH = (
+    "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+)
 
 @dataclass(kw_only=True)
 class SurfaceForcing:
@@ -326,6 +329,11 @@ class SurfaceForcing:
                     "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
                 )
                 self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            elif self.source["name"] == "MBL_co2":
+                logging.info(
+                    "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
+                )
+                self.source["path"] = DEFAULT_MBL_co2_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 

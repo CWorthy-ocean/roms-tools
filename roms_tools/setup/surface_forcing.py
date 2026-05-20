@@ -17,6 +17,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
+    MBLco2Dataset,
 )
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
@@ -183,6 +184,9 @@ class SurfaceForcing:
             opt_file = "bulk_frc.opt"
         elif self.type == "bgc":
             opt_file = "bgc.opt"
+            if self.source["name"] == "MBL_co2":
+                cppdefs_flags = set()
+                cppdefs_flags.add("PCO2AIR_FORCING")
         elif self.type == "restoring":
             opt_file = "cppdefs.opt"
             cppdefs_flags = set()
@@ -202,6 +206,12 @@ class SurfaceForcing:
                 interp_flag,
                 opt_file,
             )
+            if self.source["name"] == "MBL_co2":
+                logging.info(
+                    "Time-varying CO2 values being used."
+                    "Remember to define the following flags in your `cppdefs.opt` file: %s`.",
+                    cppdefs_flags,
+                )
         elif self.type == "restoring":
             logging.info(
                 "Data will be interpolated onto the %s. "
@@ -264,7 +274,7 @@ class SurfaceForcing:
                     processed_fields["uwnd"], processed_fields["vwnd"]
                 )
 
-        if self.type == "bgc":
+        if self.type == "bgc" and self.source["name"] != "MBL_co2":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
 
         # Reorder dimensions
@@ -416,9 +426,11 @@ class SurfaceForcing:
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
                 data = UnifiedBGCSurfaceDataset(**data_dict)
+            elif self.source["name"] == "MBL_co2":
+                data = MBLco2Dataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED", "UNIFIED", and "MBL_co2" are valid options for source["name"] when type is "bgc".'
                 )
 
         elif self.type == "restoring":
@@ -490,15 +502,26 @@ class SurfaceForcing:
                 },
             }
         elif self.type == "bgc":
-            variable_info = {}
-            for var_name in list(data.var_names.keys()) + list(
-                data.opt_var_names.keys()
-            ):
-                variable_info[var_name] = default_info
-                if var_name == "pco2_air":
-                    variable_info[var_name] = {**default_info, "validate": True}
-                else:
-                    variable_info[var_name] = {**default_info, "validate": False}
+            if self.source["name"] == "MBL_co2":
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
+                    variable_info[var_name] = default_info
+                    if var_name == "xco2_air":
+                        variable_info[var_name] = {**default_info, "validate": True}
+                    else:
+                        variable_info[var_name] = {**default_info, "validate": False}
+            else:
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
+                    variable_info[var_name] = default_info
+                    if var_name == "pco2_air":
+                        variable_info[var_name] = {**default_info, "validate": True}
+                    else:
+                        variable_info[var_name] = {**default_info, "validate": False}
         elif self.type == "restoring":
             variable_info = {}
             for var_name in list(data.var_names.keys()) + list(
@@ -656,13 +679,18 @@ class SurfaceForcing:
                     "time",
                 ]
         elif self.type == "bgc":
-            time_coords = [
-                "pco2_time",
-                "iron_time",
-                "dust_time",
-                "nox_time",
-                "nhy_time",
-            ]
+            if self.source["name"] == "MBL_co2":
+                time_coords = [
+                    "xco2_air_time",
+                ]
+            else:
+                time_coords = [
+                    "pco2_time",
+                    "iron_time",
+                    "dust_time",
+                    "nox_time",
+                    "nhy_time",
+                ]
         elif self.type == "restoring":
             time_coords = [
                 "sss_time",
@@ -769,6 +797,8 @@ class SurfaceForcing:
             - "rain": Total precipitation.
             - "pco2_air": Atmospheric pCO2.
             - "pco2_air_alt": Atmospheric pCO2, alternative CO2.
+            - "xco2_air": CO2 in Marine boundary layer.
+            - "xco2_air_alt": CO2 in Marine boundary layer, alternative CO2.
             - "iron": Iron decomposition.
             - "dust": Dust decomposition.
             - "nox": NOx decomposition.

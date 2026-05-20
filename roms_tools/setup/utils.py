@@ -411,6 +411,11 @@ def get_variable_metadata():
             "flux_units": "mmol/s",
             "integrated_units": "mmol",
         },
+        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "µmol mol⁻¹"},
+        "xco2_air_alt": {
+            "long_name": "CO2, Marine Boundary Layer; alternative CO2",
+            "units": "µmol mol⁻¹",
+        },
         "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
         "pco2_air_alt": {
             "long_name": "atmospheric pCO2, alternative CO2",

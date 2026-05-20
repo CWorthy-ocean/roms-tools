@@ -1191,6 +1191,144 @@ class WOADataset(LatLonDataset):
 
 
 @dataclass(kw_only=True)
+class MBLDataset(LatLonDataset):
+    """Represents Marine Boundary Layer data from NOAA's Global Monitoring Laboratory on original grid.
+
+    Notes
+    -----
+    Data is only available for time vs latitude. The data are replicated for all longitude points to 
+    create a full global lat, lon dataset.
+    """
+
+    #_default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
+    needs_lateral_fill: bool = False
+    has_encoded_times: bool = False
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method creates an xarray dataset from a numpy ndarray. It then converts the time type 
+        and extrapolates the latitude values across all longitudes.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with time-varying CO2 values.
+        """
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+        }
+
+        # Handle time dimension
+        if len(ds["time"]) != 2209:
+            MBL_URL = "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+            raise ValueError(
+                f"Please use the MBL dataset provided at {MBL_URL}"
+            )
+
+        # Reassign dimension and convert from float64 days to timedelta
+        decimal_yr = ds["time"].values
+        years = np.floor(decimal_yr).astype(int)
+        step  = np.round((decimal_yr - years) * 48).astype(int)   # the data provides 48 evenly spaced times per year
+
+        year_start = np.array([np.datetime64(f"{y}-01-01", "s") for y in years])
+        year_end   = np.array([np.datetime64(f"{y+1}-01-01", "s") for y in years])
+        dur_s = (year_end - year_start).astype("timedelta64[s]").astype(np.int64)
+
+        times = year_start + (step * dur_s // 48).astype("timedelta64[s]")
+        ds = ds.assign_coords(time=("time", times))
+        ds["time"].attrs = {"units": "Datetime", "long_name": "Time"}
+
+        self.dim_names["time"] = "time"
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class MBLco2Dataset(MBLDataset):
+
+    dataset_name: ClassVar[str] = "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+    """The MBL dataset url"""
+    
+    def __post_init__(self) -> None:
+        if not self.filename:
+            self.filename = self.dataset_name
+        self.ds_loader_fn = self._load_from_mbl
+    
+        super().__post_init__()
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"xco2_air": "co2"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "xco2_air_alt": "co2",
+        }
+    )
+
+    def _load_from_mbl(self) -> xr.Dataset:
+        """Load a MBL CO2 dataset.
+
+        This reads in a txt file from NOAA's Global Monitory Laboratory, containing co2 values and uncertainty for
+        the dates 1979-01-01, 2025-01-01.
+
+        Returns
+        -------
+        xr.Dataset
+            The converted xarray dataset
+        """
+        data = np.loadtxt(self.filename)
+        
+        # Create latitude array corresponding to data
+        sat_lat = [
+                   -1.00, -0.95, -0.90, -0.85, -0.80, 
+                   -0.75, -0.70, -0.65, -0.60, -0.55, 
+                   -0.50, -0.45, -0.40, -0.35, -0.30, 
+                   -0.25, -0.20, -0.15, -0.10, -0.05, 
+                   0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 
+                   0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 
+                   0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 
+                   0.90, 0.95, 1.00
+                   ]
+        
+        lat = np.asin(sat_lat)* 180/np.pi
+        
+        # Remove columns with uncertainty data
+        num_cols = data.shape[1]
+        cols_to_use = [0, 1] + list(range(3, num_cols, 2))
+
+        data = data[:, cols_to_use]
+        time = data[:, 0]
+        co2 = data[:, 1:]
+        
+        ds = xr.Dataset(
+            {"co2": (("time", "latitude"), co2, {"units": "µmol mol⁻¹", "long_name": "CO2, Marine boundary layer"})},
+            coords={
+                "time": ("time", time, {"units": "decimal_year"}),
+                "latitude": ("latitude", lat, {"units": "Degrees North", "long_name": "Latitude"}),
+            },
+        )
+        
+        # Expand CO2 value across all longitude, for each time, lat value
+        lon = np.arange(-180.0, 180.0, 2.0)
+        ds = ds.assign_coords(longitude=("longitude", lon))#, {"units": "Degrees East"}))
+        ds["longitude"].attrs = {"units": "Degrees East", "long_name": "Longitude"}
+
+        ds["co2"] = ds["co2"].expand_dims(longitude=ds["longitude"]).transpose(
+            "time", "latitude", "longitude"
+        )
+
+        return ds
+
+@dataclass(kw_only=True)
 class UnifiedDataset(LatLonDataset):
     """Represents unified BGC data on original grid.
 

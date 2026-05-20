@@ -1229,7 +1229,7 @@ class MBLDataset(LatLonDataset):
                 f"Please use the MBL dataset provided at {MBL_URL}"
             )
 
-        # Reassign dimension and convert from float64 days to timedelta
+        # Convert decimal year to datetime
         decimal_yr = ds["time"].values
         years = np.floor(decimal_yr).astype(int)
         step  = np.round((decimal_yr - years) * 48).astype(int)   # the data provides 48 evenly spaced times per year

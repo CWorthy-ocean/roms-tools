@@ -1467,11 +1467,10 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
         }
     )
     var_names: dict[str, str] = field(
-        default_factory=lambda: {"pco2_air": "pco2_air", "dust": "dust", "iron": "iron"}
+        default_factory=lambda: {"dust": "dust", "iron": "iron"}
     )
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "pco2_air_alt": "pco2_air_alt",
             "nox": "nox",
             "nhy": "nhy",
         }
@@ -1716,8 +1715,6 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "pco2_air": "pCO2SURF",
-            "pco2_air_alt": "pCO2SURF",
             "iron": "IRON_FLUX",
             "dust": "dust_FLUX_IN",
             "nox": "NOx_FLUX",
@@ -1746,7 +1743,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
             self.ds = ds
 
         mask = xr.where(
-            self.ds[self.var_names["pco2_air"]]
+            self.ds[self.var_names["dust"]]
             .isel({self.dim_names["time"]: 0})
             .isnull(),
             0,

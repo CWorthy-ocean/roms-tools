@@ -416,11 +416,6 @@ def get_variable_metadata():
             "long_name": "CO2, Marine Boundary Layer; alternative CO2",
             "units": "µmol mol⁻¹",
         },
-        "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
-        "pco2_air_alt": {
-            "long_name": "atmospheric pCO2, alternative CO2",
-            "units": "ppmv",
-        },
         "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
         "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},
         "nox": {"long_name": "NOx decomposition", "units": "kg/m^2/s"},
@@ -517,9 +512,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
         A dictionary containing surface biogeochemical variables as xarray DataArrays.
         Missing variables are computed and added to this dictionary.
 
-        Assumptions:
-        - If `pco2_air` is part of the input dictionary, it is in units of ppmv.
-
     Returns
     -------
     dict
@@ -531,7 +523,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
     """
     # Define the relationships for missing variables
     variable_relations = {
-        "pco2_air_alt": ("pco2_air", 1.0),
         "nox": (None, 1e-12),  # kg/m2/s
         "nhy": (None, 5e-12),  # kg/m2/s
     }
@@ -542,7 +533,7 @@ def compute_missing_surface_bgc_variables(bgc_data):
             if base_var:
                 bgc_data[var_name] = bgc_data[base_var] * factor
             else:
-                bgc_data[var_name] = factor * xr.ones_like(bgc_data["pco2_air"])
+                bgc_data[var_name] = factor * xr.ones_like(bgc_data["dust"])
 
     return bgc_data
 

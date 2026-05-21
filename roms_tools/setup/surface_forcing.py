@@ -525,11 +525,7 @@ class SurfaceForcing:
                 for var_name in list(data.var_names.keys()) + list(
                     data.opt_var_names.keys()
                 ):
-                    variable_info[var_name] = default_info
-                    if var_name == "pco2_air":
-                        variable_info[var_name] = {**default_info, "validate": True}
-                    else:
-                        variable_info[var_name] = {**default_info, "validate": False}
+                    variable_info[var_name] = {**default_info, "validate": False}
         elif self.type == "restoring":
             variable_info = {}
             for var_name in list(data.var_names.keys()) + list(
@@ -693,7 +689,6 @@ class SurfaceForcing:
                 ]
             else:
                 time_coords = [
-                    "pco2_time",
                     "iron_time",
                     "dust_time",
                     "nox_time",
@@ -803,8 +798,6 @@ class SurfaceForcing:
             - "Tair": Air temperature at 2m.
             - "qair": Absolute humidity at 2m.
             - "rain": Total precipitation.
-            - "pco2_air": Atmospheric pCO2.
-            - "pco2_air_alt": Atmospheric pCO2, alternative CO2.
             - "xco2_air": CO2 in Marine boundary layer.
             - "xco2_air_alt": CO2 in Marine boundary layer, alternative CO2.
             - "iron": Iron decomposition.

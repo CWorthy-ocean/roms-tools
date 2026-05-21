@@ -55,6 +55,10 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - Surface Restoring Forcing
      - Yes
      - `WOA, NOAA <https://www.ncei.noaa.gov/products/world-ocean-atlas>`_
+   * - MBL_co2
+     - Time-varying CO2, Surface Forcing
+     - No (auto-downloaded)
+     - `MBL, GML, NOAA <https://gml.noaa.gov/ccgg/mbl/data.php>`_
 
 
 Manual Downloads
@@ -356,6 +360,17 @@ Monthly coastal river discharge climatology. Downloaded automatically by ROMS-To
         - River name
       * - ``vol_stn`` (optional)
         - Annual volume at station
+
+
+MBL_co2
+~~~~~~~~~~~~~~~
+
+Marine boundary layer values for CO2 (µmol mol⁻¹). Data are from a collection of NOAA's atmospheric sampling sites, and available about weekly.
+Data are available for 1979 to 2025. Downloaded automatically by ROMS-Tools.
+
+:Version: 2019
+:Required for: River Forcing
+:Available at: `NOAA's GML, MBL <https://gml.noaa.gov/ccgg/mbl/data.php>`_t
 
 
 Download Instructions

@@ -467,7 +467,6 @@ def test_time_attr_climatology(bgc_surface_forcing_fixture, request):
     assert hasattr(bgc_surface_forcing.ds, "climatology")
 
 
-#### Is this test needed?
 def test_time_attr(bgc_surface_forcing):
     """Test that the 'cycle_length' attribute is not present in the time coordinate of
     the BGC dataset when not using climatology data.
@@ -521,6 +520,12 @@ def test_time_attr_climatology_restoring(surface_forcing_fixture, request):
             True,
             Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc")),
         ),
+        (
+            "bgc_surface_forcing_from_mbl_co2",
+            "MBL_co2",
+            False,
+            Path(download_test_data("mbl_co2_bgc_dataset.nc")),
+        ),
     ],
 )
 def test_surface_forcing_creation(
@@ -535,8 +540,12 @@ def test_surface_forcing_creation(
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     assert sfc_forcing.ds is not None
-    for var_name in ["iron", "dust", "nox", "nhy"]:
-        assert var_name in sfc_forcing.ds
+    if expected_name == "MBL_co2":
+        for var_name in ["xco2_air", "xco2_air_alt"]:
+            assert var_name in sfc_forcing.ds
+    else:
+        for var_name in ["iron", "dust", "nox", "nhy"]:
+            assert var_name in sfc_forcing.ds
 
     assert sfc_forcing.start_time == datetime(2020, 2, 1)
     assert sfc_forcing.end_time == datetime(2020, 2, 1)
@@ -548,8 +557,12 @@ def test_surface_forcing_creation(
     }
     assert not sfc_forcing.use_coarse_grid
     assert sfc_forcing.ds.attrs["source"] == expected_name
-    for time_coord in ["iron_time", "dust_time", "nox_time", "nhy_time"]:
-        assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
+    if expected_name == "MBL_co2":
+        for time_coord in ["xco2_air_time"]:
+            assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
+    else:
+        for time_coord in ["iron_time", "dust_time", "nox_time", "nhy_time"]:
+            assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
 
 @pytest.mark.parametrize(
@@ -598,21 +611,12 @@ def test_surface_forcing_creation_restoring(
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
 
-@pytest.mark.parametrize(
-    "sfc_forcing_fixture",
-    [
-        "bgc_surface_forcing",
-        "bgc_surface_forcing_from_climatology",
-        "bgc_surface_forcing_from_unified_climatology",
-    ],
-)
-#def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
-#    """Test whether pco2_air and pco2_air_alt is the same after processing."""
-#    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
-#
-#    xr.testing.assert_allclose(
-#        sfc_forcing.ds.pco2_air, sfc_forcing.ds.pco2_air_alt, rtol=1.0e-5
-#    )
+def test_surface_forcing_pco2_replication(bgc_surface_forcing_from_mbl_co2):
+    """Test whether pco2_air and pco2_air_alt is the same after processing."""
+    sfc_forcing = bgc_surface_forcing_from_mbl_co2
+    xr.testing.assert_allclose(
+        sfc_forcing.ds.xco2_air, sfc_forcing.ds.xco2_air_alt, rtol=1.0e-5
+    )
 
 
 def test_computed_missing_optional_fields(bgc_surface_forcing_from_unified_climatology):
@@ -773,7 +777,21 @@ def test_surface_forcing_bgc_plot(sfc_forcing_fixture, request):
     sfc_forcing.plot(var_name="dust", time=0)
 
 
-def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
+def test_surface_forcing_bgc_plot(bgc_surface_forcing_from_mbl_co2):
+    """Test plot method."""
+    sfc_forcing = bgc_surface_forcing_from_mbl_co2
+    sfc_forcing.plot(var_name="xco2_air", time=0)
+
+
+@pytest.mark.parametrize(
+    "sfc_forcing_fixture",
+    [
+        "bgc_surface_forcing",
+        "bgc_surface_forcing_from_mbl_co2",
+    ],
+)
+def test_surface_forcing_bgc_save(sfc_forcing_fixture, request, tmp_path):
+    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
     """Test save method."""
     for file_str in ["test_sf", "test_sf.nc"]:
         # Create a temporary filepath using the tmp_path fixture
@@ -782,7 +800,7 @@ def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
             str(tmp_path / file_str),
         ]:  # test for Path object and str
             # Test saving without grouping
-            saved_filenames = bgc_surface_forcing.save(filepath, group=False)
+            saved_filenames = sfc_forcing.save(filepath, group=False)
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}.nc")
             assert saved_filenames == [expected_filepath]
@@ -790,7 +808,7 @@ def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):
             expected_filepath.unlink()
 
             # Test saving with grouping
-            saved_filenames = bgc_surface_forcing.save(filepath, group=True)
+            saved_filenames = sfc_forcing.save(filepath, group=True)
             filepath_str = str(Path(filepath).with_suffix(""))
             expected_filepath = Path(f"{filepath_str}_2020.nc")
             assert saved_filenames == [expected_filepath]
@@ -892,6 +910,7 @@ def test_surface_forcing_restoring_save(
         "bgc_surface_forcing_from_unified_climatology",
         "restoring_surface_forcing_from_unified_climatology",
         "restoring_surface_forcing_from_woa_climatology",
+        "bgc_surface_forcing_from_mbl_co2",
     ],
 )
 def test_roundtrip_yaml(sfc_forcing_fixture, request, tmp_path, use_dask):
@@ -985,6 +1004,10 @@ def assert_roundtrip_hash_equal(
         (
             "restoring_surface_forcing_from_woa_climatology",
             "clim",
+        ),
+        (
+            "bgc_surface_forcing_from_mbl_co2",
+            "2020",
         ),
     ],
 )

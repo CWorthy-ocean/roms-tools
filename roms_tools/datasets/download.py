@@ -48,7 +48,7 @@ sal_data = pooch.create(
 pup_test_data = pooch.create(
     # Use the default cache folder for the operating system
     path=pooch.os_cache("roms-tools"),
-    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/main/",
+    base_url="https://github.com/CWorthy-ocean/roms-tools-test-data/raw/mbl_co2_data/",
     # The registry specifies the files that can be fetched
     registry={
         "GLORYS_test_data.nc": "648f88ec29c433bcf65f257c1fb9497bd3d5d3880640186336b10ed54f7129d2",
@@ -81,6 +81,7 @@ pup_test_data = pooch.create(
         "CESM_surface_global_test_data.nc": "874106ffbc8b1b220db09df1551bbb89d22439d795b4d1e5a24ee775e9a7bf6e",
         "coarsened_UNIFIED_bgc_dataset.nc": "sha256:1f1e4304a497587f75d8e4cd64913caec797a98daf07de4468a2f04d1f0bc165",
         "WOA_2018_quarterDeg_coarsened.nc": "sha256:673ce3c3a98bb386ccd899dbc23eeedf7d9a665b68ea52c96fd69829a4b929a7",
+        "mbl_co2_bgc_dataset.nc": "sha256:797a9ef48f3c83a6920e44c0b441feb00fb35553db09dea9ed4ff36dcd68d968",
         "grid_created_with_matlab.nc": "fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d",
         "etopo5_coarsened_and_shifted.nc": "9a5cb4b38c779d22ddb0ad069b298b9722db34ca85a89273eccca691e89e6f96",
         "srtm15_coarsened.nc": "48bc8f4beecfdca9c192b13f4cbeef1455f49d8261a82563aaec5757e100dff9",

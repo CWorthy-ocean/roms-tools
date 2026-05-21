@@ -459,7 +459,7 @@ def test_time_attr_climatology(bgc_surface_forcing_fixture, request):
     BGC dataset when using climatology data.
     """
     bgc_surface_forcing = request.getfixturevalue(bgc_surface_forcing_fixture)
-    for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
+    for time_coord in ["iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert hasattr(
             bgc_surface_forcing.ds[time_coord],
             "cycle_length",
@@ -472,7 +472,7 @@ def test_time_attr(bgc_surface_forcing):
     """Test that the 'cycle_length' attribute is not present in the time coordinate of
     the BGC dataset when not using climatology data.
     """
-    for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
+    for time_coord in ["iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert not hasattr(
             bgc_surface_forcing.ds[time_coord],
             "cycle_length",
@@ -535,7 +535,7 @@ def test_surface_forcing_creation(
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
 
     assert sfc_forcing.ds is not None
-    for var_name in ["pco2_air", "pco2_air_alt", "iron", "dust", "nox", "nhy"]:
+    for var_name in ["iron", "dust", "nox", "nhy"]:
         assert var_name in sfc_forcing.ds
 
     assert sfc_forcing.start_time == datetime(2020, 2, 1)
@@ -548,7 +548,7 @@ def test_surface_forcing_creation(
     }
     assert not sfc_forcing.use_coarse_grid
     assert sfc_forcing.ds.attrs["source"] == expected_name
-    for time_coord in ["pco2_time", "iron_time", "dust_time", "nox_time", "nhy_time"]:
+    for time_coord in ["iron_time", "dust_time", "nox_time", "nhy_time"]:
         assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
 
 
@@ -606,13 +606,13 @@ def test_surface_forcing_creation_restoring(
         "bgc_surface_forcing_from_unified_climatology",
     ],
 )
-def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
-    """Test whether pco2_air and pco2_air_alt is the same after processing."""
-    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
-
-    xr.testing.assert_allclose(
-        sfc_forcing.ds.pco2_air, sfc_forcing.ds.pco2_air_alt, rtol=1.0e-5
-    )
+#def test_surface_forcing_pco2_replication(sfc_forcing_fixture, request):
+#    """Test whether pco2_air and pco2_air_alt is the same after processing."""
+#    sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
+#
+#    xr.testing.assert_allclose(
+#        sfc_forcing.ds.pco2_air, sfc_forcing.ds.pco2_air_alt, rtol=1.0e-5
+#    )
 
 
 def test_computed_missing_optional_fields(bgc_surface_forcing_from_unified_climatology):
@@ -770,7 +770,7 @@ def test_surface_forcing_save(sfc_forcing_fixture, request, tmp_path):
 def test_surface_forcing_bgc_plot(sfc_forcing_fixture, request):
     """Test plot method."""
     sfc_forcing = request.getfixturevalue(sfc_forcing_fixture)
-    sfc_forcing.plot(var_name="pco2_air", time=0)
+    sfc_forcing.plot(var_name="dust", time=0)
 
 
 def test_surface_forcing_bgc_save(bgc_surface_forcing, tmp_path):

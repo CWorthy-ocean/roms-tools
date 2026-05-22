@@ -14,10 +14,10 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Correction,
     ERA5Dataset,
     LatLonDataset,
+    MBLco2Dataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
-    MBLco2Dataset,
 )
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
@@ -49,6 +49,7 @@ DEFAULT_ERA5_ARCO_PATH = (
 DEFAULT_MBL_co2_PATH = (
     "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
 )
+
 
 @dataclass(kw_only=True)
 class SurfaceForcing:
@@ -685,7 +686,7 @@ class SurfaceForcing:
         elif self.type == "bgc":
             if self.source["name"] == "MBL_co2":
                 time_coords = [
-                    "xco2_air_time",
+                    "xco2_time",
                 ]
             else:
                 time_coords = [

@@ -773,13 +773,17 @@ def group_dataset(ds, filepath):
         if len(ds["abs_time"]) > 2:
             # Determine the frequency of the data
             abs_time_freq = pd.infer_freq(ds["abs_time"].to_index())
-            if abs_time_freq.lower() in [
-                "d",
-                "h",
-                "t",
-                "s",
-            ]:  # Daily or higher frequency
-                dataset_list, output_filenames = group_by_month(ds, filepath)
+            if abs_time_freq:
+                if abs_time_freq.lower() in [
+                    "d",
+                    "h",
+                    "t",
+                    "s",
+                ]:  # Daily or higher frequency
+                    dataset_list, output_filenames = group_by_month(ds, filepath)
+                else:
+                    dataset_list, output_filenames = group_by_year(ds, filepath)
+            # If no regular spacing, default to year grouping
             else:
                 dataset_list, output_filenames = group_by_year(ds, filepath)
         else:

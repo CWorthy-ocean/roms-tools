@@ -1,14 +1,23 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from matplotlib.animation import FFMpegWriter, FuncAnimation
 from matplotlib.axes import Axes
 
 from roms_tools.analysis.cdr_analysis import compute_cdr_metrics
 from roms_tools.datasets.roms_dataset import ROMSDataset
-from roms_tools.plot import plot, plot_uptake_efficiency
+from roms_tools.plot import (
+    format_timestamp,
+    init_horizontal_movie_plot,
+    plot,
+    plot_update,
+    plot_uptake_efficiency,
+    prepare_field_for_plot,
+)
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegrid
 from roms_tools.utils import (
     generate_coordinate_range,
@@ -215,6 +224,188 @@ class ROMSOutput(ROMSDataset):
             save_path=save_path,
             cmap_name=cmap_name,
         )
+
+    @staticmethod
+    def _cmap_name_for_var(var_name: str) -> str:
+        if var_name in ["u", "v", "w", "ubar", "vbar", "zeta"]:
+            return "RdBu_r"
+        if var_name in ["temp", "salt"]:
+            return "YlOrRd"
+        return "YlGn"
+
+    @staticmethod
+    def _select_time_indices(
+        n_times: int, time_range: slice | Sequence[int] | None
+    ) -> list[int]:
+        if time_range is None:
+            return list(range(n_times))
+        if isinstance(time_range, slice):
+            return list(range(n_times)[time_range])
+        return list(time_range)
+
+    def _zeta_for_time(self, time_index: int) -> xr.DataArray | int:
+        if self.adjust_depth_for_sea_surface_height:
+            return self.ds.zeta.isel(time=time_index)
+        return 0
+
+    def _load_field_slice(self, field: xr.DataArray) -> xr.DataArray:
+        if self.use_dask:
+            from dask.diagnostics import ProgressBar
+
+            with ProgressBar():
+                field.load()
+        return field
+
+    def create_movie(
+        self,
+        var_name: str,
+        time_range: slice | Sequence[int] | None = None,
+        fps: int = 10,
+        output_file: str = "simulation.mp4",
+        s: int | None = None,
+        eta: int | None = None,
+        xi: int | None = None,
+        depth: float | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        include_boundary: bool = False,
+        depth_contours: bool = False,
+        use_coarse_grid: bool = False,
+        with_dim_names: bool = False,
+        add_colorbar: bool = True,
+        timestamp_xy: tuple[float, float] | list[float] | Sequence[float] | None = None,
+    ) -> None:
+        """Create an MP4 movie of a horizontal map using the same logic as :meth:`plot`.
+
+        Parameters
+        ----------
+        var_name : str
+            Name of the variable to animate (must include a ``time`` dimension).
+        time_range : slice or sequence of int, optional
+            Subset of time indices to include. Defaults to all times.
+        fps : int, optional
+            Frames per second for the output movie. Default is 10.
+        output_file : str, optional
+            Path to the output MP4 file. Default is ``"simulation.mp4"``.
+        s, eta, xi, depth, lat, lon, include_boundary, depth_contours,
+        use_coarse_grid, with_dim_names, add_colorbar
+            Same meaning as in :meth:`plot`. Movies are limited to top-down
+            horizontal map views (``s`` or ``depth`` for 3D fields; no sections).
+        timestamp_xy : tuple, list, or sequence of float, optional
+            ``(x, y)`` position of the timestamp label in axes coordinates
+            (``transform=ax.transAxes``; origin bottom-left). Default is
+            ``(0.75, 0.95)``. Pass ``None`` to omit the timestamp overlay.
+
+        Notes
+        -----
+        Requires ``ffmpeg`` and the ``matplotlib`` FFmpeg writer.
+        """
+        if var_name not in self.ds:
+            raise ValueError(f"Variable '{var_name}' is not found in self.ds.")
+
+        field = self.ds[var_name]
+        if "time" not in field.dims:
+            raise ValueError(
+                f"Variable '{var_name}' has no 'time' dimension; cannot create a movie."
+            )
+
+        time_indices = self._select_time_indices(len(field.time), time_range)
+        if not time_indices:
+            raise ValueError("time_range selects no time indices.")
+
+        for time_index in time_indices:
+            if time_index >= len(field.time) or time_index < 0:
+                raise ValueError(
+                    f"Invalid time index {time_index} for 'time' dimension "
+                    f"(size {len(field.time)})."
+                )
+
+        cmap_name = self._cmap_name_for_var(var_name)
+        prepare_kwargs: dict[str, Any] = dict(
+            s=s,
+            eta=eta,
+            xi=xi,
+            depth=depth,
+            lat=lat,
+            lon=lon,
+            include_boundary=include_boundary,
+            depth_contours=depth_contours,
+            use_coarse_grid=use_coarse_grid,
+            with_dim_names=with_dim_names,
+            cmap_name=cmap_name,
+        )
+
+        field_0 = self._load_field_slice(field.isel(time=time_indices[0]))
+        zeta_0 = self._zeta_for_time(time_indices[0])
+
+        fig, ax, mesh = init_horizontal_movie_plot(
+            field=field_0,
+            grid_ds=self.grid.ds,
+            zeta=zeta_0,
+            add_colorbar=add_colorbar,
+            **prepare_kwargs,
+        )
+
+        time_text = None
+        if timestamp_xy is not None:
+            if len(timestamp_xy) != 2:
+                raise ValueError(
+                    "timestamp_xy must be a (x, y) pair in axes coordinates, "
+                    f"got length {len(timestamp_xy)}."
+                )
+            x_pos, y_pos = float(timestamp_xy[0]), float(timestamp_xy[1])
+            props = dict(boxstyle="round", facecolor="white", alpha=0.8)
+            time_text = ax.text(
+                x_pos,
+                y_pos,
+                format_timestamp(
+                    self.ds,
+                    time_indices[0],
+                    model_reference_date=self.model_reference_date,
+                ),
+                transform=ax.transAxes,
+                fontsize=12,
+                verticalalignment="top",
+                bbox=props,
+                family="monospace",
+            )
+
+        def update(frame: int) -> tuple:
+            time_index = time_indices[frame]
+            field_t = self._load_field_slice(field.isel(time=time_index))
+            zeta_t = self._zeta_for_time(time_index)
+            prepared = prepare_field_for_plot(
+                field=field_t,
+                grid_ds=self.grid.ds,
+                zeta=zeta_t,
+                **prepare_kwargs,
+            )
+            return plot_update(
+                mesh,
+                time_text,
+                prepared.field,
+                ds=self.ds,
+                time_index=time_index,
+                model_reference_date=self.model_reference_date,
+            )
+
+        writer = FFMpegWriter(
+            fps=fps,
+            metadata=dict(artist="roms-tools"),
+            codec="libx264",
+            extra_args=["-pix_fmt", "yuv420p", "-preset", "fast"],
+        )
+
+        ani = FuncAnimation(
+            fig,
+            update,
+            frames=len(time_indices),
+            interval=1000 / fps,
+            blit=False,
+        )
+        ani.save(output_file, writer=writer)
+        plt.close(fig)
+        print(f"Movie saved to {output_file}")
 
     def regrid(
         self,

@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +8,7 @@ import xarray as xr
 
 from roms_tools import Grid, ROMSOutput
 from roms_tools.datasets.download import download_test_data
+from roms_tools.plot import format_timestamp
 
 try:
     import xesmf  # type: ignore
@@ -299,6 +300,85 @@ def test_plot_errors(roms_output_from_restart_file):
         match="Invalid input: For 3D fields, you must specify at least one of the dimensions",
     ):
         roms_output_from_restart_file.plot("temp", time=1)
+
+
+def test_format_timestamp(roms_output_from_two_restart_files):
+    label = format_timestamp(
+        roms_output_from_two_restart_files.ds,
+        0,
+        model_reference_date=roms_output_from_two_restart_files.model_reference_date,
+    )
+    assert label.startswith("TIME:")
+    assert "1998" in label
+    assert len(label) < 30
+
+
+def test_create_movie(roms_output_from_two_restart_files, tmp_path):
+    output_file = tmp_path / "simulation.mp4"
+
+    with patch("roms_tools.analysis.roms_output.FuncAnimation") as mock_animation:
+        mock_ani = mock_animation.return_value
+        roms_output_from_two_restart_files.create_movie(
+            "temp",
+            time_range=slice(0, 2),
+            fps=5,
+            output_file=str(output_file),
+            s=-1,
+            include_boundary=True,
+        )
+        mock_animation.assert_called_once()
+        mock_ani.save.assert_called_once()
+        save_args, save_kwargs = mock_ani.save.call_args
+        assert save_args[0] == str(output_file)
+        assert "writer" in save_kwargs
+
+
+def test_create_movie_errors(roms_output_from_restart_file):
+    with pytest.raises(ValueError, match="not found"):
+        roms_output_from_restart_file.create_movie("fake_var", s=-1)
+
+    with pytest.raises(ValueError, match="Invalid time index"):
+        roms_output_from_restart_file.create_movie("temp", time_range=[99], s=-1)
+
+    with pytest.raises(ValueError, match="time_range selects no"):
+        roms_output_from_restart_file.create_movie("temp", time_range=slice(0, 0), s=-1)
+
+    with pytest.raises(ValueError, match="Movie creation only supports"):
+        roms_output_from_restart_file.create_movie("temp", eta=1, s=-1)
+
+    with pytest.raises(ValueError, match="timestamp_xy must be"):
+        roms_output_from_restart_file.create_movie(
+            "temp", time_range=slice(0, 1), s=-1, timestamp_xy=(0.5,)
+        )
+
+
+def test_create_movie_timestamp_xy(roms_output_from_two_restart_files):
+    with patch("roms_tools.analysis.roms_output.FuncAnimation"):
+        with patch(
+            "roms_tools.analysis.roms_output.init_horizontal_movie_plot"
+        ) as mock_init:
+            mock_ax = MagicMock()
+            mock_init.return_value = (MagicMock(), mock_ax, MagicMock())
+
+            roms_output_from_two_restart_files.create_movie(
+                "temp",
+                time_range=slice(0, 1),
+                s=-1,
+                include_boundary=True,
+                timestamp_xy=None,
+            )
+            mock_ax.text.assert_not_called()
+
+            mock_ax.reset_mock()
+            roms_output_from_two_restart_files.create_movie(
+                "temp",
+                time_range=slice(0, 1),
+                s=-1,
+                include_boundary=True,
+                timestamp_xy=[0.1, 0.85],
+            )
+            mock_ax.text.assert_called_once()
+            assert mock_ax.text.call_args.args[:2] == (0.1, 0.85)
 
 
 def test_figure_gets_saved(roms_output_from_restart_file, tmp_path):

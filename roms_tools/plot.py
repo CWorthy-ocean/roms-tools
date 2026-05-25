@@ -1,4 +1,6 @@
-from typing import Any, Literal
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Literal, cast
 
 import cartopy.crs as ccrs
 import matplotlib.dates as mdates
@@ -6,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib.axes import Axes
+from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
 
 from roms_tools.regrid import LateralRegridFromROMS, VerticalRegrid
@@ -55,7 +58,8 @@ def plot_2d_horizontal_field(
     add_colorbar: bool = True,
     kwargs: dict[str, Any] | None = None,
     ax: Axes | None = None,
-) -> Figure | None:
+    return_mesh: bool = False,
+) -> Figure | None | tuple[Figure | None, Axes, QuadMesh]:
     """Plot a grid or field on a map using Cartopy projection.
 
     Supports adding depth contours, if desired.
@@ -79,11 +83,14 @@ def plot_2d_horizontal_field(
         Additional keyword arguments to pass to `pcolormesh` (e.g., colormap or color limits).
     ax : matplotlib.axes.Axes, optional
         Pre-existing axes to draw the plot on. If None, a new figure and axes are created.
+    return_mesh : bool, optional
+        If True, return ``(fig, ax, mesh)`` where ``mesh`` is the ``pcolormesh`` artist.
 
     Returns
     -------
-    matplotlib.figure.Figure, optional
-        The generated figure with the plotted data, only returned if `ax` is None.
+    matplotlib.figure.Figure or tuple, optional
+        If ``return_mesh`` is False, the figure when ``ax`` is None; otherwise None.
+        If ``return_mesh`` is True, ``(fig, ax, mesh)``.
 
     Raises
     ------
@@ -91,6 +98,7 @@ def plot_2d_horizontal_field(
         If the domain contains the North or South Pole.
     """
     fig: Figure | None = None
+    mesh: QuadMesh | None = None
 
     field = field.squeeze()
     lon_deg = field.lon
@@ -104,7 +112,7 @@ def plot_2d_horizontal_field(
     _add_boundary_to_ax(ax, lon_deg, lat_deg, trans, c, with_dim_names=with_dim_names)
 
     if plot_data:
-        _add_field_to_ax(
+        mesh = _add_field_to_ax(
             ax,
             lon_deg,
             lat_deg,
@@ -118,6 +126,10 @@ def plot_2d_horizontal_field(
 
     ax.set_title(title)
 
+    if return_mesh:
+        if mesh is None:
+            raise ValueError("return_mesh=True requires plot_data=True.")
+        return fig, ax, mesh
     return fig
 
 
@@ -601,8 +613,8 @@ def _add_field_to_ax(
     field,
     depth_contours=False,
     add_colorbar=True,
-    kwargs={},
-):
+    kwargs: dict[str, Any] | None = None,
+) -> QuadMesh:
     """Plots a grid or field on a map with optional depth contours.
 
     Parameters
@@ -633,6 +645,8 @@ def _add_field_to_ax(
     - If `depth_contours` is True, the `layer_depth` of `field` is used to add contours.
     """
     proj = ccrs.PlateCarree()
+    if kwargs is None:
+        kwargs = {}
 
     p = ax.pcolormesh(lon_deg, lat_deg, field, transform=proj, **kwargs)
     if hasattr(field, "long_name") and hasattr(field, "units"):
@@ -648,6 +662,8 @@ def _add_field_to_ax(
     if depth_contours and "layer_depth" in field.coords:
         cs = ax.contour(lon_deg, lat_deg, field.layer_depth, transform=proj, colors="k")
         ax.clabel(cs, inline=True, fontsize=FONT_SZ)
+
+    return p
 
 
 def get_projection(lon: xr.DataArray, lat: xr.DataArray):
@@ -801,7 +817,21 @@ def _set_plotting_kwargs(field: xr.DataArray, cmap_name: str) -> dict[str, Any]:
     return {"vmax": vmax, "vmin": vmin, "cmap": cmap}
 
 
-def plot(
+@dataclass
+class PreparedPlotField:
+    """Processed ROMS field and metadata for plotting or animation."""
+
+    field: xr.DataArray
+    title: str
+    kwargs: dict[str, Any]
+    plot_kind: Literal["horizontal", "section", "profile", "line"]
+    depth_contours: bool = False
+    with_dim_names: bool = False
+    interface_depth: xr.DataArray | None = None
+    max_nr_layer_contours: int | None = 10
+
+
+def prepare_field_for_plot(
     field: xr.DataArray,
     grid_ds: xr.DataArray,
     zeta: xr.DataArray | float = 0.0,
@@ -815,113 +845,12 @@ def plot(
     depth_contours: bool = False,
     layer_contours: bool = False,
     max_nr_layer_contours: int | None = 10,
-    yincrease: bool | None = None,
     use_coarse_grid: bool = False,
     with_dim_names: bool = False,
     apply_mask: bool = True,
-    ax: Axes | None = None,
-    save_path: str | None = None,
     cmap_name: str = "YlOrRd",
-    add_colorbar: bool = True,
-) -> None:
-    """Generate a plot of a 2D or 3D ROMS field for a horizontal or vertical slice.
-
-    This function supports plotting:
-
-    - horizontal slices at a specific vertical level or depth,
-    - vertical sections along constant indices or geographic lines,
-    - or 2D fields directly.
-
-    Parameters
-    ----------
-    field : xr.DataArray
-        ROMS variable already selected at a single time index.
-
-    grid_ds : xr.DataArray
-        ROMS grid dataset containing the grid geometry, including latitude/longitude,
-        inverse grid spacing (`pm`, `pn`), depth (`h`), and land/sea mask.
-        It must also include the attribute `"straddle"` to indicate whether
-        the grid crosses the dateline.
-
-    zeta : xr.DataArray or float, optional
-        Sea surface height for computing vertical coordinates. Defaults to 0.0 (flat surface).
-
-    s : int, optional
-        Vertical layer index (`s_rho`) to plot. Cannot be used with `depth`. Default is None.
-
-    eta : int, optional
-        Eta index for vertical sections or constant-eta horizontal slices.
-        Cannot be used with `lat` or `lon`. Default is None.
-
-    xi : int, optional
-        Xi index for vertical sections or constant-xi horizontal slices.
-        Cannot be used with `lat` or `lon`. Default is None.
-
-    depth : float, optional
-        Physical depth (in meters) for horizontal slices. Cannot be used with `s`. Default is None.
-
-    lat : float, optional
-        Latitude (in degrees) for vertical sections. Cannot be combined with `eta` or `xi`. Default is None.
-
-    lon : float, optional
-        Longitude (in degrees) for vertical sections. Cannot be combined with `eta` or `xi`. Default is None.
-
-    include_boundary : bool, optional
-        Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
-        Useful to exclude ghost points. Default is True.
-
-    depth_contours : bool, optional
-        If True, add contours of constant bathymetry to horizontal plots. Ignored otherwise.
-        Default is False.
-
-    layer_contours : bool, optional
-        If True, show vertical layer boundaries in vertical sections. Default is False.
-
-    max_nr_layer_contours : int, optional
-        Maximum number of vertical layer contours to draw. Default is 10.
-
-    yincrease: bool, optional
-        If True, the y-axis values increase upward (standard orientation).
-        If False, the y-axis values decrease upward (inverted axis).
-        If None (default), the orientation is determined by the default behavior
-        of the underlying plotting function.
-
-    use_coarse_grid : bool, optional
-        Use precomputed coarse-resolution grid. Default is False.
-
-    with_dim_names : bool, optional
-        Add grid dimension names (`xi`, `eta`) to the outer plot edges. Only for 2D plots. Default is False.
-
-    apply_mask: bool, optional
-        Whether to apply the land mask to the field. Default is True.
-
-    ax : Axes, optional
-        Matplotlib axes object. If None, a new figure is created. Default is None.
-
-    save_path : str, optional
-        File path to save the plot. If None, the plot is shown interactively. Default is None.
-
-    cmap_name : str, optional
-        Name of matplotlib colormap. Default is "YlOrRd".
-
-    add_colorbar : bool, optional
-        Whether to add a colorbar to the plot. Default is True.
-
-    Returns
-    -------
-    None
-        The function generates and shows or saves a plot. No value is returned.
-
-    Raises
-    ------
-    ValueError
-        - If no plotting dimensions are specified for 3D fields.
-        - If conflicting dimensions are specified (e.g., both `s` and `depth`).
-        - If incompatible combinations of grid indices and geographic coordinates are provided.
-        - If specified `eta` or `xi` indices are out of bounds.
-        - If boundary indices are used when `include_boundary=False`.
-    """
-    # Input checks
+) -> PreparedPlotField:
+    """Prepare a single-time ROMS field for plotting (shared by ``plot`` and movies)."""
     _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
 
     if "straddle" not in grid_ds.attrs:
@@ -1052,6 +981,7 @@ def plot(
             depth = depth.isel(s_rho=s)
         return depth.load()
 
+    interface_depth = None
     if compute_layer_depth:
         layer_depth = _compute_and_slice_depth("layer")
 
@@ -1118,47 +1048,310 @@ def plot(
         title = title + f", depth = {depth}m"
         depth_contours = False
 
-    # Plotting
     kwargs = _set_plotting_kwargs(field, cmap_name)
 
     if (eta is None and xi is None) and (lat is None and lon is None):
-        fig = plot_2d_horizontal_field(
-            field=field,
-            depth_contours=depth_contours,
-            with_dim_names=with_dim_names,
-            title=title,
-            kwargs=kwargs,
+        plot_kind: Literal["horizontal", "section", "profile", "line"] = "horizontal"
+    elif len(field.dims) == 2:
+        plot_kind = "section"
+    elif "s_rho" in field.dims:
+        plot_kind = "profile"
+    else:
+        plot_kind = "line"
+
+    return PreparedPlotField(
+        field=field,
+        title=title,
+        kwargs=kwargs,
+        plot_kind=plot_kind,
+        depth_contours=depth_contours,
+        with_dim_names=with_dim_names,
+        interface_depth=interface_depth,
+        max_nr_layer_contours=max_nr_layer_contours,
+    )
+
+
+def format_timestamp(
+    ds: xr.Dataset,
+    time_index: int,
+    model_reference_date: datetime | None = None,
+) -> str:
+    """Format a time label from a ROMS dataset time index.
+
+    Uses ``ds.indexes['time']``, which returns a ``pandas.DatetimeIndex``
+    or ``CFTimeIndex`` — both expose ``.strftime()`` directly, eliminating
+    manual datetime64 gymnastics.  Falls back to seconds +
+    ``model_reference_date`` for non-datetime indexes (legacy ROMS output).
+    """
+    if "time" not in ds.dims:
+        raise ValueError("Dataset has no 'time' dimension.")
+
+    t = ds.indexes["time"][time_index]
+
+    if hasattr(t, "strftime"):
+        return f"TIME: {t.strftime('%Y-%m-%d %H:%M')}"
+
+    if model_reference_date is not None:
+        dt = model_reference_date + timedelta(seconds=float(t))
+        return f"TIME: {dt.strftime('%Y-%m-%d %H:%M')}"
+
+    raise ValueError(
+        "Cannot format timestamp: 'time' index is not datetime-like and "
+        "'model_reference_date' was not provided."
+    )
+
+
+def plot_update(
+    mesh: QuadMesh,
+    time_text: Any | None,
+    field: xr.DataArray,
+    ds: xr.Dataset | None = None,
+    time_index: int | None = None,
+    model_reference_date: datetime | None = None,
+) -> tuple[QuadMesh, ...]:
+    """Update a horizontal map animation frame."""
+    mesh.set_array(np.asarray(field.values).ravel())
+    if time_text is None:
+        return (mesh,)
+    if ds is None or time_index is None:
+        raise ValueError("plot_update requires ds and time_index for the timestamp.")
+    time_text.set_text(
+        format_timestamp(ds, time_index, model_reference_date=model_reference_date)
+    )
+    return mesh, time_text
+
+
+def init_horizontal_movie_plot(
+    field: xr.DataArray,
+    grid_ds: xr.DataArray,
+    zeta: xr.DataArray | float = 0.0,
+    s: int | None = None,
+    eta: int | None = None,
+    xi: int | None = None,
+    depth: float | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    include_boundary: bool = True,
+    depth_contours: bool = False,
+    use_coarse_grid: bool = False,
+    apply_mask: bool = True,
+    with_dim_names: bool = False,
+    cmap_name: str = "YlOrRd",
+    add_colorbar: bool = True,
+) -> tuple[Figure, Axes, QuadMesh]:
+    """Build the initial figure and ``pcolormesh`` artist for a horizontal map movie."""
+    prepared = prepare_field_for_plot(
+        field=field,
+        grid_ds=grid_ds,
+        zeta=zeta,
+        s=s,
+        eta=eta,
+        xi=xi,
+        depth=depth,
+        lat=lat,
+        lon=lon,
+        include_boundary=include_boundary,
+        depth_contours=depth_contours,
+        use_coarse_grid=use_coarse_grid,
+        with_dim_names=with_dim_names,
+        apply_mask=apply_mask,
+        cmap_name=cmap_name,
+    )
+    if prepared.plot_kind != "horizontal":
+        raise ValueError(
+            "Movie creation only supports top-down horizontal map plots. "
+            "Use native grid slices (``s`` or ``depth``) without ``eta``, ``xi``, "
+            "``lat``, or ``lon`` section arguments."
+        )
+
+    fig, ax, mesh = cast(
+        tuple[Figure | None, Axes, QuadMesh],
+        plot_2d_horizontal_field(
+            field=prepared.field,
+            depth_contours=prepared.depth_contours,
+            with_dim_names=prepared.with_dim_names,
+            title=prepared.title,
+            kwargs=prepared.kwargs,
+            add_colorbar=add_colorbar,
+            return_mesh=True,
+        ),
+    )
+    return fig, ax, mesh
+
+
+def plot(
+    field: xr.DataArray,
+    grid_ds: xr.DataArray,
+    zeta: xr.DataArray | float = 0.0,
+    s: int | None = None,
+    eta: int | None = None,
+    xi: int | None = None,
+    depth: float | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    include_boundary: bool = True,
+    depth_contours: bool = False,
+    layer_contours: bool = False,
+    max_nr_layer_contours: int | None = 10,
+    yincrease: bool | None = None,
+    use_coarse_grid: bool = False,
+    with_dim_names: bool = False,
+    apply_mask: bool = True,
+    ax: Axes | None = None,
+    save_path: str | None = None,
+    cmap_name: str = "YlOrRd",
+    add_colorbar: bool = True,
+) -> None:
+    """Generate a plot of a 2D or 3D ROMS field for a horizontal or vertical slice.
+
+    This function supports plotting:
+
+    - horizontal slices at a specific vertical level or depth,
+    - vertical sections along constant indices or geographic lines,
+    - or 2D fields directly.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        ROMS variable already selected at a single time index.
+
+    grid_ds : xr.DataArray
+        ROMS grid dataset containing the grid geometry, including latitude/longitude,
+        inverse grid spacing (`pm`, `pn`), depth (`h`), and land/sea mask.
+        It must also include the attribute `"straddle"` to indicate whether
+        the grid crosses the dateline.
+
+    zeta : xr.DataArray or float, optional
+        Sea surface height for computing vertical coordinates. Defaults to 0.0 (flat surface).
+
+    s : int, optional
+        Vertical layer index (`s_rho`) to plot. Cannot be used with `depth`. Default is None.
+
+    eta : int, optional
+        Eta index for vertical sections or constant-eta horizontal slices.
+        Cannot be used with `lat` or `lon`. Default is None.
+
+    xi : int, optional
+        Xi index for vertical sections or constant-xi horizontal slices.
+        Cannot be used with `lat` or `lon`. Default is None.
+
+    depth : float, optional
+        Physical depth (in meters) for horizontal slices. Cannot be used with `s`. Default is None.
+
+    lat : float, optional
+        Latitude (in degrees) for vertical sections. Cannot be combined with `eta` or `xi`. Default is None.
+
+    lon : float, optional
+        Longitude (in degrees) for vertical sections. Cannot be combined with `eta` or `xi`. Default is None.
+
+    include_boundary : bool, optional
+        Whether to include the outermost grid cells along the `eta`- and `xi`-boundaries in the plot.
+        Useful to exclude ghost points. Default is True.
+
+    depth_contours : bool, optional
+        If True, add contours of constant bathymetry to horizontal plots. Ignored otherwise.
+        Default is False.
+
+    layer_contours : bool, optional
+        If True, show vertical layer boundaries in vertical sections. Default is False.
+
+    max_nr_layer_contours : int, optional
+        Maximum number of vertical layer contours to draw. Default is 10.
+
+    yincrease: bool, optional
+        If True, the y-axis values increase upward (standard orientation).
+        If False, the y-axis values decrease upward (inverted axis).
+        If None (default), the orientation is determined by the default behavior
+        of the underlying plotting function.
+
+    use_coarse_grid : bool, optional
+        Use precomputed coarse-resolution grid. Default is False.
+
+    with_dim_names : bool, optional
+        Add grid dimension names (`xi`, `eta`) to the outer plot edges. Only for 2D plots. Default is False.
+
+    apply_mask: bool, optional
+        Whether to apply the land mask to the field. Default is True.
+
+    ax : Axes, optional
+        Matplotlib axes object. If None, a new figure is created. Default is None.
+
+    save_path : str, optional
+        File path to save the plot. If None, the plot is shown interactively. Default is None.
+
+    cmap_name : str, optional
+        Name of matplotlib colormap. Default is "YlOrRd".
+
+    add_colorbar : bool, optional
+        Whether to add a colorbar to the plot. Default is True.
+
+    Returns
+    -------
+    None
+        The function generates and shows or saves a plot. No value is returned.
+
+    Raises
+    ------
+    ValueError
+        - If no plotting dimensions are specified for 3D fields.
+        - If conflicting dimensions are specified (e.g., both `s` and `depth`).
+        - If incompatible combinations of grid indices and geographic coordinates are provided.
+        - If specified `eta` or `xi` indices are out of bounds.
+        - If boundary indices are used when `include_boundary=False`.
+    """
+    prepared = prepare_field_for_plot(
+        field=field,
+        grid_ds=grid_ds,
+        zeta=zeta,
+        s=s,
+        eta=eta,
+        xi=xi,
+        depth=depth,
+        lat=lat,
+        lon=lon,
+        include_boundary=include_boundary,
+        depth_contours=depth_contours,
+        layer_contours=layer_contours,
+        max_nr_layer_contours=max_nr_layer_contours,
+        use_coarse_grid=use_coarse_grid,
+        with_dim_names=with_dim_names,
+        apply_mask=apply_mask,
+        cmap_name=cmap_name,
+    )
+
+    if prepared.plot_kind == "horizontal":
+        plot_2d_horizontal_field(
+            field=prepared.field,
+            depth_contours=prepared.depth_contours,
+            with_dim_names=prepared.with_dim_names,
+            title=prepared.title,
+            kwargs=prepared.kwargs,
             add_colorbar=add_colorbar,
         )
-    else:
-        if len(field.dims) == 2:
-            if compute_interface_depth:
-                if max_nr_layer_contours:
-                    # restrict number of layer_contours for the sake of plot clearity
-                    nr_layers = len(interface_depth["s_w"])
-                    selected_layers = np.linspace(
-                        0,
-                        nr_layers - 1,
-                        min(nr_layers, max_nr_layer_contours),
-                        dtype=int,
-                    )
-                    interface_depth = interface_depth.isel(s_w=selected_layers)
-            else:
-                interface_depth = None
-
-            fig = section_plot(
-                field,
-                interface_depth=interface_depth,
-                title=title,
-                yincrease=yincrease,
-                kwargs={**kwargs, "add_colorbar": add_colorbar},
-                ax=ax,
+    elif prepared.plot_kind == "section":
+        interface_depth = prepared.interface_depth
+        if interface_depth is not None and prepared.max_nr_layer_contours:
+            nr_layers = len(interface_depth["s_w"])
+            selected_layers = np.linspace(
+                0,
+                nr_layers - 1,
+                min(nr_layers, prepared.max_nr_layer_contours),
+                dtype=int,
             )
-        else:
-            if "s_rho" in field.dims:
-                fig = profile_plot(field, title=title, yincrease=yincrease, ax=ax)
-            else:
-                fig = line_plot(field, title=title, ax=ax, yincrease=yincrease)
+            interface_depth = interface_depth.isel(s_w=selected_layers)
+
+        section_plot(
+            prepared.field,
+            interface_depth=interface_depth,
+            title=prepared.title,
+            yincrease=yincrease,
+            kwargs={**prepared.kwargs, "add_colorbar": add_colorbar},
+            ax=ax,
+        )
+    elif prepared.plot_kind == "profile":
+        profile_plot(prepared.field, title=prepared.title, yincrease=yincrease, ax=ax)
+    else:
+        line_plot(prepared.field, title=prepared.title, ax=ax, yincrease=yincrease)
 
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")

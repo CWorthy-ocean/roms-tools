@@ -30,8 +30,8 @@ authors:
   - name: Benjamin Saenz
     orcid: 0000-0003-3724-3033
     affiliation: 1
-  - name: Kristen Thyng
-    orcid:
+  - name: Kristen M. Thyng
+    orcid: 0000-0002-8746-614X
     affiliation: 1
   - name: Scott Bachman
     orcid:

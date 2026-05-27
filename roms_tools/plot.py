@@ -1277,9 +1277,14 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     Parameters
     ----------
     ds : xarray.Dataset
-        Dataset containing ``time``, ``cdr_efficiency_from_flux``,
-        ``cdr_efficiency_from_DIC_difference``, ``cdr_carbon_uptake_from_flux``, and
-        ``cdr_carbon_uptake_from_DIC_difference``.
+        Dataset containing:
+        - "time": model time coordinate for the x-axis.
+        - "cdr_efficiency_from_flux": flux-based CDR uptake efficiency (dimensionless).
+        - "cdr_efficiency_from_DIC_difference": DIC-difference-based CDR uptake
+          efficiency (dimensionless).
+        - "cdr_carbon_uptake_from_flux": cumulative flux-based CO2 uptake (tonnes CO2).
+        - "cdr_carbon_uptake_from_DIC_difference": DIC-difference-based CO2 uptake
+          (tonnes CO2).
 
     Raises
     ------

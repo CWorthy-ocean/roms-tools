@@ -6,6 +6,7 @@ import xarray as xr
 
 from roms_tools.analysis.cdr_analysis import (
     _native_carbon_amount_to_tonnes_co2_scale,
+    _native_dic_amount_to_mol_multiplier,
     _validate_source,
     _validate_uptake_efficiency,
     compute_cdr_metrics,
@@ -115,6 +116,23 @@ def test_compute_cdr_metrics_outputs(
     )
 
 
+def test_native_dic_amount_to_mol_multiplier_warns_without_units(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert _native_dic_amount_to_mol_multiplier(None) == 1e-3
+    assert "missing" in caplog.text
+    assert "assuming mmol" in caplog.text
+
+
+def test_native_dic_amount_to_mol_multiplier_no_warn_for_mmol(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert _native_dic_amount_to_mol_multiplier("mmol/m^2/s") == 1e-3
+    assert caplog.text == ""
+
+
 def test_carbon_uptake_tonnes_co2_analytic() -> None:
     """Uptake (tonnes CO2) equals native mmol C times the mmol→tonnes CO2 scale."""
     grid = xr.Dataset(
@@ -156,8 +174,20 @@ def test_carbon_uptake_tonnes_co2_analytic() -> None:
 
     ds_cdr = compute_cdr_metrics(ds, grid)
 
-    native_mmol_flux = 3.0  # (5-2) * 1 m^2 * 1 s, one timestep cumsum
-    native_mmol_dic = 3.0  # (10-7) * 1 m^2 * one column
+    area = 1.0 / (grid["pm"] * grid["pn"])
+    dt = ds["avg_end_time"] - ds["avg_begin_time"]
+    native_mmol_flux = float(
+        (
+            ((ds["FG_CO2"] - ds["FG_ALT_CO2"]) * area * dt)
+            .sum(dim=("eta_rho", "xi_rho"))
+            .cumsum(dim="time")
+        ).item()
+    )
+    native_mmol_dic = float(
+        (
+            (ds["hDIC"] - ds["hDIC_ALT_CO2"]) * area
+        ).sum(dim=("s_rho", "eta_rho", "xi_rho")).item()
+    )
 
     mmol_to_tonnes = _native_carbon_amount_to_tonnes_co2_scale("mmol/m^2/s")
     assert np.isclose(

@@ -3,40 +3,8 @@ import logging
 import numpy as np
 import xarray as xr
 
-# Molar mass of CO2 (kg mol^-1), ~44.01 g mol^-1 (IUPAC-style value for conversions).
-_MOLAR_MASS_CO2_KG_PER_MOL = 44.01e-3
-
-
-def _native_carbon_amount_to_tonnes_co2_scale(units: str | None) -> float:
-    """
-    Scale factor from integrated ROMS-style DIC carbon amounts to tonnes CO2.
-
-    For each mole of DIC carbon counted in the flux or inventory difference, we
-    assign one mole of CO2 (air-sea CO2 exchange bookkeeping), then convert to
-    mass using the molar mass of CO2:
-
-        tonnes CO2 = n_C (mol) * M_CO2 (kg mol^-1) / (1000 kg tonne^-1)
-
-    ``n_C`` is obtained from the native amount (e.g. mmol) using metadata units
-    when present; missing units default to mmol (typical ROMS BGC).
-    """
-    mol_per_native = _native_dic_amount_to_mol_multiplier(units)
-    kg_co2_per_native = mol_per_native * _MOLAR_MASS_CO2_KG_PER_MOL
-    return kg_co2_per_native / 1000.0
-
-
-def _native_dic_amount_to_mol_multiplier(units: str | None) -> float:
-    """Convert one native unit of DIC carbon inventory to moles carbon."""
-    if units is None:
-        return 1e-3
-    u = units.strip().lower().replace(" ", "").replace("µ", "u")
-    if u.startswith("mmol") or "mmol/" in u:
-        return 1e-3
-    if u.startswith("umol") or "umol/" in u or "micromol" in u:
-        return 1e-6
-    if (u.startswith("mol") or u.startswith("mole")) and not u.startswith("mmol"):
-        return 1.0
-    return 1e-3
+# Molar mass of CO2 (kg mol^-1), 44.0095 g mol^-1 (IUPAC-style value for conversions).
+_MOLAR_MASS_CO2_KG_PER_MOL = 44.0095e-3
 
 
 def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
@@ -186,13 +154,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
     ds_cdr["cdr_carbon_uptake_from_flux"].attrs.update(
         long_name="CDR carbon uptake (cumulative flux differences)",
         units="tonnes CO2",
-        description=(
-            "Time-cumulative CO2 uptake mass from area-integrated CO2 flux "
-            "differences (scenario minus reference), converted from native DIC "
-            "carbon units using FG_CO2 units metadata when present (otherwise "
-            "mmol is assumed). Same quantity as the numerator of flux-based "
-            "efficiency before dividing by the source, expressed as tonnes CO2."
-        ),
+        description="Time-cumulative CO2 uptake mass from area-integrated CO2 flux differences",
     )
 
     ds_cdr["cdr_carbon_uptake_from_DIC_difference"] = diff_dic_tonnes_co2
@@ -200,11 +162,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
         long_name="CDR carbon uptake (from DIC differences)",
         units="tonnes CO2",
         description=(
-            "CO2-equivalent mass from the volume-integrated DIC difference "
-            "(scenario minus reference), converted from native DIC carbon units "
-            "using hDIC units metadata when present (otherwise mmol is assumed). "
-            "Same quantity as the numerator of DIC-based efficiency before "
-            "dividing by the source, expressed as tonnes CO2."
+            "CO2-equivalent mass from the volume-integrated DIC difference"
         ),
     )
 
@@ -273,3 +231,50 @@ def _validate_source(ds: xr.Dataset):
             raise ValueError(
                 f"'{var}' contains {sign} values, which violates release constraints."
             )
+
+
+def _native_carbon_amount_to_tonnes_co2_scale(units: str | None) -> float:
+    """
+    Scale factor from integrated ROMS-style DIC carbon amounts to tonnes CO2.
+
+    For each mole of DIC carbon counted in the flux or inventory difference, we
+    assign one mole of CO2 (air-sea CO2 exchange bookkeeping), then convert to
+    mass using the molar mass of CO2:
+
+        tonnes CO2 = n_C (mol) * M_CO2 (kg mol^-1) / (1000 kg tonne^-1)
+
+    ``n_C`` is obtained from the native amount (e.g. mmol) using metadata units
+    when present; missing units default to mmol (typical ROMS BGC).
+    """
+    mol_per_native = _native_dic_amount_to_mol_multiplier(units)
+    kg_co2_per_native = mol_per_native * _MOLAR_MASS_CO2_KG_PER_MOL
+    return kg_co2_per_native / 1000.0
+
+
+def _native_dic_amount_to_mol_multiplier(units: str | None) -> float:
+    """Convert one native unit of DIC carbon inventory to moles carbon."""
+    if units is None:
+        logging.warning(
+            "DIC carbon amount units are missing; assuming mmol for conversion to tonnes CO2."
+        )
+        return 1e-3
+    u = units.strip().lower().replace(" ", "").replace("µ", "u")
+    if u.startswith("mmol") or "mmol/" in u:
+        return 1e-3
+    if u.startswith("umol") or "umol/" in u or "micromol" in u:
+        logging.warning(
+            "DIC carbon amount units %r are not mmol; using umol-to-mol conversion.",
+            units,
+        )
+        return 1e-6
+    if (u.startswith("mol") or u.startswith("mole")) and not u.startswith("mmol"):
+        logging.warning(
+            "DIC carbon amount units %r are not mmol; using mol-to-mol conversion.",
+            units,
+        )
+        return 1.0
+    logging.warning(
+        "DIC carbon amount units %r are not recognized as mmol; assuming mmol.",
+        units,
+    )
+    return 1e-3

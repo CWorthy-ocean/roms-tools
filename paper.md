@@ -12,17 +12,26 @@ authors:
   - name: Tom Nicholas
     orcid: 0000-0002-2176-0530
     affiliation: 2
+  - name: Sam Maticka
+    orcid:
+    affiliation: 1
   - name: Scott Eilerman
     orcid:
     affiliation: 1
   - name: Christopher McBride
     orcid:
     affiliation: 1
-  - name: Sam Maticka
-    orcid:
-    affiliation: 1
   - name: Dafydd Stephenson
     orcid:
+    affiliation: 1
+  - name: Ulla Heede
+    orcid:
+    affiliation: 1
+  - name: Benjamin Saenz
+    orcid: 0000-0003-3724-3033
+    affiliation: 1
+  - name: Kristen M. Thyng
+    orcid: 0000-0002-8746-614X
     affiliation: 1
   - name: Scott Bachman
     orcid:
@@ -30,9 +39,6 @@ authors:
   - name: Pierre Damien
     orcid:
     affiliation: 3
-  - name: Ulla Heede
-    orcid:
-    affiliation: 1
   - name: Alicia Karspeck
     orcid:
     affiliation: 1
@@ -42,9 +48,6 @@ authors:
   - name: M. Jeroen Molemaker
     orcid:
     affiliation: 3
-  - name: Benjamin Saenz
-    orcid: 0000-0003-3724-3033
-    affiliation: 1
   - name: Abigale Wyatt
     orcid: 0000-0003-2428-4370
     affiliation: 1

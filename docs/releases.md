@@ -3,11 +3,13 @@
 ## v4.0.0 (unreleased)
 
 ### Breaking Changes
+* pco2 is no longer read in during `SurfaceForcing` `type='bgc'` ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608)).
 * `from_file` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).
 
 ### New Features
 
+* `SurfaceForcing` with `type='bgc'` has new data source option of 'MBL_co2' for time-varying co2. ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608))
 * `make_edata` changed to `make_nesting_info`
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Nesting now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))

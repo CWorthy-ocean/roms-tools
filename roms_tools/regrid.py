@@ -133,6 +133,21 @@ class LateralRegridFromROMS:
             regridded = self.regridder(da, keep_attrs=True)
         return regridded
 
+    def destroy(self):
+        """Release memory held by the underlying regridder.
+
+        Call this when the regridder is no longer needed to avoid accumulating
+        weight matrices across many regridding operations.
+        """
+        try:
+            del self.regridder.weights
+        except Exception:
+            pass
+        try:
+            del self.regridder
+        except Exception:
+            pass
+
 
 class VerticalRegrid:
     """Regrid ROMS variables along the vertical.

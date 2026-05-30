@@ -358,7 +358,7 @@ def test_create_movie_timestamp_xy(roms_output_from_two_restart_files):
             "roms_tools.analysis.roms_output.init_horizontal_movie_plot"
         ) as mock_init:
             mock_ax = MagicMock()
-            mock_init.return_value = (MagicMock(), mock_ax, MagicMock())
+            mock_init.return_value = (MagicMock(), mock_ax, MagicMock(), None)
 
             roms_output_from_two_restart_files.create_movie(
                 "temp",

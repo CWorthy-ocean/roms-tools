@@ -829,6 +829,7 @@ class PreparedPlotField:
     with_dim_names: bool = False
     interface_depth: xr.DataArray | None = None
     max_nr_layer_contours: int | None = 10
+    lateral_regrid: Any = None
 
 
 def prepare_field_for_plot(
@@ -849,6 +850,7 @@ def prepare_field_for_plot(
     with_dim_names: bool = False,
     apply_mask: bool = True,
     cmap_name: str = "YlOrRd",
+    lateral_regrid: Any = None,
 ) -> PreparedPlotField:
     """Prepare a single-time ROMS field for plotting (shared by ``plot`` and movies)."""
     _validate_plot_inputs(field, s, eta, xi, depth, lat, lon, include_boundary)
@@ -1011,7 +1013,8 @@ def prepare_field_for_plot(
         lons = xr.DataArray(lons, dims=["lon"], attrs={"units": "°E"})
 
         target_coords = {"lat": lats, "lon": lons}
-        lateral_regrid = LateralRegridFromROMS(field, target_coords)
+        if lateral_regrid is None:
+            lateral_regrid = LateralRegridFromROMS(field, target_coords)
         field = lateral_regrid.apply(field).squeeze()
 
         if compute_layer_depth:
@@ -1068,6 +1071,7 @@ def prepare_field_for_plot(
         with_dim_names=with_dim_names,
         interface_depth=interface_depth,
         max_nr_layer_contours=max_nr_layer_contours,
+        lateral_regrid=lateral_regrid,
     )
 
 
@@ -1138,8 +1142,13 @@ def init_horizontal_movie_plot(
     with_dim_names: bool = False,
     cmap_name: str = "YlOrRd",
     add_colorbar: bool = True,
-) -> tuple[Figure, Axes, QuadMesh]:
-    """Build the initial figure and ``pcolormesh`` artist for a horizontal map movie."""
+) -> tuple[Figure, Axes, QuadMesh, Any]:
+    """Build the initial figure and ``pcolormesh`` artist for a horizontal map movie.
+
+    Returns ``(fig, ax, mesh, lateral_regrid)`` where ``lateral_regrid`` is a
+    ``LateralRegridFromROMS`` instance (or ``None``) that the caller should reuse
+    for subsequent frames and destroy when the animation is complete.
+    """
     prepared = prepare_field_for_plot(
         field=field,
         grid_ds=grid_ds,
@@ -1176,7 +1185,7 @@ def init_horizontal_movie_plot(
             return_mesh=True,
         ),
     )
-    return fig, ax, mesh
+    return fig, ax, mesh, prepared.lateral_regrid
 
 
 def plot(
@@ -1352,6 +1361,9 @@ def plot(
         profile_plot(prepared.field, title=prepared.title, yincrease=yincrease, ax=ax)
     else:
         line_plot(prepared.field, title=prepared.title, ax=ax, yincrease=yincrease)
+
+    if prepared.lateral_regrid is not None:
+        prepared.lateral_regrid.destroy()
 
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")

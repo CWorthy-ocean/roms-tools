@@ -338,7 +338,7 @@ class ROMSOutput(ROMSDataset):
         field_0 = self._load_field_slice(field.isel(time=time_indices[0]))
         zeta_0 = self._zeta_for_time(time_indices[0])
 
-        fig, ax, mesh = init_horizontal_movie_plot(
+        fig, ax, mesh, shared_lateral_regrid = init_horizontal_movie_plot(
             field=field_0,
             grid_ds=self.grid.ds,
             zeta=zeta_0,
@@ -378,6 +378,7 @@ class ROMSOutput(ROMSDataset):
                 field=field_t,
                 grid_ds=self.grid.ds,
                 zeta=zeta_t,
+                lateral_regrid=shared_lateral_regrid,
                 **prepare_kwargs,
             )
             return plot_update(
@@ -404,6 +405,8 @@ class ROMSOutput(ROMSDataset):
             blit=False,
         )
         ani.save(output_file, writer=writer)
+        if shared_lateral_regrid is not None:
+            shared_lateral_regrid.destroy()
         plt.close(fig)
         print(f"Movie saved to {output_file}")
 

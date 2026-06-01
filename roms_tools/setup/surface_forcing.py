@@ -90,8 +90,8 @@ class SurfaceForcing:
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
 
     restoring_forces : list[str], optional
-        Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
-        ```['sss',]```.
+        Specifies which variables to apply restoring forces to. Sea surface salinity, DIC and alkalinity are supported:
+        ```['sss', 'sDIC', 'sALK']```.
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -190,6 +190,10 @@ class SurfaceForcing:
             for var in self.restoring_forces:
                 if var == "sss":
                     cppdefs_flags.add("SFLX_CORR")
+                if var == "sDIC":
+                    cppdefs_flags.add("CFLX_CORR")
+                if var == "sALK":
+                    cppdefs_flags.add("CFLX_CORR")
 
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
@@ -339,12 +343,19 @@ class SurfaceForcing:
                     "When type='restoring', `restoring_forces` must be defined."
                 )
 
-            valid_vars = ["sss"]
+            valid_vars = ["sss", "sDIC", "sALK"]
             for var in self.restoring_forces:
                 if var not in valid_vars:
                     raise ValueError(
                         f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
                     )
+            has_dic = "sDIC" in self.restoring_forces
+            has_alk = "sALK" in self.restoring_forces
+
+            if has_dic != has_alk:
+                raise ValueError(
+                    "'sDIC' and 'sALK' must both be present or both absent"
+                )
 
     def _determine_coarse_grid_usage(self, data):
         """Determine if coarse grid interpolation should be used based on the resolution
@@ -421,6 +432,7 @@ class SurfaceForcing:
                     'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
                 )
 
+        #### NEED TO ADD DATA IMPORTS FOR DIFFERENT TRACERS AND NEEDS TO BE ITERATIVE. CONCATENATE
         elif self.type == "restoring":
             if self.source["name"] == "WOA":
                 data = WOARestoringSurfaceDataset(**data_dict)
@@ -505,7 +517,7 @@ class SurfaceForcing:
                 data.opt_var_names.keys()
             ):
                 variable_info[var_name] = default_info
-                if var_name == "sss":
+                if var_name in ["sss", "sDIC", "sALK"]:
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
@@ -664,9 +676,14 @@ class SurfaceForcing:
                 "nhy_time",
             ]
         elif self.type == "restoring":
-            time_coords = [
-                "sss_time",
-            ]
+            time_coords = []
+            for var in self.restoring_forces:
+                if var == "sss":
+                    time_coords.append("sss_time")
+                if var == "sDIC":
+                    time_coords.append("sDIC_time")
+                if var == "sALK":
+                    time_coords.append("sALK_time")
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
 

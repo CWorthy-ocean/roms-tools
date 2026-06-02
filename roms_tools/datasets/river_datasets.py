@@ -12,10 +12,6 @@ from roms_tools.datasets.download import (
     download_river_tracer_defaults,
 )
 from roms_tools.datasets.utils import check_dataset, select_relevant_times
-from roms_tools.setup.utils import (
-    assign_dates_to_climatology,
-    gc_dist,
-)
 from roms_tools.utils import _get_file_matches, load_data
 
 RIVR2O_FILL_VALUE = -999.0
@@ -355,6 +351,8 @@ class RiverDataset:
         return ds
 
     def compute_climatology(self):
+        from roms_tools.setup.utils import assign_dates_to_climatology
+
         logging.info("Compute climatology for river forcing.")
 
         time_dim = self.dim_names["time"]
@@ -455,6 +453,8 @@ class RiverDataset:
             river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
         else:
             river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
+
+        from roms_tools.setup.utils import gc_dist
 
         # Calculate the distance between the target coordinates and each river mouth
         dist = gc_dist(target_coords["lon"], target_coords["lat"], river_lon, river_lat)

@@ -1,11 +1,15 @@
 import logging
 from importlib.metadata import version as _version
 
+from roms_tools.proj_config import ensure_proj_database
+
 try:
     __version__ = _version("roms_tools")
 except ImportError:  # pragma: no cover
     # Local copy or not installed with setuptools
     __version__ = "9999"
+
+ensure_proj_database()
 
 # grid must be imported first
 from roms_tools.setup.grid import Grid  # noqa: I001, F401

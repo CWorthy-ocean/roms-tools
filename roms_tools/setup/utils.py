@@ -19,9 +19,9 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
-from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
 
 if typing.TYPE_CHECKING:
+    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
     from roms_tools.setup.grid import Grid
 
 yaml.SafeDumper.add_multi_representer(
@@ -693,6 +693,8 @@ def get_tracer_defaults() -> dict[str, float]:
 
 @lru_cache(maxsize=1)
 def _load_tracer_defaults() -> dict[str, float]:
+    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
+
     return RiverTracerDefaultsDataset().defaults
 
 

@@ -7,7 +7,10 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from roms_tools.datasets.download import download_river_data
+from roms_tools.datasets.download import (
+    download_river_data,
+    download_river_tracer_defaults,
+)
 from roms_tools.datasets.utils import check_dataset, select_relevant_times
 from roms_tools.setup.utils import (
     assign_dates_to_climatology,
@@ -20,6 +23,131 @@ RIVR2O_TRACER_NAMES = ("DIC", "DOC_l", "DOC_sl", "POC", "NO3", "PO4")
 RIVR2O_MIN_YEAR = 1903
 RIVR2O_MAX_YEAR = 2024
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
+
+VALUE_OPTION_DIM = "value_option"
+RECOMMENDED_VALUE_INDEX = 0
+RIVER_TRACER_DEFAULTS_FILENAME = "river_tracer_defaults.nc"
+
+EXPECTED_TRACER_NAMES = (
+    "temp",
+    "salt",
+    "PO4",
+    "NO3",
+    "SiO3",
+    "NH4",
+    "Fe",
+    "Lig",
+    "O2",
+    "DIC",
+    "DIC_ALT_CO2",
+    "ALK",
+    "ALK_ALT_CO2",
+    "DOC",
+    "DON",
+    "DOP",
+    "DOPr",
+    "DONr",
+    "DOCr",
+    "zooC",
+    "spChl",
+    "spC",
+    "spP",
+    "spFe",
+    "spCaCO3",
+    "diatChl",
+    "diatC",
+    "diatP",
+    "diatFe",
+    "diatSi",
+    "diazChl",
+    "diazC",
+    "diazP",
+    "diazFe",
+)
+
+
+@dataclass(kw_only=True)
+class RiverTracerDefaultsDataset:
+    """Default MARBL river tracer concentrations.
+
+    Loads recommended boundary concentrations from ``river_tracer_defaults.nc``
+    in the roms-tools-data repository. Each tracer variable has dimension
+    ``value_option`` (0 = recommended, 1 = alternate).
+
+    Parameters
+    ----------
+    filename : str or Path, optional
+        Path to the NetCDF file. Defaults to the file from roms-tools-data.
+    value_option_index : int, optional
+        Index along ``value_option`` to read. Defaults to 0 (recommended values).
+
+    Attributes
+    ----------
+    defaults : dict[str, float]
+        Tracer name to concentration for the selected value option.
+    ds : xr.Dataset
+        The loaded NetCDF dataset (in memory).
+    """
+
+    filename: str | Path = field(
+        default_factory=download_river_tracer_defaults
+    )
+    value_option_index: int = RECOMMENDED_VALUE_INDEX
+    defaults: dict[str, float] = field(init=False, repr=False)
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        with xr.open_dataset(self.filename) as ds:
+            self.defaults = self._read_defaults(ds)
+            self.ds = ds.load()
+
+    def _read_defaults(self, ds: xr.Dataset) -> dict[str, float]:
+        """Extract tracer concentrations for the selected value option."""
+        expected_tracers = set(EXPECTED_TRACER_NAMES)
+
+        if VALUE_OPTION_DIM not in ds.dims:
+            raise ValueError(
+                f"{RIVER_TRACER_DEFAULTS_FILENAME} must contain a "
+                f"'{VALUE_OPTION_DIM}' dimension."
+            )
+
+        defaults: dict[str, float] = {}
+        for tracer_name in ds.data_vars:
+            if tracer_name == VALUE_OPTION_DIM:
+                continue
+
+            da = ds[tracer_name]
+            if VALUE_OPTION_DIM not in da.dims:
+                raise ValueError(
+                    f"Variable '{tracer_name}' must have dimension "
+                    f"'{VALUE_OPTION_DIM}'."
+                )
+
+            value = float(
+                da.isel({VALUE_OPTION_DIM: self.value_option_index}).values
+            )
+            if np.isnan(value):
+                raise ValueError(
+                    f"Value for tracer '{tracer_name}' at "
+                    f"{VALUE_OPTION_DIM}={self.value_option_index} is missing (NaN)."
+                )
+            defaults[tracer_name] = value
+
+        missing = expected_tracers - set(defaults)
+        if missing:
+            raise ValueError(
+                f"{RIVER_TRACER_DEFAULTS_FILENAME} is missing tracers: "
+                f"{sorted(missing)}"
+            )
+
+        extra = set(defaults) - expected_tracers
+        if extra:
+            raise ValueError(
+                f"{RIVER_TRACER_DEFAULTS_FILENAME} contains unknown tracers: "
+                f"{sorted(extra)}"
+            )
+
+        return defaults
 
 
 def rivr2o_boundary_time(year: int) -> np.datetime64:

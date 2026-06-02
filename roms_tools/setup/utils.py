@@ -19,7 +19,7 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
-from roms_tools.datasets.download import download_river_tracer_defaults
+from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -680,8 +680,8 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
 def get_tracer_defaults() -> dict[str, float]:
     """Returns constant default tracer concentrations for ROMS-MARBL.
 
-    Values are read from ``river_tracer_defaults.csv`` (recommended_value column)
-    distributed via ``roms_tools_datasets``.
+    Values are read from ``river_tracer_defaults.nc`` (recommended values at
+    ``value_option`` index 0) from the roms-tools-data repository.
 
     Returns
     -------
@@ -693,19 +693,7 @@ def get_tracer_defaults() -> dict[str, float]:
 
 @lru_cache(maxsize=1)
 def _load_tracer_defaults() -> dict[str, float]:
-    filepath = download_river_tracer_defaults()
-    df = pd.read_csv(filepath)
-
-    required_columns = {"tracer", "recommended_value"}
-    if not required_columns.issubset(df.columns):
-        missing = required_columns - set(df.columns)
-        raise ValueError(
-            f"river_tracer_defaults.csv is missing required columns: {sorted(missing)}"
-        )
-
-    return {
-        str(row["tracer"]): float(row["recommended_value"]) for _, row in df.iterrows()
-    }
+    return RiverTracerDefaultsDataset().defaults
 
 
 def extract_single_value(data):

@@ -1,7 +1,14 @@
 from pathlib import Path
 
 import pytest
+import xarray as xr
 
+from roms_tools.datasets.river_datasets import (
+    EXPECTED_TRACER_NAMES,
+    RECOMMENDED_VALUE_INDEX,
+    VALUE_OPTION_DIM,
+    RiverTracerDefaultsDataset,
+)
 from roms_tools.setup.utils import _load_tracer_defaults, get_tracer_defaults
 
 
@@ -12,17 +19,23 @@ def clear_tracer_defaults_cache():
     _load_tracer_defaults.cache_clear()
 
 
+@pytest.fixture
+def bundled_defaults_nc():
+    return (
+        Path(__file__).resolve().parents[2]
+        / "datasets"
+        / "data"
+        / "river_tracer_defaults.nc"
+    )
+
+
 class TestTracerDefaults:
-    def test_reads_recommended_values_from_bundled_csv(self, monkeypatch):
-        bundled = (
-            Path(__file__).resolve().parents[2]
-            / "datasets"
-            / "data"
-            / "river_tracer_defaults.csv"
-        )
+    def test_reads_recommended_values_from_bundled_netcdf(
+        self, monkeypatch, bundled_defaults_nc
+    ):
         monkeypatch.setattr(
-            "roms_tools.setup.utils.download_river_tracer_defaults",
-            lambda: str(bundled),
+            "roms_tools.datasets.river_datasets.download_river_tracer_defaults",
+            lambda: str(bundled_defaults_nc),
         )
 
         defaults = get_tracer_defaults()
@@ -36,19 +49,32 @@ class TestTracerDefaults:
         assert defaults["spC"] == 0.0
         assert len(defaults) == 32
 
-    def test_ignores_alternate_value_column(self, tmp_path, monkeypatch):
-        csv_path = tmp_path / "river_tracer_defaults.csv"
-        csv_path.write_text(
-            "tracer,units,recommended_value,recommended_citation,alternate_value\n"
-            "PO4,mmol/m3,4.2453,rec,99.9\n"
-            "NO3,mmol/m3,57.3565,rec,88.8\n"
-        )
-        monkeypatch.setattr(
-            "roms_tools.setup.utils.download_river_tracer_defaults",
-            lambda: str(csv_path),
-        )
+    def test_dataclass_exposes_dataset(self, bundled_defaults_nc):
+        data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)
 
-        defaults = get_tracer_defaults()
+        assert "DIC" in data.ds
+        assert data.ds["DIC"].attrs["units"] == "mmol/m3"
+        assert data.defaults["DIC"] == pytest.approx(1640.071)
 
-        assert defaults["PO4"] == pytest.approx(4.2453)
-        assert defaults["NO3"] == pytest.approx(57.3565)
+    def test_uses_recommended_index_not_alternate(self, tmp_path):
+        data_vars = {
+            "PO4": (VALUE_OPTION_DIM, [4.2453, 99.9]),
+            "NO3": (VALUE_OPTION_DIM, [57.3565, 88.8]),
+        }
+        for tracer in EXPECTED_TRACER_NAMES:
+            if tracer not in data_vars:
+                data_vars[tracer] = (VALUE_OPTION_DIM, [1.0, 999.0])
+
+        ds = xr.Dataset(data_vars, coords={VALUE_OPTION_DIM: [0, 1]})
+        nc_path = tmp_path / "river_tracer_defaults.nc"
+        ds.to_netcdf(nc_path)
+
+        data = RiverTracerDefaultsDataset(filename=nc_path)
+
+        assert data.defaults["PO4"] == pytest.approx(4.2453)
+        assert data.defaults["NO3"] == pytest.approx(57.3565)
+        assert data.defaults["temp"] == pytest.approx(1.0)
+        assert data.defaults["PO4"] != pytest.approx(99.9)
+
+    def test_recommended_index_is_zero(self):
+        assert RECOMMENDED_VALUE_INDEX == 0

@@ -1,3 +1,5 @@
+import logging
+
 import pooch
 
 # Create a Pooch object to manage ROMS-Tools dataset files
@@ -5,8 +7,8 @@ roms_tools_datasets = pooch.create(
     path=pooch.os_cache("roms-tools"),
     base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
     registry={
-        "river_tracer_defaults.csv": (
-            "sha256:c4dc6855333d04641162eaeea3c0c8f71b5bc972a9dfc2ecb74d67303837341c"
+        "river_tracer_defaults.nc": (
+            "sha256:58b7f2e00c0a4f489fc0f345988b79a378ed56f5039d1409a00dc947275e7a61"
         ),
     },
 )
@@ -147,24 +149,24 @@ def download_river_data(filename: str) -> str:
 
 
 def download_river_tracer_defaults() -> str:
-    """Download the river tracer default values CSV.
+    """Download the river tracer default values NetCDF file.
 
     Returns
     -------
     str
-        Path to ``river_tracer_defaults.csv``.
+        Path to ``river_tracer_defaults.nc``.
     """
     try:
-        return roms_tools_datasets.fetch("river_tracer_defaults.csv")
+        return roms_tools_datasets.fetch("river_tracer_defaults.nc")
     except (ConnectionError, OSError, FileNotFoundError) as exc:
         from importlib import resources
 
         bundled = resources.files("roms_tools.datasets.data").joinpath(
-            "river_tracer_defaults.csv"
+            "river_tracer_defaults.nc"
         )
         if bundled.is_file():
             logging.warning(
-                "Using bundled river_tracer_defaults.csv because remote fetch "
+                "Using bundled river_tracer_defaults.nc because remote fetch "
                 "failed: %s",
                 exc,
             )

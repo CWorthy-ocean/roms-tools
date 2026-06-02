@@ -98,7 +98,7 @@ class RiverForcing:
         ``include_bgc=True``. Keys include:
 
           - ``name`` (str): ``"CONSTANTS"`` (default) reads MARBL default river
-            tracer concentrations from ``river_tracer_defaults.csv`` for all BGC
+            tracer concentrations from ``river_tracer_defaults.nc`` for all BGC
             tracers, or ``"RIVR2O"`` reads the RIVR2O
             river export product and sets ``DIC`` (``DIC`` + ``DOC_l``), ``DOC``
             (``DOC_sl`` + ``POC``), ``DON`` and ``DOP`` (ratios of ``DOC_sl`` and

@@ -1,5 +1,16 @@
 import pooch
 
+# Create a Pooch object to manage ROMS-Tools dataset files
+roms_tools_datasets = pooch.create(
+    path=pooch.os_cache("roms-tools"),
+    base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
+    registry={
+        "river_tracer_defaults.csv": (
+            "sha256:c4dc6855333d04641162eaeea3c0c8f71b5bc972a9dfc2ecb74d67303837341c"
+        ),
+    },
+)
+
 # Create a Pooch object to manage the global topography data
 topo_data = pooch.create(
     # Use the default cache folder for the operating system
@@ -133,6 +144,32 @@ def download_river_data(filename: str) -> str:
     fname = river_data.fetch(filename)
 
     return fname
+
+
+def download_river_tracer_defaults() -> str:
+    """Download the river tracer default values CSV.
+
+    Returns
+    -------
+    str
+        Path to ``river_tracer_defaults.csv``.
+    """
+    try:
+        return roms_tools_datasets.fetch("river_tracer_defaults.csv")
+    except (ConnectionError, OSError, FileNotFoundError) as exc:
+        from importlib import resources
+
+        bundled = resources.files("roms_tools.datasets.data").joinpath(
+            "river_tracer_defaults.csv"
+        )
+        if bundled.is_file():
+            logging.warning(
+                "Using bundled river_tracer_defaults.csv because remote fetch "
+                "failed: %s",
+                exc,
+            )
+            return str(bundled)
+        raise
 
 
 def download_correction_data(filename: str) -> str:

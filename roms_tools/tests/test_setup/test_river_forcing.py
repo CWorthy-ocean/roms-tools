@@ -10,6 +10,8 @@ import xarray as xr
 from conftest import calculate_file_hash
 from roms_tools import Grid, RiverForcing
 from roms_tools.constants import MAX_DISTINCT_COLORS
+from roms_tools.datasets.river_datasets import RIVR2O_FILL_VALUE, SECONDS_PER_YEAR
+from roms_tools.setup.utils import get_tracer_defaults
 
 
 @pytest.fixture
@@ -213,8 +215,7 @@ class TestRiverForcingGeneral:
     )
     def test_tracers_are_filled(self, river_forcing_fixture, request):
         river_forcing = request.getfixturevalue(river_forcing_fixture)
-        # Test that all tracers have been filled and have positive values
-        assert river_forcing.ds.river_tracer.all() > 0.0
+        assert (river_forcing.ds.river_tracer >= 0.0).all()
         # Test that tracers are constant across rivers and time
         assert np.allclose(
             river_forcing.ds.river_tracer.std(dim=["river_time", "nriver"]),
@@ -989,3 +990,134 @@ class TestRiverForcingWithOverlappingIndices:
         synthetic_idx = ds_out.dims["nriver"] - 1
         assert float(ds_out["river_volume"].isel(nriver=synthetic_idx)) > 0
         assert not np.isnan(ds_out["river_tracer"].isel(nriver=synthetic_idx).item())
+
+
+def _write_rivr2o_file(path, lat, lon, tracer_values):
+    time = np.array([np.nan], dtype=np.float32)
+    if "POC" not in tracer_values:
+        tracer_values = {
+            **tracer_values,
+            "POC": np.full((len(lat), len(lon)), RIVR2O_FILL_VALUE),
+        }
+    data_vars = {
+        name: (["time", "lat", "lon"], values[np.newaxis, :, :])
+        for name, values in tracer_values.items()
+    }
+    ds = xr.Dataset(
+        data_vars=data_vars,
+        coords={"lat": lat, "lon": lon, "time": time},
+    )
+    ds.to_netcdf(path)
+
+
+class TestRiverForcingBGCSource:
+    def test_bgc_constants_by_default(self, iceland_test_grid, single_cell_indices):
+        defaults = get_tracer_defaults()
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            include_bgc=True,
+        )
+
+        assert river_forcing.bgc_source == {"name": "CONSTANTS"}
+        po4 = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "PO4")
+        alk = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "ALK")
+        assert float(po4.min()) == defaults["PO4"]
+        assert float(alk.min()) == defaults["ALK"]
+
+    def test_bgc_constants_explicit(self, iceland_test_grid, single_cell_indices):
+        defaults = get_tracer_defaults()
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            include_bgc=True,
+            bgc_source={"name": "CONSTANTS"},
+        )
+
+        dic = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DIC")
+        assert float(dic.min()) == defaults["DIC"]
+
+    def test_bgc_rivr2o_requires_path(self, iceland_test_grid, single_cell_indices):
+        with pytest.raises(ValueError, match='must include a "path"'):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                indices=single_cell_indices,
+                include_bgc=True,
+                bgc_source={"name": "RIVR2O"},
+            )
+
+    def test_bgc_rivr2o_overlays_four_tracers(
+        self, tmp_path, iceland_test_grid, single_cell_indices
+    ):
+        lat = np.arange(55.0, 75.5, 0.5)
+        lon = np.arange(325.0, 355.5, 0.5)
+        export_value = 100.0
+        tracer_values = {
+            "DIC": np.full((len(lat), len(lon)), export_value),
+            "DIN": np.full((len(lat), len(lon)), export_value),
+            "DOC_l": np.full((len(lat), len(lon)), export_value / 2),
+            "DOC_sl": np.full((len(lat), len(lon)), export_value / 2),
+            "POC": np.full((len(lat), len(lon)), export_value / 4),
+            "DIP": np.full((len(lat), len(lon)), export_value),
+        }
+        path = tmp_path / "rivr2o_riverinputs_1998.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        defaults = get_tracer_defaults()
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O", "path": str(path)},
+            convert_to_climatology="never",
+        )
+
+        dic = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DIC")
+        doc = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DOC")
+        don = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DON")
+        dop = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DOP")
+        alk = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "ALK")
+        dic_alt = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "DIC_ALT_CO2"
+        )
+        alk_alt = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "ALK_ALT_CO2"
+        )
+        volume = river_forcing.ds.river_volume
+
+        def expected_conc(export):
+            return (export * 1e6 / SECONDS_PER_YEAR / 12.011 / volume).astype(np.float32)
+
+        expected_dic_file = expected_conc(export_value)
+        expected_doc_l = expected_conc(export_value / 2)
+        expected_doc_sl = expected_conc(export_value / 2)
+        expected_poc = expected_conc(export_value / 4)
+
+        assert not np.allclose(dic.values, defaults["DIC"])
+        np.testing.assert_allclose(
+            dic.values, (expected_dic_file + expected_doc_l).values, rtol=1e-5
+        )
+        np.testing.assert_allclose(
+            doc.values, (expected_doc_sl + expected_poc).values, rtol=1e-5
+        )
+        np.testing.assert_allclose(
+            don.values,
+            (expected_doc_sl * (103 / 2583) + expected_poc * (25 / 276)).values,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(
+            dop.values,
+            (expected_doc_sl * (1 / 2583) + expected_poc * (1 / 276)).values,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(alk.values, expected_dic_file.values, rtol=1e-5)
+        np.testing.assert_allclose(dic_alt.values, dic.values, rtol=1e-5)
+        np.testing.assert_allclose(alk_alt.values, alk.values, rtol=1e-5)

@@ -13,7 +13,26 @@ from roms_tools.setup.utils import (
     assign_dates_to_climatology,
     gc_dist,
 )
-from roms_tools.utils import load_data
+from roms_tools.utils import _get_file_matches, load_data
+
+RIVR2O_FILL_VALUE = -999.0
+RIVR2O_TRACER_NAMES = ("DIC", "DOC_l", "DOC_sl", "POC", "NO3", "PO4")
+RIVR2O_MIN_YEAR = 1903
+RIVR2O_MAX_YEAR = 2024
+SECONDS_PER_YEAR = 365.25 * 24 * 3600
+
+
+def rivr2o_boundary_time(year: int) -> np.datetime64:
+    """Return the mid-year timestamp used for a RIVR2O annual file."""
+    return np.datetime64(datetime(year, 7, 1), "ns")
+
+
+def clamp_rivr2o_time(time: xr.DataArray) -> xr.DataArray:
+    """Clamp times to the valid RIVR2O product range, holding boundary values."""
+    return time.clip(
+        min=rivr2o_boundary_time(RIVR2O_MIN_YEAR),
+        max=rivr2o_boundary_time(RIVR2O_MAX_YEAR),
+    )
 
 
 @dataclass(kw_only=True)
@@ -441,6 +460,271 @@ class DaiRiverDataset(RiverDataset):
         ds[time_dim] = dates
 
         return ds
+
+
+def _parse_rivr2o_year(filename: str | Path) -> int:
+    """Extract the calendar year from a RIVR2O river inputs filename."""
+    stem = Path(filename).stem
+    try:
+        return int(stem.rsplit("_", 1)[-1])
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not parse year from RIVR2O filename '{filename}'. "
+            "Expected pattern 'rivr2o_riverinputs_YYYY.nc'."
+        ) from exc
+
+
+@dataclass(kw_only=True)
+class Rivr2oRiverBGCDataset:
+    """River BGC export data from the RIVR2O river inputs product.
+
+    The product is distributed as one NetCDF file per year. Each file contains
+    global river export fields on a regular lat/lon grid (typically 0.5°). Raw
+    variables are annual mass exports in ``10^6 g element yr-1``.
+
+    On load, raw fields are converted to export variables used for river forcing:
+
+    - ``DIC``, ``DOC_l``, ``DOC_sl``, and ``POC`` are kept as separate carbon exports
+    - ``DIN`` is renamed to ``NO3``
+    - ``DIP`` is renamed to ``PO4``
+
+    The resulting dataset exposes ``DIC``, ``DOC_l``, ``DOC_sl``, ``POC``, ``NO3``,
+    and ``PO4`` on dimensions ``(time, lat, lon)``. Times are assigned from the year
+    in each filename (mid-year, 1 July), because the native ``time`` variable
+    is often unset in the source files.
+
+    The product spans 1903–2024. Requests before 1903 or after 2024 use the boundary
+    years when selecting data and when mapping onto river forcing times.
+
+    Parameters
+    ----------
+    filename : str, Path, or list[str | Path]
+        Path to one file, a wildcard pattern (e.g.
+        ``"/data/rivr2o_riverinputs_*.nc"``), or a list of file paths.
+    start_time : datetime
+        Start of the time range to retain.
+    end_time : datetime
+        End of the time range to retain.
+    use_dask : bool, optional
+        If True, open files with dask chunking along time. Defaults to False.
+
+    Attributes
+    ----------
+    ds : xr.Dataset
+        Processed dataset with MARBL tracer variables on the native lat/lon grid.
+    """
+
+    filename: str | Path | list[str | Path]
+    start_time: datetime
+    end_time: datetime
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "latitude": "lat",
+            "longitude": "lon",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "DIC": "DIC",
+            "DIN": "DIN",
+            "DOC_l": "DOC_l",
+            "DOC_sl": "DOC_sl",
+            "POC": "POC",
+            "DIP": "DIP",
+        }
+    )
+    tracer_names: tuple[str, ...] = RIVR2O_TRACER_NAMES
+    fill_value: float = RIVR2O_FILL_VALUE
+    use_dask: bool = False
+    ds: xr.Dataset = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.start_time, datetime):
+            raise TypeError(
+                f"start_time must be a datetime object, but got {type(self.start_time).__name__}."
+            )
+        if not isinstance(self.end_time, datetime):
+            raise TypeError(
+                f"end_time must be a datetime object, but got {type(self.end_time).__name__}."
+            )
+
+        ds = self.load_data()
+        ds = self.clean_up(ds)
+        self.check_dataset(ds)
+        ds = self.select_relevant_times(ds)
+        self.ds = ds
+
+    def load_data(self) -> xr.Dataset:
+        """Load and concatenate yearly RIVR2O files along time.
+
+        Returns
+        -------
+        xr.Dataset
+            Concatenated dataset with one time step per input file.
+        """
+        match_result = _get_file_matches(self.filename)
+        if not match_result.matches:
+            raise FileNotFoundError(f"No RIVR2O files matched: {self.filename}")
+
+        ds_list = []
+        for file in match_result.matches:
+            chunks = {self.dim_names["time"]: 1} if self.use_dask else None
+            ds = xr.open_dataset(file, decode_times=False, chunks=chunks)
+            year = _parse_rivr2o_year(file)
+            ds = ds.assign_coords(
+                {
+                    self.dim_names["time"]: [
+                        np.datetime64(datetime(year, 7, 1), "ns")
+                    ]
+                }
+            )
+            ds_list.append(ds)
+
+        return xr.concat(
+            ds_list,
+            dim=self.dim_names["time"],
+            coords="minimal",
+            compat="override",
+            combine_attrs="override",
+        )
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Replace fill values and rename raw RIVR2O variables."""
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+
+        for var_name in self.var_names.values():
+            if var_name in ds:
+                ds[var_name] = ds[var_name].where(ds[var_name] != self.fill_value)
+
+        ds["NO3"] = ds[self.var_names["DIN"]].rename("NO3")
+        ds["NO3"].attrs = ds[self.var_names["DIN"]].attrs
+
+        ds["PO4"] = ds[self.var_names["DIP"]].rename("PO4")
+        ds["PO4"].attrs = ds[self.var_names["DIP"]].attrs
+
+        ds = ds.drop_vars(
+            [self.var_names["DIN"], self.var_names["DIP"]],
+            errors="ignore",
+        )
+
+        ds = ds.drop_vars(
+            [var for var in ds.data_vars if var not in self.tracer_names],
+            errors="ignore",
+        )
+
+        if lat_dim in ds.coords and ds[lat_dim].ndim == 1:
+            ds = ds.sortby(lat_dim)
+        if lon_dim in ds.coords and ds[lon_dim].ndim == 1:
+            ds = ds.sortby(lon_dim)
+
+        return ds
+
+    def check_dataset(self, ds: xr.Dataset) -> None:
+        """Validate dimensions and MARBL tracer variables."""
+        for dim_key in ("latitude", "longitude", "time"):
+            dim_name = self.dim_names[dim_key]
+            if dim_name not in ds.dims:
+                raise ValueError(
+                    f"Dataset is missing required dimension '{dim_name}' "
+                    f"({dim_key})."
+                )
+
+        missing_tracers = [name for name in self.tracer_names if name not in ds]
+        if missing_tracers:
+            raise ValueError(
+                f"Dataset is missing required tracer variables: {missing_tracers}"
+            )
+
+    def select_relevant_times(self, ds: xr.Dataset) -> xr.Dataset:
+        """Select records within the simulation window, clamped to the product range."""
+        time_dim = self.dim_names["time"]
+
+        select_start = self.start_time
+        select_end = self.end_time
+
+        if self.start_time.year < RIVR2O_MIN_YEAR:
+            logging.info(
+                "Simulation start time is before %s; using RIVR2O values from %s.",
+                RIVR2O_MIN_YEAR,
+                RIVR2O_MIN_YEAR,
+            )
+            select_start = datetime(RIVR2O_MIN_YEAR, 1, 1)
+
+        if self.end_time.year > RIVR2O_MAX_YEAR:
+            logging.info(
+                "Simulation end time is after %s; using RIVR2O values from %s.",
+                RIVR2O_MAX_YEAR,
+                RIVR2O_MAX_YEAR,
+            )
+            select_end = datetime(RIVR2O_MAX_YEAR, 12, 31, 23, 59, 59)
+
+        if select_start > select_end:
+            boundary_year = (
+                RIVR2O_MIN_YEAR
+                if self.end_time.year < RIVR2O_MIN_YEAR
+                else RIVR2O_MAX_YEAR
+            )
+            target_time = rivr2o_boundary_time(boundary_year)
+            idx = int(np.abs(ds[time_dim].values - target_time).argmin())
+            return ds.isel({time_dim: idx})
+
+        return select_relevant_times(
+            ds=ds,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            start_time=select_start,
+            end_time=select_end,
+        )
+
+    def sample_at_points(
+        self,
+        lon: xr.DataArray | np.ndarray | float,
+        lat: xr.DataArray | np.ndarray | float,
+        *,
+        straddle: bool = False,
+        method: str = "nearest",
+    ) -> xr.Dataset:
+        """Sample MARBL tracer exports at point locations.
+
+        Parameters
+        ----------
+        lon, lat : array-like or scalar
+            Longitude and latitude of sample points in degrees.
+        straddle : bool, optional
+            If True, longitudes greater than 180° are converted to -180–180 before
+            sampling. If False, negative longitudes are converted to 0–360.
+        method : str, optional
+            Interpolation method passed to :meth:`xarray.Dataset.interp`.
+
+        Returns
+        -------
+        xr.Dataset
+            Tracer variables with dimensions ``(time, points)`` when multiple
+            locations are provided, or ``(time,)`` for a scalar point.
+        """
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+
+        lon_da = xr.DataArray(lon, dims="points") if np.ndim(lon) else lon
+        lat_da = xr.DataArray(lat, dims="points") if np.ndim(lat) else lat
+
+        ds_lon = self.ds[lon_dim]
+        if float(ds_lon.max()) > 180:
+            lon_da = xr.where(lon_da < 0, lon_da + 360, lon_da)
+        elif straddle:
+            lon_da = xr.where(lon_da > 180, lon_da - 360, lon_da)
+
+        sampled = self.ds.interp(
+            {lon_dim: lon_da, lat_dim: lat_da},
+            method=method,
+        )
+
+        if not np.ndim(lon):
+            return sampled.squeeze("points", drop=True)
+
+        return sampled
 
 
 def _decode_string(byte_array):

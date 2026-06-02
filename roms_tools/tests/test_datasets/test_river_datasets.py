@@ -3,7 +3,11 @@ from datetime import datetime
 import numpy as np
 import xarray as xr
 
-from roms_tools.datasets.river_datasets import RiverDataset
+from roms_tools.datasets.river_datasets import (
+    RIVR2O_FILL_VALUE,
+    RiverDataset,
+    Rivr2oRiverBGCDataset,
+)
 
 
 class TestRiverDataset:
@@ -46,3 +50,123 @@ class TestRiverDataset:
         assert "Amazon_2" in names
         assert "Nile" in names
         assert len(set(names)) == len(names)  # all names must be unique
+
+
+def _write_rivr2o_file(path, lat, lon, tracer_values):
+    time = np.array([np.nan], dtype=np.float32)
+    if "POC" not in tracer_values:
+        tracer_values = {
+            **tracer_values,
+            "POC": np.full((len(lat), len(lon)), RIVR2O_FILL_VALUE),
+        }
+    data_vars = {
+        name: (["time", "lat", "lon"], values[np.newaxis, :, :])
+        for name, values in tracer_values.items()
+    }
+    ds = xr.Dataset(
+        data_vars=data_vars,
+        coords={"lat": lat, "lon": lon, "time": time},
+    )
+    ds.to_netcdf(path)
+
+
+class TestRivr2oRiverBGCDataset:
+    @staticmethod
+    def _make_files(tmp_path, years=(2000, 2001)):
+        lat = np.array([-10.0, 10.0])
+        lon = np.array([100.0, 110.0])
+        files = []
+        for i, year in enumerate(years):
+            tracer_values = {
+                "DIC": np.full((2, 2), 1.0 + i),
+                "DIN": np.full((2, 2), 2.0 + i),
+                "DOC_l": np.full((2, 2), 0.5 + i),
+                "DOC_sl": np.full((2, 2), 0.25 + i),
+                "POC": np.full((2, 2), 0.1 + i),
+                "DIP": np.full((2, 2), 3.0 + i),
+            }
+            path = tmp_path / f"rivr2o_riverinputs_{year}.nc"
+            _write_rivr2o_file(path, lat, lon, tracer_values)
+            files.append(path)
+        return files, lat, lon
+
+    def test_load_and_map_tracers(self, tmp_path):
+        files, lat, lon = self._make_files(tmp_path)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=files,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2001, 12, 31),
+        )
+
+        assert set(dataset.ds.data_vars) == {
+            "DIC",
+            "DOC_l",
+            "DOC_sl",
+            "POC",
+            "NO3",
+            "PO4",
+        }
+        assert dataset.ds.sizes["time"] == 2
+        assert np.datetime64("2000-07-01") in dataset.ds.time.values
+        assert np.datetime64("2001-07-01") in dataset.ds.time.values
+
+        doc_l = dataset.ds["DOC_l"].isel(time=0, lat=0, lon=0).item()
+        assert doc_l == 0.5
+
+        no3 = dataset.ds["NO3"].isel(time=1, lat=0, lon=0).item()
+        assert no3 == 3.0
+
+    def test_wildcard_and_time_subset(self, tmp_path):
+        self._make_files(tmp_path, years=(1999, 2000, 2001))
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=str(tmp_path / "rivr2o_riverinputs_*.nc"),
+            start_time=datetime(2000, 6, 1),
+            end_time=datetime(2000, 8, 1),
+        )
+
+        assert dataset.ds.sizes["time"] == 1
+        assert dataset.ds.time.dt.year.item() == 2000
+
+    def test_sample_at_points(self, tmp_path):
+        files, lat, lon = self._make_files(tmp_path)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=files,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2001, 12, 31),
+        )
+
+        sampled = dataset.sample_at_points(
+            lon=lon[0],
+            lat=lat[0],
+        )
+
+        assert sampled.sizes == {"time": 2}
+        assert sampled["DIC"].isel(time=0).item() == 1.0
+        assert sampled["DOC_sl"].isel(time=1).item() == 1.25
+
+    def test_time_clamped_before_min_year(self, tmp_path):
+        self._make_files(tmp_path, years=(1903, 1904, 1905))
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=str(tmp_path / "rivr2o_riverinputs_*.nc"),
+            start_time=datetime(1890, 1, 1),
+            end_time=datetime(1895, 12, 31),
+        )
+
+        assert dataset.ds.sizes["time"] == 1
+        assert dataset.ds.time.dt.year.item() == 1903
+
+    def test_time_clamped_after_max_year(self, tmp_path):
+        self._make_files(tmp_path, years=(2022, 2023, 2024))
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=str(tmp_path / "rivr2o_riverinputs_*.nc"),
+            start_time=datetime(2025, 1, 1),
+            end_time=datetime(2030, 12, 31),
+        )
+
+        assert dataset.ds.sizes["time"] == 1
+        assert dataset.ds.time.dt.year.item() == 2024

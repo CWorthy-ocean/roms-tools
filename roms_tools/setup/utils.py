@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -18,6 +19,7 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
+from roms_tools.datasets.download import download_river_tracer_defaults
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -678,49 +680,31 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
 def get_tracer_defaults() -> dict[str, float]:
     """Returns constant default tracer concentrations for ROMS-MARBL.
 
-    These values represent typical physical and biogeochemical tracer levels
-    (e.g., temperature, salinity, nutrients, carbon) in freshwater.
+    Values are read from ``river_tracer_defaults.csv`` (recommended_value column)
+    distributed via ``roms_tools_datasets``.
 
     Returns
     -------
     dict
-        Dictionary of tracer names and their default concentrations
+        Dictionary of tracer names and their default concentrations.
     """
+    return _load_tracer_defaults()
+
+
+@lru_cache(maxsize=1)
+def _load_tracer_defaults() -> dict[str, float]:
+    filepath = download_river_tracer_defaults()
+    df = pd.read_csv(filepath)
+
+    required_columns = {"tracer", "recommended_value"}
+    if not required_columns.issubset(df.columns):
+        missing = required_columns - set(df.columns)
+        raise ValueError(
+            f"river_tracer_defaults.csv is missing required columns: {sorted(missing)}"
+        )
+
     return {
-        "temp": 17.0,  # degrees C
-        "salt": 1.0,  # psu
-        "PO4": 2.7,  # mmol m-3
-        "NO3": 24.2,  # mmol m-3
-        "SiO3": 13.2,  # mmol m-3
-        "NH4": 2.2,  # mmol m-3
-        "Fe": 1.79,  # mmol m-3
-        "Lig": 3 * 1.79,  # mmol m-3, inferred from Fe
-        "O2": 187.5,  # mmol m-3
-        "DIC": 2370.0,  # mmol m-3
-        "DIC_ALT_CO2": 2370.0,  # mmol m-3
-        "ALK": 2310.0,  # meq m-3
-        "ALK_ALT_CO2": 2310.0,  # meq m-3
-        "DOC": 1e-4,  # mmol m-3
-        "DON": 1.0,  # mmol m-3
-        "DOP": 0.1,  # mmol m-3
-        "DOPr": 0.003,  # mmol m-3
-        "DONr": 0.8,  # mmol m-3
-        "DOCr": 1e-6,  # mmol m-3
-        "zooC": 2.7,  # mmol m-3
-        "spChl": 1.35,  # mg m-3
-        "spC": 6.75,  # mmol m-3
-        "spP": 1.5 * 0.03,  # mmol m-3, inferred from ?
-        "spFe": 2.7e-5,  # mmol m-3
-        "spCaCO3": 0.135,  # mmol m-3
-        "diatChl": 0.135,  # mg m-3
-        "diatC": 0.405,  # mmol m-3
-        "diatP": 1.5 * 0.02,  # mmol m-3, inferred from ?
-        "diatFe": 2.7e-6,  # mmol m-3
-        "diatSi": 0.135,  # mmol m-3
-        "diazChl": 0.015,  # mg m-3
-        "diazC": 0.075,  # mmol m-3
-        "diazP": 1.5 * 0.01,  # mmol m-3, inferred from ?
-        "diazFe": 1.5e-6,  # mmol m-3
+        str(row["tracer"]): float(row["recommended_value"]) for _, row in df.iterrows()
     }
 
 

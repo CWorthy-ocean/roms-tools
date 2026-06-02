@@ -12,7 +12,10 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.datasets.river_datasets import (
+    SECONDS_PER_YEAR,
     DaiRiverDataset,
+    Rivr2oRiverBGCDataset,
+    clamp_rivr2o_time,
     get_indices_of_nearest_grid_cell_for_rivers,
 )
 from roms_tools.plot import (
@@ -41,6 +44,19 @@ INCLUDE_ALL_RIVER_NAMES = "all"
 MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
+
+_RIVR2O_MOLAR_MASS_G = {
+    "DIC": 12.011, # molar mass of C
+    "DOC_l": 12.011, # molar mass of C
+    "DOC_sl": 12.011, # molar mass of C
+    "POC": 12.011, # molar mass of C
+    "NO3": 14.007, # molar mass of N
+    "PO4": 30.974, # molar mass of P
+}
+_DON_FROM_DOC_SL = 103 / 2583
+_DON_FROM_POC = 25 / 276
+_DOP_FROM_DOC_SL = 1 / 2583
+_DOP_FROM_POC = 1 / 276
 
 
 @dataclass(kw_only=True)
@@ -77,6 +93,25 @@ class RiverForcing:
 
     include_bgc : bool, optional
         Whether to include BGC tracers. Defaults to `False`.
+    bgc_source : RawDataSource, optional
+        Dictionary specifying the source of river BGC tracer data. Only used when
+        ``include_bgc=True``. Keys include:
+
+          - ``name`` (str): ``"CONSTANTS"`` (default) reads MARBL default river
+            tracer concentrations from ``river_tracer_defaults.csv`` for all BGC
+            tracers, or ``"RIVR2O"`` reads the RIVR2O
+            river export product and sets ``DIC`` (``DIC`` + ``DOC_l``), ``DOC``
+            (``DOC_sl`` + ``POC``), ``DON`` and ``DOP`` (ratios of ``DOC_sl`` and
+            ``POC``), ``ALK`` (file ``DIC``), ``DIC_ALT_CO2``, ``ALK_ALT_CO2``,
+            ``NO3``, and ``PO4`` from lat/lon fields (all other BGC tracers remain
+            at default values).
+          - ``path`` (str, Path, or list): Required for ``"RIVR2O"``. Path to one
+            file, a wildcard pattern, or a list of ``rivr2o_riverinputs_*.nc`` files.
+
+        If ``include_bgc=True`` and ``bgc_source`` is omitted, ``"CONSTANTS"`` is used.
+
+        For ``"RIVR2O"``, the product covers 1903–2024. Simulation times before 1903
+        or after 2024 use the 1903 and 2024 fields, respectively.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
     indices : dict[str, list[tuple[int, int]]], optional
@@ -111,6 +146,8 @@ class RiverForcing:
     """Determines when to compute climatology for river forcing."""
     include_bgc: bool = False
     """Whether to include BGC tracers."""
+    bgc_source: RawDataSource | None = None
+    """Dictionary specifying the source of river BGC tracer data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
@@ -179,6 +216,25 @@ class RiverForcing:
             **self.source,
             "climatology": self.source.get("climatology", False),
         }
+
+        if self.include_bgc:
+            if self.bgc_source is None:
+                self.bgc_source = {"name": "CONSTANTS"}
+            elif "name" not in self.bgc_source:
+                raise ValueError("`bgc_source` must include a 'name'.")
+            elif self.bgc_source["name"] not in ("CONSTANTS", "RIVR2O"):
+                raise ValueError(
+                    'Only "CONSTANTS" and "RIVR2O" are valid options for '
+                    'bgc_source["name"].'
+                )
+            elif self.bgc_source["name"] == "RIVR2O" and "path" not in self.bgc_source:
+                raise ValueError(
+                    '`bgc_source` must include a "path" when name is "RIVR2O".'
+                )
+        elif self.bgc_source is not None:
+            logging.warning(
+                "`bgc_source` is ignored because `include_bgc` is False."
+            )
 
         # Check if 'indices' is provided and has the correct format
         if self.indices is not None:
@@ -252,6 +308,126 @@ class RiverForcing:
             raise ValueError('Only "DAI" is a valid option for source["name"].')
 
         return data
+
+    def _get_bgc_data(self) -> Rivr2oRiverBGCDataset:
+        """Load the RIVR2O river BGC export dataset."""
+        return Rivr2oRiverBGCDataset(
+            filename=self.bgc_source["path"],
+            start_time=self.start_time,
+            end_time=self.end_time,
+        )
+
+    def _get_river_sample_coords(
+        self, river_names: list[str]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return mean lat/lon at each river's coastal injection point(s)."""
+        lons = []
+        lats = []
+        for river_name in river_names:
+            cell_lons = []
+            cell_lats = []
+            for eta_rho, xi_rho in self.indices[river_name]:
+                cell_lons.append(float(self.grid.ds.lon_rho[eta_rho, xi_rho]))
+                cell_lats.append(float(self.grid.ds.lat_rho[eta_rho, xi_rho]))
+            lons.append(np.mean(cell_lons))
+            lats.append(np.mean(cell_lats))
+        return np.asarray(lons), np.asarray(lats)
+
+    def _rivr2o_export_to_concentration(
+        self,
+        export: xr.DataArray,
+        molar_mass_g: float,
+        river_volume: xr.DataArray,
+        river_time: xr.DataArray,
+    ) -> xr.DataArray:
+        """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
+        export = export.interp(
+            time=clamp_rivr2o_time(river_time),
+            method="nearest",
+        )
+        mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
+        mmol_flux = mass_flux_g_s / molar_mass_g
+        return (mmol_flux / river_volume).astype(np.float32)
+
+    def _set_river_tracer_values(
+        self, ds: xr.Dataset, tracer_name: str, values: xr.DataArray
+    ) -> None:
+        ntracer = int(np.where(ds.tracer_name.values == tracer_name)[0][0])
+        ds["river_tracer"].loc[{"ntracers": ntracer}] = values
+
+    def _apply_rivr2o_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
+        """Overlay RIVR2O-derived BGC tracers onto default river tracer values."""
+        bgc_data = self._get_bgc_data()
+        river_names = [str(name) for name in ds.river_name.values]
+        lons, lats = self._get_river_sample_coords(river_names)
+
+        sampled = bgc_data.sample_at_points(
+            lon=lons,
+            lat=lats,
+            straddle=self.grid.straddle,
+            method="nearest",
+        )
+
+        dic_from_file = self._rivr2o_export_to_concentration(
+            sampled["DIC"],
+            _RIVR2O_MOLAR_MASS_G["DIC"],
+            ds["river_volume"],
+            ds["river_time"],
+        )
+        doc_l_conc = self._rivr2o_export_to_concentration(
+            sampled["DOC_l"],
+            _RIVR2O_MOLAR_MASS_G["DOC_l"],
+            ds["river_volume"],
+            ds["river_time"],
+        )
+        doc_sl_conc = self._rivr2o_export_to_concentration(
+            sampled["DOC_sl"],
+            _RIVR2O_MOLAR_MASS_G["DOC_sl"],
+            ds["river_volume"],
+            ds["river_time"],
+        )
+        poc_conc = self._rivr2o_export_to_concentration(
+            sampled["POC"],
+            _RIVR2O_MOLAR_MASS_G["POC"],
+            ds["river_volume"],
+            ds["river_time"],
+        )
+
+        dic_forcing = dic_from_file + doc_l_conc
+        doc_forcing = doc_sl_conc + poc_conc
+        alk_forcing = dic_from_file
+        don_forcing = doc_sl_conc * _DON_FROM_DOC_SL + poc_conc * _DON_FROM_POC
+        dop_forcing = doc_sl_conc * _DOP_FROM_DOC_SL + poc_conc * _DOP_FROM_POC
+
+        self._set_river_tracer_values(ds, "DIC", dic_forcing)
+        self._set_river_tracer_values(ds, "DOC", doc_forcing)
+        self._set_river_tracer_values(ds, "DON", don_forcing.astype(np.float32))
+        self._set_river_tracer_values(ds, "DOP", dop_forcing.astype(np.float32))
+        self._set_river_tracer_values(ds, "ALK", alk_forcing)
+        self._set_river_tracer_values(ds, "DIC_ALT_CO2", dic_forcing)
+        self._set_river_tracer_values(ds, "ALK_ALT_CO2", alk_forcing)
+        self._set_river_tracer_values(
+            ds,
+            "NO3",
+            self._rivr2o_export_to_concentration(
+                sampled["NO3"],
+                _RIVR2O_MOLAR_MASS_G["NO3"],
+                ds["river_volume"],
+                ds["river_time"],
+            ),
+        )
+        self._set_river_tracer_values(
+            ds,
+            "PO4",
+            self._rivr2o_export_to_concentration(
+                sampled["PO4"],
+                _RIVR2O_MOLAR_MASS_G["PO4"],
+                ds["river_volume"],
+                ds["river_time"],
+            ),
+        )
+
+        return ds
 
     def _move_rivers_to_closest_coast(self, target_coords, data):
         """Move river mouths to the closest coastal grid cell.
@@ -403,6 +579,9 @@ class RiverForcing:
             ds, self.model_reference_date, self.climatology, time_name="river_time"
         )
         ds = ds.assign_coords({"river_time": time})
+
+        if self.bgc_source is not None and self.bgc_source["name"] == "RIVR2O":
+            ds = self._apply_rivr2o_bgc_tracers(ds)
 
         return ds
 

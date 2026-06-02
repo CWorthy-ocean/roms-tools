@@ -878,6 +878,7 @@ def bgc_surface_forcing_from_mbl_co2(use_dask: bool) -> SurfaceForcing:
         source={"name": "MBL_co2", "path": fname_bgc},  # type: ignore[dict-item]
         type="bgc",
         coarse_grid_mode="never",
+        use_dask=use_dask,
     )
 
 

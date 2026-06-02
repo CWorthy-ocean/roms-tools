@@ -345,11 +345,11 @@ class RiverForcing:
         export: xr.DataArray,
         molar_mass_g: float,
         river_volume: xr.DataArray,
-        river_time: xr.DataArray,
+        target_time: xr.DataArray,
     ) -> xr.DataArray:
         """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
         export = export.interp(
-            time=clamp_rivr2o_time(river_time),
+            time=clamp_rivr2o_time(target_time),
             method="nearest",
         )
         mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
@@ -375,29 +375,30 @@ class RiverForcing:
             method="nearest",
         )
 
+        abs_time = ds["abs_time"]
         dic_from_file = self._rivr2o_export_to_concentration(
             sampled["DIC"],
             _RIVR2O_MOLAR_MASS_G["DIC"],
             ds["river_volume"],
-            ds["river_time"],
+            abs_time,
         )
         doc_l_conc = self._rivr2o_export_to_concentration(
             sampled["DOC_l"],
             _RIVR2O_MOLAR_MASS_G["DOC_l"],
             ds["river_volume"],
-            ds["river_time"],
+            abs_time,
         )
         doc_sl_conc = self._rivr2o_export_to_concentration(
             sampled["DOC_sl"],
             _RIVR2O_MOLAR_MASS_G["DOC_sl"],
             ds["river_volume"],
-            ds["river_time"],
+            abs_time,
         )
         poc_conc = self._rivr2o_export_to_concentration(
             sampled["POC"],
             _RIVR2O_MOLAR_MASS_G["POC"],
             ds["river_volume"],
-            ds["river_time"],
+            abs_time,
         )
 
         dic_forcing = dic_from_file + doc_l_conc
@@ -420,7 +421,7 @@ class RiverForcing:
                 sampled["NO3"],
                 _RIVR2O_MOLAR_MASS_G["NO3"],
                 ds["river_volume"],
-                ds["river_time"],
+                abs_time,
             ),
         )
         self._set_river_tracer_values(
@@ -430,7 +431,7 @@ class RiverForcing:
                 sampled["PO4"],
                 _RIVR2O_MOLAR_MASS_G["PO4"],
                 ds["river_volume"],
-                ds["river_time"],
+                abs_time,
             ),
         )
 

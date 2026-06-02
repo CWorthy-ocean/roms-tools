@@ -38,3 +38,6 @@ def ensure_proj_database() -> str:
 
     pyproj.datadir.set_data_dir(data_dir_str)
     return data_dir_str
+
+
+ensure_proj_database()

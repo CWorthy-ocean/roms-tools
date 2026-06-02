@@ -21,7 +21,6 @@ from pydantic import BaseModel
 from roms_tools.constants import R_EARTH
 
 if typing.TYPE_CHECKING:
-    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
     from roms_tools.setup.grid import Grid
 
 yaml.SafeDumper.add_multi_representer(

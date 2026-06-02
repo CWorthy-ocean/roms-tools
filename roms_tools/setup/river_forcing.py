@@ -46,12 +46,12 @@ MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
 _RIVR2O_MOLAR_MASS_G = {
-    "DIC": 12.011, # molar mass of C
-    "DOC_l": 12.011, # molar mass of C
-    "DOC_sl": 12.011, # molar mass of C
-    "POC": 12.011, # molar mass of C
-    "NO3": 14.007, # molar mass of N
-    "PO4": 30.974, # molar mass of P
+    "DIC": 12.011,  # molar mass of C
+    "DOC_l": 12.011,  # molar mass of C
+    "DOC_sl": 12.011,  # molar mass of C
+    "POC": 12.011,  # molar mass of C
+    "NO3": 14.007,  # molar mass of N
+    "PO4": 30.974,  # molar mass of P
 }
 _DON_FROM_DOC_SL = 103 / 2583
 _DON_FROM_POC = 25 / 276
@@ -110,7 +110,7 @@ class RiverForcing:
 
         If ``include_bgc=True`` and ``bgc_source`` is omitted, ``"CONSTANTS"`` is used.
 
-        For ``"RIVR2O"``, the product covers 1903–2024. Simulation times before 1903
+        For ``"RIVR2O"``, the product covers 1903-2024. Simulation times before 1903
         or after 2024 use the 1903 and 2024 fields, respectively.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
@@ -232,9 +232,7 @@ class RiverForcing:
                     '`bgc_source` must include a "path" when name is "RIVR2O".'
                 )
         elif self.bgc_source is not None:
-            logging.warning(
-                "`bgc_source` is ignored because `include_bgc` is False."
-            )
+            logging.warning("`bgc_source` is ignored because `include_bgc` is False.")
 
         # Check if 'indices' is provided and has the correct format
         if self.indices is not None:
@@ -311,8 +309,14 @@ class RiverForcing:
 
     def _get_bgc_data(self) -> Rivr2oRiverBGCDataset:
         """Load the RIVR2O river BGC export dataset."""
+        bgc_source = self.bgc_source
+        if bgc_source is None:
+            raise RuntimeError("bgc_source must be set for RIVR2O.")
+        path = bgc_source.get("path")
+        if path is None or isinstance(path, bool):
+            raise ValueError('bgc_source must include a "path" when name is "RIVR2O".')
         return Rivr2oRiverBGCDataset(
-            filename=self.bgc_source["path"],
+            filename=path,
             start_time=self.start_time,
             end_time=self.end_time,
         )
@@ -321,12 +325,15 @@ class RiverForcing:
         self, river_names: list[str]
     ) -> tuple[np.ndarray, np.ndarray]:
         """Return mean lat/lon at each river's coastal injection point(s)."""
+        if self.indices is None:
+            raise RuntimeError("River indices are not set.")
+        indices = self.indices
         lons = []
         lats = []
         for river_name in river_names:
             cell_lons = []
             cell_lats = []
-            for eta_rho, xi_rho in self.indices[river_name]:
+            for eta_rho, xi_rho in indices[river_name]:
                 cell_lons.append(float(self.grid.ds.lon_rho[eta_rho, xi_rho]))
                 cell_lats.append(float(self.grid.ds.lat_rho[eta_rho, xi_rho]))
             lons.append(np.mean(cell_lons))

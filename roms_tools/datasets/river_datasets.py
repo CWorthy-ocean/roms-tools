@@ -85,9 +85,7 @@ class RiverTracerDefaultsDataset:
         The loaded NetCDF dataset (in memory).
     """
 
-    filename: str | Path = field(
-        default_factory=download_river_tracer_defaults
-    )
+    filename: str | Path = field(default_factory=download_river_tracer_defaults)
     value_option_index: int = RECOMMENDED_VALUE_INDEX
     defaults: dict[str, float] = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
@@ -119,9 +117,7 @@ class RiverTracerDefaultsDataset:
                     f"'{VALUE_OPTION_DIM}'."
                 )
 
-            value = float(
-                da.isel({VALUE_OPTION_DIM: self.value_option_index}).values
-            )
+            value = float(da.isel({VALUE_OPTION_DIM: self.value_option_index}).values)
             if np.isnan(value):
                 raise ValueError(
                     f"Value for tracer '{tracer_name}' at "
@@ -621,7 +617,7 @@ class Rivr2oRiverBGCDataset:
     in each filename (mid-year, 1 July), because the native ``time`` variable
     is often unset in the source files.
 
-    The product spans 1903–2024. Requests before 1903 or after 2024 use the boundary
+    The product spans 1903-2024. Requests before 1903 or after 2024 use the boundary
     years when selecting data and when mapping onto river forcing times.
 
     Parameters
@@ -701,11 +697,7 @@ class Rivr2oRiverBGCDataset:
             ds = xr.open_dataset(file, decode_times=False, chunks=chunks)
             year = _parse_rivr2o_year(file)
             ds = ds.assign_coords(
-                {
-                    self.dim_names["time"]: [
-                        np.datetime64(datetime(year, 7, 1), "ns")
-                    ]
-                }
+                {self.dim_names["time"]: [np.datetime64(datetime(year, 7, 1), "ns")]}
             )
             ds_list.append(ds)
 
@@ -755,8 +747,7 @@ class Rivr2oRiverBGCDataset:
             dim_name = self.dim_names[dim_key]
             if dim_name not in ds.dims:
                 raise ValueError(
-                    f"Dataset is missing required dimension '{dim_name}' "
-                    f"({dim_key})."
+                    f"Dataset is missing required dimension '{dim_name}' ({dim_key})."
                 )
 
         missing_tracers = [name for name in self.tracer_names if name not in ds]
@@ -821,8 +812,8 @@ class Rivr2oRiverBGCDataset:
         lon, lat : array-like or scalar
             Longitude and latitude of sample points in degrees.
         straddle : bool, optional
-            If True, longitudes greater than 180° are converted to -180–180 before
-            sampling. If False, negative longitudes are converted to 0–360.
+            If True, longitudes greater than 180° are converted to -180-180 before
+            sampling. If False, negative longitudes are converted to 0-360.
         method : str, optional
             Interpolation method passed to :meth:`xarray.Dataset.interp`.
 

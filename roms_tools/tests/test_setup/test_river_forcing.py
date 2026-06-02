@@ -1022,8 +1022,12 @@ class TestRiverForcingBGCSource:
         )
 
         assert river_forcing.bgc_source == {"name": "CONSTANTS"}
-        po4 = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "PO4")
-        alk = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "ALK")
+        po4 = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "PO4"
+        )
+        alk = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "ALK"
+        )
         assert float(po4.min()) == defaults["PO4"]
         assert float(alk.min()) == defaults["ALK"]
 
@@ -1038,7 +1042,9 @@ class TestRiverForcingBGCSource:
             bgc_source={"name": "CONSTANTS"},
         )
 
-        dic = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DIC")
+        dic = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "DIC"
+        )
         assert float(dic.min()) == defaults["DIC"]
 
     def test_bgc_rivr2o_requires_path(self, iceland_test_grid, single_cell_indices):
@@ -1080,11 +1086,21 @@ class TestRiverForcingBGCSource:
             convert_to_climatology="never",
         )
 
-        dic = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DIC")
-        doc = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DOC")
-        don = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DON")
-        dop = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "DOP")
-        alk = river_forcing.ds.river_tracer.sel(ntracers=river_forcing.ds.tracer_name == "ALK")
+        dic = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "DIC"
+        )
+        doc = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "DOC"
+        )
+        don = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "DON"
+        )
+        dop = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "DOP"
+        )
+        alk = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "ALK"
+        )
         dic_alt = river_forcing.ds.river_tracer.sel(
             ntracers=river_forcing.ds.tracer_name == "DIC_ALT_CO2"
         )
@@ -1094,7 +1110,9 @@ class TestRiverForcingBGCSource:
         volume = river_forcing.ds.river_volume
 
         def expected_conc(export):
-            return (export * 1e6 / SECONDS_PER_YEAR / 12.011 / volume).astype(np.float32)
+            return (export * 1e6 / SECONDS_PER_YEAR / 12.011 / volume).astype(
+                np.float32
+            )
 
         expected_dic_file = expected_conc(export_value)
         expected_doc_l = expected_conc(export_value / 2)

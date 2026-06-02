@@ -5,14 +5,12 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import regionmask
 import xarray as xr
 from scipy.ndimage import label
 
 from roms_tools.proj_config import ensure_proj_database
 from roms_tools.setup.utils import handle_boundaries
-
-ensure_proj_database()
-import regionmask  # noqa: E402  # after PROJ database is configured
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
 

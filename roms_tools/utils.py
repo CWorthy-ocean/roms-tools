@@ -912,10 +912,12 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     if use_dask:
         from dask.diagnostics import ProgressBar
 
-        with ProgressBar():
-            xr.save_mfdataset(dataset_list, output_filenames)
+        for ds, fname in zip(dataset_list, output_filenames):
+            with ProgressBar():
+                ds.to_netcdf(fname)
     else:
-        xr.save_mfdataset(dataset_list, output_filenames)
+        for ds, fname in zip(dataset_list, output_filenames):
+            ds.to_netcdf(fname)
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

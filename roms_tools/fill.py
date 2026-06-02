@@ -98,11 +98,6 @@ class LateralFill:
         # Initial guess: ocean points take their original values, land points are set to 0
         x0 = xr.where(self.mask, var, 0)
 
-        if x0.isnull().any():
-            raise ValueError(
-                "LateralFill error: The fill operation cannot proceed because the input field contains NaNs at grid points marked as valid by the mask."
-            )
-
         # Apply the iterative solver using a custom NumPy function
         var_filled = xr.apply_ufunc(
             _lateral_fill_np_array,
@@ -150,6 +145,11 @@ def _lateral_fill_np_array(x0, b, ml, tol=1.0e-4):
         The filled 2D array where NaN values have been replaced with iteratively
         computed values, and non-NaN values remain unchanged.
     """
+    if np.any(np.isnan(x0)):
+        raise ValueError(
+            "LateralFill error: The fill operation cannot proceed because the input field "
+            "contains NaNs at grid points marked as valid by the mask."
+        )
     b_flat = b.flatten()
     x0_flat = x0.flatten()
     x = ml.solve(b_flat, x0_flat, tol=tol)

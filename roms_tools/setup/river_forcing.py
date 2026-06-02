@@ -352,9 +352,19 @@ class RiverForcing:
             time=clamp_rivr2o_time(target_time),
             method="nearest",
         )
+        export = self._align_rivr2o_concentration(export)
         mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
         mmol_flux = mass_flux_g_s / molar_mass_g
         return (mmol_flux / river_volume).astype(np.float32)
+
+    def _align_rivr2o_concentration(self, values: xr.DataArray) -> xr.DataArray:
+        """Match RIVR2O sample dimensions to ``river_tracer`` (river_time, nriver)."""
+        if "points" in values.dims:
+            values = values.rename(points="nriver")
+        if "time" in values.dims:
+            values = values.rename(time="river_time")
+        dims = [d for d in ("river_time", "nriver") if d in values.dims]
+        return values.transpose(*dims)
 
     def _set_river_tracer_values(
         self, ds: xr.Dataset, tracer_name: str, values: xr.DataArray

@@ -558,7 +558,7 @@ def test_surface_forcing_creation(
     assert not sfc_forcing.use_coarse_grid
     assert sfc_forcing.ds.attrs["source"] == expected_name
     if expected_name == "MBL_co2":
-        for time_coord in ["xco2_air_time"]:
+        for time_coord in ["xco2_time"]:
             assert sfc_forcing.ds.coords[time_coord].attrs["units"] == "days"
     else:
         for time_coord in ["iron_time", "dust_time", "nox_time", "nhy_time"]:
@@ -777,7 +777,7 @@ def test_surface_forcing_bgc_plot(sfc_forcing_fixture, request):
     sfc_forcing.plot(var_name="dust", time=0)
 
 
-def test_surface_forcing_bgc_plot(bgc_surface_forcing_from_mbl_co2):
+def test_surface_forcing_xco2_plot(bgc_surface_forcing_from_mbl_co2):
     """Test plot method."""
     sfc_forcing = bgc_surface_forcing_from_mbl_co2
     sfc_forcing.plot(var_name="xco2_air", time=0)

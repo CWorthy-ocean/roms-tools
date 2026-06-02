@@ -1196,11 +1196,9 @@ class MBLDataset(LatLonDataset):
 
     Notes
     -----
-    Data is only available for time vs latitude. The data are replicated for all longitude points to 
+    Data is only available for time vs latitude. The data are replicated for all longitude points to
     create a full global lat, lon dataset.
     """
-
-    #_default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     needs_lateral_fill: bool = False
     has_encoded_times: bool = False
@@ -1209,7 +1207,7 @@ class MBLDataset(LatLonDataset):
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Ensure the dataset's time dimension is correctly defined and standardized.
 
-        This method creates an xarray dataset from a numpy ndarray. It then converts the time type 
+        This method creates an xarray dataset from a numpy ndarray. It then converts the time type
         and extrapolates the latitude values across all longitudes.
 
         Returns
@@ -1225,17 +1223,16 @@ class MBLDataset(LatLonDataset):
         # Handle time dimension
         if len(ds["time"]) != 2209:
             MBL_URL = "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
-            raise ValueError(
-                f"Please use the MBL dataset provided at {MBL_URL}"
-            )
+            raise ValueError(f"Please use the MBL dataset provided at {MBL_URL}")
 
         # Convert decimal year to datetime
         decimal_yr = ds["time"].values
         years = np.floor(decimal_yr).astype(int)
-        step  = np.round((decimal_yr - years) * 48).astype(int)   # the data provides 48 evenly spaced times per year
+        # the data provides 48 evenly spaced times per year
+        step = np.round((decimal_yr - years) * 48).astype(int)
 
         year_start = np.array([np.datetime64(f"{y}-01-01", "s") for y in years])
-        year_end   = np.array([np.datetime64(f"{y+1}-01-01", "s") for y in years])
+        year_end = np.array([np.datetime64(f"{y + 1}-01-01", "s") for y in years])
         dur_s = (year_end - year_start).astype("timedelta64[s]").astype(np.int64)
 
         times = year_start + (step * dur_s // 48).astype("timedelta64[s]")
@@ -1249,15 +1246,16 @@ class MBLDataset(LatLonDataset):
 
 @dataclass(kw_only=True)
 class MBLco2Dataset(MBLDataset):
-
-    dataset_name: ClassVar[str] = "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+    dataset_name: ClassVar[str] = (
+        "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+    )
     """The MBL dataset url"""
-    
+
     def __post_init__(self) -> None:
         if not self.filename:
             self.filename = self.dataset_name
         self.ds_loader_fn = self._load_from_mbl
-    
+
         super().__post_init__()
 
     dim_names: dict[str, str] = field(
@@ -1286,47 +1284,92 @@ class MBLco2Dataset(MBLDataset):
             The converted xarray dataset
         """
         data = np.loadtxt(self.filename)
-        
+
         # Create latitude array corresponding to data
         sat_lat = [
-                   -1.00, -0.95, -0.90, -0.85, -0.80, 
-                   -0.75, -0.70, -0.65, -0.60, -0.55, 
-                   -0.50, -0.45, -0.40, -0.35, -0.30, 
-                   -0.25, -0.20, -0.15, -0.10, -0.05, 
-                   0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 
-                   0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 
-                   0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 
-                   0.90, 0.95, 1.00
-                   ]
-        
-        lat = np.asin(sat_lat)* 180/np.pi
-        
+            -1.00,
+            -0.95,
+            -0.90,
+            -0.85,
+            -0.80,
+            -0.75,
+            -0.70,
+            -0.65,
+            -0.60,
+            -0.55,
+            -0.50,
+            -0.45,
+            -0.40,
+            -0.35,
+            -0.30,
+            -0.25,
+            -0.20,
+            -0.15,
+            -0.10,
+            -0.05,
+            0.00,
+            0.05,
+            0.10,
+            0.15,
+            0.20,
+            0.25,
+            0.30,
+            0.35,
+            0.40,
+            0.45,
+            0.50,
+            0.55,
+            0.60,
+            0.65,
+            0.70,
+            0.75,
+            0.80,
+            0.85,
+            0.90,
+            0.95,
+            1.00,
+        ]
+
+        lat = np.asin(sat_lat) * 180 / np.pi
         # Remove columns with uncertainty data
         num_cols = data.shape[1]
-        cols_to_use = [0, 1] + list(range(3, num_cols, 2))
+        cols_to_use = [0, 1, *list(range(3, num_cols, 2))]
 
         data = data[:, cols_to_use]
         time = data[:, 0]
         co2 = data[:, 1:]
-        
+
         ds = xr.Dataset(
-            {"co2": (("time", "latitude"), co2, {"units": "µmol mol⁻¹", "long_name": "CO2, Marine boundary layer"})},
+            {
+                "co2": (
+                    ("time", "latitude"),
+                    co2,
+                    {"units": "µmol mol⁻¹", "long_name": "CO2, Marine boundary layer"},
+                )
+            },
             coords={
                 "time": ("time", time, {"units": "decimal_year"}),
-                "latitude": ("latitude", lat, {"units": "Degrees North", "long_name": "Latitude"}),
+                "latitude": (
+                    "latitude",
+                    lat,
+                    {"units": "Degrees North", "long_name": "Latitude"},
+                ),
             },
         )
-        
+
         # Expand CO2 value across all longitude, for each time, lat value
         lon = np.arange(-180.0, 180.0, 2.0)
-        ds = ds.assign_coords(longitude=("longitude", lon))#, {"units": "Degrees East"}))
+        ds = ds.assign_coords(longitude=("longitude", lon))
         ds["longitude"].attrs = {"units": "Degrees East", "long_name": "Longitude"}
 
-        ds["co2"] = ds["co2"].expand_dims(longitude=ds["longitude"]).transpose(
-            "time", "latitude", "longitude"
+        ds["co2"] = (
+            ds["co2"]
+            .expand_dims(longitude=ds["longitude"])
+            .transpose("time", "latitude", "longitude")
         )
 
         return ds
+
 
 @dataclass(kw_only=True)
 class UnifiedDataset(LatLonDataset):
@@ -1743,9 +1786,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
             self.ds = ds
 
         mask = xr.where(
-            self.ds[self.var_names["dust"]]
-            .isel({self.dim_names["time"]: 0})
-            .isnull(),
+            self.ds[self.var_names["dust"]].isel({self.dim_names["time"]: 0}).isnull(),
             0,
             1,
         )

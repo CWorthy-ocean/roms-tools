@@ -42,7 +42,7 @@
     "units": "nmol/cm^2/s",
     "source": " Hamilton et al. (2022)",
     "source file": "/data/project7/pdamien/DATA/BGC/Srf_BGC_Flx/IronDeposition_Hamilton/Hamilton2022/CAM6-MIMI_2002-2020CLIMOMEAN_IRONDEP.nc",
-    "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
+    "coordinates": "abs_time dust_time iron_time month nhy_time nox_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

@@ -38,6 +38,7 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    _estimate_dask_num_workers,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
@@ -161,6 +162,11 @@ class InitialConditions:
     """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    num_dask_save_workers: int | None = None
+    """Number of concurrent dask workers during save(). When None (default), auto-estimated
+    from source data chunk size and available RAM. Set explicitly to override, e.g. on HPC
+    clusters where psutil may not reflect the SLURM job allocation."""
+
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -168,10 +174,13 @@ class InitialConditions:
     """Whether to account for sea surface height when computing depth coordinates."""
     ds_depth_coords: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing the depth coordinates."""
+    _num_dask_workers: int | None = field(init=False, repr=False)
+    """Auto-estimated safe worker count derived from source chunk size; see num_dask_save_workers."""
 
     def __post_init__(self):
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
+        self._num_dask_workers = None  # updated by _process_data from source chunk sizes
 
         self._input_checks()
 
@@ -192,6 +201,14 @@ class InitialConditions:
 
         ds = self._add_global_metadata(ds)
 
+        # Materialize when using dask with validation to avoid double computation:
+        # _validate() would trigger one full compute pass, and save() would
+        # re-compute from cold source.  Materializing once makes validation
+        # instant and save() pure I/O.  Set bypass_validation=True for long
+        # runs to keep output lazy and compute only during save().
+        if self.use_dask and not self.bypass_validation:
+            ds = ds.compute()
+
         if not self.bypass_validation:
             self._validate(ds)
 
@@ -205,6 +222,14 @@ class InitialConditions:
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data(forcing_type=type)
+        if self.use_dask and self.num_dask_save_workers is None:
+            est = _estimate_dask_num_workers(data.ds)
+            # Keep the most conservative estimate across physics and bgc sources
+            self._num_dask_workers = (
+                min(self._num_dask_workers, est)
+                if self._num_dask_workers is not None
+                else est
+            )
         data.choose_subdomain(
             target_coords,
             unchunk_lateral_dims=True,
@@ -988,8 +1013,16 @@ class InitialConditions:
         dataset_list = [self.ds]
         output_filenames = [str(filepath)]
 
+        n_workers = (
+            self.num_dask_save_workers
+            if self.num_dask_save_workers is not None
+            else self._num_dask_workers
+        )
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            num_dask_save_workers=n_workers,
         )
 
         return saved_filenames

@@ -37,6 +37,7 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    _estimate_dask_num_workers,
     interpolate_from_rho_to_u,
     interpolate_from_rho_to_v,
     rotate_velocities,
@@ -143,6 +144,10 @@ class BoundaryForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    num_dask_save_workers: int | None = None
+    """Number of concurrent dask workers during save(). When None (default), auto-estimated
+    from source data chunk size and available RAM. Set explicitly to override, e.g. on HPC
+    clusters where psutil may not reflect the SLURM job allocation."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -151,6 +156,8 @@ class BoundaryForcing:
     """Whether to account for sea surface height when computing depth coordinates."""
     ds_depth_coords: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing the depth coordinates."""
+    _num_dask_workers: int | None = field(init=False, repr=False)
+    """Auto-estimated safe worker count derived from source chunk size; see num_dask_save_workers."""
 
     def __post_init__(self):
         # Initialize depth coordinates
@@ -170,8 +177,18 @@ class BoundaryForcing:
             )
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
+            # Estimate after unchunking: chunk size now reflects full lateral extent
+            if self.use_dask and self.num_dask_save_workers is None:
+                self._num_dask_workers = _estimate_dask_num_workers(data.ds)
+            else:
+                self._num_dask_workers = 1
             data.extrapolate_deepest_to_bottom()
             data.apply_lateral_fill()
+        else:
+            if self.use_dask and self.num_dask_save_workers is None:
+                self._num_dask_workers = _estimate_dask_num_workers(data.ds)
+            else:
+                self._num_dask_workers = 1
 
         self._set_variable_info(data)
         self._set_boundary_info()
@@ -393,6 +410,16 @@ class BoundaryForcing:
 
         # Add global information
         ds = self._add_global_metadata(data, ds)
+
+        # When using dask with validation enabled, materialize the output dataset
+        # before validating.  _validate() would otherwise trigger one full compute
+        # pass (reading cold source data), and save() would then re-compute from
+        # scratch, doubling wall time.  Materializing once here makes validation
+        # instant and save() pure I/O.  For very long time series where keeping
+        # the full output in RAM is infeasible, set bypass_validation=True; the
+        # output stays lazy and is computed once during save().
+        if self.use_dask and not self.bypass_validation:
+            ds = ds.compute()
 
         if not self.bypass_validation:
             self._validate(ds)
@@ -1070,8 +1097,16 @@ class BoundaryForcing:
             dataset_list = [self.ds]
             output_filenames = [str(filepath)]
 
+        n_workers = (
+            self.num_dask_save_workers
+            if self.num_dask_save_workers is not None
+            else self._num_dask_workers
+        )
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            num_dask_save_workers=n_workers,
         )
 
         return saved_filenames

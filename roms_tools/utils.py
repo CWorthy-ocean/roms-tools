@@ -844,7 +844,87 @@ def transpose_dimensions(da: xr.DataArray) -> xr.DataArray:
     return transposed_da
 
 
-def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
+def _estimate_dask_num_workers(source_ds: xr.Dataset, ram_fraction: float = 0.5) -> int:
+    """Estimate a safe number of dask workers for saving based on source chunk memory.
+
+    Uses psutil to determine available memory. On HPC clusters where psutil reports
+    node-wide memory rather than the job allocation, set ``num_dask_save_workers``
+    explicitly instead of relying on this estimate.
+
+    Parameters
+    ----------
+    source_ds : xr.Dataset
+        The source dataset (before regridding) whose chunk sizes determine peak memory
+        during dask compute. Should be sampled while the source data object is still in
+        scope in __post_init__, before it goes out of scope.
+    ram_fraction : float, optional
+        Fraction of available memory to budget for concurrent dask tasks. Default 0.5.
+
+    Returns
+    -------
+    int
+        Estimated safe number of concurrent dask workers.
+    """
+    import os
+
+    import psutil
+
+    available = psutil.virtual_memory().available
+    cpu_cap = os.cpu_count() or 1
+
+    max_chunk_bytes = 0
+    for var in source_ds.data_vars:
+        da = source_ds[var]
+        if da.chunks:
+            chunk_bytes = da.dtype.itemsize * int(np.prod([c[0] for c in da.chunks]))
+            max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
+
+    if max_chunk_bytes == 0:
+        logging.info(
+            "num_dask_save_workers: source data has no dask chunks; defaulting to %d",
+            cpu_cap,
+        )
+        return cpu_cap
+
+    budget = available * ram_fraction
+    n = max(1, min(cpu_cap, int(budget / max_chunk_bytes)))
+    logging.info(
+        "num_dask_save_workers auto-estimated: %d "
+        "(source chunk: %.0f MB, budget: %.0f MB [%.0f%% of psutil available=%.1f GB], cpu_cap: %d)",
+        n,
+        max_chunk_bytes / 1e6,
+        budget / 1e6,
+        ram_fraction * 100,
+        available / 1e9,
+        cpu_cap,
+    )
+    return n
+
+
+def _resolve_unlimited_dims(ds: xr.Dataset) -> list[str]:
+    """Return valid unlimited dimension names for writing, filtering stale encoding.
+
+    Dataset.encoding["unlimited_dims"] can reference a dimension that was renamed
+    (e.g., "time" → "bry_time" via swap_dims). This returns only names that
+    actually exist as dimensions, falling back to any time-like dimension name.
+    """
+    actual_dims = set(ds.dims)
+    stale = ds.encoding.get("unlimited_dims", [])
+    if isinstance(stale, str):
+        stale = [stale]
+    valid = [d for d in stale if d in actual_dims]
+    if not valid:
+        valid = [d for d in actual_dims if "time" in d.lower()]
+    return valid
+
+
+def save_datasets(
+    dataset_list,
+    output_filenames,
+    use_dask=False,
+    verbose=True,
+    num_dask_save_workers=None,
+):
     """Save the list of datasets to netCDF4 files.
 
     Parameters
@@ -858,6 +938,11 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
     verbose : bool, optional
         Whether to log information about the files being written. If True, logs the output filenames.
         Defaults to True.
+    num_dask_save_workers : int or None, optional
+        Number of concurrent dask workers used during each file write. Limits how many
+        chunks are computed simultaneously, bounding peak memory. When None (default),
+        dask's own default (typically all CPU cores) is used. Auto-estimated by each
+        class from source data chunk sizes; can be overridden by the user.
 
     Returns
     -------
@@ -910,14 +995,24 @@ def save_datasets(dataset_list, output_filenames, use_dask=False, verbose=True):
         )
 
     if use_dask:
+        import dask
+        from contextlib import nullcontext
+
         from dask.diagnostics import ProgressBar
 
         for ds, fname in zip(dataset_list, output_filenames):
-            with ProgressBar():
-                ds.to_netcdf(fname)
+            unlimited_dims = _resolve_unlimited_dims(ds)
+            worker_cfg = (
+                dask.config.set(num_workers=num_dask_save_workers)
+                if num_dask_save_workers is not None
+                else nullcontext()
+            )
+            with worker_cfg, ProgressBar():
+                ds.to_netcdf(fname, unlimited_dims=unlimited_dims)
     else:
         for ds, fname in zip(dataset_list, output_filenames):
-            ds.to_netcdf(fname)
+            unlimited_dims = _resolve_unlimited_dims(ds)
+            ds.to_netcdf(fname, unlimited_dims=unlimited_dims)
 
     saved_filenames.extend(Path(f) for f in output_filenames)
 

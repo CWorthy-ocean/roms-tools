@@ -35,6 +35,7 @@ from roms_tools.setup.utils import (
     write_to_yaml,
 )
 from roms_tools.utils import (
+    _estimate_dask_num_workers,
     interpolate_from_climatology,
     rotate_velocities,
     save_datasets,
@@ -159,17 +160,27 @@ class SurfaceForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    num_dask_save_workers: int | None = None
+    """Number of concurrent dask workers during save(). When None (default), auto-estimated
+    from source data chunk size and available RAM. Set explicitly to override, e.g. on HPC
+    clusters where psutil may not reflect the SLURM job allocation."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
     use_coarse_grid: bool = field(init=False, repr=False)
     """Whether data is interpolated onto grid coarsened by factor 2."""
+    _num_dask_workers: int | None = field(init=False, repr=False)
+    """Auto-estimated safe worker count derived from source chunk size; see num_dask_save_workers."""
 
     def __post_init__(self):
         self._input_checks()
 
         data = self._get_data()
+        if self.use_dask and self.num_dask_save_workers is None:
+            self._num_dask_workers = _estimate_dask_num_workers(data.ds)
+        else:
+            self._num_dask_workers = 1
 
         if self.coarse_grid_mode == "always":
             use_coarse_grid = True
@@ -276,6 +287,14 @@ class SurfaceForcing:
         d_meta = get_variable_metadata()
 
         ds = self._write_into_dataset(processed_fields, data, d_meta)
+
+        # Materialize when using dask with validation to avoid double computation:
+        # _validate() would trigger one full compute pass, and save() would
+        # re-compute from cold source.  Materializing once makes validation
+        # instant and save() pure I/O.  Set bypass_validation=True for long
+        # runs to keep output lazy and compute only during save().
+        if self.use_dask and not self.bypass_validation:
+            ds = ds.compute()
 
         if not self.bypass_validation:
             self._validate(ds)
@@ -860,8 +879,16 @@ class SurfaceForcing:
             dataset_list = [self.ds]
             output_filenames = [str(filepath)]
 
+        n_workers = (
+            self.num_dask_save_workers
+            if self.num_dask_save_workers is not None
+            else self._num_dask_workers
+        )
         saved_filenames = save_datasets(
-            dataset_list, output_filenames, use_dask=self.use_dask
+            dataset_list,
+            output_filenames,
+            use_dask=self.use_dask,
+            num_dask_save_workers=n_workers,
         )
 
         return saved_filenames

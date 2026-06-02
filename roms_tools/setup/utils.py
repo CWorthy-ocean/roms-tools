@@ -1525,7 +1525,7 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
     if isinstance(forcing_object, BaseModel):
         field_names = forcing_object.model_fields.keys()
     elif is_dataclass(forcing_object):
-        field_names = [f.name for f in fields(forcing_object)]
+        field_names = [f.name for f in fields(forcing_object) if f.init]
     else:
         raise TypeError("Forcing object must be a dataclass or pydantic model")
 

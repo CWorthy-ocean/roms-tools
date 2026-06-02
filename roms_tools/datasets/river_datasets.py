@@ -150,7 +150,7 @@ def rivr2o_boundary_time(year: int) -> np.datetime64:
 def clamp_rivr2o_time(time: xr.DataArray) -> xr.DataArray:
     """Clamp times to the valid RIVR2O product range, holding boundary values.
 
-    Expects absolute datetimes (e.g. ``ds[\"abs_time\"]``), not ROMS relative
+    Expects absolute datetimes (e.g. ``ds['abs_time']``), not ROMS relative
     ``river_time`` in days since the model reference date.
     """
     return time.clip(

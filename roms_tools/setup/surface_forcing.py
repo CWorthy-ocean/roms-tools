@@ -293,11 +293,14 @@ class SurfaceForcing:
         # re-compute from cold source.  Materializing once makes validation
         # instant and save() pure I/O.  Set bypass_validation=True for long
         # runs to keep output lazy and compute only during save().
-        if self.use_dask and not self.bypass_validation:
-            ds = ds.compute()
-
         if not self.bypass_validation:
+            logging.info(
+                "Validation requested. Please wait for associated data load and processing..."
+            )
+            if self.use_dask:
+                ds = ds.compute()
             self._validate(ds)
+            logging.info("Validation complete.")
 
         # Shift radiation time for hourly ERA5 data
         if self.type == "physics" and self.source["name"] == "ERA5":
@@ -320,6 +323,14 @@ class SurfaceForcing:
         if self.start_time is None and self.end_time is None:
             logging.warning(
                 "Both `start_time` and `end_time` are None. No time filtering will be applied to the source data."
+            )
+
+        if self.use_dask and not self.bypass_validation:
+            logging.warning(
+                "Validation is enabled (bypass_validation=False). When use_dask=True, this "
+                "loads the full output dataset (all time steps × full 2D grid) into RAM before "
+                "saving. For large domains or long time series this may cause a memory overflow. "
+                "Set bypass_validation=True to keep the output lazy and compute it during save() instead."
             )
 
         # Validate the 'type' parameter

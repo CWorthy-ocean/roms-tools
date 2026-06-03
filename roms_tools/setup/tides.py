@@ -1,4 +1,5 @@
 import importlib.metadata
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -178,12 +179,14 @@ class TidalForcing:
 
         ds = self._add_global_metadata(ds)
 
-        # Materialize when using dask with validation to avoid double computation.
-        if self.use_dask and not self.bypass_validation:
-            ds = ds.compute()
-
         if not self.bypass_validation:
+            logging.info(
+                "Validation requested. Please wait for associated data load and processing..."
+            )
+            if self.use_dask:
+                ds = ds.compute()
             self._validate(ds)
+            logging.info("Validation complete.")
 
         ds = ds.assign_coords({"omega": tidal_data.datasets["omega"]})
         ds["ntides"].attrs["long_name"] = "constituent label"

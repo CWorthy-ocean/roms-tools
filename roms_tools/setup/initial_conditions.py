@@ -1,4 +1,5 @@
 import importlib.metadata
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -206,11 +207,14 @@ class InitialConditions:
         # re-compute from cold source.  Materializing once makes validation
         # instant and save() pure I/O.  Set bypass_validation=True for long
         # runs to keep output lazy and compute only during save().
-        if self.use_dask and not self.bypass_validation:
-            ds = ds.compute()
-
         if not self.bypass_validation:
+            logging.info(
+                "Validation requested. Please wait for associated data load and processing..."
+            )
+            if self.use_dask:
+                ds = ds.compute()
             self._validate(ds)
+            logging.info("Validation complete.")
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -495,6 +499,14 @@ class InitialConditions:
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
                 f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
+            )
+
+        if self.use_dask and not self.bypass_validation:
+            logging.warning(
+                "Validation is enabled (bypass_validation=False). When use_dask=True, this "
+                "loads the full 3D output dataset into RAM before saving. For large grids this "
+                "may cause a memory overflow. Set bypass_validation=True to keep the output lazy "
+                "and compute it during save() instead."
             )
 
     def _get_data(

@@ -418,11 +418,14 @@ class BoundaryForcing:
         # instant and save() pure I/O.  For very long time series where keeping
         # the full output in RAM is infeasible, set bypass_validation=True; the
         # output stays lazy and is computed once during save().
-        if self.use_dask and not self.bypass_validation:
-            ds = ds.compute()
-
         if not self.bypass_validation:
+            logging.info(
+                "Validation requested. Please wait for associated data load and processing..."
+            )
+            if self.use_dask:
+                ds = ds.compute()
             self._validate(ds)
+            logging.info("Validation complete.")
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:

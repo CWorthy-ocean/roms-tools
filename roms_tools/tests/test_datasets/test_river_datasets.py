@@ -147,6 +147,31 @@ class TestRivr2oRiverBGCDataset:
         assert sampled["DIC"].isel(time=0).item() == 1.0
         assert sampled["DOC_sl"].isel(time=1).item() == 1.25
 
+    def test_sample_at_points_nearest_nonzero_export(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 7.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 7.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 1.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 1.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 1.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 7.0]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+
+        # Closer to (0, 0) which is zero; nearest non-zero cell is (2, 2).
+        sampled = dataset.sample_at_points(lon=0.1, lat=0.1)
+
+        assert sampled["DIC"].isel(time=0).item() == 7.0
+
     def test_time_clamped_before_min_year(self, tmp_path):
         self._make_files(tmp_path, years=(1903, 1904, 1905))
 

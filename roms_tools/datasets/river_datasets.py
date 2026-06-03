@@ -801,6 +801,41 @@ class Rivr2oRiverBGCDataset:
             end_time=select_end,
         )
 
+    def _adjust_lon_to_grid(
+        self, lon: np.ndarray, *, straddle: bool
+    ) -> np.ndarray:
+        """Put query longitudes in the same convention as the RIVR2O lon coordinate."""
+        lon_dim = self.dim_names["longitude"]
+        grid_lon = self.ds[lon_dim]
+        if float(grid_lon.max()) > 180:
+            return np.where(lon < 0, lon + 360, lon)
+        if straddle:
+            return np.where(lon > 180, lon - 360, lon)
+        return lon
+
+    def _valid_export_cell_indices(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return indices and coordinates of grid cells with non-zero river export."""
+        lat_dim = self.dim_names["latitude"]
+        lon_dim = self.dim_names["longitude"]
+        time_dim = self.dim_names["time"]
+
+        has_export = self.ds[self.tracer_names[0]] > 0
+        for tracer in self.tracer_names[1:]:
+            has_export = has_export | (self.ds[tracer] > 0)
+
+        valid = has_export.any(dim=time_dim)
+        lat_indices, lon_indices = np.where(valid.values)
+        if lat_indices.size == 0:
+            raise ValueError(
+                "No non-zero RIVR2O export cells found in the loaded dataset."
+            )
+
+        grid_lats = self.ds[lat_dim].values[lat_indices]
+        grid_lons = self.ds[lon_dim].values[lon_indices]
+        return lat_indices, lon_indices, grid_lats, grid_lons
+
     def sample_at_points(
         self,
         lon: xr.DataArray | np.ndarray | float,
@@ -811,6 +846,11 @@ class Rivr2oRiverBGCDataset:
     ) -> xr.Dataset:
         """Sample MARBL tracer exports at point locations.
 
+        For each query point, the nearest RIVR2O grid cell with a positive export
+        (non-zero, non-fill) is used. This avoids picking land or ocean cells where
+        the product is zero when the ROMS river mouth lies between active river
+        cells on the RIVR2O grid.
+
         Parameters
         ----------
         lon, lat : array-like or scalar
@@ -819,7 +859,8 @@ class Rivr2oRiverBGCDataset:
             If True, longitudes greater than 180° are converted to -180-180 before
             sampling. If False, negative longitudes are converted to 0-360.
         method : str, optional
-            Interpolation method passed to :meth:`xarray.Dataset.interp`.
+            Accepted for API compatibility; sampling always uses the nearest
+            non-zero export cell.
 
         Returns
         -------
@@ -827,24 +868,37 @@ class Rivr2oRiverBGCDataset:
             Tracer variables with dimensions ``(time, points)`` when multiple
             locations are provided, or ``(time,)`` for a scalar point.
         """
+        del method  # nearest non-zero coastal cell, not xarray interp
         lat_dim = self.dim_names["latitude"]
         lon_dim = self.dim_names["longitude"]
 
-        lon_da = xr.DataArray(lon, dims="points") if np.ndim(lon) else lon
-        lat_da = xr.DataArray(lat, dims="points") if np.ndim(lat) else lat
+        scalar_point = not np.ndim(lon)
+        query_lon = np.atleast_1d(np.asarray(lon, dtype=float))
+        query_lat = np.atleast_1d(np.asarray(lat, dtype=float))
+        query_lon = self._adjust_lon_to_grid(query_lon, straddle=straddle)
 
-        ds_lon = self.ds[lon_dim]
-        if float(ds_lon.max()) > 180:
-            lon_da = xr.where(lon_da < 0, lon_da + 360, lon_da)
-        elif straddle:
-            lon_da = xr.where(lon_da > 180, lon_da - 360, lon_da)
-
-        sampled = self.ds.interp(
-            {lon_dim: lon_da, lat_dim: lat_da},
-            method=method,
+        lat_indices, lon_indices, grid_lats, grid_lons = (
+            self._valid_export_cell_indices()
         )
 
-        if not np.ndim(lon):
+        from roms_tools.setup.utils import gc_dist
+
+        nearest_lat = []
+        nearest_lon = []
+        for q_lon, q_lat in zip(query_lon, query_lat, strict=True):
+            dist = gc_dist(q_lon, q_lat, grid_lons, grid_lats)
+            nearest = int(np.argmin(dist))
+            nearest_lat.append(lat_indices[nearest])
+            nearest_lon.append(lon_indices[nearest])
+
+        sampled = self.ds.isel(
+            {
+                lat_dim: xr.DataArray(nearest_lat, dims="points"),
+                lon_dim: xr.DataArray(nearest_lon, dims="points"),
+            }
+        )
+
+        if scalar_point:
             return sampled.squeeze("points", drop=True)
 
         return sampled

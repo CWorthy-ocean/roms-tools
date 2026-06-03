@@ -382,7 +382,6 @@ class RiverForcing:
             lon=lons,
             lat=lats,
             straddle=self.grid.straddle,
-            method="nearest",
         )
 
         abs_time = ds["abs_time"]

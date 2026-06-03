@@ -838,39 +838,36 @@ class Rivr2oRiverBGCDataset:
         *,
         time_index: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return indices and coordinates of grid cells with non-zero river export.
+        """Return indices and coordinates of grid cells with positive DIC export.
 
-        When ``time_index`` is set, only cells with positive export in that annual
-        record are included. Otherwise any year with export qualifies.
+        Only ``DIC`` defines eligible cells (not DIN/DIP or other tracers), because
+        sparse nutrients can otherwise dominate the mask on the coarse RIVR2O grid.
+
+        When ``time_index`` is set, only cells with ``DIC > 0`` in that annual record
+        are included. Otherwise any year with positive DIC qualifies.
         """
         lat_dim = self.dim_names["latitude"]
         lon_dim = self.dim_names["longitude"]
         time_dim = self.dim_names["time"]
 
+        dic = self.ds["DIC"]
         if time_index is None:
-            has_export = self.ds[self.tracer_names[0]] > 0
-            for tracer in self.tracer_names[1:]:
-                has_export = has_export | (self.ds[tracer] > 0)
-            valid = has_export.any(dim=time_dim)
+            valid = (dic > 0).any(dim=time_dim)
         else:
-            has_export = self.ds[self.tracer_names[0]].isel({time_dim: time_index}) > 0
-            for tracer in self.tracer_names[1:]:
-                has_export = has_export | (
-                    self.ds[tracer].isel({time_dim: time_index}) > 0
-                )
-            valid = has_export
+            valid = dic.isel({time_dim: time_index}) > 0
 
         lat_indices, lon_indices = np.where(valid.values)
         if lat_indices.size == 0:
             if time_index is not None:
                 logging.warning(
-                    "No non-zero RIVR2O export at time index %s; "
-                    "falling back to cells valid in any year.",
+                    "No non-zero RIVR2O DIC export at time index %s; "
+                    "falling back to cells with DIC export in any loaded year.",
                     time_index,
                 )
                 return self._valid_export_cell_indices(time_index=None)
             raise ValueError(
-                "No non-zero RIVR2O export cells found in the loaded dataset."
+                "No grid cells with positive RIVR2O DIC export found in the "
+                "loaded dataset."
             )
 
         grid_lats = self.ds[lat_dim].values[lat_indices]
@@ -888,10 +885,10 @@ class Rivr2oRiverBGCDataset:
     ) -> xr.Dataset:
         """Sample MARBL tracer exports at point locations.
 
-        For each query point, the nearest RIVR2O grid cell with a positive export
-        (non-zero, non-fill) is used. This avoids picking land or ocean cells where
-        the product is zero when the ROMS river mouth lies between active river
-        cells on the RIVR2O grid.
+        For each query point, the nearest RIVR2O grid cell with positive ``DIC``
+        export (non-zero, non-fill) is used. Other tracers (e.g. DIN/DIP) are not
+        used for cell selection. This avoids picking cells that only have sparse
+        nutrient export when the ROMS river mouth lies between active river cells.
 
         Parameters
         ----------
@@ -901,11 +898,11 @@ class Rivr2oRiverBGCDataset:
             If True, longitudes greater than 180° are converted to -180-180 before
             sampling. If False, negative longitudes are converted to 0-360.
         time : datetime or numpy.datetime64, optional
-            Annual RIVR2O record used to decide which grid cells have export. When
-            omitted, a cell is eligible if it has export in any loaded year.
+            Annual RIVR2O record used to decide which grid cells have DIC export.
+            When omitted, a cell is eligible if it has ``DIC > 0`` in any loaded year.
         method : str, optional
-            Accepted for API compatibility; sampling always uses the nearest
-            non-zero export cell.
+            Accepted for API compatibility; sampling always uses the nearest cell
+            with positive DIC export.
 
         Returns
         -------

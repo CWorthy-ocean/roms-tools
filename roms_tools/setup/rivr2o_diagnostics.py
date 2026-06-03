@@ -288,6 +288,26 @@ def diagnose_rivr2o_river_forcing(
             .values
         )
 
+        lat_idx = cell["lat_index"]
+        lon_idx = cell["lon_index"]
+        t_idx = cell["rivr2o_time_index"]
+        dic_at_cell_anchor = np.nan
+        no3_at_cell_anchor = np.nan
+        if lat_idx is not None and lon_idx is not None and t_idx is not None:
+            lat_dim = bgc.dim_names["latitude"]
+            lon_dim = bgc.dim_names["longitude"]
+            time_dim = bgc.dim_names["time"]
+            dic_at_cell_anchor = float(
+                bgc.ds["DIC"]
+                .isel({time_dim: t_idx, lat_dim: lat_idx, lon_dim: lon_idx})
+                .values
+            )
+            no3_at_cell_anchor = float(
+                bgc.ds["NO3"]
+                .isel({time_dim: t_idx, lat_dim: lat_idx, lon_dim: lon_idx})
+                .values
+            )
+
         row = {
             "river": name,
             "mouth_lon": float(mouth_lons[i]),
@@ -297,6 +317,8 @@ def diagnose_rivr2o_river_forcing(
             "dist_to_cell_km": cell["dist_km"],
             "rivr2o_time_used": str(rivr2o_time_used),
             "abs_time": str(abs_time_scalar),
+            "DIC_at_selected_cell_anchor_year": dic_at_cell_anchor,
+            "NO3_at_selected_cell_anchor_year": no3_at_cell_anchor,
             "DIC_export_1e6g_yr": export_dic,
             "DOC_l_export_1e6g_yr": export_doc_l,
             "interp_DIC_at_mouth": interp["interp_dic"],
@@ -351,6 +373,14 @@ def diagnose_rivr2o_river_forcing(
         "(see roms_tools/setup/river_forcing.py)."
     )
     print(f"RIVR2O anchor year for cell search: {rivr2o_time_used}")
+    nan_export = df["DIC_export_1e6g_yr"].isna()
+    if nan_export.any():
+        print(
+            f"{nan_export.sum()} river(s) with NaN DIC export. "
+            "Common causes: (1) no positive DIC within reach of the mouth on the "
+            "RIVR2O grid; (2) DIC fill/missing at the selected cell for the "
+            "simulation year; (3) zero/NaN river_volume (see river_volume_m3_s)."
+        )
     return df
 
 

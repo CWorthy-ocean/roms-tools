@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
-import xarray as xr
 
 from roms_tools.datasets.river_datasets import (
     SECONDS_PER_YEAR,
@@ -130,7 +129,7 @@ def _nearest_nonzero_cell_info(
     *,
     straddle: bool,
     time: datetime | np.datetime64 | None = None,
-) -> dict[str, float]:
+) -> dict[str, float | int | None]:
     """Mirror ``Rivr2oRiverBGCDataset.sample_at_points`` cell selection."""
     lat_dim = bgc.dim_names["latitude"]
     lon_dim = bgc.dim_names["longitude"]
@@ -242,9 +241,7 @@ def diagnose_rivr2o_river_forcing(
     )
 
     bbox = iceland_bbox or _iceland_bbox_from_grid(river_forcing)
-    field_stats = _rivr2o_field_stats_in_bbox(
-        bgc, bbox, time_index=rivr2o_time_index
-    )
+    field_stats = _rivr2o_field_stats_in_bbox(bgc, bbox, time_index=rivr2o_time_index)
 
     dic_idx = int(np.where(ds.tracer_name.values == "DIC")[0][0])
     rows: list[dict[str, Any]] = []
@@ -267,7 +264,10 @@ def diagnose_rivr2o_river_forcing(
 
         target_time = clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index))
         export_dic = float(
-            sampled["DIC"].interp(time=target_time, method="nearest").isel(points=i).values
+            sampled["DIC"]
+            .interp(time=target_time, method="nearest")
+            .isel(points=i)
+            .values
         )
         export_doc_l = float(
             sampled["DOC_l"]

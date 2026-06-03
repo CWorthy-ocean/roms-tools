@@ -172,6 +172,44 @@ class TestRivr2oRiverBGCDataset:
 
         assert sampled["DIC"].isel(time=0).item() == 7.0
 
+    def test_sample_at_points_uses_export_at_requested_time(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        values_1999 = {
+            "DIC": np.array([[5.0, 0.0], [0.0, 0.0]]),
+            "DIN": np.array([[5.0, 0.0], [0.0, 0.0]]),
+            "DOC_l": np.array([[1.0, 0.0], [0.0, 0.0]]),
+            "DOC_sl": np.array([[1.0, 0.0], [0.0, 0.0]]),
+            "POC": np.array([[1.0, 0.0], [0.0, 0.0]]),
+            "DIP": np.array([[5.0, 0.0], [0.0, 0.0]]),
+        }
+        values_2000 = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 8.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 8.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 1.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 1.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 1.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 8.0]]),
+        }
+        path_1999 = tmp_path / "rivr2o_riverinputs_1999.nc"
+        path_2000 = tmp_path / "rivr2o_riverinputs_2000.nc"
+        _write_rivr2o_file(path_1999, lat, lon, values_1999)
+        _write_rivr2o_file(path_2000, lat, lon, values_2000)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=[path_1999, path_2000],
+            start_time=datetime(1999, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+
+        sampled = dataset.sample_at_points(
+            lon=0.1,
+            lat=0.1,
+            time=datetime(2000, 1, 15),
+        )
+
+        assert sampled["DIC"].isel(time=1).item() == 8.0
+
     def test_time_clamped_before_min_year(self, tmp_path):
         self._make_files(tmp_path, years=(1903, 1904, 1905))
 

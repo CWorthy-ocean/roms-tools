@@ -11,7 +11,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from roms_tools.datasets.river_datasets import SECONDS_PER_YEAR, Rivr2oRiverBGCDataset
+from roms_tools.datasets.river_datasets import (
+    SECONDS_PER_YEAR,
+    Rivr2oRiverBGCDataset,
+    clamp_rivr2o_time,
+)
 from roms_tools.setup.utils import gc_dist
 
 if TYPE_CHECKING:
@@ -95,12 +99,18 @@ def _rivr2o_field_stats_in_bbox(
     lats = bgc.ds[lat_dim]
     lons = bgc.ds[lon_dim]
     lat_mask = (lats >= bbox["lat_min"]) & (lats <= bbox["lat_max"])
-    lon_mask = (lons >= bbox["lon_min"]) & (lons <= bbox["lon_max"])
-    if float(lons.max()) > 180 and bbox["lon_min"] < 0:
-        lon_mask = lon_mask | ((lons >= bbox["lon_min"] + 360) & (lons <= bbox["lon_max"] + 360))
+    lon_min = bbox["lon_min"]
+    lon_max = bbox["lon_max"]
+    if float(lons.max()) <= 180 and lon_min > 180:
+        lon_min, lon_max = lon_min - 360, lon_max - 360
+    elif float(lons.max()) > 180 and lon_max < 0:
+        lon_min, lon_max = lon_min + 360, lon_max + 360
+    lon_mask = (lons >= lon_min) & (lons <= lon_max)
 
-    sub = bgc.ds.isel({time_dim: time_index}).where(lat_mask, drop=True).where(
-        lon_mask, drop=True
+    sub = (
+        bgc.ds.isel({time_dim: time_index})
+        .where(lat_mask, drop=True)
+        .where(lon_mask, drop=True)
     )
     dic = sub["DIC"].values
     valid = np.isfinite(dic) & (dic > 0)
@@ -119,23 +129,29 @@ def _nearest_nonzero_cell_info(
     lat: float,
     *,
     straddle: bool,
+    time: datetime | np.datetime64 | None = None,
 ) -> dict[str, float]:
     """Mirror ``Rivr2oRiverBGCDataset.sample_at_points`` cell selection."""
     lat_dim = bgc.dim_names["latitude"]
     lon_dim = bgc.dim_names["longitude"]
 
     query_lon = bgc._adjust_lon_to_grid(np.array([lon]), straddle=straddle)[0]
-    lat_indices, lon_indices, grid_lats, grid_lons = bgc._valid_export_cell_indices()
-    dist_km = gc_dist(query_lon, lat, grid_lons, grid_lats)
-    nearest = int(np.argmin(dist_km))
+    time_index = bgc._nearest_time_index(time) if time is not None else None
+    lat_indices, lon_indices, grid_lats, grid_lons = bgc._valid_export_cell_indices(
+        time_index=time_index
+    )
+    dist_m = gc_dist(query_lon, lat, grid_lons, grid_lats)
+    nearest = int(np.argmin(dist_m))
     return {
         "query_lon": float(query_lon),
         "query_lat": float(lat),
         "cell_lat": float(bgc.ds[lat_dim].values[lat_indices[nearest]]),
         "cell_lon": float(bgc.ds[lon_dim].values[lon_indices[nearest]]),
-        "dist_km": float(dist_km[nearest]),
+        "dist_m": float(dist_m[nearest]),
+        "dist_km": float(dist_m[nearest]) / 1000.0,
         "lat_index": int(lat_indices[nearest]),
         "lon_index": int(lon_indices[nearest]),
+        "rivr2o_time_index": time_index,
     }
 
 
@@ -152,7 +168,11 @@ def _interp_at_mouth(
     query_lon = float(bgc._adjust_lon_to_grid(np.array([lon]), straddle=straddle)[0])
     time_val = np.datetime64(time)
     point = bgc.ds.interp(
-        {lon_dim: query_lon, bgc.dim_names["latitude"]: lat, bgc.dim_names["time"]: time_val},
+        {
+            lon_dim: query_lon,
+            bgc.dim_names["latitude"]: lat,
+            bgc.dim_names["time"]: time_val,
+        },
         method="nearest",
     )
     return {
@@ -195,24 +215,36 @@ def diagnose_rivr2o_river_forcing(
     pandas.DataFrame
         One row per river with sampled exports, volumes, and concentration checks.
     """
-    if river_forcing.bgc_source is None or river_forcing.bgc_source.get("name") != "RIVR2O":
+    if (
+        river_forcing.bgc_source is None
+        or river_forcing.bgc_source.get("name") != "RIVR2O"
+    ):
         raise ValueError("river_forcing must use bgc_source name 'RIVR2O'.")
 
     ds = river_forcing.ds
     bgc = river_forcing._get_bgc_data()
     river_names = [str(n) for n in ds.river_name.values]
     mouth_lons, mouth_lats = river_forcing._get_river_sample_coords(river_names)
+
+    abs_time = ds["abs_time"].isel(river_time=time_index).values
+    abs_time_scalar = pd.Timestamp(abs_time).to_pydatetime()
+    anchor_time = clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index)).item()
+    rivr2o_time_index = bgc._nearest_time_index(anchor_time)
+    rivr2o_time_used = pd.Timestamp(
+        bgc.ds[bgc.dim_names["time"]].values[rivr2o_time_index]
+    )
+
     sampled = bgc.sample_at_points(
         lon=mouth_lons,
         lat=mouth_lats,
         straddle=river_forcing.grid.straddle,
+        time=anchor_time,
     )
 
     bbox = iceland_bbox or _iceland_bbox_from_grid(river_forcing)
-    field_stats = _rivr2o_field_stats_in_bbox(bgc, bbox, time_index=time_index)
-
-    abs_time = ds["abs_time"].isel(river_time=time_index).values
-    abs_time_scalar = pd.Timestamp(abs_time).to_pydatetime()
+    field_stats = _rivr2o_field_stats_in_bbox(
+        bgc, bbox, time_index=rivr2o_time_index
+    )
 
     dic_idx = int(np.where(ds.tracer_name.values == "DIC")[0][0])
     rows: list[dict[str, Any]] = []
@@ -223,6 +255,7 @@ def diagnose_rivr2o_river_forcing(
             float(mouth_lons[i]),
             float(mouth_lats[i]),
             straddle=river_forcing.grid.straddle,
+            time=anchor_time,
         )
         interp = _interp_at_mouth(
             bgc,
@@ -232,18 +265,24 @@ def diagnose_rivr2o_river_forcing(
             time=abs_time_scalar,
         )
 
-        export_dic = float(sampled["DIC"].isel(points=i, time=time_index).values)
-        export_doc_l = float(sampled["DOC_l"].isel(points=i, time=time_index).values)
-        q = float(ds["river_volume"].isel(nriver=i, river_time=time_index).values)
-        c_dic_file = float(
-            rivr2o_export_to_mmol_m3(export_dic, q)
+        target_time = clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index))
+        export_dic = float(
+            sampled["DIC"].interp(time=target_time, method="nearest").isel(points=i).values
         )
+        export_doc_l = float(
+            sampled["DOC_l"]
+            .interp(time=target_time, method="nearest")
+            .isel(points=i)
+            .values
+        )
+        q = float(ds["river_volume"].isel(nriver=i, river_time=time_index).values)
+        c_dic_file = float(rivr2o_export_to_mmol_m3(export_dic, q))
         c_doc_l = float(rivr2o_export_to_mmol_m3(export_doc_l, q))
         c_dic_forcing_manual = c_dic_file + c_doc_l
         c_dic_actual = float(
-            ds["river_tracer"].isel(
-                ntracers=dic_idx, nriver=i, river_time=time_index
-            ).values
+            ds["river_tracer"]
+            .isel(ntracers=dic_idx, nriver=i, river_time=time_index)
+            .values
         )
 
         row = {
@@ -253,6 +292,7 @@ def diagnose_rivr2o_river_forcing(
             "sample_cell_lon": cell["cell_lon"],
             "sample_cell_lat": cell["cell_lat"],
             "dist_to_cell_km": cell["dist_km"],
+            "rivr2o_time_used": str(rivr2o_time_used),
             "abs_time": str(abs_time_scalar),
             "DIC_export_1e6g_yr": export_dic,
             "DOC_l_export_1e6g_yr": export_doc_l,
@@ -307,4 +347,33 @@ def diagnose_rivr2o_river_forcing(
         "DIC in river_forcing = mmol/m3 from (DIC + DOC_l) export / river_volume "
         "(see roms_tools/setup/river_forcing.py)."
     )
+    print(f"RIVR2O anchor year for cell search: {rivr2o_time_used}")
     return df
+
+
+def print_usage() -> None:
+    """Print how to run diagnostics from a Jupyter notebook."""
+    print(
+        "rivr2o_diagnostics.py defines helpers only; running it does not analyze data.\n"
+        "\n"
+        "In your notebook (after building river_forcing), use either:\n"
+        "\n"
+        "  from roms_tools.setup.rivr2o_diagnostics import diagnose_rivr2o_river_forcing\n"
+        "  diag = diagnose_rivr2o_river_forcing(river_forcing)\n"
+        "  display(diag)\n"
+        "\n"
+        "Or keep names in the notebook namespace with:\n"
+        "\n"
+        "  %run -i path/to/rivr2o_diagnostics.py\n"
+        "  diag = diagnose_rivr2o_river_forcing(river_forcing)\n"
+        "\n"
+        "Plain %run without -i removes functions after the cell finishes.\n"
+        "\n"
+        "Hand-check (E in 10^6 g C/yr, Q in m3/s) at Q=400:\n"
+        f"  E=10000  -> {expected_mmol_m3_range(10_000, 400):.2f} mmol/m3\n"
+        f"  E=50000  -> {expected_mmol_m3_range(50_000, 400):.2f} mmol/m3\n"
+    )
+
+
+if __name__ == "__main__":
+    print_usage()

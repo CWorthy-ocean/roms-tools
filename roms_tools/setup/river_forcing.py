@@ -378,13 +378,14 @@ class RiverForcing:
         river_names = [str(name) for name in ds.river_name.values]
         lons, lats = self._get_river_sample_coords(river_names)
 
+        abs_time = ds["abs_time"]
+        anchor_time = clamp_rivr2o_time(abs_time.isel(river_time=0)).item()
         sampled = bgc_data.sample_at_points(
             lon=lons,
             lat=lats,
             straddle=self.grid.straddle,
+            time=anchor_time,
         )
-
-        abs_time = ds["abs_time"]
         dic_from_file = self._rivr2o_export_to_concentration(
             sampled["DIC"],
             _RIVR2O_MOLAR_MASS_G["DIC"],
@@ -432,12 +433,8 @@ class RiverForcing:
                             "message": "RIVR2O apply summary",
                             "data": {
                                 "nriver": int(ds.sizes["nriver"]),
-                                "DIC_export_min": float(
-                                    sampled["DIC"].min().values
-                                ),
-                                "DIC_export_max": float(
-                                    sampled["DIC"].max().values
-                                ),
+                                "DIC_export_min": float(sampled["DIC"].min().values),
+                                "DIC_export_max": float(sampled["DIC"].max().values),
                                 "dic_forcing_min": float(dic_forcing.min().values),
                                 "dic_forcing_max": float(dic_forcing.max().values),
                                 "river_volume_min": float(

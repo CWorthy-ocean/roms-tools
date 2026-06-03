@@ -15,6 +15,7 @@ from roms_tools.datasets.river_datasets import (
     SECONDS_PER_YEAR,
     Rivr2oRiverBGCDataset,
     clamp_rivr2o_time,
+    rivr2o_coerce_time,
 )
 from roms_tools.setup.utils import gc_dist
 
@@ -228,7 +229,9 @@ def diagnose_rivr2o_river_forcing(
 
     abs_time = ds["abs_time"].isel(river_time=time_index).values
     abs_time_scalar = pd.Timestamp(abs_time).to_pydatetime()
-    anchor_time = clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index)).item()
+    anchor_time = rivr2o_coerce_time(
+        clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index)).values
+    )
     rivr2o_time_index = bgc._nearest_time_index(anchor_time)
     rivr2o_time_used = pd.Timestamp(
         bgc.ds[bgc.dim_names["time"]].values[rivr2o_time_index]

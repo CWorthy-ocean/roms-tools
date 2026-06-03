@@ -159,6 +159,20 @@ def clamp_rivr2o_time(time: xr.DataArray) -> xr.DataArray:
     )
 
 
+def rivr2o_coerce_time(
+    time: datetime | np.datetime64 | np.integer | int | float | str,
+) -> np.datetime64:
+    """Convert a scalar time to ``datetime64[ns]`` for RIVR2O time indexing.
+
+    Handles ``datetime``, ``numpy.datetime64``, and integer nanosecond stamps
+    (as returned by ``.item()`` on some xarray ``abs_time`` values under Dai
+    climatology).
+    """
+    import pandas as pd
+
+    return np.datetime64(pd.Timestamp(time).to_datetime64())
+
+
 @dataclass(kw_only=True)
 class RiverDataset:
     """Represents river data.
@@ -811,10 +825,12 @@ class Rivr2oRiverBGCDataset:
             return np.where(lon > 180, lon - 360, lon)
         return lon
 
-    def _nearest_time_index(self, time: datetime | np.datetime64) -> int:
+    def _nearest_time_index(
+        self, time: datetime | np.datetime64 | np.integer | int | float | str
+    ) -> int:
         """Index of the RIVR2O annual record closest to ``time``."""
         time_dim = self.dim_names["time"]
-        target = np.datetime64(time)
+        target = rivr2o_coerce_time(time)
         return int(np.argmin(np.abs(self.ds[time_dim].values - target)))
 
     def _valid_export_cell_indices(
@@ -868,7 +884,7 @@ class Rivr2oRiverBGCDataset:
         *,
         straddle: bool = False,
         method: str = "nearest",
-        time: datetime | np.datetime64 | None = None,
+        time: datetime | np.datetime64 | np.integer | int | float | str | None = None,
     ) -> xr.Dataset:
         """Sample MARBL tracer exports at point locations.
 

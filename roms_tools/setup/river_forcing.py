@@ -17,6 +17,7 @@ from roms_tools.datasets.river_datasets import (
     Rivr2oRiverBGCDataset,
     clamp_rivr2o_time,
     get_indices_of_nearest_grid_cell_for_rivers,
+    rivr2o_coerce_time,
 )
 from roms_tools.plot import (
     assign_category_colors,
@@ -379,7 +380,9 @@ class RiverForcing:
         lons, lats = self._get_river_sample_coords(river_names)
 
         abs_time = ds["abs_time"]
-        anchor_time = clamp_rivr2o_time(abs_time.isel(river_time=0)).item()
+        anchor_time = rivr2o_coerce_time(
+            clamp_rivr2o_time(abs_time.isel(river_time=0)).values
+        )
         sampled = bgc_data.sample_at_points(
             lon=lons,
             lat=lats,

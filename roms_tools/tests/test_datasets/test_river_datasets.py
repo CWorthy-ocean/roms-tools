@@ -7,6 +7,7 @@ from roms_tools.datasets.river_datasets import (
     RIVR2O_FILL_VALUE,
     RiverDataset,
     Rivr2oRiverBGCDataset,
+    rivr2o_coerce_time,
 )
 
 
@@ -209,6 +210,12 @@ class TestRivr2oRiverBGCDataset:
         )
 
         assert sampled["DIC"].isel(time=1).item() == 8.0
+
+    def test_rivr2o_coerce_time_accepts_int_nanoseconds(self):
+        expected = np.datetime64("2000-01-15", "ns")
+        as_int = int(expected.view("int64"))
+        assert rivr2o_coerce_time(as_int) == expected
+        assert rivr2o_coerce_time(datetime(2000, 1, 15)) == expected
 
     def test_time_clamped_before_min_year(self, tmp_path):
         self._make_files(tmp_path, years=(1903, 1904, 1905))

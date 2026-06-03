@@ -232,9 +232,7 @@ class TestRivr2oRiverBGCDataset:
             end_time=datetime(2000, 12, 31),
         )
 
-        sampled = dataset.sample_at_points(
-            lon=0.1, lat=0.1, time=datetime(2000, 7, 1)
-        )
+        sampled = dataset.sample_at_points(lon=0.1, lat=0.1, time=datetime(2000, 7, 1))
 
         assert sampled["DIC"].isel(time=0).item() == 5.0
         assert sampled["NO3"].isel(time=0).item() == 0.0

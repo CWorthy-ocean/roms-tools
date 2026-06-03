@@ -1110,9 +1110,9 @@ class TestRiverForcingBGCSource:
         volume = river_forcing.ds.river_volume
 
         def expected_conc(export):
-            return (export * 1e6 / SECONDS_PER_YEAR / 12.011 / volume).astype(
-                np.float32
-            )
+            return (
+                export * 1e6 / SECONDS_PER_YEAR / 12.011 / volume * 1000.0
+            ).astype(np.float32)
 
         expected_dic_file = expected_conc(export_value)
         expected_doc_l = expected_conc(export_value / 2)

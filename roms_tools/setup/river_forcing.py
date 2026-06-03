@@ -354,7 +354,7 @@ class RiverForcing:
         )
         export = self._align_rivr2o_concentration(export)
         mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
-        mmol_flux = mass_flux_g_s / molar_mass_g
+        mmol_flux = mass_flux_g_s / molar_mass_g * 1000.0
         return (mmol_flux / river_volume).astype(np.float32)
 
     def _align_rivr2o_concentration(self, values: xr.DataArray) -> xr.DataArray:
@@ -415,6 +415,47 @@ class RiverForcing:
         alk_forcing = dic_from_file
         don_forcing = doc_sl_conc * _DON_FROM_DOC_SL + poc_conc * _DON_FROM_POC
         dop_forcing = doc_sl_conc * _DOP_FROM_DOC_SL + poc_conc * _DOP_FROM_POC
+
+        # region agent log
+        try:
+            import json
+            import time
+
+            _log_path = "/Users/ullaheede/roms-tools/.cursor/debug-406116.log"
+            with open(_log_path, "a", encoding="utf-8") as _dbg:
+                _dbg.write(
+                    json.dumps(
+                        {
+                            "sessionId": "406116",
+                            "timestamp": int(time.time() * 1000),
+                            "location": "river_forcing.py:_apply_rivr2o_bgc_tracers",
+                            "message": "RIVR2O apply summary",
+                            "data": {
+                                "nriver": int(ds.sizes["nriver"]),
+                                "DIC_export_min": float(
+                                    sampled["DIC"].min().values
+                                ),
+                                "DIC_export_max": float(
+                                    sampled["DIC"].max().values
+                                ),
+                                "dic_forcing_min": float(dic_forcing.min().values),
+                                "dic_forcing_max": float(dic_forcing.max().values),
+                                "river_volume_min": float(
+                                    ds["river_volume"].min().values
+                                ),
+                                "river_volume_max": float(
+                                    ds["river_volume"].max().values
+                                ),
+                            },
+                            "hypothesisId": "A",
+                            "runId": "pre-fix",
+                        }
+                    )
+                    + "\n"
+                )
+        except OSError:
+            pass
+        # endregion
 
         self._set_river_tracer_values(ds, "DIC", dic_forcing)
         self._set_river_tracer_values(ds, "DOC", doc_forcing)

@@ -405,9 +405,7 @@ class RiverForcing:
                 month = 1
                 year += 1
         if not dates:
-            raise ValueError(
-                "No mid-month dates fall between start_time and end_time."
-            )
+            raise ValueError("No mid-month dates fall between start_time and end_time.")
         return dates
 
     def _expand_climatology_for_rivr2o_timeseries(self, ds: xr.Dataset) -> xr.Dataset:

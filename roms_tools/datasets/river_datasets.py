@@ -955,11 +955,7 @@ class Rivr2oRiverBGCDataset:
             nearest = int(np.argmin(dist))
             min_dist_m = float(dist[nearest])
             if min_dist_m > dist_warn_m:
-                label = (
-                    river_names[i]
-                    if river_names is not None
-                    else f"point {i}"
-                )
+                label = river_names[i] if river_names is not None else f"point {i}"
                 logging.warning(
                     "RIVR2O DIC export cell for %s is %.1f km from the river "
                     "mouth (lat=%.4f, lon=%.4f); using grid cell lat_idx=%d, "
@@ -1032,7 +1028,7 @@ class Rivr2oRiverBGCDataset:
                 cell_weight = q_series / q_sum_mean
                 cell_weight = cell_weight.where(q_sum_mean > 0, other=1.0 / n_shared)
                 _weight_column(cell_weight, point_idx)
-            shared_msgs.append(f"({lat_idx},{lon_idx})×{n_shared}")
+            shared_msgs.append(f"({lat_idx},{lon_idx})x{n_shared}")
 
         if shared_msgs:
             logging.info(

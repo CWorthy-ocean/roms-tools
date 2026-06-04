@@ -365,6 +365,13 @@ class SurfaceForcing:
                         f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
                     )
 
+        # Check that climatology is false for t-varying co2
+        if self.type == "bgc" and self.source["name"] == "MBL_co2":
+            if self.source["climatology"]:
+                raise ValueError(
+                    "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
+                )
+
     def _determine_coarse_grid_usage(self, data):
         """Determine if coarse grid interpolation should be used based on the resolution
         of the dataset and the target grid.

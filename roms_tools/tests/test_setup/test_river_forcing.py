@@ -1139,3 +1139,59 @@ class TestRiverForcingBGCSource:
         np.testing.assert_allclose(alk.values, expected_dic_file.values, rtol=1e-5)
         np.testing.assert_allclose(dic_alt.values, dic.values, rtol=1e-5)
         np.testing.assert_allclose(alk_alt.values, alk.values, rtol=1e-5)
+
+    def test_rivr2o_climatology_discharge_repeats_bgc_varies_by_year(
+        self, tmp_path, iceland_test_grid, single_cell_indices
+    ):
+        """Dai climatology + RIVR2O: repeating Q, year-varying alkalinity (like plot)."""
+        lat = np.arange(55.0, 75.5, 0.5)
+        lon = np.arange(325.0, 355.5, 0.5)
+        paths = []
+        for year in (1998, 1999, 2000):
+            export = float(year)
+            tracer_values = {
+                "DIC": np.full((len(lat), len(lon)), export),
+                "DIN": np.full((len(lat), len(lon)), export),
+                "DOC_l": np.full((len(lat), len(lon)), export / 2),
+                "DOC_sl": np.full((len(lat), len(lon)), export / 2),
+                "POC": np.full((len(lat), len(lon)), export / 4),
+                "DIP": np.full((len(lat), len(lon)), export),
+            }
+            paths.append(
+                tmp_path / f"rivr2o_riverinputs_{year}.nc",
+            )
+            _write_rivr2o_file(paths[-1], lat, lon, tracer_values)
+
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(2000, 12, 31),
+            indices=single_cell_indices,
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O", "path": [str(p) for p in paths]},
+            convert_to_climatology="always",
+        )
+
+        assert river_forcing.climatology
+        assert (
+            str(river_forcing.ds.attrs.get("discharge_climatology")).lower() == "true"
+        )
+        assert river_forcing.ds.sizes["river_time"] == 36
+        assert not hasattr(river_forcing.ds.river_time, "cycle_length")
+
+        abs_time = river_forcing.ds["abs_time"]
+        jan_steps = np.where(abs_time.dt.month.values == 1)[0]
+
+        volume = river_forcing.ds["river_volume"].isel(nriver=0)
+        np.testing.assert_allclose(
+            float(volume.isel(river_time=jan_steps[0]).values),
+            float(volume.isel(river_time=jan_steps[-1]).values),
+            rtol=1e-6,
+        )
+
+        alk = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "ALK", nriver=0
+        )
+        assert float(alk.isel(river_time=jan_steps[0]).values) != float(
+            alk.isel(river_time=jan_steps[-1]).values
+        )

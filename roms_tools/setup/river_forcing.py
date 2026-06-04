@@ -17,7 +17,6 @@ from roms_tools.datasets.river_datasets import (
     Rivr2oRiverBGCDataset,
     clamp_rivr2o_time,
     get_indices_of_nearest_grid_cell_for_rivers,
-    rivr2o_coerce_time,
 )
 from roms_tools.plot import (
     assign_category_colors,
@@ -43,6 +42,7 @@ from roms_tools.utils import save_datasets
 
 INCLUDE_ALL_RIVER_NAMES = "all"
 MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
+DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
@@ -112,7 +112,20 @@ class RiverForcing:
         If ``include_bgc=True`` and ``bgc_source`` is omitted, ``"CONSTANTS"`` is used.
 
         For ``"RIVR2O"``, the product covers 1903-2024. Simulation times before 1903
-        or after 2024 use the 1903 and 2024 fields, respectively.
+        or after 2024 use the 1903 and 2024 fields, respectively. Each river mouth is
+        mapped to the nearest RIVR2O grid cell with positive ``DIC`` export; that cell
+        supplies all tracers, with exports interpolated in time onto ``river_time``.
+        If several rivers share one RIVR2O cell, export is split in proportion to
+        discharge each month and normalized over the year so co-located rivers keep
+        similar concentrations in every month while higher-discharge months carry
+        more carbon export.
+
+        When Dai discharge is monthly climatology (``convert_to_climatology`` is
+        ``"always"`` or ``"if_any_missing"`` with missing data) and BGC is RIVR2O,
+        ``river_time`` is expanded to a monthly calendar axis from ``start_time`` to
+        ``end_time``: ``river_volume`` repeats the climatological month each year,
+        while RIVR2O tracers (e.g. alkalinity) follow the annual export files in that
+        window—producing repeating discharge seasons and year-to-year BGC variation.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
     indices : dict[str, list[tuple[int, int]]], optional
@@ -347,6 +360,8 @@ class RiverForcing:
         molar_mass_g: float,
         river_volume: xr.DataArray,
         target_time: xr.DataArray,
+        *,
+        partition_weight: xr.DataArray,
     ) -> xr.DataArray:
         """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
         export = export.interp(
@@ -354,6 +369,7 @@ class RiverForcing:
             method="nearest",
         )
         export = self._align_rivr2o_concentration(export)
+        export = export * partition_weight
         mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
         mmol_flux = mass_flux_g_s / molar_mass_g * 1000.0
         return (mmol_flux / river_volume).astype(np.float32)
@@ -373,6 +389,62 @@ class RiverForcing:
         ntracer = int(np.where(ds.tracer_name.values == tracer_name)[0][0])
         ds["river_tracer"].loc[{"ntracers": ntracer}] = values
 
+    @staticmethod
+    def _calendar_midmonth_dates(
+        start_time: datetime, end_time: datetime
+    ) -> list[datetime]:
+        """Monthly 15th-of-month dates between ``start_time`` and ``end_time``."""
+        dates: list[datetime] = []
+        year, month = start_time.year, start_time.month
+        while (year, month) <= (end_time.year, end_time.month):
+            candidate = datetime(year, month, 15)
+            if start_time <= candidate <= end_time:
+                dates.append(candidate)
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+        if not dates:
+            raise ValueError(
+                "No mid-month dates fall between start_time and end_time."
+            )
+        return dates
+
+    def _expand_climatology_for_rivr2o_timeseries(self, ds: xr.Dataset) -> xr.Dataset:
+        """Tile monthly discharge climatology onto a calendar ``river_time`` axis.
+
+        Dai/Trenberth discharge stays as a repeating seasonal cycle; RIVR2O BGC is
+        applied afterward using ``abs_time`` at each calendar step.
+        """
+        calendar_dates = self._calendar_midmonth_dates(self.start_time, self.end_time)
+        month_to_index = {
+            int(month): idx for idx, month in enumerate(ds["month"].values.astype(int))
+        }
+        ds_base = ds.drop_vars("month", errors="ignore")
+        pieces = [
+            ds_base.isel(river_time=month_to_index[dt.month]) for dt in calendar_dates
+        ]
+        ds_expanded = xr.concat(pieces, dim="river_time")
+        ds_expanded = ds_expanded.assign_coords(
+            river_time=np.array(calendar_dates, dtype="datetime64[ns]")
+        )
+        ds_expanded.attrs.pop("climatology", None)
+        ds_expanded.attrs[DISCHARGE_CLIMATOLOGY_ATTR] = "True"
+        ds_expanded, time = add_time_info_to_ds(
+            ds_expanded,
+            self.model_reference_date,
+            climatology=False,
+            time_name="river_time",
+        )
+        logging.info(
+            "Expanded discharge climatology to %d calendar river_time steps "
+            "(%s to %s) for RIVR2O BGC.",
+            len(calendar_dates),
+            calendar_dates[0].date(),
+            calendar_dates[-1].date(),
+        )
+        return ds_expanded.assign_coords({"river_time": time})
+
     def _apply_rivr2o_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
         """Overlay RIVR2O-derived BGC tracers onto default river tracer values."""
         bgc_data = self._get_bgc_data()
@@ -380,38 +452,47 @@ class RiverForcing:
         lons, lats = self._get_river_sample_coords(river_names)
 
         abs_time = ds["abs_time"]
-        anchor_time = rivr2o_coerce_time(
-            clamp_rivr2o_time(abs_time.isel(river_time=0)).values
+        nearest_lat, nearest_lon = bgc_data.nearest_dic_cell_indices_for_points(
+            lons,
+            lats,
+            straddle=self.grid.straddle,
+        )
+        partition_weight = bgc_data.discharge_partition_weights(
+            ds["river_volume"], nearest_lat, nearest_lon
         )
         sampled = bgc_data.sample_at_points(
             lon=lons,
             lat=lats,
             straddle=self.grid.straddle,
-            time=anchor_time,
         )
+        conc_kw = {"partition_weight": partition_weight}
         dic_from_file = self._rivr2o_export_to_concentration(
             sampled["DIC"],
             _RIVR2O_MOLAR_MASS_G["DIC"],
             ds["river_volume"],
             abs_time,
+            **conc_kw,
         )
         doc_l_conc = self._rivr2o_export_to_concentration(
             sampled["DOC_l"],
             _RIVR2O_MOLAR_MASS_G["DOC_l"],
             ds["river_volume"],
             abs_time,
+            **conc_kw,
         )
         doc_sl_conc = self._rivr2o_export_to_concentration(
             sampled["DOC_sl"],
             _RIVR2O_MOLAR_MASS_G["DOC_sl"],
             ds["river_volume"],
             abs_time,
+            **conc_kw,
         )
         poc_conc = self._rivr2o_export_to_concentration(
             sampled["POC"],
             _RIVR2O_MOLAR_MASS_G["POC"],
             ds["river_volume"],
             abs_time,
+            **conc_kw,
         )
 
         dic_forcing = dic_from_file + doc_l_conc
@@ -472,6 +553,7 @@ class RiverForcing:
                 _RIVR2O_MOLAR_MASS_G["NO3"],
                 ds["river_volume"],
                 abs_time,
+                **conc_kw,
             ),
         )
         self._set_river_tracer_values(
@@ -482,6 +564,7 @@ class RiverForcing:
                 _RIVR2O_MOLAR_MASS_G["PO4"],
                 ds["river_volume"],
                 abs_time,
+                **conc_kw,
             ),
         )
 
@@ -637,6 +720,13 @@ class RiverForcing:
             ds, self.model_reference_date, self.climatology, time_name="river_time"
         )
         ds = ds.assign_coords({"river_time": time})
+
+        if (
+            self.climatology
+            and self.bgc_source is not None
+            and self.bgc_source["name"] == "RIVR2O"
+        ):
+            ds = self._expand_climatology_for_rivr2o_timeseries(ds)
 
         if self.bgc_source is not None and self.bgc_source["name"] == "RIVR2O":
             ds = self._apply_rivr2o_bgc_tracers(ds)
@@ -1070,7 +1160,10 @@ class RiverForcing:
         else:
             colors = assign_category_colors(valid_river_names)
 
-        if self.climatology:
+        discharge_climatology = (
+            str(self.ds.attrs.get(DISCHARGE_CLIMATOLOGY_ATTR, "")).lower() == "true"
+        )
+        if self.climatology and not discharge_climatology:
             xticks = self.ds.month.values
             xlabel = "month"
         else:
@@ -1107,7 +1200,7 @@ class RiverForcing:
 
         ax.set_xticks(xticks)
         ax.set_xlabel(xlabel)
-        if not self.climatology:
+        if discharge_climatology or not self.climatology:
             n = len(self.ds.river_time)
             ticks = self.ds.abs_time.values[:: n // 6 + 1]
             ax.set_xticks(ticks)

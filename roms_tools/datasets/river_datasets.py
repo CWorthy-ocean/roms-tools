@@ -638,6 +638,12 @@ class Rivr2oRiverBGCDataset:
     The product spans 1903-2024. Requests before 1903 or after 2024 use the boundary
     years when selecting data and when mapping onto river forcing times.
 
+    Spatial sampling (``sample_at_points``) uses the nearest grid cell with positive
+    ``DIC`` export. DIC has the same spatial coverage each year; that cell is used
+    for all tracers and all years. When several rivers share a cell, ``RiverForcing``
+    splits export in proportion to discharge (``discharge_partition_weights``) so
+    co-located rivers receive similar concentrations.
+
     Parameters
     ----------
     filename : str, Path, or list[str | Path]
@@ -833,38 +839,20 @@ class Rivr2oRiverBGCDataset:
         target = rivr2o_coerce_time(time)
         return int(np.argmin(np.abs(self.ds[time_dim].values - target)))
 
-    def _valid_export_cell_indices(
+    def _valid_dic_export_cell_indices(
         self,
-        *,
-        time_index: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return indices and coordinates of grid cells with positive DIC export.
+        """Grid cells with positive DIC export (union over loaded years).
 
-        Only ``DIC`` defines eligible cells (not DIN/DIP or other tracers), because
-        sparse nutrients can otherwise dominate the mask on the coarse RIVR2O grid.
-
-        When ``time_index`` is set, only cells with ``DIC > 0`` in that annual record
-        are included. Otherwise any year with positive DIC qualifies.
+        DIC spatial coverage is the same each year; DIN/DIP masks are not used.
         """
         lat_dim = self.dim_names["latitude"]
         lon_dim = self.dim_names["longitude"]
         time_dim = self.dim_names["time"]
 
-        dic = self.ds["DIC"]
-        if time_index is None:
-            valid = (dic > 0).any(dim=time_dim)
-        else:
-            valid = dic.isel({time_dim: time_index}) > 0
-
+        valid = (self.ds["DIC"] > 0).any(dim=time_dim)
         lat_indices, lon_indices = np.where(valid.values)
         if lat_indices.size == 0:
-            if time_index is not None:
-                logging.warning(
-                    "No non-zero RIVR2O DIC export at time index %s; "
-                    "falling back to cells with DIC export in any loaded year.",
-                    time_index,
-                )
-                return self._valid_export_cell_indices(time_index=None)
             raise ValueError(
                 "No grid cells with positive RIVR2O DIC export found in the "
                 "loaded dataset."
@@ -881,14 +869,17 @@ class Rivr2oRiverBGCDataset:
         *,
         straddle: bool = False,
         method: str = "nearest",
-        time: datetime | np.datetime64 | np.integer | int | float | str | None = None,
     ) -> xr.Dataset:
         """Sample MARBL tracer exports at point locations.
 
-        For each query point, the nearest RIVR2O grid cell with positive ``DIC``
-        export (non-zero, non-fill) is used. Other tracers (e.g. DIN/DIP) are not
-        used for cell selection. This avoids picking cells that only have sparse
-        nutrient export when the ROMS river mouth lies between active river cells.
+        For each query point, the nearest grid cell with positive ``DIC`` export
+        is used for **all tracers and all years** in the loaded dataset. Cell
+        choice does not depend on simulation year; exports vary in time only
+        along the ``time`` dimension of the returned sample.
+
+        Returns the full cell export at each point. ``RiverForcing`` applies
+        ``discharge_partition_weights`` so rivers on the same cell share export
+        in proportion to discharge.
 
         Parameters
         ----------
@@ -897,9 +888,6 @@ class Rivr2oRiverBGCDataset:
         straddle : bool, optional
             If True, longitudes greater than 180° are converted to -180-180 before
             sampling. If False, negative longitudes are converted to 0-360.
-        time : datetime or numpy.datetime64, optional
-            Annual RIVR2O record used to decide which grid cells have DIC export.
-            When omitted, a cell is eligible if it has ``DIC > 0`` in any loaded year.
         method : str, optional
             Accepted for API compatibility; sampling always uses the nearest cell
             with positive DIC export.
@@ -910,7 +898,7 @@ class Rivr2oRiverBGCDataset:
             Tracer variables with dimensions ``(time, points)`` when multiple
             locations are provided, or ``(time,)`` for a scalar point.
         """
-        del method  # nearest non-zero coastal cell, not xarray interp
+        del method  # nearest DIC export cell, not xarray interp at the mouth
         lat_dim = self.dim_names["latitude"]
         lon_dim = self.dim_names["longitude"]
 
@@ -919,20 +907,9 @@ class Rivr2oRiverBGCDataset:
         query_lat = np.atleast_1d(np.asarray(lat, dtype=float))
         query_lon = self._adjust_lon_to_grid(query_lon, straddle=straddle)
 
-        time_index = self._nearest_time_index(time) if time is not None else None
-        lat_indices, lon_indices, grid_lats, grid_lons = (
-            self._valid_export_cell_indices(time_index=time_index)
+        nearest_lat, nearest_lon = self.nearest_dic_cell_indices_for_points(
+            query_lon, query_lat, straddle=straddle
         )
-
-        from roms_tools.setup.utils import gc_dist
-
-        nearest_lat = []
-        nearest_lon = []
-        for q_lon, q_lat in zip(query_lon, query_lat, strict=True):
-            dist = gc_dist(q_lon, q_lat, grid_lons, grid_lats)
-            nearest = int(np.argmin(dist))
-            nearest_lat.append(lat_indices[nearest])
-            nearest_lon.append(lon_indices[nearest])
 
         sampled = self.ds.isel(
             {
@@ -945,6 +922,101 @@ class Rivr2oRiverBGCDataset:
             return sampled.squeeze("points", drop=True)
 
         return sampled
+
+    def nearest_dic_cell_indices_for_points(
+        self,
+        lon: np.ndarray,
+        lat: np.ndarray,
+        *,
+        straddle: bool = False,
+    ) -> tuple[list[int], list[int]]:
+        """RIVR2O ``(lat, lon)`` indices of the nearest cell with positive DIC export."""
+        from roms_tools.setup.utils import gc_dist
+
+        query_lon = np.atleast_1d(np.asarray(lon, dtype=float))
+        query_lat = np.atleast_1d(np.asarray(lat, dtype=float))
+        query_lon = self._adjust_lon_to_grid(query_lon, straddle=straddle)
+
+        lat_indices, lon_indices, grid_lats, grid_lons = (
+            self._valid_dic_export_cell_indices()
+        )
+
+        nearest_lat = []
+        nearest_lon = []
+        for q_lon, q_lat in zip(query_lon, query_lat, strict=True):
+            dist = gc_dist(q_lon, q_lat, grid_lons, grid_lats)
+            nearest = int(np.argmin(dist))
+            nearest_lat.append(int(lat_indices[nearest]))
+            nearest_lon.append(int(lon_indices[nearest]))
+        return nearest_lat, nearest_lon
+
+    def discharge_partition_weights(
+        self,
+        river_volume: xr.DataArray,
+        nearest_lat: list[int],
+        nearest_lon: list[int],
+    ) -> xr.DataArray:
+        """Scale RIVR2O export by discharge for shared cells and through the year.
+
+        For rivers on the same RIVR2O cell at each ``river_time`` step, export is
+        allocated in proportion to ``Q_i / sum(Q_j)``. Weights are then normalized
+        by the mean total discharge of that cell group over ``river_time`` so that
+        ``export * weight / Q_i`` gives the same concentration for co-located rivers
+        at every month, while months with higher discharge receive a larger share of
+        the annual export (more carbon flux when ``Q`` is high).
+        """
+        volume = river_volume
+        if "points" in volume.dims:
+            volume = volume.rename(points="nriver")
+
+        n_points = len(nearest_lat)
+        if volume.sizes["nriver"] != n_points:
+            raise ValueError(
+                f"river_volume nriver size {volume.sizes['nriver']} does not match "
+                f"{n_points} sample points."
+            )
+
+        cell_to_points: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for point_idx, (lat_idx, lon_idx) in enumerate(
+            zip(nearest_lat, nearest_lon, strict=True)
+        ):
+            cell_to_points[(lat_idx, lon_idx)].append(point_idx)
+
+        weights = xr.ones_like(volume, dtype=np.float64)
+        time_dim = "river_time"
+        shared_msgs: list[str] = []
+
+        def _weight_column(values: xr.DataArray, point_idx: int) -> None:
+            weights.values[:, point_idx] = np.asarray(values).reshape(-1)
+
+        for (lat_idx, lon_idx), point_indices in cell_to_points.items():
+            q_cell = volume.isel(nriver=point_indices)
+            if len(point_indices) == 1:
+                point_idx = point_indices[0]
+                q_series = volume.isel(nriver=point_idx, drop=True)
+                q_mean = q_series.mean(dim=time_dim, skipna=True)
+                cell_weight = (q_series / q_mean).where(q_mean > 0, other=1.0)
+                _weight_column(cell_weight, point_idx)
+                continue
+
+            q_sum = q_cell.sum(dim="nriver", min_count=1)
+            q_sum_mean = q_sum.mean(dim=time_dim, skipna=True)
+            n_shared = len(point_indices)
+            for point_idx in point_indices:
+                q_series = volume.isel(nriver=point_idx, drop=True)
+                cell_weight = q_series / q_sum_mean
+                cell_weight = cell_weight.where(q_sum_mean > 0, other=1.0 / n_shared)
+                _weight_column(cell_weight, point_idx)
+            shared_msgs.append(f"({lat_idx},{lon_idx})×{n_shared}")
+
+        if shared_msgs:
+            logging.info(
+                "Partitioning RIVR2O export by discharge among rivers sharing "
+                "grid cell(s): %s.",
+                ", ".join(shared_msgs),
+            )
+
+        return weights
 
 
 def _decode_string(byte_array):

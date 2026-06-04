@@ -14,7 +14,6 @@ from roms_tools.datasets.river_datasets import (
     SECONDS_PER_YEAR,
     Rivr2oRiverBGCDataset,
     clamp_rivr2o_time,
-    rivr2o_coerce_time,
 )
 from roms_tools.setup.utils import gc_dist
 
@@ -129,29 +128,36 @@ def _nearest_nonzero_cell_info(
     lat: float,
     *,
     straddle: bool,
-    time: datetime | np.datetime64 | None = None,
 ) -> dict[str, float | int | None]:
     """Mirror ``Rivr2oRiverBGCDataset.sample_at_points`` cell selection."""
     lat_dim = bgc.dim_names["latitude"]
     lon_dim = bgc.dim_names["longitude"]
 
     query_lon = bgc._adjust_lon_to_grid(np.array([lon]), straddle=straddle)[0]
-    time_index = bgc._nearest_time_index(time) if time is not None else None
-    lat_indices, lon_indices, grid_lats, grid_lons = bgc._valid_export_cell_indices(
-        time_index=time_index
+    nearest_lat, nearest_lon = bgc.nearest_dic_cell_indices_for_points(
+        np.array([lon]),
+        np.array([lat]),
+        straddle=straddle,
     )
-    dist_m = gc_dist(query_lon, lat, grid_lons, grid_lats)
-    nearest = int(np.argmin(dist_m))
+    cell_lat_idx = nearest_lat[0]
+    cell_lon_idx = nearest_lon[0]
+    dist_m = float(
+        gc_dist(
+            query_lon,
+            lat,
+            float(bgc.ds[lon_dim].values[cell_lon_idx]),
+            float(bgc.ds[lat_dim].values[cell_lat_idx]),
+        )
+    )
     return {
         "query_lon": float(query_lon),
         "query_lat": float(lat),
-        "cell_lat": float(bgc.ds[lat_dim].values[lat_indices[nearest]]),
-        "cell_lon": float(bgc.ds[lon_dim].values[lon_indices[nearest]]),
-        "dist_m": float(dist_m[nearest]),
-        "dist_km": float(dist_m[nearest]) / 1000.0,
-        "lat_index": int(lat_indices[nearest]),
-        "lon_index": int(lon_indices[nearest]),
-        "rivr2o_time_index": time_index,
+        "cell_lat": float(bgc.ds[lat_dim].values[cell_lat_idx]),
+        "cell_lon": float(bgc.ds[lon_dim].values[cell_lon_idx]),
+        "dist_m": dist_m,
+        "dist_km": dist_m / 1000.0,
+        "lat_index": cell_lat_idx,
+        "lon_index": cell_lon_idx,
     }
 
 
@@ -228,19 +234,24 @@ def diagnose_rivr2o_river_forcing(
 
     abs_time = ds["abs_time"].isel(river_time=time_index).values
     abs_time_scalar = pd.Timestamp(abs_time).to_pydatetime()
-    anchor_time = rivr2o_coerce_time(
-        clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index)).values
-    )
-    rivr2o_time_index = bgc._nearest_time_index(anchor_time)
+    target_time = clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index))
+    rivr2o_time_index = bgc._nearest_time_index(target_time)
     rivr2o_time_used = pd.Timestamp(
         bgc.ds[bgc.dim_names["time"]].values[rivr2o_time_index]
     )
 
+    nearest_lat, nearest_lon = bgc.nearest_dic_cell_indices_for_points(
+        mouth_lons,
+        mouth_lats,
+        straddle=river_forcing.grid.straddle,
+    )
+    partition_weight = bgc.discharge_partition_weights(
+        ds["river_volume"], nearest_lat, nearest_lon
+    )
     sampled = bgc.sample_at_points(
         lon=mouth_lons,
         lat=mouth_lats,
         straddle=river_forcing.grid.straddle,
-        time=anchor_time,
     )
 
     bbox = iceland_bbox or _iceland_bbox_from_grid(river_forcing)
@@ -255,7 +266,6 @@ def diagnose_rivr2o_river_forcing(
             float(mouth_lons[i]),
             float(mouth_lats[i]),
             straddle=river_forcing.grid.straddle,
-            time=anchor_time,
         )
         interp = _interp_at_mouth(
             bgc,
@@ -265,18 +275,21 @@ def diagnose_rivr2o_river_forcing(
             time=abs_time_scalar,
         )
 
-        target_time = clamp_rivr2o_time(ds["abs_time"].isel(river_time=time_index))
         export_dic = float(
-            sampled["DIC"]
-            .interp(time=target_time, method="nearest")
-            .isel(points=i)
-            .values
+            (
+                sampled["DIC"]
+                .interp(time=target_time, method="nearest")
+                .isel(points=i)
+                * partition_weight.isel(nriver=i, river_time=time_index)
+            ).values
         )
         export_doc_l = float(
-            sampled["DOC_l"]
-            .interp(time=target_time, method="nearest")
-            .isel(points=i)
-            .values
+            (
+                sampled["DOC_l"]
+                .interp(time=target_time, method="nearest")
+                .isel(points=i)
+                * partition_weight.isel(nriver=i, river_time=time_index)
+            ).values
         )
         q = float(ds["river_volume"].isel(nriver=i, river_time=time_index).values)
         c_dic_file = float(rivr2o_export_to_mmol_m3(export_dic, q))
@@ -290,10 +303,10 @@ def diagnose_rivr2o_river_forcing(
 
         lat_idx = cell["lat_index"]
         lon_idx = cell["lon_index"]
-        t_idx = cell["rivr2o_time_index"]
+        t_idx = rivr2o_time_index
         dic_at_cell_anchor = np.nan
         no3_at_cell_anchor = np.nan
-        if lat_idx is not None and lon_idx is not None and t_idx is not None:
+        if lat_idx is not None and lon_idx is not None:
             lat_dim = bgc.dim_names["latitude"]
             lon_dim = bgc.dim_names["longitude"]
             time_dim = bgc.dim_names["time"]
@@ -317,8 +330,8 @@ def diagnose_rivr2o_river_forcing(
             "dist_to_cell_km": cell["dist_km"],
             "rivr2o_time_used": str(rivr2o_time_used),
             "abs_time": str(abs_time_scalar),
-            "DIC_at_selected_cell_anchor_year": dic_at_cell_anchor,
-            "NO3_at_selected_cell_anchor_year": no3_at_cell_anchor,
+            "DIC_at_selected_cell": dic_at_cell_anchor,
+            "NO3_at_selected_cell": no3_at_cell_anchor,
             "DIC_export_1e6g_yr": export_dic,
             "DOC_l_export_1e6g_yr": export_doc_l,
             "interp_DIC_at_mouth": interp["interp_dic"],
@@ -372,7 +385,15 @@ def diagnose_rivr2o_river_forcing(
         "DIC in river_forcing = mmol/m3 from (DIC + DOC_l) export / river_volume "
         "(see roms_tools/setup/river_forcing.py)."
     )
-    print(f"RIVR2O anchor year for cell search: {rivr2o_time_used}")
+    print(
+        "RIVR2O cell search: nearest grid point with DIC export (same cell all years). "
+        f"Export snapshot year for index {time_index}: {rivr2o_time_used}"
+    )
+    if str(ds.attrs.get("discharge_climatology", "")).lower() == "true":
+        print(
+            "Discharge climatology is tiled on calendar river_time; RIVR2O tracers "
+            "vary by year at each abs_time."
+        )
     nan_export = df["DIC_export_1e6g_yr"].isna()
     if nan_export.any():
         print(

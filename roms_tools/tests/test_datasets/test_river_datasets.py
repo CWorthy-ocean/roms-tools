@@ -5,6 +5,7 @@ import xarray as xr
 
 from roms_tools.datasets.river_datasets import (
     RIVR2O_FILL_VALUE,
+    SECONDS_PER_YEAR,
     RiverDataset,
     Rivr2oRiverBGCDataset,
     rivr2o_coerce_time,
@@ -173,7 +174,8 @@ class TestRivr2oRiverBGCDataset:
 
         assert sampled["DIC"].isel(time=0).item() == 7.0
 
-    def test_sample_at_points_uses_export_at_requested_time(self, tmp_path):
+    def test_sample_at_points_same_dic_cell_all_years(self, tmp_path):
+        """Nearest DIC cell is fixed in space; values vary along ``time``."""
         lat = np.array([0.0, 2.0])
         lon = np.array([0.0, 2.0])
         values_1999 = {
@@ -203,13 +205,182 @@ class TestRivr2oRiverBGCDataset:
             end_time=datetime(2000, 12, 31),
         )
 
-        sampled = dataset.sample_at_points(
-            lon=0.1,
-            lat=0.1,
-            time=datetime(2000, 1, 15),
+        sampled = dataset.sample_at_points(lon=0.1, lat=0.1)
+
+        assert sampled["DIC"].isel(time=0).item() == 5.0
+        assert sampled["DIC"].isel(time=1).item() == 0.0
+        assert sampled["NO3"].isel(time=1).item() == 0.0
+
+    def test_sample_at_points_returns_full_cell_export_on_shared_cell(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 2.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
         )
 
-        assert sampled["DIC"].isel(time=1).item() == 8.0
+        sampled = dataset.sample_at_points(
+            lon=[0.1, 0.15],
+            lat=[0.1, 0.12],
+        )
+
+        assert sampled["DIC"].isel(time=0, points=0).item() == 10.0
+        assert sampled["DIC"].isel(time=0, points=1).item() == 10.0
+
+    def test_discharge_partition_weights_with_fortran_nriver_index(self, tmp_path):
+        """``nriver`` uses 1-based IDs like ``RiverForcing`` output."""
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+
+        n_time = 180
+        river_volume = xr.DataArray(
+            np.ones((n_time, 2)),
+            dims=["river_time", "nriver"],
+            coords={
+                "river_time": np.arange(n_time),
+                "nriver": [1, 2],
+            },
+        )
+        nearest_lat, nearest_lon = dataset.nearest_dic_cell_indices_for_points(
+            lon=[0.1, 0.15],
+            lat=[0.1, 0.12],
+        )
+        weights = dataset.discharge_partition_weights(
+            river_volume, nearest_lat, nearest_lon
+        )
+
+        assert list(weights.nriver.values) == [1, 2]
+        assert weights.shape == (n_time, 2)
+        assert weights.values.ndim == 2
+
+    def test_discharge_partition_weights_match_concentrations(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+
+        river_volume = xr.DataArray(
+            [[100.0, 300.0]],
+            dims=["river_time", "nriver"],
+            coords={"river_time": [0], "nriver": [0, 1]},
+        )
+        nearest_lat, nearest_lon = dataset.nearest_dic_cell_indices_for_points(
+            lon=[0.1, 0.15],
+            lat=[0.1, 0.12],
+        )
+        weights = dataset.discharge_partition_weights(
+            river_volume, nearest_lat, nearest_lon
+        )
+        sampled = dataset.sample_at_points(
+            lon=[0.1, 0.15],
+            lat=[0.1, 0.12],
+        )
+
+        export = sampled["DIC"].isel(time=0) * weights.isel(river_time=0)
+        mass_flux = export * 1e6 / SECONDS_PER_YEAR
+        mmol_flux = mass_flux / 12.011 * 1000.0
+        conc = mmol_flux / river_volume.isel(river_time=0)
+        np.testing.assert_allclose(
+            conc.isel(nriver=0).item(), conc.isel(nriver=1).item(), rtol=1e-6
+        )
+        assert export.isel(nriver=0).item() == 2.5
+        assert export.isel(nriver=1).item() == 7.5
+
+    def test_discharge_partition_constant_concentration_each_month(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+
+        river_volume = xr.DataArray(
+            [[100.0, 300.0], [200.0, 600.0]],
+            dims=["river_time", "nriver"],
+            coords={"river_time": [0, 1], "nriver": [0, 1]},
+        )
+        nearest_lat, nearest_lon = dataset.nearest_dic_cell_indices_for_points(
+            lon=[0.1, 0.15],
+            lat=[0.1, 0.12],
+        )
+        weights = dataset.discharge_partition_weights(
+            river_volume, nearest_lat, nearest_lon
+        )
+        sampled = dataset.sample_at_points(
+            lon=[0.1, 0.15],
+            lat=[0.1, 0.12],
+        )
+        cell_export = 10.0
+
+        def mmol_m3(export, q):
+            mass_flux = export * 1e6 / SECONDS_PER_YEAR
+            return mass_flux / 12.011 * 1000.0 / q
+
+        for t in (0, 1):
+            export = sampled["DIC"].isel(time=0) * weights.isel(river_time=t)
+            q = river_volume.isel(river_time=t)
+            conc = mmol_m3(export, q)
+            np.testing.assert_allclose(
+                conc.isel(nriver=0).item(), conc.isel(nriver=1).item(), rtol=1e-6
+            )
+
+        export_low = (cell_export * weights.isel(river_time=0, nriver=0)).item()
+        export_high = (cell_export * weights.isel(river_time=1, nriver=0)).item()
+        assert export_high > export_low
 
     def test_sample_at_points_ignores_cells_with_only_other_tracers(self, tmp_path):
         """Cell mask uses DIC only; DIP/NO3-only cells are not selected."""
@@ -232,7 +403,7 @@ class TestRivr2oRiverBGCDataset:
             end_time=datetime(2000, 12, 31),
         )
 
-        sampled = dataset.sample_at_points(lon=0.1, lat=0.1, time=datetime(2000, 7, 1))
+        sampled = dataset.sample_at_points(lon=0.1, lat=0.1)
 
         assert sampled["DIC"].isel(time=0).item() == 5.0
         assert sampled["NO3"].isel(time=0).item() == 0.0

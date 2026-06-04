@@ -929,6 +929,7 @@ class Rivr2oRiverBGCDataset:
         lat: np.ndarray,
         *,
         straddle: bool = False,
+        river_names: list[str] | None = None,
     ) -> tuple[list[int], list[int]]:
         """RIVR2O ``(lat, lon)`` indices of the nearest cell with positive DIC export."""
         from roms_tools.setup.utils import gc_dist
@@ -941,11 +942,35 @@ class Rivr2oRiverBGCDataset:
             self._valid_dic_export_cell_indices()
         )
 
+        if river_names is not None and len(river_names) != len(query_lon):
+            raise ValueError(
+                "river_names must have the same length as lon/lat query points."
+            )
+
+        dist_warn_m = 100_000.0  # 100 km
         nearest_lat = []
         nearest_lon = []
-        for q_lon, q_lat in zip(query_lon, query_lat, strict=True):
+        for i, (q_lon, q_lat) in enumerate(zip(query_lon, query_lat, strict=True)):
             dist = gc_dist(q_lon, q_lat, grid_lons, grid_lats)
             nearest = int(np.argmin(dist))
+            min_dist_m = float(dist[nearest])
+            if min_dist_m > dist_warn_m:
+                label = (
+                    river_names[i]
+                    if river_names is not None
+                    else f"point {i}"
+                )
+                logging.warning(
+                    "RIVR2O DIC export cell for %s is %.1f km from the river "
+                    "mouth (lat=%.4f, lon=%.4f); using grid cell lat_idx=%d, "
+                    "lon_idx=%d.",
+                    label,
+                    min_dist_m / 1000.0,
+                    q_lat,
+                    q_lon,
+                    int(lat_indices[nearest]),
+                    int(lon_indices[nearest]),
+                )
             nearest_lat.append(int(lat_indices[nearest]))
             nearest_lon.append(int(lon_indices[nearest]))
         return nearest_lat, nearest_lon

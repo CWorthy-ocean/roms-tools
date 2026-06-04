@@ -456,6 +456,7 @@ class RiverForcing:
             lons,
             lats,
             straddle=self.grid.straddle,
+            river_names=river_names,
         )
         partition_weight = bgc_data.discharge_partition_weights(
             ds["river_volume"], nearest_lat, nearest_lon

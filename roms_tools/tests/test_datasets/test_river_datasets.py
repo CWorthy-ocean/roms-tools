@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 
 import numpy as np
 import xarray as xr
@@ -238,6 +239,45 @@ class TestRivr2oRiverBGCDataset:
 
         assert sampled["DIC"].isel(time=0, points=0).item() == 10.0
         assert sampled["DIC"].isel(time=0, points=1).item() == 10.0
+
+    def test_nearest_dic_cell_warns_when_mouth_far_from_cell(self, tmp_path, caplog):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, 10.0]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "POC": np.array([[0.0, 0.0], [0.0, 0.0]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            dataset.nearest_dic_cell_indices_for_points(
+                lon=[-50.0],
+                lat=[-50.0],
+                river_names=["FarRiver"],
+            )
+        assert "RIVR2O DIC export cell for FarRiver" in caplog.text
+        assert "km from the river mouth" in caplog.text
+
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            dataset.nearest_dic_cell_indices_for_points(
+                lon=[0.1],
+                lat=[0.1],
+                river_names=["NearRiver"],
+            )
+        assert "RIVR2O DIC export cell" not in caplog.text
 
     def test_discharge_partition_weights_with_fortran_nriver_index(self, tmp_path):
         """``nriver`` uses 1-based IDs like ``RiverForcing`` output."""

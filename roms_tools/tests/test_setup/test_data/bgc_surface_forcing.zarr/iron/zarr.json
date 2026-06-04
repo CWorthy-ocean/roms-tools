@@ -40,7 +40,7 @@
   "attributes": {
     "long_name": "iron decomposition",
     "units": "nmol/cm^2/s",
-    "coordinates": "abs_time dust_time iron_time nhy_time nox_time pco2_time",
+    "coordinates": "abs_time dust_time iron_time nhy_time nox_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

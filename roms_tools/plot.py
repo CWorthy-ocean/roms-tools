@@ -1274,22 +1274,23 @@ def plot_location(
 
 def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     """
-    Plot Carbon Dioxide Removal (CDR) uptake efficiency over time.
+    Plot CDR uptake efficiency and CO2 uptake mass over time.
 
-    This function plots two estimates of uptake efficiency stored in the dataset:
-    1. `cdr_efficiency`, computed from CO2 flux differences.
-    2. `cdr_efficiency_from_delta_diff`, computed from DIC differences.
-
-    The x-axis shows absolute time, formatted as YYYY-MM-DD, and the y-axis shows
-    the uptake efficiency values. The plot includes a legend and grid for clarity.
+    CDR efficiency is shown on the left y-axis; CO2 uptake in tonnes of CO2 is
+    shown on the right using matplotlib mathtext (subscript 2 on the axis
+    label). Each axis carries flux-based and DIC-difference-based estimates.
 
     Parameters
     ----------
     ds : xarray.Dataset
-        Dataset containing the following variables:
-        - "time": array of timestamps (datetime-like)
-        - "cdr_efficiency": uptake efficiency from flux differences
-        - "cdr_efficiency_from_delta_diff": uptake efficiency from DIC differences
+        Dataset containing:
+        - "time": model time coordinate for the x-axis.
+        - "cdr_efficiency_from_flux": flux-based CDR uptake efficiency (dimensionless).
+        - "cdr_efficiency_from_DIC_difference": DIC-difference-based CDR uptake
+          efficiency (dimensionless).
+        - "cdr_carbon_uptake_from_flux": cumulative flux-based CO2 uptake (tonnes CO2).
+        - "cdr_carbon_uptake_from_DIC_difference": DIC-difference-based CO2 uptake
+          (tonnes CO2).
 
     Raises
     ------
@@ -1300,7 +1301,13 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     -------
     None
     """
-    required_vars = ["time", "cdr_efficiency", "cdr_efficiency_from_delta_diff"]
+    required_vars = [
+        "time",
+        "cdr_efficiency_from_flux",
+        "cdr_efficiency_from_DIC_difference",
+        "cdr_carbon_uptake_from_flux",
+        "cdr_carbon_uptake_from_DIC_difference",
+    ]
     for var in required_vars:
         if var not in ds or ds[var].size == 0:
             raise ValueError(f"Dataset must contain non-empty variable '{var}'.")
@@ -1311,17 +1318,57 @@ def plot_uptake_efficiency(ds: xr.Dataset) -> None:
     if not np.all(times[1:] >= times[:-1]):
         raise ValueError("time must be strictly increasing.")
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax_eff = plt.subplots(figsize=(10, 4))
 
-    ax.plot(times, ds["cdr_efficiency"], label="from CO2 flux differences", lw=2)
-    ax.plot(
-        times, ds["cdr_efficiency_from_delta_diff"], label="from DIC differences", lw=2
+    c0, c1 = "C0", "C1"
+    ax_eff.plot(
+        times,
+        ds["cdr_efficiency_from_flux"],
+        color=c0,
+        lw=2,
+        label=r"CDR efficiency (CO$_2$ flux)",
     )
-    ax.grid()
-    ax.set_title("CDR uptake efficiency")
-    ax.legend()
+    ax_eff.plot(
+        times,
+        ds["cdr_efficiency_from_DIC_difference"],
+        color=c1,
+        lw=2,
+        label="CDR efficiency (DIC difference)",
+    )
+    ax_eff.set_ylabel("CDR efficiency")
+    ax_eff.grid()
+
+    ax_mass = ax_eff.twinx()
+    ax_mass.plot(
+        times,
+        ds["cdr_carbon_uptake_from_flux"],
+        color=c0,
+        lw=2,
+        ls="--",
+        label=r"CO$_2$ uptake (flux)",
+    )
+    ax_mass.plot(
+        times,
+        ds["cdr_carbon_uptake_from_DIC_difference"],
+        color=c1,
+        lw=2,
+        ls="--",
+        label=r"CO$_2$ uptake (DIC difference)",
+    )
+    ax_mass.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
+
+    ax_eff.set_title(r"CO$_2$ uptake and CDR efficiency")
+
+    lines_eff, labels_eff = ax_eff.get_legend_handles_labels()
+    lines_mass, labels_mass = ax_mass.get_legend_handles_labels()
+    ax_eff.legend(
+        lines_eff + lines_mass,
+        labels_eff + labels_mass,
+        loc="upper left",
+        framealpha=0.9,
+    )
 
     # Format x-axis as YYYY-MM-DD
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    ax_eff.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
     fig.autofmt_xdate()
     plt.show()

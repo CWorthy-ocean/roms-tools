@@ -18,7 +18,7 @@ correction_data = pooch.create(
     base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
     # The registry specifies the files that can be fetched
     registry={
-        "SSR_correction.nc": "sha256:a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
+        "ERA5_correction.nc": "sha256:a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
     },
 )
 
@@ -142,7 +142,7 @@ def download_correction_data(filename: str) -> str:
     ----------
     filename : str
         The name of the test data file to be downloaded. Available options:
-        - "SSR_correction.nc"
+        - "ERA5_correction.nc"
 
     Returns
     -------

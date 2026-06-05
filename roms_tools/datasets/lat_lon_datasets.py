@@ -1755,11 +1755,12 @@ class ERA5Correction(LatLonDataset):
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     filename: str = field(
-        default_factory=lambda: download_correction_data("SSR_correction.nc")
+        default_factory=lambda: download_correction_data("ERA5_correction.nc")
     )
     var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "swr_corr": "ssr_corr",  # multiplicative correction factor for ERA5 shortwave radiation
+            "swr_corr": "ssr_corr",   # multiplicative correction factor for ERA5 shortwave radiation
+            "lwr_corr": "strd_corr",  # multiplicative correction factor for ERA5 longwave radiation
         }
     )
     dim_names: dict[str, str] = field(

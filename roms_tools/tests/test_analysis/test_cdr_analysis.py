@@ -184,9 +184,9 @@ def test_carbon_uptake_tonnes_co2_analytic() -> None:
         ).item()
     )
     native_mmol_dic = float(
-        (
-            (ds["hDIC"] - ds["hDIC_ALT_CO2"]) * area
-        ).sum(dim=("s_rho", "eta_rho", "xi_rho")).item()
+        ((ds["hDIC"] - ds["hDIC_ALT_CO2"]) * area)
+        .sum(dim=("s_rho", "eta_rho", "xi_rho"))
+        .item()
     )
 
     mmol_to_tonnes = _native_carbon_amount_to_tonnes_co2_scale("mmol/m^2/s")

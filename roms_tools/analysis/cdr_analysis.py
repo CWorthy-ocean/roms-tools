@@ -161,9 +161,7 @@ def compute_cdr_metrics(ds: xr.Dataset, grid_ds: xr.Dataset) -> xr.Dataset:
     ds_cdr["cdr_carbon_uptake_from_DIC_difference"].attrs.update(
         long_name="CDR carbon uptake (from DIC differences)",
         units="tonnes CO2",
-        description=(
-            "CO2-equivalent mass from the volume-integrated DIC difference"
-        ),
+        description=("CO2-equivalent mass from the volume-integrated DIC difference"),
     )
 
     return ds_cdr

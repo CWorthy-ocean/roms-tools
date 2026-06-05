@@ -206,6 +206,7 @@ def get_variable_metadata():
             "flux_units": "degrees Celsius/s",
         },
         "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
+        "sss": {"long_name": "sea surface salinity", "units": "PSU"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -410,10 +411,10 @@ def get_variable_metadata():
             "flux_units": "mmol/s",
             "integrated_units": "mmol",
         },
-        "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
-        "pco2_air_alt": {
-            "long_name": "atmospheric pCO2, alternative CO2",
-            "units": "ppmv",
+        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "µmol mol⁻¹"},
+        "xco2_air_alt": {
+            "long_name": "CO2, Marine Boundary Layer; alternative CO2",
+            "units": "µmol mol⁻¹",
         },
         "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
         "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},
@@ -511,9 +512,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
         A dictionary containing surface biogeochemical variables as xarray DataArrays.
         Missing variables are computed and added to this dictionary.
 
-        Assumptions:
-        - If `pco2_air` is part of the input dictionary, it is in units of ppmv.
-
     Returns
     -------
     dict
@@ -525,7 +523,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
     """
     # Define the relationships for missing variables
     variable_relations = {
-        "pco2_air_alt": ("pco2_air", 1.0),
         "nox": (None, 1e-12),  # kg/m2/s
         "nhy": (None, 5e-12),  # kg/m2/s
     }
@@ -536,7 +533,7 @@ def compute_missing_surface_bgc_variables(bgc_data):
             if base_var:
                 bgc_data[var_name] = bgc_data[base_var] * factor
             else:
-                bgc_data[var_name] = factor * xr.ones_like(bgc_data["pco2_air"])
+                bgc_data[var_name] = factor * xr.ones_like(bgc_data["dust"])
 
     return bgc_data
 
@@ -776,13 +773,17 @@ def group_dataset(ds, filepath):
         if len(ds["abs_time"]) > 2:
             # Determine the frequency of the data
             abs_time_freq = pd.infer_freq(ds["abs_time"].to_index())
-            if abs_time_freq.lower() in [
-                "d",
-                "h",
-                "t",
-                "s",
-            ]:  # Daily or higher frequency
-                dataset_list, output_filenames = group_by_month(ds, filepath)
+            if abs_time_freq:
+                if abs_time_freq.lower() in [
+                    "d",
+                    "h",
+                    "t",
+                    "s",
+                ]:  # Daily or higher frequency
+                    dataset_list, output_filenames = group_by_month(ds, filepath)
+                else:
+                    dataset_list, output_filenames = group_by_year(ds, filepath)
+            # If no regular spacing, default to year grouping
             else:
                 dataset_list, output_filenames = group_by_year(ds, filepath)
         else:
@@ -1342,6 +1343,9 @@ def normalize_paths(value: Any) -> Any:
     Heuristic: strings containing '/' or ending with '.nc' are treated as paths.
     """
     if isinstance(value, str):
+        # if the path looks like a URL, don't make it a PosixPath, or it will strip out the double //
+        if "://" in value:
+            return value
         return Path(value) if "/" in value or value.endswith(".nc") else value
     if isinstance(value, list):
         return [normalize_paths(v) for v in value]

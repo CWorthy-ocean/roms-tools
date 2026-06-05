@@ -1,7 +1,7 @@
 import importlib.metadata
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +14,10 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Correction,
     ERA5Dataset,
     LatLonDataset,
+    MBLco2Dataset,
     UnifiedBGCSurfaceDataset,
+    UnifiedRestoringSurfaceDataset,
+    WOARestoringSurfaceDataset,
 )
 from roms_tools.plot import plot
 from roms_tools.regrid import LateralRegridToROMS
@@ -41,6 +44,10 @@ from roms_tools.utils import (
 
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
+
+DEFAULT_MBL_co2_PATH = (
+    "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
 )
 
 
@@ -77,6 +84,7 @@ class SurfaceForcing:
 
           - "physics": for physical atmospheric forcing.
           - "bgc": for biogeochemical forcing.
+          - "restoring": for restoring forces.
 
     correct_radiation : bool
         Whether to correct shortwave radiation. Default is True.
@@ -85,6 +93,10 @@ class SurfaceForcing:
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
         This applies an exponential decay to wind magnitude near the coast, based on
         a 12.5 km e-folding scale, with up to 40% reduction at the coastline. Default is False.
+
+    restoring_forces : list[str], optional
+        Specifies which variables to apply restoring forces to. Currently only sea surface salinity is supported:
+        ```['sss',]```.
 
     coarse_grid_mode : str, optional
         Specifies whether to interpolate onto grid coarsened by a factor of two. Options are:
@@ -97,10 +109,19 @@ class SurfaceForcing:
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
         Indicates whether to use dask for processing. If True, data is processed with dask; if False, data is processed eagerly. Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None (default chunking is used).
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading with dask. Only Geographic bounds are supported:
+         ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}`` in degrees. The
+         bounds are applied to the dataset before reading the underlying datasets to reduce memory usage.
     bypass_validation: bool, optional
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
+
 
     Examples
     --------
@@ -123,18 +144,24 @@ class SurfaceForcing:
     source: RawDataSource
     """Dictionary specifying the source of the surface forcing data."""
     type: str = "physics"
-    """Specifies the type of forcing data ("physics", "bgc")."""
+    """Specifies the type of forcing data ("physics", "bgc", "restoring")."""
     correct_radiation: bool = True
     """Whether to correct shortwave radiation."""
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
+    restoring_forces: list[str] | None = None
+    """The variables to create the restoring forces for."""
     coarse_grid_mode: str = "auto"
     """Specifies whether to interpolate onto grid coarsened by a factor of two."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the model."""
     use_dask: bool = False
     """Whether to use dask for processing."""
+    chunks: dict[str, int] | None = None
+    """Dask chunk sizes for lat/lon surface-forcing sources; default None."""
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
+    """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
 
@@ -146,6 +173,7 @@ class SurfaceForcing:
 
     def __post_init__(self):
         self._input_checks()
+
         data = self._get_data()
 
         if self.coarse_grid_mode == "always":
@@ -156,23 +184,57 @@ class SurfaceForcing:
             use_coarse_grid = self._determine_coarse_grid_usage(data)
         self.use_coarse_grid = use_coarse_grid
 
-        opt_file = "bulk_frc.opt" if self.type == "physics" else "bgc.opt"
+        if self.type == "physics":
+            opt_file = "bulk_frc.opt"
+        elif self.type == "bgc":
+            opt_file = "bgc.opt"
+            if self.source["name"] == "MBL_co2":
+                cppdefs_flags = set()
+                cppdefs_flags.add("PCO2AIR_FORCING")
+        elif self.type == "restoring":
+            opt_file = "cppdefs.opt"
+            cppdefs_flags = set()
+
+            for var in self.restoring_forces:
+                if var == "sss":
+                    cppdefs_flags.add("SFLX_CORR")
+
         grid_desc = "grid coarsened by factor 2" if use_coarse_grid else "fine grid"
         interp_flag = 1 if use_coarse_grid else 0
 
-        logging.info(
-            "Data will be interpolated onto the %s. "
-            "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
-            grid_desc,
-            interp_flag,
-            opt_file,
-        )
+        if self.type in ["physics", "bgc"]:
+            logging.info(
+                "Data will be interpolated onto the %s. "
+                "Remember to set `interp_frc = %d` in your `%s` ROMS option file.",
+                grid_desc,
+                interp_flag,
+                opt_file,
+            )
+            if self.source["name"] == "MBL_co2":
+                logging.info(
+                    "Time-varying CO2 values being used."
+                    "Remember to define the following flags in your `cppdefs.opt` file: %s`.",
+                    cppdefs_flags,
+                )
+        elif self.type == "restoring":
+            logging.info(
+                "Data will be interpolated onto the %s. "
+                "Restoring data being created for %s. "
+                "Remember to define the following flags in your `%s` file: %s`.",
+                grid_desc,
+                self.restoring_forces,
+                opt_file,
+                cppdefs_flags,
+            )
 
         target_coords = get_target_coords(self.grid, self.use_coarse_grid)
         self.target_coords = target_coords
 
+        # Unifies chunking on the *source* lat/lon grid (data.ds). Output self.ds is
+        # built later from regridded processed_fields, so its chunks follow regrid ops.
         data.choose_subdomain(
             target_coords,
+            unchunk_lateral_dims=True,
         )
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
@@ -216,7 +278,7 @@ class SurfaceForcing:
                     processed_fields["uwnd"], processed_fields["vwnd"]
                 )
 
-        if self.type == "bgc":
+        if self.type == "bgc" and self.source["name"] != "MBL_co2":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
 
         # Reorder dimensions
@@ -231,6 +293,10 @@ class SurfaceForcing:
 
         if not self.bypass_validation:
             self._validate(ds)
+
+        # Shift radiation time for hourly ERA5 data
+        if self.type == "physics" and self.source["name"] == "ERA5":
+            ds = self._apply_rad_time(ds)
 
         # substitute NaNs over land by a fill value to avoid blow-up of ROMS
         for var_name in ds.data_vars:
@@ -252,8 +318,8 @@ class SurfaceForcing:
             )
 
         # Validate the 'type' parameter
-        if self.type not in ["physics", "bgc"]:
-            raise ValueError("`type` must be either 'physics' or 'bgc'.")
+        if self.type not in ["physics", "bgc", "restoring"]:
+            raise ValueError("`type` must be either 'physics', 'bgc', or 'restoring'.")
 
         # Ensure 'source' dictionary contains required keys
         if "name" not in self.source:
@@ -264,6 +330,11 @@ class SurfaceForcing:
                     "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
                 )
                 self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            elif self.source["name"] == "MBL_co2":
+                logging.info(
+                    "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
+                )
+                self.source["path"] = DEFAULT_MBL_co2_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 
@@ -279,6 +350,27 @@ class SurfaceForcing:
             raise ValueError(
                 f"`coarse_grid_mode` must be one of {valid_modes}, but got '{self.coarse_grid_mode}'."
             )
+
+        # Check if restoring variables are accepted
+        if self.type == "restoring":
+            if not self.restoring_forces:
+                raise ValueError(
+                    "When type='restoring', `restoring_forces` must be defined."
+                )
+
+            valid_vars = ["sss"]
+            for var in self.restoring_forces:
+                if var not in valid_vars:
+                    raise ValueError(
+                        f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
+                    )
+
+        # Check that climatology is false for t-varying co2
+        if self.type == "bgc" and self.source["name"] == "MBL_co2":
+            if self.source["climatology"]:
+                raise ValueError(
+                    "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
+                )
 
     def _determine_coarse_grid_usage(self, data):
         """Determine if coarse grid interpolation should be used based on the resolution
@@ -321,10 +413,15 @@ class SurfaceForcing:
             "end_time": self.end_time,
             "climatology": self.source["climatology"],
             "use_dask": self.use_dask,
+            "chunks": self.chunks,
+            "initial_slice_bounds": self.initial_slice_bounds,
         }
 
         if self.type == "physics":
             if self.source["name"] == "ERA5":
+                # Add 1 hr since radiation time will shift by 1 hr
+                if data_dict["end_time"] is not None:
+                    data_dict["end_time"] = data_dict["end_time"] + timedelta(hours=1)
                 if str(self.source["path"]).startswith("gs://") or str(
                     self.source["path"]
                 ).startswith("gcs://"):
@@ -345,9 +442,21 @@ class SurfaceForcing:
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
                 data = UnifiedBGCSurfaceDataset(**data_dict)
+            elif self.source["name"] == "MBL_co2":
+                data = MBLco2Dataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED", "UNIFIED", and "MBL_co2" are valid options for source["name"] when type is "bgc".'
+                )
+
+        elif self.type == "restoring":
+            if self.source["name"] == "WOA":
+                data = WOARestoringSurfaceDataset(**data_dict)
+            elif self.source["name"] == "UNIFIED":
+                data = UnifiedRestoringSurfaceDataset(**data_dict)
+            else:
+                raise ValueError(
+                    'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring".'
                 )
 
         return data
@@ -409,12 +518,29 @@ class SurfaceForcing:
                 },
             }
         elif self.type == "bgc":
+            if self.source["name"] == "MBL_co2":
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
+                    variable_info[var_name] = default_info
+                    if var_name == "xco2_air":
+                        variable_info[var_name] = {**default_info, "validate": True}
+                    else:
+                        variable_info[var_name] = {**default_info, "validate": False}
+            else:
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
+                    variable_info[var_name] = {**default_info, "validate": False}
+        elif self.type == "restoring":
             variable_info = {}
             for var_name in list(data.var_names.keys()) + list(
                 data.opt_var_names.keys()
             ):
                 variable_info[var_name] = default_info
-                if var_name == "pco2_air":
+                if var_name == "sss":
                     variable_info[var_name] = {**default_info, "validate": True}
                 else:
                     variable_info[var_name] = {**default_info, "validate": False}
@@ -449,7 +575,7 @@ class SurfaceForcing:
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
-        correction_data.match_subdomain(coords_correction)
+        correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 
@@ -555,19 +681,38 @@ class SurfaceForcing:
         )
 
         if self.type == "physics":
-            time_coords = ["time"]
+            if self.source["name"] == "ERA5":
+                time_coords = [
+                    "time",
+                    "rad_time",
+                ]
+            else:
+                time_coords = [
+                    "time",
+                ]
         elif self.type == "bgc":
+            if self.source["name"] == "MBL_co2":
+                time_coords = [
+                    "xco2_time",
+                ]
+            else:
+                time_coords = [
+                    "iron_time",
+                    "dust_time",
+                    "nox_time",
+                    "nhy_time",
+                ]
+        elif self.type == "restoring":
             time_coords = [
-                "pco2_time",
-                "iron_time",
-                "dust_time",
-                "nox_time",
-                "nhy_time",
+                "sss_time",
             ]
         for time_coord in time_coords:
             ds = ds.assign_coords({time_coord: sfc_time})
 
         if self.type == "bgc":
+            ds = ds.drop_vars(["time"])
+
+        if self.type == "restoring":
             ds = ds.drop_vars(["time"])
 
         variables_to_drop = ["lat_rho", "lon_rho", "lat_coarse", "lon_coarse"]
@@ -600,6 +745,23 @@ class SurfaceForcing:
                 # all variables are at rho-points
                 mask = self.target_coords["mask"]
                 nan_check(ds[var_name].isel(time=0), mask)
+
+    def _apply_rad_time(self, ds):
+        """Shifts the short and long wave radiation time dimension by 30 minutes, and renames the 'time'
+        dimension to 'rad_time'. Done only for ERA5 data that is a time-average for hourly date.
+
+        Parameters
+        ----------
+        ds : xarray.Dataset
+            The dataset to shift time for. ds must contain variables 'swrad' and 'lwrad'.
+
+        """
+        # Create time dimension shifted 30 minutes earlier
+        ds = ds.assign_coords(rad_time=("time", ds["time"].values - 30 / 60 / 24))
+        ds.rad_time.attrs["long_name"] = ds.time.attrs["long_name"]
+        ds.rad_time.attrs["units"] = ds.time.attrs["units"]
+
+        return ds
 
     def _add_global_metadata(self, ds=None):
         if ds is None:
@@ -644,8 +806,8 @@ class SurfaceForcing:
             - "Tair": Air temperature at 2m.
             - "qair": Absolute humidity at 2m.
             - "rain": Total precipitation.
-            - "pco2_air": Atmospheric pCO2.
-            - "pco2_air_alt": Atmospheric pCO2, alternative CO2.
+            - "xco2_air": CO2 in Marine boundary layer.
+            - "xco2_air_alt": CO2 in Marine boundary layer, alternative CO2.
             - "iron": Iron decomposition.
             - "dust": Dust decomposition.
             - "nox": NOx decomposition.

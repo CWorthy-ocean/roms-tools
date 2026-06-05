@@ -121,18 +121,15 @@ def plot_2d_horizontal_field(
     return fig
 
 
-def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=False):
+def plot_nesting(parent_grid, child_grid, with_dim_names=False):
     """Plots nested parent and child grids with boundary overlays and grid masking.
 
     Parameters
     ----------
-    parent_grid_ds : xarray.Dataset
-        The parent grid dataset containing `lon_rho`, `lat_rho`, and `mask_rho` variables.
-    child_grid_ds : xarray.Dataset
-        The child grid dataset containing `lon_rho` and `lat_rho` variables.
-    parent_straddle : bool
-        Whether the parent grid straddles the 180-degree meridian. If True, longitudes
-        greater than 180° are wrapped to the -180° to 180° range.
+    parent_grid : Grid
+        The parent grid object with a dataset containing `lon_rho`, `lat_rho`, and `mask_rho` variables.
+    child_grid : Grid
+        The child grid object with a dataset containing `lon_rho` and `lat_rho` variables.
     with_dim_names : bool, optional
         Whether to include dimension names in the plotted grid boundaries. Defaults to False.
 
@@ -142,11 +139,13 @@ def plot_nesting(parent_grid_ds, child_grid_ds, parent_straddle, with_dim_names=
         The generated figure displaying the parent and child grid boundaries, mask,
         and additional map features.
     """
-    parent_lon_deg = parent_grid_ds["lon_rho"]
-    parent_lat_deg = parent_grid_ds["lat_rho"]
+    parent_lon_deg = parent_grid.ds["lon_rho"]
+    parent_lat_deg = parent_grid.ds["lat_rho"]
 
-    child_lon_deg = child_grid_ds["lon_rho"]
-    child_lat_deg = child_grid_ds["lat_rho"]
+    child_lon_deg = child_grid.ds["lon_rho"]
+    child_lat_deg = child_grid.ds["lat_rho"]
+
+    parent_straddle = parent_grid.straddle
 
     if parent_straddle:
         parent_lon_deg = xr.where(
@@ -995,7 +994,14 @@ def plot(
         field = field.isel(**slice_dict[loc])
 
     # Prepare figure title
-    if "abs_time" in field.coords:
+    if field.name in ["swrad", "lwrad"]:
+        # Handle variables that have shifted times
+        time_removed = np.round((field.time.values - field.rad_time.values) * 24 * 60)
+        formatted_time = np.datetime_as_string(
+            field.abs_time.values - np.timedelta64(int(time_removed), "m"), unit="m"
+        )
+        title = f"time: {formatted_time}"
+    elif "abs_time" in field.coords:
         formatted_time = np.datetime_as_string(field.abs_time.values, unit="m")
         title = f"time: {formatted_time}"
     elif "ntides" in field.coords:

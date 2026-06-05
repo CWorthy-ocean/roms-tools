@@ -7,6 +7,7 @@ dependencies:
   - sphinx
   - nbsphinx
   - sphinx-book-theme
+  - sphinx-design
   - sphinxcontrib-bibtex
   - myst-parser
   - pre-commit==3.8.0

@@ -5,6 +5,7 @@ import textwrap
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from importlib.util import find_spec
 from pathlib import Path
 from typing import TypeAlias
@@ -171,7 +172,7 @@ def dataset_using_dask(ds: xr.Dataset, first_var_only: bool = True) -> bool:
 
 
 def get_dask_chunks(
-    dim_names: dict[str, str], time_chunking: bool = True
+    dim_names: dict[str, str], time_chunking: bool = True, lateral_chunk: int = -1
 ) -> dict[str, int]:
     """Return the default dask chunks for ROMS datasets.
 
@@ -185,26 +186,32 @@ def get_dask_chunks(
         If True and `use_dask=True`, the data will be chunked along the time dimension with a chunk size of 1.
         If False, the data will not be chunked explicitly along the time dimension, but will follow the default auto chunking scheme. This option is useful for ROMS restart files.
         Defaults to True.
+    lateral_chunk : int, optional
+        The chunk size for the lateral dimensions. Defaults to -1.
+        If -1, the chunk size will be determined by the data (e.g. the entire DataArray dimension is one chunk).
+        If a positive integer, the chunk size will be set to the specified value.
 
     Returns
     -------
     dict[str, int]
         The default dask chunks for ROMS datasets.
     """
+    # TODO: move dask chunking to dataset classes.  We may want different default chunks load loading different datasets,
+    # and perhaps dynmically set chunking.
     if "latitude" in dim_names and "longitude" in dim_names:
         # for lat-lon datasets
         chunks = {
-            dim_names["latitude"]: -1,
-            dim_names["longitude"]: -1,
+            dim_names["latitude"]: lateral_chunk,
+            dim_names["longitude"]: lateral_chunk,
         }
     else:
         # For ROMS datasets
         chunks = {
-            "eta_rho": -1,
-            "eta_v": -1,
-            "xi_rho": -1,
-            "xi_u": -1,
-            "s_rho": -1,
+            "eta_rho": lateral_chunk,
+            "eta_v": lateral_chunk,
+            "xi_rho": lateral_chunk,
+            "xi_u": lateral_chunk,
+            "s_rho": lateral_chunk,
         }
 
     if "depth" in dim_names:
@@ -217,6 +224,66 @@ def get_dask_chunks(
     return chunks
 
 
+def unchunk_dask(
+    ds: xr.Dataset, dim_names: dict[str, str], time_chunking: bool = True
+) -> xr.Dataset:
+    """Reset the dask chunks for a dataset so unchunk geographic dimensions.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset to unchunk.
+    dim_names : dict[str, str]
+        Dictionary specifying the names of dimensions in the dataset, with standardized dims as keys.
+    time_chunking : bool, optional
+        If True, the time dimension will be chunked = 1.
+    """
+    if dataset_using_dask(ds):
+        chunks = get_dask_chunks(dim_names, time_chunking)
+        chunks_ds = {dim: size for dim, size in chunks.items() if dim in ds.dims}
+        return ds.chunk(chunks_ds)
+    return ds
+
+
+def _apply_slices(ds, selectors, use_isel: bool = False):
+    """
+    The method passed to 'preprocess'.
+    It checks which dimensions exist in the current file before slicing.
+    """
+    # Intersection: only use keys that exist in the current file's dimensions
+    # This prevents 'KeyError' if some files have different dim names
+    active_selectors = {k: v for k, v in selectors.items() if k in ds.dims}
+
+    if active_selectors:
+        if use_isel:
+            return ds.isel(**active_selectors)
+        return ds.sel(**active_selectors)
+
+    return ds
+
+
+def _get_ds_preprocessor(initial_slice_bounds, initial_slice_bounds_use_isel):
+    bounds = initial_slice_bounds or {}
+    if initial_slice_bounds_use_isel:
+        selectors = {
+            dim: slice(int(pair[0]), int(pair[1]) + 1) for dim, pair in bounds.items()
+        }
+    else:
+        selectors = {
+            # type checkers failing here (wants only int), but slice can actually take any type
+            dim: slice(pair[0], pair[1])  # type: ignore[arg-type]
+            for dim, pair in bounds.items()  # type: ignore[arg-type]
+        }
+
+    prep_func = partial(
+        _apply_slices,
+        selectors=selectors,
+        use_isel=initial_slice_bounds_use_isel,
+    )
+
+    return prep_func
+
+
 def _load_data_dask(
     filenames: list[str],
     dim_names: dict[str, str],
@@ -226,6 +293,8 @@ def _load_data_dask(
     read_zarr: bool = True,
     load_kwargs: dict[str, str] | None = None,
     chunks: dict[str, int] | None = None,
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
+    initial_slice_bounds_use_isel: bool = False,
 ) -> xr.Dataset:
     """Load dataset from the specified file using Dask.
 
@@ -255,6 +324,14 @@ def _load_data_dask(
         Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
         If provided, these chunks override the default chunking scheme when ``use_dask=True``.
         Defaults to None.
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None | None = None,
+        Optional horizontal subset to apply when loading.
+        - Index bounds on dimensions: keys are the dataset dimension names for rho
+          points (usually ``"eta_rho"`` and ``"xi_rho"``, or ``"latitide"`` and ``"longitude"``),
+          values are inclusive ``(min_index, max_index)`` tuples.
+    initial_slice_bounds_use_isel : bool, optional
+        Passed to :class:`DaskInitalSliceLoader`. Use ``True`` for inclusive integer
+        index bounds on ROMS rho dimensions.
 
     Returns
     -------
@@ -280,21 +357,35 @@ def _load_data_dask(
         )
 
         if read_zarr:
+            # zarr data is always chunked, so we remove any dask chunks except time to let
+            # dask inherit the zarr intrinsic chunking. Otherwise conflicting/non-aligned
+            # chunking causes errors. Testing with {'time': 1} chunks works, but is slower
+            # than passing None.
+            # TODO: Possibly refactor this into defaults for zarr-based datasets; perhaps there is
+            # some situation where we want to impose dask chunks on zarr datasets?
+
             return xr.open_zarr(
                 filenames[0],
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
-                chunks=chunks,
+                chunks=None,
                 consolidated=None,
                 storage_options={"token": "anon"},
             )
 
         kwargs = {**_get_ds_combine_base_params(), **(load_kwargs or {})}
+
+        preprocessor = (
+            _get_ds_preprocessor(initial_slice_bounds, initial_slice_bounds_use_isel)
+            if initial_slice_bounds is not None
+            else None
+        )
         return xr.open_mfdataset(
             filenames,
             decode_times=decode_times,
             decode_timedelta=decode_timedelta,
             chunks=chunks,
+            preprocess=preprocessor,
             **kwargs,
         )
 
@@ -396,6 +487,8 @@ def load_data(
     read_zarr: bool = False,
     ds_loader_fn: Callable[[], xr.Dataset] | None = None,
     chunks: dict[str, int] | None = None,
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
+    initial_slice_bounds_use_isel: bool = False,
 ):
     """Load dataset from the specified file.
 
@@ -430,6 +523,15 @@ def load_data(
         Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
         If provided, these chunks override the default chunking scheme when ``use_dask=True``.
         Defaults to None.
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None,
+        Optional horizontal subset to apply when loading.
+        - Index bounds on dimensions: keys are the dataset dimension names for rho
+          points (usually ``"eta_rho"`` and ``"xi_rho"``, or ``"latitide"`` and ``"longitude"``),
+          values are inclusive ``(min_index, max_index)`` tuples.
+    initial_slice_bounds_use_isel : bool, optional
+        When ``use_dask=True``, if True apply ``initial_slice_bounds`` with
+        :meth:`xarray.Dataset.isel` so integer pairs are inclusive index ranges (ROMS).
+        Lat/lon datasets should leave this False (default).
 
     Returns
     -------
@@ -473,6 +575,8 @@ def load_data(
             read_zarr,
             load_kwargs,
             chunks,
+            initial_slice_bounds,
+            initial_slice_bounds_use_isel,
         )
     else:
         ds_list = []

@@ -42,6 +42,7 @@ from roms_tools.utils import (
     has_gcsfs,
     interpolate_cyclic_time,
     load_data,
+    unchunk_dask,
 )
 
 TConcatEndTypes = Literal["lower", "upper", "both"]
@@ -57,6 +58,9 @@ DEFAULT_NR_BUFFER_POINTS = (
 # - Too few points → potential boundary artifacts when lateral refill is performed
 # See discussion: https://github.com/CWorthy-ocean/roms-tools/issues/153
 # This default will be applied consistently across all datasets requiring lateral fill.
+
+# Default lateral chunk size for Dask-backed LatLonDataset subclasses (latitude/longitude).
+_DEFAULT_LAT_LON_LATERAL_CHUNK = 50
 
 
 @dataclass(kw_only=True)
@@ -83,12 +87,22 @@ class LatLonDataset:
         Defaults to an empty dictionary.
     climatology : bool
         Indicates whether the dataset is climatological. Defaults to False.
+    has_encoded_times : bool
+        Indicates whether the dataset has a time variable with units that are decodable. Defaults to True.
     needs_lateral_fill: bool, optional
         Indicates whether land values require lateral filling. If `True`, ocean values will be extended into land areas
         to replace NaNs or non-ocean values (such as atmospheric values in ERA5 data). If `False`, it is assumed that
         land values are already correctly assigned, and lateral filling will be skipped. Defaults to `True`.
     use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is loaded eagerly. Defaults to False.
+    chunks : dict[str, int], optional
+        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
+        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
+        Defaults to None (default chunking is used).
+    initial_slice_bounds : dict, optional
+        Optional horizontal subset to apply when loading with dask. Only Geographic bounds are supported:
+         ``{"latitude": (min_lat, max_lat), "longitude": (min_lon, max_lon)}`` in degrees. The
+         bounds are applied to the dataset before reading the underlying datasets to reduce memory usage.
     read_zarr: bool, optional
         If True, use the zarr engine to read the dataset, and don't use mfdataset.
         Defaults to False.
@@ -102,10 +116,7 @@ class LatLonDataset:
         Only used when `end_time` is None. Has no effect otherwise.
     apply_post_processing: bool
         Indicates whether to post-process the dataset for futher use. Defaults to True.
-    chunks : dict[str, int], optional
-        Dictionary specifying chunk sizes for dask dimensions, e.g., ``{"latitude": 100, "longitude": 100}``.
-        If provided, these chunks override the default chunking scheme when ``use_dask=True``.
-        Defaults to None.
+
 
     Attributes
     ----------
@@ -136,14 +147,16 @@ class LatLonDataset:
     var_names: dict[str, str]
     opt_var_names: dict[str, str] = field(default_factory=dict)
     climatology: bool = False
+    has_encoded_times: bool = True
     needs_lateral_fill: bool = True
     use_dask: bool = False
+    chunks: dict[str, int] | None = None
+    initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     read_zarr: bool = False
     allow_flex_time: bool = False
     apply_post_processing: bool = True
-
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
-    chunks: dict[str, int] | None = None
+    _default_lateral_dask_chunk: ClassVar[int | None] = None
     is_global: bool = field(init=False, repr=False)
     ds: xr.Dataset = field(init=False, repr=False)
 
@@ -157,6 +170,11 @@ class LatLonDataset:
         5. Checks if the dataset covers the entire globe and adjusts if necessary.
         """
         validate_start_end_time(self.start_time, self.end_time)
+        if self.chunks is None:
+            lateral = type(self)._default_lateral_dask_chunk
+            if lateral is not None:
+                self.chunks = get_dask_chunks(self.dim_names, lateral_chunk=lateral)
+
         ds = self.load_data()
         ds = self.clean_up(ds)
         check_dataset(ds, self.dim_names, self.var_names, self.opt_var_names)
@@ -208,9 +226,11 @@ class LatLonDataset:
             filename=self.filename,
             dim_names=self.dim_names,
             use_dask=self.use_dask,
+            decode_times=self.has_encoded_times,
             read_zarr=self.read_zarr,
             ds_loader_fn=self.ds_loader_fn,
             chunks=self.chunks,
+            initial_slice_bounds=self.initial_slice_bounds,
         )
 
         return ds
@@ -549,7 +569,7 @@ class LatLonDataset:
         return_copy: bool = False,
         return_coords_only: bool = False,
         verbose: bool = False,
-        reset_chunking: bool = False,
+        unchunk_lateral_dims: bool = False,
     ) -> xr.Dataset | LatLonDataset | None:
         """Selects a subdomain from the xarray Dataset based on specified target
         coordinates, extending the selection by a defined buffer. Adjusts longitude
@@ -573,7 +593,7 @@ class LatLonDataset:
         verbose : bool, optional
             If True, print message if dataset is concatenated along longitude dimension.
             Defaults to False.
-        reset_chunking : bool
+        unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.
 
@@ -598,7 +618,7 @@ class LatLonDataset:
             target_coords=target_coords,
             buffer_points=buffer_points,
             use_dask=self.use_dask,
-            reset_chunking=reset_chunking,
+            unchunk_lateral_dims=unchunk_lateral_dims,
         )
 
         if return_coords_only:
@@ -748,6 +768,8 @@ class TPXODataset(LatLonDataset):
     ds : xr.Dataset
         The xarray Dataset containing the TPXO tidal model data, loaded from the specified file.
     """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     filename: str
     grid_filename: str
@@ -941,6 +963,8 @@ class TPXODataset(LatLonDataset):
 class GLORYSDataset(LatLonDataset):
     """Represents GLORYS data on original grid."""
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "temp": "thetao",
@@ -1064,6 +1088,13 @@ class GLORYSDefaultDataset(GLORYSDataset):
     def _load_from_copernicus(self) -> xr.Dataset:
         """Load a GLORYS dataset supporting streaming.
 
+        This reads in using zarr on the Copernicus Marine Data Store.
+        The impact of chunk_size_limit=-1 is to let the toolkit determine optimal chunking
+        based on the dataset and request parameters, which can help improve performance
+        when working with large datasets. So, this is dask-backed but does not use the
+        parameter _DEFAULT_LAT_LON_LATERAL_CHUNK for chunking, which does not work well
+        for streaming.
+
         Returns
         -------
         xr.Dataset
@@ -1091,13 +1122,251 @@ class GLORYSDefaultDataset(GLORYSDataset):
         ds = copernicusmarine.open_dataset(
             self.dataset_name,
             start_datetime=self.start_time,
-            end_datetime=self.end_time,
+            end_datetime=self.end_time
+            if self.end_time is not None
+            else self.start_time,
             service="arco-geo-series",
             coordinates_selection_method="outside",
-            chunk_size_limit=-1,
+            chunk_size_limit=-1,  # auto-chunks internally
         )
-        chunks = get_dask_chunks(self.dim_names)
-        ds = ds.chunk(chunks)
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class WOADataset(LatLonDataset):
+    """Represents World Ocean Atlas data on original grid.
+
+    Notes
+    -----
+    No pre-processing is done so land points are nans. The `needs_lateral_fill` attribute is set to `True`.
+    Time units provided in WOA datasets are not decoded by xarray, so `decode_times` is set to `False` when reading data.
+    """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
+    needs_lateral_fill: bool = True
+    has_encoded_times: bool = False
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method verifies that the time dimension exists in the dataset and assigns it appropriately.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with the 12 climatology times.
+        """
+        ds = ds.rename({"lon": "longitude", "lat": "latitude"})
+        ds = ds.assign_coords(
+            {
+                "latitude": ds["latitude"],
+                "longitude": ds["longitude"],
+            }
+        )
+
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "depth": "depth",
+        }
+
+        # Handle time dimension
+        if "time" not in ds.dims:
+            raise ValueError("Expecting WOA data containing dimension of 'time'")
+
+        if len(ds["time"]) != 12:
+            raise ValueError(
+                "The WOA data must be climatological and contain a 'time' dimension of length 12."
+            )
+
+        # Reassign dimension and convert from float64 days to timedelta
+        ds = assign_dates_to_climatology(ds, "time")
+
+        self.dim_names["time"] = "time"
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class MBLDataset(LatLonDataset):
+    """Represents Marine Boundary Layer data from NOAA's Global Monitoring Laboratory on original grid.
+
+    Notes
+    -----
+    Data is only available for time vs latitude. The data are replicated for all longitude points to
+    create a full global lat, lon dataset.
+    """
+
+    needs_lateral_fill: bool = False
+    has_encoded_times: bool = False
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method creates an xarray dataset from a numpy ndarray. It then converts the time type
+        and extrapolates the latitude values across all longitudes.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with time-varying CO2 values.
+        """
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+        }
+
+        # Handle time dimension
+        if len(ds["time"]) != 2209:
+            MBL_URL = "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+            raise ValueError(f"Please use the MBL dataset provided at {MBL_URL}")
+
+        # Convert decimal year to datetime
+        decimal_yr = ds["time"].values
+        years = np.floor(decimal_yr).astype(int)
+        # the data provides 48 evenly spaced times per year
+        step = np.round((decimal_yr - years) * 48).astype(int)
+
+        year_start = np.array([np.datetime64(f"{y}-01-01", "s") for y in years])
+        year_end = np.array([np.datetime64(f"{y + 1}-01-01", "s") for y in years])
+        dur_s = (year_end - year_start).astype("timedelta64[s]").astype(np.int64)
+
+        times = year_start + (step * dur_s // 48).astype("timedelta64[s]")
+        ds = ds.assign_coords(time=("time", times))
+        ds["time"].attrs = {"units": "Datetime", "long_name": "Time"}
+
+        self.dim_names["time"] = "time"
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class MBLco2Dataset(MBLDataset):
+    dataset_name: ClassVar[str] = (
+        "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+    )
+    """The MBL dataset url"""
+
+    def __post_init__(self) -> None:
+        if not self.filename:
+            self.filename = self.dataset_name
+        self.ds_loader_fn = self._load_from_mbl
+
+        super().__post_init__()
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"xco2_air": "co2"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "xco2_air_alt": "co2",
+        }
+    )
+
+    def _load_from_mbl(self) -> xr.Dataset:
+        """Load a MBL CO2 dataset.
+
+        This reads in a txt file from NOAA's Global Monitory Laboratory, containing co2 values and uncertainty for
+        the dates 1979-01-01, 2025-01-01.
+
+        Returns
+        -------
+        xr.Dataset
+            The converted xarray dataset
+        """
+        data = np.loadtxt(self.filename)
+
+        # Create latitude array corresponding to data
+        sat_lat = [
+            -1.00,
+            -0.95,
+            -0.90,
+            -0.85,
+            -0.80,
+            -0.75,
+            -0.70,
+            -0.65,
+            -0.60,
+            -0.55,
+            -0.50,
+            -0.45,
+            -0.40,
+            -0.35,
+            -0.30,
+            -0.25,
+            -0.20,
+            -0.15,
+            -0.10,
+            -0.05,
+            0.00,
+            0.05,
+            0.10,
+            0.15,
+            0.20,
+            0.25,
+            0.30,
+            0.35,
+            0.40,
+            0.45,
+            0.50,
+            0.55,
+            0.60,
+            0.65,
+            0.70,
+            0.75,
+            0.80,
+            0.85,
+            0.90,
+            0.95,
+            1.00,
+        ]
+
+        lat = np.asin(sat_lat) * 180 / np.pi
+        # Remove columns with uncertainty data
+        num_cols = data.shape[1]
+        cols_to_use = [0, 1, *list(range(3, num_cols, 2))]
+
+        data = data[:, cols_to_use]
+        time = data[:, 0]
+        co2 = data[:, 1:]
+
+        ds = xr.Dataset(
+            {
+                "co2": (
+                    ("time", "latitude"),
+                    co2,
+                    {"units": "µmol mol⁻¹", "long_name": "CO2, Marine boundary layer"},
+                )
+            },
+            coords={
+                "time": ("time", time, {"units": "decimal_year"}),
+                "latitude": (
+                    "latitude",
+                    lat,
+                    {"units": "Degrees North", "long_name": "Latitude"},
+                ),
+            },
+        )
+
+        # Expand CO2 value across all longitude, for each time, lat value
+        lon = np.arange(-180.0, 180.0, 2.0)
+        ds = ds.assign_coords(longitude=("longitude", lon))
+        ds["longitude"].attrs = {"units": "Degrees East", "long_name": "Longitude"}
+
+        ds["co2"] = (
+            ds["co2"]
+            .expand_dims(longitude=ds["longitude"])
+            .transpose("time", "latitude", "longitude")
+        )
 
         return ds
 
@@ -1112,6 +1381,8 @@ class UnifiedDataset(LatLonDataset):
     and since the dataset does not contain a mask, the `needs_lateral_fill`
     attribute is set to `False`.
     """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     needs_lateral_fill: bool = False
 
@@ -1239,11 +1510,10 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
         }
     )
     var_names: dict[str, str] = field(
-        default_factory=lambda: {"pco2_air": "pco2_air", "dust": "dust", "iron": "iron"}
+        default_factory=lambda: {"dust": "dust", "iron": "iron"}
     )
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "pco2_air_alt": "pco2_air_alt",
             "nox": "nox",
             "nhy": "nhy",
         }
@@ -1253,8 +1523,77 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
 
 
 @dataclass(kw_only=True)
+class UnifiedRestoringSurfaceDataset(UnifiedDataset):
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sss": "salt",
+        }
+    )
+
+    climatology: bool = True
+
+    def post_process(self) -> None:
+        """
+        Processes WOA2018 data values as follows:
+        - Reduce 3D field to surface values.
+        - Apply a mask to the dataset based on locations of NaN values.
+        """
+        if "depth" in self.dim_names:
+            self.ds = self.ds.sel(depth=0)
+            self.ds = self.ds.drop_vars("depth")
+            del self.dim_names["depth"]
+
+
+@dataclass(kw_only=True)
+class WOARestoringSurfaceDataset(WOADataset):
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "s_an"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sss": "s_an",
+        }
+    )
+
+    climatology: bool = True
+
+    def post_process(self) -> None:
+        """
+        Processes WOA2018 data values as follows:
+        - Reduce 3D field to surface values.
+        - Apply a mask to the dataset based on locations of NaN values.
+        """
+        if "depth" in self.dim_names:
+            self.ds = self.ds.sel(depth=0)
+            self.ds = self.ds.drop_vars("depth")
+            del self.dim_names["depth"]
+
+        mask = xr.where(
+            self.ds["s_an"].isnull().any(dim=self.dim_names["time"]),
+            0,
+            1,
+        )
+
+        self.ds["mask"] = mask
+
+
+@dataclass(kw_only=True)
 class CESMDataset(LatLonDataset):
     """Represents CESM data on original grid."""
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -1419,8 +1758,6 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "pco2_air": "pCO2SURF",
-            "pco2_air_alt": "pCO2SURF",
             "iron": "IRON_FLUX",
             "dust": "dust_FLUX_IN",
             "nox": "NOx_FLUX",
@@ -1449,9 +1786,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
             self.ds = ds
 
         mask = xr.where(
-            self.ds[self.var_names["pco2_air"]]
-            .isel({self.dim_names["time"]: 0})
-            .isnull(),
+            self.ds[self.var_names["dust"]].isel({self.dim_names["time"]: 0}).isnull(),
             0,
             1,
         )
@@ -1462,6 +1797,8 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 @dataclass(kw_only=True)
 class ERA5Dataset(LatLonDataset):
     """Represents ERA5 data on original grid."""
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {
@@ -1591,6 +1928,8 @@ class ERA5Correction(LatLonDataset):
     radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
     """
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     filename: str = field(
         default_factory=lambda: download_correction_data("SSR_correction.nc")
     )
@@ -1616,7 +1955,9 @@ class ERA5Correction(LatLonDataset):
 
         super().__post_init__()
 
-    def match_subdomain(self, target_coords: dict[str, Any]) -> None:
+    def match_subdomain(
+        self, target_coords: dict[str, Any], unchunk_lateral_dims: bool = False
+    ) -> None:
         """
         Selects a subdomain from the dataset matching the specified coordinates.
 
@@ -1629,6 +1970,10 @@ class ERA5Correction(LatLonDataset):
         target_coords : dict[str, Any]
             A dictionary containing the target latitude and longitude values to select.
             Expected keys: "lat" and "lon", each mapped to a DataArray of coordinates.
+
+        unchunk_lateral_dims : bool
+            Optionally set the dask chunking of the dataset to tell dask that full (non-time)
+            dimensions are required for subsequent operations. Defaults to False.
 
         Raises
         ------
@@ -1663,12 +2008,18 @@ class ERA5Correction(LatLonDataset):
             raise ValueError(
                 "The correction dataset does not contain all specified longitude values."
             )
+
+        if self.use_dask and unchunk_lateral_dims:
+            subdomain = unchunk_dask(subdomain, self.dim_names)
+
         self.ds = subdomain
 
 
 @dataclass(kw_only=True)
 class ETOPO5Dataset(LatLonDataset):
     """Represents topography data on the original grid from the ETOPO5 dataset."""
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     filename: str = field(default_factory=lambda: download_topo("etopo5.nc"))
     var_names: dict[str, str] = field(
@@ -1707,6 +2058,8 @@ class ETOPO5Dataset(LatLonDataset):
 class SRTM15Dataset(LatLonDataset):
     """Represents topography data on the original grid from the SRTM15 dataset."""
 
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "topo": "z",
@@ -1721,6 +2074,8 @@ class SRTM15Dataset(LatLonDataset):
 @dataclass(kw_only=True)
 class EMODDataset(LatLonDataset):
     """Represents topography data on the original grid from the EMOD dataset."""
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {
@@ -2368,7 +2723,7 @@ def choose_subdomain(
     target_coords: Mapping[str, Any],
     buffer_points: int = DEFAULT_NR_BUFFER_POINTS,
     use_dask: bool = False,
-    reset_chunking: bool = False,
+    unchunk_lateral_dims: bool = False,
 ) -> xr.Dataset:
     """
     Select a subdomain from an xarray Dataset based on target coordinates,
@@ -2392,7 +2747,7 @@ def choose_subdomain(
         Number of grid points to extend beyond the target coordinates.
     use_dask: bool, optional
         Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is processed eagerly. Defaults to False.
-    reset_chunking : bool
+    unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.
     Returns
@@ -2500,12 +2855,8 @@ def choose_subdomain(
 
     # if subsequent operations require this entire chunk, and dask if currently used,
     # reset the chunking to load the rest of the dataset
-    if reset_chunking and dataset_using_dask(subdomain):
-        chunks = get_dask_chunks(
-            dict(dim_names), time_chunking=False
-        )  # ensure possible Mapping is converted to dict
-        chunks_ds = {dim: size for dim, size in chunks.items() if dim in subdomain.dims}
-        subdomain = subdomain.chunk(chunks_ds)
+    if unchunk_lateral_dims and dataset_using_dask(subdomain):
+        subdomain = unchunk_dask(subdomain, dict(dim_names))
 
     return subdomain
 

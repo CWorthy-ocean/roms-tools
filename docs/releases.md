@@ -3,6 +3,7 @@
 ## v4.0.0 (unreleased)
 
 ### Breaking Changes
+* pco2 is no longer read in during `SurfaceForcing` `type='bgc'` ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608)).
 * `from_file` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).
 * CDR metrics on `ds_cdr` rename efficiency fields: `cdr_efficiency` to `cdr_efficiency_from_flux`, and `cdr_efficiency_from_delta_diff` to `cdr_efficiency_from_DIC_difference`. Saved datasets, ensemble inputs, or downstream code using the old names need updating.
@@ -10,6 +11,8 @@
 
 ### New Features
 
+* `SurfaceForcing` with `type='bgc'` has new data source option of 'MBL_co2' for time-varying co2; climatology no longer acceptd for xco2. ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608))
+* `make_edata` changed to `make_nesting_info`
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Nesting now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
 * Include time records strictly outside start/end bounds for `SurfaceForcing`, `BoundaryForcing` ([#547](https://github.com/CWorthy-ocean/roms-tools/pull/547))
@@ -48,6 +51,7 @@
 
 * Corrected enclosed-basin filling in mask generation by iterating connected-component labels `1..nreg` in `_fill_enclosed_basins`, preventing spurious interior lakes; updated the enclosed-region test to expect a single connected wet region. ([#577](https://github.com/CWorthy-ocean/roms-tools/pull/577))
 * Fix timer logging messages during mask generation so durations render correctly when closing narrow channels and filling enclosed basins
+* Fix for hanging when using the default of streaming from Copernicus for GLORYS output. ([#604](https://github.com/CWorthy-ocean/roms-tools/pull/604))
 
 ## v3.5.0
 

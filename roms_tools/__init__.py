@@ -15,7 +15,7 @@ from roms_tools.setup.boundary_forcing import BoundaryForcing  # noqa: F401
 from roms_tools.setup.cdr_forcing import CDRForcing  # noqa: F401
 from roms_tools.setup.cdr_release import TracerPerturbation, VolumeRelease  # noqa: F401
 from roms_tools.setup.initial_conditions import InitialConditions  # noqa: F401
-from roms_tools.setup.nesting import align_grids, make_edata  # noqa: F401
+from roms_tools.setup.nesting import align_grids, make_nesting_info  # noqa: F401
 from roms_tools.plot import plot_nesting  # noqa: F401
 from roms_tools.setup.river_forcing import RiverForcing  # noqa: F401
 from roms_tools.setup.surface_forcing import SurfaceForcing  # noqa: F401

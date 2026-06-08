@@ -277,28 +277,72 @@ class ROMSOutput(ROMSDataset):
     ) -> None:
         """Create an MP4 movie of a horizontal map using the same logic as :meth:`plot`.
 
+        Each frame corresponds to one time step. Only top-down horizontal map
+        views are supported (no vertical sections). For 3D fields, specify
+        either ``s`` or ``depth`` to select the horizontal level to animate.
+
         Parameters
         ----------
         var_name : str
-            Name of the variable to animate (must include a ``time`` dimension).
+            Name of the variable to animate. Must be present in ``self.ds``
+            and have a ``time`` dimension.
         time_range : slice or sequence of int, optional
-            Subset of time indices to include. Defaults to all times.
+            Subset of time indices to include. A ``slice`` is interpreted as
+            ``range(*time_range.indices(n_times))``. Defaults to all times.
         fps : int, optional
             Frames per second for the output movie. Default is 10.
         output_file : str, optional
             Path to the output MP4 file. Default is ``"simulation.mp4"``.
-        s, eta, xi, depth, lat, lon, include_boundary, depth_contours,
-        use_coarse_grid, with_dim_names, add_colorbar
-            Same meaning as in :meth:`plot`. Movies are limited to top-down
-            horizontal map views (``s`` or ``depth`` for 3D fields; no sections).
+        s : int, optional
+            Index of the vertical s-layer to animate. For 3D fields, exactly
+            one of ``s`` or ``depth`` must be given. Cannot be combined with
+            ``depth``. Default is None.
+        eta : int, optional
+            eta-index for a horizontal slice. Cannot be combined with ``lat``
+            or ``lon``. Default is None.
+        xi : int, optional
+            xi-index for a horizontal slice. Cannot be combined with ``lat``
+            or ``lon``. Default is None.
+        depth : float, optional
+            Depth in metres at which to interpolate and animate a horizontal
+            slice. Cannot be combined with ``s``. Default is None.
+        lat : float, optional
+            Latitude (degrees) for a horizontal slice. Cannot be combined with
+            ``eta`` or ``xi``. Default is None.
+        lon : float, optional
+            Longitude (degrees) for a horizontal slice. Cannot be combined
+            with ``eta`` or ``xi``. Default is None.
+        include_boundary : bool, optional
+            Whether to include the outermost grid cells in the plot. Default
+            is False.
+        depth_contours : bool, optional
+            If True, overlays constant-depth contour lines on each frame.
+            Only relevant when ``s`` is provided. Default is False.
+        use_coarse_grid : bool, optional
+            If True, regrids to the coarsened grid (factor 2) before plotting.
+            Default is False.
+        with_dim_names : bool, optional
+            If True, labels axes with ROMS dimension names instead of physical
+            coordinates. Default is False.
+        add_colorbar : bool, optional
+            If True, adds a colorbar to the figure. Default is True.
         timestamp_xy : tuple, list, or sequence of float, optional
             ``(x, y)`` position of the timestamp label in axes coordinates
-            (``transform=ax.transAxes``; origin bottom-left). Default is
-            ``(0.75, 0.95)``. Pass ``None`` to omit the timestamp overlay.
+            (origin at bottom-left corner, ``transform=ax.transAxes``).
+            Default is ``(0.75, 0.95)``. Pass ``None`` to omit the timestamp.
+
+        Raises
+        ------
+        ValueError
+            If ``var_name`` is not in ``self.ds``, the variable has no
+            ``time`` dimension, ``time_range`` selects no indices, any
+            selected index is out of bounds, or ``timestamp_xy`` is not a
+            length-2 sequence.
 
         Notes
         -----
-        Requires ``ffmpeg`` and the ``matplotlib`` FFmpeg writer.
+        Requires ``ffmpeg`` to be installed and accessible to matplotlib's
+        ``FFMpegWriter``.
         """
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in self.ds.")

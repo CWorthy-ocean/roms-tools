@@ -2121,9 +2121,6 @@ class TPXOManager:
         Reference date for the TPXO data. Defaults to January 1, 1992.
         Used as the baseline for tidal time series calculations.
 
-    allan_factor : float, optional
-        Factor used in tidal model computations. Defaults to 2.0.
-
     use_dask : bool, optional
         Whether to use Dask for chunking. If True, data is loaded lazily; if False, data is loaded eagerly. Defaults to False.
 
@@ -2137,7 +2134,6 @@ class TPXOManager:
     filenames: dict
     ntides: int
     reference_date: datetime = datetime(1992, 1, 1)
-    allan_factor: float = 2.0
     use_dask: bool | None = False
 
     def __post_init__(self):
@@ -2533,7 +2529,7 @@ class TPXOManager:
         tpc = self.compute_equilibrium_tide(lon, lat)
 
         # Correct for SAL
-        tsc = self.allan_factor * (
+        tsc = (
             datasets["sal"].ds[datasets["sal"].var_names["sal_Re"]]
             + 1j * datasets["sal"].ds[datasets["sal"].var_names["sal_Im"]]
         )

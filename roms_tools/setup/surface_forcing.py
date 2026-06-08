@@ -561,11 +561,17 @@ class SurfaceForcing:
         # Spatial regrid first: only 12 interpolations per variable regardless of
         # the length of the forcing time series. lateral_regrid.apply() forces eager
         # compute on the 12-step climatology, which is acceptable (~MB of data).
-        lateral_regrid = LateralRegridToROMS(self.target_coords, correction_data.dim_names)
+        lateral_regrid = LateralRegridToROMS(
+            self.target_coords, correction_data.dim_names
+        )
         time_dim = correction_data.dim_names["time"]
 
-        swr_12 = lateral_regrid.apply(correction_data.ds[correction_data.var_names["swr_corr"]])
-        lwr_12 = lateral_regrid.apply(correction_data.ds[correction_data.var_names["lwr_corr"]])
+        swr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["swr_corr"]]
+        )
+        lwr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["lwr_corr"]]
+        )
 
         # Wrap back to dask so that temporal interpolation builds a lazy graph
         # rather than materialising the full (N, ny, nx) output as numpy.

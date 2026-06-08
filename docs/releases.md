@@ -8,6 +8,7 @@
 
 ### New Features
 
+* ERA5 data correction in `SurfaceForcing` now includes longwave radiation, and the shortwave radation correction multipliers are updated ([#614](https://github.com/CWorthy-ocean/roms-tools/pull/614))
 * `make_edata` changed to `make_nesting_info`
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Nesting now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))

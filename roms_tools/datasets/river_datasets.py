@@ -811,15 +811,15 @@ class Rivr2oRiverBGCDataset:
             )
             target_time = rivr2o_boundary_time(boundary_year)
             idx = int(np.abs(ds[time_dim].values - target_time).argmin())
-            return ds.isel({time_dim: idx})
+            return ds.isel({time_dim: [idx]})
 
-        return select_relevant_times(
-            ds=ds,
-            time_dim=time_dim,
-            time_coord=time_dim,
-            start_time=select_start,
-            end_time=select_end,
+        # Annual files use mid-year (1 July) timestamps; match on calendar year.
+        start_year = select_start.year
+        end_year = select_end.year
+        in_range = (ds[time_dim].dt.year >= start_year) & (
+            ds[time_dim].dt.year <= end_year
         )
+        return ds.sel({time_dim: ds[time_dim].where(in_range, drop=True)})
 
     def _adjust_lon_to_grid(self, lon: np.ndarray, *, straddle: bool) -> np.ndarray:
         """Put query longitudes in the same convention as the RIVR2O lon coordinate."""

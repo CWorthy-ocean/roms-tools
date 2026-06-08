@@ -270,11 +270,23 @@ class TestRivr2oRiverBGCDataset:
         assert "RIVR2O DIC export cell for FarRiver" in caplog.text
         assert "km from the river mouth" in caplog.text
 
+        near_path = tmp_path / "rivr2o_riverinputs_2001.nc"
+        near_tracer_values = {
+            **tracer_values,
+            "DIC": np.array([[10.0, 0.0], [0.0, 0.0]]),
+        }
+        _write_rivr2o_file(near_path, lat, lon, near_tracer_values)
+        near_dataset = Rivr2oRiverBGCDataset(
+            filename=near_path,
+            start_time=datetime(2001, 1, 1),
+            end_time=datetime(2001, 12, 31),
+        )
+
         caplog.clear()
         with caplog.at_level(logging.WARNING):
-            dataset.nearest_dic_cell_indices_for_points(
-                lon=[0.1],
-                lat=[0.1],
+            near_dataset.nearest_dic_cell_indices_for_points(
+                lon=[0.05],
+                lat=[0.05],
                 river_names=["NearRiver"],
             )
         assert "RIVR2O DIC export cell" not in caplog.text
@@ -358,15 +370,17 @@ class TestRivr2oRiverBGCDataset:
             lat=[0.1, 0.12],
         )
 
-        export = sampled["DIC"].isel(time=0) * weights.isel(river_time=0)
+        weights_t0 = weights.isel(river_time=0).rename(nriver="points")
+        export = sampled["DIC"].isel(time=0) * weights_t0
         mass_flux = export * 1e6 / SECONDS_PER_YEAR
         mmol_flux = mass_flux / 12.011 * 1000.0
-        conc = mmol_flux / river_volume.isel(river_time=0)
+        q_t0 = river_volume.isel(river_time=0).rename(nriver="points")
+        conc = mmol_flux / q_t0
         np.testing.assert_allclose(
-            conc.isel(nriver=0).item(), conc.isel(nriver=1).item(), rtol=1e-6
+            conc.isel(points=0).item(), conc.isel(points=1).item(), rtol=1e-6
         )
-        assert export.isel(nriver=0).item() == 2.5
-        assert export.isel(nriver=1).item() == 7.5
+        assert export.isel(points=0).item() == 2.5
+        assert export.isel(points=1).item() == 7.5
 
     def test_discharge_partition_constant_concentration_each_month(self, tmp_path):
         lat = np.array([0.0, 2.0])
@@ -411,11 +425,12 @@ class TestRivr2oRiverBGCDataset:
             return mass_flux / 12.011 * 1000.0 / q
 
         for t in (0, 1):
-            export = sampled["DIC"].isel(time=0) * weights.isel(river_time=t)
-            q = river_volume.isel(river_time=t)
+            weights_t = weights.isel(river_time=t).rename(nriver="points")
+            export = sampled["DIC"].isel(time=0) * weights_t
+            q = river_volume.isel(river_time=t).rename(nriver="points")
             conc = mmol_m3(export, q)
             np.testing.assert_allclose(
-                conc.isel(nriver=0).item(), conc.isel(nriver=1).item(), rtol=1e-6
+                conc.isel(points=0).item(), conc.isel(points=1).item(), rtol=1e-6
             )
 
         export_low = (cell_export * weights.isel(river_time=0, nriver=0)).item()

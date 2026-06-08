@@ -47,7 +47,9 @@ class TestTracerDefaults:
         assert defaults["DOP"] == pytest.approx(1.0242011)
         assert defaults["NH4"] == 0.0
         assert defaults["spC"] == 0.0
-        assert len(defaults) == 32
+        # 32 MARBL tracers plus temperature and salinity
+        assert len(defaults) == len(EXPECTED_TRACER_NAMES)
+        assert len(defaults) == 34
 
     def test_dataclass_exposes_dataset(self, bundled_defaults_nc):
         data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)

@@ -17,6 +17,7 @@ from roms_tools.datasets.river_datasets import (
     Rivr2oRiverBGCDataset,
     clamp_rivr2o_time,
     get_indices_of_nearest_grid_cell_for_rivers,
+    rivr2o_boundary_time,
 )
 from roms_tools.plot import (
     assign_category_colors,
@@ -364,22 +365,33 @@ class RiverForcing:
         partition_weight: xr.DataArray,
     ) -> xr.DataArray:
         """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
-        export = export.interp(
-            time=clamp_rivr2o_time(target_time),
-            method="nearest",
+        time_dim = target_time.dims[0]
+        rivr2o_times = xr.DataArray(
+            [
+                rivr2o_boundary_time(int(year))
+                for year in clamp_rivr2o_time(target_time).dt.year.values
+            ],
+            dims=[time_dim],
+            coords={time_dim: target_time.coords[time_dim]},
         )
-        export = self._align_rivr2o_concentration(export)
+        export = export.sel(time=rivr2o_times)
+        export = self._align_rivr2o_concentration(
+            export, river_volume.coords["nriver"]
+        )
         export = export * partition_weight
         mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
         mmol_flux = mass_flux_g_s / molar_mass_g * 1000.0
         return (mmol_flux / river_volume).astype(np.float32)
 
-    def _align_rivr2o_concentration(self, values: xr.DataArray) -> xr.DataArray:
+    def _align_rivr2o_concentration(
+        self, values: xr.DataArray, nriver_coord: xr.DataArray
+    ) -> xr.DataArray:
         """Match RIVR2O sample dimensions to ``river_tracer`` (river_time, nriver)."""
         if "points" in values.dims:
             values = values.rename(points="nriver")
         if "time" in values.dims:
             values = values.rename(time="river_time")
+        values = values.assign_coords(nriver=nriver_coord)
         dims = [d for d in ("river_time", "nriver") if d in values.dims]
         return values.transpose(*dims)
 

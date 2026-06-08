@@ -21,7 +21,7 @@
       "separator": "/"
     }
   },
-  "fill_value": 0.0,
+  "fill_value": "NaN",
   "codecs": [
     {
       "name": "bytes",
@@ -39,6 +39,7 @@
   ],
   "attributes": {
     "long_name": "River tracer data",
+    "units": "unitless",
     "coordinates": "abs_time month river_name tracer_long_name tracer_name tracer_unit",
     "_FillValue": "AAAAAAAA+H8="
   },

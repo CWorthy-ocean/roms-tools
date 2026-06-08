@@ -82,7 +82,7 @@ class SurfaceForcing:
           - "restoring": for restoring forces.
 
     correct_radiation : bool
-        Whether to correct shortwave radiation. Default is True.
+        Whether to correct shortwave and longwave radiation. Default is True.
 
     wind_dropoff : bool, optional
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
@@ -141,7 +141,7 @@ class SurfaceForcing:
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc", "restoring")."""
     correct_radiation: bool = True
-    """Whether to correct shortwave radiation."""
+    """Whether to correct shortwave and longwave radiation."""
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""

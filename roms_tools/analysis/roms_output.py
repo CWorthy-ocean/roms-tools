@@ -344,6 +344,14 @@ class ROMSOutput(ROMSDataset):
         Requires ``ffmpeg`` to be installed and accessible to matplotlib's
         ``FFMpegWriter``.
         """
+        if not FFMpegWriter.isAvailable():
+            raise RuntimeError(
+                "ffmpeg not found. Install it via:\n"
+                "  conda: conda install -c conda-forge ffmpeg\n"
+                "  pip:   pip install imageio-ffmpeg\n"
+                "  HPC:   module load ffmpeg"
+            )
+
         if var_name not in self.ds:
             raise ValueError(f"Variable '{var_name}' is not found in self.ds.")
 

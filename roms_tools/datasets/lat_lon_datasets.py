@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -29,7 +30,8 @@ from roms_tools.datasets.utils import (
     select_relevant_times,
     validate_start_end_time,
 )
-from roms_tools.fill import LateralFill
+from roms_tools.fill import LateralFill, nearest_neighbor_fill
+from roms_tools.regrid import _xesmf_extrap_kwargs
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
@@ -658,6 +660,67 @@ class LatLonDataset:
             self.ds = subdomain
             return None
 
+    def apply_prefill(
+        self,
+        method: str,
+        prefill_kwargs: dict | None = None,
+        prefill_was_user_set: bool = False,
+    ):
+        """Fill masked (land/void) cells in the source by the chosen method.
+
+        Thin dispatcher over the concrete fills so callers select a strategy by
+        name. After a prefill the source is NaN-free, so a subsequent regrid can
+        use plain bilinear (no destination extrapolation needed).
+
+        Parameters
+        ----------
+        method : str
+            One of:
+
+            - ``"2d_lateral_fill"`` -- iterative AMG Poisson fill
+              (:meth:`apply_lateral_fill`); no xESMF required.
+            - ``"nearest_neighbor"`` -- cheap distance-transform fill
+              (:meth:`apply_nearest_neighbor_fill`); no xESMF required.
+            - ``"inverse_dist"`` / ``"nearest_s2d"`` / ``"creep_fill"`` -- xESMF
+              source-on-source fill (:meth:`apply_source_fill`).
+        prefill_kwargs : dict, optional
+            Method-specific kwargs. For the xESMF methods these are forwarded to
+            :meth:`apply_source_fill` (e.g. ``num_src_pnts`` / ``dist_exponent``
+            for ``"inverse_dist"``, ``num_levels`` for ``"creep_fill"``). Ignored
+            by the AMG and nearest-neighbor methods.
+        prefill_was_user_set : bool, optional
+            Whether the caller's ``prefill`` was set explicitly by the user (vs a
+            class default). Only used to decide whether to emit the
+            "source already NaN-free; prefill is a no-op" info-log when this
+            dataset does not need a lateral fill.
+
+        Notes
+        -----
+        All underlying fills early-return when ``self.needs_lateral_fill`` is
+        ``False`` (the source is already NaN-free, e.g. the unified BGC dataset).
+        In that case an explicit user ``prefill`` is a no-op; this is surfaced as
+        an info-log rather than silently ignored.
+        """
+        prefill_kwargs = prefill_kwargs or {}
+
+        if not self.needs_lateral_fill:
+            if prefill_was_user_set:
+                logging.info(
+                    "Source data is already NaN-free (needs_lateral_fill=False); "
+                    "prefill=%r is a no-op.",
+                    method,
+                )
+            return
+
+        if method == "2d_lateral_fill":
+            self.apply_lateral_fill()
+        elif method == "nearest_neighbor":
+            self.apply_nearest_neighbor_fill()
+        elif method in ("inverse_dist", "nearest_s2d", "creep_fill"):
+            self.apply_source_fill(method=method, **prefill_kwargs)
+        else:
+            raise ValueError(f"Unknown prefill method: {method!r}")
+
     def apply_lateral_fill(self):
         """Apply lateral fill to variables using the dataset's mask and grid dimensions.
 
@@ -706,6 +769,136 @@ class LatLonDataset:
                 else:
                     # Apply standard lateral fill for other variables
                     self.ds[var_name] = lateral_fill.apply(self.ds[var_name])
+
+    def apply_nearest_neighbor_fill(self):
+        """Fill masked values in `self.ds` using nearest-neighbor lookup.
+
+        This is a cheap alternative to :meth:`apply_lateral_fill` (the iterative
+        Poisson solver). It mirrors that method's mask handling -- a separate
+        mask (`mask_vel`) is used for velocity variables (e.g. `u`, `v`) if
+        available -- but fills each masked cell with the value of the nearest
+        valid (ocean) cell via :func:`roms_tools.fill.nearest_neighbor_fill`.
+
+        Like :meth:`apply_lateral_fill`, this assumes a ('latitude', 'longitude')
+        dimension ordering and loops over `self.ds.data_vars` so each variable is
+        filled only once.
+        """
+        if self.needs_lateral_fill:
+            dims = (self.dim_names["latitude"], self.dim_names["longitude"])
+
+            separate_fill_for_velocities = "mask_vel" in self.ds.data_vars
+
+            for var_name in self.ds.data_vars:
+                if var_name.startswith("mask"):
+                    # Skip variables that are mask types
+                    continue
+                elif (
+                    separate_fill_for_velocities
+                    and "u" in self.var_names
+                    and "v" in self.var_names
+                    and var_name in [self.var_names["u"], self.var_names["v"]]
+                ):
+                    self.ds[var_name] = nearest_neighbor_fill(
+                        self.ds[var_name], self.ds["mask_vel"], dims
+                    )
+                else:
+                    self.ds[var_name] = nearest_neighbor_fill(
+                        self.ds[var_name], self.ds["mask"], dims
+                    )
+
+    def apply_source_fill(
+        self,
+        method: str = "creep_fill",
+        num_levels: int = 100,
+        num_src_pnts: int | None = None,
+        dist_exponent: float | None = None,
+    ):
+        """Fill masked values by regridding the source onto its own grid (xESMF).
+
+        EXPERIMENTAL. Unlike destination-side extrapolation during the boundary
+        regrid, this fills the 2D *source* field itself, where the valid ocean
+        cells act as seeds spread across the whole grid. Velocity variables use
+        ``mask_vel`` when present, mirroring the other fills.
+
+        Parameters
+        ----------
+        method : str
+            xESMF extrapolation method used for the fill:
+
+            - ``"creep_fill"`` -- truncated Laplace-style diffusion; smooth but
+              only reaches ``num_levels`` cells from ocean. Needs a recent xESMF.
+            - ``"inverse_dist"`` -- inverse-distance-weighted average of the
+              nearest source points; tuned by ``num_src_pnts`` / ``dist_exponent``.
+            - ``"nearest_s2d"`` -- single nearest source point.
+        num_levels : int
+            Number of creep iterations (``creep_fill`` only).
+        num_src_pnts : int, optional
+            Number of nearest source points to average (``inverse_dist`` only;
+            xESMF default is 8).
+        dist_exponent : float, optional
+            Inverse-distance weighting exponent (``inverse_dist`` only; xESMF
+            default is 2.0).
+        """
+        if not self.needs_lateral_fill:
+            return
+        import warnings
+
+        import xesmf as xe
+
+        lat = self.dim_names["latitude"]
+        lon = self.dim_names["longitude"]
+        lat_vals = self.ds[lat].values
+        lon_vals = self.ds[lon].values
+
+        def _build(mask_da):
+            ds_in = xr.Dataset(
+                {
+                    "mask": (
+                        ("lat", "lon"),
+                        mask_da.transpose(lat, lon).values.astype("int32"),
+                    )
+                },
+                coords={"lat": lat_vals, "lon": lon_vals},
+            )
+            ds_out = xr.Dataset(coords={"lat": lat_vals, "lon": lon_vals})
+            kwargs = dict(method="bilinear", unmapped_to_nan=True, extrap_method=method)
+            kwargs.update(
+                _xesmf_extrap_kwargs(
+                    method,
+                    {
+                        "num_levels": num_levels,
+                        "num_src_pnts": num_src_pnts,
+                        "dist_exponent": dist_exponent,
+                    },
+                )
+            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+                return xe.Regridder(ds_in, ds_out, **kwargs)
+
+        def _fill(da, rg):
+            renamed = da.rename({lat: "lat", lon: "lon"})
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="xesmf")
+                out = rg(renamed, keep_attrs=True)
+            return out.rename({"lat": lat, "lon": lon})
+
+        regridder = _build(self.ds["mask"])
+        separate = "mask_vel" in self.ds.data_vars
+        regridder_vel = _build(self.ds["mask_vel"]) if separate else None
+
+        for var_name in self.ds.data_vars:
+            if var_name.startswith("mask"):
+                continue
+            elif (
+                separate
+                and "u" in self.var_names
+                and "v" in self.var_names
+                and var_name in [self.var_names["u"], self.var_names["v"]]
+            ):
+                self.ds[var_name] = _fill(self.ds[var_name], regridder_vel)
+            else:
+                self.ds[var_name] = _fill(self.ds[var_name], regridder)
 
     def extrapolate_deepest_to_bottom(self):
         """Extrapolate deepest non-NaN values to fill bottom NaNs along the depth

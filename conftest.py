@@ -536,7 +536,7 @@ def boundary_forcing(use_dask: bool, small_grid: Grid) -> BoundaryForcing:
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
-        apply_2d_horizontal_fill=False,
+        prefill=None,
         use_dask=use_dask,
     )
 
@@ -551,7 +551,7 @@ def boundary_forcing_with_2d_fill(use_dask: bool, small_grid: Grid) -> BoundaryF
         start_time=datetime(2012, 1, 1),
         end_time=datetime(2012, 12, 31),
         source={"name": "GLORYS", "path": [fname1, fname2]},
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
         use_dask=use_dask,
     )
 
@@ -583,7 +583,10 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
+        # scipy regrid keeps this fixture byte-identical to the legacy AMG output
+        # (the new default 'auto' would use xESMF); see test_validation regression.
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 
@@ -613,7 +616,10 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
         end_time=datetime(2021, 6, 30),
         source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
         type="bgc",
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
+        # scipy regrid keeps this fixture byte-identical to the legacy AMG output
+        # (the new default 'auto' would use xESMF); see test_validation regression.
+        regrid_method="scipy",
         use_dask=use_dask,
     )
 

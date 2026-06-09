@@ -234,6 +234,7 @@ class SurfaceForcing:
         # built later from regridded processed_fields, so its chunks follow regrid ops.
         data.choose_subdomain(
             target_coords,
+            # unchunk_lateral_dims=True required for lateral fill, consider trying False if lateral fill ever becomes optional
             unchunk_lateral_dims=True,
         )
         # Enforce double precision to ensure reproducibility
@@ -575,7 +576,8 @@ class SurfaceForcing:
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
-        correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
+        # unchunk_lateral_dims=True required for lateral fill, consider trying False if lateral fill ever becomes optional
+        correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True) 
         correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
 

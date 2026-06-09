@@ -368,7 +368,7 @@ def _load_data_dask(
                 filenames[0],
                 decode_times=decode_times,
                 decode_timedelta=decode_timedelta,
-                chunks=None,
+                chunks={},  # {} is fastest - mean use on-disk zarr chunking
                 consolidated=None,
                 storage_options={"token": "anon"},
             )

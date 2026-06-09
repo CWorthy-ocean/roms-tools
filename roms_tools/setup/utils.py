@@ -109,9 +109,7 @@ def _xesmf_available() -> bool:
         return False
 
 
-def resolve_regrid_engine(
-    regrid_method: str | None, *, xesmf_available: bool
-) -> bool:
+def resolve_regrid_engine(regrid_method: str | None, *, xesmf_available: bool) -> bool:
     """Resolve a ``regrid_method`` selector to a boolean "use xESMF" decision.
 
     Parameters

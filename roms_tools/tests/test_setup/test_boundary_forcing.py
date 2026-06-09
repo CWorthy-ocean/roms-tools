@@ -434,9 +434,7 @@ def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
 @pytest.mark.parametrize("regrid_method", ["auto", "xesmf", "scipy"])
 def test_regrid_method_produces_nan_free_boundaries(use_dask, regrid_method):
     """The regrid engine can be chosen independently of prefill; all are NaN-free."""
-    bf = BoundaryForcing(
-        **_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method
-    )
+    bf = BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method)
     _assert_no_nan_in_boundary_fields(bf)
 
 
@@ -469,7 +467,8 @@ def test_regrid_method_xesmf_requires_xesmf(use_dask, monkeypatch):
 
 def test_scipy_2d_lateral_fill_matches_legacy_amg(use_dask):
     """prefill='2d_lateral_fill' + regrid_method='scipy' reproduces the legacy
-    AMG+scipy path byte-for-byte (decoupled engine, appropriate inputs)."""
+    AMG+scipy path byte-for-byte (decoupled engine, appropriate inputs).
+    """
     kwargs = _coarse_glorys_kwargs(use_dask)
     bf_scipy = BoundaryForcing(
         **kwargs, prefill="2d_lateral_fill", regrid_method="scipy"

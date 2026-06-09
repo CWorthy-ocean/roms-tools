@@ -228,9 +228,7 @@ class LateralRegridToROMS:
                 regridded = regridded.isel({self._dummy_dim: 0})
             return regridded
 
-        return da.interp(self.coords, method=method).drop_vars(
-            list(self.coords.keys())
-        )
+        return da.interp(self.coords, method=method).drop_vars(list(self.coords.keys()))
 
 
 class LateralRegridFromROMS:

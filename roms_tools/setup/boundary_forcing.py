@@ -10,6 +10,7 @@ from typing import ClassVar
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
@@ -258,7 +259,9 @@ class BoundaryForcing:
 
         # Effective destination extrapolation for the default (no-prefill) path.
         effective_extrap = self.extrap_method or "inverse_dist"
-        user_set_extrap = self.extrap_method is not None or self.extrap_kwargs is not None
+        user_set_extrap = (
+            self.extrap_method is not None or self.extrap_kwargs is not None
+        )
         if user_set_extrap and prefill is not None:
             logging.info(
                 "extrap_method/extrap_kwargs are ignored because prefill=%r fills "
@@ -372,7 +375,9 @@ class BoundaryForcing:
                 # With a prefilled (NaN-free) source, no regrid-time extrapolation
                 # is needed; use plain bilinear.
                 regrid_extrap_method = None if prefill is not None else effective_extrap
-                regrid_extrap_kwargs = None if prefill is not None else self.extrap_kwargs
+                regrid_extrap_kwargs = (
+                    None if prefill is not None else self.extrap_kwargs
+                )
 
                 processed_fields = {}
 
@@ -1262,5 +1267,3 @@ class BoundaryForcing:
 
         # Create and return an instance of InitialConditions
         return cls(grid=grid, **params, use_dask=use_dask)
-
-

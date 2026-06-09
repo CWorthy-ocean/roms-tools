@@ -698,11 +698,12 @@ class RiverForcing:
         ds["river_volume"].attrs["long_name"] = "River volume flux"
         ds["river_volume"].attrs["units"] = "m^3/s"
 
-        # River tracers
-        ds["river_tracer"] = xr.zeros_like(
-            ds.river_time.astype(np.float32) * ds.ntracers * ds.nriver, dtype=np.float32
+        # River tracers (per-tracer units live on tracer_unit, not on this array)
+        tracer_template = (
+            ds.river_time.astype(np.float32) * ds.ntracers * ds.nriver
         )
-        ds["river_tracer"].attrs["long_name"] = "River tracer data"
+        ds["river_tracer"] = xr.zeros_like(tracer_template, dtype=np.float32)
+        ds["river_tracer"].attrs = {"long_name": "River tracer data"}
 
         defaults = get_tracer_defaults()
         for ntracer in range(ds.ntracers.size):

@@ -375,9 +375,7 @@ class RiverForcing:
             coords={time_dim: target_time.coords[time_dim]},
         )
         export = export.sel(time=rivr2o_times)
-        export = self._align_rivr2o_concentration(
-            export, river_volume.coords["nriver"]
-        )
+        export = self._align_rivr2o_concentration(export, river_volume.coords["nriver"])
         export = export * partition_weight
         mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
         mmol_flux = mass_flux_g_s / molar_mass_g * 1000.0

@@ -9,7 +9,6 @@ import regionmask
 import xarray as xr
 from scipy.ndimage import label
 
-from roms_tools.proj_config import ensure_proj_database
 from roms_tools.setup.utils import handle_boundaries
 from roms_tools.utils import interpolate_from_rho_to_u, interpolate_from_rho_to_v
 
@@ -47,8 +46,6 @@ def add_mask(
     xarray.Dataset
         The original dataset with an added 'mask_rho' variable, representing land/water mask.
     """
-    ensure_proj_database()
-
     # Infer mask from coastlines
     if verbose:
         start_time = time.time()

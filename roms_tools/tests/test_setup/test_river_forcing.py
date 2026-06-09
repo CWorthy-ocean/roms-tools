@@ -1121,9 +1121,7 @@ class TestRiverForcingBGCSource:
         nearest_lat, nearest_lon = bgc_data.nearest_dic_cell_indices_for_points(
             lons, lats
         )
-        weights = bgc_data.discharge_partition_weights(
-            volume, nearest_lat, nearest_lon
-        )
+        weights = bgc_data.discharge_partition_weights(volume, nearest_lat, nearest_lon)
 
         def expected_conc(export):
             mass_flux = export * weights * 1e6 / SECONDS_PER_YEAR

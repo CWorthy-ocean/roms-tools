@@ -1025,7 +1025,9 @@ class BoundaryForcing:
                             f"{bdry_var_name} consists entirely of NaNs after regridding. "
                             f"This may be due to the {direction}ern boundary being entirely on land in the "
                             f"{self.source['name']} data, which could have a coarser resolution than the ROMS domain. "
-                            f"If the issue persists, try setting `prefill='2d_lateral_fill'` (legacy AMG fill)."
+                            f"Try setting a `prefill` method (e.g. 'inverse_dist', 'nearest_neighbor', or "
+                            f"'2d_lateral_fill') to fill the source before regridding; see "
+                            f"https://roms-tools.readthedocs.io/en/latest/boundary_forcing.html for details."
                         )
 
                         nan_check(

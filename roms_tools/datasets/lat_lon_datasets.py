@@ -682,12 +682,12 @@ class LatLonDataset:
             - ``"nearest_neighbor"`` -- cheap distance-transform fill
               (:meth:`apply_nearest_neighbor_fill`); no xESMF required.
             - ``"inverse_dist"`` / ``"nearest_s2d"`` / ``"creep_fill"`` -- xESMF
-              source-on-source fill (:meth:`apply_source_fill`).
+              source-on-source fill (:meth:`apply_xesmf_source_fill`).
         prefill_kwargs : dict, optional
             Method-specific kwargs. For the xESMF methods these are forwarded to
-            :meth:`apply_source_fill` (e.g. ``num_src_pnts`` / ``dist_exponent``
-            for ``"inverse_dist"``, ``num_levels`` for ``"creep_fill"``). Ignored
-            by the AMG and nearest-neighbor methods.
+            :meth:`apply_xesmf_source_fill` (e.g. ``num_src_pnts`` /
+            ``dist_exponent`` for ``"inverse_dist"``, ``num_levels`` for
+            ``"creep_fill"``). Ignored by the AMG and nearest-neighbor methods.
         prefill_was_user_set : bool, optional
             Whether the caller's ``prefill`` was set explicitly by the user (vs a
             class default). Only used to decide whether to emit the
@@ -717,7 +717,7 @@ class LatLonDataset:
         elif method == "nearest_neighbor":
             self.apply_nearest_neighbor_fill()
         elif method in ("inverse_dist", "nearest_s2d", "creep_fill"):
-            self.apply_source_fill(method=method, **prefill_kwargs)
+            self.apply_xesmf_source_fill(method=method, **prefill_kwargs)
         else:
             raise ValueError(f"Unknown prefill method: {method!r}")
 
@@ -806,30 +806,36 @@ class LatLonDataset:
                         self.ds[var_name], self.ds["mask"], dims
                     )
 
-    def apply_source_fill(
+    def apply_xesmf_source_fill(
         self,
-        method: str = "creep_fill",
+        method: str = "inverse_dist",
         num_levels: int = 100,
         num_src_pnts: int | None = None,
         dist_exponent: float | None = None,
     ):
         """Fill masked values by regridding the source onto its own grid (xESMF).
 
-        EXPERIMENTAL. Unlike destination-side extrapolation during the boundary
-        regrid, this fills the 2D *source* field itself, where the valid ocean
-        cells act as seeds spread across the whole grid. Velocity variables use
-        ``mask_vel`` when present, mirroring the other fills.
+        Unlike destination-side extrapolation during the boundary regrid, this
+        fills the 2D *source* field itself, where the valid ocean cells act as
+        seeds spread across the whole grid. Velocity variables use ``mask_vel``
+        when present, mirroring the other fills. The ``apply_xesmf_`` prefix
+        distinguishes this from the non-xESMF :meth:`apply_lateral_fill` (AMG) and
+        :meth:`apply_nearest_neighbor_fill` (scipy) fills.
 
         Parameters
         ----------
         method : str
-            xESMF extrapolation method used for the fill:
+            xESMF extrapolation method used for the fill (default
+            ``"inverse_dist"``):
 
-            - ``"creep_fill"`` -- truncated Laplace-style diffusion; smooth but
-              only reaches ``num_levels`` cells from ocean. Needs a recent xESMF.
             - ``"inverse_dist"`` -- inverse-distance-weighted average of the
               nearest source points; tuned by ``num_src_pnts`` / ``dist_exponent``.
             - ``"nearest_s2d"`` -- single nearest source point.
+            - ``"creep_fill"`` -- truncated Laplace-style diffusion; smooth but
+              only reaches ``num_levels`` cells from ocean. **Not available in
+              current released xESMF** (requires a newer/unreleased xESMF + ESMF);
+              included for forward compatibility and not exposed through
+              ``BoundaryForcing``'s ``prefill`` argument.
         num_levels : int
             Number of creep iterations (``creep_fill`` only).
         num_src_pnts : int, optional

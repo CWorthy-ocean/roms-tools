@@ -9,7 +9,7 @@ def _xesmf_extrap_kwargs(method: str | None, kwargs: dict | None) -> dict:
     """Map friendly extrapolation kwargs to ``xe.Regridder`` ``extrap_*`` kwargs.
 
     Both the destination-side extrapolation in :class:`LateralRegridToROMS` and
-    the source-on-source fill in ``LatLonDataset.apply_source_fill`` accept the
+    the source-on-source fill in ``LatLonDataset.apply_xesmf_source_fill`` accept the
     same user-facing keys; this centralizes the translation to xESMF's
     ``extrap_num_levels`` / ``extrap_num_src_pnts`` / ``extrap_dist_exponent``.
 

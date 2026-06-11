@@ -1,8 +1,10 @@
 import logging
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 import xarray as xr
@@ -23,6 +25,87 @@ SECONDS_PER_YEAR = 365.25 * 24 * 3600
 VALUE_OPTION_DIM = "value_option"
 RECOMMENDED_VALUE_INDEX = 0
 RIVER_TRACER_DEFAULTS_FILENAME = "river_tracer_defaults.nc"
+
+
+class RiverBGCDataset(Protocol):
+    """Protocol for river BGC datasets used by ``RiverForcing``."""
+
+    @property
+    def requires_calendar_discharge_time(self) -> bool:
+        """Whether discharge climatology must be expanded to a calendar axis."""
+        ...
+
+    def forcing_concentrations(
+        self,
+        river_volume: xr.DataArray,
+        abs_time: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        *,
+        straddle: bool,
+        river_names: list[str],
+    ) -> dict[str, xr.DataArray]:
+        """Return ROMS tracer concentrations on ``(river_time, nriver)``."""
+        ...
+
+
+def fill_river_bgc_concentrations(
+    dynamic: dict[str, xr.DataArray],
+    fill: dict[str, float],
+    tracer_names: Iterable[str],
+    template: xr.DataArray,
+    *,
+    fill_at_nan: bool = True,
+) -> dict[str, xr.DataArray]:
+    """Merge dynamic river BGC concentrations with fill values.
+
+    For each tracer in ``tracer_names``:
+
+    - If the tracer is absent from ``dynamic``, broadcast the fill scalar to
+      ``template`` shape.
+    - If the tracer is present and ``fill_at_nan`` is True, use dynamic values
+      where finite and fill elsewhere.
+    - If the tracer is present and ``fill_at_nan`` is False, use dynamic values
+      as-is.
+
+    Parameters
+    ----------
+    dynamic
+        Tracer concentrations supplied by a dynamic BGC dataset (may be partial).
+    fill
+        Scalar fill concentrations keyed by tracer name.
+    tracer_names
+        Tracer names to include in the output (typically ``ds.tracer_name``).
+    template
+        Array with shape ``(river_time, nriver)`` used to define output dimensions.
+    fill_at_nan
+        If True, replace non-finite dynamic values with fill scalars.
+
+    Returns
+    -------
+    dict[str, xr.DataArray]
+        Merged concentrations on ``(river_time, nriver)``.
+    """
+    merged: dict[str, xr.DataArray] = {}
+    for tracer_name in tracer_names:
+        if tracer_name not in fill:
+            logging.warning(
+                "Fill source has no value for tracer %s; skipping.", tracer_name
+            )
+            continue
+        fill_arr = xr.full_like(template, fill[tracer_name], dtype=np.float32)
+        if tracer_name in dynamic:
+            dyn = dynamic[tracer_name]
+            if fill_at_nan:
+                merged[tracer_name] = dyn.where(np.isfinite(dyn), fill_arr).astype(
+                    np.float32
+                )
+            else:
+                merged[tracer_name] = dyn.astype(np.float32)
+        else:
+            merged[tracer_name] = fill_arr
+    return merged
+
 
 EXPECTED_TRACER_NAMES = (
     "temp",
@@ -140,6 +223,27 @@ class RiverTracerDefaultsDataset:
             )
 
         return defaults
+
+    @property
+    def requires_calendar_discharge_time(self) -> bool:
+        return False
+
+    def forcing_concentrations(
+        self,
+        river_volume: xr.DataArray,
+        abs_time: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        *,
+        straddle: bool,
+        river_names: list[str],
+    ) -> dict[str, xr.DataArray]:
+        """Broadcast constant default concentrations to ``river_volume`` shape."""
+        del abs_time, lons, lats, straddle, river_names
+        return {
+            tracer_name: xr.full_like(river_volume, value, dtype=np.float32)
+            for tracer_name, value in self.defaults.items()
+        }
 
 
 def rivr2o_boundary_time(year: int) -> np.datetime64:
@@ -616,6 +720,20 @@ def _parse_rivr2o_year(filename: str | Path) -> int:
         ) from exc
 
 
+_RIVR2O_MOLAR_MASS_G = {
+    "DIC": 12.011,
+    "DOC_l": 12.011,
+    "DOC_sl": 12.011,
+    "POC": 12.011,
+    "NO3": 14.007,
+    "PO4": 30.974,
+}
+_DON_FROM_DOC_SL = 103 / 2583
+_DON_FROM_POC = 25 / 276
+_DOP_FROM_DOC_SL = 1 / 2583
+_DOP_FROM_POC = 1 / 276
+
+
 @dataclass(kw_only=True)
 class Rivr2oRiverBGCDataset:
     """River BGC export data from the RIVR2O river inputs product.
@@ -640,9 +758,10 @@ class Rivr2oRiverBGCDataset:
 
     Spatial sampling (``sample_at_points``) uses the nearest grid cell with positive
     ``DIC`` export. DIC has the same spatial coverage each year; that cell is used
-    for all tracers and all years. When several rivers share a cell, ``RiverForcing``
-    splits export in proportion to discharge (``discharge_partition_weights``) so
-    co-located rivers receive similar concentrations.
+    for all tracers and all years. When several rivers share a cell,
+    ``discharge_partition_weights`` splits export in proportion to discharge so
+    co-located rivers receive similar concentrations. Use ``forcing_concentrations``
+    to convert exports to MARBL river tracer concentrations for ROMS forcing.
 
     Parameters
     ----------
@@ -877,9 +996,9 @@ class Rivr2oRiverBGCDataset:
         choice does not depend on simulation year; exports vary in time only
         along the ``time`` dimension of the returned sample.
 
-        Returns the full cell export at each point. ``RiverForcing`` applies
-        ``discharge_partition_weights`` so rivers on the same cell share export
-        in proportion to discharge.
+        Returns the full cell export at each point. ``forcing_concentrations``
+        applies ``discharge_partition_weights`` so rivers on the same cell share
+        export in proportion to discharge.
 
         Parameters
         ----------
@@ -1038,6 +1157,136 @@ class Rivr2oRiverBGCDataset:
             )
 
         return weights
+
+    @property
+    def requires_calendar_discharge_time(self) -> bool:
+        return True
+
+    @staticmethod
+    def _align_concentration(
+        values: xr.DataArray, nriver_coord: xr.DataArray
+    ) -> xr.DataArray:
+        """Match sample dimensions to ``river_tracer`` (river_time, nriver)."""
+        if "points" in values.dims:
+            values = values.rename(points="nriver")
+        if "time" in values.dims:
+            values = values.rename(time="river_time")
+        values = values.assign_coords(nriver=nriver_coord)
+        dims = [d for d in ("river_time", "nriver") if d in values.dims]
+        return values.transpose(*dims)
+
+    def _export_to_concentration(
+        self,
+        export: xr.DataArray,
+        molar_mass_g: float,
+        river_volume: xr.DataArray,
+        target_time: xr.DataArray,
+        *,
+        partition_weight: xr.DataArray,
+    ) -> xr.DataArray:
+        """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
+        time_dim = target_time.dims[0]
+        rivr2o_times = xr.DataArray(
+            [
+                rivr2o_boundary_time(int(year))
+                for year in clamp_rivr2o_time(target_time).dt.year.values
+            ],
+            dims=[time_dim],
+            coords={time_dim: target_time.coords[time_dim]},
+        )
+        export = export.sel(time=rivr2o_times)
+        export = self._align_concentration(export, river_volume.coords["nriver"])
+        export = export * partition_weight
+        mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
+        mmol_flux = mass_flux_g_s / molar_mass_g * 1000.0
+        return (mmol_flux / river_volume).astype(np.float32)
+
+    def forcing_concentrations(
+        self,
+        river_volume: xr.DataArray,
+        abs_time: xr.DataArray,
+        lons: np.ndarray,
+        lats: np.ndarray,
+        *,
+        straddle: bool,
+        river_names: list[str],
+    ) -> dict[str, xr.DataArray]:
+        """Convert RIVR2O exports to MARBL river tracer concentrations (mmol m-3).
+
+        Combines raw carbon exports into MARBL tracers (``DIC``, ``DOC``, ``DON``,
+        ``DOP``, ``ALK``, ``DIC_ALT_CO2``, ``ALK_ALT_CO2``) and passes ``NO3`` and
+        ``PO4`` through from the product.
+        """
+        nearest_lat, nearest_lon = self.nearest_dic_cell_indices_for_points(
+            lons,
+            lats,
+            straddle=straddle,
+            river_names=river_names,
+        )
+        partition_weight = self.discharge_partition_weights(
+            river_volume, nearest_lat, nearest_lon
+        )
+        sampled = self.sample_at_points(lon=lons, lat=lats, straddle=straddle)
+        conc_kw = {"partition_weight": partition_weight}
+
+        dic_from_file = self._export_to_concentration(
+            sampled["DIC"],
+            _RIVR2O_MOLAR_MASS_G["DIC"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+        doc_l_conc = self._export_to_concentration(
+            sampled["DOC_l"],
+            _RIVR2O_MOLAR_MASS_G["DOC_l"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+        doc_sl_conc = self._export_to_concentration(
+            sampled["DOC_sl"],
+            _RIVR2O_MOLAR_MASS_G["DOC_sl"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+        poc_conc = self._export_to_concentration(
+            sampled["POC"],
+            _RIVR2O_MOLAR_MASS_G["POC"],
+            river_volume,
+            abs_time,
+            **conc_kw,
+        )
+
+        dic_forcing = dic_from_file + doc_l_conc
+        doc_forcing = doc_sl_conc + poc_conc
+        alk_forcing = dic_from_file
+        don_forcing = doc_sl_conc * _DON_FROM_DOC_SL + poc_conc * _DON_FROM_POC
+        dop_forcing = doc_sl_conc * _DOP_FROM_DOC_SL + poc_conc * _DOP_FROM_POC
+
+        return {
+            "DIC": dic_forcing,
+            "DOC": doc_forcing,
+            "DON": don_forcing.astype(np.float32),
+            "DOP": dop_forcing.astype(np.float32),
+            "ALK": alk_forcing,
+            "DIC_ALT_CO2": dic_forcing,
+            "ALK_ALT_CO2": alk_forcing,
+            "NO3": self._export_to_concentration(
+                sampled["NO3"],
+                _RIVR2O_MOLAR_MASS_G["NO3"],
+                river_volume,
+                abs_time,
+                **conc_kw,
+            ),
+            "PO4": self._export_to_concentration(
+                sampled["PO4"],
+                _RIVR2O_MOLAR_MASS_G["PO4"],
+                river_volume,
+                abs_time,
+                **conc_kw,
+            ),
+        }
 
 
 def _decode_string(byte_array):

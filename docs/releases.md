@@ -33,6 +33,7 @@
 * short and long wave radiation time is shifted 1/2 a timestep sooner and have a dim of `rad_time` ([#586](https://github.com/CWorthy-ocean/roms-tools/pull/586))
 * The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 * 2 checks added for a point source when plotting `CDRForcing.plot_distribution()`. Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
+* River BGC forcing uses `fill_river_bgc_concentrations` to merge dynamic tracers with fill values from `bgc_source["fill"]` (default `CONSTANTS`); RIVR2O/MARBL mapping lives in `Rivr2oRiverBGCDataset.forcing_concentrations`
 
 ### Documentation
 

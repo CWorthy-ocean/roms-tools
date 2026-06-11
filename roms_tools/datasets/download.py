@@ -1,17 +1,4 @@
-import logging
-
 import pooch
-
-# Create a Pooch object to manage ROMS-Tools dataset files
-roms_tools_datasets = pooch.create(
-    path=pooch.os_cache("roms-tools"),
-    base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
-    registry={
-        "river_tracer_defaults.nc": (
-            "sha256:58b7f2e00c0a4f489fc0f345988b79a378ed56f5039d1409a00dc947275e7a61"
-        ),
-    },
-)
 
 # Create a Pooch object to manage the global topography data
 topo_data = pooch.create(
@@ -43,6 +30,7 @@ river_data = pooch.create(
     # The registry specifies the files that can be fetched
     registry={
         "dai_trenberth_may2019.nc": "sha256:793849e6aa60d1f6bdb480c345515fb2453d903c0a30599241b3d752f53715ab",
+        "river_tracer_defaults.nc": "sha256:58b7f2e00c0a4f489fc0f345988b79a378ed56f5039d1409a00dc947275e7a61",
     },
 )
 
@@ -135,12 +123,14 @@ def download_river_data(filename: str) -> str:
     Parameters
     ----------
     filename : str
-        The name of the test data file to be downloaded. Available options:
+        The name of the river data file to be downloaded. Available options:
         - "dai_trenberth_may2019.nc"
+        - "river_tracer_defaults.nc"
+
     Returns
     -------
     str
-        The path to the downloaded test data file.
+        The path to the downloaded file.
     """
     # Fetch the file using Pooch, downloading if necessary
     fname = river_data.fetch(filename)
@@ -148,30 +138,24 @@ def download_river_data(filename: str) -> str:
     return fname
 
 
-def download_river_tracer_defaults() -> str:
+def download_river_tracer_defaults(filename: str = "river_tracer_defaults.nc") -> str:
     """Download the river tracer default values NetCDF file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the river tracer defaults file to be downloaded. Available
+        options:
+        - "river_tracer_defaults.nc"
 
     Returns
     -------
     str
-        Path to ``river_tracer_defaults.nc``.
+        The path to the downloaded file.
     """
-    try:
-        return roms_tools_datasets.fetch("river_tracer_defaults.nc")
-    except (ConnectionError, OSError, FileNotFoundError) as exc:
-        from importlib import resources
+    fname = river_data.fetch(filename)
 
-        bundled = resources.files("roms_tools.datasets.data").joinpath(
-            "river_tracer_defaults.nc"
-        )
-        if bundled.is_file():
-            logging.warning(
-                "Using bundled river_tracer_defaults.nc because remote fetch "
-                "failed: %s",
-                exc,
-            )
-            return str(bundled)
-        raise
+    return fname
 
 
 def download_correction_data(filename: str) -> str:

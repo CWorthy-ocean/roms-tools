@@ -12,12 +12,12 @@ import xarray as xr
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.datasets.river_datasets import (
-    SECONDS_PER_YEAR,
     DaiRiverDataset,
+    RiverBGCDataset,
+    RiverTracerDefaultsDataset,
     Rivr2oRiverBGCDataset,
-    clamp_rivr2o_time,
+    fill_river_bgc_concentrations,
     get_indices_of_nearest_grid_cell_for_rivers,
-    rivr2o_boundary_time,
 )
 from roms_tools.plot import (
     assign_category_colors,
@@ -47,18 +47,29 @@ DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
-_RIVR2O_MOLAR_MASS_G = {
-    "DIC": 12.011,  # molar mass of C
-    "DOC_l": 12.011,  # molar mass of C
-    "DOC_sl": 12.011,  # molar mass of C
-    "POC": 12.011,  # molar mass of C
-    "NO3": 14.007,  # molar mass of N
-    "PO4": 30.974,  # molar mass of P
+RiverBGCSource: TypeAlias = dict[
+    str, str | Path | list[str | Path] | bool | dict[str, str]
+]
+
+_BGC_DATASET_MAP: dict[str, type[RiverBGCDataset]] = {
+    "CONSTANTS": RiverTracerDefaultsDataset,
+    "RIVR2O": Rivr2oRiverBGCDataset,
 }
-_DON_FROM_DOC_SL = 103 / 2583
-_DON_FROM_POC = 25 / 276
-_DOP_FROM_DOC_SL = 1 / 2583
-_DOP_FROM_POC = 1 / 276
+
+_FILL_DATASET_MAP: dict[str, type[RiverTracerDefaultsDataset]] = {
+    "CONSTANTS": RiverTracerDefaultsDataset,
+}
+
+
+def _get_bgc_fill_source(bgc_source: RiverBGCSource) -> dict[str, str]:
+    r"""Return normalized ``bgc_source["fill"]`` with a string ``name`` key."""
+    raw_fill = bgc_source.get("fill", {"name": "CONSTANTS"})
+    if not isinstance(raw_fill, dict):
+        raise ValueError('bgc_source["fill"] must be a dictionary.')
+    fill_name = raw_fill.get("name")
+    if not isinstance(fill_name, str):
+        raise ValueError('bgc_source["fill"] must include a "name".')
+    return {"name": fill_name}
 
 
 @dataclass(kw_only=True)
@@ -109,10 +120,15 @@ class RiverForcing:
             at default values).
           - ``path`` (str, Path, or list): Required for ``"RIVR2O"``. Path to one
             file, a wildcard pattern, or a list of ``rivr2o_riverinputs_*.nc`` files.
+          - ``fill`` (dict, optional): Source for tracers not provided by the dynamic
+            BGC dataset. Defaults to ``{"name": "CONSTANTS"}``, which reads scalar
+            fill values from ``river_tracer_defaults.nc``. Tracers absent from the
+            dynamic source, or non-finite dynamic values, are filled from this source.
 
         If ``include_bgc=True`` and ``bgc_source`` is omitted, ``"CONSTANTS"`` is used.
 
-        For ``"RIVR2O"``, the product covers 1903-2024. Simulation times before 1903
+        For ``"RIVR2O"``, the product covers 1903-2024. Dynamic tracers are merged
+        with fill values for all other BGC tracers in the ROMS schema. Simulation times before 1903
         or after 2024 use the 1903 and 2024 fields, respectively. Each river mouth is
         mapped to the nearest RIVR2O grid cell with positive ``DIC`` export; that cell
         supplies all tracers, with exports interpolated in time onto ``river_time``.
@@ -161,7 +177,7 @@ class RiverForcing:
     """Determines when to compute climatology for river forcing."""
     include_bgc: bool = False
     """Whether to include BGC tracers."""
-    bgc_source: RawDataSource | None = None
+    bgc_source: RiverBGCSource | None = None
     """Dictionary specifying the source of river BGC tracer data."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
@@ -246,6 +262,17 @@ class RiverForcing:
                 raise ValueError(
                     '`bgc_source` must include a "path" when name is "RIVR2O".'
                 )
+            fill_source = _get_bgc_fill_source(self.bgc_source)
+            if fill_source["name"] not in _FILL_DATASET_MAP:
+                valid = ", ".join(_FILL_DATASET_MAP)
+                raise ValueError(
+                    f'Invalid bgc_source["fill"]["name"] "{fill_source["name"]}". '
+                    f"Valid options: {valid}."
+                )
+            self.bgc_source = {
+                **self.bgc_source,
+                "fill": fill_source,
+            }
         elif self.bgc_source is not None:
             logging.warning("`bgc_source` is ignored because `include_bgc` is False.")
 
@@ -322,19 +349,47 @@ class RiverForcing:
 
         return data
 
-    def _get_bgc_data(self) -> Rivr2oRiverBGCDataset:
-        """Load the RIVR2O river BGC export dataset."""
+    def _get_bgc_dataset(self) -> RiverBGCDataset:
+        """Instantiate the BGC dataset for the configured ``bgc_source``."""
         bgc_source = self.bgc_source
         if bgc_source is None:
-            raise RuntimeError("bgc_source must be set for RIVR2O.")
+            raise RuntimeError("bgc_source must be set.")
+        source_name = str(bgc_source["name"])
+        if source_name not in _BGC_DATASET_MAP:
+            valid = ", ".join(_BGC_DATASET_MAP)
+            raise ValueError(
+                f'Invalid bgc_source["name"] "{source_name}". Valid options: {valid}.'
+            )
+        if source_name == "CONSTANTS":
+            return RiverTracerDefaultsDataset()
         path = bgc_source.get("path")
-        if path is None or isinstance(path, bool):
+        if (
+            path is None
+            or isinstance(path, bool)
+            or isinstance(path, dict)
+            or not isinstance(path, str | Path | list)
+        ):
             raise ValueError('bgc_source must include a "path" when name is "RIVR2O".')
         return Rivr2oRiverBGCDataset(
             filename=path,
             start_time=self.start_time,
             end_time=self.end_time,
         )
+
+    def _get_fill_defaults(self) -> dict[str, float]:
+        """Load scalar fill concentrations for missing or non-finite BGC tracers."""
+        bgc_source = self.bgc_source
+        if bgc_source is None:
+            raise RuntimeError("bgc_source must be set.")
+        fill_source = _get_bgc_fill_source(bgc_source)
+        fill_name = fill_source["name"]
+        if fill_name not in _FILL_DATASET_MAP:
+            valid = ", ".join(_FILL_DATASET_MAP)
+            raise ValueError(
+                f'Invalid bgc_source["fill"]["name"] "{fill_name}". '
+                f"Valid options: {valid}."
+            )
+        return _FILL_DATASET_MAP[fill_name]().defaults
 
     def _get_river_sample_coords(
         self, river_names: list[str]
@@ -354,44 +409,6 @@ class RiverForcing:
             lons.append(np.mean(cell_lons))
             lats.append(np.mean(cell_lats))
         return np.asarray(lons), np.asarray(lats)
-
-    def _rivr2o_export_to_concentration(
-        self,
-        export: xr.DataArray,
-        molar_mass_g: float,
-        river_volume: xr.DataArray,
-        target_time: xr.DataArray,
-        *,
-        partition_weight: xr.DataArray,
-    ) -> xr.DataArray:
-        """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
-        time_dim = target_time.dims[0]
-        rivr2o_times = xr.DataArray(
-            [
-                rivr2o_boundary_time(int(year))
-                for year in clamp_rivr2o_time(target_time).dt.year.values
-            ],
-            dims=[time_dim],
-            coords={time_dim: target_time.coords[time_dim]},
-        )
-        export = export.sel(time=rivr2o_times)
-        export = self._align_rivr2o_concentration(export, river_volume.coords["nriver"])
-        export = export * partition_weight
-        mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
-        mmol_flux = mass_flux_g_s / molar_mass_g * 1000.0
-        return (mmol_flux / river_volume).astype(np.float32)
-
-    def _align_rivr2o_concentration(
-        self, values: xr.DataArray, nriver_coord: xr.DataArray
-    ) -> xr.DataArray:
-        """Match RIVR2O sample dimensions to ``river_tracer`` (river_time, nriver)."""
-        if "points" in values.dims:
-            values = values.rename(points="nriver")
-        if "time" in values.dims:
-            values = values.rename(time="river_time")
-        values = values.assign_coords(nriver=nriver_coord)
-        dims = [d for d in ("river_time", "nriver") if d in values.dims]
-        return values.transpose(*dims)
 
     def _set_river_tracer_values(
         self, ds: xr.Dataset, tracer_name: str, values: xr.DataArray
@@ -453,130 +470,37 @@ class RiverForcing:
         )
         return ds_expanded.assign_coords({"river_time": time})
 
-    def _apply_rivr2o_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
-        """Overlay RIVR2O-derived BGC tracers onto default river tracer values."""
-        bgc_data = self._get_bgc_data()
+    def _apply_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
+        """Apply BGC tracer concentrations, filling gaps from ``bgc_source["fill"]``."""
+        if self.bgc_source is None:
+            raise RuntimeError("bgc_source must be set.")
+        bgc_data = self._get_bgc_dataset()
+        fill_source = _get_bgc_fill_source(self.bgc_source)
+        if isinstance(bgc_data, RiverTracerDefaultsDataset) and (
+            fill_source["name"] == "CONSTANTS"
+        ):
+            fill_defaults = bgc_data.defaults
+        else:
+            fill_defaults = self._get_fill_defaults()
+
         river_names = [str(name) for name in ds.river_name.values]
         lons, lats = self._get_river_sample_coords(river_names)
-
-        abs_time = ds["abs_time"]
-        nearest_lat, nearest_lon = bgc_data.nearest_dic_cell_indices_for_points(
+        dynamic = bgc_data.forcing_concentrations(
+            ds["river_volume"],
+            ds["abs_time"],
             lons,
             lats,
             straddle=self.grid.straddle,
             river_names=river_names,
         )
-        partition_weight = bgc_data.discharge_partition_weights(
-            ds["river_volume"], nearest_lat, nearest_lon
-        )
-        sampled = bgc_data.sample_at_points(
-            lon=lons,
-            lat=lats,
-            straddle=self.grid.straddle,
-        )
-        conc_kw = {"partition_weight": partition_weight}
-        dic_from_file = self._rivr2o_export_to_concentration(
-            sampled["DIC"],
-            _RIVR2O_MOLAR_MASS_G["DIC"],
+        merged = fill_river_bgc_concentrations(
+            dynamic,
+            fill_defaults,
+            ds.tracer_name.values,
             ds["river_volume"],
-            abs_time,
-            **conc_kw,
         )
-        doc_l_conc = self._rivr2o_export_to_concentration(
-            sampled["DOC_l"],
-            _RIVR2O_MOLAR_MASS_G["DOC_l"],
-            ds["river_volume"],
-            abs_time,
-            **conc_kw,
-        )
-        doc_sl_conc = self._rivr2o_export_to_concentration(
-            sampled["DOC_sl"],
-            _RIVR2O_MOLAR_MASS_G["DOC_sl"],
-            ds["river_volume"],
-            abs_time,
-            **conc_kw,
-        )
-        poc_conc = self._rivr2o_export_to_concentration(
-            sampled["POC"],
-            _RIVR2O_MOLAR_MASS_G["POC"],
-            ds["river_volume"],
-            abs_time,
-            **conc_kw,
-        )
-
-        dic_forcing = dic_from_file + doc_l_conc
-        doc_forcing = doc_sl_conc + poc_conc
-        alk_forcing = dic_from_file
-        don_forcing = doc_sl_conc * _DON_FROM_DOC_SL + poc_conc * _DON_FROM_POC
-        dop_forcing = doc_sl_conc * _DOP_FROM_DOC_SL + poc_conc * _DOP_FROM_POC
-
-        # region agent log
-        try:
-            import json
-            import time
-
-            _log_path = "/Users/ullaheede/roms-tools/.cursor/debug-406116.log"
-            with open(_log_path, "a", encoding="utf-8") as _dbg:
-                _dbg.write(
-                    json.dumps(
-                        {
-                            "sessionId": "406116",
-                            "timestamp": int(time.time() * 1000),
-                            "location": "river_forcing.py:_apply_rivr2o_bgc_tracers",
-                            "message": "RIVR2O apply summary",
-                            "data": {
-                                "nriver": int(ds.sizes["nriver"]),
-                                "DIC_export_min": float(sampled["DIC"].min().values),
-                                "DIC_export_max": float(sampled["DIC"].max().values),
-                                "dic_forcing_min": float(dic_forcing.min().values),
-                                "dic_forcing_max": float(dic_forcing.max().values),
-                                "river_volume_min": float(
-                                    ds["river_volume"].min().values
-                                ),
-                                "river_volume_max": float(
-                                    ds["river_volume"].max().values
-                                ),
-                            },
-                            "hypothesisId": "A",
-                            "runId": "pre-fix",
-                        }
-                    )
-                    + "\n"
-                )
-        except OSError:
-            pass
-        # endregion
-
-        self._set_river_tracer_values(ds, "DIC", dic_forcing)
-        self._set_river_tracer_values(ds, "DOC", doc_forcing)
-        self._set_river_tracer_values(ds, "DON", don_forcing.astype(np.float32))
-        self._set_river_tracer_values(ds, "DOP", dop_forcing.astype(np.float32))
-        self._set_river_tracer_values(ds, "ALK", alk_forcing)
-        self._set_river_tracer_values(ds, "DIC_ALT_CO2", dic_forcing)
-        self._set_river_tracer_values(ds, "ALK_ALT_CO2", alk_forcing)
-        self._set_river_tracer_values(
-            ds,
-            "NO3",
-            self._rivr2o_export_to_concentration(
-                sampled["NO3"],
-                _RIVR2O_MOLAR_MASS_G["NO3"],
-                ds["river_volume"],
-                abs_time,
-                **conc_kw,
-            ),
-        )
-        self._set_river_tracer_values(
-            ds,
-            "PO4",
-            self._rivr2o_export_to_concentration(
-                sampled["PO4"],
-                _RIVR2O_MOLAR_MASS_G["PO4"],
-                ds["river_volume"],
-                abs_time,
-                **conc_kw,
-            ),
-        )
-
+        for tracer_name, values in merged.items():
+            self._set_river_tracer_values(ds, tracer_name, values)
         return ds
 
     def _move_rivers_to_closest_coast(self, target_coords, data):
@@ -703,10 +627,13 @@ class RiverForcing:
         ds["river_tracer"] = xr.zeros_like(tracer_template, dtype=np.float32)
         ds["river_tracer"].attrs = {"long_name": "River tracer data"}
 
-        defaults = get_tracer_defaults()
-        for ntracer in range(ds.ntracers.size):
-            tracer_name = ds.tracer_name[ntracer].item()
-            ds["river_tracer"].loc[{"ntracers": ntracer}] = defaults[tracer_name]
+        if self.include_bgc:
+            ds["river_tracer"] = ds["river_tracer"] * np.nan
+        else:
+            defaults = get_tracer_defaults()
+            for ntracer in range(ds.ntracers.size):
+                tracer_name = ds.tracer_name[ntracer].item()
+                ds["river_tracer"].loc[{"ntracers": ntracer}] = defaults[tracer_name]
 
         # River names
         river_names = data.ds[data.var_names["name"]].rename(
@@ -729,15 +656,13 @@ class RiverForcing:
         )
         ds = ds.assign_coords({"river_time": time})
 
-        if (
-            self.climatology
-            and self.bgc_source is not None
-            and self.bgc_source["name"] == "RIVR2O"
-        ):
-            ds = self._expand_climatology_for_rivr2o_timeseries(ds)
+        if self.climatology and self.bgc_source is not None:
+            bgc = self._get_bgc_dataset()
+            if bgc.requires_calendar_discharge_time:
+                ds = self._expand_climatology_for_rivr2o_timeseries(ds)
 
-        if self.bgc_source is not None and self.bgc_source["name"] == "RIVR2O":
-            ds = self._apply_rivr2o_bgc_tracers(ds)
+        if self.include_bgc and self.bgc_source is not None:
+            ds = self._apply_bgc_tracers(ds)
 
         return ds
 

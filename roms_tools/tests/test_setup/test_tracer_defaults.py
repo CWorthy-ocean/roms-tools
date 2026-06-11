@@ -80,3 +80,7 @@ class TestTracerDefaults:
 
     def test_recommended_index_is_zero(self):
         assert RECOMMENDED_VALUE_INDEX == 0
+
+    def test_requires_calendar_discharge_time_is_false(self, bundled_defaults_nc):
+        data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)
+        assert data.requires_calendar_discharge_time is False

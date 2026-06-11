@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 
 import numpy as np
+import pytest
 import xarray as xr
 
 from roms_tools.datasets.river_datasets import (
@@ -9,6 +10,7 @@ from roms_tools.datasets.river_datasets import (
     SECONDS_PER_YEAR,
     RiverDataset,
     Rivr2oRiverBGCDataset,
+    fill_river_bgc_concentrations,
     rivr2o_coerce_time,
 )
 
@@ -71,6 +73,50 @@ def _write_rivr2o_file(path, lat, lon, tracer_values):
         coords={"lat": lat, "lon": lon, "time": time},
     )
     ds.to_netcdf(path)
+
+
+class TestFillRiverBGCConcentrations:
+    @pytest.fixture
+    def template(self):
+        return xr.DataArray(
+            [[1.0, 2.0], [3.0, 4.0]],
+            dims=["river_time", "nriver"],
+            coords={"river_time": [0, 1], "nriver": [0, 1]},
+        )
+
+    def test_missing_tracer_uses_fill(self, template):
+        fill = {"DIC": 10.0, "SiO3": 5.0}
+        merged = fill_river_bgc_concentrations({}, fill, ["DIC", "SiO3"], template)
+        np.testing.assert_allclose(merged["DIC"].values, 10.0)
+        np.testing.assert_allclose(merged["SiO3"].values, 5.0)
+
+    def test_dynamic_overrides_fill(self, template):
+        fill = {"DIC": 10.0, "SiO3": 5.0}
+        dynamic = {"DIC": template * 2.0}
+        merged = fill_river_bgc_concentrations(dynamic, fill, ["DIC", "SiO3"], template)
+        np.testing.assert_allclose(merged["DIC"].values, template.values * 2.0)
+        np.testing.assert_allclose(merged["SiO3"].values, 5.0)
+
+    def test_nan_filled_from_defaults(self, template):
+        fill = {"DIC": 10.0}
+        dic = template.copy()
+        dic.values[0, 1] = np.nan
+        dynamic = {"DIC": dic}
+        merged = fill_river_bgc_concentrations(
+            dynamic, fill, ["DIC"], template, fill_at_nan=True
+        )
+        assert merged["DIC"].values[0, 0] == 1.0
+        assert merged["DIC"].values[0, 1] == 10.0
+
+    def test_fill_at_nan_false_preserves_nan(self, template):
+        fill = {"DIC": 10.0}
+        dic = template.copy()
+        dic.values[0, 1] = np.nan
+        dynamic = {"DIC": dic}
+        merged = fill_river_bgc_concentrations(
+            dynamic, fill, ["DIC"], template, fill_at_nan=False
+        )
+        assert np.isnan(merged["DIC"].values[0, 1])
 
 
 class TestRivr2oRiverBGCDataset:
@@ -492,3 +538,110 @@ class TestRivr2oRiverBGCDataset:
 
         assert dataset.ds.sizes["time"] == 1
         assert dataset.ds.time.dt.year.item() == 2024
+
+    def test_forcing_concentrations_dims_and_marbl_mapping(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        export_value = 100.0
+        tracer_values = {
+            "DIC": np.array([[0.0, 0.0], [0.0, export_value]]),
+            "DIN": np.array([[0.0, 0.0], [0.0, export_value]]),
+            "DOC_l": np.array([[0.0, 0.0], [0.0, export_value / 2]]),
+            "DOC_sl": np.array([[0.0, 0.0], [0.0, export_value / 2]]),
+            "POC": np.array([[0.0, 0.0], [0.0, export_value / 4]]),
+            "DIP": np.array([[0.0, 0.0], [0.0, export_value]]),
+        }
+        path = tmp_path / "rivr2o_riverinputs_1998.nc"
+        _write_rivr2o_file(path, lat, lon, tracer_values)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+        )
+        assert dataset.requires_calendar_discharge_time is True
+
+        river_volume = xr.DataArray(
+            [[100.0], [200.0], [150.0]],
+            dims=["river_time", "nriver"],
+            coords={
+                "river_time": [0, 1, 2],
+                "nriver": [1],
+            },
+        )
+        abs_time = xr.DataArray(
+            np.array(
+                [
+                    np.datetime64("1998-01-15"),
+                    np.datetime64("1998-02-15"),
+                    np.datetime64("1998-03-15"),
+                ]
+            ),
+            dims=["river_time"],
+        )
+        concentrations = dataset.forcing_concentrations(
+            river_volume,
+            abs_time,
+            lons=np.array([0.1]),
+            lats=np.array([0.1]),
+            straddle=False,
+            river_names=["test_river"],
+        )
+
+        assert set(concentrations) >= {
+            "DIC",
+            "DOC",
+            "DON",
+            "DOP",
+            "ALK",
+            "DIC_ALT_CO2",
+            "ALK_ALT_CO2",
+            "NO3",
+            "PO4",
+        }
+        for values in concentrations.values():
+            assert values.dims == ("river_time", "nriver")
+            assert values.shape == (3, 1)
+
+        weights = dataset.discharge_partition_weights(
+            river_volume,
+            *dataset.nearest_dic_cell_indices_for_points(
+                np.array([0.1]), np.array([0.1])
+            ),
+        )
+
+        def expected_conc(export):
+            mass_flux = export * weights * 1e6 / SECONDS_PER_YEAR
+            mmol_flux = mass_flux / 12.011 * 1000.0
+            return (mmol_flux / river_volume).astype(np.float32)
+
+        expected_dic_file = expected_conc(export_value)
+        expected_doc_l = expected_conc(export_value / 2)
+        expected_doc_sl = expected_conc(export_value / 2)
+        expected_poc = expected_conc(export_value / 4)
+
+        np.testing.assert_allclose(
+            concentrations["DIC"].values,
+            (expected_dic_file + expected_doc_l).values,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(
+            concentrations["DOC"].values,
+            (expected_doc_sl + expected_poc).values,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(
+            concentrations["DON"].values,
+            (expected_doc_sl * (103 / 2583) + expected_poc * (25 / 276)).values,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(
+            concentrations["ALK"].values,
+            expected_dic_file.values,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(
+            concentrations["DIC_ALT_CO2"].values,
+            concentrations["DIC"].values,
+            rtol=1e-5,
+        )

@@ -1015,6 +1015,12 @@ def _write_rivr2o_file(path, lat, lon, tracer_values):
 
 
 class TestRiverForcingBGCSource:
+    def test_river_forcing_has_no_rivr2o_specific_helpers(self):
+        import roms_tools.setup.river_forcing as rf
+
+        assert not hasattr(rf, "_apply_rivr2o_bgc_tracers")
+        assert not hasattr(rf, "_RIVR2O_MOLAR_MASS_G")
+
     def test_bgc_constants_by_default(self, iceland_test_grid, single_cell_indices):
         defaults = get_tracer_defaults()
         river_forcing = RiverForcing(
@@ -1025,7 +1031,10 @@ class TestRiverForcingBGCSource:
             include_bgc=True,
         )
 
-        assert river_forcing.bgc_source == {"name": "CONSTANTS"}
+        assert river_forcing.bgc_source == {
+            "name": "CONSTANTS",
+            "fill": {"name": "CONSTANTS"},
+        }
         po4 = river_forcing.ds.river_tracer.sel(
             ntracers=river_forcing.ds.tracer_name == "PO4"
         )
@@ -1153,6 +1162,38 @@ class TestRiverForcingBGCSource:
         np.testing.assert_allclose(alk.values, expected_dic_file, rtol=1e-5)
         np.testing.assert_allclose(dic_alt.values, dic.values, rtol=1e-5)
         np.testing.assert_allclose(alk_alt.values, alk.values, rtol=1e-5)
+
+        sio3 = tracer_values_for("SiO3")
+        np.testing.assert_allclose(float(sio3.min()), defaults["SiO3"], rtol=1e-6)
+
+    def test_bgc_rivr2o_default_fill_source(
+        self, tmp_path, iceland_test_grid, single_cell_indices
+    ):
+        lat = np.arange(55.0, 75.5, 0.5)
+        lon = np.arange(325.0, 355.5, 0.5)
+        path = tmp_path / "rivr2o_riverinputs_1998.nc"
+        _write_rivr2o_file(
+            path,
+            lat,
+            lon,
+            {
+                "DIC": np.full((len(lat), len(lon)), 100.0),
+                "DIN": np.full((len(lat), len(lon)), 100.0),
+                "DOC_l": np.full((len(lat), len(lon)), 50.0),
+                "DOC_sl": np.full((len(lat), len(lon)), 50.0),
+                "POC": np.full((len(lat), len(lon)), 25.0),
+                "DIP": np.full((len(lat), len(lon)), 100.0),
+            },
+        )
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(1998, 1, 1),
+            end_time=datetime(1998, 3, 1),
+            indices=single_cell_indices,
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O", "path": str(path)},
+        )
+        assert river_forcing.bgc_source["fill"] == {"name": "CONSTANTS"}
 
     def test_rivr2o_climatology_discharge_repeats_bgc_varies_by_year(
         self, tmp_path, iceland_test_grid, single_cell_indices

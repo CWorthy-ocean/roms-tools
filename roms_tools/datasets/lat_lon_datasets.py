@@ -2104,7 +2104,7 @@ class TPXOManager:
     constituents from the TPXO dataset.
 
     This class handles multiple tidal constituents following the TPXO9v2a standard.
-    The self-attraction and loading (SAL) correction data is sourced internally from TPXO9v2a.
+    The self-attraction and loading (SAL) correction data is sourced internally from TPXO10v2a, which follows the TPXO9v2a standard.
 
     Parameters
     ----------
@@ -2137,7 +2137,7 @@ class TPXOManager:
     use_dask: bool | None = False
 
     def __post_init__(self):
-        fname_sal = download_sal_data("sal_tpxo9.v2a.nc")
+        fname_sal = download_sal_data("sal_tpxo10.v2a.nc")
 
         # Initialize the data_dict with TPXODataset instances
         data_dict = {
@@ -2154,7 +2154,7 @@ class TPXOManager:
                 location="h",
                 var_names={"sal_Re": "hRe", "sal_Im": "hIm"},
                 use_dask=self.use_dask,
-                tolerate_coord_mismatch=True,  # Allow coordinate mismatch since SAL is from TPXO9v2a and may not align exactly with newer grids
+                tolerate_coord_mismatch=True,  # Allow coordinate mismatch since SAL is from TPXO10v2a and may not align exactly with newer grids
             ),
             "u": TPXODataset(
                 filename=self.filenames["u"],
@@ -2187,7 +2187,7 @@ class TPXOManager:
 
     def get_omega(self):
         """Retrieve angular frequencies (omega) for tidal constituents from the TPXO9.v2
-        atlas.
+        atlas. Confirmed to be the same as for TPXO10v2a, 2026-06-12.
 
         This method returns the angular frequencies (in radians per second) for 15 tidal constituents,
         sourced from the TPXO tidal model and defined in the OTPSnc `constit.h` file, see https://www.tpxo.net/otps.

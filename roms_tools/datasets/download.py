@@ -40,7 +40,7 @@ sal_data = pooch.create(
     base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
     # The registry specifies the files that can be fetched
     registry={
-        "sal_tpxo9.v2a.nc": "sha256:5343d745b4374170a069bfc2c67dcdd9f1dc4eb0df7c0e6de5c004432c903f40",
+        "sal_tpxo10.v2a.nc": "sha256:4309ce204a5e4884aae4dd5209c2ac5a130121176a2f49c1fad2021bba8737a1",
     },
 )
 
@@ -163,7 +163,7 @@ def download_sal_data(filename: str) -> str:
     ----------
     filename : str
         The name of the test data file to be downloaded. Available options:
-        - "sal_tpxo9.v2a.nc"
+        - "sal_tpxo10.v2a.nc"
 
     Returns
     -------

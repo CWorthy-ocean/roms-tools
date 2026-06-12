@@ -36,7 +36,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e . --force-reinstall
+           python -m pip install -e .[movie] --force-reinstall
 
       - name: Running Tests without Dask
         shell: bash -l {0}
@@ -87,7 +87,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .[dask]  --force-reinstall
+           python -m pip install -e .[dask,movie]  --force-reinstall
 
       - name: Running Tests with Dask
         shell: bash -l {0}
@@ -190,7 +190,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .[stream]  --force-reinstall
+           python -m pip install -e .[stream,movie]  --force-reinstall
 
       - name: Running Tests with Streaming
         shell: bash -l {0}
@@ -245,7 +245,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e .[dask]  --force-reinstall
+           python -m pip install -e .[dask,movie]  --force-reinstall
 
       - name: Running Tests with Dask and Xesmf
         shell: bash -l {0}

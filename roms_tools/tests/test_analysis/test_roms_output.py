@@ -15,6 +15,13 @@ try:
 except ImportError:
     xesmf = None
 
+try:
+    from matplotlib.animation import FFMpegWriter
+
+    HAS_FFMPEG = FFMpegWriter.isAvailable()
+except ImportError:
+    HAS_FFMPEG = False
+
 
 @pytest.fixture
 def roms_output_from_restart_file(use_dask):
@@ -313,6 +320,7 @@ def test_format_timestamp(roms_output_from_two_restart_files):
     assert len(label) < 30
 
 
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg required")
 def test_create_movie(roms_output_from_two_restart_files, tmp_path):
     output_file = tmp_path / "simulation.mp4"
 
@@ -333,7 +341,9 @@ def test_create_movie(roms_output_from_two_restart_files, tmp_path):
         assert "writer" in save_kwargs
 
 
-def test_create_movie_errors(roms_output_from_restart_file):
+@patch("roms_tools.analysis.roms_output.FFMpegWriter")
+def test_create_movie_errors(mock_writer, roms_output_from_restart_file):
+    mock_writer.isAvailable.return_value = True
     with pytest.raises(ValueError, match="not found"):
         roms_output_from_restart_file.create_movie("fake_var", s=-1)
 
@@ -352,6 +362,7 @@ def test_create_movie_errors(roms_output_from_restart_file):
         )
 
 
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg required")
 def test_create_movie_timestamp_xy(roms_output_from_two_restart_files):
     with patch("roms_tools.analysis.roms_output.FuncAnimation"):
         with patch(

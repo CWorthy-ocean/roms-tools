@@ -606,7 +606,15 @@ def load_data(
         ds = ds.expand_dims(dim_names["time"])
 
     if "time" in dim_names and not read_zarr:
-        ds = ds.drop_duplicates(dim=dim_names["time"])
+        # `drop_duplicates` applies a fancy-index reindex across every data
+        # variable, which builds a pathological dask graph when the time
+        # dimension is chunked one-element-per-chunk over a long record (e.g. a
+        # multi-decade single source file). Guard on the in-memory time index:
+        # `has_duplicates` is a cheap, graph-neutral O(n) check, so we only pay
+        # for the reindex when duplicate timestamps actually exist.
+        time_index = ds[dim_names["time"]].to_index()
+        if time_index.has_duplicates:
+            ds = ds.drop_duplicates(dim=dim_names["time"])
 
     return ds
 

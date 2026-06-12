@@ -44,6 +44,10 @@
 * Ensure `regionmask>=0.11.0` in `pyproject.toml` ([#565](https://github.com/CWorthy-ocean/roms-tools/pull/565))
 * Integrate narrow-channel closing directly into `Grid.update_mask()` (internal `_close_narrow_channels`), iterating north–south and east–west up to 10 passes
 * CDR analysis tests cover tonnes-CO2 uptake and renamed efficiency fields; `compute_cdr_metrics` requires `DIC_source` in the input dataset alongside other CDR variables.
+* short and long wave radiation time is shifted 1/2 a timestep sooner and have a dim of `rad_time` ([#586](https://github.com/CWorthy-ocean/roms-tools/pull/586))
+* The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
+* 2 checks added for a point source when plotting `CDRForcing.plot_distribution()`. Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
+* `load_data` now only de-duplicates the time dimension when the time index actually contains duplicates (guarded by a cheap, graph-neutral `has_duplicates` check). The previous unconditional `drop_duplicates` applied a fancy-index reindex across every variable, which built a pathological Dask graph — slow to construct and capable of exhausting memory at compute time — for long, finely time-chunked single source files (e.g. a multi-decade GLORYS file chunked one timestep per chunk). De-duplication of overlapping multi-file inputs is unchanged.
 
 ### Documentation
 

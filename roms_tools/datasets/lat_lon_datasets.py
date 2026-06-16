@@ -524,9 +524,7 @@ class LatLonDataset:
             "=== Concatenating the data along the longitude dimension ===",
             verbose=verbose,
         ):
-            ds_concatenated = _concatenate_longitudes(
-                ds, self.dim_names, end, self.use_dask
-            )
+            ds_concatenated = _concatenate_longitudes(ds, self.dim_names, end)
 
         return ds_concatenated
 
@@ -610,6 +608,31 @@ class LatLonDataset:
         ValueError
             If the selected latitude or longitude range does not intersect with the dataset.
         """
+        if return_coords_only and self.is_global:
+            # Fast path: build a minimal 2-variable dataset (just lat/lon coordinate
+            # arrays) so that _concatenate_longitudes only operates on small 1D arrays
+            # rather than the full multi-dimensional data — the caller only needs
+            # the coordinate values, not any data variables.
+            lat_name = self.dim_names["latitude"]
+            lon_name = self.dim_names["longitude"]
+            coords_only_ds = xr.Dataset(
+                {
+                    lat_name: self.ds[lat_name],
+                    lon_name: self.ds[lon_name],
+                }
+            )
+            subdomain = choose_subdomain(
+                ds=coords_only_ds,
+                dim_names=self.dim_names,
+                resolution=self.resolution,
+                is_global=self.is_global,
+                target_coords=target_coords,
+                buffer_points=buffer_points,
+                use_dask=False,
+                unchunk_lateral_dims=False,
+            )
+            return subdomain[[lat_name, lon_name]]
+
         subdomain = choose_subdomain(
             ds=self.ds,
             dim_names=self.dim_names,
@@ -622,7 +645,8 @@ class LatLonDataset:
         )
 
         if return_coords_only:
-            # Create and return a dataset with only latitudes and longitudes
+            # Non-global case: dataset doesn't need longitude wrapping, so the
+            # standard subdomain selection is already efficient.
             coords_ds = subdomain[
                 [self.dim_names["latitude"], self.dim_names["longitude"]]
             ]
@@ -1831,67 +1855,79 @@ class ERA5Dataset(LatLonDataset):
         - Convert temperature from Kelvin to Celsius.
         - Compute relative humidity if not present, convert to absolute humidity.
         - Use SST to create mask.
+
+        revised to be dask-lazy
         """
-        # Translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
-        # Convert radiation from J/m^2 to W/m^2
-        self.ds[self.var_names["swrad"]] /= 3600
-        self.ds[self.var_names["lwrad"]] /= 3600
-        self.ds[self.var_names["swrad"]].attrs["units"] = "W/m^2"
-        self.ds[self.var_names["lwrad"]].attrs["units"] = "W/m^2"
+        ds = self.ds
+        vn = self.var_names
+
+        # --- Build dict of all modifications, applied lazily via assign ---
+        updates = {}
+
+        # Convert radiation from J/m^2 to W/m^2 (ERA5 integrates over 1 hour)
+        updates[vn["swrad"]] = ds[vn["swrad"]] / 3600
+        updates[vn["lwrad"]] = ds[vn["lwrad"]] / 3600
+
         # Convert rainfall from m to cm/day
-        self.ds[self.var_names["rain"]] *= 100 * 24
+        updates[vn["rain"]] = ds[vn["rain"]] * (100 * 24)
 
         # Convert temperature from Kelvin to Celsius
-        self.ds[self.var_names["Tair"]] -= 273.15
-        self.ds[self.var_names["d2m"]] -= 273.15
-        self.ds[self.var_names["Tair"]].attrs["units"] = "degrees C"
-        self.ds[self.var_names["d2m"]].attrs["units"] = "degrees C"
+        updates[vn["Tair"]] = ds[vn["Tair"]] - 273.15
+        updates[vn["d2m"]] = ds[vn["d2m"]] - 273.15
 
-        # Compute relative humidity if not present
-        if "qair" not in self.ds.data_vars:
-            qair = np.exp(
-                (17.625 * self.ds[self.var_names["d2m"]])
-                / (243.04 + self.ds[self.var_names["d2m"]])
-            ) / np.exp(
-                (17.625 * self.ds[self.var_names["Tair"]])
-                / (243.04 + self.ds[self.var_names["Tair"]])
+        # Apply all scalar transforms in one lazy assign
+        ds = ds.assign(updates)
+
+        # Update units attributes (metadata only, never triggers compute)
+        ds[vn["swrad"]].attrs["units"] = "W/m^2"
+        ds[vn["lwrad"]].attrs["units"] = "W/m^2"
+        ds[vn["Tair"]].attrs["units"] = "degrees C"
+        ds[vn["d2m"]].attrs["units"] = "degrees C"
+
+        # --- Humidity (lazy - all xarray/numpy ops on dask arrays stay lazy) ---
+        if "qair" not in ds.data_vars:
+            # Use the already-updated (Celsius) versions from ds
+            tair = ds[vn["Tair"]]
+            d2m = ds[vn["d2m"]]
+
+            # Relative humidity (Magnus formula)
+            qair = np.exp((17.625 * d2m) / (243.04 + d2m)) / np.exp(
+                (17.625 * tair) / (243.04 + tair)
             )
+
             # Convert relative to absolute humidity
             patm = 1010.0
             cff = (
                 (1.0007 + 3.46e-6 * patm)
                 * 6.1121
-                * np.exp(
-                    17.502
-                    * self.ds[self.var_names["Tair"]]
-                    / (240.97 + self.ds[self.var_names["Tair"]])
-                )
+                * np.exp(17.502 * tair / (240.97 + tair))
             )
             cff = cff * qair
+            qair_abs = 0.62197 * (cff / (patm - 0.378 * cff))
 
-            ds = self.ds
-            ds["qair"] = 0.62197 * (cff / (patm - 0.378 * cff))
+            # Assign qair and drop d2m in one lazy operation
+            ds = ds.assign({"qair": qair_abs})
             ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
             ds["qair"].attrs["units"] = "kg/kg"
-            ds = ds.drop_vars([self.var_names["d2m"]])
-            self.ds = ds
+            ds = ds.drop_vars([vn["d2m"]])
 
-            # Update var_names dictionary
-            var_names = {**self.var_names, "qair": "qair"}
-            var_names.pop("d2m")
-            self.var_names = var_names
+            # Update var_names
+            self.var_names = {
+                **{k: v for k, v in vn.items() if k != "d2m"},
+                "qair": "qair",
+            }
+            vn = self.var_names
 
-        if "mask" in self.var_names.keys():
-            ds = self.ds
-            mask = xr.where(self.ds[self.var_names["mask"]].isel(time=0).isnull(), 0, 1)
-            ds["mask"] = mask
-            ds = ds.drop_vars([self.var_names["mask"]])
-            self.ds = ds
+        # --- Mask (lazy) ---
+        if "mask" in vn:
+            mask = xr.where(ds[vn["mask"]].isel(time=0).isnull(), 0, 1)
+            ds = ds.assign({"mask": mask})
+            ds = ds.drop_vars([vn["mask"]])
 
-            # Remove mask from var_names dictionary
-            var_names = self.var_names
-            var_names.pop("mask")
-            self.var_names = var_names
+            # Remove mask from var_names
+            self.var_names = {k: v for k, v in vn.items() if k != "mask"}
+
+        self.ds = ds
 
 
 @dataclass(kw_only=True)
@@ -2668,7 +2704,9 @@ def _concatenate_longitudes(
         - "upper": extend by adding 360 degrees.
         - "both": extend on both sides.
     use_dask : bool, default False
-        If True, chunk the concatenated longitude dimension using Dask.
+        Accepted for backward compatibility; no longer causes eager rechunking.
+        Rechunking should be applied by the caller after longitude selection so it
+        operates on the small regional subset rather than the full global dataset.
 
     Returns
     -------
@@ -2702,10 +2740,6 @@ def _concatenate_longitudes(
         if lon_name in ds[var].dims:
             field = ds[var]
             field_concat = xr.concat([field] * n_copies, dim=lon_name)
-
-            if use_dask:
-                field_concat = field_concat.chunk({lon_name: -1})
-
             ds_concat[var] = field_concat
         else:
             ds_concat[var] = ds[var]
@@ -2746,7 +2780,8 @@ def choose_subdomain(
     buffer_points : int, default 20
         Number of grid points to extend beyond the target coordinates.
     use_dask: bool, optional
-        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is processed eagerly. Defaults to False.
+        Accepted for backward compatibility; no longer used internally. Rechunking
+        is deferred to the caller via ``unchunk_lateral_dims``. Defaults to False.
     unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.

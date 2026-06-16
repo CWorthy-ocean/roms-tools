@@ -11,6 +11,7 @@
 
 ### New Features
 
+* `SurfaceForcing` was refactored to be more dask-lazy, such that data loading/streaming is minimized until `save` is called on the class, and thereby supports longer periods between start/end dates.
 * `SurfaceForcing` with `type='bgc'` has new data source option of 'MBL_co2' for time-varying co2; climatology no longer acceptd for xco2. ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608))
 * `make_edata` changed to `make_nesting_info`
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))

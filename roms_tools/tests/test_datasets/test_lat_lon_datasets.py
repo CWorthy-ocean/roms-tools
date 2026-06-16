@@ -887,8 +887,6 @@ def test_concatenate_longitudes(sample_ds, end, expected_lons, use_dask):
 
         # Ensure dask array backing the data
         assert isinstance(ds_concat.var_with_lon.data, dask.array.Array)
-        # Longitude dimension should be chunked (-1 → one chunk spanning the whole dim)
-        assert ds_concat.var_with_lon.chunks[-1] == (len(expected_lons),)
     else:
         # With use_dask=False, data should be a numpy array
         assert isinstance(ds_concat.var_with_lon.data, np.ndarray)

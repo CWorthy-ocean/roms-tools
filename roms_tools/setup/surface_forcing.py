@@ -14,6 +14,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Correction,
     ERA5Dataset,
     LatLonDataset,
+    MBLco2Dataset,
     SODARestoringSurfaceDataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
@@ -44,6 +45,10 @@ from roms_tools.utils import (
 
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
+
+DEFAULT_MBL_co2_PATH = (
+    "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
 )
 
 
@@ -184,6 +189,9 @@ class SurfaceForcing:
             opt_file = "bulk_frc.opt"
         elif self.type == "bgc":
             opt_file = "bgc.opt"
+            if self.source["name"] == "MBL_co2":
+                cppdefs_flags = set()
+                cppdefs_flags.add("PCO2AIR_FORCING")
         elif self.type == "restoring":
             opt_file = "cppdefs.opt"
             cppdefs_flags = set()
@@ -207,6 +215,12 @@ class SurfaceForcing:
                 interp_flag,
                 opt_file,
             )
+            if self.source["name"] == "MBL_co2":
+                logging.info(
+                    "Time-varying CO2 values being used."
+                    "Remember to define the following flags in your `cppdefs.opt` file: %s`.",
+                    cppdefs_flags,
+                )
         elif self.type == "restoring":
             logging.info(
                 "Data will be interpolated onto the %s. "
@@ -269,7 +283,7 @@ class SurfaceForcing:
                     processed_fields["uwnd"], processed_fields["vwnd"]
                 )
 
-        if self.type == "bgc":
+        if self.type == "bgc" and self.source["name"] != "MBL_co2":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
 
         # Reorder dimensions
@@ -321,6 +335,11 @@ class SurfaceForcing:
                     "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
                 )
                 self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            elif self.source["name"] == "MBL_co2":
+                logging.info(
+                    "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
+                )
+                self.source["path"] = DEFAULT_MBL_co2_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 
@@ -356,6 +375,13 @@ class SurfaceForcing:
             if has_dic != has_alk:
                 raise ValueError(
                     "'sDIC' and 'sALK' must both be present or both absent"
+                )
+
+        # Check that climatology is false for t-varying co2
+        if self.type == "bgc" and self.source["name"] == "MBL_co2":
+            if self.source["climatology"]:
+                raise ValueError(
+                    "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
                 )
 
     def _determine_coarse_grid_usage(self, data):
@@ -428,9 +454,11 @@ class SurfaceForcing:
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
                 data = UnifiedBGCSurfaceDataset(**data_dict)
+            elif self.source["name"] == "MBL_co2":
+                data = MBLco2Dataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED", "UNIFIED", and "MBL_co2" are valid options for source["name"] when type is "bgc".'
                 )
 
         #### NEED TO ADD DATA IMPORTS FOR DIFFERENT TRACERS AND NEEDS TO BE ITERATIVE. CONCATENATE
@@ -511,14 +539,21 @@ class SurfaceForcing:
                 },
             }
         elif self.type == "bgc":
-            variable_info = {}
-            for var_name in list(data.var_names.keys()) + list(
-                data.opt_var_names.keys()
-            ):
-                variable_info[var_name] = default_info
-                if var_name == "pco2_air":
-                    variable_info[var_name] = {**default_info, "validate": True}
-                else:
+            if self.source["name"] == "MBL_co2":
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
+                    variable_info[var_name] = default_info
+                    if var_name == "xco2_air":
+                        variable_info[var_name] = {**default_info, "validate": True}
+                    else:
+                        variable_info[var_name] = {**default_info, "validate": False}
+            else:
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
                     variable_info[var_name] = {**default_info, "validate": False}
         elif self.type == "restoring":
             variable_info = {}
@@ -677,13 +712,17 @@ class SurfaceForcing:
                     "time",
                 ]
         elif self.type == "bgc":
-            time_coords = [
-                "pco2_time",
-                "iron_time",
-                "dust_time",
-                "nox_time",
-                "nhy_time",
-            ]
+            if self.source["name"] == "MBL_co2":
+                time_coords = [
+                    "xco2_time",
+                ]
+            else:
+                time_coords = [
+                    "iron_time",
+                    "dust_time",
+                    "nox_time",
+                    "nhy_time",
+                ]
         elif self.type == "restoring":
             time_coords = []
             for var in self.restoring_forces:
@@ -793,8 +832,8 @@ class SurfaceForcing:
             - "Tair": Air temperature at 2m.
             - "qair": Absolute humidity at 2m.
             - "rain": Total precipitation.
-            - "pco2_air": Atmospheric pCO2.
-            - "pco2_air_alt": Atmospheric pCO2, alternative CO2.
+            - "xco2_air": CO2 in Marine boundary layer.
+            - "xco2_air_alt": CO2 in Marine boundary layer, alternative CO2.
             - "iron": Iron decomposition.
             - "dust": Dust decomposition.
             - "nox": NOx decomposition.

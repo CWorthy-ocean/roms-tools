@@ -23,17 +23,32 @@ class Ensemble:
     members: dict[str, str | xr.Dataset]
     """Dictionary mapping member names to CDR metrics."""
     ds: xr.Dataset = field(init=False)
-    """xarray Dataset containing aligned efficiencies for all ensemble members."""
+    """xarray Dataset containing aligned efficiency and CO2 uptake diagnostics."""
 
     def __post_init__(self):
         """
-        Loads datasets, extracts efficiencies, aligns times, stores in self.ds, and
-        plots ensemble curves.
+        Loads datasets, extracts efficiency and CO2 uptake, aligns times, computes
+        ensemble statistics, and stores in ``self.ds``.
         """
         datasets = self._load_members()
-        effs = {name: self._extract_efficiency(ds) for name, ds in datasets.items()}
-        aligned = self._align_times(effs)
-        self.ds = self._compute_statistics(aligned)
+        effs = {}
+        uptakes = {}
+        for name, ds in datasets.items():
+            release_start = self._get_release_start(ds)
+            effs[name] = self._extract_efficiency(ds, release_start=release_start)
+            uptakes[name] = self._extract_uptake(ds, release_start=release_start)
+
+        aligned_eff = self._align_times(effs)
+        aligned_uptake = self._align_times(uptakes).rename_vars(
+            {name: f"{name}_co2_uptake" for name in uptakes}
+        )
+
+        self.ds = xr.merge(
+            [
+                self._compute_statistics(aligned_eff),
+                self._compute_uptake_statistics(aligned_uptake),
+            ]
+        )
 
     def _load_members(self) -> dict[str, xr.Dataset]:
         """
@@ -52,14 +67,33 @@ class Ensemble:
             for name, path in self.members.items()
         }
 
-    def _extract_efficiency(self, ds: xr.Dataset) -> xr.DataArray:
+    def _get_time_coord(self, da: xr.DataArray, ds: xr.Dataset) -> xr.DataArray:
+        """Return the absolute time coordinate for a member variable."""
+        if "time" in da.coords:
+            return da.coords["time"]
+        if "time" in ds.data_vars:
+            return ds["time"]
+        raise ValueError("Dataset must contain a 'time' coordinate or data variable.")
+
+    def _get_release_start(self, ds: xr.Dataset) -> np.datetime64:
+        """Infer release start from first valid efficiency value."""
+        eff = ds["cdr_efficiency_from_flux"]
+        abs_time = self._get_time_coord(eff, ds)
+        valid_mask = ~np.isnan(eff.values)
+        if not valid_mask.any():
+            raise ValueError("No valid efficiency values found in dataset.")
+        return abs_time.values[valid_mask][0]
+
+    def _extract_efficiency(
+        self, ds: xr.Dataset, release_start: np.datetime64 | None = None
+    ) -> xr.DataArray:
         """
         Extracts the CDR efficiency metric and reindex to time since release start.
 
         Parameters
         ----------
         ds : xr.Dataset
-            Dataset containing a "cdr_efficiency" variable and "time" coordinate.
+            Dataset containing a "cdr_efficiency_from_flux" variable and "time" coordinate.
 
         Returns
         -------
@@ -71,26 +105,17 @@ class Ensemble:
         ValueError
             If 'time' coordinate is missing or there are no valid efficiency values.
         """
-        eff = ds["cdr_efficiency"]
+        eff = ds["cdr_efficiency_from_flux"]
 
-        # Check that time coordinate exists
-        if "time" in eff.coords:
-            abs_time = eff.coords["time"]
-            eff = eff.drop_vars("time")
-        elif "time" in ds.data_vars:
-            abs_time = ds["time"]
-            eff = eff.drop_vars("time")
-        else:
-            raise ValueError(
-                "Dataset must contain a 'time' coordinate or data variable."
-            )
+        abs_time = self._get_time_coord(eff, ds)
 
         # Drop NaNs to find first valid time
         valid_mask = ~np.isnan(eff.values)
         if not valid_mask.any():
             raise ValueError("No valid efficiency values found in dataset.")
 
-        release_start = abs_time.values[valid_mask][0]
+        if release_start is None:
+            release_start = abs_time.values[valid_mask][0]
 
         # Compute relative time in days
         time_rel = (abs_time - release_start).astype("timedelta64[D]")
@@ -100,6 +125,44 @@ class Ensemble:
         eff_rel.time.attrs["long_name"] = "time since release start"
 
         return eff_rel
+
+    def _extract_uptake(
+        self, ds: xr.Dataset, release_start: np.datetime64 | None = None
+    ) -> xr.DataArray:
+        """
+        Extracts CO2 uptake (flux-based) and reindexes to time since release start.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing a ``cdr_carbon_uptake_from_flux`` variable and ``time``
+            coordinate.
+
+        Returns
+        -------
+        xr.DataArray
+            CO2 uptake reindexed to a relative time axis in days since release start.
+
+        Raises
+        ------
+        ValueError
+            If 'time' coordinate is missing or there are no valid uptake values.
+        """
+        uptake = ds["cdr_carbon_uptake_from_flux"]
+
+        abs_time = self._get_time_coord(uptake, ds)
+
+        valid_mask = ~np.isnan(uptake.values)
+        if not valid_mask.any():
+            raise ValueError("No valid CO2 uptake values found in dataset.")
+
+        if release_start is None:
+            release_start = abs_time.values[valid_mask][0]
+        time_rel = (abs_time - release_start).astype("timedelta64[D]")
+        uptake_rel = uptake.assign_coords(time=time_rel)
+        uptake_rel.time.attrs["long_name"] = "time since release start"
+
+        return uptake_rel
 
     def _align_times(self, effs: dict[str, xr.DataArray]) -> xr.Dataset:
         """
@@ -142,8 +205,28 @@ class Ensemble:
             the ensemble mean and standard deviation across members.
         """
         da = ds.to_dataarray("member")  # stack into (member, time)
-        ds["ensemble_mean"] = da.mean(dim="member")
-        ds["ensemble_std"] = da.std(dim="member")
+        ds["ensemble_efficiency_mean"] = da.mean(dim="member")
+        ds["ensemble_efficiency_std"] = da.std(dim="member")
+        return ds
+
+    def _compute_uptake_statistics(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Computes ensemble statistics for CO2 uptake member series.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset containing aligned member uptake series.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset with additional variables ``ensemble_uptake_mean`` and
+            ``ensemble_uptake_std``.
+        """
+        da = ds.to_dataarray("member")
+        ds["ensemble_uptake_mean"] = da.mean(dim="member")
+        ds["ensemble_uptake_std"] = da.std(dim="member")
         return ds
 
     def plot(
@@ -151,10 +234,11 @@ class Ensemble:
         save_path: str | None = None,
     ) -> None:
         """
-        Plots ensemble members with mean ± standard deviation shading.
+        Plot ensemble CDR efficiency and CO2 uptake in two subplots.
 
-        Displays individual member efficiency time series along with the ensemble
-        mean and ±1 standard deviation as a shaded region.
+        Both subplots show individual ensemble-member curves. When multiple members are
+        present, a shaded band highlights the spread between the lower and upper member
+        envelopes at each time.
 
         Parameters
         ----------
@@ -167,29 +251,61 @@ class Ensemble:
         None
             This method does not return any value. It generates and displays a plot.
         """
-        fig, ax = plt.subplots(figsize=(8, 5))
-
-        time = self.ds.time.values / np.timedelta64(1, "D")  # converts to float days
-
-        # Individual ensemble members
-        for name in self.members.keys():
-            ax.plot(time, self.ds[name], lw=2, label=name)
-
-        # Mean ± std
-        ax.plot(time, self.ds.ensemble_mean, color="black", lw=2, label="ensemble mean")
-        ax.fill_between(
-            time,
-            self.ds.ensemble_mean - self.ds.ensemble_std,
-            self.ds.ensemble_mean + self.ds.ensemble_std,
-            color="gray",
-            alpha=0.3,
+        fig, (ax_eff, ax_uptake) = plt.subplots(
+            nrows=2, ncols=1, figsize=(9, 8), sharex=True
         )
 
-        ax.set_xlabel("Time since release start [days]")
-        ax.set_ylabel("CDR Efficiency")
-        ax.set_title("Ensemble of interventions")
-        ax.legend()
-        ax.grid()
+        time = self.ds.time.values / np.timedelta64(1, "D")
+        member_names = list(self.members.keys())
+        colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+
+        # Plot member lines on both panels with matching colors.
+        for idx, name in enumerate(member_names):
+            color = colors[idx % len(colors)] if colors else None
+            ax_eff.plot(time, self.ds[name], lw=1.8, alpha=0.9, color=color, label=name)
+            ax_uptake.plot(
+                time,
+                self.ds[f"{name}_co2_uptake"],
+                lw=1.8,
+                alpha=0.9,
+                color=color,
+                label=name,
+            )
+
+        if len(member_names) > 1:
+            eff_stack = xr.concat(
+                [self.ds[name] for name in member_names], dim="member"
+            )
+            uptake_stack = xr.concat(
+                [self.ds[f"{name}_co2_uptake"] for name in member_names], dim="member"
+            )
+            ax_eff.fill_between(
+                time,
+                eff_stack.min(dim="member"),
+                eff_stack.max(dim="member"),
+                color="gray",
+                alpha=0.18,
+            )
+            ax_uptake.fill_between(
+                time,
+                uptake_stack.min(dim="member"),
+                uptake_stack.max(dim="member"),
+                color="C3",
+                alpha=0.12,
+            )
+
+        ax_eff.set_ylabel("CDR efficiency")
+        ax_eff.set_title("CDR efficiency")
+        ax_eff.grid()
+        ax_eff.legend(loc="best")
+
+        ax_uptake.set_ylabel(r"CO$_2$ uptake (tonnes CO$_2$)")
+        ax_uptake.set_xlabel("Time since release start [days]")
+        ax_uptake.set_title(r"CO$_2$ uptake")
+        ax_uptake.grid()
+        ax_uptake.legend(loc="best")
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        else:
+            plt.show()

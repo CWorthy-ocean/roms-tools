@@ -464,6 +464,8 @@ def test_cdr_metrics_computes_and_plots(roms_output_with_cdr_vars):
 
         ds_cdr = roms_output_with_cdr_vars.ds_cdr
 
-        # Check presence of both efficiency variables
-        assert "cdr_efficiency" in ds_cdr
-        assert "cdr_efficiency_from_delta_diff" in ds_cdr
+        # Check presence of efficiency and uptake variables
+        assert "cdr_efficiency_from_flux" in ds_cdr
+        assert "cdr_efficiency_from_DIC_difference" in ds_cdr
+        assert "cdr_carbon_uptake_from_flux" in ds_cdr
+        assert "cdr_carbon_uptake_from_DIC_difference" in ds_cdr

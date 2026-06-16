@@ -14,6 +14,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Correction,
     ERA5Dataset,
     LatLonDataset,
+    SODARestoringSurfaceDataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
@@ -434,14 +435,22 @@ class SurfaceForcing:
 
         #### NEED TO ADD DATA IMPORTS FOR DIFFERENT TRACERS AND NEEDS TO BE ITERATIVE. CONCATENATE
         elif self.type == "restoring":
-            if self.source["name"] == "WOA":
-                data = WOARestoringSurfaceDataset(**data_dict)
-            elif self.source["name"] == "UNIFIED":
-                data = UnifiedRestoringSurfaceDataset(**data_dict)
-            else:
-                raise ValueError(
-                    'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring".'
-                )
+            if "sss" in self.restoring_forces:
+                if self.source["name"] == "WOA":
+                    data = WOARestoringSurfaceDataset(**data_dict)
+                elif self.source["name"] == "UNIFIED":
+                    data = UnifiedRestoringSurfaceDataset(**data_dict)
+                else:
+                    raise ValueError(
+                        'Only "WOA" and "UNIFIED" are valid options for source["name"] when type is "restoring", and restoring_forces is ["sss"].'
+                    )
+            if "sDIC" in self.restoring_forces:
+                if self.source["name"] == "SODA":
+                    data = SODARestoringSurfaceDataset(**data_dict)
+                else:
+                    raise ValueError(
+                        'Only "SODA" is a valid option for source["name"] when type is "restoring", and restoring_forces is ["sDIC", "sALK"].'
+                    )
 
         return data
 

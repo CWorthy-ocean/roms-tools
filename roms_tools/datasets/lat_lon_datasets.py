@@ -524,9 +524,7 @@ class LatLonDataset:
             "=== Concatenating the data along the longitude dimension ===",
             verbose=verbose,
         ):
-            ds_concatenated = _concatenate_longitudes(
-                ds, self.dim_names, end
-            )
+            ds_concatenated = _concatenate_longitudes(ds, self.dim_names, end)
 
         return ds_concatenated
 
@@ -1919,7 +1917,6 @@ class ERA5Dataset(LatLonDataset):
     #         var_names.pop("mask")
     #         self.var_names = var_names
 
-
     def post_process(self) -> None:
         """
         Processes and converts ERA5 data values as follows:
@@ -1946,7 +1943,7 @@ class ERA5Dataset(LatLonDataset):
 
         # Convert temperature from Kelvin to Celsius
         updates[vn["Tair"]] = ds[vn["Tair"]] - 273.15
-        updates[vn["d2m"]]  = ds[vn["d2m"]]  - 273.15
+        updates[vn["d2m"]] = ds[vn["d2m"]] - 273.15
 
         # Apply all scalar transforms in one lazy assign
         ds = ds.assign(updates)
@@ -1954,20 +1951,18 @@ class ERA5Dataset(LatLonDataset):
         # Update units attributes (metadata only, never triggers compute)
         ds[vn["swrad"]].attrs["units"] = "W/m^2"
         ds[vn["lwrad"]].attrs["units"] = "W/m^2"
-        ds[vn["Tair"]].attrs["units"]  = "degrees C"
-        ds[vn["d2m"]].attrs["units"]   = "degrees C"
+        ds[vn["Tair"]].attrs["units"] = "degrees C"
+        ds[vn["d2m"]].attrs["units"] = "degrees C"
 
         # --- Humidity (lazy - all xarray/numpy ops on dask arrays stay lazy) ---
         if "qair" not in ds.data_vars:
-
             # Use the already-updated (Celsius) versions from ds
             tair = ds[vn["Tair"]]
-            d2m  = ds[vn["d2m"]]
+            d2m = ds[vn["d2m"]]
 
             # Relative humidity (Magnus formula)
-            qair = (
-                np.exp((17.625 * d2m)  / (243.04 + d2m)) /
-                np.exp((17.625 * tair) / (243.04 + tair))
+            qair = np.exp((17.625 * d2m) / (243.04 + d2m)) / np.exp(
+                (17.625 * tair) / (243.04 + tair)
             )
 
             # Convert relative to absolute humidity
@@ -1983,7 +1978,7 @@ class ERA5Dataset(LatLonDataset):
             # Assign qair and drop d2m in one lazy operation
             ds = ds.assign({"qair": qair_abs})
             ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
-            ds["qair"].attrs["units"]     = "kg/kg"
+            ds["qair"].attrs["units"] = "kg/kg"
             ds = ds.drop_vars([vn["d2m"]])
 
             # Update var_names

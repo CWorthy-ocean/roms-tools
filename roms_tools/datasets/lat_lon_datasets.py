@@ -31,6 +31,8 @@ from roms_tools.datasets.utils import (
 )
 from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
+    BGC_SOURCE_SALT,
+    BGC_SOURCE_TEMP,
     Timed,
     assign_dates_to_climatology,
     get_target_coords,
@@ -1519,6 +1521,14 @@ class UnifiedBGCDataset(UnifiedDataset):
             "spCaCO3": "spCaCO3",
             "zooC": "zooC",
             "CHL": "CHL",
+            # Source temperature/salinity used to build the density coordinate for
+            # density-space interpolation of BGC tracers. Mapped to the file variables
+            # (currently ``temp_WOA``/``salt_WOA``) under the stable internal keys
+            # ``temp_bgc``/``salt_bgc``. Optional: absent in older files, in which case
+            # interpolation falls back to depth space. If the file renames these
+            # variables, update only the values here.
+            BGC_SOURCE_TEMP: "temp_WOA",
+            BGC_SOURCE_SALT: "salt_WOA",
         }
     )
 

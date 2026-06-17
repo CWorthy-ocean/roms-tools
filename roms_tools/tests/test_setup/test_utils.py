@@ -9,8 +9,10 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
+    _compute_density_coord,
     _infer_valid_boundaries_from_mask,
     check_and_set_boundaries,
+    compute_potential_density,
     get_target_coords,
     validate_names,
 )
@@ -295,3 +297,68 @@ def test_check_and_set_full_user_boundaries(simple_mask):
     result = check_and_set_boundaries(boundaries, simple_mask)
 
     assert result == boundaries  # unchanged
+
+
+# test compute_potential_density
+
+
+def test_compute_potential_density_known_value():
+    """Verify sigma-0 against a known seawater value (T=20°C, S=35 PSU → ~24.64 kg/m³)."""
+    temp = xr.DataArray([[20.0]])
+    salt = xr.DataArray([[35.0]])
+    result = compute_potential_density(temp, salt)
+    assert float(result.values.flat[0]) == pytest.approx(24.64, abs=0.1)
+
+
+def test_compute_potential_density_dask():
+    """Verify compute_potential_density returns a lazy dask-backed array."""
+    import dask.array as da
+
+    temp = xr.DataArray(da.from_array([[20.0]], chunks=(1, 1)))
+    salt = xr.DataArray(da.from_array([[35.0]], chunks=(1, 1)))
+    result = compute_potential_density(temp, salt)
+    assert result.chunks is not None
+
+
+def test_compute_density_coord_constant_TS():
+    """For constant T/S, the density coordinate equals sigma0(S,T) plus the
+    monotonicity perturbation along the depth dimension.
+    """
+    import gsw
+
+    n_depth = 4
+    T_const, S_const = 10.0, 35.0
+    temp = xr.DataArray(np.full((n_depth, 1, 1), T_const), dims=["depth", "eta", "xi"])
+    salt = xr.DataArray(np.full((n_depth, 1, 1), S_const), dims=["depth", "eta", "xi"])
+
+    result = _compute_density_coord(temp, salt, "depth")
+
+    # gsw.sigma0 is invariant for constant T/S; only the per-index perturbation
+    # added along the depth axis changes the value across depth.
+    expected = gsw.sigma0(S_const, T_const) + np.arange(n_depth) * 1e-7
+    np.testing.assert_allclose(result.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
+
+
+def test_compute_density_coord_monotonic_and_chunked():
+    """The density coordinate is strictly increasing along the depth dim and is
+    single-chunked there (required by xgcm.transform).
+    """
+    # A stably stratified column: density should already increase with depth, and
+    # the perturbation guarantees strict monotonicity even for ties.
+    temp = xr.DataArray(
+        np.array([20.0, 20.0, 12.0, 4.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    ).chunk({"s_rho": 2})
+    salt = xr.DataArray(
+        np.array([34.0, 34.0, 34.8, 35.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    ).chunk({"s_rho": 2})
+
+    result = _compute_density_coord(temp, salt, "s_rho")
+
+    profile = result.values[:, 0, 0]
+    assert np.all(np.diff(profile) > 0), "density coordinate must be strictly monotonic"
+    # single chunk along the transformed dim
+    assert result.chunks is not None
+    s_axis = result.dims.index("s_rho")
+    assert len(result.chunks[s_axis]) == 1

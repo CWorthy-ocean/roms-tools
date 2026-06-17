@@ -68,7 +68,7 @@ install ``ROMS-Tools`` along with the additional dependencies via::
 
     pip install ".[stream]"
 
-If you want to use the :meth:`~roms_tools.ROMSOutput.create_movie` functionality and you 
+If you want to use the :meth:`~roms_tools.ROMSOutput.create_movie` functionality and you
 do not have ``ffmpeg`` installed by other means, install with the ``movie`` extra::
 
     pip install ".[movie]"

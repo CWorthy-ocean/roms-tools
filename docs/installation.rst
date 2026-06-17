@@ -26,6 +26,15 @@ If you want to use ``ROMS-Tools`` with ``dask`` and all packages required for st
 
     pip install roms-tools[stream]
 
+If you want to use the :meth:`~roms_tools.ROMSOutput.create_movie` functionality to generate animations, install ``ROMS-Tools`` with the ``movie`` extra, which provides ``ffmpeg`` via the ``imageio-ffmpeg`` package::
+
+    pip install roms-tools[movie]
+
+If you already have ``ffmpeg`` installed (e.g. via conda or your system package manager), the ``[movie]`` extra is not needed.
+
+Multiple extras can be combined. For example, to use both ``dask`` and movie creation::
+
+    pip install roms-tools[dask,movie]
 
 Note: The PyPI versions of ``ROMS-Tools`` do not include ``xesmf``, so some features will be unavailable.
 
@@ -58,3 +67,12 @@ streaming source data directly from the cloud, you can
 install ``ROMS-Tools`` along with the additional dependencies via::
 
     pip install ".[stream]"
+
+If you want to use the :meth:`~roms_tools.ROMSOutput.create_movie` functionality and you 
+do not have ``ffmpeg`` installed by other means, install with the ``movie`` extra::
+
+    pip install ".[movie]"
+
+Multiple extras can be combined, for example::
+
+    pip install ".[dask,movie]"

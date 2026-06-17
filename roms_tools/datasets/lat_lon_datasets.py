@@ -1372,6 +1372,94 @@ class MBLco2Dataset(MBLDataset):
 
 
 @dataclass(kw_only=True)
+class SODADataset(LatLonDataset):
+    """Represents global gridded marine carbonate system data calculated from machine learning estimates of Total Alkalinity and the fugacity of carbon dioxide. Data taken from NOAA's OceanSODA-ETHZ version 2025. Monthly data for years 1982-2024 at 1 degree resolution.
+
+    Notes
+    -----
+    """
+
+    needs_lateral_fill: bool = True
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method creates an xarray dataset from a numpy ndarray. It then converts the time type
+        and extrapolates the latitude values across all longitudes.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with time-varying CO2 values.
+        """
+        ds = ds.rename({"lon": "longitude", "lat": "latitude"})
+
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "time": "time",
+        }
+
+        ds = ds.assign_coords(
+            {
+                "latitude": ds["latitude"],
+                "longitude": ds["longitude"],
+            }
+        )
+
+        # Confirm the correct dataset is being used
+        if len(ds["time"]) != 516:
+            SODA_URL = "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
+            raise ValueError(f"Please use the OceanSODA dataset provided at {SODA_URL}")
+
+        ds["time"].attrs = {"units": "Datetime", "long_name": "Time"}
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class SODARestoringSurfaceDataset(SODADataset):
+    dataset_name: ClassVar[str] = (
+        "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
+    )
+    """The SODA dataset url"""
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {"sDIC": "dic", "sALK": "talk"}
+    )
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "sDIC": "dic",
+            "sALK": "talk",
+        }
+    )
+
+    def post_process(self) -> None:
+        """
+        Processes SODAv2025 data values as follows:
+        - drop the year coordinate
+        - convert micromol/kg to mmol/m^3
+        - Apply a mask to the dataset based on locations of NaN values.
+        """
+        self.ds = self.ds.drop_vars("year")
+        density_temp = 1025  # kg/m3
+        mask = xr.where(
+            self.ds["dic"].isnull().any(dim=self.dim_names["time"]),
+            0,
+            1,
+        )
+
+        self.ds["mask"] = mask
+
+
+@dataclass(kw_only=True)
 class UnifiedDataset(LatLonDataset):
     """Represents unified BGC data on original grid.
 

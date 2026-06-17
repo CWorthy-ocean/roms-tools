@@ -371,10 +371,16 @@ class SurfaceForcing:
                     )
             has_dic = "sDIC" in self.restoring_forces
             has_alk = "sALK" in self.restoring_forces
+            has_sss = "sss" in self.restoring_forces
 
             if has_dic != has_alk:
                 raise ValueError(
                     "'sDIC' and 'sALK' must both be present or both absent"
+                )
+
+            if has_dic and has_sss:
+                raise ValueError(
+                    "'sss' must be called separately from 'sDIC' and 'sALK'."
                 )
 
         # Check that climatology is false for t-varying co2

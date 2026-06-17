@@ -390,6 +390,13 @@ class SurfaceForcing:
                     "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
                 )
 
+        # Check that climatology is false for restoring of 'sDIC' and 'sALK'
+        if self.type == "restoring" and self.source["name"] == "SODA":
+            if self.source["climatology"]:
+                raise ValueError(
+                    "When 'name' is 'SODA', monthly `dic` and `talk` data is expected. 'climatology' must be 'False'"
+                )
+
     def _determine_coarse_grid_usage(self, data):
         """Determine if coarse grid interpolation should be used based on the resolution
         of the dataset and the target grid.

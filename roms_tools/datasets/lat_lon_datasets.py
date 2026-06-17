@@ -33,6 +33,7 @@ from roms_tools.fill import LateralFill
 from roms_tools.setup.utils import (
     Timed,
     assign_dates_to_climatology,
+    compute_potential_density,
     get_target_coords,
 )
 from roms_tools.utils import (
@@ -1373,25 +1374,25 @@ class MBLco2Dataset(MBLDataset):
 
 @dataclass(kw_only=True)
 class SODADataset(LatLonDataset):
-    """Represents global gridded marine carbonate system data calculated from machine learning estimates of Total Alkalinity and the fugacity of carbon dioxide. Data taken from NOAA's OceanSODA-ETHZ version 2025. Monthly data for years 1982-2024 at 1 degree resolution.
+    """Represents global gridded marine carbonate system data calculated from machine learning estimates of Total Alkalinity and the fugacity of carbon dioxide. Data taken from NOAA's OceanSODA-ETHZ version 2025. Monthly data for years 1982-2024 at 1 degree resolution for the surface water.
 
     Notes
     -----
+    No pre-processing is done so land points are nans. The `needs_lateral_fill` attribute is set to `True`.
+    Both variables `dic` and `talk` have units of micromol/kg, so density is calulated from the `temperature` and `salinity` in the datset to convert to units of mmol/m^3.
     """
 
     needs_lateral_fill: bool = True
 
     # overwrite clean_up method from parent class
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """Ensure the dataset's time dimension is correctly defined and standardized.
-
-        This method creates an xarray dataset from a numpy ndarray. It then converts the time type
-        and extrapolates the latitude values across all longitudes.
+        """This method calculates density from T and S in the dataset, and then uses it to convert
+        dic and talk from units of micromol/kg to mmol/m^3.
 
         Returns
         -------
         ds : xr.Dataset
-            The xarray Dataset with time-varying CO2 values.
+            The xarray Dataset with monthly dic and talk data.
         """
         ds = ds.rename({"lon": "longitude", "lat": "latitude"})
 
@@ -1414,6 +1415,14 @@ class SODADataset(LatLonDataset):
             raise ValueError(f"Please use the OceanSODA dataset provided at {SODA_URL}")
 
         ds["time"].attrs = {"units": "Datetime", "long_name": "Time"}
+
+        # Calculate density
+        sigma0 = compute_potential_density(ds["temperature"], ds["salinity"])
+        potential_density = sigma0 + 1000  # [kg/m^3]
+
+        # convert from micromol/kg to mmol/m^3
+        ds["dic"] = ds["dic"] * potential_density / 1000
+        ds["talk"] = ds["talk"] * potential_density / 1000
 
         return ds
 
@@ -1445,11 +1454,10 @@ class SODARestoringSurfaceDataset(SODADataset):
         """
         Processes SODAv2025 data values as follows:
         - drop the year coordinate
-        - convert micromol/kg to mmol/m^3
         - Apply a mask to the dataset based on locations of NaN values.
         """
         self.ds = self.ds.drop_vars("year")
-        density_temp = 1025  # kg/m3
+
         mask = xr.where(
             self.ds["dic"].isnull().any(dim=self.dim_names["time"]),
             0,

@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+import gsw
 import numba as nb
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
+from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -498,6 +500,96 @@ def compute_missing_bgc_variables(bgc_data):
     bgc_data.pop("CHL", None)
 
     return bgc_data
+
+
+def compute_potential_density(
+    temp: "xr.DataArray", salt: "xr.DataArray"
+) -> "xr.DataArray":
+    """Compute sigma-0 potential density anomaly (kg/m³ - 1000) via TEOS-10 (gsw).
+
+    Wraps gsw.sigma0 with apply_ufunc for dask compatibility. Treats practical
+    salinity as Absolute Salinity and in-situ temperature as Conservative
+    Temperature — an approximation sufficient for density-coordinate interpolation.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        In-situ temperature (°C).
+    salt : xr.DataArray
+        Practical salinity (PSU).
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 (kg/m³ - 1000).
+    """
+    density = xr.apply_ufunc(
+        gsw.sigma0,
+        salt,
+        temp,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+    # apply_ufunc preserves the input dim order, but normalize to the package's
+    # canonical order so this public function returns a predictable layout to
+    # users who call it directly.
+    density = transpose_dimensions(density)
+    density.name = "sigma0"
+    density.attrs["long_name"] = "potential density anomaly"
+    density.attrs["units"] = "kg/m^3 - 1000"
+    return density
+
+
+# Internal variable-name keys for the single source temperature/salinity pair used to
+# build the BGC density coordinate. A BGC dataset declares these keys in its
+# ``opt_var_names`` (mapping them to whatever the file calls the fields, e.g.
+# ``temp_WOA``/``salt_WOA``); the density-space interpolation in
+# ``InitialConditions``/``BoundaryForcing`` detects, uses, and then drops them. The keys
+# are deliberately NOT ``temp``/``salt`` so they cannot collide with the physics model
+# T/S that share ``processed_fields`` in ``InitialConditions``.
+BGC_SOURCE_TEMP = "temp_bgc"
+BGC_SOURCE_SALT = "salt_bgc"
+
+
+def _compute_density_coord(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth_dim: str,
+) -> "xr.DataArray":
+    """Build a strictly monotonic potential-density coordinate for density-space
+    interpolation.
+
+    Computes sigma-0 from ``temp``/``salt`` and adds a tiny depth-index perturbation
+    (matching the reference MATLAB implementation) so the profile is strictly
+    increasing along ``depth_dim`` — required by the ``xgcm`` transform that consumes
+    it as a coordinate. The result is single-chunked along ``depth_dim``, which
+    ``xgcm.transform`` also requires.
+
+    The same helper builds both the *source* coordinate (``depth_dim`` = the BGC
+    source depth dimension) and the *target* coordinate (``depth_dim`` = the ROMS
+    ``s_rho`` dimension); the inputs differ (BGC's own T/S for the source, the model's
+    T/S for the target), but the construction is identical.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        Temperature (°C) on the grid whose density coordinate is wanted.
+    salt : xr.DataArray
+        Practical salinity (PSU) on the same grid.
+    depth_dim : str
+        Name of the vertical dimension along which the coordinate must be monotonic.
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 plus monotonicity perturbation, single-
+        chunked along ``depth_dim``.
+    """
+    density = compute_potential_density(temp, salt)
+    n_depth = density.sizes[depth_dim]
+    density = density + xr.DataArray(np.arange(n_depth) * 1e-7, dims=[depth_dim])
+    # xgcm.transform requires a single chunk along the dim being transformed.
+    return density.chunk({depth_dim: -1})
 
 
 def compute_missing_surface_bgc_variables(bgc_data):

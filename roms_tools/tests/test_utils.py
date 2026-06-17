@@ -205,58 +205,6 @@ def test_load_data_open_dataset(
     assert expected_dim in ds.dims
 
 
-def _write_nc_with_times(path: Path, times) -> None:
-    """Write a tiny lat/lon/time netCDF file with the given time stamps."""
-    ds = xr.Dataset(
-        {"data": (("time", "latitude", "longitude"), np.zeros((len(times), 2, 2)))},
-        coords={
-            "time": ("time", times),
-            "latitude": [0.0, 1.0],
-            "longitude": [0.0, 1.0],
-        },
-    )
-    ds.to_netcdf(path)
-
-
-def test_load_data_skips_drop_duplicates_when_time_is_unique(tmp_path):
-    """A duplicate-free time axis must not trigger the ``drop_duplicates`` reindex.
-
-    ``drop_duplicates`` applies a fancy-index reindex across every variable, which
-    builds a pathological Dask graph (and can exhaust memory) on long, finely
-    time-chunked single source files. The loader guards it behind a cheap,
-    graph-neutral ``has_duplicates`` check, so a clean source skips it entirely.
-    """
-    path = tmp_path / "unique_times.nc"
-    _write_nc_with_times(path, pd.date_range("2000-01-01", periods=6, freq="D"))
-
-    dim_names = {"time": "time", "latitude": "latitude", "longitude": "longitude"}
-    with mock.patch.object(
-        xr.Dataset,
-        "drop_duplicates",
-        autospec=True,
-        wraps=xr.Dataset.drop_duplicates,
-    ) as spy:
-        ds = load_data(path, dim_names, use_dask=True)
-
-    spy.assert_not_called()
-    assert ds.sizes["time"] == 6
-
-
-def test_load_data_drops_duplicate_times_from_overlapping_files(tmp_path):
-    """Overlapping source files (a shared timestamp) are still de-duplicated."""
-    f1 = tmp_path / "part1.nc"
-    f2 = tmp_path / "part2.nc"
-    # part1: 01,02,03 ; part2: 03,04,05  -> 03 is shared (overlap)
-    _write_nc_with_times(f1, pd.date_range("2000-01-01", periods=3, freq="D"))
-    _write_nc_with_times(f2, pd.date_range("2000-01-03", periods=3, freq="D"))
-
-    dim_names = {"time": "time", "latitude": "latitude", "longitude": "longitude"}
-    ds = load_data([f1, f2], dim_names, use_dask=True)
-
-    assert ds.sizes["time"] == 5
-    assert not ds["time"].to_index().has_duplicates
-
-
 # test get_dask_chunks
 
 

@@ -606,10 +606,6 @@ def load_data(
         ds = ds.expand_dims(dim_names["time"])
 
     if "time" in dim_names and not read_zarr:
-        # TEMP DIAGNOSTIC: unconditional drop_duplicates restored (reverting the
-        # has_duplicates guard) to test whether the guard's chunk-structure side
-        # effect is what broke saving from a subchunked source. Re-run the save:
-        # if it now completes, the guard is the regression.
         ds = ds.drop_duplicates(dim=dim_names["time"])
 
     return ds

@@ -60,9 +60,7 @@ class TestValidatePrefill:
     def test_restricted_allowed_set_rejects_new_values(self):
         restricted = frozenset({"2d_lateral_fill"})
         with pytest.raises(ValueError, match="not supported"):
-            validate_prefill(
-                "inverse_dist", None, restricted, xesmf_available=True
-            )
+            validate_prefill("inverse_dist", None, restricted, xesmf_available=True)
         # the one allowed value passes
         validate_prefill("2d_lateral_fill", None, restricted, xesmf_available=True)
 
@@ -124,7 +122,9 @@ class TestResolveRegridEngine:
 
 
 class TestValidateExtrap:
-    @pytest.mark.parametrize("method", [None, "inverse_dist", "nearest_s2d", "creep_fill"])
+    @pytest.mark.parametrize(
+        "method", [None, "inverse_dist", "nearest_s2d", "creep_fill"]
+    )
     def test_valid_methods(self, method):
         validate_extrap(method, None)
 

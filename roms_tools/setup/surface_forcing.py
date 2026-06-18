@@ -481,7 +481,6 @@ class SurfaceForcing:
                     'Only "CESM_REGRIDDED", "UNIFIED", and "MBL_co2" are valid options for source["name"] when type is "bgc".'
                 )
 
-        #### NEED TO ADD DATA IMPORTS FOR DIFFERENT TRACERS AND NEEDS TO BE ITERATIVE. CONCATENATE
         elif self.type == "restoring":
             if "sss" in self.restoring_forces:
                 if self.source["name"] == "WOA":

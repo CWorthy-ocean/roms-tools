@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Literal, cast
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
 
+import fsspec
 import numpy as np
 import xarray as xr
 
@@ -1433,6 +1434,14 @@ class SODARestoringSurfaceDataset(SODADataset):
         "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
     )
     """The SODA dataset url"""
+
+    def __post_init__(self) -> None:
+        if not self.filename:
+            self.filename = self.dataset_name
+        self.ds_loader_fn = self._load_from_soda
+
+        super().__post_init__()
+
     dim_names: dict[str, str] = field(
         default_factory=lambda: {
             "longitude": "lon",
@@ -1449,6 +1458,21 @@ class SODARestoringSurfaceDataset(SODADataset):
             "sALK": "talk",
         }
     )
+
+    def _load_from_soda(self) -> xr.Dataset:
+        """Load a OceanSODA carbonate system dataset.
+
+        This reads in a nedCDF file from NOAA. The carbonate systme is determined via machine learning.
+        Data are available from 1982 through 2024.
+
+        Returns
+        -------
+        xr.Dataset
+            The converted xarray dataset
+        """
+        ds = xr.open_dataset(fsspec.open(self.filename).open(), engine="h5netcdf")
+
+        return ds
 
     def post_process(self) -> None:
         """

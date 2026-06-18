@@ -51,6 +51,8 @@ DEFAULT_MBL_co2_PATH = (
     "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
 )
 
+DEFAULT_SODA_PATH = "https://www.ncei.noaa.gov/data/oceans/archive/arc0160/0220059/6.6/data/0-data/OceanSODA_ETHZ-v2025.OCADS.01-1982-2024.nc"
+
 
 @dataclass(kw_only=True)
 class SurfaceForcing:
@@ -340,6 +342,11 @@ class SurfaceForcing:
                     "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
                 )
                 self.source["path"] = DEFAULT_MBL_co2_PATH
+            elif self.source["name"] == "SODA":
+                logging.info(
+                    "No path specified for SODA source; defaulting to the OceanSODA-ETHZ v2025 dataset from NCEI, NOAA."
+                )
+                self.source["path"] = DEFAULT_SODA_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 

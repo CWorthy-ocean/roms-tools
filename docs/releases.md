@@ -26,6 +26,7 @@
 
 ### Internal Changes
 
+* TPXO data classes used in TidalForcing use an updated self-attraction and loading (SAL) dataset, calculated from TPXO10v2a. Processing in TPXOManager class was updated to reflect corrections to the SAL dataset.
 * A function to create a dict from a `Grid` obj ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * A function to check if child wet points are outside the parent ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * `ChildGrid` tests were adapted to the new framework ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))

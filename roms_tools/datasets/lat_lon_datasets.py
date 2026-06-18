@@ -2533,7 +2533,7 @@ class TPXOManager:
             datasets["sal"].ds[datasets["sal"].var_names["sal_Re"]]
             + 1j * datasets["sal"].ds[datasets["sal"].var_names["sal_Im"]]
         )
-        tpc = tpc - tsc
+        tpc = tpc + tsc
 
         # Elevations and transports
         thc = (

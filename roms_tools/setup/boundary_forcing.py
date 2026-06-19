@@ -143,6 +143,10 @@ class BoundaryForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    pad_times: bool = True
+    """If True (default), include one dataset record before start_time and after end_time
+    so ROMS can interpolate at exact simulation boundaries. If False, select only records
+    within [start_time, end_time] inclusive."""
 
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
@@ -519,6 +523,7 @@ class BoundaryForcing:
             use_dask=self.use_dask,
             chunks=self.chunks,
             initial_slice_bounds=self.initial_slice_bounds,
+            pad_times=self.pad_times,
         )
 
     def _set_variable_info(self, data):

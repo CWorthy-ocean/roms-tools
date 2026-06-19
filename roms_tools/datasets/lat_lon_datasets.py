@@ -114,6 +114,11 @@ class LatLonDataset:
           time entry within that window. Raises a ValueError if none are found.
 
         Only used when `end_time` is None. Has no effect otherwise.
+    pad_times : bool, optional
+        If True (default), time selection includes one record before `start_time` and one
+        after `end_time` so that ROMS can interpolate forcing at the exact simulation
+        boundaries. If False, only records within ``[start_time, end_time]`` inclusive are
+        selected. Has no effect when `end_time` is None or `climatology` is True.
     apply_post_processing: bool
         Indicates whether to post-process the dataset for futher use. Defaults to True.
 
@@ -154,6 +159,7 @@ class LatLonDataset:
     initial_slice_bounds: dict[str, tuple[int | float, int | float]] | None = None
     read_zarr: bool = False
     allow_flex_time: bool = False
+    pad_times: bool = True
     apply_post_processing: bool = True
     ds_loader_fn: Callable[[], xr.Dataset] | None = None
     _default_lateral_dask_chunk: ClassVar[int | None] = None
@@ -356,6 +362,7 @@ class LatLonDataset:
             end_time=self.end_time,
             climatology=self.climatology,
             allow_flex_time=self.allow_flex_time,
+            pad_times=self.pad_times,
         )
 
         return ds

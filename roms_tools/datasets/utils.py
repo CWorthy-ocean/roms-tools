@@ -191,6 +191,7 @@ def select_relevant_times(
     end_time: datetime | None = None,
     climatology: bool = False,
     allow_flex_time: bool = False,
+    pad_times: bool = True,
 ) -> xr.Dataset:
     """
     Select a subset of the dataset based on time constraints.
@@ -199,8 +200,11 @@ def select_relevant_times(
 
     1. **Time range selection (start_time + end_time provided):**
        - Returns all records between `start_time` and `end_time`.
-       - Ensures at least one record before `start_time` and one record
-         after `end_time` are included.
+       - If `pad_times=True` (default), also includes the nearest record before
+         `start_time` and after `end_time`, so that ROMS can interpolate at the
+         exact simulation boundaries.
+       - If `pad_times=False`, selects only records within
+         ``[start_time, end_time]`` inclusive.
 
     2. **Initial condition selection (start_time provided, end_time=None):**
        - Delegates to `_select_initial_time`, which reduces the dataset to exactly one
@@ -234,6 +238,11 @@ def select_relevant_times(
     allow_flex_time : bool, optional
         Whether to allow a +24h search window after `start_time` when `end_time`
         is None. If False (default), requires an exact match.
+    pad_times : bool, optional
+        If True (default), include one record before `start_time` and one record
+        after `end_time` so ROMS can interpolate at the exact simulation boundaries.
+        If False, select only records within ``[start_time, end_time]`` inclusive.
+        Has no effect when `end_time` is None or `climatology` is True.
 
     Returns
     -------
@@ -250,7 +259,8 @@ def select_relevant_times(
     Warns
     -----
     UserWarning
-        - If no records exist at or before `start_time` or at or after `end_time`.
+        - If `pad_times=True` and no records exist at or before `start_time` or at or
+          after `end_time`.
         - If the specified time dimension does not exist in the dataset.
 
     Notes
@@ -298,32 +308,39 @@ def select_relevant_times(
     if climatology:
         return ds
 
-    # Identify records before start_time
-    before_start = ds[time_coord] < np.datetime64(start_time)
-    if before_start.any():
-        closest_before_start = ds[time_coord].where(before_start, drop=True)[-1]
-    else:
-        logging.warning(f"No records found before the start_time: {start_time}.")
-        closest_before_start = ds[time_coord][0]
+    if pad_times:
+        # Include one record before start_time and one after end_time so that
+        # ROMS can interpolate forcing at the exact simulation boundaries.
+        before_start = ds[time_coord] < np.datetime64(start_time)
+        if before_start.any():
+            closest_before_start = ds[time_coord].where(before_start, drop=True)[-1]
+        else:
+            logging.warning(f"No records found before the start_time: {start_time}.")
+            closest_before_start = ds[time_coord][0]
 
-    # Identify records after end_time
-    after_end = ds[time_coord] > np.datetime64(end_time)
-    if after_end.any():
-        closest_after_end = ds[time_coord].where(after_end, drop=True).min()
-    else:
-        logging.warning(f"No records found after the end_time: {end_time}.")
-        closest_after_end = ds[time_coord].max()
+        after_end = ds[time_coord] > np.datetime64(end_time)
+        if after_end.any():
+            closest_after_end = ds[time_coord].where(after_end, drop=True).min()
+        else:
+            logging.warning(f"No records found after the end_time: {end_time}.")
+            closest_after_end = ds[time_coord].max()
 
-    # Select records within the time range and add the closest before/after
-    within_range = (ds[time_coord] > closest_before_start) & (
-        ds[time_coord] < closest_after_end
-    )
-    selected_times = ds[time_coord].where(
-        within_range
-        | (ds[time_coord] == closest_before_start)
-        | (ds[time_coord] == closest_after_end),
-        drop=True,
-    )
+        within_range = (ds[time_coord] > closest_before_start) & (
+            ds[time_coord] < closest_after_end
+        )
+        selected_times = ds[time_coord].where(
+            within_range
+            | (ds[time_coord] == closest_before_start)
+            | (ds[time_coord] == closest_after_end),
+            drop=True,
+        )
+    else:
+        # Strict selection: only records within [start_time, end_time].
+        mask = (ds[time_coord] >= np.datetime64(start_time)) & (
+            ds[time_coord] <= np.datetime64(end_time)
+        )
+        selected_times = ds[time_coord].where(mask, drop=True)
+
     ds = ds.sel({time_dim: selected_times})
 
     return ds

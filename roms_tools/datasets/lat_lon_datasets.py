@@ -1960,18 +1960,20 @@ class ERA5ARCODataset(ERA5Dataset):
 class ERA5Correction(LatLonDataset):
     """Global dataset to correct ERA5 radiation.
 
-    The dataset contains multiplicative correction factors for the ERA5 shortwave
-    radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
+    The dataset contains multiplicative correction factors for both ERA5 shortwave
+    and longwave radiation, obtained by comparing the COREv2 climatology to the
+    ERA5 climatology.
     """
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     filename: str = field(
-        default_factory=lambda: download_correction_data("SSR_correction.nc")
+        default_factory=lambda: download_correction_data("ERA5_correction.nc")
     )
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "swr_corr": "ssr_corr",  # multiplicative correction factor for ERA5 shortwave radiation
+            "lwr_corr": "strd_corr",  # multiplicative correction factor for ERA5 longwave radiation
         }
     )
     dim_names: dict[str, str] = field(

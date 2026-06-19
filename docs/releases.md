@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-* The underlying data allowing self attration and loading (SAL) correction to tidal forcing has been updated for accuracy, and was derived from the TPXO10v2a datasets. This is not a functional breaking change, but will change (improve) output from `TidalForcing` based on TPXO data compared to previos versions of ROMS-Tools. See ([#617](https://github.com/CWorthy-ocean/roms-tools/pull/617)) 
+* The underlying data allowing self attration and loading (SAL) correction to tidal forcing has been updated for accuracy, and was derived from the TPXO10v2a datasets. This is not a functional breaking change, but will change (improve) output from `TidalForcing` based on TPXO data compared to previos versions of ROMS-Tools. See ([#617](https://github.com/CWorthy-ocean/roms-tools/pull/617))
 * pco2 is no longer read in during `SurfaceForcing` `type='bgc'` ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608)).
 * `from_file` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).

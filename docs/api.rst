@@ -67,6 +67,10 @@ Analyzing ROMS output
    :toctree: generated/
 
    roms_tools.ROMSOutput
+   roms_tools.ROMSOutput.plot
+   roms_tools.ROMSOutput.create_movie
+   roms_tools.ROMSOutput.regrid
+   roms_tools.ROMSOutput.cdr_metrics
    roms_tools.Ensemble
 
 =======

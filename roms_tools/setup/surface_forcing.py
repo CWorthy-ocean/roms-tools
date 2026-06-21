@@ -87,7 +87,7 @@ class SurfaceForcing:
           - "restoring": for restoring forces.
 
     correct_radiation : bool
-        Whether to correct shortwave radiation. Default is True.
+        Whether to correct shortwave and longwave radiation. Default is True.
 
     wind_dropoff : bool, optional
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
@@ -146,7 +146,7 @@ class SurfaceForcing:
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc", "restoring")."""
     correct_radiation: bool = True
-    """Whether to correct shortwave radiation."""
+    """Whether to correct shortwave and longwave radiation."""
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
@@ -234,6 +234,7 @@ class SurfaceForcing:
         # built later from regridded processed_fields, so its chunks follow regrid ops.
         data.choose_subdomain(
             target_coords,
+            # unchunk_lateral_dims=True required for lateral fill, consider trying False if lateral fill ever becomes optional
             unchunk_lateral_dims=True,
         )
         # Enforce double precision to ensure reproducibility
@@ -267,8 +268,11 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.correct_radiation:
-                processed_fields["swrad"] = self._apply_radiation_correction(
-                    processed_fields["swrad"], data
+                (
+                    processed_fields["swrad"],
+                    processed_fields["lwrad"],
+                ) = self._apply_radiation_corrections(
+                    processed_fields["swrad"], processed_fields["lwrad"], data
                 )
             if self.wind_dropoff:
                 (
@@ -547,75 +551,93 @@ class SurfaceForcing:
 
         self.variable_info = variable_info
 
-    def _apply_radiation_correction(
-        self, radiation: xr.DataArray, data: LatLonDataset
-    ) -> xr.DataArray:
-        """Apply a climatological correction to shortwave radiation.
+    def _apply_radiation_corrections(
+        self,
+        swrad: xr.DataArray,
+        lwrad: xr.DataArray,
+        data: LatLonDataset,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Apply climatological corrections to shortwave and longwave radiation.
 
-        This method scales the input `radiation` field using a correction factor
-        derived from climatological data, interpolated in time and regridded
-        to the ROMS domain.
+        The correction dataset is loaded and preprocessed once. The 12-month
+        climatology is spatially regridded to the ROMS grid first (only 12
+        spatial interpolations per variable), then lazily interpolated in time
+        to match the full forcing time axis. Correction factors are rechunked
+        to align with the radiation fields before multiplication so that dask
+        can execute the multiply chunk-by-chunk during save().
 
         Parameters
         ----------
-        radiation : xr.DataArray
-            Shortwave radiation field to be corrected. Must include a `time` coordinate.
-
-        data : Dataset
-            Dataset containing ROMS grid and mask information used to align correction data.
+        swrad : xr.DataArray
+            Shortwave radiation field to be corrected. Must include a ``time`` coordinate.
+        lwrad : xr.DataArray
+            Longwave radiation field to be corrected. Must include a ``time`` coordinate.
+        data : LatLonDataset
+            ERA5 dataset providing the mask and spatial coordinates used to
+            align the correction data.
 
         Returns
         -------
-        radiation_corrected : xr.DataArray
-            Radiation field scaled by the correction factor, with original coordinates.
+        swrad_corrected : xr.DataArray
+            Shortwave radiation scaled by the SSR correction factor.
+        lwrad_corrected : xr.DataArray
+            Longwave radiation scaled by the STRD correction factor.
         """
         correction_data = self._get_correction_data()
-        # Match subdomain to forcing data to reuse the mask
+
         coords_correction = {
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
+        # unchunk_lateral_dims=True required for lateral fill, consider trying False if lateral fill ever becomes optional
         correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
-        correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
+        correction_data.ds["mask"] = data.ds["mask"]
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
-
         correction_data.apply_lateral_fill()
 
-        # Temporal interpolation: Perform before spatial regridding for better performance
-        if self.use_dask:
-            # Perform temporal interpolation for each time slice to enforce chunking in time.
-            # This reduces memory usage by processing one time step at a time.
-            # The interpolated slices are then concatenated along the "time" dimension.
-            corr_factor = xr.concat(
-                [
-                    interpolate_from_climatology(
-                        field=correction_data.ds[correction_data.var_names["swr_corr"]],
-                        time_dim=correction_data.dim_names["time"],
-                        time_coord=correction_data.dim_names["time"],
-                        time=time,
-                    )
-                    for time in radiation.time
-                ],
-                dim="time",
-            )
-        else:
-            # Interpolate across all time steps at once
-            corr_factor = interpolate_from_climatology(
-                field=correction_data.ds[correction_data.var_names["swr_corr"]],
-                time_dim=correction_data.dim_names["time"],
-                time_coord=correction_data.dim_names["time"],
-                time=radiation.time,
-            )
-
-        # Spatial regridding
+        # Spatial regrid first: only 12 interpolations per variable regardless of
+        # the length of the forcing time series. lateral_regrid.apply() forces eager
+        # compute on the 12-step climatology, which is acceptable (~MB of data).
         lateral_regrid = LateralRegridToROMS(
             self.target_coords, correction_data.dim_names
         )
-        corr_factor = lateral_regrid.apply(corr_factor)
+        time_dim = correction_data.dim_names["time"]
 
-        radiation_corrected = radiation * corr_factor
+        swr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["swr_corr"]]
+        )
+        lwr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["lwr_corr"]]
+        )
 
-        return radiation_corrected
+        # Wrap back to dask so that temporal interpolation builds a lazy graph
+        # rather than materialising the full (N, ny, nx) output as numpy.
+        if self.use_dask:
+            swr_12 = swr_12.chunk({time_dim: len(swr_12[time_dim])})
+            lwr_12 = lwr_12.chunk({time_dim: len(lwr_12[time_dim])})
+
+        # Single interpolate call per variable — lazy when input is dask-backed.
+        # Produces (N, ny_roms, nx_roms) with one large time chunk.
+        swr_corr_factor = interpolate_from_climatology(
+            field=swr_12,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            time=swrad.time,
+        )
+        lwr_corr_factor = interpolate_from_climatology(
+            field=lwr_12,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            time=lwrad.time,
+        )
+
+        # Rechunk time to match the radiation fields so that the element-wise
+        # multiply is chunk-aligned and dask can execute it slice-by-slice.
+        if self.use_dask:
+            swr_corr_factor = swr_corr_factor.chunk(swrad.chunksizes)
+            lwr_corr_factor = lwr_corr_factor.chunk(lwrad.chunksizes)
+
+        return swrad * swr_corr_factor, lwrad * lwr_corr_factor
 
     def _apply_wind_correction(
         self, uwnd: xr.DataArray, vwnd: xr.DataArray

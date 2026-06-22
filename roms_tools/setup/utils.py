@@ -1629,7 +1629,7 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
         Serialized representation of the forcing object.
     """
     exclude_list = exclude or []
-    exclude_set: set[str] = {"grid", "parent_grid", "ds", *exclude_list}
+    exclude_set: set[str] = {"grid", "parent_grid", "ds", "_bgc_dataset", *exclude_list}
 
     # --- Serialize top-level grid(s) ---
     yaml_data = {}

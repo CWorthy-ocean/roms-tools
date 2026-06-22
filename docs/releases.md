@@ -18,6 +18,8 @@
 * Option to automatically close narrow 1-cell water channels during mask generation via `Grid.update_mask(close_narrow_channels=True)` or `Grid(close_narrow_channels=True)`; integrated into the standard mask workflow
 * New `type` is added to SurfaceForcing. `restoring` creates restoring forces files for ROMS ('sss' is the only option) ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 * `CDRForcing` has an option `time_interpolation` to choose step-like or interpolated releases ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
+* `RiverForcing` supports time-varying river BGC from the RIVR2O export product via `bgc_source={"name": "RIVR2O", "path": ...}`; MARBL tracers not supplied dynamically are filled from `bgc_source["fill"]` (default: recommended constants from `river_tracer_defaults.nc`)
+* RIVR2O concentrations vary by calendar year and are discharge-partitioned when rivers share a grid cell; missing annual files are linearly interpolated on the year axis
 
 
 ### Internal Changes
@@ -33,7 +35,11 @@
 * short and long wave radiation time is shifted 1/2 a timestep sooner and have a dim of `rad_time` ([#586](https://github.com/CWorthy-ocean/roms-tools/pull/586))
 * The coarse UNIFIED BGC dataset used for testing was updated to have depths of 0 and 5 m available ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 * 2 checks added for a point source when plotting `CDRForcing.plot_distribution()`. Low hsc is treated as a point source ([#600](https://github.com/CWorthy-ocean/roms-tools/pull/600))
-* River BGC forcing uses `fill_river_bgc_concentrations` to merge dynamic tracers with fill values from `bgc_source["fill"]` (default `CONSTANTS`); RIVR2O/MARBL mapping lives in `Rivr2oRiverBGCDataset.forcing_concentrations`
+* River BGC refactored behind a `RiverBGCDataset` protocol; `RiverForcing` merges dynamic and fill tracers via `fill_river_bgc_concentrations`
+* `Rivr2oRiverBGCDataset` handles yearly file loading, spatial sampling, export-to-concentration conversion, and MARBL tracer mapping
+* Monthly discharge climatology is expanded to calendar mid-month dates when combined with year-indexed RIVR2O BGC (`expand_monthly_climatology_time_axis`)
+* Invalid dynamic BGC values (non-finite, negative, fill values) are masked before fill merge
+* Coarse regional RIVR2O test files (2000–2002) added to roms-tools-test-data
 
 ### Documentation
 
@@ -42,6 +48,7 @@
 * Document `close_narrow_channels` option in `Grid` and `update_mask()`; update notebook examples
 * Both the surface forcing and datasets notebooks are updated to reflect `restoring` function and WOA data ([#589](https://github.com/CWorthy-ocean/roms-tools/pull/589))
 * The cdr notebook is updated to reflect interpolation option. Default is same as ROMS, no interpolation ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
+* `river_forcing.ipynb` documents RIVR2O BGC forcing, including climatological discharge with year-varying tracers
 
 ### Bugfixes
 

@@ -538,17 +538,6 @@ def compute_potential_density(
     return density
 
 
-# Internal variable-name keys for the single source temperature/salinity pair used to
-# build the BGC density coordinate. A BGC dataset declares these keys in its
-# ``opt_var_names`` (mapping them to whatever the file calls the fields, e.g.
-# ``temp_WOA``/``salt_WOA``); the density-space interpolation in
-# ``InitialConditions``/``BoundaryForcing`` detects, uses, and then drops them. The keys
-# are deliberately NOT ``temp``/``salt`` so they cannot collide with the physics model
-# T/S that share ``processed_fields`` in ``InitialConditions``.
-BGC_SOURCE_TEMP = "temp_bgc"
-BGC_SOURCE_SALT = "salt_bgc"
-
-
 def _compute_density_coord(
     temp: "xr.DataArray",
     salt: "xr.DataArray",

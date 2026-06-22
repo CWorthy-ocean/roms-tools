@@ -26,8 +26,6 @@ from roms_tools.regrid import (
     VerticalRegrid,
 )
 from roms_tools.setup.utils import (
-    BGC_SOURCE_SALT,
-    BGC_SOURCE_TEMP,
     RawDataSource,
     _compute_density_coord,
     compute_barotropic_velocity,
@@ -446,20 +444,17 @@ class InitialConditions:
                     data.ds, source_dim=data.dim_names["depth"]
                 )
 
-                # The BGC dataset's own source temperature/salinity pair
-                # (``temp_bgc``/``salt_bgc``) defines the source density coordinate. It
-                # is not a ROMS output variable, so it is handled separately from the
-                # tracers and dropped afterwards.
+                # The BGC dataset declares its own source temperature/salinity pair
+                # (``bgc_source_ts``, e.g. ``temp_bgc``/``salt_bgc``) that defines the
+                # source density coordinate. These are not ROMS output variables, so they
+                # are handled separately from the tracers and dropped afterwards.
+                ts_keys = tuple(getattr(data, "bgc_source_ts", ()))
                 aux_ts_vars = [
-                    v
-                    for v in (BGC_SOURCE_TEMP, BGC_SOURCE_SALT)
-                    if v in filtered_vars and v in processed_fields
+                    v for v in ts_keys if v in filtered_vars and v in processed_fields
                 ]
                 tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
 
-                has_source_ts = (
-                    BGC_SOURCE_TEMP in aux_ts_vars and BGC_SOURCE_SALT in aux_ts_vars
-                )
+                has_source_ts = len(aux_ts_vars) == 2
                 use_density = (
                     type == "bgc" and self.use_density_interpolation and has_source_ts
                 )
@@ -477,11 +472,12 @@ class InitialConditions:
                 source_density = None
                 target_density = None
                 if use_density:
+                    temp_key, salt_key = ts_keys
                     # Source density: the BGC dataset's own T/S at its source depth
                     # levels (no regrid — already on this grid).
                     source_density = _compute_density_coord(
-                        processed_fields[BGC_SOURCE_TEMP],
-                        processed_fields[BGC_SOURCE_SALT],
+                        processed_fields[temp_key],
+                        processed_fields[salt_key],
                         data.dim_names["depth"],
                     )
                     # Target density: the model's (physics) T/S on the ROMS sigma grid,

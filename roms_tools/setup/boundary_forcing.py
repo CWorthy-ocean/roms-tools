@@ -21,8 +21,6 @@ from roms_tools.fill import one_dim_fill
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegrid
 from roms_tools.setup.utils import (
-    BGC_SOURCE_SALT,
-    BGC_SOURCE_TEMP,
     RawDataSource,
     _compute_density_coord,
     add_time_info_to_ds,
@@ -428,21 +426,19 @@ class BoundaryForcing:
                             bdry_data.ds, source_dim=bdry_data.dim_names["depth"]
                         )
 
-                        # The BGC dataset's own source T/S pair
-                        # (``temp_bgc``/``salt_bgc``) defines the source density
-                        # coordinate; it is not written to output, so it is handled
-                        # separately from the tracers and dropped afterwards.
+                        # The BGC dataset declares its own source T/S pair
+                        # (``bgc_source_ts``, e.g. ``temp_bgc``/``salt_bgc``) that defines
+                        # the source density coordinate; it is not written to output, so it
+                        # is handled separately from the tracers and dropped afterwards.
+                        ts_keys = tuple(getattr(bdry_data, "bgc_source_ts", ()))
                         aux_ts_vars = [
                             v
-                            for v in (BGC_SOURCE_TEMP, BGC_SOURCE_SALT)
+                            for v in ts_keys
                             if v in filtered_vars and v in processed_fields
                         ]
                         tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
 
-                        has_source_ts = (
-                            BGC_SOURCE_TEMP in aux_ts_vars
-                            and BGC_SOURCE_SALT in aux_ts_vars
-                        )
+                        has_source_ts = len(aux_ts_vars) == 2
                         use_density = (
                             self.type == "bgc"
                             and self.use_density_interpolation
@@ -566,18 +562,19 @@ class BoundaryForcing:
         assert self.physics_forcing is not None
         bgc_climatology = bool(self.source["climatology"])
         bgc_depth_dim = bdry_data.dim_names["depth"]
+        temp_key, salt_key = bdry_data.bgc_source_ts
 
         # --- Source density: the BGC dataset's own T/S pair ---
         source_density = _compute_density_coord(
-            processed_fields[BGC_SOURCE_TEMP],
-            processed_fields[BGC_SOURCE_SALT],
+            processed_fields[temp_key],
+            processed_fields[salt_key],
             bgc_depth_dim,
         )
 
         # BGC time axis (shared with the tracers) — taken from the source T/S.
         bgc_time_dim = bdry_data.dim_names.get("time")
         bgc_time_coord = None
-        src_temp = processed_fields[BGC_SOURCE_TEMP]
+        src_temp = processed_fields[temp_key]
         if bgc_time_dim is not None and bgc_time_dim in src_temp.dims:
             bgc_time_coord = src_temp[bgc_time_dim]
 

@@ -37,6 +37,7 @@ from roms_tools.setup.utils import (
     get_tracer_defaults,
     get_variable_metadata,
     interpolate_dynamic_bgc_by_calendar_year,
+    serialize_paths,
     substitute_nans_by_fillvalue,
     to_dict,
     validate_names,
@@ -191,7 +192,9 @@ class RiverForcing:
     ROMS."""
     climatology: xr.Dataset = field(init=False, repr=False)
     """Indicates whether the final river forcing is climatological."""
-    _bgc_dataset: RiverBGCDataset | None = field(default=None, init=False, repr=False)
+    _bgc_dataset: RiverBGCDataset | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self):
         self._input_checks()
@@ -272,6 +275,11 @@ class RiverForcing:
                 **self.bgc_source,
                 "fill": fill_source,
             }
+            if "path" in self.bgc_source:
+                self.bgc_source = {
+                    **self.bgc_source,
+                    "path": serialize_paths(self.bgc_source["path"]),
+                }
         elif self.bgc_source is not None:
             logging.warning("`bgc_source` is ignored because `include_bgc` is False.")
 

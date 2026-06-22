@@ -191,6 +191,7 @@ class RiverForcing:
     ROMS."""
     climatology: xr.Dataset = field(init=False, repr=False)
     """Indicates whether the final river forcing is climatological."""
+    _bgc_dataset: RiverBGCDataset | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         self._input_checks()
@@ -349,6 +350,9 @@ class RiverForcing:
 
     def _get_bgc_dataset(self) -> RiverBGCDataset:
         """Instantiate the BGC dataset for the configured ``bgc_source``."""
+        if self._bgc_dataset is not None:
+            return self._bgc_dataset
+
         bgc_source = self.bgc_source
         if bgc_source is None:
             raise RuntimeError("bgc_source must be set.")
@@ -359,7 +363,8 @@ class RiverForcing:
                 f'Invalid bgc_source["name"] "{source_name}". Valid options: {valid}.'
             )
         if source_name == "CONSTANTS":
-            return RiverTracerDefaultsDataset()
+            self._bgc_dataset = RiverTracerDefaultsDataset()
+            return self._bgc_dataset
         path = bgc_source.get("path")
         if (
             path is None
@@ -368,11 +373,12 @@ class RiverForcing:
             or not isinstance(path, str | Path | list)
         ):
             raise ValueError('bgc_source must include a "path" when name is "RIVR2O".')
-        return Rivr2oRiverBGCDataset(
+        self._bgc_dataset = Rivr2oRiverBGCDataset(
             filename=path,
             start_time=self.start_time,
             end_time=self.end_time,
         )
+        return self._bgc_dataset
 
     def _get_fill_defaults(self) -> dict[str, float]:
         """Load scalar fill concentrations for missing or non-finite BGC tracers."""

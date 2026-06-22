@@ -22,6 +22,7 @@
 * Option to automatically close narrow 1-cell water channels during mask generation via `Grid.update_mask(close_narrow_channels=True)` or `Grid(close_narrow_channels=True)`; integrated into the standard mask workflow
 * CDR metrics report CO2 uptake as mass in tonnes of CO2 for both the air-sea flux-difference and DIC-difference constructions (using CO2 molar mass and native flux or inventory units when available).
 * The CDR metrics figure from `ROMSOutput.cdr_metrics()` uses twin y-axes: CDR efficiency (dimensionless) and CO2 uptake (tonnes CO2), with title "CO2 uptake and CDR efficiency".
+* `SurfaceForcing` with `type='restoring'` now allows for making DIC and ALK restoring forces files ([#619](https://github.com/CWorthy-ocean/roms-tools/pull/619))
 
 
 ### Internal Changes

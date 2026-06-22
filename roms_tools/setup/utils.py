@@ -156,6 +156,136 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     return ds
 
 
+def calendar_midmonth_dates(start_time: datetime, end_time: datetime) -> list[datetime]:
+    """Return 15th-of-month dates between ``start_time`` and ``end_time``."""
+    dates: list[datetime] = []
+    year, month = start_time.year, start_time.month
+    while (year, month) <= (end_time.year, end_time.month):
+        candidate = datetime(year, month, 15)
+        if start_time <= candidate <= end_time:
+            dates.append(candidate)
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    if not dates:
+        raise ValueError("No mid-month dates fall between start_time and end_time.")
+    return dates
+
+
+def month_to_time_index(month_coord: np.ndarray | xr.DataArray) -> dict[int, int]:
+    """Map calendar month (1-12) to index along a monthly climatology axis."""
+    values = np.asarray(month_coord).astype(int)
+    return {int(month): idx for idx, month in enumerate(values)}
+
+
+def tile_monthly_climatology_on_calendar(
+    ds: xr.Dataset,
+    calendar_dates: Sequence[datetime],
+    *,
+    month_coord: str = "month",
+    time_dim: str = "river_time",
+) -> xr.Dataset:
+    """Repeat monthly climatology fields along a calendar date axis."""
+    if month_coord not in ds:
+        raise ValueError(f"Dataset must contain coordinate '{month_coord}'.")
+
+    month_to_index = month_to_time_index(ds[month_coord])
+    ds_base = ds.drop_vars(month_coord, errors="ignore")
+    pieces = [
+        ds_base.isel({time_dim: month_to_index[dt.month]}) for dt in calendar_dates
+    ]
+    ds_tiled = xr.concat(pieces, dim=time_dim)
+    return ds_tiled.assign_coords(
+        {time_dim: np.array(calendar_dates, dtype="datetime64[ns]")}
+    )
+
+
+def expand_monthly_climatology_time_axis(
+    ds: xr.Dataset,
+    start_time: datetime,
+    end_time: datetime,
+    model_reference_date: datetime | np.datetime64,
+    *,
+    time_dim: str = "river_time",
+    month_coord: str = "month",
+    discharge_climatology_attr: str = "discharge_climatology",
+) -> xr.Dataset:
+    """Expand a monthly climatology dataset to calendar mid-month times."""
+    calendar_dates = calendar_midmonth_dates(start_time, end_time)
+    ds_expanded = tile_monthly_climatology_on_calendar(
+        ds,
+        calendar_dates,
+        month_coord=month_coord,
+        time_dim=time_dim,
+    )
+    ds_expanded.attrs.pop("climatology", None)
+    ds_expanded.attrs[discharge_climatology_attr] = "True"
+    ds_expanded, time = add_time_info_to_ds(
+        ds_expanded,
+        model_reference_date,
+        climatology=False,
+        time_name=time_dim,
+    )
+    logging.info(
+        "Repeated 12-month discharge climatology on %d calendar river_time steps "
+        "(%s to %s).",
+        len(calendar_dates),
+        calendar_dates[0].date(),
+        calendar_dates[-1].date(),
+    )
+    return ds_expanded.assign_coords({time_dim: time})
+
+
+def interpolate_dynamic_bgc_by_calendar_year(
+    dynamic: dict[str, xr.DataArray],
+    abs_time: xr.DataArray,
+    *,
+    time_dim: str = "river_time",
+) -> dict[str, xr.DataArray]:
+    """Linearly interpolate interior gap years in dynamic BGC concentrations.
+
+    Each tracer is collapsed to one value per calendar year (mean of finite
+    ``river_time`` steps in that year), missing years are inserted, interior NaN
+    years are linearly interpolated along the year axis, and the result is
+    broadcast back to every ``river_time`` step. Leading and trailing NaN years
+    are left unchanged.
+    """
+    calendar_years = abs_time.dt.year
+    if time_dim not in calendar_years.dims:
+        raise ValueError(
+            f"abs_time must have dimension {time_dim!r}, got dims {calendar_years.dims}."
+        )
+
+    start_year = int(calendar_years.min())
+    end_year = int(calendar_years.max())
+    full_years = np.arange(start_year, end_year + 1)
+    year_at_steps = calendar_years.values
+
+    interpolated: dict[str, xr.DataArray] = {}
+    for tracer_name, values in dynamic.items():
+        if time_dim not in values.dims:
+            raise ValueError(
+                f"Dynamic tracer {tracer_name!r} must have dimension {time_dim!r}."
+            )
+
+        tagged = values.assign_coords(calendar_year=calendar_years)
+        annual = tagged.groupby("calendar_year").mean(dim=time_dim, skipna=True)
+        annual = annual.reindex(calendar_year=full_years)
+        annual = annual.interpolate_na(dim="calendar_year", method="linear")
+
+        year_indexer = xr.DataArray(
+            year_at_steps,
+            dims=[time_dim],
+            coords={time_dim: values.coords[time_dim]},
+        )
+        filled = annual.sel(calendar_year=year_indexer, drop=True)
+        dims = [d for d in (time_dim, "nriver") if d in values.dims]
+        interpolated[tracer_name] = filled.transpose(*dims).astype(np.float32)
+
+    return interpolated
+
+
 def get_variable_metadata():
     """Retrieves metadata for commonly used variables in the dataset.
 
@@ -543,6 +673,47 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
+# Canonical ROMS-MARBL tracer list for river forcing and related setup code.
+# Defined here (not in river_datasets) so RiverForcing, BGC dataset classes, and
+# tracer metadata share one schema without circular imports between setup and datasets.
+MARBL_TRACER_NAMES = (
+    "temp",
+    "salt",
+    "PO4",
+    "NO3",
+    "SiO3",
+    "NH4",
+    "Fe",
+    "Lig",
+    "O2",
+    "DIC",
+    "DIC_ALT_CO2",
+    "ALK",
+    "ALK_ALT_CO2",
+    "DOC",
+    "DON",
+    "DOP",
+    "DOPr",
+    "DONr",
+    "DOCr",
+    "zooC",
+    "spChl",
+    "spC",
+    "spP",
+    "spFe",
+    "spCaCO3",
+    "diatChl",
+    "diatC",
+    "diatP",
+    "diatFe",
+    "diatSi",
+    "diazChl",
+    "diazC",
+    "diazP",
+    "diazFe",
+)
+
+
 def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
@@ -568,42 +739,7 @@ def get_tracer_metadata_dict(
         containing 'units' and 'long_name' for each tracer.
     """
     if include_bgc:
-        tracer_names = [
-            "temp",
-            "salt",
-            "PO4",
-            "NO3",
-            "SiO3",
-            "NH4",
-            "Fe",
-            "Lig",
-            "O2",
-            "DIC",
-            "DIC_ALT_CO2",
-            "ALK",
-            "ALK_ALT_CO2",
-            "DOC",
-            "DON",
-            "DOP",
-            "DOPr",
-            "DONr",
-            "DOCr",
-            "zooC",
-            "spChl",
-            "spC",
-            "spP",
-            "spFe",
-            "spCaCO3",
-            "diatChl",
-            "diatC",
-            "diatP",
-            "diatFe",
-            "diatSi",
-            "diazChl",
-            "diazC",
-            "diazP",
-            "diazFe",
-        ]
+        tracer_names = list(MARBL_TRACER_NAMES)
     else:
         tracer_names = ["temp", "salt"]
 
@@ -677,10 +813,17 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
 
 
 def get_tracer_defaults() -> dict[str, float]:
-    """Returns constant default tracer concentrations for ROMS-MARBL.
+    """Return constant default tracer concentrations for ROMS-MARBL.
 
     Values are read from ``river_tracer_defaults.nc`` (recommended values at
     ``value_option`` index 0) from the roms-tools-data repository.
+
+    This accessor lives in ``setup.utils`` rather than ``river_datasets`` so
+    ``RiverForcing``, fill sources, and other setup code can reuse the same
+    defaults without pulling in dataset implementations at import time. The
+    dataset class is loaded lazily in :func:`_load_tracer_defaults` to avoid a
+    circular import: ``river_datasets`` imports :data:`MARBL_TRACER_NAMES` from
+    here for schema validation.
 
     Returns
     -------
@@ -692,6 +835,12 @@ def get_tracer_defaults() -> dict[str, float]:
 
 @lru_cache(maxsize=1)
 def _load_tracer_defaults() -> dict[str, float]:
+    """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
+
+    ``RiverTracerDefaultsDataset`` is imported inside this function so
+    ``river_datasets`` can import :data:`MARBL_TRACER_NAMES` from this module
+    without a circular dependency at module load time.
+    """
     from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
 
     return RiverTracerDefaultsDataset().defaults

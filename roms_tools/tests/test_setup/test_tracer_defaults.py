@@ -4,12 +4,15 @@ import pytest
 import xarray as xr
 
 from roms_tools.datasets.river_datasets import (
-    EXPECTED_TRACER_NAMES,
     RECOMMENDED_VALUE_INDEX,
     VALUE_OPTION_DIM,
     RiverTracerDefaultsDataset,
 )
-from roms_tools.setup.utils import _load_tracer_defaults, get_tracer_defaults
+from roms_tools.setup.utils import (
+    MARBL_TRACER_NAMES,
+    _load_tracer_defaults,
+    get_tracer_defaults,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +51,7 @@ class TestTracerDefaults:
         assert defaults["NH4"] == 0.0
         assert defaults["spC"] == 0.0
         # 32 MARBL tracers plus temperature and salinity
-        assert len(defaults) == len(EXPECTED_TRACER_NAMES)
+        assert len(defaults) == len(MARBL_TRACER_NAMES)
         assert len(defaults) == 34
 
     def test_dataclass_exposes_dataset(self, bundled_defaults_nc):
@@ -63,7 +66,7 @@ class TestTracerDefaults:
             "PO4": (VALUE_OPTION_DIM, [4.2453, 99.9]),
             "NO3": (VALUE_OPTION_DIM, [57.3565, 88.8]),
         }
-        for tracer in EXPECTED_TRACER_NAMES:
+        for tracer in MARBL_TRACER_NAMES:
             if tracer not in data_vars:
                 data_vars[tracer] = (VALUE_OPTION_DIM, [1.0, 999.0])
 
@@ -84,3 +87,7 @@ class TestTracerDefaults:
     def test_requires_calendar_discharge_time_is_false(self, bundled_defaults_nc):
         data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)
         assert data.requires_calendar_discharge_time is False
+
+    def test_temporal_interpolation_is_none(self, bundled_defaults_nc):
+        data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)
+        assert data.temporal_interpolation == "none"

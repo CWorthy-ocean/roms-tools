@@ -15,7 +15,7 @@ from roms_tools import (
     SurfaceForcing,
     TidalForcing,
 )
-from roms_tools.datasets.download import download_test_data
+from roms_tools.datasets.download import download_rivr2o_test_data, download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
     CESMBGCSurfaceForcingDataset,
@@ -964,6 +964,29 @@ def river_forcing_with_bgc() -> RiverForcing:
 
     return RiverForcing(
         grid=grid, start_time=start_time, end_time=end_time, include_bgc=True
+    )
+
+
+@pytest.fixture(scope="session")
+def rivr2o_test_data_paths() -> list[str]:
+    """Paths to coarse regional RIVR2O test files (2000-2002) from roms-tools-test-data."""
+    return download_rivr2o_test_data()
+
+
+@pytest.fixture(scope="session")
+def river_forcing_with_rivr2o_bgc(rivr2o_test_data_paths: list[str]) -> RiverForcing:
+    """RiverForcing with Dai discharge and RIVR2O BGC from the test-data repository."""
+    grid = Grid(
+        nx=18, ny=18, size_x=800, size_y=800, center_lon=-18, center_lat=65, rot=20, N=3
+    )
+
+    return RiverForcing(
+        grid=grid,
+        start_time=datetime(2000, 1, 1),
+        end_time=datetime(2002, 3, 1),
+        include_bgc=True,
+        bgc_source={"name": "RIVR2O", "path": rivr2o_test_data_paths},
+        convert_to_climatology="if_any_missing",
     )
 
 

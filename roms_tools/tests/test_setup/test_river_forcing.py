@@ -15,7 +15,9 @@ from roms_tools.datasets.river_datasets import (
     SECONDS_PER_YEAR,
     Rivr2oRiverBGCDataset,
 )
+from roms_tools.setup.river_forcing import _mask_invalid_dynamic_bgc_concentrations
 from roms_tools.setup.utils import get_tracer_defaults
+from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 
 @pytest.fixture
@@ -996,25 +998,20 @@ class TestRiverForcingWithOverlappingIndices:
         assert not np.isnan(ds_out["river_tracer"].isel(nriver=synthetic_idx).item())
 
 
-def _write_rivr2o_file(path, lat, lon, tracer_values):
-    time = np.array([np.nan], dtype=np.float32)
-    if "POC" not in tracer_values:
-        tracer_values = {
-            **tracer_values,
-            "POC": np.full((len(lat), len(lon)), RIVR2O_FILL_VALUE),
-        }
-    data_vars = {
-        name: (["time", "lat", "lon"], values[np.newaxis, :, :])
-        for name, values in tracer_values.items()
-    }
-    ds = xr.Dataset(
-        data_vars=data_vars,
-        coords={"lat": lat, "lon": lon, "time": time},
-    )
-    ds.to_netcdf(path)
-
-
 class TestRiverForcingBGCSource:
+    def test_mask_invalid_dynamic_bgc_masks_negative_and_fill(self):
+        dic = xr.DataArray(
+            [[10.0, -1.0], [RIVR2O_FILL_VALUE, np.nan]],
+            dims=["river_time", "nriver"],
+        )
+        masked = _mask_invalid_dynamic_bgc_concentrations(
+            {"DIC": dic}, fill_value=RIVR2O_FILL_VALUE
+        )
+        assert masked["DIC"].values[0, 0] == 10.0
+        assert np.isnan(masked["DIC"].values[0, 1])
+        assert np.isnan(masked["DIC"].values[1, 0])
+        assert np.isnan(masked["DIC"].values[1, 1])
+
     def test_river_forcing_has_no_rivr2o_specific_helpers(self):
         import roms_tools.setup.river_forcing as rf
 
@@ -1086,7 +1083,7 @@ class TestRiverForcingBGCSource:
             "DIP": np.full((len(lat), len(lon)), export_value),
         }
         path = tmp_path / "rivr2o_riverinputs_1998.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         # Non-overlapping rivers avoid synthetic overlap entries in assertions.
         indices = {
@@ -1172,7 +1169,7 @@ class TestRiverForcingBGCSource:
         lat = np.arange(55.0, 75.5, 0.5)
         lon = np.arange(325.0, 355.5, 0.5)
         path = tmp_path / "rivr2o_riverinputs_1998.nc"
-        _write_rivr2o_file(
+        write_rivr2o_file(
             path,
             lat,
             lon,
@@ -1215,7 +1212,7 @@ class TestRiverForcingBGCSource:
             paths.append(
                 tmp_path / f"rivr2o_riverinputs_{year}.nc",
             )
-            _write_rivr2o_file(paths[-1], lat, lon, tracer_values)
+            write_rivr2o_file(paths[-1], lat, lon, tracer_values)
 
         river_forcing = RiverForcing(
             grid=iceland_test_grid,
@@ -1250,3 +1247,76 @@ class TestRiverForcingBGCSource:
         alk_jan_first = float(alk.isel(river_time=jan_steps[0]).squeeze().values)
         alk_jan_last = float(alk.isel(river_time=jan_steps[-1]).squeeze().values)
         assert alk_jan_first != alk_jan_last
+
+    def test_rivr2o_missing_year_file_is_interpolated_in_forcing(
+        self, tmp_path, iceland_test_grid, single_cell_indices
+    ):
+        """Missing annual file: interior year uses linear temporal interpolation."""
+        lat = np.arange(55.0, 75.5, 0.5)
+        lon = np.arange(325.0, 355.5, 0.5)
+        export_low = 100.0
+        export_high = 200.0
+
+        def write_year(year, export):
+            tracer_values = {
+                "DIC": np.full((len(lat), len(lon)), export),
+                "DIN": np.full((len(lat), len(lon)), export),
+                "DOC_l": np.full((len(lat), len(lon)), export / 2),
+                "DOC_sl": np.full((len(lat), len(lon)), export / 2),
+                "POC": np.full((len(lat), len(lon)), export / 4),
+                "DIP": np.full((len(lat), len(lon)), export),
+            }
+            path = tmp_path / f"rivr2o_riverinputs_{year}.nc"
+            write_rivr2o_file(path, lat, lon, tracer_values)
+            return path
+
+        paths = [write_year(2000, export_low), write_year(2002, export_high)]
+        defaults = get_tracer_defaults()
+
+        river_forcing = RiverForcing(
+            grid=iceland_test_grid,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2002, 12, 31),
+            indices=single_cell_indices,
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O", "path": [str(p) for p in paths]},
+        )
+
+        alk = river_forcing.ds.river_tracer.sel(
+            ntracers=river_forcing.ds.tracer_name == "ALK"
+        ).isel(nriver=0)
+        abs_time = river_forcing.ds["abs_time"]
+        alk_2000 = float(alk.sel(river_time=abs_time.dt.year == 2000).mean())
+        alk_2001 = float(alk.sel(river_time=abs_time.dt.year == 2001).mean())
+        alk_2002 = float(alk.sel(river_time=abs_time.dt.year == 2002).mean())
+
+        assert alk_2000 != defaults["ALK"]
+        assert alk_2002 != defaults["ALK"]
+        assert alk_2000 < alk_2001 < alk_2002
+        np.testing.assert_allclose(alk_2001, (alk_2000 + alk_2002) / 2, rtol=1e-4)
+
+
+class TestRiverForcingRivr2oFromTestData:
+    def test_dynamic_tracers_differ_from_defaults(self, river_forcing_with_rivr2o_bgc):
+        defaults = get_tracer_defaults()
+        river_forcing = river_forcing_with_rivr2o_bgc
+
+        def tracer(name):
+            return river_forcing.ds.river_tracer.sel(
+                ntracers=river_forcing.ds.tracer_name == name
+            ).squeeze("ntracers", drop=True)
+
+        assert not np.allclose(tracer("DIC").values, defaults["DIC"])
+        assert not np.allclose(tracer("ALK").values, defaults["ALK"])
+        np.testing.assert_allclose(
+            float(tracer("SiO3").min()), defaults["SiO3"], rtol=1e-6
+        )
+
+    def test_all_tracers_nonnegative(self, river_forcing_with_rivr2o_bgc):
+        assert (river_forcing_with_rivr2o_bgc.ds.river_tracer >= 0).all()
+
+    def test_roundtrip_yaml(self, river_forcing_with_rivr2o_bgc, tmp_path):
+        filepath = tmp_path / "river_forcing_rivr2o.yaml"
+        river_forcing_with_rivr2o_bgc.to_yaml(filepath)
+        restored = RiverForcing.from_yaml(filepath)
+        assert river_forcing_with_rivr2o_bgc == restored

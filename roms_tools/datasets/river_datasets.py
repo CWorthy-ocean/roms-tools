@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 import xarray as xr
@@ -14,7 +14,10 @@ from roms_tools.datasets.download import (
     download_river_tracer_defaults,
 )
 from roms_tools.datasets.utils import check_dataset, select_relevant_times
+from roms_tools.setup.utils import MARBL_TRACER_NAMES
 from roms_tools.utils import _get_file_matches, load_data
+
+RiverBGCTemporalInterpolation = Literal["none", "calendar_year"]
 
 RIVR2O_FILL_VALUE = -999.0
 RIVR2O_TRACER_NAMES = ("DIC", "DOC_l", "DOC_sl", "POC", "NO3", "PO4")
@@ -33,6 +36,11 @@ class RiverBGCDataset(Protocol):
     @property
     def requires_calendar_discharge_time(self) -> bool:
         """Whether discharge climatology must be expanded to a calendar axis."""
+        ...
+
+    @property
+    def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        """How interior temporal gaps in dynamic concentrations are filled."""
         ...
 
     def forcing_concentrations(
@@ -107,51 +115,17 @@ def fill_river_bgc_concentrations(
     return merged
 
 
-EXPECTED_TRACER_NAMES = (
-    "temp",
-    "salt",
-    "PO4",
-    "NO3",
-    "SiO3",
-    "NH4",
-    "Fe",
-    "Lig",
-    "O2",
-    "DIC",
-    "DIC_ALT_CO2",
-    "ALK",
-    "ALK_ALT_CO2",
-    "DOC",
-    "DON",
-    "DOP",
-    "DOPr",
-    "DONr",
-    "DOCr",
-    "zooC",
-    "spChl",
-    "spC",
-    "spP",
-    "spFe",
-    "spCaCO3",
-    "diatChl",
-    "diatC",
-    "diatP",
-    "diatFe",
-    "diatSi",
-    "diazChl",
-    "diazC",
-    "diazP",
-    "diazFe",
-)
-
-
 @dataclass(kw_only=True)
 class RiverTracerDefaultsDataset:
     """Default MARBL river tracer concentrations.
 
-    Loads recommended boundary concentrations from ``river_tracer_defaults.nc``
-    in the roms-tools-data repository. Each tracer variable has dimension
-    ``value_option`` (0 = recommended, 1 = alternate).
+    Used as the ``"CONSTANTS"`` ``bgc_source`` and as the default ``fill`` source
+    in ``RiverForcing``. Loads recommended boundary concentrations from
+    ``river_tracer_defaults.nc`` in the roms-tools-data repository. Each tracer
+    variable has dimension ``value_option`` (0 = recommended, 1 = alternate).
+
+    ``forcing_concentrations`` broadcasts scalar defaults to every
+    ``(river_time, nriver)`` point.
 
     Parameters
     ----------
@@ -180,7 +154,7 @@ class RiverTracerDefaultsDataset:
 
     def _read_defaults(self, ds: xr.Dataset) -> dict[str, float]:
         """Extract tracer concentrations for the selected value option."""
-        expected_tracers = set(EXPECTED_TRACER_NAMES)
+        expected_tracers = set(MARBL_TRACER_NAMES)
 
         if VALUE_OPTION_DIM not in ds.dims:
             raise ValueError(
@@ -227,6 +201,10 @@ class RiverTracerDefaultsDataset:
     @property
     def requires_calendar_discharge_time(self) -> bool:
         return False
+
+    @property
+    def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        return "none"
 
     def forcing_concentrations(
         self,
@@ -1160,7 +1138,12 @@ class Rivr2oRiverBGCDataset:
 
     @property
     def requires_calendar_discharge_time(self) -> bool:
+        """RIVR2O BGC varies by calendar year and needs a calendar ``river_time`` axis."""
         return True
+
+    @property
+    def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
+        return "calendar_year"
 
     @staticmethod
     def _align_concentration(
@@ -1186,6 +1169,7 @@ class Rivr2oRiverBGCDataset:
     ) -> xr.DataArray:
         """Convert RIVR2O annual export (10^6 g element yr-1) to mmol m-3."""
         time_dim = target_time.dims[0]
+        source_time_dim = "time" if "time" in export.dims else export.dims[0]
         rivr2o_times = xr.DataArray(
             [
                 rivr2o_boundary_time(int(year))
@@ -1194,7 +1178,15 @@ class Rivr2oRiverBGCDataset:
             dims=[time_dim],
             coords={time_dim: target_time.coords[time_dim]},
         )
-        export = export.sel(time=rivr2o_times)
+        requested_times = np.unique(rivr2o_times.values)
+        source_times = export[source_time_dim].values
+        missing_times = requested_times[~np.isin(requested_times, source_times)]
+        if missing_times.size:
+            export = export.reindex(
+                {source_time_dim: np.concatenate([source_times, missing_times])},
+                fill_value=np.nan,
+            )
+        export = export.sel({source_time_dim: rivr2o_times})
         export = self._align_concentration(export, river_volume.coords["nriver"])
         export = export * partition_weight
         mass_flux_g_s = export * 1e6 / SECONDS_PER_YEAR
@@ -1213,9 +1205,18 @@ class Rivr2oRiverBGCDataset:
     ) -> dict[str, xr.DataArray]:
         """Convert RIVR2O exports to MARBL river tracer concentrations (mmol m-3).
 
-        Combines raw carbon exports into MARBL tracers (``DIC``, ``DOC``, ``DON``,
-        ``DOP``, ``ALK``, ``DIC_ALT_CO2``, ``ALK_ALT_CO2``) and passes ``NO3`` and
-        ``PO4`` through from the product.
+        Samples export at each river mouth, applies ``discharge_partition_weights``,
+        converts annual mass export to concentration, and maps to ROMS tracer names:
+
+        - ``DIC`` = file ``DIC`` + ``DOC_l``
+        - ``DOC`` = ``DOC_sl`` + ``POC``
+        - ``DON`` and ``DOP`` from stoichiometric ratios of ``DOC_sl`` and ``POC``
+        - ``ALK`` = file ``DIC``; ``DIC_ALT_CO2`` and ``ALK_ALT_CO2`` mirror ``DIC``
+          and ``ALK``
+        - ``NO3`` and ``PO4`` from renamed file fields
+
+        Returns only the tracers listed above; other ROMS BGC tracers are supplied
+        by the fill source in ``RiverForcing``.
         """
         nearest_lat, nearest_lon = self.nearest_dic_cell_indices_for_points(
             lons,

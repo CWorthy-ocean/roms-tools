@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -13,6 +14,9 @@ from roms_tools.datasets.river_datasets import (
     fill_river_bgc_concentrations,
     rivr2o_coerce_time,
 )
+from roms_tools.setup.river_forcing import _mask_invalid_dynamic_bgc_concentrations
+from roms_tools.setup.utils import interpolate_dynamic_bgc_by_calendar_year
+from roms_tools.tests.rivr2o_test_utils import write_rivr2o_file
 
 
 class TestRiverDataset:
@@ -55,24 +59,6 @@ class TestRiverDataset:
         assert "Amazon_2" in names
         assert "Nile" in names
         assert len(set(names)) == len(names)  # all names must be unique
-
-
-def _write_rivr2o_file(path, lat, lon, tracer_values):
-    time = np.array([np.nan], dtype=np.float32)
-    if "POC" not in tracer_values:
-        tracer_values = {
-            **tracer_values,
-            "POC": np.full((len(lat), len(lon)), RIVR2O_FILL_VALUE),
-        }
-    data_vars = {
-        name: (["time", "lat", "lon"], values[np.newaxis, :, :])
-        for name, values in tracer_values.items()
-    }
-    ds = xr.Dataset(
-        data_vars=data_vars,
-        coords={"lat": lat, "lon": lon, "time": time},
-    )
-    ds.to_netcdf(path)
 
 
 class TestFillRiverBGCConcentrations:
@@ -135,7 +121,7 @@ class TestRivr2oRiverBGCDataset:
                 "DIP": np.full((2, 2), 3.0 + i),
             }
             path = tmp_path / f"rivr2o_riverinputs_{year}.nc"
-            _write_rivr2o_file(path, lat, lon, tracer_values)
+            write_rivr2o_file(path, lat, lon, tracer_values)
             files.append(path)
         return files, lat, lon
 
@@ -208,7 +194,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, 7.0]]),
         }
         path = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -243,8 +229,8 @@ class TestRivr2oRiverBGCDataset:
         }
         path_1999 = tmp_path / "rivr2o_riverinputs_1999.nc"
         path_2000 = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path_1999, lat, lon, values_1999)
-        _write_rivr2o_file(path_2000, lat, lon, values_2000)
+        write_rivr2o_file(path_1999, lat, lon, values_1999)
+        write_rivr2o_file(path_2000, lat, lon, values_2000)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=[path_1999, path_2000],
@@ -270,7 +256,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
         }
         path = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -298,7 +284,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
         }
         path = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -321,7 +307,7 @@ class TestRivr2oRiverBGCDataset:
             **tracer_values,
             "DIC": np.array([[10.0, 0.0], [0.0, 0.0]]),
         }
-        _write_rivr2o_file(near_path, lat, lon, near_tracer_values)
+        write_rivr2o_file(near_path, lat, lon, near_tracer_values)
         near_dataset = Rivr2oRiverBGCDataset(
             filename=near_path,
             start_time=datetime(2001, 1, 1),
@@ -350,7 +336,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
         }
         path = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -391,7 +377,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
         }
         path = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -440,7 +426,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, 10.0]]),
         }
         path = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -496,7 +482,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, 8.0]]),
         }
         path = tmp_path / "rivr2o_riverinputs_2000.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -552,7 +538,7 @@ class TestRivr2oRiverBGCDataset:
             "DIP": np.array([[0.0, 0.0], [0.0, export_value]]),
         }
         path = tmp_path / "rivr2o_riverinputs_1998.nc"
-        _write_rivr2o_file(path, lat, lon, tracer_values)
+        write_rivr2o_file(path, lat, lon, tracer_values)
 
         dataset = Rivr2oRiverBGCDataset(
             filename=path,
@@ -645,3 +631,197 @@ class TestRivr2oRiverBGCDataset:
             concentrations["DIC"].values,
             rtol=1e-5,
         )
+
+    def test_temporal_interpolation_is_calendar_year(self, tmp_path):
+        path = tmp_path / "rivr2o_riverinputs_2000.nc"
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        export = 1.0
+        tracer_values = {
+            "DIC": np.full((2, 2), export),
+            "DIN": np.full((2, 2), export),
+            "DOC_l": np.full((2, 2), export / 2),
+            "DOC_sl": np.full((2, 2), export / 2),
+            "POC": np.full((2, 2), export / 4),
+            "DIP": np.full((2, 2), export),
+        }
+        write_rivr2o_file(path, lat, lon, tracer_values)
+        dataset = Rivr2oRiverBGCDataset(
+            filename=path,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+        assert dataset.temporal_interpolation == "calendar_year"
+
+    @staticmethod
+    def _uniform_tracer_values(export: float, shape: tuple[int, int]) -> dict:
+        return {
+            "DIC": np.full(shape, export),
+            "DIN": np.full(shape, export),
+            "DOC_l": np.full(shape, export / 2),
+            "DOC_sl": np.full(shape, export / 2),
+            "POC": np.full(shape, export / 4),
+            "DIP": np.full(shape, export),
+        }
+
+    def test_missing_year_file_is_temporally_interpolated(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        path_2000 = tmp_path / "rivr2o_riverinputs_2000.nc"
+        path_2002 = tmp_path / "rivr2o_riverinputs_2002.nc"
+        write_rivr2o_file(
+            path_2000, lat, lon, self._uniform_tracer_values(100.0, (2, 2))
+        )
+        write_rivr2o_file(
+            path_2002, lat, lon, self._uniform_tracer_values(200.0, (2, 2))
+        )
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=[path_2000, path_2002],
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2002, 12, 31),
+        )
+        abs_time = xr.DataArray(
+            np.array(
+                [datetime(y, m, 15) for y in (2000, 2001, 2002) for m in range(1, 13)],
+                dtype="datetime64[ns]",
+            ),
+            dims=["river_time"],
+        )
+        river_volume = xr.DataArray(
+            np.full((abs_time.size, 1), 100.0),
+            dims=["river_time", "nriver"],
+            coords={"river_time": np.arange(abs_time.size), "nriver": [0]},
+        )
+        dynamic = dataset.forcing_concentrations(
+            river_volume,
+            abs_time,
+            lons=np.array([0.1]),
+            lats=np.array([0.1]),
+            straddle=False,
+            river_names=["test_river"],
+        )
+        dynamic = _mask_invalid_dynamic_bgc_concentrations(
+            dynamic, fill_value=RIVR2O_FILL_VALUE
+        )
+        dynamic = interpolate_dynamic_bgc_by_calendar_year(dynamic, abs_time)
+
+        alk_2000 = float(
+            dynamic["ALK"].isel(river_time=abs_time.dt.year == 2000).mean()
+        )
+        alk_2001 = float(
+            dynamic["ALK"].isel(river_time=abs_time.dt.year == 2001).mean()
+        )
+        alk_2002 = float(
+            dynamic["ALK"].isel(river_time=abs_time.dt.year == 2002).mean()
+        )
+        assert alk_2000 < alk_2001 < alk_2002
+        np.testing.assert_allclose(alk_2001, (alk_2000 + alk_2002) / 2, rtol=1e-5)
+
+    def test_fill_value_gap_year_is_temporally_interpolated(self, tmp_path):
+        lat = np.array([0.0, 2.0])
+        lon = np.array([0.0, 2.0])
+        shape = (2, 2)
+        paths = []
+        for year, export in ((2000, 100.0), (2001, RIVR2O_FILL_VALUE), (2002, 200.0)):
+            path = tmp_path / f"rivr2o_riverinputs_{year}.nc"
+            write_rivr2o_file(
+                path, lat, lon, self._uniform_tracer_values(export, shape)
+            )
+            paths.append(path)
+
+        dataset = Rivr2oRiverBGCDataset(
+            filename=paths,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2002, 12, 31),
+        )
+        abs_time = xr.DataArray(
+            np.array(
+                [datetime(y, m, 15) for y in (2000, 2001, 2002) for m in range(1, 13)],
+                dtype="datetime64[ns]",
+            ),
+            dims=["river_time"],
+        )
+        river_volume = xr.DataArray(
+            np.full((abs_time.size, 1), 100.0),
+            dims=["river_time", "nriver"],
+            coords={"river_time": np.arange(abs_time.size), "nriver": [0]},
+        )
+        dynamic = dataset.forcing_concentrations(
+            river_volume,
+            abs_time,
+            lons=np.array([0.1]),
+            lats=np.array([0.1]),
+            straddle=False,
+            river_names=["test_river"],
+        )
+        dynamic = _mask_invalid_dynamic_bgc_concentrations(
+            dynamic, fill_value=RIVR2O_FILL_VALUE
+        )
+        dynamic = interpolate_dynamic_bgc_by_calendar_year(dynamic, abs_time)
+
+        alk_2001 = float(
+            dynamic["ALK"].isel(river_time=abs_time.dt.year == 2001).mean()
+        )
+        alk_2000 = float(
+            dynamic["ALK"].isel(river_time=abs_time.dt.year == 2000).mean()
+        )
+        alk_2002 = float(
+            dynamic["ALK"].isel(river_time=abs_time.dt.year == 2002).mean()
+        )
+        np.testing.assert_allclose(alk_2001, (alk_2000 + alk_2002) / 2, rtol=1e-5)
+
+
+class TestRivr2oRiverBGCDatasetFromTestData:
+    def test_load_list_and_wildcard(self, rivr2o_test_data_paths, tmp_path):
+        dataset = Rivr2oRiverBGCDataset(
+            filename=rivr2o_test_data_paths,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2002, 12, 31),
+        )
+        assert dataset.ds.sizes["time"] == 3
+        assert set(dataset.ds.data_vars) >= {
+            "DIC",
+            "NO3",
+            "PO4",
+            "DOC_l",
+            "DOC_sl",
+            "POC",
+        }
+        assert float(dataset.ds.lat.min()) == 47.0
+        assert float(dataset.ds.lon.max()) == 6.0
+
+        for src in rivr2o_test_data_paths:
+            (tmp_path / Path(src).name).symlink_to(src)
+        wildcard_dataset = Rivr2oRiverBGCDataset(
+            filename=str(tmp_path / "rivr2o_riverinputs_*.nc"),
+            start_time=datetime(2000, 6, 1),
+            end_time=datetime(2001, 8, 1),
+        )
+        assert wildcard_dataset.ds.sizes["time"] == 2
+
+    def test_forcing_concentrations_finite_at_iceland(self, rivr2o_test_data_paths):
+        dataset = Rivr2oRiverBGCDataset(
+            filename=rivr2o_test_data_paths,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2000, 12, 31),
+        )
+        abs_time = xr.DataArray(
+            [datetime(2000, 1, 15), datetime(2000, 2, 15)],
+            dims=["river_time"],
+        )
+        river_volume = xr.DataArray(
+            [[100.0], [100.0]],
+            dims=["river_time", "nriver"],
+            coords={"river_time": [0, 1], "nriver": [0]},
+        )
+        concentrations = dataset.forcing_concentrations(
+            river_volume,
+            abs_time,
+            lons=np.array([-10.0]),
+            lats=np.array([65.0]),
+            straddle=False,
+            river_names=["test"],
+        )
+        assert np.isfinite(concentrations["DIC"].values).all()
+        assert (concentrations["DIC"].values > 0).any()

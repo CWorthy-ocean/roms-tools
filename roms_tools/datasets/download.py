@@ -93,7 +93,16 @@ pup_test_data = pooch.create(
         "GSHHS_l_L1.shp": "bc76f101f9b8671f90e734b4026da91c20066fc627cc8b5889ba22d90cbf97e9",
         "GSHHS_l_L1.shx": "72879354892d80d6c39c612f645661ec0edc75f3f9f8f74b19d9387ae0327377",
         "EMODnet_C2_coarse100.nc": "4202a6a5877de726bf13f41de7a1edfea2db83278ce371fe7732eb4b6770ed6d",
+        "rivr2o_riverinputs_2000.nc": "sha256:1ff94f4b732bb5fd91276120979a6af38d9a6f257570bb7fcc676c651f36dac0",
+        "rivr2o_riverinputs_2001.nc": "sha256:3ca4ca6d12103ef8bdd67592c9eeaaf0e7a2a765f1d18ad4c978dee52ebbec04",
+        "rivr2o_riverinputs_2002.nc": "sha256:0f760d85962ad025c88d39158e2a80ee33bb2d039877ef7dcb650ef32f56f660",
     },
+)
+
+RIVR2O_TEST_DATA_FILES = (
+    "rivr2o_riverinputs_2000.nc",
+    "rivr2o_riverinputs_2001.nc",
+    "rivr2o_riverinputs_2002.nc",
 )
 
 
@@ -196,6 +205,17 @@ def download_sal_data(filename: str) -> str:
     fname = sal_data.fetch(filename)
 
     return fname
+
+
+def download_rivr2o_test_data() -> list[str]:
+    """Download the regional RIVR2O test files from roms-tools-test-data.
+
+    Returns
+    -------
+    list[str]
+        Paths to the yearly NetCDF files (2000-2002).
+    """
+    return [download_test_data(filename) for filename in RIVR2O_TEST_DATA_FILES]
 
 
 def download_test_data(filename: str) -> str:

@@ -1,5 +1,6 @@
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -29,11 +30,13 @@ from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
     add_tracer_metadata_to_ds,
+    expand_monthly_climatology_time_axis,
     from_yaml,
     gc_dist,
     get_target_coords,
     get_tracer_defaults,
     get_variable_metadata,
+    interpolate_dynamic_bgc_by_calendar_year,
     substitute_nans_by_fillvalue,
     to_dict,
     validate_names,
@@ -48,7 +51,7 @@ DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
 RiverBGCSource: TypeAlias = dict[
-    str, str | Path | list[str | Path] | bool | dict[str, str]
+    str, str | Path | Sequence[str | Path] | bool | dict[str, str]
 ]
 
 _BGC_DATASET_MAP: dict[str, type[RiverBGCDataset]] = {
@@ -70,6 +73,21 @@ def _get_bgc_fill_source(bgc_source: RiverBGCSource) -> dict[str, str]:
     if not isinstance(fill_name, str):
         raise ValueError('bgc_source["fill"] must include a "name".')
     return {"name": fill_name}
+
+
+def _mask_invalid_dynamic_bgc_concentrations(
+    dynamic: dict[str, xr.DataArray],
+    *,
+    fill_value: float | None = None,
+) -> dict[str, xr.DataArray]:
+    """Replace fill values, negative values, and non-finite values with NaN."""
+    masked: dict[str, xr.DataArray] = {}
+    for tracer_name, values in dynamic.items():
+        valid = np.isfinite(values) & (values >= 0)
+        if fill_value is not None:
+            valid = valid & (values != fill_value)
+        masked[tracer_name] = values.where(valid)
+    return masked
 
 
 @dataclass(kw_only=True)
@@ -106,43 +124,23 @@ class RiverForcing:
 
     include_bgc : bool, optional
         Whether to include BGC tracers. Defaults to `False`.
-    bgc_source : RawDataSource, optional
-        Dictionary specifying the source of river BGC tracer data. Only used when
+    bgc_source : dict, optional
+        Primary river BGC dataset configuration. Only used when
         ``include_bgc=True``. Keys include:
 
-          - ``name`` (str): ``"CONSTANTS"`` (default) reads MARBL default river
-            tracer concentrations from ``river_tracer_defaults.nc`` for all BGC
-            tracers, or ``"RIVR2O"`` reads the RIVR2O
-            river export product and sets ``DIC`` (``DIC`` + ``DOC_l``), ``DOC``
-            (``DOC_sl`` + ``POC``), ``DON`` and ``DOP`` (ratios of ``DOC_sl`` and
-            ``POC``), ``ALK`` (file ``DIC``), ``DIC_ALT_CO2``, ``ALK_ALT_CO2``,
-            ``NO3``, and ``PO4`` from lat/lon fields (all other BGC tracers remain
-            at default values).
-          - ``path`` (str, Path, or list): Required for ``"RIVR2O"``. Path to one
-            file, a wildcard pattern, or a list of ``rivr2o_riverinputs_*.nc`` files.
-          - ``fill`` (dict, optional): Source for tracers not provided by the dynamic
-            BGC dataset. Defaults to ``{"name": "CONSTANTS"}``, which reads scalar
-            fill values from ``river_tracer_defaults.nc``. Tracers absent from the
-            dynamic source, or non-finite dynamic values, are filled from this source.
+          - ``name`` (str): Registered dataset identifier.
+          - ``path`` (str, Path, or list): File path(s), when required by the
+            dataset.
+          - ``fill`` (dict, optional): Secondary dataset with the same key
+            structure. Supplies tracers missing from the primary result, or
+            replaces non-finite primary values.
 
-        If ``include_bgc=True`` and ``bgc_source`` is omitted, ``"CONSTANTS"`` is used.
+        If omitted when ``include_bgc=True``, only constant default
+        concentrations are used.
 
-        For ``"RIVR2O"``, the product covers 1903-2024. Dynamic tracers are merged
-        with fill values for all other BGC tracers in the ROMS schema. Simulation times before 1903
-        or after 2024 use the 1903 and 2024 fields, respectively. Each river mouth is
-        mapped to the nearest RIVR2O grid cell with positive ``DIC`` export; that cell
-        supplies all tracers, with exports interpolated in time onto ``river_time``.
-        If several rivers share one RIVR2O cell, export is split in proportion to
-        discharge each month and normalized over the year so co-located rivers keep
-        similar concentrations in every month while higher-discharge months carry
-        more carbon export.
-
-        When Dai discharge is monthly climatology (``convert_to_climatology`` is
-        ``"always"`` or ``"if_any_missing"`` with missing data) and BGC is RIVR2O,
-        ``river_time`` is expanded to a monthly calendar axis from ``start_time`` to
-        ``end_time``: ``river_volume`` repeats the climatological month each year,
-        while RIVR2O tracers (e.g. alkalinity) follow the annual export files in that
-        window—producing repeating discharge seasons and year-to-year BGC variation.
+        Concentrations come from the primary dataset's
+        ``forcing_concentrations()``, then are merged with fill via
+        ``fill_river_bgc_concentrations``.
     model_reference_date : datetime, optional
         Reference date for the ROMS simulation. Default is January 1, 2000.
     indices : dict[str, list[tuple[int, int]]], optional
@@ -178,7 +176,7 @@ class RiverForcing:
     include_bgc: bool = False
     """Whether to include BGC tracers."""
     bgc_source: RiverBGCSource | None = None
-    """Dictionary specifying the source of river BGC tracer data."""
+    """Primary and fill BGC dataset configuration."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
@@ -416,62 +414,8 @@ class RiverForcing:
         ntracer = int(np.where(ds.tracer_name.values == tracer_name)[0][0])
         ds["river_tracer"].loc[{"ntracers": ntracer}] = values
 
-    @staticmethod
-    def _calendar_midmonth_dates(
-        start_time: datetime, end_time: datetime
-    ) -> list[datetime]:
-        """Monthly 15th-of-month dates between ``start_time`` and ``end_time``."""
-        dates: list[datetime] = []
-        year, month = start_time.year, start_time.month
-        while (year, month) <= (end_time.year, end_time.month):
-            candidate = datetime(year, month, 15)
-            if start_time <= candidate <= end_time:
-                dates.append(candidate)
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-        if not dates:
-            raise ValueError("No mid-month dates fall between start_time and end_time.")
-        return dates
-
-    def _expand_climatology_for_rivr2o_timeseries(self, ds: xr.Dataset) -> xr.Dataset:
-        """Tile monthly discharge climatology onto a calendar ``river_time`` axis.
-
-        Dai/Trenberth discharge stays as a repeating seasonal cycle; RIVR2O BGC is
-        applied afterward using ``abs_time`` at each calendar step.
-        """
-        calendar_dates = self._calendar_midmonth_dates(self.start_time, self.end_time)
-        month_to_index = {
-            int(month): idx for idx, month in enumerate(ds["month"].values.astype(int))
-        }
-        ds_base = ds.drop_vars("month", errors="ignore")
-        pieces = [
-            ds_base.isel(river_time=month_to_index[dt.month]) for dt in calendar_dates
-        ]
-        ds_expanded = xr.concat(pieces, dim="river_time")
-        ds_expanded = ds_expanded.assign_coords(
-            river_time=np.array(calendar_dates, dtype="datetime64[ns]")
-        )
-        ds_expanded.attrs.pop("climatology", None)
-        ds_expanded.attrs[DISCHARGE_CLIMATOLOGY_ATTR] = "True"
-        ds_expanded, time = add_time_info_to_ds(
-            ds_expanded,
-            self.model_reference_date,
-            climatology=False,
-            time_name="river_time",
-        )
-        logging.info(
-            "Expanded discharge climatology to %d calendar river_time steps "
-            "(%s to %s) for RIVR2O BGC.",
-            len(calendar_dates),
-            calendar_dates[0].date(),
-            calendar_dates[-1].date(),
-        )
-        return ds_expanded.assign_coords({"river_time": time})
-
     def _apply_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
-        """Apply BGC tracer concentrations, filling gaps from ``bgc_source["fill"]``."""
+        """Apply BGC tracer concentrations from the primary source, with fill."""
         if self.bgc_source is None:
             raise RuntimeError("bgc_source must be set.")
         bgc_data = self._get_bgc_dataset()
@@ -493,6 +437,12 @@ class RiverForcing:
             straddle=self.grid.straddle,
             river_names=river_names,
         )
+        dynamic = _mask_invalid_dynamic_bgc_concentrations(
+            dynamic,
+            fill_value=getattr(bgc_data, "fill_value", None),
+        )
+        if bgc_data.temporal_interpolation == "calendar_year":
+            dynamic = interpolate_dynamic_bgc_by_calendar_year(dynamic, ds["abs_time"])
         merged = fill_river_bgc_concentrations(
             dynamic,
             fill_defaults,
@@ -659,7 +609,13 @@ class RiverForcing:
         if self.climatology and self.bgc_source is not None:
             bgc = self._get_bgc_dataset()
             if bgc.requires_calendar_discharge_time:
-                ds = self._expand_climatology_for_rivr2o_timeseries(ds)
+                ds = expand_monthly_climatology_time_axis(
+                    ds,
+                    self.start_time,
+                    self.end_time,
+                    self.model_reference_date,
+                    discharge_climatology_attr=DISCHARGE_CLIMATOLOGY_ATTR,
+                )
 
         if self.include_bgc and self.bgc_source is not None:
             ds = self._apply_bgc_tracers(ds)

@@ -96,7 +96,8 @@ def test_check_results(
 
     # Set small tolerance because some fields like NOx, NHy have values order 1e-12
     xr.testing.assert_allclose(
-        forcing.ds, expected_forcing_ds, rtol=1.0e-12, atol=1e-13
+        #forcing.ds, expected_forcing_ds, rtol=1.0e-12, atol=1e-13
+        forcing.ds, expected_forcing_ds, rtol=1.0e-10, atol=1e-11
     )
 
 

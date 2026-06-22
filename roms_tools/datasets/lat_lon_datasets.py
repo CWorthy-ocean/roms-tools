@@ -653,7 +653,7 @@ class LatLonDataset:
             return coords_ds
 
         if return_copy:
-            return LatLonDataset.from_ds(self, subdomain)
+            return type(self).from_ds(self, subdomain)
         else:
             self.ds = subdomain
             return None

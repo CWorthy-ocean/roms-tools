@@ -11,7 +11,6 @@
 * The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).
 * CDR metrics on `ds_cdr` rename efficiency fields: `cdr_efficiency` to `cdr_efficiency_from_flux`, and `cdr_efficiency_from_delta_diff` to `cdr_efficiency_from_DIC_difference`. Saved datasets, ensemble inputs, or downstream code using the old names need updating.
 * CDR ensemble statistics on `Ensemble.ds` rename efficiency fields: `ensemble_mean` to `ensemble_efficiency_mean` and `ensemble_std` to `ensemble_efficiency_std`.
-* Drop support for Python 3.11.
 
 ### New Features
 

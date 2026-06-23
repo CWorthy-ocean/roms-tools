@@ -114,12 +114,12 @@ class InitialConditions:
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
     use_density_interpolation : bool, optional
-        If True (default), BGC tracers are vertically interpolated in density space
+        If True, BGC tracers are vertically interpolated in density space
         rather than depth space. Density is computed from the physics source T/S
         (via TEOS-10 sigma-0) and used as the vertical coordinate for interpolation,
         preserving water-mass properties. Only applies when ``bgc_source`` is provided
         and the physics source is a lat/lon dataset (not a ROMS restart). Falls back
-        to depth-based interpolation silently if physics T/S are unavailable.
+        to depth-based interpolation if physics T/S are unavailable and notes in log.
 
         Interpolation uses ``xgcm.Grid.transform`` with the linear method inside
         the source density range and edge-value (nearest-neighbor) extrapolation

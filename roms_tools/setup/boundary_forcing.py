@@ -151,7 +151,7 @@ class BoundaryForcing:
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
     use_density_interpolation : bool, optional
-        If True (default), BGC tracers are vertically interpolated in density space
+        If True, BGC tracers are vertically interpolated in density space
         rather than depth space when ``physics_forcing`` is provided. Preserves
         water-mass properties. Only used when ``type='bgc'``.
 

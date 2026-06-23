@@ -79,3 +79,7 @@ class TestTracerDefaults:
     def test_temporal_interpolation_is_none(self, tracer_defaults_path):
         data = RiverTracerDefaultsDataset(filename=tracer_defaults_path)
         assert data.temporal_interpolation == "none"
+
+    def test_fill_value_is_none(self, tracer_defaults_path):
+        data = RiverTracerDefaultsDataset(filename=tracer_defaults_path)
+        assert data.fill_value is None

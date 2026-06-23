@@ -265,6 +265,15 @@ class TestRiverForcingGeneral:
                 source={"path": "river_data.nc"},
             )
 
+    def test_invalid_convert_to_climatology(self, iceland_test_grid):
+        with pytest.raises(ValueError, match="Invalid convert_to_climatology"):
+            RiverForcing(
+                grid=iceland_test_grid,
+                start_time=datetime(1998, 1, 1),
+                end_time=datetime(1998, 3, 1),
+                convert_to_climatology="sometimes",
+            )
+
     def test_river_forcing_plot(self, river_forcing_with_bgc):
         """Test plot methods with and without specifying river_names."""
         river_names = list(river_forcing_with_bgc.indices.keys())[0:2]

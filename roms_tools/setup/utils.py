@@ -169,7 +169,11 @@ def calendar_midmonth_dates(start_time: datetime, end_time: datetime) -> list[da
             month = 1
             year += 1
     if not dates:
-        raise ValueError("No mid-month dates fall between start_time and end_time.")
+        # Window is shorter than a month and skips every 15th; fall back to a
+        # single representative mid-month date clamped into the window so the
+        # correct climatology month is still selected.
+        candidate = datetime(start_time.year, start_time.month, 15)
+        dates.append(min(max(candidate, start_time), end_time))
     return dates
 
 

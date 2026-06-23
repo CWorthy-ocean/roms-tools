@@ -50,6 +50,7 @@ from roms_tools.utils import save_datasets
 INCLUDE_ALL_RIVER_NAMES = "all"
 MAX_RIVERS_TO_PLOT = 20  # must be <= MAX_DISTINCT_COLORS
 DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
+VALID_CONVERT_TO_CLIMATOLOGY = ("never", "if_any_missing", "always")
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
@@ -285,6 +286,11 @@ class RiverForcing:
         self.ds = ds
 
     def _input_checks(self):
+        if self.convert_to_climatology not in VALID_CONVERT_TO_CLIMATOLOGY:
+            raise ValueError(
+                f'Invalid convert_to_climatology "{self.convert_to_climatology}". '
+                f"Valid options: {', '.join(VALID_CONVERT_TO_CLIMATOLOGY)}."
+            )
         self.source = self._normalized_source()
         self.bgc_source = self._normalized_bgc_source()
         self._validate_indices()
@@ -478,7 +484,7 @@ class RiverForcing:
         )
         dynamic = _mask_invalid_dynamic_bgc_concentrations(
             dynamic,
-            fill_value=getattr(bgc_data, "fill_value", None),
+            fill_value=bgc_data.fill_value,
         )
         if bgc_data.temporal_interpolation == "calendar_year":
             dynamic = interpolate_dynamic_bgc_by_calendar_year(dynamic, ds["abs_time"])

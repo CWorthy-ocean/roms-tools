@@ -43,6 +43,16 @@ class RiverBGCDataset(Protocol):
         """How interior temporal gaps in dynamic concentrations are filled."""
         ...
 
+    @property
+    def fill_value(self) -> float | None:
+        """Sentinel marking missing concentrations, or ``None`` if not used.
+
+        ``RiverForcing`` masks this value out of dynamic concentrations before
+        merging in fill defaults, so any dataset that uses a sentinel must
+        surface it here.
+        """
+        ...
+
     def forcing_concentrations(
         self,
         river_volume: xr.DataArray,
@@ -205,6 +215,10 @@ class RiverTracerDefaultsDataset(RiverBGCDataset):
     @property
     def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
         return "none"
+
+    @property
+    def fill_value(self) -> float | None:
+        return None
 
     def forcing_concentrations(
         self,
@@ -916,6 +930,13 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         in_range = (ds[time_dim].dt.year >= start_year) & (
             ds[time_dim].dt.year <= end_year
         )
+        if not bool(in_range.any()):
+            available = sorted({int(y) for y in ds[time_dim].dt.year.values})
+            raise ValueError(
+                f"No RIVR2O files cover the requested years {start_year}-{end_year}. "
+                f"Loaded files span years {available}. Provide RIVR2O files that "
+                "overlap the simulation window."
+            )
         return ds.sel({time_dim: ds[time_dim].where(in_range, drop=True)})
 
     def _adjust_lon_to_grid(self, lon: np.ndarray, *, straddle: bool) -> np.ndarray:

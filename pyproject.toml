@@ -27,7 +27,7 @@ dependencies = [
     "matplotlib",
     "cartopy",
     "packaging",
-    "scipy",
+    "scipy >= 1.18.0",
     "gcm_filters >=0.5.1",
     "netcdf4",
     "PyYAML",

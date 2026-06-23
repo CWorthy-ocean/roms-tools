@@ -10,6 +10,7 @@ dependencies:
   - pytest
   - pytest-xdist
   - h5py
+  - h5netcdf
   - flake8
   - black
   - pre-commit==3.8.0

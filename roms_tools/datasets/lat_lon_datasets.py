@@ -1470,7 +1470,7 @@ class SODARestoringSurfaceDataset(SODADataset):
         xr.Dataset
             The converted xarray dataset
         """
-        ds = xr.open_dataset(fsspec.open(self.filename).open())
+        ds = xr.open_dataset(fsspec.open(self.filename).open(), engine="h5netcdf")
 
         return ds
 

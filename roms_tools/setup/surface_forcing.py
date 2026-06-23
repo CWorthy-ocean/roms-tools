@@ -14,6 +14,7 @@ from roms_tools.datasets.lat_lon_datasets import (
     ERA5Correction,
     ERA5Dataset,
     LatLonDataset,
+    MBLco2Dataset,
     UnifiedBGCSurfaceDataset,
     UnifiedRestoringSurfaceDataset,
     WOARestoringSurfaceDataset,
@@ -43,6 +44,10 @@ from roms_tools.utils import (
 
 DEFAULT_ERA5_ARCO_PATH = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
+
+DEFAULT_MBL_co2_PATH = (
+    "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
 )
 
 
@@ -82,7 +87,7 @@ class SurfaceForcing:
           - "restoring": for restoring forces.
 
     correct_radiation : bool
-        Whether to correct shortwave radiation. Default is True.
+        Whether to correct shortwave and longwave radiation. Default is True.
 
     wind_dropoff : bool, optional
         Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-off.
@@ -141,7 +146,7 @@ class SurfaceForcing:
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc", "restoring")."""
     correct_radiation: bool = True
-    """Whether to correct shortwave radiation."""
+    """Whether to correct shortwave and longwave radiation."""
     wind_dropoff: bool = False
     """Whether to apply a coastal wind speed reduction to mimic nearshore wind drop-
     off."""
@@ -183,6 +188,9 @@ class SurfaceForcing:
             opt_file = "bulk_frc.opt"
         elif self.type == "bgc":
             opt_file = "bgc.opt"
+            if self.source["name"] == "MBL_co2":
+                cppdefs_flags = set()
+                cppdefs_flags.add("PCO2AIR_FORCING")
         elif self.type == "restoring":
             opt_file = "cppdefs.opt"
             cppdefs_flags = set()
@@ -202,6 +210,12 @@ class SurfaceForcing:
                 interp_flag,
                 opt_file,
             )
+            if self.source["name"] == "MBL_co2":
+                logging.info(
+                    "Time-varying CO2 values being used."
+                    "Remember to define the following flags in your `cppdefs.opt` file: %s`.",
+                    cppdefs_flags,
+                )
         elif self.type == "restoring":
             logging.info(
                 "Data will be interpolated onto the %s. "
@@ -220,6 +234,7 @@ class SurfaceForcing:
         # built later from regridded processed_fields, so its chunks follow regrid ops.
         data.choose_subdomain(
             target_coords,
+            # unchunk_lateral_dims=True required for lateral fill, consider trying False if lateral fill ever becomes optional
             unchunk_lateral_dims=True,
         )
         # Enforce double precision to ensure reproducibility
@@ -253,8 +268,11 @@ class SurfaceForcing:
 
         if self.type == "physics":
             if self.correct_radiation:
-                processed_fields["swrad"] = self._apply_radiation_correction(
-                    processed_fields["swrad"], data
+                (
+                    processed_fields["swrad"],
+                    processed_fields["lwrad"],
+                ) = self._apply_radiation_corrections(
+                    processed_fields["swrad"], processed_fields["lwrad"], data
                 )
             if self.wind_dropoff:
                 (
@@ -264,7 +282,7 @@ class SurfaceForcing:
                     processed_fields["uwnd"], processed_fields["vwnd"]
                 )
 
-        if self.type == "bgc":
+        if self.type == "bgc" and self.source["name"] != "MBL_co2":
             processed_fields = compute_missing_surface_bgc_variables(processed_fields)
 
         # Reorder dimensions
@@ -316,6 +334,11 @@ class SurfaceForcing:
                     "No path specified for ERA5 source; defaulting to ARCO ERA5 dataset on Google Cloud."
                 )
                 self.source["path"] = DEFAULT_ERA5_ARCO_PATH
+            elif self.source["name"] == "MBL_co2":
+                logging.info(
+                    "No path specified for MBL_co2 source; defaulting to the MBL dataset from GML, NOAA."
+                )
+                self.source["path"] = DEFAULT_MBL_co2_PATH
             else:
                 raise ValueError("`source` must include a 'path'.")
 
@@ -345,6 +368,13 @@ class SurfaceForcing:
                     raise ValueError(
                         f"`restoring_forces` must be any of {valid_vars}, but got '{var}'."
                     )
+
+        # Check that climatology is false for t-varying co2
+        if self.type == "bgc" and self.source["name"] == "MBL_co2":
+            if self.source["climatology"]:
+                raise ValueError(
+                    "When 'name' is 'MBL_co2', time-varying xco2 data is expected. 'climatology' must be 'False'"
+                )
 
     def _determine_coarse_grid_usage(self, data):
         """Determine if coarse grid interpolation should be used based on the resolution
@@ -416,9 +446,11 @@ class SurfaceForcing:
                 data = CESMBGCSurfaceForcingDataset(**data_dict)
             elif self.source["name"] == "UNIFIED":
                 data = UnifiedBGCSurfaceDataset(**data_dict)
+            elif self.source["name"] == "MBL_co2":
+                data = MBLco2Dataset(**data_dict)
             else:
                 raise ValueError(
-                    'Only "CESM_REGRIDDED" and "UNIFIED" are valid options for source["name"] when type is "bgc".'
+                    'Only "CESM_REGRIDDED", "UNIFIED", and "MBL_co2" are valid options for source["name"] when type is "bgc".'
                 )
 
         elif self.type == "restoring":
@@ -490,14 +522,21 @@ class SurfaceForcing:
                 },
             }
         elif self.type == "bgc":
-            variable_info = {}
-            for var_name in list(data.var_names.keys()) + list(
-                data.opt_var_names.keys()
-            ):
-                variable_info[var_name] = default_info
-                if var_name == "pco2_air":
-                    variable_info[var_name] = {**default_info, "validate": True}
-                else:
+            if self.source["name"] == "MBL_co2":
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
+                    variable_info[var_name] = default_info
+                    if var_name == "xco2_air":
+                        variable_info[var_name] = {**default_info, "validate": True}
+                    else:
+                        variable_info[var_name] = {**default_info, "validate": False}
+            else:
+                variable_info = {}
+                for var_name in list(data.var_names.keys()) + list(
+                    data.opt_var_names.keys()
+                ):
                     variable_info[var_name] = {**default_info, "validate": False}
         elif self.type == "restoring":
             variable_info = {}
@@ -512,75 +551,93 @@ class SurfaceForcing:
 
         self.variable_info = variable_info
 
-    def _apply_radiation_correction(
-        self, radiation: xr.DataArray, data: LatLonDataset
-    ) -> xr.DataArray:
-        """Apply a climatological correction to shortwave radiation.
+    def _apply_radiation_corrections(
+        self,
+        swrad: xr.DataArray,
+        lwrad: xr.DataArray,
+        data: LatLonDataset,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Apply climatological corrections to shortwave and longwave radiation.
 
-        This method scales the input `radiation` field using a correction factor
-        derived from climatological data, interpolated in time and regridded
-        to the ROMS domain.
+        The correction dataset is loaded and preprocessed once. The 12-month
+        climatology is spatially regridded to the ROMS grid first (only 12
+        spatial interpolations per variable), then lazily interpolated in time
+        to match the full forcing time axis. Correction factors are rechunked
+        to align with the radiation fields before multiplication so that dask
+        can execute the multiply chunk-by-chunk during save().
 
         Parameters
         ----------
-        radiation : xr.DataArray
-            Shortwave radiation field to be corrected. Must include a `time` coordinate.
-
-        data : Dataset
-            Dataset containing ROMS grid and mask information used to align correction data.
+        swrad : xr.DataArray
+            Shortwave radiation field to be corrected. Must include a ``time`` coordinate.
+        lwrad : xr.DataArray
+            Longwave radiation field to be corrected. Must include a ``time`` coordinate.
+        data : LatLonDataset
+            ERA5 dataset providing the mask and spatial coordinates used to
+            align the correction data.
 
         Returns
         -------
-        radiation_corrected : xr.DataArray
-            Radiation field scaled by the correction factor, with original coordinates.
+        swrad_corrected : xr.DataArray
+            Shortwave radiation scaled by the SSR correction factor.
+        lwrad_corrected : xr.DataArray
+            Longwave radiation scaled by the STRD correction factor.
         """
         correction_data = self._get_correction_data()
-        # Match subdomain to forcing data to reuse the mask
+
         coords_correction = {
             "lat": data.ds[data.dim_names["latitude"]],
             "lon": data.ds[data.dim_names["longitude"]],
         }
+        # unchunk_lateral_dims=True required for lateral fill, consider trying False if lateral fill ever becomes optional
         correction_data.match_subdomain(coords_correction, unchunk_lateral_dims=True)
-        correction_data.ds["mask"] = data.ds["mask"]  # use mask from ERA5 data
+        correction_data.ds["mask"] = data.ds["mask"]
         correction_data.ds["time"] = correction_data.ds["time"].dt.days
-
         correction_data.apply_lateral_fill()
 
-        # Temporal interpolation: Perform before spatial regridding for better performance
-        if self.use_dask:
-            # Perform temporal interpolation for each time slice to enforce chunking in time.
-            # This reduces memory usage by processing one time step at a time.
-            # The interpolated slices are then concatenated along the "time" dimension.
-            corr_factor = xr.concat(
-                [
-                    interpolate_from_climatology(
-                        field=correction_data.ds[correction_data.var_names["swr_corr"]],
-                        time_dim=correction_data.dim_names["time"],
-                        time_coord=correction_data.dim_names["time"],
-                        time=time,
-                    )
-                    for time in radiation.time
-                ],
-                dim="time",
-            )
-        else:
-            # Interpolate across all time steps at once
-            corr_factor = interpolate_from_climatology(
-                field=correction_data.ds[correction_data.var_names["swr_corr"]],
-                time_dim=correction_data.dim_names["time"],
-                time_coord=correction_data.dim_names["time"],
-                time=radiation.time,
-            )
-
-        # Spatial regridding
+        # Spatial regrid first: only 12 interpolations per variable regardless of
+        # the length of the forcing time series. lateral_regrid.apply() forces eager
+        # compute on the 12-step climatology, which is acceptable (~MB of data).
         lateral_regrid = LateralRegridToROMS(
             self.target_coords, correction_data.dim_names
         )
-        corr_factor = lateral_regrid.apply(corr_factor)
+        time_dim = correction_data.dim_names["time"]
 
-        radiation_corrected = radiation * corr_factor
+        swr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["swr_corr"]]
+        )
+        lwr_12 = lateral_regrid.apply(
+            correction_data.ds[correction_data.var_names["lwr_corr"]]
+        )
 
-        return radiation_corrected
+        # Wrap back to dask so that temporal interpolation builds a lazy graph
+        # rather than materialising the full (N, ny, nx) output as numpy.
+        if self.use_dask:
+            swr_12 = swr_12.chunk({time_dim: len(swr_12[time_dim])})
+            lwr_12 = lwr_12.chunk({time_dim: len(lwr_12[time_dim])})
+
+        # Single interpolate call per variable — lazy when input is dask-backed.
+        # Produces (N, ny_roms, nx_roms) with one large time chunk.
+        swr_corr_factor = interpolate_from_climatology(
+            field=swr_12,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            time=swrad.time,
+        )
+        lwr_corr_factor = interpolate_from_climatology(
+            field=lwr_12,
+            time_dim=time_dim,
+            time_coord=time_dim,
+            time=lwrad.time,
+        )
+
+        # Rechunk time to match the radiation fields so that the element-wise
+        # multiply is chunk-aligned and dask can execute it slice-by-slice.
+        if self.use_dask:
+            swr_corr_factor = swr_corr_factor.chunk(swrad.chunksizes)
+            lwr_corr_factor = lwr_corr_factor.chunk(lwrad.chunksizes)
+
+        return swrad * swr_corr_factor, lwrad * lwr_corr_factor
 
     def _apply_wind_correction(
         self, uwnd: xr.DataArray, vwnd: xr.DataArray
@@ -656,13 +713,17 @@ class SurfaceForcing:
                     "time",
                 ]
         elif self.type == "bgc":
-            time_coords = [
-                "pco2_time",
-                "iron_time",
-                "dust_time",
-                "nox_time",
-                "nhy_time",
-            ]
+            if self.source["name"] == "MBL_co2":
+                time_coords = [
+                    "xco2_time",
+                ]
+            else:
+                time_coords = [
+                    "iron_time",
+                    "dust_time",
+                    "nox_time",
+                    "nhy_time",
+                ]
         elif self.type == "restoring":
             time_coords = [
                 "sss_time",
@@ -767,8 +828,8 @@ class SurfaceForcing:
             - "Tair": Air temperature at 2m.
             - "qair": Absolute humidity at 2m.
             - "rain": Total precipitation.
-            - "pco2_air": Atmospheric pCO2.
-            - "pco2_air_alt": Atmospheric pCO2, alternative CO2.
+            - "xco2_air": CO2 in Marine boundary layer.
+            - "xco2_air_alt": CO2 in Marine boundary layer, alternative CO2.
             - "iron": Iron decomposition.
             - "dust": Dust decomposition.
             - "nox": NOx decomposition.

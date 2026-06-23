@@ -42,7 +42,7 @@
     "units": "kg/m^2/s",
     "source": "Kok et al. (2020)",
     "source file": "/data/project7/pdamien/DATA/BGC/Srf_BGC_Flx/KoK2021/DustCOMM_totdep_seas_bin.nc",
-    "coordinates": "abs_time dust_time iron_time month nhy_time nox_time pco2_time",
+    "coordinates": "abs_time dust_time iron_time month nhy_time nox_time",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

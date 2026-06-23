@@ -18,7 +18,7 @@ correction_data = pooch.create(
     base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
     # The registry specifies the files that can be fetched
     registry={
-        "SSR_correction.nc": "sha256:a170c1698e6cc2765b3f0bb51a18c6a979bc796ac3a4c014585aeede1f1f8ea0",
+        "ERA5_correction.nc": "sha256:7729179c90c5c4d1202659194bf82409dce21ec821911db1ad2dc027ce4a87ec",
     },
 )
 
@@ -41,7 +41,7 @@ sal_data = pooch.create(
     base_url="https://github.com/CWorthy-ocean/roms-tools-data/raw/main/",
     # The registry specifies the files that can be fetched
     registry={
-        "sal_tpxo9.v2a.nc": "sha256:5343d745b4374170a069bfc2c67dcdd9f1dc4eb0df7c0e6de5c004432c903f40",
+        "sal_tpxo10.v2a.nc": "sha256:4309ce204a5e4884aae4dd5209c2ac5a130121176a2f49c1fad2021bba8737a1",
     },
 )
 
@@ -82,6 +82,7 @@ pup_test_data = pooch.create(
         "CESM_surface_global_test_data.nc": "874106ffbc8b1b220db09df1551bbb89d22439d795b4d1e5a24ee775e9a7bf6e",
         "coarsened_UNIFIED_bgc_dataset.nc": "sha256:1f1e4304a497587f75d8e4cd64913caec797a98daf07de4468a2f04d1f0bc165",
         "WOA_2018_quarterDeg_coarsened.nc": "sha256:673ce3c3a98bb386ccd899dbc23eeedf7d9a665b68ea52c96fd69829a4b929a7",
+        "mbl_co2_bgc_dataset.nc": "sha256:797a9ef48f3c83a6920e44c0b441feb00fb35553db09dea9ed4ff36dcd68d968",
         "grid_created_with_matlab.nc": "fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d",
         "etopo5_coarsened_and_shifted.nc": "9a5cb4b38c779d22ddb0ad069b298b9722db34ca85a89273eccca691e89e6f96",
         "srtm15_coarsened.nc": "48bc8f4beecfdca9c192b13f4cbeef1455f49d8261a82563aaec5757e100dff9",
@@ -174,7 +175,7 @@ def download_correction_data(filename: str) -> str:
     ----------
     filename : str
         The name of the test data file to be downloaded. Available options:
-        - "SSR_correction.nc"
+        - "ERA5_correction.nc"
 
     Returns
     -------
@@ -194,7 +195,7 @@ def download_sal_data(filename: str) -> str:
     ----------
     filename : str
         The name of the test data file to be downloaded. Available options:
-        - "sal_tpxo9.v2a.nc"
+        - "sal_tpxo10.v2a.nc"
 
     Returns
     -------

@@ -546,10 +546,10 @@ def get_variable_metadata():
             "flux_units": "mmol/s",
             "integrated_units": "mmol",
         },
-        "pco2_air": {"long_name": "atmospheric pCO2", "units": "ppmv"},
-        "pco2_air_alt": {
-            "long_name": "atmospheric pCO2, alternative CO2",
-            "units": "ppmv",
+        "xco2_air": {"long_name": "CO2, Marine Boundary Layer", "units": "µmol mol⁻¹"},
+        "xco2_air_alt": {
+            "long_name": "CO2, Marine Boundary Layer; alternative CO2",
+            "units": "µmol mol⁻¹",
         },
         "iron": {"long_name": "iron decomposition", "units": "nmol/cm^2/s"},
         "dust": {"long_name": "dust decomposition", "units": "kg/m^2/s"},
@@ -647,9 +647,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
         A dictionary containing surface biogeochemical variables as xarray DataArrays.
         Missing variables are computed and added to this dictionary.
 
-        Assumptions:
-        - If `pco2_air` is part of the input dictionary, it is in units of ppmv.
-
     Returns
     -------
     dict
@@ -661,7 +658,6 @@ def compute_missing_surface_bgc_variables(bgc_data):
     """
     # Define the relationships for missing variables
     variable_relations = {
-        "pco2_air_alt": ("pco2_air", 1.0),
         "nox": (None, 1e-12),  # kg/m2/s
         "nhy": (None, 5e-12),  # kg/m2/s
     }
@@ -672,7 +668,7 @@ def compute_missing_surface_bgc_variables(bgc_data):
             if base_var:
                 bgc_data[var_name] = bgc_data[base_var] * factor
             else:
-                bgc_data[var_name] = factor * xr.ones_like(bgc_data["pco2_air"])
+                bgc_data[var_name] = factor * xr.ones_like(bgc_data["dust"])
 
     return bgc_data
 
@@ -903,13 +899,17 @@ def group_dataset(ds, filepath):
         if len(ds["abs_time"]) > 2:
             # Determine the frequency of the data
             abs_time_freq = pd.infer_freq(ds["abs_time"].to_index())
-            if abs_time_freq.lower() in [
-                "d",
-                "h",
-                "t",
-                "s",
-            ]:  # Daily or higher frequency
-                dataset_list, output_filenames = group_by_month(ds, filepath)
+            if abs_time_freq:
+                if abs_time_freq.lower() in [
+                    "d",
+                    "h",
+                    "t",
+                    "s",
+                ]:  # Daily or higher frequency
+                    dataset_list, output_filenames = group_by_month(ds, filepath)
+                else:
+                    dataset_list, output_filenames = group_by_year(ds, filepath)
+            # If no regular spacing, default to year grouping
             else:
                 dataset_list, output_filenames = group_by_year(ds, filepath)
         else:

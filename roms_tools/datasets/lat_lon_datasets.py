@@ -524,9 +524,7 @@ class LatLonDataset:
             "=== Concatenating the data along the longitude dimension ===",
             verbose=verbose,
         ):
-            ds_concatenated = _concatenate_longitudes(
-                ds, self.dim_names, end, self.use_dask
-            )
+            ds_concatenated = _concatenate_longitudes(ds, self.dim_names, end)
 
         return ds_concatenated
 
@@ -610,6 +608,31 @@ class LatLonDataset:
         ValueError
             If the selected latitude or longitude range does not intersect with the dataset.
         """
+        if return_coords_only and self.is_global:
+            # Fast path: build a minimal 2-variable dataset (just lat/lon coordinate
+            # arrays) so that _concatenate_longitudes only operates on small 1D arrays
+            # rather than the full multi-dimensional data — the caller only needs
+            # the coordinate values, not any data variables.
+            lat_name = self.dim_names["latitude"]
+            lon_name = self.dim_names["longitude"]
+            coords_only_ds = xr.Dataset(
+                {
+                    lat_name: self.ds[lat_name],
+                    lon_name: self.ds[lon_name],
+                }
+            )
+            subdomain = choose_subdomain(
+                ds=coords_only_ds,
+                dim_names=self.dim_names,
+                resolution=self.resolution,
+                is_global=self.is_global,
+                target_coords=target_coords,
+                buffer_points=buffer_points,
+                use_dask=False,
+                unchunk_lateral_dims=False,
+            )
+            return subdomain[[lat_name, lon_name]]
+
         subdomain = choose_subdomain(
             ds=self.ds,
             dim_names=self.dim_names,
@@ -622,7 +645,8 @@ class LatLonDataset:
         )
 
         if return_coords_only:
-            # Create and return a dataset with only latitudes and longitudes
+            # Non-global case: dataset doesn't need longitude wrapping, so the
+            # standard subdomain selection is already efficient.
             coords_ds = subdomain[
                 [self.dim_names["latitude"], self.dim_names["longitude"]]
             ]
@@ -1191,6 +1215,187 @@ class WOADataset(LatLonDataset):
 
 
 @dataclass(kw_only=True)
+class MBLDataset(LatLonDataset):
+    """Represents Marine Boundary Layer data from NOAA's Global Monitoring Laboratory on original grid.
+
+    Notes
+    -----
+    Data is only available for time vs latitude. The data are replicated for all longitude points to
+    create a full global lat, lon dataset.
+    """
+
+    needs_lateral_fill: bool = False
+    has_encoded_times: bool = False
+
+    # overwrite clean_up method from parent class
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Ensure the dataset's time dimension is correctly defined and standardized.
+
+        This method creates an xarray dataset from a numpy ndarray. It then converts the time type
+        and extrapolates the latitude values across all longitudes.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The xarray Dataset with time-varying CO2 values.
+        """
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+        }
+
+        # Handle time dimension
+        if len(ds["time"]) != 2209:
+            MBL_URL = "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+            raise ValueError(f"Please use the MBL dataset provided at {MBL_URL}")
+
+        # Convert decimal year to datetime
+        decimal_yr = ds["time"].values
+        years = np.floor(decimal_yr).astype(int)
+        # the data provides 48 evenly spaced times per year
+        step = np.round((decimal_yr - years) * 48).astype(int)
+
+        year_start = np.array([np.datetime64(f"{y}-01-01", "s") for y in years])
+        year_end = np.array([np.datetime64(f"{y + 1}-01-01", "s") for y in years])
+        dur_s = (year_end - year_start).astype("timedelta64[s]").astype(np.int64)
+
+        times = year_start + (step * dur_s // 48).astype("timedelta64[s]")
+        ds = ds.assign_coords(time=("time", times))
+        ds["time"].attrs = {"units": "Datetime", "long_name": "Time"}
+
+        self.dim_names["time"] = "time"
+
+        return ds
+
+
+@dataclass(kw_only=True)
+class MBLco2Dataset(MBLDataset):
+    dataset_name: ClassVar[str] = (
+        "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+    )
+    """The MBL dataset url"""
+
+    def __post_init__(self) -> None:
+        if not self.filename:
+            self.filename = self.dataset_name
+        self.ds_loader_fn = self._load_from_mbl
+
+        super().__post_init__()
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "longitude",
+            "latitude": "latitude",
+            "time": "time",
+        }
+    )
+    var_names: dict[str, str] = field(default_factory=lambda: {"xco2_air": "co2"})
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "xco2_air_alt": "co2",
+        }
+    )
+
+    def _load_from_mbl(self) -> xr.Dataset:
+        """Load a MBL CO2 dataset.
+
+        This reads in a txt file from NOAA's Global Monitory Laboratory, containing co2 values and uncertainty for
+        the dates 1979-01-01, 2025-01-01.
+
+        Returns
+        -------
+        xr.Dataset
+            The converted xarray dataset
+        """
+        data = np.loadtxt(self.filename)
+
+        # Create latitude array corresponding to data
+        sat_lat = [
+            -1.00,
+            -0.95,
+            -0.90,
+            -0.85,
+            -0.80,
+            -0.75,
+            -0.70,
+            -0.65,
+            -0.60,
+            -0.55,
+            -0.50,
+            -0.45,
+            -0.40,
+            -0.35,
+            -0.30,
+            -0.25,
+            -0.20,
+            -0.15,
+            -0.10,
+            -0.05,
+            0.00,
+            0.05,
+            0.10,
+            0.15,
+            0.20,
+            0.25,
+            0.30,
+            0.35,
+            0.40,
+            0.45,
+            0.50,
+            0.55,
+            0.60,
+            0.65,
+            0.70,
+            0.75,
+            0.80,
+            0.85,
+            0.90,
+            0.95,
+            1.00,
+        ]
+
+        lat = np.asin(sat_lat) * 180 / np.pi
+        # Remove columns with uncertainty data
+        num_cols = data.shape[1]
+        cols_to_use = [0, 1, *list(range(3, num_cols, 2))]
+
+        data = data[:, cols_to_use]
+        time = data[:, 0]
+        co2 = data[:, 1:]
+
+        ds = xr.Dataset(
+            {
+                "co2": (
+                    ("time", "latitude"),
+                    co2,
+                    {"units": "µmol mol⁻¹", "long_name": "CO2, Marine boundary layer"},
+                )
+            },
+            coords={
+                "time": ("time", time, {"units": "decimal_year"}),
+                "latitude": (
+                    "latitude",
+                    lat,
+                    {"units": "Degrees North", "long_name": "Latitude"},
+                ),
+            },
+        )
+
+        # Expand CO2 value across all longitude, for each time, lat value
+        lon = np.arange(-180.0, 180.0, 2.0)
+        ds = ds.assign_coords(longitude=("longitude", lon))
+        ds["longitude"].attrs = {"units": "Degrees East", "long_name": "Longitude"}
+
+        ds["co2"] = (
+            ds["co2"]
+            .expand_dims(longitude=ds["longitude"])
+            .transpose("time", "latitude", "longitude")
+        )
+
+        return ds
+
+
+@dataclass(kw_only=True)
 class UnifiedDataset(LatLonDataset):
     """Represents unified BGC data on original grid.
 
@@ -1329,11 +1534,10 @@ class UnifiedBGCSurfaceDataset(UnifiedDataset):
         }
     )
     var_names: dict[str, str] = field(
-        default_factory=lambda: {"pco2_air": "pco2_air", "dust": "dust", "iron": "iron"}
+        default_factory=lambda: {"dust": "dust", "iron": "iron"}
     )
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "pco2_air_alt": "pco2_air_alt",
             "nox": "nox",
             "nhy": "nhy",
         }
@@ -1578,8 +1782,6 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
 
     var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "pco2_air": "pCO2SURF",
-            "pco2_air_alt": "pCO2SURF",
             "iron": "IRON_FLUX",
             "dust": "dust_FLUX_IN",
             "nox": "NOx_FLUX",
@@ -1608,9 +1810,7 @@ class CESMBGCSurfaceForcingDataset(CESMDataset):
             self.ds = ds
 
         mask = xr.where(
-            self.ds[self.var_names["pco2_air"]]
-            .isel({self.dim_names["time"]: 0})
-            .isnull(),
+            self.ds[self.var_names["dust"]].isel({self.dim_names["time"]: 0}).isnull(),
             0,
             1,
         )
@@ -1655,67 +1855,79 @@ class ERA5Dataset(LatLonDataset):
         - Convert temperature from Kelvin to Celsius.
         - Compute relative humidity if not present, convert to absolute humidity.
         - Use SST to create mask.
+
+        revised to be dask-lazy
         """
-        # Translate radiation to fluxes. ERA5 stores values integrated over 1 hour.
-        # Convert radiation from J/m^2 to W/m^2
-        self.ds[self.var_names["swrad"]] /= 3600
-        self.ds[self.var_names["lwrad"]] /= 3600
-        self.ds[self.var_names["swrad"]].attrs["units"] = "W/m^2"
-        self.ds[self.var_names["lwrad"]].attrs["units"] = "W/m^2"
+        ds = self.ds
+        vn = self.var_names
+
+        # --- Build dict of all modifications, applied lazily via assign ---
+        updates = {}
+
+        # Convert radiation from J/m^2 to W/m^2 (ERA5 integrates over 1 hour)
+        updates[vn["swrad"]] = ds[vn["swrad"]] / 3600
+        updates[vn["lwrad"]] = ds[vn["lwrad"]] / 3600
+
         # Convert rainfall from m to cm/day
-        self.ds[self.var_names["rain"]] *= 100 * 24
+        updates[vn["rain"]] = ds[vn["rain"]] * (100 * 24)
 
         # Convert temperature from Kelvin to Celsius
-        self.ds[self.var_names["Tair"]] -= 273.15
-        self.ds[self.var_names["d2m"]] -= 273.15
-        self.ds[self.var_names["Tair"]].attrs["units"] = "degrees C"
-        self.ds[self.var_names["d2m"]].attrs["units"] = "degrees C"
+        updates[vn["Tair"]] = ds[vn["Tair"]] - 273.15
+        updates[vn["d2m"]] = ds[vn["d2m"]] - 273.15
 
-        # Compute relative humidity if not present
-        if "qair" not in self.ds.data_vars:
-            qair = np.exp(
-                (17.625 * self.ds[self.var_names["d2m"]])
-                / (243.04 + self.ds[self.var_names["d2m"]])
-            ) / np.exp(
-                (17.625 * self.ds[self.var_names["Tair"]])
-                / (243.04 + self.ds[self.var_names["Tair"]])
+        # Apply all scalar transforms in one lazy assign
+        ds = ds.assign(updates)
+
+        # Update units attributes (metadata only, never triggers compute)
+        ds[vn["swrad"]].attrs["units"] = "W/m^2"
+        ds[vn["lwrad"]].attrs["units"] = "W/m^2"
+        ds[vn["Tair"]].attrs["units"] = "degrees C"
+        ds[vn["d2m"]].attrs["units"] = "degrees C"
+
+        # --- Humidity (lazy - all xarray/numpy ops on dask arrays stay lazy) ---
+        if "qair" not in ds.data_vars:
+            # Use the already-updated (Celsius) versions from ds
+            tair = ds[vn["Tair"]]
+            d2m = ds[vn["d2m"]]
+
+            # Relative humidity (Magnus formula)
+            qair = np.exp((17.625 * d2m) / (243.04 + d2m)) / np.exp(
+                (17.625 * tair) / (243.04 + tair)
             )
+
             # Convert relative to absolute humidity
             patm = 1010.0
             cff = (
                 (1.0007 + 3.46e-6 * patm)
                 * 6.1121
-                * np.exp(
-                    17.502
-                    * self.ds[self.var_names["Tair"]]
-                    / (240.97 + self.ds[self.var_names["Tair"]])
-                )
+                * np.exp(17.502 * tair / (240.97 + tair))
             )
             cff = cff * qair
+            qair_abs = 0.62197 * (cff / (patm - 0.378 * cff))
 
-            ds = self.ds
-            ds["qair"] = 0.62197 * (cff / (patm - 0.378 * cff))
+            # Assign qair and drop d2m in one lazy operation
+            ds = ds.assign({"qair": qair_abs})
             ds["qair"].attrs["long_name"] = "Absolute humidity at 2m"
             ds["qair"].attrs["units"] = "kg/kg"
-            ds = ds.drop_vars([self.var_names["d2m"]])
-            self.ds = ds
+            ds = ds.drop_vars([vn["d2m"]])
 
-            # Update var_names dictionary
-            var_names = {**self.var_names, "qair": "qair"}
-            var_names.pop("d2m")
-            self.var_names = var_names
+            # Update var_names
+            self.var_names = {
+                **{k: v for k, v in vn.items() if k != "d2m"},
+                "qair": "qair",
+            }
+            vn = self.var_names
 
-        if "mask" in self.var_names.keys():
-            ds = self.ds
-            mask = xr.where(self.ds[self.var_names["mask"]].isel(time=0).isnull(), 0, 1)
-            ds["mask"] = mask
-            ds = ds.drop_vars([self.var_names["mask"]])
-            self.ds = ds
+        # --- Mask (lazy) ---
+        if "mask" in vn:
+            mask = xr.where(ds[vn["mask"]].isel(time=0).isnull(), 0, 1)
+            ds = ds.assign({"mask": mask})
+            ds = ds.drop_vars([vn["mask"]])
 
-            # Remove mask from var_names dictionary
-            var_names = self.var_names
-            var_names.pop("mask")
-            self.var_names = var_names
+            # Remove mask from var_names
+            self.var_names = {k: v for k, v in vn.items() if k != "mask"}
+
+        self.ds = ds
 
 
 @dataclass(kw_only=True)
@@ -1748,18 +1960,20 @@ class ERA5ARCODataset(ERA5Dataset):
 class ERA5Correction(LatLonDataset):
     """Global dataset to correct ERA5 radiation.
 
-    The dataset contains multiplicative correction factors for the ERA5 shortwave
-    radiation, obtained by comparing the COREv2 climatology to the ERA5 climatology.
+    The dataset contains multiplicative correction factors for both ERA5 shortwave
+    and longwave radiation, obtained by comparing the COREv2 climatology to the
+    ERA5 climatology.
     """
 
     _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
 
     filename: str = field(
-        default_factory=lambda: download_correction_data("SSR_correction.nc")
+        default_factory=lambda: download_correction_data("ERA5_correction.nc")
     )
     var_names: dict[str, str] = field(
         default_factory=lambda: {
             "swr_corr": "ssr_corr",  # multiplicative correction factor for ERA5 shortwave radiation
+            "lwr_corr": "strd_corr",  # multiplicative correction factor for ERA5 longwave radiation
         }
     )
     dim_names: dict[str, str] = field(
@@ -1928,7 +2142,7 @@ class TPXOManager:
     constituents from the TPXO dataset.
 
     This class handles multiple tidal constituents following the TPXO9v2a standard.
-    The self-attraction and loading (SAL) correction data is sourced internally from TPXO9v2a.
+    The self-attraction and loading (SAL) correction data is sourced internally from TPXO10v2a, which follows the TPXO9v2a standard.
 
     Parameters
     ----------
@@ -1945,9 +2159,6 @@ class TPXOManager:
         Reference date for the TPXO data. Defaults to January 1, 1992.
         Used as the baseline for tidal time series calculations.
 
-    allan_factor : float, optional
-        Factor used in tidal model computations. Defaults to 2.0.
-
     use_dask : bool, optional
         Whether to use Dask for chunking. If True, data is loaded lazily; if False, data is loaded eagerly. Defaults to False.
 
@@ -1961,11 +2172,10 @@ class TPXOManager:
     filenames: dict
     ntides: int
     reference_date: datetime = datetime(1992, 1, 1)
-    allan_factor: float = 2.0
     use_dask: bool | None = False
 
     def __post_init__(self):
-        fname_sal = download_sal_data("sal_tpxo9.v2a.nc")
+        fname_sal = download_sal_data("sal_tpxo10.v2a.nc")
 
         # Initialize the data_dict with TPXODataset instances
         data_dict = {
@@ -1982,7 +2192,7 @@ class TPXOManager:
                 location="h",
                 var_names={"sal_Re": "hRe", "sal_Im": "hIm"},
                 use_dask=self.use_dask,
-                tolerate_coord_mismatch=True,  # Allow coordinate mismatch since SAL is from TPXO9v2a and may not align exactly with newer grids
+                tolerate_coord_mismatch=True,  # Allow coordinate mismatch since SAL is from TPXO10v2a and may not align exactly with newer grids
             ),
             "u": TPXODataset(
                 filename=self.filenames["u"],
@@ -2015,7 +2225,7 @@ class TPXOManager:
 
     def get_omega(self):
         """Retrieve angular frequencies (omega) for tidal constituents from the TPXO9.v2
-        atlas.
+        atlas. Confirmed to be the same as for TPXO10v2a, 2026-06-12.
 
         This method returns the angular frequencies (in radians per second) for 15 tidal constituents,
         sourced from the TPXO tidal model and defined in the OTPSnc `constit.h` file, see https://www.tpxo.net/otps.
@@ -2357,11 +2567,11 @@ class TPXOManager:
         tpc = self.compute_equilibrium_tide(lon, lat)
 
         # Correct for SAL
-        tsc = self.allan_factor * (
+        tsc = (
             datasets["sal"].ds[datasets["sal"].var_names["sal_Re"]]
             + 1j * datasets["sal"].ds[datasets["sal"].var_names["sal_Im"]]
         )
-        tpc = tpc - tsc
+        tpc = tpc + tsc
 
         # Elevations and transports
         thc = (
@@ -2492,7 +2702,9 @@ def _concatenate_longitudes(
         - "upper": extend by adding 360 degrees.
         - "both": extend on both sides.
     use_dask : bool, default False
-        If True, chunk the concatenated longitude dimension using Dask.
+        Accepted for backward compatibility; no longer causes eager rechunking.
+        Rechunking should be applied by the caller after longitude selection so it
+        operates on the small regional subset rather than the full global dataset.
 
     Returns
     -------
@@ -2526,10 +2738,6 @@ def _concatenate_longitudes(
         if lon_name in ds[var].dims:
             field = ds[var]
             field_concat = xr.concat([field] * n_copies, dim=lon_name)
-
-            if use_dask:
-                field_concat = field_concat.chunk({lon_name: -1})
-
             ds_concat[var] = field_concat
         else:
             ds_concat[var] = ds[var]
@@ -2570,7 +2778,8 @@ def choose_subdomain(
     buffer_points : int, default 20
         Number of grid points to extend beyond the target coordinates.
     use_dask: bool, optional
-        Indicates whether to use dask for chunking. If True, data is loaded with dask; if False, data is processed eagerly. Defaults to False.
+        Accepted for backward compatibility; no longer used internally. Rechunking
+        is deferred to the caller via ``unchunk_lateral_dims``. Defaults to False.
     unchunk_lateral_dims : bool
             Optionally set the dask chunking of the dataset to tell dask that full (non-time)
             dimensions are required for subsequent operations. Defaults to False.

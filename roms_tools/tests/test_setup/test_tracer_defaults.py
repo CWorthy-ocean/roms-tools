@@ -1,8 +1,7 @@
-from pathlib import Path
-
 import pytest
 import xarray as xr
 
+from roms_tools.datasets.download import download_river_tracer_defaults
 from roms_tools.datasets.river_datasets import (
     RECOMMENDED_VALUE_INDEX,
     VALUE_OPTION_DIM,
@@ -23,24 +22,13 @@ def clear_tracer_defaults_cache():
 
 
 @pytest.fixture
-def bundled_defaults_nc():
-    return (
-        Path(__file__).resolve().parents[2]
-        / "datasets"
-        / "data"
-        / "river_tracer_defaults.nc"
-    )
+def tracer_defaults_path():
+    """Path to the river tracer defaults NetCDF, fetched via pooch."""
+    return download_river_tracer_defaults()
 
 
 class TestTracerDefaults:
-    def test_reads_recommended_values_from_bundled_netcdf(
-        self, monkeypatch, bundled_defaults_nc
-    ):
-        monkeypatch.setattr(
-            "roms_tools.datasets.river_datasets.download_river_tracer_defaults",
-            lambda: str(bundled_defaults_nc),
-        )
-
+    def test_reads_recommended_values_from_netcdf(self):
         defaults = get_tracer_defaults()
 
         assert defaults["DIC"] == pytest.approx(1640.071)
@@ -54,8 +42,8 @@ class TestTracerDefaults:
         assert len(defaults) == len(MARBL_TRACER_NAMES)
         assert len(defaults) == 34
 
-    def test_dataclass_exposes_dataset(self, bundled_defaults_nc):
-        data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)
+    def test_dataclass_exposes_dataset(self, tracer_defaults_path):
+        data = RiverTracerDefaultsDataset(filename=tracer_defaults_path)
 
         assert "DIC" in data.ds
         assert data.ds["DIC"].attrs["units"] == "mmol/m3"
@@ -84,10 +72,10 @@ class TestTracerDefaults:
     def test_recommended_index_is_zero(self):
         assert RECOMMENDED_VALUE_INDEX == 0
 
-    def test_requires_calendar_discharge_time_is_false(self, bundled_defaults_nc):
-        data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)
+    def test_requires_calendar_discharge_time_is_false(self, tracer_defaults_path):
+        data = RiverTracerDefaultsDataset(filename=tracer_defaults_path)
         assert data.requires_calendar_discharge_time is False
 
-    def test_temporal_interpolation_is_none(self, bundled_defaults_nc):
-        data = RiverTracerDefaultsDataset(filename=bundled_defaults_nc)
+    def test_temporal_interpolation_is_none(self, tracer_defaults_path):
+        data = RiverTracerDefaultsDataset(filename=tracer_defaults_path)
         assert data.temporal_interpolation == "none"

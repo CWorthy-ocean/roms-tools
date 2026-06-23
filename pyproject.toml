@@ -81,7 +81,7 @@ fallback_version = "9999"
 exclude = ["docs", "tests", "tests.*", "docs.*"]
 
 [tool.setuptools.package-data]
-roms_tools = ["py.typed", "datasets/data/*.nc"]
+roms_tools = ["py.typed"]
 
 [tool.ruff]
 fix = true

@@ -1,4 +1,5 @@
 import logging
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -60,21 +61,50 @@ class FillSource(BaseModel):
     name: Literal["CONSTANTS"] = "CONSTANTS"
 
 
-class ConstantsBgcSource(BaseModel):
+class BgcSourceModel(BaseModel, ABC):
+    """Base for validated BGC source configurations.
+
+    Each subclass is one valid BGC source: it declares its discriminator
+    ``name`` and knows how to build its dataset via ``build_dataset``. Adding a
+    source means adding a subclass and listing it in ``BgcSource`` — no changes
+    to ``RiverForcing`` dispatch logic.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    fill: FillSource = Field(default_factory=FillSource)
+
+    @abstractmethod
+    def build_dataset(
+        self, *, start_time: datetime, end_time: datetime
+    ) -> RiverBGCDataset:
+        """Instantiate the BGC dataset this source describes."""
+        ...
+
+
+class ConstantsBgcSource(BgcSourceModel):
     """Constant default MARBL river tracer concentrations."""
 
-    model_config = ConfigDict(extra="forbid")
     name: Literal["CONSTANTS"] = "CONSTANTS"
-    fill: FillSource = Field(default_factory=FillSource)
+
+    def build_dataset(
+        self, *, start_time: datetime, end_time: datetime
+    ) -> RiverBGCDataset:
+        return RiverTracerDefaultsDataset()
 
 
-class Rivr2oBgcSource(BaseModel):
+class Rivr2oBgcSource(BgcSourceModel):
     """River BGC export from the RIVR2O product (one NetCDF file per year)."""
 
-    model_config = ConfigDict(extra="forbid")
     name: Literal["RIVR2O"] = "RIVR2O"
     path: str | Path | list[str | Path]
-    fill: FillSource = Field(default_factory=FillSource)
+
+    def build_dataset(
+        self, *, start_time: datetime, end_time: datetime
+    ) -> RiverBGCDataset:
+        return Rivr2oRiverBGCDataset(
+            filename=self.path, start_time=start_time, end_time=end_time
+        )
 
 
 # Discriminated on ``name``: these variant classes are the registry of valid
@@ -377,29 +407,24 @@ class RiverForcing:
     def _get_bgc_dataset(self) -> RiverBGCDataset:
         """Instantiate the BGC dataset for the configured ``bgc_source``.
 
-        ``bgc_source`` is a validated ``BgcSource`` model (see ``_input_checks``),
-        so this just dispatches on the variant type.
+        ``bgc_source`` is a validated ``BgcSourceModel`` (see ``_input_checks``),
+        which knows how to build its own dataset.
         """
         if self._bgc_dataset is not None:
             return self._bgc_dataset
 
-        match self.bgc_source:
-            case ConstantsBgcSource():
-                self._bgc_dataset = RiverTracerDefaultsDataset()
-            case Rivr2oBgcSource(path=path):
-                self._bgc_dataset = Rivr2oRiverBGCDataset(
-                    filename=path,
-                    start_time=self.start_time,
-                    end_time=self.end_time,
-                )
-            case _:
-                raise RuntimeError("bgc_source must be a validated BgcSource model.")
+        bgc_source = self.bgc_source
+        if not isinstance(bgc_source, BgcSourceModel):
+            raise RuntimeError("bgc_source must be a validated BgcSource model.")
+        self._bgc_dataset = bgc_source.build_dataset(
+            start_time=self.start_time, end_time=self.end_time
+        )
         return self._bgc_dataset
 
     def _get_fill_defaults(self) -> dict[str, float]:
         """Load scalar fill concentrations for missing or non-finite BGC tracers."""
         bgc_source = self.bgc_source
-        if not isinstance(bgc_source, ConstantsBgcSource | Rivr2oBgcSource):
+        if not isinstance(bgc_source, BgcSourceModel):
             raise RuntimeError("bgc_source must be a validated BgcSource model.")
         return _FILL_DATASET_MAP[bgc_source.fill.name]().defaults
 
@@ -431,7 +456,7 @@ class RiverForcing:
     def _apply_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
         """Apply BGC tracer concentrations from the primary source, with fill."""
         bgc_source = self.bgc_source
-        if not isinstance(bgc_source, ConstantsBgcSource | Rivr2oBgcSource):
+        if not isinstance(bgc_source, BgcSourceModel):
             raise RuntimeError("bgc_source must be a validated BgcSource model.")
         bgc_data = self._get_bgc_dataset()
         if isinstance(bgc_data, RiverTracerDefaultsDataset) and (

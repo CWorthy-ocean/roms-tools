@@ -43,6 +43,16 @@ class RiverBGCDataset(Protocol):
         """How interior temporal gaps in dynamic concentrations are filled."""
         ...
 
+    @property
+    def fill_value(self) -> float | None:
+        """Sentinel marking missing concentrations, or ``None`` if not used.
+
+        ``RiverForcing`` masks this value out of dynamic concentrations before
+        merging in fill defaults, so any dataset that uses a sentinel must
+        surface it here.
+        """
+        ...
+
     def forcing_concentrations(
         self,
         river_volume: xr.DataArray,
@@ -116,7 +126,7 @@ def fill_river_bgc_concentrations(
 
 
 @dataclass(kw_only=True)
-class RiverTracerDefaultsDataset:
+class RiverTracerDefaultsDataset(RiverBGCDataset):
     """Default MARBL river tracer concentrations.
 
     Used as the ``"CONSTANTS"`` ``bgc_source`` and as the default ``fill`` source
@@ -205,6 +215,10 @@ class RiverTracerDefaultsDataset:
     @property
     def temporal_interpolation(self) -> RiverBGCTemporalInterpolation:
         return "none"
+
+    @property
+    def fill_value(self) -> float | None:
+        return None
 
     def forcing_concentrations(
         self,
@@ -713,7 +727,7 @@ _DOP_FROM_POC = 1 / 276
 
 
 @dataclass(kw_only=True)
-class Rivr2oRiverBGCDataset:
+class Rivr2oRiverBGCDataset(RiverBGCDataset):
     """River BGC export data from the RIVR2O river inputs product.
 
     The product is distributed as one NetCDF file per year. Each file contains
@@ -916,6 +930,13 @@ class Rivr2oRiverBGCDataset:
         in_range = (ds[time_dim].dt.year >= start_year) & (
             ds[time_dim].dt.year <= end_year
         )
+        if not bool(in_range.any()):
+            available = sorted({int(y) for y in ds[time_dim].dt.year.values})
+            raise ValueError(
+                f"No RIVR2O files cover the requested years {start_year}-{end_year}. "
+                f"Loaded files span years {available}. Provide RIVR2O files that "
+                "overlap the simulation window."
+            )
         return ds.sel({time_dim: ds[time_dim].where(in_range, drop=True)})
 
     def _adjust_lon_to_grid(self, lon: np.ndarray, *, straddle: bool) -> np.ndarray:

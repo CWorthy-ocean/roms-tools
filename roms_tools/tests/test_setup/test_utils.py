@@ -360,6 +360,13 @@ class TestMonthlyClimatologyExpansion:
             datetime(2020, m, 15) for m in (1, 2, 3)
         ]
 
+    def test_calendar_midmonth_dates_short_window_without_15th(self):
+        # A sub-month window that skips the 15th must still yield one in-window
+        # date tagged to the correct month, not raise.
+        dates = calendar_midmonth_dates(datetime(2020, 1, 20), datetime(2020, 1, 28))
+        assert dates == [datetime(2020, 1, 20)]
+        assert dates[0].month == 1
+
 
 class TestInterpolateDynamicBGCByCalendarYear:
     @staticmethod

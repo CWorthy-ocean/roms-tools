@@ -169,7 +169,11 @@ def calendar_midmonth_dates(start_time: datetime, end_time: datetime) -> list[da
             month = 1
             year += 1
     if not dates:
-        raise ValueError("No mid-month dates fall between start_time and end_time.")
+        # Window is shorter than a month and skips every 15th; fall back to a
+        # single representative mid-month date clamped into the window so the
+        # correct climatology month is still selected.
+        candidate = datetime(start_time.year, start_time.month, 15)
+        dates.append(min(max(candidate, start_time), end_time))
     return dates
 
 
@@ -1513,7 +1517,9 @@ def deserialize_datetime(
     return value
 
 
-def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+def serialize_source_dict(
+    src: dict[str, Any] | BaseModel | None,
+) -> dict[str, Any] | None:
     """Serialize a source or BGC source dictionary for YAML or JSON output.
 
     This function performs the following transformations:
@@ -1539,7 +1545,10 @@ def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
     if src is None:
         return None
 
-    src = deepcopy(src)
+    if isinstance(src, BaseModel):
+        src = src.model_dump(mode="python")
+    else:
+        src = deepcopy(src)
 
     # Serialize paths
     if "path" in src:

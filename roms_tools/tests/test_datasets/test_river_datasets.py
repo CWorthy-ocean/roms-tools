@@ -164,6 +164,27 @@ class TestRivr2oRiverBGCDataset:
         assert dataset.ds.sizes["time"] == 1
         assert dataset.ds.time.dt.year.item() == 2000
 
+    def test_window_outside_loaded_files_raises_clear_error(self, tmp_path):
+        files, _, _ = self._make_files(tmp_path, years=(2000, 2001))
+
+        with pytest.raises(
+            ValueError, match="No RIVR2O files cover the requested years 2010-2011"
+        ):
+            Rivr2oRiverBGCDataset(
+                filename=files,
+                start_time=datetime(2010, 1, 1),
+                end_time=datetime(2011, 12, 31),
+            )
+
+    def test_fill_value_exposed_for_protocol(self, tmp_path):
+        files, _, _ = self._make_files(tmp_path)
+        dataset = Rivr2oRiverBGCDataset(
+            filename=files,
+            start_time=datetime(2000, 1, 1),
+            end_time=datetime(2001, 12, 31),
+        )
+        assert dataset.fill_value == RIVR2O_FILL_VALUE
+
     def test_sample_at_points(self, tmp_path):
         files, lat, lon = self._make_files(tmp_path)
 

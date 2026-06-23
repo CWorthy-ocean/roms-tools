@@ -5,6 +5,7 @@
 ### Breaking Changes
 * `from_file` is now a private function to `Grid`. Files are now loaded as `Grid(filename='grid.nc')` ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * The `ChildGrid` has been removed. Both a child and parent grid are created using `Grid`, and the functions `align_grids` and `make_edata` are called to adjust bathymetry and do the mapping ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573)).
+* Default river/CDR tracer concentrations are now read from `river_tracer_defaults.nc` and differ from the previous hardcoded values (e.g. DIC, NO3, ALK, temperature) ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
 
 ### New Features
 

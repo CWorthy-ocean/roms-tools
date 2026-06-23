@@ -201,7 +201,7 @@ class BoundaryForcing:
     """Optional initial bounding slice when loading source data (Dask); see dataset classes."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
-    use_density_interpolation: bool = True
+    use_density_interpolation: bool = False
     """Whether to interpolate BGC tracers in density space rather than depth space."""
     physics_forcing: "BoundaryForcing | None" = None
     """Physics BoundaryForcing object supplying T/S for density-based BGC interpolation."""

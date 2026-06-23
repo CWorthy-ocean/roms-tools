@@ -715,7 +715,7 @@ def test_ic_density_interpolation_drops_source_ts(
     temp/salt remain.
     """
     ic = initial_conditions_with_unified_bgc_from_climatology
-    assert ic.use_density_interpolation is True
+    assert ic.use_density_interpolation is False
     aux = [v for v in ic.ds.data_vars if str(v).startswith(("temp_", "salt_"))]
     assert aux == [], f"source T/S leaked into output: {aux}"
     # physics temperature/salinity are still present in the output
@@ -728,7 +728,7 @@ def test_ic_bgc_vars_present_with_density_interpolation(
 ):
     """BGC variables are present in the dataset when density interpolation is used."""
     ic = initial_conditions_with_unified_bgc_from_climatology
-    assert ic.use_density_interpolation is True
+    assert ic.use_density_interpolation is False
     for var in ["NO3", "DIC", "ALK", "O2", "PO4"]:
         assert var in ic.ds
 

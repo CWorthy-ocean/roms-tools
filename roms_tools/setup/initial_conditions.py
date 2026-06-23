@@ -174,7 +174,7 @@ class InitialConditions:
     """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
-    use_density_interpolation: bool = True
+    use_density_interpolation: bool = False
     """Whether to interpolate BGC tracers in density space rather than depth space."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into

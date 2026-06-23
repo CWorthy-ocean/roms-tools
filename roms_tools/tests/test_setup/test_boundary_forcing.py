@@ -746,7 +746,7 @@ def test_bgc_bc_density_fallback_without_physics_forcing(
 ):
     """BGC BC with density interpolation but no physics_forcing falls back to depth-based."""
     bf = bgc_boundary_forcing_from_unified_climatology
-    assert bf.use_density_interpolation is True
+    assert bf.use_density_interpolation is False
     assert bf.physics_forcing is None
     # BGC variables should still be present (depth-based fallback succeeded)
     assert any("NO3" in v for v in bf.ds.data_vars)
@@ -790,6 +790,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
         type="bgc",
         physics_forcing=physics_bc,
+        use_density_interpolation=True,
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )

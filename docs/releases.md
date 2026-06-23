@@ -39,8 +39,6 @@
 * River BGC refactored behind a `RiverBGCDataset` protocol; `RiverForcing` merges dynamic and fill tracers via `fill_river_bgc_concentrations`
 * `Rivr2oRiverBGCDataset` handles yearly file loading, spatial sampling, export-to-concentration conversion, and MARBL tracer mapping
 * Monthly discharge climatology is expanded to calendar mid-month dates when combined with year-indexed RIVR2O BGC (`expand_monthly_climatology_time_axis`)
-* Invalid dynamic BGC values (non-finite, negative, fill values) are masked before fill merge
-* Coarse regional RIVR2O test files (2000–2002) added to roms-tools-test-data
 
 ### Documentation
 

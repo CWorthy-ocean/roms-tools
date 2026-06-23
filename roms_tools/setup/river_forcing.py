@@ -236,110 +236,123 @@ class RiverForcing:
         self.ds = ds
 
     def _input_checks(self):
-        if self.source is None:
-            self.source = {"name": "DAI"}
+        self.source = self._normalized_source()
+        self.bgc_source = self._normalized_bgc_source()
+        self._validate_indices()
 
-        if "name" not in self.source:
+    def _normalized_source(self) -> RawDataSource:
+        """Apply defaults to ``source`` and validate its required keys."""
+        source: RawDataSource = (
+            self.source if self.source is not None else {"name": "DAI"}
+        )
+
+        if "name" not in source:
             raise ValueError("`source` must include a 'name'.")
-        if "path" not in self.source:
-            if self.source["name"] != "DAI":
-                raise ValueError("`source` must include a 'path'.")
+        if "path" not in source and source["name"] != "DAI":
+            raise ValueError("`source` must include a 'path'.")
 
         # Set 'climatology' to False if not provided in 'source'
-        self.source = {
-            **self.source,
-            "climatology": self.source.get("climatology", False),
-        }
+        return {**source, "climatology": source.get("climatology", False)}
 
-        if self.include_bgc:
-            if self.bgc_source is None:
-                self.bgc_source = {"name": "CONSTANTS"}
-            elif "name" not in self.bgc_source:
-                raise ValueError("`bgc_source` must include a 'name'.")
-            elif self.bgc_source["name"] not in ("CONSTANTS", "RIVR2O"):
-                raise ValueError(
-                    'Only "CONSTANTS" and "RIVR2O" are valid options for '
-                    'bgc_source["name"].'
+    def _normalized_bgc_source(self) -> RiverBGCSource | None:
+        """Apply defaults to ``bgc_source`` and validate it when BGC is enabled."""
+        if not self.include_bgc:
+            if self.bgc_source is not None:
+                logging.warning(
+                    "`bgc_source` is ignored because `include_bgc` is False."
                 )
-            elif self.bgc_source["name"] == "RIVR2O" and "path" not in self.bgc_source:
+            return self.bgc_source
+
+        bgc_source: RiverBGCSource = (
+            self.bgc_source if self.bgc_source is not None else {"name": "CONSTANTS"}
+        )
+
+        if "name" not in bgc_source:
+            raise ValueError("`bgc_source` must include a 'name'.")
+        if bgc_source["name"] not in _BGC_DATASET_MAP:
+            valid = ", ".join(_BGC_DATASET_MAP)
+            raise ValueError(
+                f'Invalid bgc_source["name"] "{bgc_source["name"]}". '
+                f"Valid options: {valid}."
+            )
+        if bgc_source["name"] == "RIVR2O" and "path" not in bgc_source:
+            raise ValueError(
+                '`bgc_source` must include a "path" when name is "RIVR2O".'
+            )
+
+        fill_source = _get_bgc_fill_source(bgc_source)
+        if fill_source["name"] not in _FILL_DATASET_MAP:
+            valid = ", ".join(_FILL_DATASET_MAP)
+            raise ValueError(
+                f'Invalid bgc_source["fill"]["name"] "{fill_source["name"]}". '
+                f"Valid options: {valid}."
+            )
+
+        bgc_source = {**bgc_source, "fill": fill_source}
+        if "path" in bgc_source:
+            bgc_source = {**bgc_source, "path": serialize_paths(bgc_source["path"])}
+        return bgc_source
+
+    def _validate_indices(self) -> None:
+        """Validate the format of a provided ``indices`` mapping, if any."""
+        if self.indices is None:
+            return
+        if not isinstance(self.indices, dict):
+            raise ValueError("`indices` must be a dictionary.")
+
+        # Ensure the dictionary contains at least one river
+        if len(self.indices) == 0:
+            raise ValueError(
+                "The provided 'indices' dictionary must contain at least one river."
+            )
+
+        for river_name, river_data in self.indices.items():
+            self._validate_river_index_entry(river_name, river_data)
+
+    def _validate_river_index_entry(self, river_name, river_data) -> None:
+        """Validate one ``indices`` entry: a river name and its list of locations."""
+        if not isinstance(river_name, str):
+            raise ValueError(f"River name `{river_name}` must be a string.")
+
+        if not isinstance(river_data, list):
+            raise ValueError(f"Data for river `{river_name}` must be a list of tuples.")
+
+        seen_tuples = set()
+        # Ensure each element in the list is a tuple of length 2
+        for idx_pair in river_data:
+            if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
                 raise ValueError(
-                    '`bgc_source` must include a "path" when name is "RIVR2O".'
+                    f"Each item for river `{river_name}` must be a tuple of length 2 representing (eta_rho, xi_rho)."
                 )
-            fill_source = _get_bgc_fill_source(self.bgc_source)
-            if fill_source["name"] not in _FILL_DATASET_MAP:
-                valid = ", ".join(_FILL_DATASET_MAP)
+
+            eta_rho, xi_rho = idx_pair
+
+            # Ensure both eta_rho and xi_rho are integers
+            if not isinstance(eta_rho, int):
                 raise ValueError(
-                    f'Invalid bgc_source["fill"]["name"] "{fill_source["name"]}". '
-                    f"Valid options: {valid}."
+                    f"First element of tuple for river `{river_name}` must be an integer (eta_rho), but got {type(eta_rho)}."
                 )
-            self.bgc_source = {
-                **self.bgc_source,
-                "fill": fill_source,
-            }
-            if "path" in self.bgc_source:
-                self.bgc_source = {
-                    **self.bgc_source,
-                    "path": serialize_paths(self.bgc_source["path"]),
-                }
-        elif self.bgc_source is not None:
-            logging.warning("`bgc_source` is ignored because `include_bgc` is False.")
-
-        # Check if 'indices' is provided and has the correct format
-        if self.indices is not None:
-            if not isinstance(self.indices, dict):
-                raise ValueError("`indices` must be a dictionary.")
-
-            # Ensure the dictionary contains at least one river
-            if len(self.indices) == 0:
+            if not isinstance(xi_rho, int):
                 raise ValueError(
-                    "The provided 'indices' dictionary must contain at least one river."
+                    f"Second element of tuple for river `{river_name}` must be an integer (xi_rho), but got {type(xi_rho)}."
                 )
 
-            for river_name, river_data in self.indices.items():
-                if not isinstance(river_name, str):
-                    raise ValueError(f"River name `{river_name}` must be a string.")
+            # Check that eta_rho and xi_rho are within the valid range
+            if not (0 <= eta_rho < len(self.grid.ds.eta_rho)):
+                raise ValueError(
+                    f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho) - 1}]."
+                )
+            if not (0 <= xi_rho < len(self.grid.ds.xi_rho)):
+                raise ValueError(
+                    f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho) - 1}]."
+                )
 
-                if not isinstance(river_data, list):
-                    raise ValueError(
-                        f"Data for river `{river_name}` must be a list of tuples."
-                    )
-
-                seen_tuples = set()
-                # Ensure each element in the list is a tuple of length 2
-                for idx_pair in river_data:
-                    if not isinstance(idx_pair, tuple) or len(idx_pair) != 2:
-                        raise ValueError(
-                            f"Each item for river `{river_name}` must be a tuple of length 2 representing (eta_rho, xi_rho)."
-                        )
-
-                    eta_rho, xi_rho = idx_pair
-
-                    # Ensure both eta_rho and xi_rho are integers
-                    if not isinstance(eta_rho, int):
-                        raise ValueError(
-                            f"First element of tuple for river `{river_name}` must be an integer (eta_rho), but got {type(eta_rho)}."
-                        )
-                    if not isinstance(xi_rho, int):
-                        raise ValueError(
-                            f"Second element of tuple for river `{river_name}` must be an integer (xi_rho), but got {type(xi_rho)}."
-                        )
-
-                    # Check that eta_rho and xi_rho are within the valid range
-                    if not (0 <= eta_rho < len(self.grid.ds.eta_rho)):
-                        raise ValueError(
-                            f"Value of eta_rho for river `{river_name}` ({eta_rho}) is out of valid range [0, {len(self.grid.ds.eta_rho) - 1}]."
-                        )
-                    if not (0 <= xi_rho < len(self.grid.ds.xi_rho)):
-                        raise ValueError(
-                            f"Value of xi_rho for river `{river_name}` ({xi_rho}) is out of valid range [0, {len(self.grid.ds.xi_rho) - 1}]."
-                        )
-
-                    # Check for duplicate tuples for a single river
-                    if idx_pair in seen_tuples:
-                        raise ValueError(
-                            f"Duplicate location {idx_pair} found for river `{river_name}`."
-                        )
-                    seen_tuples.add(idx_pair)
+            # Check for duplicate tuples for a single river
+            if idx_pair in seen_tuples:
+                raise ValueError(
+                    f"Duplicate location {idx_pair} found for river `{river_name}`."
+                )
+            seen_tuples.add(idx_pair)
 
     def _get_data(self) -> RiverDataset:
         source = self.source
@@ -359,29 +372,25 @@ class RiverForcing:
         return DaiRiverDataset(**data_dict)
 
     def _get_bgc_dataset(self) -> RiverBGCDataset:
-        """Instantiate the BGC dataset for the configured ``bgc_source``."""
+        """Instantiate the BGC dataset for the configured ``bgc_source``.
+
+        ``bgc_source`` is normalized and validated in ``_input_checks`` (``name``
+        is a key of ``_BGC_DATASET_MAP``, and ``"RIVR2O"`` carries a ``"path"``),
+        so this dispatches on the name and only narrows the path value's type.
+        """
         if self._bgc_dataset is not None:
             return self._bgc_dataset
 
         bgc_source = self.bgc_source
         if bgc_source is None:
             raise RuntimeError("bgc_source must be set.")
-        source_name = str(bgc_source["name"])
-        if source_name not in _BGC_DATASET_MAP:
-            valid = ", ".join(_BGC_DATASET_MAP)
-            raise ValueError(
-                f'Invalid bgc_source["name"] "{source_name}". Valid options: {valid}.'
-            )
-        if source_name == "CONSTANTS":
+
+        if bgc_source["name"] == "CONSTANTS":
             self._bgc_dataset = RiverTracerDefaultsDataset()
             return self._bgc_dataset
-        path = bgc_source.get("path")
-        if (
-            path is None
-            or isinstance(path, bool)
-            or isinstance(path, dict)
-            or not isinstance(path, str | Path | list)
-        ):
+
+        path = bgc_source["path"]
+        if not isinstance(path, str | Path | list):
             raise ValueError('bgc_source must include a "path" when name is "RIVR2O".')
         self._bgc_dataset = Rivr2oRiverBGCDataset(
             filename=path,

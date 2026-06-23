@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,6 +15,7 @@ from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.datasets.river_datasets import (
     DaiRiverDataset,
     RiverBGCDataset,
+    RiverDataset,
     RiverTracerDefaultsDataset,
     Rivr2oRiverBGCDataset,
     fill_river_bgc_concentrations,
@@ -190,7 +191,7 @@ class RiverForcing:
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
-    climatology: xr.Dataset = field(init=False, repr=False)
+    climatology: bool = field(init=False, repr=False)
     """Indicates whether the final river forcing is climatological."""
     _bgc_dataset: RiverBGCDataset | None = field(
         default=None, init=False, repr=False, compare=False
@@ -340,21 +341,22 @@ class RiverForcing:
                         )
                     seen_tuples.add(idx_pair)
 
-    def _get_data(self):
-        data_dict = {
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "climatology": self.source["climatology"],
-        }
-
-        if self.source["name"] == "DAI":
-            if "path" in self.source.keys():
-                data_dict["filename"] = self.source["path"]
-            data = DaiRiverDataset(**data_dict)
-        else:
+    def _get_data(self) -> RiverDataset:
+        source = self.source
+        if source is None:
+            raise RuntimeError("source must be set.")
+        if source["name"] != "DAI":
             raise ValueError('Only "DAI" is a valid option for source["name"].')
 
-        return data
+        data_dict: dict[str, Any] = {
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "climatology": source["climatology"],
+        }
+        if "path" in source:
+            data_dict["filename"] = source["path"]
+
+        return DaiRiverDataset(**data_dict)
 
     def _get_bgc_dataset(self) -> RiverBGCDataset:
         """Instantiate the BGC dataset for the configured ``bgc_source``."""
@@ -467,7 +469,7 @@ class RiverForcing:
             self._set_river_tracer_values(ds, tracer_name, values)
         return ds
 
-    def _move_rivers_to_closest_coast(self, target_coords, data):
+    def _move_rivers_to_closest_coast(self, target_coords, data: RiverDataset):
         """Move river mouths to the closest coastal grid cell.
 
         This method computes the closest coastal grid point to each river mouth
@@ -481,8 +483,8 @@ class RiverForcing:
             - "lat" (xarray.DataArray): Latitude coordinates of the target grid points.
             - "straddle" (bool): A flag indicating whether the river mouth crosses the International Date Line.
 
-        data : object
-            An object that contains the dataset and related variables. It must have the following attributes:
+        data : RiverDataset
+            A river dataset providing the following attributes:
             - `ds`: The dataset containing river information.
             - `var_names`: A dictionary of variable names in the dataset (e.g., longitude, latitude, station names).
             - `dim_names`: A dictionary containing dimension names for the dataset (e.g., "station", "eta_rho", "xi_rho").
@@ -525,7 +527,7 @@ class RiverForcing:
 
         return river_indices
 
-    def _create_river_forcing(self, data):
+    def _create_river_forcing(self, data: RiverDataset):
         """Create river forcing data for volume flux and tracers (temperature, salinity,
         BGC tracers).
 
@@ -538,8 +540,8 @@ class RiverForcing:
 
         Parameters
         ----------
-        data : object
-            An object containing the necessary dataset and variables for river forcing creation. The object must have the following attributes:
+        data : RiverDataset
+            A river dataset providing the necessary data and variables for river forcing creation, with the following attributes:
             - `ds`: The dataset containing the river flux, ratio, and other related variables.
             - `var_names`: A dictionary mapping variable names (e.g., `"flux"`, `"ratio"`, `"name"`) to the corresponding variable names in the dataset.
             - `dim_names`: A dictionary mapping dimension names (e.g., `"time"`, `"station"`) to the corresponding dimension names in the dataset.
@@ -551,7 +553,10 @@ class RiverForcing:
             - `river_volume`: A `DataArray` representing the river volume flux (m³/s).
             - `river_tracer`: A `DataArray` representing tracer data for temperature, salinity and BGC tracers (if specified) for each river over time.
         """
-        if self.source["climatology"]:
+        source = self.source
+        if source is None:
+            raise RuntimeError("source must be set.")
+        if source["climatology"]:
             self.climatology = True
         else:
             if self.convert_to_climatology in ["never", "if_any_missing"]:

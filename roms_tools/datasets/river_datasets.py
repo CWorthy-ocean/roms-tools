@@ -116,7 +116,7 @@ def fill_river_bgc_concentrations(
 
 
 @dataclass(kw_only=True)
-class RiverTracerDefaultsDataset:
+class RiverTracerDefaultsDataset(RiverBGCDataset):
     """Default MARBL river tracer concentrations.
 
     Used as the ``"CONSTANTS"`` ``bgc_source`` and as the default ``fill`` source
@@ -713,7 +713,7 @@ _DOP_FROM_POC = 1 / 276
 
 
 @dataclass(kw_only=True)
-class Rivr2oRiverBGCDataset:
+class Rivr2oRiverBGCDataset(RiverBGCDataset):
     """River BGC export data from the RIVR2O river inputs product.
 
     The product is distributed as one NetCDF file per year. Each file contains

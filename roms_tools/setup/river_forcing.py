@@ -587,8 +587,15 @@ class RiverForcing:
         ds["river_volume"].attrs["units"] = "m^3/s"
 
         # River tracers (per-tracer units live on tracer_unit, not on this array)
-        tracer_template = ds.river_time.astype(np.float32) * ds.ntracers * ds.nriver
-        ds["river_tracer"] = xr.zeros_like(tracer_template, dtype=np.float32)
+        target_shape = (
+            ds.sizes["river_time"],
+            ds.sizes["ntracers"],
+            ds.sizes["nriver"],
+        )
+        ds["river_tracer"] = xr.DataArray(
+            np.zeros(target_shape, dtype=np.float32),
+            dims=("river_time", "ntracers", "nriver"),
+        )
         ds["river_tracer"].attrs = {"long_name": "River tracer data"}
 
         if self.include_bgc:

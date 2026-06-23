@@ -1513,7 +1513,9 @@ def deserialize_datetime(
     return value
 
 
-def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+def serialize_source_dict(
+    src: dict[str, Any] | BaseModel | None,
+) -> dict[str, Any] | None:
     """Serialize a source or BGC source dictionary for YAML or JSON output.
 
     This function performs the following transformations:
@@ -1539,7 +1541,10 @@ def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
     if src is None:
         return None
 
-    src = deepcopy(src)
+    if isinstance(src, BaseModel):
+        src = src.model_dump(mode="python")
+    else:
+        src = deepcopy(src)
 
     # Serialize paths
     if "path" in src:

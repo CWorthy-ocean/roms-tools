@@ -1,14 +1,14 @@
 import logging
 from collections import defaultdict
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
@@ -52,29 +52,44 @@ DISCHARGE_CLIMATOLOGY_ATTR = "discharge_climatology"
 
 TRiverIndex: TypeAlias = dict[tuple[int, int], list[str]]
 
-RiverBGCSource: TypeAlias = dict[
-    str, str | Path | Sequence[str | Path] | bool | dict[str, str]
-]
 
-_BGC_DATASET_MAP: dict[str, type[RiverBGCDataset]] = {
-    "CONSTANTS": RiverTracerDefaultsDataset,
-    "RIVR2O": Rivr2oRiverBGCDataset,
-}
+class FillSource(BaseModel):
+    """Secondary BGC source supplying tracers missing from the primary result."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: Literal["CONSTANTS"] = "CONSTANTS"
+
+
+class ConstantsBgcSource(BaseModel):
+    """Constant default MARBL river tracer concentrations."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: Literal["CONSTANTS"] = "CONSTANTS"
+    fill: FillSource = Field(default_factory=FillSource)
+
+
+class Rivr2oBgcSource(BaseModel):
+    """River BGC export from the RIVR2O product (one NetCDF file per year)."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: Literal["RIVR2O"] = "RIVR2O"
+    path: str | Path | list[str | Path]
+    fill: FillSource = Field(default_factory=FillSource)
+
+
+# Discriminated on ``name``: these variant classes are the registry of valid
+# BGC sources. Users pass a plain dict; the adapter validates and coerces it,
+# rejecting unknown names, missing RIVR2O paths, and unexpected keys.
+BgcSource: TypeAlias = Annotated[
+    ConstantsBgcSource | Rivr2oBgcSource, Field(discriminator="name")
+]
+_BGC_SOURCE_ADAPTER: TypeAdapter[ConstantsBgcSource | Rivr2oBgcSource] = TypeAdapter(
+    BgcSource
+)
 
 _FILL_DATASET_MAP: dict[str, type[RiverTracerDefaultsDataset]] = {
     "CONSTANTS": RiverTracerDefaultsDataset,
 }
-
-
-def _get_bgc_fill_source(bgc_source: RiverBGCSource) -> dict[str, str]:
-    r"""Return normalized ``bgc_source["fill"]`` with a string ``name`` key."""
-    raw_fill = bgc_source.get("fill", {"name": "CONSTANTS"})
-    if not isinstance(raw_fill, dict):
-        raise ValueError('bgc_source["fill"] must be a dictionary.')
-    fill_name = raw_fill.get("name")
-    if not isinstance(fill_name, str):
-        raise ValueError('bgc_source["fill"] must include a "name".')
-    return {"name": fill_name}
 
 
 def _mask_invalid_dynamic_bgc_concentrations(
@@ -177,8 +192,12 @@ class RiverForcing:
     """Determines when to compute climatology for river forcing."""
     include_bgc: bool = False
     """Whether to include BGC tracers."""
-    bgc_source: RiverBGCSource | None = None
-    """Primary and fill BGC dataset configuration."""
+    bgc_source: dict | BgcSource | None = None
+    """Primary and fill BGC dataset configuration.
+
+    Accepts a plain dict on input; normalized to a validated ``BgcSource`` model
+    (or ``None`` when ``include_bgc`` is False) during initialization.
+    """
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the ROMS simulation."""
 
@@ -254,44 +273,28 @@ class RiverForcing:
         # Set 'climatology' to False if not provided in 'source'
         return {**source, "climatology": source.get("climatology", False)}
 
-    def _normalized_bgc_source(self) -> RiverBGCSource | None:
-        """Apply defaults to ``bgc_source`` and validate it when BGC is enabled."""
+    def _normalized_bgc_source(self) -> BgcSource | None:
+        """Validate ``bgc_source`` into a typed model when BGC is enabled.
+
+        Returns ``None`` when BGC is disabled. Otherwise the input dict is
+        validated into the discriminated ``BgcSource`` union, which applies the
+        ``CONSTANTS`` default and rejects unknown names, missing RIVR2O paths,
+        and unexpected keys.
+        """
         if not self.include_bgc:
             if self.bgc_source is not None:
                 logging.warning(
                     "`bgc_source` is ignored because `include_bgc` is False."
                 )
-            return self.bgc_source
+            return None
 
-        bgc_source: RiverBGCSource = (
+        raw: Any = (
             self.bgc_source if self.bgc_source is not None else {"name": "CONSTANTS"}
         )
-
-        if "name" not in bgc_source:
-            raise ValueError("`bgc_source` must include a 'name'.")
-        if bgc_source["name"] not in _BGC_DATASET_MAP:
-            valid = ", ".join(_BGC_DATASET_MAP)
-            raise ValueError(
-                f'Invalid bgc_source["name"] "{bgc_source["name"]}". '
-                f"Valid options: {valid}."
-            )
-        if bgc_source["name"] == "RIVR2O" and "path" not in bgc_source:
-            raise ValueError(
-                '`bgc_source` must include a "path" when name is "RIVR2O".'
-            )
-
-        fill_source = _get_bgc_fill_source(bgc_source)
-        if fill_source["name"] not in _FILL_DATASET_MAP:
-            valid = ", ".join(_FILL_DATASET_MAP)
-            raise ValueError(
-                f'Invalid bgc_source["fill"]["name"] "{fill_source["name"]}". '
-                f"Valid options: {valid}."
-            )
-
-        bgc_source = {**bgc_source, "fill": fill_source}
-        if "path" in bgc_source:
-            bgc_source = {**bgc_source, "path": serialize_paths(bgc_source["path"])}
-        return bgc_source
+        if isinstance(raw, dict) and "path" in raw:
+            # Normalize Path -> str so the stored config round-trips through YAML.
+            raw = {**raw, "path": serialize_paths(raw["path"])}
+        return _BGC_SOURCE_ADAPTER.validate_python(raw)
 
     def _validate_indices(self) -> None:
         """Validate the format of a provided ``indices`` mapping, if any."""
@@ -374,45 +377,31 @@ class RiverForcing:
     def _get_bgc_dataset(self) -> RiverBGCDataset:
         """Instantiate the BGC dataset for the configured ``bgc_source``.
 
-        ``bgc_source`` is normalized and validated in ``_input_checks`` (``name``
-        is a key of ``_BGC_DATASET_MAP``, and ``"RIVR2O"`` carries a ``"path"``),
-        so this dispatches on the name and only narrows the path value's type.
+        ``bgc_source`` is a validated ``BgcSource`` model (see ``_input_checks``),
+        so this just dispatches on the variant type.
         """
         if self._bgc_dataset is not None:
             return self._bgc_dataset
 
-        bgc_source = self.bgc_source
-        if bgc_source is None:
-            raise RuntimeError("bgc_source must be set.")
-
-        if bgc_source["name"] == "CONSTANTS":
-            self._bgc_dataset = RiverTracerDefaultsDataset()
-            return self._bgc_dataset
-
-        path = bgc_source["path"]
-        if not isinstance(path, str | Path | list):
-            raise ValueError('bgc_source must include a "path" when name is "RIVR2O".')
-        self._bgc_dataset = Rivr2oRiverBGCDataset(
-            filename=path,
-            start_time=self.start_time,
-            end_time=self.end_time,
-        )
+        match self.bgc_source:
+            case ConstantsBgcSource():
+                self._bgc_dataset = RiverTracerDefaultsDataset()
+            case Rivr2oBgcSource(path=path):
+                self._bgc_dataset = Rivr2oRiverBGCDataset(
+                    filename=path,
+                    start_time=self.start_time,
+                    end_time=self.end_time,
+                )
+            case _:
+                raise RuntimeError("bgc_source must be a validated BgcSource model.")
         return self._bgc_dataset
 
     def _get_fill_defaults(self) -> dict[str, float]:
         """Load scalar fill concentrations for missing or non-finite BGC tracers."""
         bgc_source = self.bgc_source
-        if bgc_source is None:
-            raise RuntimeError("bgc_source must be set.")
-        fill_source = _get_bgc_fill_source(bgc_source)
-        fill_name = fill_source["name"]
-        if fill_name not in _FILL_DATASET_MAP:
-            valid = ", ".join(_FILL_DATASET_MAP)
-            raise ValueError(
-                f'Invalid bgc_source["fill"]["name"] "{fill_name}". '
-                f"Valid options: {valid}."
-            )
-        return _FILL_DATASET_MAP[fill_name]().defaults
+        if not isinstance(bgc_source, ConstantsBgcSource | Rivr2oBgcSource):
+            raise RuntimeError("bgc_source must be a validated BgcSource model.")
+        return _FILL_DATASET_MAP[bgc_source.fill.name]().defaults
 
     def _get_river_sample_coords(
         self, river_names: list[str]
@@ -441,12 +430,12 @@ class RiverForcing:
 
     def _apply_bgc_tracers(self, ds: xr.Dataset) -> xr.Dataset:
         """Apply BGC tracer concentrations from the primary source, with fill."""
-        if self.bgc_source is None:
-            raise RuntimeError("bgc_source must be set.")
+        bgc_source = self.bgc_source
+        if not isinstance(bgc_source, ConstantsBgcSource | Rivr2oBgcSource):
+            raise RuntimeError("bgc_source must be a validated BgcSource model.")
         bgc_data = self._get_bgc_dataset()
-        fill_source = _get_bgc_fill_source(self.bgc_source)
         if isinstance(bgc_data, RiverTracerDefaultsDataset) and (
-            fill_source["name"] == "CONSTANTS"
+            bgc_source.fill.name == "CONSTANTS"
         ):
             fill_defaults = bgc_data.defaults
         else:

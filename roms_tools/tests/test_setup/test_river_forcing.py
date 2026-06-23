@@ -761,7 +761,7 @@ class TestRiverForcingBGCSource:
             include_bgc=True,
         )
 
-        assert river_forcing.bgc_source == {
+        assert river_forcing.bgc_source.model_dump() == {
             "name": "CONSTANTS",
             "fill": {"name": "CONSTANTS"},
         }
@@ -775,7 +775,7 @@ class TestRiverForcingBGCSource:
         np.testing.assert_allclose(float(alk.min()), defaults["ALK"], rtol=1e-6)
 
     def test_bgc_rivr2o_requires_path(self, iceland_test_grid, single_cell_indices):
-        with pytest.raises(ValueError, match='must include a "path"'):
+        with pytest.raises(ValueError, match="path"):
             RiverForcing(
                 grid=iceland_test_grid,
                 start_time=datetime(1998, 1, 1),
@@ -812,7 +812,7 @@ class TestRiverForcingBGCSource:
             include_bgc=True,
             bgc_source={"name": "RIVR2O", "path": str(path)},
         )
-        assert river_forcing.bgc_source["fill"] == {"name": "CONSTANTS"}
+        assert river_forcing.bgc_source.fill.name == "CONSTANTS"
 
     def test_rivr2o_climatology_discharge_repeats_bgc_varies_by_year(
         self, tmp_path, iceland_test_grid, single_cell_indices

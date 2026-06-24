@@ -11,9 +11,14 @@ from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
     _compute_density_coord,
     _infer_valid_boundaries_from_mask,
+    calendar_midmonth_dates,
     check_and_set_boundaries,
     compute_potential_density,
+    expand_monthly_climatology_time_axis,
     get_target_coords,
+    interpolate_dynamic_bgc_by_calendar_year,
+    month_to_time_index,
+    tile_monthly_climatology_on_calendar,
     validate_names,
 )
 
@@ -415,3 +420,132 @@ def test_density_space_interpolation_returns_correct_values():
 
     expected = np.interp(tgt_rho, src_rho, tracer.values[:, 0, 0])
     np.testing.assert_allclose(regridded.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
+class TestMonthlyClimatologyExpansion:
+    @staticmethod
+    def _monthly_climatology_ds() -> xr.Dataset:
+        months = np.arange(1, 13)
+        return xr.Dataset(
+            {
+                "river_volume": (
+                    ("river_time", "nriver"),
+                    np.arange(12 * 2, dtype=float).reshape(12, 2),
+                )
+            },
+            coords={
+                "river_time": months,
+                "month": ("river_time", months),
+                "nriver": [0, 1],
+            },
+            attrs={"climatology": "True"},
+        )
+
+    def test_month_to_time_index(self):
+        assert month_to_time_index(np.array([1, 2, 3])) == {1: 0, 2: 1, 3: 2}
+
+    def test_tile_monthly_climatology_on_calendar(self):
+        ds = self._monthly_climatology_ds()
+        dates = [
+            datetime(2020, 1, 15),
+            datetime(2020, 2, 15),
+            datetime(2021, 1, 15),
+        ]
+        tiled = tile_monthly_climatology_on_calendar(ds, dates)
+        assert tiled.sizes["river_time"] == 3
+        np.testing.assert_allclose(
+            tiled["river_volume"].isel(river_time=0).values,
+            ds["river_volume"].isel(river_time=0).values,
+        )
+        np.testing.assert_allclose(
+            tiled["river_volume"].isel(river_time=2).values,
+            ds["river_volume"].isel(river_time=0).values,
+        )
+        assert "month" not in tiled
+
+    def test_expand_monthly_climatology_time_axis(self):
+        ds = self._monthly_climatology_ds()
+        expanded = expand_monthly_climatology_time_axis(
+            ds,
+            datetime(2020, 1, 1),
+            datetime(2020, 3, 15),
+            datetime(2000, 1, 1),
+            discharge_climatology_attr="discharge_climatology",
+        )
+        assert expanded.sizes["river_time"] == 3
+        assert expanded.attrs["discharge_climatology"] == "True"
+        assert "climatology" not in expanded.attrs
+        assert "abs_time" in expanded
+        assert calendar_midmonth_dates(datetime(2020, 1, 1), datetime(2020, 3, 15)) == [
+            datetime(2020, m, 15) for m in (1, 2, 3)
+        ]
+
+    def test_calendar_midmonth_dates_short_window_without_15th(self):
+        # A sub-month window that skips the 15th must still yield one in-window
+        # date tagged to the correct month, not raise.
+        dates = calendar_midmonth_dates(datetime(2020, 1, 20), datetime(2020, 1, 28))
+        assert dates == [datetime(2020, 1, 20)]
+        assert dates[0].month == 1
+
+
+class TestInterpolateDynamicBGCByCalendarYear:
+    @staticmethod
+    def _monthly_abs_time(years: tuple[int, ...]) -> xr.DataArray:
+        dates = [datetime(year, month, 15) for year in years for month in range(1, 13)]
+        return xr.DataArray(
+            np.array(dates, dtype="datetime64[ns]"),
+            dims=["river_time"],
+        )
+
+    def test_interior_gap_year_is_linearly_interpolated(self):
+        abs_time = self._monthly_abs_time((2000, 2001, 2002))
+        years = abs_time.dt.year.values
+        values = np.empty((len(years), 1), dtype=np.float32)
+        for i, year in enumerate(years):
+            if year == 2001:
+                values[i, 0] = np.nan
+            elif year == 2000:
+                values[i, 0] = 100.0
+            else:
+                values[i, 0] = 200.0
+        dic = xr.DataArray(
+            values,
+            dims=["river_time", "nriver"],
+            coords={"river_time": abs_time, "nriver": [0]},
+        )
+        result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
+        gap = result["DIC"].sel(river_time=abs_time.dt.year == 2001)
+        np.testing.assert_allclose(gap.values, 150.0, rtol=1e-6)
+
+    def test_leading_and_trailing_nan_years_remain_nan(self):
+        abs_time = self._monthly_abs_time((2000, 2001, 2002))
+        years = abs_time.dt.year.values
+        values = np.where(years == 2001, 100.0, np.nan).astype(np.float32)[
+            :, np.newaxis
+        ]
+        dic = xr.DataArray(
+            values,
+            dims=["river_time", "nriver"],
+            coords={"river_time": abs_time, "nriver": [0]},
+        )
+        result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
+        assert np.all(np.isnan(result["DIC"].sel(river_time=abs_time.dt.year == 2000)))
+        assert np.all(np.isnan(result["DIC"].sel(river_time=abs_time.dt.year == 2002)))
+
+    def test_zero_export_year_is_not_interpolated(self):
+        abs_time = self._monthly_abs_time((2000, 2001, 2002))
+        years = abs_time.dt.year.values
+        values = np.empty((len(years), 1), dtype=np.float32)
+        for i, year in enumerate(years):
+            if year == 2001:
+                values[i, 0] = 0.0
+            elif year == 2000:
+                values[i, 0] = 100.0
+            else:
+                values[i, 0] = 200.0
+        dic = xr.DataArray(
+            values,
+            dims=["river_time", "nriver"],
+            coords={"river_time": abs_time, "nriver": [0]},
+        )
+        result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
+        gap = result["DIC"].sel(river_time=abs_time.dt.year == 2001)
+        np.testing.assert_allclose(gap.values, 0.0)

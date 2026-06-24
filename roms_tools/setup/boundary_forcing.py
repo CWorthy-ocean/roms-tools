@@ -27,12 +27,14 @@ from roms_tools.setup.utils import (
     check_and_set_boundaries,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
+    deserialize_forcing_data,
     from_yaml,
     get_boundary_coords,
     get_target_coords,
     get_variable_metadata,
     group_dataset,
     nan_check,
+    pop_grid_data,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -1302,6 +1304,23 @@ class BoundaryForcing:
                 "physics_forcing",
             ],
         )
+        # Embed the companion physics BoundaryForcing (used as the target density
+        # coordinate for density-space BGC interpolation) as an optional sub-item of
+        # the BGC block, mirroring how Grids are embedded. The shared "Grid" is
+        # dropped since the physics forcing reuses the same grid on reconstruction.
+        if self.physics_forcing is not None:
+            physics_dict = to_dict(
+                self.physics_forcing,
+                exclude=[
+                    "ds_depth_coords",
+                    "adjust_depth_for_sea_surface_height",
+                    "use_dask",
+                    "physics_forcing",
+                ],
+            )
+            forcing_dict["BoundaryForcing"]["physics_forcing"] = physics_dict[
+                "BoundaryForcing"
+            ]
         write_to_yaml(forcing_dict, filepath)
 
     @classmethod
@@ -1329,8 +1348,25 @@ class BoundaryForcing:
         grid = Grid.from_yaml(filepath)
         params = from_yaml(cls, filepath)
 
-        # Create and return an instance of InitialConditions
-        return cls(grid=grid, **params, use_dask=use_dask)
+        # Reconstruct an optional embedded physics BoundaryForcing, reusing the shared
+        # grid. The generic `from_yaml` only deserializes the top-level block, so the
+        # nested block's datetimes/paths/source are restored here.
+        physics_data = params.pop("physics_forcing", None)
+        physics_forcing = None
+        if physics_data is not None:
+            physics_data = deserialize_forcing_data(physics_data)
+            for name in ["source", "bgc_source"]:
+                src_dict = physics_data.get(name)
+                if src_dict and src_dict.get("grid") is not None:
+                    src_dict["grid"] = Grid(**pop_grid_data(src_dict["grid"]))
+            physics_forcing = cls(grid=grid, **physics_data, use_dask=use_dask)
+
+        return cls(
+            grid=grid,
+            **params,
+            physics_forcing=physics_forcing,
+            use_dask=use_dask,
+        )
 
 
 def apply_1d_horizontal_fill(data_array: xr.DataArray) -> xr.DataArray:

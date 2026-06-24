@@ -370,6 +370,72 @@ def _check_dimension_match(dims: tuple[str, str], da: xr.DataArray):
         )
 
 
+def nearest_neighbor_fill(
+    da: xr.DataArray, mask: xr.DataArray, dims: tuple[str, str]
+) -> xr.DataArray:
+    """Fill masked (land/NaN) cells with the value of the nearest valid cell.
+
+    This is a cheap alternative to the iterative Poisson :class:`LateralFill`.
+    Using a static 2D ocean ``mask``, it computes the index of the nearest valid
+    (ocean) cell for every grid cell once via
+    :func:`scipy.ndimage.distance_transform_edt`, then remaps every cell to that
+    nearest valid value. Valid cells map to themselves (distance 0) and are left
+    unchanged; masked cells take the nearest valid neighbor's value. The same
+    index map is applied to every horizontal slice (depth/time), so the cost is
+    a single distance transform regardless of the number of slices.
+
+    This guarantees a NaN-free field (as long as at least one valid cell exists),
+    so a subsequent linear interpolation cannot propagate NaNs.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        Input DataArray to fill. Must contain both dimensions in ``dims``.
+    mask : xarray.DataArray
+        2D boolean/integer ocean mask (True/1 = valid, False/0 = masked) with
+        dimensions matching ``dims``.
+    dims : tuple of str
+        The two horizontal dimensions, ordered ``(latitude, longitude)``.
+
+    Returns
+    -------
+    xarray.DataArray
+        A new DataArray with masked cells filled by nearest-neighbor lookup.
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    _check_dimension_match(dims, da)
+
+    mask_bool = mask.transpose(*dims).values.astype(bool)
+
+    # Index of the nearest valid (True) cell for every cell in the grid.
+    ii, jj = distance_transform_edt(
+        ~mask_bool, return_distances=False, return_indices=True
+    )
+
+    def _fill(arr):
+        # arr has the core dims (lat, lon) as its trailing axes; advanced
+        # indexing with the 2D index arrays broadcasts over any leading dims.
+        return arr[..., ii, jj]
+
+    filled = xr.apply_ufunc(
+        _fill,
+        da,
+        input_core_dims=[list(dims)],
+        output_core_dims=[list(dims)],
+        output_dtypes=[da.dtype],
+        dask="parallelized",
+        dask_gufunc_kwargs={
+            "output_sizes": {
+                dims[0]: mask_bool.shape[0],
+                dims[1]: mask_bool.shape[1],
+            }
+        },
+    )
+
+    return filled.transpose(*da.dims)
+
+
 def one_dim_fill(da: xr.DataArray, dim: str, direction="forward") -> xr.DataArray:
     """Fill NaN values in a DataArray along a specified dimension.
 

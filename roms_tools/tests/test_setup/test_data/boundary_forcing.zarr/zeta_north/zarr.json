@@ -46,6 +46,7 @@
       681,
       1440
     ],
+    "regrid_method": "bilinear",
     "coordinates": "abs_time",
     "_FillValue": "AAAAAAAA+H8="
   },

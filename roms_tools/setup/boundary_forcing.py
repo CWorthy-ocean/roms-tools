@@ -1,14 +1,15 @@
 import importlib.metadata
 import logging
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from scipy.ndimage import label
 
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
@@ -17,11 +18,14 @@ from roms_tools.datasets.lat_lon_datasets import (
     GLORYSDefaultDataset,
     UnifiedBGCDataset,
 )
-from roms_tools.fill import one_dim_fill
 from roms_tools.plot import line_plot, section_plot
-from roms_tools.regrid import LateralRegridToROMS, VerticalRegrid
+from roms_tools.regrid import (
+    LateralRegridToROMS,
+    VerticalRegrid,
+)
 from roms_tools.setup.utils import (
     RawDataSource,
+    _xesmf_available,
     add_time_info_to_ds,
     check_and_set_boundaries,
     compute_barotropic_velocity,
@@ -32,8 +36,11 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     nan_check,
+    resolve_regrid_engine,
     substitute_nans_by_fillvalue,
     to_dict,
+    validate_extrap,
+    validate_prefill,
     write_to_yaml,
 )
 from roms_tools.utils import (
@@ -84,10 +91,60 @@ class BoundaryForcing:
           - "physics": for physical atmospheric forcing.
           - "bgc": for biogeochemical forcing.
 
+    prefill : str or None, optional
+        How to fill NaN (land/void) cells in the *source* before regridding. The
+        default (``None``) applies **no** source prefill: with xESMF installed,
+        masked bilinear interpolation plus destination extrapolation
+        (``extrap_method``) produces NaN-free boundaries directly; without xESMF,
+        the source is automatically pre-filled with a cheap nearest-neighbor fill
+        before scipy interpolation. Set ``prefill`` to fill the whole-domain
+        source first (the regrid is then plain bilinear and ``extrap_method`` is
+        ignored). Options:
+
+          - ``"2d_lateral_fill"`` -- legacy AMG Poisson fill (smoothest, slow;
+            no xESMF required). This is the modern spelling of the deprecated
+            ``apply_2d_horizontal_fill=True``.
+          - ``"inverse_dist"`` -- xESMF inverse-distance-weighted source fill
+            (tunable via ``prefill_kwargs``; requires xESMF).
+          - ``"nearest_s2d"`` -- xESMF nearest-source fill (requires xESMF).
+          - ``"nearest_neighbor"`` -- cheap distance-transform fill (no xESMF;
+            also the automatic fallback when xESMF is unavailable). Use for
+            cross-platform reproducibility or when xESMF is unavailable and the
+            AMG fill is too slow; not recommended when xESMF is available.
+
+        Defaults to ``None``.
+    prefill_kwargs : dict, optional
+        Method-specific options for ``prefill``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``. Ignored by the other methods.
+        Defaults to ``None``.
+    regrid_method : str or None, optional
+        Horizontal regrid engine, chosen independently of ``prefill``:
+
+          - ``None`` / ``"auto"`` (default) -- use xESMF if it is installed
+            (lazy, weight-reused, faster on large grids), otherwise scipy.
+          - ``"xesmf"`` -- force the xESMF regridder (raises if xESMF is absent).
+          - ``"scipy"`` -- force scipy ``interp``. Byte-reproducible with pre-v4
+            outputs; when ``prefill`` is ``None`` a nearest-neighbor source
+            pre-fill is applied automatically so scipy cannot propagate NaNs.
+
+        Note that ``inverse_dist`` / ``nearest_s2d`` *prefills* still require xESMF
+        for the fill step regardless of ``regrid_method``. Defaults to ``None``.
+    extrap_method : str or None, optional
+        xESMF *destination* extrapolation used on the default path
+        (``prefill is None``) to fill boundary points whose source neighbors are
+        all land/out of range, guaranteeing NaN-free output. ``"inverse_dist"``
+        (the effective default) gives an inverse-distance-weighted average of the
+        nearest source points (smoothly varying); ``"nearest_s2d"`` uses the
+        single nearest source point. Ignored when ``prefill`` is set. Defaults to
+        ``None`` (treated as ``"inverse_dist"``).
+    extrap_kwargs : dict, optional
+        Method-specific options for ``extrap_method``: ``num_src_pnts`` /
+        ``dist_exponent`` for ``"inverse_dist"``. Defaults to ``None``.
     apply_2d_horizontal_fill : bool, optional
-        Indicates whether to perform a two-dimensional horizontal fill on the source data prior to regridding to boundaries.
-        If `False`, a one-dimensional horizontal fill is performed separately on each of the four regridded boundaries.
-        Defaults to `False`.
+        **Deprecated** -- use ``prefill`` instead. ``True`` maps to
+        ``prefill="2d_lateral_fill"`` and ``False`` to ``prefill=None``; setting
+        it emits a ``DeprecationWarning``. Cannot be combined with an explicit
+        ``prefill``. Defaults to ``None`` (unset).
     model_reference_date : datetime, optional
         Reference date for the model. Default is January 1, 2000.
     use_dask: bool, optional
@@ -130,9 +187,33 @@ class BoundaryForcing:
     """Dictionary specifying the source of the boundary forcing data."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""
-    apply_2d_horizontal_fill: bool = False
-    """Whether to perform a two-dimensional horizontal fill on the source data prior to
-    regridding to boundaries."""
+    prefill: str | None = None
+    """Source-side fill applied before regridding (``None`` = no prefill, the default
+    NaN-aware masked-bilinear path). See the class docstring for the available methods."""
+    prefill_kwargs: dict | None = None
+    """Method-specific options for ``prefill`` (e.g. ``num_src_pnts``/``dist_exponent``)."""
+    regrid_method: str | None = None
+    """Horizontal regrid engine, independent of ``prefill``. ``None``/``"auto"`` uses xESMF
+    when installed (faster on large grids) and scipy otherwise; ``"xesmf"`` forces xESMF;
+    ``"scipy"`` forces scipy ``interp`` (byte-reproducible with pre-v4 outputs)."""
+    extrap_method: str | None = None
+    """xESMF destination extrapolation for the default path (``prefill is None``). ``None`` is
+    treated as ``"inverse_dist"``. Ignored when ``prefill`` is set."""
+    extrap_kwargs: dict | None = None
+    """Method-specific options for ``extrap_method`` (e.g. ``num_src_pnts``/``dist_exponent``)."""
+    apply_2d_horizontal_fill: bool | None = None
+    """Deprecated alias for ``prefill`` (sentinel ``None`` = unset). ``True`` ->
+    ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``; emits a DeprecationWarning."""
+
+    _ALLOWED_PREFILL: ClassVar[frozenset] = frozenset(
+        {
+            None,
+            "2d_lateral_fill",
+            "inverse_dist",
+            "nearest_s2d",
+            "nearest_neighbor",
+        }
+    )
     model_reference_date: datetime = datetime(2000, 1, 1)
     """Reference date for the model."""
     use_dask: bool = False
@@ -157,13 +238,48 @@ class BoundaryForcing:
         self.adjust_depth_for_sea_surface_height = False
         self.ds_depth_coords = xr.Dataset()
 
+        self._resolve_prefill_options()
         self._input_checks()
 
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
 
-        if self.apply_2d_horizontal_fill:
+        # Regrid engine is chosen independently of the prefill via
+        # ``regrid_method`` (resolved in _resolve_prefill_options):
+        #   - prefill is None + xESMF      : masked xESMF bilinear regrid + extrap (no fill)
+        #   - prefill is None + scipy      : nearest-neighbor pre-fill + scipy interp
+        #   - prefill set + xESMF          : whole-domain source fill, then plain
+        #                                    xESMF bilinear regrid (lazy, faster on large grids)
+        #   - prefill set + scipy          : whole-domain source fill, then scipy interp
+        # On a prefilled (NaN-free) source no mask or extrapolation is needed, so
+        # the xESMF regrid is plain bilinear.
+        prefill = self.prefill
+        use_xesmf = self._use_xesmf
+
+        # Effective destination extrapolation for the default (no-prefill) path.
+        effective_extrap = self.extrap_method or "inverse_dist"
+        user_set_extrap = (
+            self.extrap_method is not None or self.extrap_kwargs is not None
+        )
+        if user_set_extrap and prefill is not None:
+            logging.info(
+                "extrap_method/extrap_kwargs are ignored because prefill=%r fills "
+                "the source first (the regrid is plain bilinear).",
+                prefill,
+            )
+        elif user_set_extrap and not use_xesmf:
+            logging.info(
+                "extrap_method/extrap_kwargs are ignored because the scipy regrid "
+                "engine is in use (xESMF unavailable or regrid_method='scipy'); "
+                "the source is nearest-neighbor pre-filled instead."
+            )
+
+        if prefill is not None:
+            # Whole-domain source fill (parallels the legacy AMG path): gives the
+            # fill the same ocean context across the full footprint, not a thin
+            # per-boundary strip. After this the source is NaN-free, so each
+            # boundary is regridded with plain bilinear (no extrapolation).
             data.choose_subdomain(
                 target_coords,
                 unchunk_lateral_dims=True,
@@ -171,7 +287,11 @@ class BoundaryForcing:
             # Enforce double precision to ensure reproducibility
             data.convert_to_float64()
             data.extrapolate_deepest_to_bottom()
-            data.apply_lateral_fill()
+            data.apply_prefill(
+                prefill,
+                prefill_kwargs=self.prefill_kwargs,
+                prefill_was_user_set=True,
+            )
 
         self._set_variable_info(data)
         self._set_boundary_info()
@@ -211,15 +331,53 @@ class BoundaryForcing:
 
                 bdry_data = data.choose_subdomain(
                     bdry_target_coords,
+                    # TODO: make per-boundary buffer_points configurable.
                     buffer_points=3,
                     return_copy=True,
                     unchunk_lateral_dims=True,
                 )
 
-                if not self.apply_2d_horizontal_fill:
+                if prefill is None:
+                    # Default (no source prefill) path. Prep happens per boundary.
                     # Enforce double precision to ensure reproducibility
                     bdry_data.convert_to_float64()
                     bdry_data.extrapolate_deepest_to_bottom()
+                    if not use_xesmf:
+                        # xESMF unavailable: nearest-neighbor pre-fill the source so the
+                        # subsequent scipy interpolation cannot propagate NaNs.
+                        bdry_data.apply_nearest_neighbor_fill()
+                # When prefill is set, the whole-domain source was already filled
+                # (float64 + deepest-to-bottom + fill) before this loop.
+
+                # Precomputed static source masks for the xESMF masked-bilinear
+                # path, matched to the field type: ``mask`` (tracer validity) for
+                # tracers and ``zeta``, ``mask_vel`` (velocity validity) for u/v.
+                # Reusing these stored 2D fields avoids recomputing a mask from the
+                # full (lazy) source series. ``None`` means the source is already
+                # NaN-free (e.g. the pre-filled UNIFIED BGC dataset, which carries
+                # no mask, or a whole-domain prefill above) so the regridder uses
+                # plain bilinear; irrelevant on the scipy path.
+                if use_xesmf and prefill is None:
+                    tracer_mask = (
+                        bdry_data.ds["mask"]
+                        if "mask" in bdry_data.ds.data_vars
+                        else None
+                    )
+                    vector_mask = (
+                        bdry_data.ds["mask_vel"]
+                        if "mask_vel" in bdry_data.ds.data_vars
+                        else tracer_mask
+                    )
+                else:
+                    tracer_mask = None
+                    vector_mask = None
+
+                # With a prefilled (NaN-free) source, no regrid-time extrapolation
+                # is needed; use plain bilinear.
+                regrid_extrap_method = None if prefill is not None else effective_extrap
+                regrid_extrap_kwargs = (
+                    None if prefill is not None else self.extrap_kwargs
+                )
 
                 processed_fields = {}
 
@@ -239,18 +397,36 @@ class BoundaryForcing:
                     lat = target_coords["lat"].isel(
                         **self.bdry_coords["vector"][direction]
                     )
-                    lateral_regrid = LateralRegridToROMS(
-                        {"lat": lat, "lon": lon}, bdry_data.dim_names
+                    lateral_regrid_vector = LateralRegridToROMS(
+                        {"lat": lat, "lon": lon},
+                        bdry_data.dim_names,
+                        source_ds=bdry_data.ds,
+                        use_xesmf=use_xesmf,
+                        source_mask=vector_mask,
+                        extrap_method=regrid_extrap_method,
+                        extrap_kwargs=regrid_extrap_kwargs,
                     )
                     for var_name in filtered_vars:
-                        processed_fields[var_name] = lateral_regrid.apply(
+                        processed_fields[var_name] = lateral_regrid_vector.apply(
                             bdry_data.ds[var_names[var_name]["name"]]
                         )
 
                     if self.adjust_depth_for_sea_surface_height:
                         # Regrid sea surface height ('zeta') onto a 2-cell-wide margin.
                         # This is needed to correctly infer depth coordinates at u- and v-points along the boundary.
-                        zeta_vector = lateral_regrid.apply(
+                        # 'zeta' is a tracer, so it uses the tracer mask (not the
+                        # velocity mask of the vector regridder); build a dedicated
+                        # regridder on the same vector-margin target.
+                        zeta_vector_regrid = LateralRegridToROMS(
+                            {"lat": lat, "lon": lon},
+                            bdry_data.dim_names,
+                            source_ds=bdry_data.ds,
+                            use_xesmf=use_xesmf,
+                            source_mask=tracer_mask,
+                            extrap_method=regrid_extrap_method,
+                            extrap_kwargs=regrid_extrap_kwargs,
+                        )
+                        zeta_vector = zeta_vector_regrid.apply(
                             bdry_data.ds[var_names["zeta"]["name"]]
                         )
 
@@ -270,7 +446,13 @@ class BoundaryForcing:
                         **self.bdry_coords["rho"][direction]
                     )
                     lateral_regrid = LateralRegridToROMS(
-                        {"lat": lat, "lon": lon}, bdry_data.dim_names
+                        {"lat": lat, "lon": lon},
+                        bdry_data.dim_names,
+                        source_ds=bdry_data.ds,
+                        use_xesmf=use_xesmf,
+                        source_mask=tracer_mask,
+                        extrap_method=regrid_extrap_method,
+                        extrap_kwargs=regrid_extrap_kwargs,
                     )
                     for var_name in filtered_vars:
                         processed_fields[var_name] = lateral_regrid.apply(
@@ -306,21 +488,6 @@ class BoundaryForcing:
                 if self.adjust_depth_for_sea_surface_height:
                     zeta_u = zeta_u.isel(**self.bdry_coords["u"][direction])
                     zeta_v = zeta_v.isel(**self.bdry_coords["v"][direction])
-
-                if not self.apply_2d_horizontal_fill and bdry_data.needs_lateral_fill:
-                    if not self.bypass_validation:
-                        self._validate_1d_fill(
-                            processed_fields,
-                            direction,
-                            bdry_data.dim_names["depth"],
-                        )
-                    for var_name in processed_fields:
-                        processed_fields[var_name] = apply_1d_horizontal_fill(
-                            processed_fields[var_name]
-                        )
-                    if self.adjust_depth_for_sea_surface_height:
-                        zeta_u = apply_1d_horizontal_fill(zeta_u)
-                        zeta_v = apply_1d_horizontal_fill(zeta_v)
 
                 if self.adjust_depth_for_sea_surface_height:
                     zeta = processed_fields["zeta"]
@@ -402,6 +569,44 @@ class BoundaryForcing:
             ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
 
         self.ds = ds
+
+    def _resolve_prefill_options(self) -> None:
+        """Map the deprecated flag and validate the prefill + regrid options.
+
+        ``apply_2d_horizontal_fill`` is a deprecated alias for ``prefill``:
+        ``True`` -> ``prefill="2d_lateral_fill"``, ``False`` -> ``prefill=None``.
+        After mapping, the deprecated attribute is reset to ``None`` so it is not
+        re-serialized. ``prefill``/``prefill_kwargs`` are then validated against
+        this class's allowed set and xESMF availability, and ``regrid_method`` is
+        resolved to the boolean ``self._use_xesmf``.
+        """
+        if self.apply_2d_horizontal_fill is not None:
+            warnings.warn(
+                "`apply_2d_horizontal_fill` is deprecated; use `prefill` instead "
+                "(True -> prefill='2d_lateral_fill', False -> prefill=None).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if self.prefill is not None:
+                raise ValueError(
+                    "Set either the deprecated `apply_2d_horizontal_fill` or "
+                    "`prefill`, not both."
+                )
+            self.prefill = "2d_lateral_fill" if self.apply_2d_horizontal_fill else None
+            # Reset the sentinel so it is not re-serialized going forward.
+            self.apply_2d_horizontal_fill = None
+
+        xesmf_available = _xesmf_available()
+        validate_prefill(
+            self.prefill,
+            self.prefill_kwargs,
+            self._ALLOWED_PREFILL,
+            xesmf_available=xesmf_available,
+        )
+        validate_extrap(self.extrap_method, self.extrap_kwargs)
+        self._use_xesmf = resolve_regrid_engine(
+            self.regrid_method, xesmf_available=xesmf_available
+        )
 
     def _input_checks(self) -> None:
         """Validate and normalize user-provided input parameters."""
@@ -757,7 +962,9 @@ class BoundaryForcing:
         ds.attrs["end_time"] = str(self.end_time)
         ds.attrs["source"] = self.source["name"]
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
-        ds.attrs["apply_2d_horizontal_fill"] = str(self.apply_2d_horizontal_fill)
+        ds.attrs["prefill"] = str(self.prefill)
+        ds.attrs["regrid_method"] = "xesmf" if self._use_xesmf else "scipy"
+        ds.attrs["extrap_method"] = str(self.extrap_method or "inverse_dist")
         ds.attrs["adjust_depth_for_sea_surface_height"] = str(
             self.adjust_depth_for_sea_surface_height
         )
@@ -775,68 +982,6 @@ class BoundaryForcing:
         ds = ds.drop_vars("time")
 
         return ds
-
-    def _validate_1d_fill(self, processed_fields, direction, depth_dim):
-        """Check if any boundary is divided by land and issue a warning if so,
-        suggesting the use of 2D horizontal fill for safer regridding.
-
-        Parameters
-        ----------
-        processed_fields : dict
-            A dictionary where keys are variable names and values are `xarray.DataArray`
-            objects representing the processed data for each variable.
-
-        direction : str
-            The boundary direction being processed (e.g., "north", "south", "east", or "west").
-
-        depth_dim : str
-            The dimension representing depth (e.g., 'z', 'depth', etc.), used when slicing 3D
-            data for a specific depth level.
-
-        Returns
-        -------
-        None
-            If a boundary is divided by land, a warning is issued. No return value is provided.
-        """
-        if not hasattr(self, "_warned_directions"):
-            self._warned_directions = set()
-
-        for var_name in processed_fields.keys():
-            if self.variable_info[var_name]["validate"]:
-                location = self.variable_info[var_name]["location"]
-
-                # Select the appropriate mask based on variable location
-                if location == "rho":
-                    mask = self.grid.ds.mask_rho
-                elif location == "u":
-                    mask = self.grid.ds.mask_u
-                elif location == "v":
-                    mask = self.grid.ds.mask_v
-
-                mask = mask.isel(**self.bdry_coords[location][direction])
-
-                if self.variable_info[var_name]["is_3d"]:
-                    da = processed_fields[var_name].isel({depth_dim: 0, "time": 0})
-                else:
-                    da = processed_fields[var_name].isel({"time": 0})
-
-                wet_nans = xr.where(da.where(mask).isnull(), 1, 0)
-                # Apply label to find connected components of wet NaNs
-                labeled_array, num_features = label(wet_nans)
-
-                left_margin = labeled_array[0]
-                right_margin = labeled_array[-1]
-                if left_margin != 0:
-                    num_features = num_features - 1
-                if right_margin != 0:
-                    num_features = num_features - 1
-
-                if num_features > 0 and direction not in self._warned_directions:
-                    logging.warning(
-                        f"The {direction}ern boundary is divided by land. "
-                        "It would be safer (but slower and more memory-intensive) to use `apply_2d_horizontal_fill = True`."
-                    )
-                    self._warned_directions.add(direction)
 
     def _validate(self, ds):
         """Validate the dataset for NaN values at the first time step (bry_time=0) for
@@ -876,15 +1021,14 @@ class BoundaryForcing:
                         bdry_var_name = f"{var_name}_{direction}"
 
                         # Check for NaN values at the first time step using the nan_check function
-                        if self.apply_2d_horizontal_fill:
-                            error_message = None
-                        else:
-                            error_message = (
-                                f"{bdry_var_name} consists entirely of NaNs after regridding. "
-                                f"This may be due to the {direction}ern boundary being on land in the "
-                                f"{self.source['name']} data, which could have a coarser resolution than the ROMS domain. "
-                                f"Try setting `apply_2d_horizontal_fill = True` to resolve this issue."
-                            )
+                        error_message = (
+                            f"{bdry_var_name} consists entirely of NaNs after regridding. "
+                            f"This may be due to the {direction}ern boundary being entirely on land in the "
+                            f"{self.source['name']} data, which could have a coarser resolution than the ROMS domain. "
+                            f"Try setting a `prefill` method (e.g. 'inverse_dist', 'nearest_neighbor', or "
+                            f"'2d_lateral_fill') to fill the source before regridding; see "
+                            f"https://roms-tools.readthedocs.io/en/latest/boundary_forcing.html for details."
+                        )
 
                         nan_check(
                             ds[bdry_var_name].isel(bry_time=0),
@@ -1091,6 +1235,9 @@ class BoundaryForcing:
                 "ds_depth_coords",
                 "adjust_depth_for_sea_surface_height",
                 "use_dask",
+                # Deprecated alias: superseded by ``prefill``. Emit only ``prefill``
+                # going forward (old YAML setting it still loads via __init__).
+                "apply_2d_horizontal_fill",
             ],
         )
         write_to_yaml(forcing_dict, filepath)
@@ -1122,44 +1269,3 @@ class BoundaryForcing:
 
         # Create and return an instance of InitialConditions
         return cls(grid=grid, **params, use_dask=use_dask)
-
-
-def apply_1d_horizontal_fill(data_array: xr.DataArray) -> xr.DataArray:
-    """Forward and backward fill NaN values in a single horizontal dimension for open
-    boundaries.
-
-    Parameters
-    ----------
-    data_array : xarray.DataArray
-        The data array to be updated.
-
-    Returns
-    -------
-    xarray.DataArray
-        The updated data array with NaN values filled.
-
-    Raises
-    ------
-    ValueError
-        If more than one horizontal dimension is found or none at all.
-    """
-    horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
-    selected_horizontal_dim = None
-
-    # Determine the horizontal dimension to fill
-    for dim in horizontal_dims:
-        if dim in data_array.dims:
-            if selected_horizontal_dim is not None:
-                raise ValueError(
-                    f"More than one horizontal dimension found in variable '{data_array.name}'."
-                )
-            selected_horizontal_dim = dim
-
-    if selected_horizontal_dim is None:
-        raise ValueError(
-            f"No valid horizontal dimension found for variable '{data_array.name}'."
-        )
-
-    # Forward and backward fill in the horizontal direction
-    filled = one_dim_fill(data_array, selected_horizontal_dim, direction="forward")
-    return one_dim_fill(filled, selected_horizontal_dim, direction="backward")

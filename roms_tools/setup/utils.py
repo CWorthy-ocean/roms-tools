@@ -34,6 +34,190 @@ HEADER_CHAR = "="
 RawDataSource: TypeAlias = dict[str, str | Path | list[str | Path] | bool]
 
 
+# ---------------------------------------------------------------------------
+# Source prefill / lateral-regrid configuration (shared across setup classes)
+# ---------------------------------------------------------------------------
+
+#: Per-method allowed keys for ``prefill_kwargs`` / ``extrap_kwargs``. A method
+#: not listed here (e.g. ``None``) accepts no kwargs.
+PREFILL_ALLOWED_KWARGS: dict[str, frozenset[str]] = {
+    "2d_lateral_fill": frozenset(),
+    "nearest_neighbor": frozenset(),
+    "nearest_s2d": frozenset(),
+    "inverse_dist": frozenset({"num_src_pnts", "dist_exponent"}),
+    "creep_fill": frozenset({"num_levels"}),
+}
+
+#: Prefill methods that are implemented via an xESMF source-on-source regrid and
+#: therefore require the optional ``xesmf`` dependency.
+XESMF_PREFILL_METHODS: frozenset[str] = frozenset(
+    {"inverse_dist", "nearest_s2d", "creep_fill"}
+)
+
+#: Valid xESMF destination-extrapolation methods (``extrap_method``). ``None`` means
+#: "use the default", which callers treat as ``"inverse_dist"``.
+EXTRAP_METHODS: frozenset[str] = frozenset(
+    {"inverse_dist", "nearest_s2d", "creep_fill"}
+)
+
+
+def validate_extrap(extrap_method: str | None, extrap_kwargs: dict | None) -> None:
+    """Validate a destination ``extrap_method`` and its keyword arguments.
+
+    Parameters
+    ----------
+    extrap_method : str or None
+        The xESMF destination-extrapolation method. ``None`` is treated as the
+        default ``"inverse_dist"``.
+    extrap_kwargs : dict or None
+        Method-specific keyword arguments, validated against the chosen method
+        using the same table as ``prefill_kwargs`` (``PREFILL_ALLOWED_KWARGS``).
+
+    Raises
+    ------
+    ValueError
+        If ``extrap_method`` is unrecognized or ``extrap_kwargs`` contains keys
+        the chosen method does not accept.
+    """
+    if extrap_method is not None and extrap_method not in EXTRAP_METHODS:
+        allowed = ", ".join(repr(m) for m in sorted(EXTRAP_METHODS))
+        raise ValueError(
+            f"extrap_method={extrap_method!r} is not supported. Allowed values: "
+            f"{allowed} (or None for the default 'inverse_dist')."
+        )
+    method = extrap_method or "inverse_dist"
+    allowed_keys = PREFILL_ALLOWED_KWARGS.get(method, frozenset())
+    extra = set(extrap_kwargs or {}) - allowed_keys
+    if extra:
+        allowed_keys_str = ", ".join(sorted(allowed_keys)) or "(none)"
+        raise ValueError(
+            f"extrap_kwargs {sorted(extra)} are not valid for "
+            f"extrap_method={method!r}. Allowed keys: {allowed_keys_str}."
+        )
+
+
+#: Allowed values for the ``regrid_method`` selector.
+REGRID_METHODS: frozenset[str] = frozenset({"auto", "xesmf", "scipy"})
+
+
+def _xesmf_available() -> bool:
+    """Return True if the optional xESMF dependency can be imported."""
+    try:
+        import xesmf  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def resolve_regrid_engine(regrid_method: str | None, *, xesmf_available: bool) -> bool:
+    """Resolve a ``regrid_method`` selector to a boolean "use xESMF" decision.
+
+    Parameters
+    ----------
+    regrid_method : str or None
+        ``None`` or ``"auto"`` -> xESMF if available, else scipy; ``"xesmf"`` ->
+        force xESMF (error if unavailable); ``"scipy"`` -> force scipy.
+    xesmf_available : bool
+        Whether xESMF can be imported.
+
+    Returns
+    -------
+    bool
+        ``True`` to use the xESMF regridder, ``False`` to use scipy ``interp``.
+
+    Raises
+    ------
+    ValueError
+        If ``regrid_method`` is not a recognized value.
+    ImportError
+        If ``regrid_method="xesmf"`` but xESMF is not installed.
+    """
+    method = regrid_method or "auto"
+    if method not in REGRID_METHODS:
+        allowed = ", ".join(repr(m) for m in sorted(REGRID_METHODS))
+        raise ValueError(
+            f"regrid_method={regrid_method!r} is not supported. Allowed values: "
+            f"{allowed} (or None for 'auto')."
+        )
+    if method == "scipy":
+        return False
+    if method == "xesmf":
+        if not xesmf_available:
+            raise ImportError(
+                "regrid_method='xesmf' requires the optional xESMF dependency, "
+                "which is not installed. Install `roms-tools` via conda, or use "
+                "regrid_method='scipy' (or 'auto')."
+            )
+        return True
+    # auto
+    return xesmf_available
+
+
+def validate_prefill(
+    prefill: str | None,
+    prefill_kwargs: dict | None,
+    allowed: "frozenset[str | None] | set[str | None]",
+    *,
+    xesmf_available: bool,
+) -> None:
+    """Validate a ``prefill`` selection and its keyword arguments.
+
+    Parameters
+    ----------
+    prefill : str or None
+        The requested source-prefill method (``None`` means "no prefill").
+    prefill_kwargs : dict or None
+        Method-specific keyword arguments to validate against the chosen method.
+    allowed : set or frozenset of (str or None)
+        The prefill values this class accepts (e.g. ``{None, "2d_lateral_fill",
+        ...}`` for ``BoundaryForcing``; ``{"2d_lateral_fill"}`` for classes that
+        only support the legacy fill).
+    xesmf_available : bool
+        Whether xESMF can be imported. Used to reject xESMF-only prefill methods
+        on installs without it.
+
+    Raises
+    ------
+    ValueError
+        If ``prefill`` is not in ``allowed`` or ``prefill_kwargs`` contains keys
+        the chosen method does not accept.
+    ImportError
+        If ``prefill`` is an xESMF-only method but xESMF is not installed.
+    """
+    if prefill not in allowed:
+        allowed_str = ", ".join(
+            repr(a) for a in sorted(allowed, key=lambda x: (x is not None, x or ""))
+        )
+        raise ValueError(
+            f"prefill={prefill!r} is not supported here. Allowed values: {allowed_str}."
+        )
+
+    if prefill is None:
+        if prefill_kwargs:
+            raise ValueError(
+                "prefill_kwargs were provided but prefill is None (no prefill). "
+                "Set a prefill method or drop prefill_kwargs."
+            )
+        return
+
+    if prefill in XESMF_PREFILL_METHODS and not xesmf_available:
+        raise ImportError(
+            f"prefill={prefill!r} requires the optional xESMF dependency, which is "
+            "not installed. Install `roms-tools` via conda, or use "
+            "prefill='nearest_neighbor' (cheap, no xESMF) or prefill='2d_lateral_fill'."
+        )
+
+    allowed_keys = PREFILL_ALLOWED_KWARGS.get(prefill, frozenset())
+    extra = set(prefill_kwargs or {}) - allowed_keys
+    if extra:
+        allowed_keys_str = ", ".join(sorted(allowed_keys)) or "(none)"
+        raise ValueError(
+            f"prefill_kwargs {sorted(extra)} are not valid for prefill={prefill!r}. "
+            f"Allowed keys: {allowed_keys_str}."
+        )
+
+
 def log_the_separator() -> None:
     """Log a separator line using HEADER_CHAR repeated HEADER_SZ times."""
     logging.info(HEADER_CHAR * HEADER_SZ)

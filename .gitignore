@@ -78,6 +78,9 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Local scratch / experiments (not part of the tracked docs)
+/scratch/
+
 # IPython
 profile_default/
 ipython_config.py

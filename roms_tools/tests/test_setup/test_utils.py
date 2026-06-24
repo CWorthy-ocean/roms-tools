@@ -420,6 +420,8 @@ def test_density_space_interpolation_returns_correct_values():
 
     expected = np.interp(tgt_rho, src_rho, tracer.values[:, 0, 0])
     np.testing.assert_allclose(regridded.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
+
+
 class TestMonthlyClimatologyExpansion:
     @staticmethod
     def _monthly_climatology_ds() -> xr.Dataset:

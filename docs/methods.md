@@ -376,6 +376,7 @@ where $\Delta x$ and $\Delta y$ represent the grid spacing in the x- and y-direc
 
 2. **Placement of Rivers at Coastal Land Points**: ROMS requires rivers to be placed at coastal land points, i.e., land points that are adjacent to wet points. Therefore, `ROMS-Tools` moves the relevant rivers (from Step 1) to the nearest coastal land point, see [here](river_forcing.ipynb#River-locations) for an example.
 3. **Creating the River Forcing**: For the relevant rivers, `ROMS-Tools` extracts the volume flux for the specified time period (as a climatology, if specified). Additionally, constant values of 17$^\circ$C and 1 PSU (pratical salinity units) are assigned for river temperature and salinity, respectively.
+4. **BGC tracers (optional)**: When `include_bgc=True`, MARBL biogeochemical tracers are added from `bgc_source` (e.g. recommended constants or the RIVR2O export product). Tracers not supplied by the dynamic source, or non-finite values, are filled from `bgc_source["fill"]` (default: constants from `river_tracer_defaults.nc`). See [Adding BGC river forcing](river_forcing.ipynb#Adding-BGC-river-forcing) in the notebook.
 
 For practical examples, see [this notebook](river_forcing.ipynb).
 

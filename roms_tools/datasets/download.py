@@ -80,7 +80,7 @@ pup_test_data = pooch.create(
         "CESM_BGC_SURFACE_2012.nc": "3c4d156adca97909d0fac36bf50b99583ab37d8020d7a3e8511e92abf2331b38",
         "CESM_surface_global_test_data_climatology.nc": "a072757110c6f7b716a98f867688ef4195a5966741d2f368201ac24617254e35",
         "CESM_surface_global_test_data.nc": "874106ffbc8b1b220db09df1551bbb89d22439d795b4d1e5a24ee775e9a7bf6e",
-        "coarsened_UNIFIED_bgc_dataset.nc": "sha256:1f1e4304a497587f75d8e4cd64913caec797a98daf07de4468a2f04d1f0bc165",
+        "coarsened_UNIFIED_bgc_dataset.nc": "269d5bcd8e6e64d3400362ae0a65afe049810ce06c536ccf31cca7c00f321bc1",
         "WOA_2018_quarterDeg_coarsened.nc": "sha256:673ce3c3a98bb386ccd899dbc23eeedf7d9a665b68ea52c96fd69829a4b929a7",
         "mbl_co2_bgc_dataset.nc": "sha256:797a9ef48f3c83a6920e44c0b441feb00fb35553db09dea9ed4ff36dcd68d968",
         "coarsened_OceanSODA_dataset.nc": "sha256:b4a284303c9c1a8904a6ea3fa338ff05ac042c0b024fb4e1ad4bbb1d9fedff38",

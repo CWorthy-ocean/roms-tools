@@ -15,11 +15,10 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "xarray>=2022.6.0,<2025.8.0",
     "numpy>2.0,<2.3",
@@ -27,7 +26,7 @@ dependencies = [
     "matplotlib",
     "cartopy",
     "packaging",
-    "scipy",
+    "scipy >= 1.18.0",
     "gcm_filters >=0.5.1",
     "netcdf4",
     "PyYAML",
@@ -53,12 +52,16 @@ stream = [
     "zarr",
     "copernicusmarine",
 ]
+movie = [
+    "imageio-ffmpeg",
+]
 notebooks = [
     "dask[diagnostics]",
     "gcsfs",
     "zarr",
     "copernicusmarine",
     "gdown",
+    "imageio-ffmpeg",
     "ipykernel",
     "jupyter"
 ]
@@ -92,7 +95,7 @@ exclude = ["docs"]
 
 [tool.ruff.lint]
 extend-select = ["I", "E", "W", "F" , "D", "RUF", "UP"]
-ignore = ["E501", "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104"]
+ignore = ["E501", "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104", "UP040", "RUF043", "RUF059"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"

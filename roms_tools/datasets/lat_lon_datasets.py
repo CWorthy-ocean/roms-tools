@@ -1564,10 +1564,10 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             "latitude": "lat",
         }
     )
-    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt_WOA"})
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "sss": "salt",
+            "sss": "salt_WOA",
         }
     )
 

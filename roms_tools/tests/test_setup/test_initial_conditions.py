@@ -707,12 +707,12 @@ def test_invalid_var_type():
 # test density interpolation
 
 
-def test_ic_density_interpolation_drops_source_ts(
+def test_ic_default_depth_drops_source_ts(
     initial_conditions_with_unified_bgc_from_climatology,
 ):
-    """The auxiliary source temperature/salinity (``temp_WOA``/... ) used to build the
-    BGC density coordinate are not written to the output; only the physics
-    temp/salt remain.
+    """The auxiliary source temperature/salinity (``temp_WOA``/... ) carried by the
+    BGC dataset are not written to the output, even on the default depth-space path;
+    only the physics temp/salt remain.
     """
     ic = initial_conditions_with_unified_bgc_from_climatology
     assert ic.use_density_interpolation is False
@@ -723,10 +723,10 @@ def test_ic_density_interpolation_drops_source_ts(
     assert "salt" in ic.ds.data_vars
 
 
-def test_ic_bgc_vars_present_with_density_interpolation(
+def test_ic_bgc_vars_present_default(
     initial_conditions_with_unified_bgc_from_climatology,
 ):
-    """BGC variables are present in the dataset when density interpolation is used."""
+    """BGC variables are present in the dataset on the default depth-space path."""
     ic = initial_conditions_with_unified_bgc_from_climatology
     assert ic.use_density_interpolation is False
     for var in ["NO3", "DIC", "ALK", "O2", "PO4"]:
@@ -734,7 +734,9 @@ def test_ic_bgc_vars_present_with_density_interpolation(
 
 
 def test_ic_density_vs_depth_interpolation(use_dask):
-    """Density-based and depth-based IC produce same shape/vars but (potentially) different values."""
+    """Density- and depth-based IC produce the same shape/vars; values differ when the
+    BGC source carries its own temperature/salinity (else density falls back to depth).
+    """
     grid = Grid(
         nx=2,
         ny=2,
@@ -766,3 +768,35 @@ def test_ic_density_vs_depth_interpolation(use_dask):
         assert var in ic_density.ds
         assert var in ic_depth.ds
         assert ic_density.ds[var].shape == ic_depth.ds[var].shape
+
+    # Whether density interpolation actually fires depends on the BGC source carrying
+    # its own temperature/salinity (``temp_WOA``/...). If present, density output must
+    # differ from depth somewhere; if absent (older test data), the run falls back to
+    # depth and is identical.
+    bgc_src = xr.open_dataset(fname_bgc)
+    source_has_ts = any(
+        str(v).startswith(("temp_", "salt_")) for v in bgc_src.data_vars
+    )
+
+    any_diff = False
+    for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+        if var in ic_density.ds and var in ic_depth.ds:
+            a = ic_density.ds[var].values
+            b = ic_depth.ds[var].values
+            valid = ~(np.isnan(a) | np.isnan(b))
+            if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
+                any_diff = True
+                break
+
+    if source_has_ts:
+        # Wiring guard: confirm density interpolation actually fires (does not silently
+        # fall back to depth). Exact-value verification of the density output lives in
+        # the ``initial_conditions_with_unified_bgc_density`` regression fixture.
+        assert any_diff, (
+            "Density interpolation produced identical output to depth-based"
+        )
+    else:
+        assert not any_diff, (
+            "BGC source has no temperature/salinity, so density interpolation "
+            "should fall back to depth-based and match exactly"
+        )

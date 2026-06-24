@@ -362,3 +362,56 @@ def test_compute_density_coord_monotonic_and_chunked():
     assert result.chunks is not None
     s_axis = result.dims.index("s_rho")
     assert len(result.chunks[s_axis]) == 1
+
+
+def test_density_space_interpolation_returns_correct_values():
+    """End-to-end correctness of density-space interpolation on a synthetic column.
+
+    A tracer placed on a source density coordinate (built from source T/S) and
+    interpolated onto a target density coordinate (built from target T/S) must equal
+    a direct 1-D linear interpolation of the tracer in density space. This pins the
+    full density-interpolation composition (``_compute_density_coord`` feeding
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    # Source column: stably stratified (colder/denser with depth) so the density
+    # coordinate is monotonic; a tracer that increases with depth.
+    src_temp = xr.DataArray(
+        np.array([25.0, 20.0, 15.0, 10.0]).reshape(-1, 1, 1),
+        dims=["depth", "eta", "xi"],
+    )
+    src_salt = xr.DataArray(np.full((4, 1, 1), 35.0), dims=["depth", "eta", "xi"])
+    tracer = xr.DataArray(
+        np.array([2000.0, 2100.0, 2200.0, 2300.0]).reshape(-1, 1, 1),
+        dims=["depth", "eta", "xi"],
+        name="ALK",
+    )
+
+    # Target ROMS sigma levels, with T/S chosen so the target densities fall strictly
+    # inside the source range (genuine interpolation, not edge clamping).
+    tgt_temp = xr.DataArray(
+        np.array([22.0, 17.0, 12.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    )
+    tgt_salt = xr.DataArray(np.full((3, 1, 1), 35.0), dims=["s_rho", "eta", "xi"])
+
+    source_density = _compute_density_coord(src_temp, src_salt, "depth")
+    target_density = _compute_density_coord(tgt_temp, tgt_salt, "s_rho")
+
+    src_rho = source_density.values[:, 0, 0]
+    tgt_rho = target_density.values[:, 0, 0]
+    # sanity: target densities are interior to the source range
+    assert tgt_rho.min() > src_rho.min()
+    assert tgt_rho.max() < src_rho.max()
+
+    ds = xr.Dataset({"ALK": tracer})
+    vertical_regrid = VerticalRegrid(ds, source_dim="depth")
+    regridded = vertical_regrid.apply(
+        ds["ALK"],
+        source_depth_coords=source_density,
+        target_depth_coords=target_density,
+    ).transpose("s_rho", "eta", "xi")
+
+    expected = np.interp(tgt_rho, src_rho, tracer.values[:, 0, 0])
+    np.testing.assert_allclose(regridded.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)

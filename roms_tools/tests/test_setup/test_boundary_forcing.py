@@ -842,6 +842,9 @@ def test_bgc_bc_with_physics_forcing(use_dask):
             break
 
     if source_has_ts:
+        # Wiring guard: confirm density interpolation actually fires (does not silently
+        # fall back to depth). Exact-value verification of the density output lives in
+        # the ``bgc_boundary_forcing_from_unified_density`` regression fixture.
         assert any_diff, (
             "Density interpolation produced identical output to depth-based"
         )
@@ -850,3 +853,33 @@ def test_bgc_bc_with_physics_forcing(use_dask):
             "BGC source has no temperature/salinity, so density interpolation "
             "should fall back to depth-based and match exactly"
         )
+
+
+def test_physics_forcing_survives_yaml_roundtrip(
+    bgc_boundary_forcing_from_unified_density, tmp_path, use_dask
+):
+    """A density BGC BoundaryForcing must round-trip through YAML with its companion
+    physics_forcing intact, so the reloaded object stays in density space (instead of
+    silently falling back to depth interpolation).
+    """
+    bf = bgc_boundary_forcing_from_unified_density
+    filepath = tmp_path / "density_bc.yaml"
+    bf.to_yaml(filepath)
+
+    reloaded = BoundaryForcing.from_yaml(filepath, use_dask=use_dask)
+
+    # physics_forcing must survive serialization and be reconstructed.
+    assert reloaded.physics_forcing is not None
+    assert reloaded.physics_forcing.type == "physics"
+    assert reloaded.use_density_interpolation is True
+    # The physics forcing reuses the shared grid (not a duplicated one).
+    assert reloaded.physics_forcing.grid is reloaded.grid
+
+    # Density interpolation actually fired on reload: output matches the original.
+    # (Do not use object ``==``; the dataclass eq on xarray ds is unreliable.)
+    for direction in ["south", "east", "north", "west"]:
+        if bf.boundaries[direction]:
+            for var in ["NO3", "DIC", "ALK"]:
+                name = f"{var}_{direction}"
+                if name in bf.ds and name in reloaded.ds:
+                    xr.testing.assert_allclose(reloaded.ds[name], bf.ds[name])

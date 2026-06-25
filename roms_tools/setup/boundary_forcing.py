@@ -22,6 +22,7 @@ from roms_tools.setup.bgc_source import (
     BGCSource,
     instantiate_bgc_dataset,
     merge_bgc_fields,
+    warn_missing_bgc_variables,
 )
 from roms_tools.setup.utils import (
     RawDataSource,
@@ -728,6 +729,7 @@ class BoundaryForcing:
             source_data.append((src, raw_data))
 
         ds = xr.Dataset()
+        _completeness_checked = False
         for direction, is_enabled in self.boundaries.items():
             if is_enabled:
                 # Pre-compute both depth types so plotting always works
@@ -749,26 +751,46 @@ class BoundaryForcing:
                     merged[var_name] = transpose_dimensions(merged[var_name])
 
                 merged = compute_missing_bgc_variables(merged)
+
+                if not _completeness_checked:
+                    warn_missing_bgc_variables(merged)
+                    _completeness_checked = True
+
                 ds = self._write_into_dataset(direction, merged, ds)
 
-        # Determine climatology flag and source name from Mode A sources
-        primary_lat_lon = next(
-            (src for src, _ in source_data if src.name is not None), None
+        # Determine climatology flag and source name from Mode A sources.
+        # Use any() so that a non-climatology primary source (e.g. GLODAP)
+        # doesn't override a climatological secondary source (e.g. UNIFIED)
+        # that actually provides the time axis in the merged dataset.
+        climatology = any(
+            src.climatology for src, _ in source_data if src.name is not None
         )
-        climatology = primary_lat_lon.climatology if primary_lat_lon is not None else False
         source_names = ", ".join(
             src.name for src, _ in source_data if src.name is not None
         ) or "constants"
 
-        # Pure-static sources produce no time dimension; add a single time step
-        # so _add_global_metadata / ROMS can handle the output consistently.
+        # Pure-static sources produce no time dimension.  ROMS requires at least two
+        # boundary records that bracket the simulation window so it can interpolate.
+        # Repeat the static data at start_time and end_time, which produces a
+        # constant boundary condition over the full period.
         if "time" not in ds.dims:
-            ds = ds.expand_dims(
-                {"time": [np.datetime64(self.start_time, "ns")]}, axis=0
-            )
+            t0 = np.datetime64(self.start_time, "ns")
+            t1 = np.datetime64(self.end_time, "ns")
+            time_vals = [t0] if t0 == t1 else [t0, t1]
+            ds = ds.expand_dims({"time": time_vals}, axis=0)
+            # Replicate data along the new time dimension (broadcast is already done
+            # by expand_dims; no additional data copy is needed — all time slices
+            # share the same underlying array via dask or numpy broadcasting).
 
         ds = self._add_global_metadata(
             None, ds, source_name=source_names, climatology=climatology
+        )
+
+        import logging as _log_bgc
+        _log_bgc.info(
+            "_process_bgc after _add_global_metadata: abs_time dtype=%s values=%s",
+            ds["abs_time"].dtype,
+            ds["abs_time"].values[:3] if len(ds["abs_time"]) >= 3 else ds["abs_time"].values,
         )
 
         if not self.bypass_validation:
@@ -1202,6 +1224,8 @@ class BoundaryForcing:
             self._warned_directions = set()
 
         for var_name in processed_fields.keys():
+            if var_name not in self.variable_info:
+                continue
             if self.variable_info[var_name]["validate"]:
                 location = self.variable_info[var_name]["location"]
 
@@ -1215,10 +1239,11 @@ class BoundaryForcing:
 
                 mask = mask.isel(**self.bdry_coords[location][direction])
 
-                if self.variable_info[var_name]["is_3d"]:
-                    da = processed_fields[var_name].isel({depth_dim: 0, "time": 0})
-                else:
-                    da = processed_fields[var_name].isel({"time": 0})
+                da = processed_fields[var_name]
+                if self.variable_info[var_name]["is_3d"] and depth_dim in da.dims:
+                    da = da.isel({depth_dim: 0})
+                if "time" in da.dims:
+                    da = da.isel(time=0)
 
                 wet_nans = xr.where(da.where(mask).isnull(), 1, 0)
                 # Apply label to find connected components of wet NaNs

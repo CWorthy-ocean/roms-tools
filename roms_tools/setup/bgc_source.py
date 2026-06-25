@@ -47,6 +47,10 @@ _BGC_VARS = [
     "zooC", "CHL",
 ]
 
+# Variables expected in the final output (CHL is consumed by compute_missing_bgc_variables
+# and replaced by per-PFT phytoplankton vars; it is never written to the output file).
+_BGC_EXPECTED_OUTPUT: frozenset[str] = frozenset(_BGC_VARS) - {"CHL"}
+
 BGC_VARIABLE_INFO: dict[str, dict] = {
     var: {
         "location": "rho",
@@ -57,6 +61,32 @@ BGC_VARIABLE_INFO: dict[str, dict] = {
     }
     for var in _BGC_VARS
 }
+
+
+def warn_missing_bgc_variables(bgc_data: dict[str, "xr.DataArray"]) -> None:
+    """Warn if any expected BGC output variables are absent after source merging.
+
+    Call this *after* :func:`compute_missing_bgc_variables` has run so that
+    derived variables (Lig, ALT_CO2 copies, phytoplankton from CHL, defaults)
+    have already been added.  Any variable still absent at that point will also
+    be absent from the saved file.
+
+    Parameters
+    ----------
+    bgc_data : dict[str, xr.DataArray]
+        The merged BGC variable dict post-derivation.
+    """
+    import logging
+    missing = sorted(_BGC_EXPECTED_OUTPUT - bgc_data.keys())
+    if missing:
+        logging.warning(
+            "BGC sourcing incomplete — %d variable(s) have no source and will be "
+            "absent from the output file:\n  %s\n"
+            "To fill phytoplankton/zooplankton variables add a source that provides "
+            "CHL (e.g. name='UNIFIED') or individual PFT fields.",
+            len(missing),
+            ", ".join(missing),
+        )
 
 
 @dataclass
@@ -98,7 +128,7 @@ class BGCSource:
         ``direction`` is a boundary name (``"south"`` etc.) for BoundaryForcing, or
         ``None`` for the full domain (InitialConditions).  The callable must return
         lazy (dask-backed) DataArrays already on the ROMS boundary or domain grid.
-    variables : list[str], optional
+    overwrite_fields : list[str], optional
         When set, these specific variable names are **force-overwritten** in the merged
         result even if a higher-priority source already provided them.  All other
         variables from this source follow normal fill-only semantics.
@@ -118,7 +148,7 @@ class BGCSource:
     algorithm: Callable | None = None
 
     # --- Priority override ---
-    variables: list[str] | None = None
+    overwrite_fields: list[str] | None = None
 
     def __post_init__(self) -> None:
         modes = sum([
@@ -212,7 +242,7 @@ def merge_bgc_fields(
     For each variable:
 
     * If the variable is not yet in the accumulator → add it (fill-only).
-    * If the variable is already present **and** appears in ``source.variables`` →
+    * If the variable is already present **and** appears in ``source.overwrite_fields`` →
       overwrite it (explicit override).
     * Otherwise → skip (higher-priority source already filled this variable).
 
@@ -230,11 +260,22 @@ def merge_bgc_fields(
     dict[str, xr.DataArray]
         Merged variable dictionary.
     """
+    import logging as _logging
     merged: dict[str, xr.DataArray] = {}
     for src, fields in source_fields:
+        src_label = src.name or ("constants" if src.constants else "algorithm")
+        _logging.debug("merge_bgc_fields: source=%s keys=%s time_dims=%s",
+                       src_label,
+                       list(fields.keys()),
+                       {k: ("time" in v.dims) for k, v in fields.items()})
         for var, da in fields.items():
             if var not in merged:
                 merged[var] = da
-            elif src.variables and var in src.variables:
+            elif src.overwrite_fields and var in src.overwrite_fields:
+                _logging.info("merge_bgc_fields: overwriting '%s' with %s (dims=%s)",
+                              var, src_label, da.dims)
                 merged[var] = da
+            else:
+                _logging.debug("merge_bgc_fields: skipping '%s' from %s (already in merged)",
+                               var, src_label)
     return merged

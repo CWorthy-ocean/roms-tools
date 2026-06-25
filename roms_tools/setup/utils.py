@@ -927,7 +927,14 @@ def group_dataset(ds, filepath):
     tuple
         A tuple containing the list of grouped datasets and corresponding output filenames.
     """
-    if hasattr(ds, "climatology"):
+    import logging as _gd_log
+    _gd_log.info(
+        "group_dataset: abs_time dtype=%s values=%s climatology_attr=%s",
+        ds["abs_time"].dtype,
+        ds["abs_time"].values[:3] if len(ds["abs_time"]) >= 3 else ds["abs_time"].values,
+        ds.attrs.get("climatology", "<not set>"),
+    )
+    if ds.attrs.get("climatology"):
         output_filename = f"{filepath}_clim"
         output_filenames = [output_filename]
         dataset_list = [ds]
@@ -1404,8 +1411,19 @@ def add_time_info_to_ds(
         month.attrs["long_name"] = "Month index (1-12)"
         ds = ds.assign_coords({"month": month})
 
+        # DEBUG — remove after diagnosis
+        _tv = ds[time_name]
+        import logging as _log
+        _log.info("add_time_info_to_ds: time dtype=%s shape=%s values=%s",
+                  _tv.dtype, _tv.shape, _tv.values[:3] if len(_tv) > 0 else "empty")
+        _log.info("add_time_info_to_ds: model_reference_date=%s type=%s np.datetime64=%s",
+                  model_reference_date, type(model_reference_date),
+                  np.datetime64(model_reference_date))
+
         # Absolute time (for readability only)
         abs_time = np.datetime64(model_reference_date) + ds[time_name]
+        _log.info("add_time_info_to_ds: abs_time dtype=%s values[:3]=%s",
+                  abs_time.dtype, abs_time.values[:3] if len(abs_time) > 0 else "empty")
 
         # Custom relative time logic for climatology
         timedelta_index = pd.to_timedelta(ds[time_name].values)
@@ -1566,8 +1584,8 @@ def _bgc_source_to_dict(src: "BGCSource") -> dict[str, Any]:
         d["grid"] = serialize_grid(src.grid)
     if src.constants is not None:
         d["constants"] = dict(src.constants)
-    if src.variables is not None:
-        d["variables"] = list(src.variables)
+    if src.overwrite_fields is not None:
+        d["overwrite_fields"] = list(src.overwrite_fields)
     # physics_forcing and algorithm are not YAML-serializable; omit silently
     return d
 
@@ -1582,7 +1600,7 @@ def _dict_to_bgc_source(d: dict[str, Any]) -> "BGCSource":
         kwargs["path"] = normalize_paths(kwargs["path"])
     if "grid" in kwargs and isinstance(kwargs["grid"], dict):
         kwargs["grid"] = Grid(**kwargs["grid"])
-    known = {"name", "path", "climatology", "grid", "constants", "variables"}
+    known = {"name", "path", "climatology", "grid", "constants", "overwrite_fields"}
     kwargs = {k: v for k, v in kwargs.items() if k in known}
     return BGCSource(**kwargs)
 
@@ -1659,7 +1677,7 @@ def deserialize_source_dict(
             return _dict_to_bgc_source(src)
 
         # For source: if it contains BGCSource-only keys, reconstruct BGCSource
-        _bgc_only = {"constants", "algorithm", "physics_forcing", "variables"}
+        _bgc_only = {"constants", "algorithm", "physics_forcing", "overwrite_fields"}
         if _bgc_only & src.keys():
             return _dict_to_bgc_source(src)
 

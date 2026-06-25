@@ -23,7 +23,7 @@ from roms_tools.regrid import (
     LateralRegridToROMS,
     VerticalRegrid,
 )
-from roms_tools.setup.bgc_source import BGCSource, instantiate_bgc_dataset, merge_bgc_fields
+from roms_tools.setup.bgc_source import BGCSource, instantiate_bgc_dataset, merge_bgc_fields, warn_missing_bgc_variables
 from roms_tools.setup.utils import (
     RawDataSource,
     _compute_density_coord,
@@ -211,6 +211,7 @@ class InitialConditions:
                 source_fields.append((src, partial))
             bgc_fields = merge_bgc_fields(source_fields)
             bgc_fields = compute_missing_bgc_variables(bgc_fields)
+            warn_missing_bgc_variables(bgc_fields)
             processed_fields.update(bgc_fields)
 
         for var_name in processed_fields:

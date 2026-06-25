@@ -3010,7 +3010,13 @@ class GLODAPv2Dataset(LatLonDataset):
                 if file_var in required_file_vars:
                     missing_required.append(file_var)
                 continue
-            datasets.append(xr.open_dataset(filepath, **open_kwargs))
+            ds_one = xr.open_dataset(filepath, **open_kwargs)
+            # Each GLODAP file carries per-variable metadata arrays (e.g.
+            # Input_mean, SnR) that conflict across files at merge time.
+            # Keep only the target data variable plus the shared 1-D depth
+            # lookup (Depth) so that clean_up() can promote it to a coordinate.
+            keep = [v for v in [file_var, "Depth"] if v in ds_one.data_vars]
+            datasets.append(ds_one[keep])
 
         if missing_required:
             raise FileNotFoundError(
@@ -3025,20 +3031,72 @@ class GLODAPv2Dataset(LatLonDataset):
         return xr.merge(datasets)
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
-        """Rename GLODAP native coordinates to roms-tools conventions."""
-        ds = ds.rename({"lon": "longitude", "lat": "latitude", "Depth": "depth"})
-        ds = ds.assign_coords({
-            "latitude": ds["latitude"],
-            "longitude": ds["longitude"],
-            "depth": ds["depth"],
-        })
+        """Rename GLODAP native coordinates/variables to roms-tools conventions.
+
+        GLODAP files store the depth grid as a 1-D data variable ``Depth`` on
+        an unlabelled ``depth_surface`` dimension.  This method promotes it to a
+        proper dimension coordinate and renames all axes to the package standard
+        (``latitude``, ``longitude``, ``depth``).
+        """
+        # Promote the 1-D Depth data variable to a dimension coordinate and
+        # rename the underlying dimension from depth_surface → depth.
+        if "Depth" in ds.data_vars:
+            depth_dim = ds["Depth"].dims[0]          # "depth_surface"
+            ds = ds.assign_coords({depth_dim: ds["Depth"].values})
+            ds = ds.drop_vars("Depth")
+            ds = ds.rename({depth_dim: "depth"})
+        # Rename the lat/lon dimension coordinates to package convention.
+        rename = {}
+        if "lon" in ds.coords:
+            rename["lon"] = "longitude"
+        if "lat" in ds.coords:
+            rename["lat"] = "latitude"
+        if rename:
+            ds = ds.rename(rename)
         self.dim_names = {
             "latitude": "latitude",
             "longitude": "longitude",
             "depth": "depth",
         }
-        # No time dimension — omitted intentionally
+        # Build a preliminary land/ocean mask from the NaN pattern at the
+        # surface depth of the first available data variable.  apply_lateral_fill()
+        # expects self.ds["mask"] to exist.  For GLODAP the mask is rebuilt after
+        # the depth-fill pass in extrapolate_deepest_to_bottom() so that variables
+        # whose shallowest data is below depth[0] are also correctly treated as ocean.
+        data_vars = [v for v in ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = ds[data_vars[0]].isel(depth=0, drop=True)
+            ds["mask"] = xr.where(surface.isnull(), 0, 1)
         return ds
+
+    def extrapolate_deepest_to_bottom(self) -> None:
+        """Forward- and backward-fill vertical NaN gaps for the sparse GLODAP grid.
+
+        The standard forward (downward) fill is not enough for GLODAP: a variable
+        can be NaN at the surface even when data exists at a deeper level, or two
+        variables can have different surface coverage so the mask (built from the
+        first variable) marks a cell as ocean while a second variable has NaN there.
+
+        This override adds a backward (upward) fill after the forward fill so that
+        the shallowest valid value is propagated to the surface.  The mask is then
+        rebuilt from the first non-mask variable at depth=0 so that apply_lateral_fill()
+        never encounters NaN values at ocean grid points.
+        """
+        if "depth" not in self.dim_names:
+            return
+        dim = self.dim_names["depth"]
+        for var_name in self.ds.data_vars:
+            if dim not in self.ds[var_name].dims:
+                continue
+            self.ds[var_name] = self.ds[var_name].ffill(dim=dim)
+            self.ds[var_name] = self.ds[var_name].bfill(dim=dim)
+
+        # Rebuild the mask now that all variables have surface values wherever
+        # data exists at any depth.
+        data_vars = [v for v in self.ds.data_vars if not v.startswith("mask")]
+        if data_vars:
+            surface = self.ds[data_vars[0]].isel(depth=0, drop=True)
+            self.ds["mask"] = xr.where(surface.isnull(), 0, 1)
 
     @staticmethod
     def _compute_density(

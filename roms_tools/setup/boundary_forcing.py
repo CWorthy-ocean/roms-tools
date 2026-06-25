@@ -120,6 +120,24 @@ def _interpolate_phys_to_bgc_time(
         )
         result = interpolate_cyclic_time(phys_for_interp, time_dim, time_dim, bgc_doy)
         return result.assign_coords({time_dim: bgc_time_coord.values})
+
+    # Non-climatology path: linear interpolation within physics range; flat
+    # extrapolation (hold first/last value) outside it so that BGC time windows
+    # that exceed the physics coverage never produce NaN target densities.
+    bgc_times = bgc_time_coord.values
+    phys_times = phys_da[time_dim].values
+    pads = []
+    if len(bgc_times) > 0 and bgc_times[0] < phys_times[0]:
+        pads.append(
+            phys_da.isel({time_dim: [0]}).assign_coords({time_dim: [bgc_times[0]]})
+        )
+    pads.append(phys_da)
+    if len(bgc_times) > 0 and bgc_times[-1] > phys_times[-1]:
+        pads.append(
+            phys_da.isel({time_dim: [-1]}).assign_coords({time_dim: [bgc_times[-1]]})
+        )
+    if len(pads) > 1:
+        phys_da = xr.concat(pads, dim=time_dim)
     return phys_da.interp({time_dim: bgc_time_coord}, method="linear")
 
 
@@ -1135,7 +1153,8 @@ class BoundaryForcing:
         source_density = target_density = None
         if use_density:
             source_density, target_density = self._compute_bgc_density_coords(
-                direction, bdry_data, partial_fields
+                direction, bdry_data, partial_fields,
+                bgc_climatology=src.climatology,
             )
 
         tracer_vars = [v for v in partial_fields if v not in aux_ts_vars]
@@ -1166,6 +1185,7 @@ class BoundaryForcing:
         direction: str,
         bdry_data,
         partial_fields: dict,
+        bgc_climatology: bool = False,
     ) -> tuple[xr.DataArray, xr.DataArray]:
         """Build source and target density coordinates for density-space BGC interpolation.
 
@@ -1193,12 +1213,6 @@ class BoundaryForcing:
         bgc_time_coord = None
         if bgc_time_dim and bgc_time_dim in partial_fields[temp_key].dims:
             bgc_time_coord = partial_fields[temp_key][bgc_time_dim]
-
-        # Detect whether source is a climatology (drives cyclic time interpolation)
-        primary_src = next(
-            (s for s in self.source if s.name is not None), None
-        )
-        bgc_climatology = primary_src.climatology if primary_src is not None else False
 
         def _align_time(da: xr.DataArray, time_dim: str) -> xr.DataArray:
             if time_dim not in da.dims:

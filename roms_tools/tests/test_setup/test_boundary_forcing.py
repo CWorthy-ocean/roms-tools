@@ -746,7 +746,7 @@ def test_bgc_bc_density_fallback_without_physics_forcing(
 ):
     """BGC BC with density interpolation but no physics_forcing falls back to depth-based."""
     bf = bgc_boundary_forcing_from_unified_climatology
-    assert bf.use_density_interpolation is False
+    assert bf.bgc_interpolation_method == "depth"
     assert bf.physics_forcing is None
     # BGC variables should still be present (depth-based fallback succeeded)
     assert any("NO3" in v for v in bf.ds.data_vars)
@@ -790,12 +790,12 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
         type="bgc",
         physics_forcing=physics_bc,
-        use_density_interpolation=True,
+        bgc_interpolation_method="density",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
 
-    assert bgc_bc.use_density_interpolation is True
+    assert bgc_bc.bgc_interpolation_method == "density"
     assert bgc_bc.physics_forcing is physics_bc
     for direction in ["south", "east", "north", "west"]:
         if bgc_bc.boundaries[direction]:
@@ -821,7 +821,7 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         end_time=datetime(2012, 1, 2),
         source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
         type="bgc",
-        use_density_interpolation=False,
+        bgc_interpolation_method="depth",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
     )
@@ -841,17 +841,116 @@ def test_bgc_bc_with_physics_forcing(use_dask):
         if any_diff:
             break
 
+    # MLD-anchored interpolation: builds, produces BGC vars, and never leaks T/S.
+    bgc_bc_mld = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2012, 1, 1),
+        end_time=datetime(2012, 1, 2),
+        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        type="bgc",
+        physics_forcing=physics_bc,
+        bgc_interpolation_method="density_mld",
+        apply_2d_horizontal_fill=True,
+        use_dask=use_dask,
+    )
+    assert bgc_bc_mld.bgc_interpolation_method == "density_mld"
+    assert not any(
+        str(v).startswith(("temp_", "salt_")) for v in bgc_bc_mld.ds.data_vars
+    )
+
+    mld_diff = False
+    for direction in ["south", "east", "north", "west"]:
+        if not bgc_bc.boundaries[direction]:
+            continue
+        for var in ["NO3", "DIC", "ALK", "PO4", "O2"]:
+            name = f"{var}_{direction}"
+            if name in bgc_bc_mld.ds and name in bgc_bc_depth.ds:
+                a = bgc_bc_mld.ds[name].values
+                b = bgc_bc_depth.ds[name].values
+                valid = ~(np.isnan(a) | np.isnan(b))
+                if valid.any() and np.abs(a[valid] - b[valid]).max() > 0:
+                    mld_diff = True
+                    break
+        if mld_diff:
+            break
+
     if source_has_ts:
-        # Wiring guard: confirm density interpolation actually fires (does not silently
-        # fall back to depth). Exact-value verification of the density output lives in
-        # the ``bgc_boundary_forcing_from_unified_density`` regression fixture.
+        # Wiring guard: confirm the density methods actually fire (do not silently fall
+        # back to depth). Exact-value verification of the density output lives in the
+        # ``bgc_boundary_forcing_from_unified_density`` regression fixture.
         assert any_diff, (
             "Density interpolation produced identical output to depth-based"
         )
+        assert mld_diff, "MLD interpolation produced identical output to depth-based"
     else:
         assert not any_diff, (
             "BGC source has no temperature/salinity, so density interpolation "
             "should fall back to depth-based and match exactly"
+        )
+        assert not mld_diff, (
+            "BGC source has no temperature/salinity, so MLD interpolation "
+            "should fall back to depth-based and match exactly"
+        )
+
+
+def test_bgc_bc_deprecated_use_density_interpolation_warns(use_dask):
+    """The deprecated ``use_density_interpolation`` bool still works on BoundaryForcing,
+    warns, and maps onto ``bgc_interpolation_method``.
+    """
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    with pytest.warns(DeprecationWarning):
+        bf = BoundaryForcing(
+            grid=grid,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2012, 1, 2),
+            source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+            type="bgc",
+            use_density_interpolation=False,
+            apply_2d_horizontal_fill=True,
+            use_dask=use_dask,
+        )
+    assert bf.bgc_interpolation_method == "depth"
+
+
+def test_bgc_bc_invalid_interpolation_method_raises(use_dask):
+    """An unknown ``bgc_interpolation_method`` is rejected."""
+    fname_bgc = Path(download_test_data("coarsened_UNIFIED_bgc_dataset.nc"))
+    grid = Grid(
+        nx=3,
+        ny=3,
+        size_x=400,
+        size_y=400,
+        center_lon=-8,
+        center_lat=58,
+        rot=0,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    with pytest.raises(ValueError, match="bgc_interpolation_method"):
+        BoundaryForcing(
+            grid=grid,
+            start_time=datetime(2012, 1, 1),
+            end_time=datetime(2012, 1, 2),
+            source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+            type="bgc",
+            bgc_interpolation_method="bogus",
+            apply_2d_horizontal_fill=True,
+            use_dask=use_dask,
         )
 
 
@@ -871,7 +970,7 @@ def test_physics_forcing_survives_yaml_roundtrip(
     # physics_forcing must survive serialization and be reconstructed.
     assert reloaded.physics_forcing is not None
     assert reloaded.physics_forcing.type == "physics"
-    assert reloaded.use_density_interpolation is True
+    assert reloaded.bgc_interpolation_method == "density"
     # The physics forcing reuses the shared grid (not a duplicated one).
     assert reloaded.physics_forcing.grid is reloaded.grid
 

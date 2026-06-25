@@ -11,7 +11,7 @@ import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
-from roms_tools import BoundaryForcing, Grid
+from roms_tools import BGCSource, BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.tests.test_setup.utils import download_regional_and_bigger
 
@@ -99,7 +99,7 @@ def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
 
     assert boundary_forcing.start_time == datetime(2021, 6, 29)
     assert boundary_forcing.end_time == datetime(2021, 6, 30)
-    assert boundary_forcing.source["climatology"]
+    assert boundary_forcing.source[0].climatology
     assert boundary_forcing.model_reference_date == datetime(2000, 1, 1)
     assert all(
         k in boundary_forcing.boundaries for k in ["south", "east", "north", "west"]
@@ -184,7 +184,7 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
             grid=grid,
             start_time=datetime(2021, 6, 29),
             end_time=datetime(2021, 6, 30),
-            source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},
+            source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc, climatology=True),
             type="bgc",
             apply_2d_horizontal_fill=False,
             use_dask=use_dask,
@@ -297,7 +297,7 @@ def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
         "grid": grid,
         "start_time": datetime(2021, 6, 29),
         "end_time": datetime(2021, 6, 29),
-        "source": {"path": fname_bgc, "name": "UNIFIED", "climatology": True},
+        "source": BGCSource(name="UNIFIED", path=fname_bgc, climatology=True),
         "type": "bgc",
         "use_dask": use_dask,
     }

@@ -8,7 +8,7 @@ import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
-from roms_tools import Grid, InitialConditions
+from roms_tools import BGCSource, Grid, InitialConditions
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
@@ -242,11 +242,7 @@ def test_initial_conditions_raises_on_regridded_nans(use_dask):
             ini_time=datetime(1998, 1, 6),
             source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
             use_dask=use_dask,
-            bgc_source={
-                "name": "ROMS",
-                "grid": parent_grid,
-                "path": restart_file,
-            },
+            bgc_source=BGCSource(name="ROMS", grid=parent_grid, path=restart_file),
         )
 
 
@@ -311,10 +307,10 @@ def test_initial_conditions_missing_physics_name(example_grid, use_dask):
         )
 
 
-# Test initialization with missing 'name' in bgc_source
+# Test initialization with invalid bgc_source type (must be BGCSource, not dict)
 def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    with pytest.raises(ValueError, match="`bgc_source` must include a 'name'"):
+    with pytest.raises(ValueError, match="`bgc_source` must be a BGCSource"):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
@@ -324,19 +320,10 @@ def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
         )
 
 
-# Test initialization with missing 'path' in bgc_source
+# Test initialization with invalid bgc_source name
 def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
-    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    with pytest.raises(
-        ValueError, match="`bgc_source` must include a 'path' if it is provided."
-    ):
-        InitialConditions(
-            grid=example_grid,
-            ini_time=datetime(2021, 6, 29),
-            source={"name": "GLORYS", "path": fname},
-            bgc_source={"name": "CESM_REGRIDDED"},
-            use_dask=use_dask,
-        )
+    with pytest.raises(ValueError, match="unknown name"):
+        BGCSource(name="INVALID_SOURCE")
 
 
 # Test initialization with missing ini_time
@@ -377,11 +364,11 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
-        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
+        bgc_source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc),
         use_dask=use_dask,
     )
 
-    assert initial_conditions.bgc_source["climatology"] is False
+    assert initial_conditions.bgc_source.climatology is False
 
 
 @pytest.mark.parametrize(

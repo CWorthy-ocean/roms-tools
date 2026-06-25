@@ -8,6 +8,7 @@ import h5py
 import pytest
 
 from roms_tools import (
+    BGCSource,
     BoundaryForcing,
     Grid,
     InitialConditions,
@@ -419,7 +420,7 @@ def initial_conditions_with_bgc(use_dask: bool) -> InitialConditions:
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
-        bgc_source={"path": fname_bgc, "name": "CESM_REGRIDDED"},
+        bgc_source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc),
         use_dask=use_dask,
     )
 
@@ -448,11 +449,7 @@ def initial_conditions_with_bgc_from_climatology(use_dask: bool) -> InitialCondi
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
-        bgc_source={
-            "path": fname_bgc,
-            "name": "CESM_REGRIDDED",
-            "climatology": True,  # type: ignore[dict-item]
-        },
+        bgc_source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc, climatology=True),
         use_dask=use_dask,
     )
 
@@ -482,7 +479,7 @@ def initial_conditions_with_unified_bgc_from_climatology(
         grid=grid,
         ini_time=datetime(2021, 6, 29),
         source={"path": fname, "name": "GLORYS"},
-        bgc_source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        bgc_source=BGCSource(name="UNIFIED", path=fname_bgc, climatology=True),
         use_dask=use_dask,
     )
 
@@ -502,7 +499,7 @@ def initial_conditions_from_roms(
         grid=grid,
         ini_time=datetime(1998, 1, 6),
         source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
-        bgc_source={"name": "ROMS", "path": fname_restart, "grid": parent_grid},  # type: ignore
+        bgc_source=BGCSource(name="ROMS", path=fname_restart, grid=parent_grid),
         use_dask=use_dask,
     )
 
@@ -581,7 +578,7 @@ def bgc_boundary_forcing_from_climatology(use_dask: bool) -> BoundaryForcing:
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "CESM_REGRIDDED", "climatology": True},  # type: ignore[dict-item]
+        source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc, climatology=True),
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,
@@ -611,7 +608,7 @@ def bgc_boundary_forcing_from_unified_climatology(use_dask: bool) -> BoundaryFor
         grid=grid,
         start_time=datetime(2021, 6, 29),
         end_time=datetime(2021, 6, 30),
-        source={"path": fname_bgc, "name": "UNIFIED", "climatology": True},  # type: ignore[dict-item]
+        source=BGCSource(name="UNIFIED", path=fname_bgc, climatology=True),
         type="bgc",
         apply_2d_horizontal_fill=True,
         use_dask=use_dask,

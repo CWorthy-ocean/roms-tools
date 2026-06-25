@@ -11,11 +11,9 @@ from matplotlib.axes import Axes
 
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
-    CESMBGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
     LatLonDataset,
-    UnifiedBGCDataset,
 )
 from roms_tools.datasets.roms_dataset import ROMSDataset, choose_subdomain
 from roms_tools.plot import plot
@@ -24,6 +22,7 @@ from roms_tools.regrid import (
     LateralRegridToROMS,
     VerticalRegrid,
 )
+from roms_tools.setup.bgc_source import BGCSource, instantiate_bgc_dataset, merge_bgc_fields
 from roms_tools.setup.utils import (
     RawDataSource,
     compute_barotropic_velocity,
@@ -146,9 +145,9 @@ class InitialConditions:
     """The date and time at which the initial conditions are set."""
     source: RawDataSource
     """Dictionary specifying the source of the physical initial condition data."""
-    bgc_source: RawDataSource | None = None
-    """Dictionary specifying the source of the biogeochemical (BGC) initial condition
-    data."""
+    bgc_source: BGCSource | list[BGCSource] | None = None
+    """BGC initial condition source(s).  A single :class:`~roms_tools.setup.bgc_source.BGCSource`
+    or an ordered list of them (first source has highest priority)."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """The reference date for the model."""
     allow_flex_time: bool = False
@@ -179,8 +178,26 @@ class InitialConditions:
         processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
-            processed_fields = self._process_data(processed_fields, type="bgc")
-            processed_fields = compute_missing_bgc_variables(processed_fields)
+            # Normalise to list[BGCSource]
+            bgc_sources = (
+                [self.bgc_source]
+                if isinstance(self.bgc_source, BGCSource)
+                else self.bgc_source
+            )
+            physics_time = processed_fields["temp"]["time"]
+            source_fields = []
+            for src in bgc_sources:
+                partial = self._process_data({}, type="bgc", bgc_source=src)
+                # Align BGC time coordinate with the physics time coordinate
+                for var_name in list(partial):
+                    if "time" in partial[var_name].coords:
+                        partial[var_name] = partial[var_name].assign_coords(
+                            {"time": physics_time}
+                        )
+                source_fields.append((src, partial))
+            bgc_fields = merge_bgc_fields(source_fields)
+            bgc_fields = compute_missing_bgc_variables(bgc_fields)
+            processed_fields.update(bgc_fields)
 
         for var_name in processed_fields:
             processed_fields[var_name] = transpose_dimensions(
@@ -201,10 +218,33 @@ class InitialConditions:
 
         self.ds = ds
 
-    def _process_data(self, processed_fields, type="physics"):
+    def _process_data(
+        self,
+        processed_fields: dict,
+        type: str = "physics",
+        bgc_source: BGCSource | None = None,
+    ) -> dict:
+        """Regrid one data source (physics or a single BGC source) onto the ROMS grid.
+
+        Parameters
+        ----------
+        processed_fields : dict
+            Accumulator dict that physics variables are merged into (mutated for
+            physics, ignored for BGC — BGC returns a fresh partial dict).
+        type : str
+            ``"physics"`` or ``"bgc"``.
+        bgc_source : BGCSource, optional
+            The specific BGC source to process.  Required when ``type="bgc"``.
+
+        Returns
+        -------
+        dict
+            The updated ``processed_fields`` (for physics) or a new partial dict
+            containing only variables from this BGC source.
+        """
         target_coords = get_target_coords(self.grid)
 
-        data = self._get_data(forcing_type=type)
+        data = self._get_data(forcing_type=type, bgc_source=bgc_source)
         data.choose_subdomain(
             target_coords,
             unchunk_lateral_dims=True,
@@ -258,13 +298,6 @@ class InitialConditions:
                 target_coords["angle"],
                 interpolate_after=True,
             )
-
-        if type == "bgc":
-            # Ensure time coordinate matches that of physical variables
-            for var_name in var_names:
-                processed_fields[var_name] = processed_fields[var_name].assign_coords(
-                    {"time": processed_fields["temp"]["time"]}
-                )
 
         # Get depth coordinates
         zeta = (
@@ -454,87 +487,90 @@ class InitialConditions:
             "climatology": self.source.get("climatology", False),
         }
         if self.bgc_source is not None:
-            if "name" not in self.bgc_source.keys():
+            # Validate that bgc_source is BGCSource or list[BGCSource]
+            if isinstance(self.bgc_source, BGCSource):
+                pass  # already valid; list normalisation happens in __post_init__
+            elif isinstance(self.bgc_source, list) and all(
+                isinstance(s, BGCSource) for s in self.bgc_source
+            ):
+                if not self.bgc_source:
+                    raise ValueError("`bgc_source` list must not be empty.")
+            else:
                 raise ValueError(
-                    "`bgc_source` must include a 'name' if it is provided."
+                    "`bgc_source` must be a BGCSource or a list of BGCSource objects."
                 )
-            if "path" not in self.bgc_source.keys():
-                raise ValueError(
-                    "`bgc_source` must include a 'path' if it is provided."
-                )
-            # set self.bgc_source["climatology"] to False if not provided
-            self.bgc_source = {
-                **self.bgc_source,
-                "climatology": self.bgc_source.get("climatology", False),
-            }
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
                 f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
             )
 
     def _get_data(
-        self, forcing_type=Literal["physics", "bgc"]
+        self,
+        forcing_type: str = "physics",
+        bgc_source: BGCSource | None = None,
     ) -> LatLonDataset | ROMSDataset:
-        """Determine the correct `Dataset` type and return an instance.
+        """Instantiate the dataset for physics or a single BGC source.
 
+        Parameters
+        ----------
         forcing_type : str
-            Specifies the type of forcing data. Options are:
+            ``"physics"`` or ``"bgc"``.
+        bgc_source : BGCSource, optional
+            The BGC source to instantiate.  Required when ``forcing_type="bgc"``.
 
-            - "physics": for physical atmospheric forcing.
-            - "bgc": for biogeochemical forcing.
         Returns
         -------
-        Dataset
-            The `LatLonDataset` or `ROMSDataset` instance
+        LatLonDataset or ROMSDataset
         """
-        dataset_map: dict[
-            str, dict[str, dict[str, type[LatLonDataset | ROMSDataset]]]
-        ] = {
-            "physics": {
-                "GLORYS": {
-                    "external": GLORYSDataset,
-                    "default": GLORYSDefaultDataset,
-                },
-                "ROMS": defaultdict(lambda: ROMSDataset),
+        if forcing_type == "bgc":
+            # BGC instantiation is centralised in instantiate_bgc_dataset()
+            assert bgc_source is not None, "_get_data(type='bgc') requires bgc_source"
+            roms_var_names = _set_required_vars("bgc") if bgc_source.name == "ROMS" else None
+            adjust_ssh = bgc_source.name == "ROMS"
+            if adjust_ssh:
+                self.adjust_depth_for_sea_surface_height = True
+            return instantiate_bgc_dataset(
+                bgc_source,
+                start_time=self.ini_time,
+                end_time=None,
+                use_dask=self.use_dask,
+                chunks=self.chunks,
+                initial_slice_bounds=self.initial_slice_bounds,
+                roms_var_names=roms_var_names,
+                allow_flex_time=self.allow_flex_time,
+                adjust_depth_for_sea_surface_height=adjust_ssh,
+            )
+
+        # --- Physics path (unchanged) ---
+        physics_map: dict[str, dict[str, type[LatLonDataset | ROMSDataset]]] = {
+            "GLORYS": {
+                "external": GLORYSDataset,
+                "default": GLORYSDefaultDataset,
             },
-            "bgc": {
-                "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
-                "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
-                "ROMS": defaultdict(lambda: ROMSDataset),
-            },
+            "ROMS": defaultdict(lambda: ROMSDataset),
         }
 
-        source_dict = self.source if forcing_type == "physics" else self.bgc_source
-
-        if source_dict is None:
-            raise ValueError(f"{forcing_type} source is not set")
-
-        source_name = str(source_dict["name"])
-        if source_name not in dataset_map[forcing_type]:
-            tpl = 'Valid options for source["name"] for type {} include: {}'
-            msg = tpl.format(
-                forcing_type, " and ".join(dataset_map[forcing_type].keys())
+        source_name = str(self.source["name"])
+        if source_name not in physics_map:
+            raise ValueError(
+                f'Valid options for source["name"] for type "physics" include: '
+                f'{" and ".join(physics_map)}'
             )
-            raise ValueError(msg)
 
-        has_no_path = "path" not in source_dict
-        has_default_path = source_dict.get("path") == GLORYSDefaultDataset.dataset_name
-        use_default = has_no_path or has_default_path
+        has_no_path = "path" not in self.source
+        has_default_path = self.source.get("path") == GLORYSDefaultDataset.dataset_name
+        variant = "default" if (has_no_path or has_default_path) else "external"
+        data_type = physics_map[source_name][variant]
 
-        variant = "default" if use_default else "external"
-
-        data_type = dataset_map[forcing_type][source_name][variant]
-
-        if isinstance(source_dict["path"], bool):
+        if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
 
-        if source_dict["name"] == "ROMS":
-            var_names = _set_required_vars(forcing_type)
+        if source_name == "ROMS":
+            var_names = _set_required_vars("physics")
             self.adjust_depth_for_sea_surface_height = True
-
-            data = data_type(
-                path=source_dict["path"],  # type: ignore
-                grid=source_dict["grid"],  # type: ignore
+            return data_type(
+                path=self.source["path"],  # type: ignore
+                grid=self.source["grid"],  # type: ignore
                 var_names=var_names,
                 start_time=self.ini_time,
                 allow_flex_time=self.allow_flex_time,
@@ -543,20 +579,16 @@ class InitialConditions:
                 chunks=self.chunks,
             )
 
-        else:
-            self.adjust_depth_for_sea_surface_height = False
-
-            data = data_type(
-                filename=source_dict["path"],  # type: ignore
-                start_time=self.ini_time,
-                climatology=source_dict["climatology"],  # type: ignore
-                allow_flex_time=self.allow_flex_time,
-                use_dask=self.use_dask,
-                chunks=self.chunks,
-                initial_slice_bounds=self.initial_slice_bounds,
-            )
-
-        return data
+        self.adjust_depth_for_sea_surface_height = False
+        return data_type(
+            filename=self.source["path"],  # type: ignore
+            start_time=self.ini_time,
+            climatology=self.source["climatology"],  # type: ignore
+            allow_flex_time=self.allow_flex_time,
+            use_dask=self.use_dask,
+            chunks=self.chunks,
+            initial_slice_bounds=self.initial_slice_bounds,
+        )
 
     def _set_variable_info(self, data, type="physics"):
         """Sets up a dictionary with metadata for variables based on the type.
@@ -824,7 +856,14 @@ class InitialConditions:
         )
         ds.attrs["source"] = self.source["name"]
         if self.bgc_source is not None:
-            ds.attrs["bgc_source"] = self.bgc_source["name"]
+            bgc_sources = (
+                [self.bgc_source]
+                if isinstance(self.bgc_source, BGCSource)
+                else self.bgc_source
+            )
+            ds.attrs["bgc_source"] = ", ".join(
+                s.name or "constants" for s in bgc_sources
+            )
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
@@ -1038,12 +1077,12 @@ class InitialConditions:
         grid = Grid.from_yaml(filepath)
         initial_conditions_params = from_yaml(cls, filepath)
 
-        # Deserialize nested grids inside 'source' and 'bgc_source'
-        for name in ["source", "bgc_source"]:
-            src_dict = initial_conditions_params.get(name)
-            if src_dict and "grid" in src_dict and src_dict["grid"] is not None:
-                grid_data = pop_grid_data(src_dict["grid"])
-                src_dict["grid"] = Grid(**grid_data)
+        # Deserialize nested grids inside 'source' (physics dict only).
+        # bgc_source was already reconstructed as BGCSource by from_yaml / deserialize_source_dict.
+        src_dict = initial_conditions_params.get("source")
+        if isinstance(src_dict, dict) and "grid" in src_dict and src_dict["grid"] is not None:
+            grid_data = pop_grid_data(src_dict["grid"])
+            src_dict["grid"] = Grid(**grid_data)
 
         return cls(
             grid=grid,

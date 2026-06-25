@@ -2954,3 +2954,193 @@ def get_glorys_bounds(
         "minimum_longitude": float(ds_subset.longitude.min()),
         "maximum_longitude": float(ds_subset.longitude.max()),
     }
+
+@dataclass(kw_only=True)
+class GLODAPv2Dataset(LatLonDataset):
+    """GLODAPv2 2016b gridded dataset — one per-variable file per data variable.
+
+    Files are named ``GLODAPv2.2016b.{var}.nc`` and live in the directory given by
+    ``filename``.  Each file holds one variable on a 1° × 1° lat/lon grid with
+    coordinate names ``lat``, ``lon``, and ``Depth``.  There is **no time dimension**;
+    the data represent an observational climatology.
+
+    Parameters
+    ----------
+    filename : str or Path
+        Path to the **directory** that contains the GLODAP 2016b netCDF files.
+    """
+
+    _default_lateral_dask_chunk: ClassVar[int] = _DEFAULT_LAT_LON_LATERAL_CHUNK
+    _file_prefix: ClassVar[str] = "GLODAPv2.2016b"
+
+    needs_lateral_fill: bool = True
+    has_encoded_times: bool = False  # no time coordinate in these files
+
+    def load_data(self) -> xr.Dataset:
+        """Open and merge per-variable GLODAP files from the given directory.
+
+        Each variable named in ``var_names`` / ``opt_var_names`` maps to a file
+        ``{directory}/{prefix}.{file_var_name}.nc``.  Files for optional variables
+        that are not present on disk are silently skipped.  All datasets are merged
+        into one using :func:`xarray.merge`, which is dask-lazy when ``use_dask=True``.
+        """
+        base_dir = Path(self.filename)
+        if not base_dir.is_dir():
+            raise FileNotFoundError(f"GLODAP directory not found: {base_dir}")
+
+        all_file_vars = set(self.var_names.values()) | set(self.opt_var_names.values())
+        required_file_vars = set(self.var_names.values())
+
+        open_kwargs: dict = {"decode_times": False}
+        if self.use_dask:
+            open_kwargs["chunks"] = self.chunks or {}
+
+        datasets: list[xr.Dataset] = []
+        missing_required: list[str] = []
+        for file_var in sorted(all_file_vars):
+            filepath = base_dir / f"{self._file_prefix}.{file_var}.nc"
+            if not filepath.exists():
+                if file_var in required_file_vars:
+                    missing_required.append(file_var)
+                continue
+            datasets.append(xr.open_dataset(filepath, **open_kwargs))
+
+        if missing_required:
+            raise FileNotFoundError(
+                f"Required GLODAP variable files not found in {base_dir}: "
+                f"{sorted(missing_required)}"
+            )
+        if not datasets:
+            raise FileNotFoundError(
+                f"No GLODAP files found in {base_dir} with prefix '{self._file_prefix}'."
+            )
+
+        return xr.merge(datasets)
+
+    def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
+        """Rename GLODAP native coordinates to roms-tools conventions."""
+        ds = ds.rename({"lon": "longitude", "lat": "latitude", "Depth": "depth"})
+        ds = ds.assign_coords({
+            "latitude": ds["latitude"],
+            "longitude": ds["longitude"],
+            "depth": ds["depth"],
+        })
+        self.dim_names = {
+            "latitude": "latitude",
+            "longitude": "longitude",
+            "depth": "depth",
+        }
+        # No time dimension — omitted intentionally
+        return ds
+
+    @staticmethod
+    def _compute_density(
+        temperature: xr.DataArray,
+        salinity: xr.DataArray,
+    ) -> xr.DataArray:
+        """Compute seawater density from temperature and salinity (dask-lazy).
+
+        Parameters
+        ----------
+        temperature : xr.DataArray
+            In-situ temperature (°C), shape (depth, lat, lon).
+        salinity : xr.DataArray
+            Practical salinity (PSU), shape (depth, lat, lon).
+
+        Returns
+        -------
+        xr.DataArray
+            Density in kg m⁻³, same shape as inputs.
+
+        Notes
+        -----
+        **Placeholder implementation** — returns a spatially uniform value of
+        1025 kg m⁻³ regardless of T/S.  Replace the body of this method with a
+        full equation-of-state (e.g. TEOS-10 via ``gsw``) when available.
+        The placeholder uses :func:`xarray.full_like` so the result is dask-lazy
+        and carries the same chunk structure as the inputs.
+        """
+        return xr.full_like(temperature, 1025.0)
+
+
+@dataclass(kw_only=True)
+class GLODAPv2BGCDataset(GLODAPv2Dataset):
+    """GLODAPv2 2016b mapped to ROMS BGC variable names.
+
+    Loads six core BGC tracers plus temperature and salinity (needed for the
+    µmol kg⁻¹ → mmol m⁻³ unit conversion).  After :meth:`post_process` runs,
+    temperature and salinity are removed from the dataset so they are never
+    treated as BGC output variables by the downstream pipeline.
+
+    Variables loaded
+    ----------------
+    BGC (kept in output): PO4, NO3, SiO3 (silicate), O2 (oxygen), DIC (TCO2),
+    ALK (TAlk).
+
+    Ancillary (dropped after conversion): temperature, salinity.
+
+    Notes
+    -----
+    GLODAPv2 values are in **µmol kg⁻¹**.  :meth:`post_process` converts to
+    **mmol m⁻³** using ``val × ρ / 1000`` where ρ is the density returned by
+    :meth:`~GLODAPv2Dataset._compute_density` (currently a 1025 kg m⁻³
+    placeholder).
+    """
+
+    dim_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "longitude": "lon",
+            "latitude": "lat",
+            "depth": "Depth",
+        }
+    )
+    var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            # BGC tracers (kept in output after unit conversion)
+            "PO4": "PO4",
+            "NO3": "NO3",
+            "SiO3": "silicate",
+            "O2": "oxygen",
+            "DIC": "TCO2",
+            "ALK": "TAlk",
+            # Ancillary — needed for density calculation, dropped afterwards
+            "temperature": "temperature",
+            "salinity": "salinity",
+        }
+    )
+    opt_var_names: dict[str, str] = field(default_factory=dict)
+
+    # File variable names of the ancillary fields to drop after post_process
+    _ANCILLARY_FILE_VARS: ClassVar[frozenset[str]] = frozenset(
+        ["temperature", "salinity"]
+    )
+
+    def post_process(self) -> None:
+        """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³ and drop ancillary fields.
+
+        Steps (all dask-lazy — no ``.compute()`` is triggered):
+
+        1. Compute seawater density from temperature and salinity via
+           :meth:`~GLODAPv2Dataset._compute_density`.
+        2. Multiply every BGC tracer by ``density / 1000`` to convert from
+           µmol kg⁻¹ to mmol m⁻³.
+        3. Drop ``temperature`` and ``salinity`` from ``self.ds`` so they are
+           not passed on as BGC output variables.
+        """
+        density = self._compute_density(
+            self.ds["temperature"], self.ds["salinity"]
+        )
+        conversion_factor = density / 1000.0  # µmol kg⁻¹ → mmol m⁻³
+
+        for file_var in self.var_names.values():
+            if file_var in self._ANCILLARY_FILE_VARS:
+                continue
+            if file_var in self.ds.data_vars:
+                self.ds[file_var] = self.ds[file_var] * conversion_factor
+
+        # Remove ancillary fields; the BGC pipeline filter
+        # (`if src_name in raw_data.ds.data_vars`) already excludes missing vars,
+        # but explicit removal is cleaner and avoids accidental regridding.
+        drop_vars = [v for v in self._ANCILLARY_FILE_VARS if v in self.ds.data_vars]
+        if drop_vars:
+            self.ds = self.ds.drop_vars(drop_vars)

@@ -1,6 +1,5 @@
 import importlib.metadata
 import logging
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -12,14 +11,18 @@ from scipy.ndimage import label
 
 from roms_tools import Grid
 from roms_tools.datasets.lat_lon_datasets import (
-    CESMBGCDataset,
     GLORYSDataset,
     GLORYSDefaultDataset,
-    UnifiedBGCDataset,
 )
 from roms_tools.fill import one_dim_fill
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegrid
+from roms_tools.setup.bgc_source import (
+    BGC_VARIABLE_INFO,
+    BGCSource,
+    instantiate_bgc_dataset,
+    merge_bgc_fields,
+)
 from roms_tools.setup.utils import (
     RawDataSource,
     add_time_info_to_ds,
@@ -44,6 +47,52 @@ from roms_tools.utils import (
     transpose_dimensions,
 )
 from roms_tools.vertical_coordinate import compute_depth
+
+
+def _broadcast_static_to_time(
+    fields: dict[str, xr.DataArray],
+) -> dict[str, xr.DataArray]:
+    """Broadcast time-free fields to match the time dimension of time-varying fields.
+
+    When a static (no-time) source such as GLODAPv2 is mixed with a time-varying
+    source (e.g. CESM, UNIFIED), the merged dict contains DataArrays with and without
+    a ``"time"`` dimension.  This function broadcasts the time-free arrays against the
+    first time-varying array found, using
+    :meth:`xarray.DataArray.broadcast_like` which is dask-safe — no ``.compute()``
+    is triggered.
+
+    If no time-varying field is present (pure static source), the dict is returned
+    unchanged; the caller must handle the no-time case.
+    """
+    time_template = next(
+        (da for da in fields.values() if "time" in da.dims), None
+    )
+    if time_template is None:
+        return fields
+    for var in list(fields):
+        if "time" not in fields[var].dims:
+            fields[var] = fields[var].broadcast_like(time_template)
+    return fields
+
+
+def _broadcast_scalar_bgc_fields(
+    fields: dict[str, xr.DataArray],
+) -> dict[str, xr.DataArray]:
+    """Broadcast any 0-D (scalar) DataArrays to match the first N-D field.
+
+    Called after :func:`~roms_tools.setup.bgc_source.merge_bgc_fields` to expand
+    Mode B (constant) contributions to the ROMS boundary shape.
+
+    Uses :meth:`xarray.DataArray.broadcast_like` which is dask-safe — no
+    ``.compute()`` is triggered.
+    """
+    template = next((da for da in fields.values() if da.ndim > 0), None)
+    if template is None:
+        return fields
+    for var in list(fields):
+        if fields[var].ndim == 0:
+            fields[var] = fields[var].broadcast_like(template)
+    return fields
 
 
 @dataclass(kw_only=True)
@@ -126,8 +175,11 @@ class BoundaryForcing:
     """The end time of the desired surface forcing data."""
     boundaries: dict[str, bool] | None = None
     """Dictionary specifying which boundaries are forced (south, east, north, west)."""
-    source: RawDataSource
-    """Dictionary specifying the source of the boundary forcing data."""
+    source: RawDataSource | BGCSource | list[BGCSource]
+    """Boundary forcing data source.  For ``type='physics'`` this is a
+    :data:`~roms_tools.setup.utils.RawDataSource` dict.  For ``type='bgc'`` this is a
+    :class:`~roms_tools.setup.bgc_source.BGCSource` or an ordered list of them (first
+    source has highest priority)."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""
     apply_2d_horizontal_fill: bool = False
@@ -159,6 +211,11 @@ class BoundaryForcing:
 
         self._input_checks()
 
+        # BGC has its own multi-source pipeline; physics continues below
+        if self.type == "bgc":
+            self.ds = self._process_bgc()
+            return
+
         target_coords = get_target_coords(self.grid)
 
         data = self._get_data()
@@ -173,7 +230,7 @@ class BoundaryForcing:
             data.extrapolate_deepest_to_bottom()
             data.apply_lateral_fill()
 
-        self._set_variable_info(data)
+        self._set_variable_info()
         self._set_boundary_info()
         ds = xr.Dataset()
 
@@ -385,9 +442,6 @@ class BoundaryForcing:
                         processed_fields[var_name]
                     )
 
-                if self.type == "bgc":
-                    processed_fields = compute_missing_bgc_variables(processed_fields)
-
                 # Write the boundary data into dataset
                 ds = self._write_into_dataset(direction, processed_fields, ds)
 
@@ -427,16 +481,32 @@ class BoundaryForcing:
         # -------------------------------------------------------
         # Source configuration checks
         # -------------------------------------------------------
-        if "name" not in self.source:
-            raise ValueError("`source` must include a 'name'.")
+        if self.type == "bgc":
+            # Normalise to list[BGCSource]
+            if isinstance(self.source, BGCSource):
+                self.source = [self.source]
+            elif not isinstance(self.source, list) or not all(
+                isinstance(s, BGCSource) for s in self.source
+            ):
+                raise ValueError(
+                    "For type='bgc', `source` must be a BGCSource or a list of BGCSource objects."
+                )
+            if not self.source:
+                raise ValueError(
+                    "For type='bgc', `source` must contain at least one BGCSource."
+                )
+        else:
+            # Physics: existing dict-based validation (unchanged)
+            if "name" not in self.source:
+                raise ValueError("`source` must include a 'name'.")
 
-        if "path" not in self.source:
-            if self.source["name"] != "GLORYS":
-                raise ValueError("`source` must include a 'path'.")
-            self.source["path"] = GLORYSDefaultDataset.dataset_name
+            if "path" not in self.source:
+                if self.source["name"] != "GLORYS":
+                    raise ValueError("`source` must include a 'path'.")
+                self.source["path"] = GLORYSDefaultDataset.dataset_name
 
-        # Assign default value
-        self.source["climatology"] = self.source.get("climatology", False)
+            # Assign default value
+            self.source["climatology"] = self.source.get("climatology", False)
 
         # -------------------------------------------------------
         # Boundary selection defaults and validation
@@ -456,57 +526,31 @@ class BoundaryForcing:
             )
             self.adjust_depth_for_sea_surface_height = False
 
-    def _get_data(
-        self,
-    ) -> GLORYSDataset | GLORYSDefaultDataset | CESMBGCDataset | UnifiedBGCDataset:
-        """Determine the correct `Dataset` type and return an instance.
+    def _get_data(self) -> GLORYSDataset | GLORYSDefaultDataset:
+        """Instantiate the physics dataset.  BGC sources are handled by _process_bgc().
 
         Returns
         -------
-        Dataset
-            The `Dataset` instance
-
+        GLORYSDataset or GLORYSDefaultDataset
         """
-        dataset_map: dict[
-            str,
-            dict[
-                str,
-                dict[
-                    str,
-                    type[
-                        GLORYSDataset
-                        | GLORYSDefaultDataset
-                        | CESMBGCDataset
-                        | UnifiedBGCDataset
-                    ],
-                ],
-            ],
-        ] = {
-            "physics": {
-                "GLORYS": {
-                    "external": GLORYSDataset,
-                    "default": GLORYSDefaultDataset,
-                },
-            },
-            "bgc": {
-                "CESM_REGRIDDED": defaultdict(lambda: CESMBGCDataset),
-                "UNIFIED": defaultdict(lambda: UnifiedBGCDataset),
+        physics_map: dict[str, dict[str, type[GLORYSDataset | GLORYSDefaultDataset]]] = {
+            "GLORYS": {
+                "external": GLORYSDataset,
+                "default": GLORYSDefaultDataset,
             },
         }
 
         source_name = str(self.source["name"])
-        if source_name not in dataset_map[self.type]:
-            tpl = 'Valid options for source["name"] for type {} include: {}'
-            msg = tpl.format(self.type, " and ".join(dataset_map[self.type].keys()))
-            raise ValueError(msg)
+        if source_name not in physics_map:
+            raise ValueError(
+                f'Valid options for source["name"] for type "physics" include: '
+                f'{" and ".join(physics_map)}'
+            )
 
         has_no_path = "path" not in self.source
         has_default_path = self.source.get("path") == GLORYSDefaultDataset.dataset_name
-        use_default = has_no_path or has_default_path
-
-        variant = "default" if use_default else "external"
-
-        data_type = dataset_map[self.type][source_name][variant]
+        variant = "default" if (has_no_path or has_default_path) else "external"
+        data_type = physics_map[source_name][variant]
 
         if isinstance(self.source["path"], bool):
             raise ValueError('source["path"] cannot be a boolean here')
@@ -521,9 +565,8 @@ class BoundaryForcing:
             initial_slice_bounds=self.initial_slice_bounds,
         )
 
-    def _set_variable_info(self, data):
-        """Sets up a dictionary with metadata for variables based on the type of data
-        (physics or BGC).
+    def _set_variable_info(self):
+        """Sets up a dictionary with metadata for physics variables.
 
         The dictionary contains the following information:
         - `location`: Where the variable resides in the grid (e.g., rho, u, or v points).
@@ -548,58 +591,225 @@ class BoundaryForcing:
             "is_3d": True,
         }
 
-        # Define a dictionary for variable names and their associated information
-        if self.type == "physics":
-            variable_info = {
-                "zeta": {
-                    "location": "rho",
-                    "is_vector": False,
-                    "vector_pair": None,
-                    "is_3d": False,
-                    "validate": True,
-                },
-                "temp": {**default_info, "validate": True},
-                "salt": {**default_info, "validate": False},
-                "u": {
-                    "location": "u",
-                    "is_vector": True,
-                    "vector_pair": "v",
-                    "is_3d": True,
-                    "validate": True,
-                },
-                "v": {
-                    "location": "v",
-                    "is_vector": True,
-                    "vector_pair": "u",
-                    "is_3d": True,
-                    "validate": True,
-                },
-                "ubar": {
-                    "location": "u",
-                    "is_vector": True,
-                    "vector_pair": "vbar",
-                    "is_3d": False,
-                    "validate": False,
-                },
-                "vbar": {
-                    "location": "v",
-                    "is_vector": True,
-                    "vector_pair": "ubar",
-                    "is_3d": False,
-                    "validate": False,
-                },
-            }
-        elif self.type == "bgc":
-            variable_info = {}
-            for var_name in list(data.var_names.keys()) + list(
-                data.opt_var_names.keys()
-            ):
-                if var_name == "ALK":
-                    variable_info[var_name] = {**default_info, "validate": True}
-                else:
-                    variable_info[var_name] = {**default_info, "validate": False}
+        # Physics variable metadata (BGC is handled in _process_bgc via BGC_VARIABLE_INFO)
+        self.variable_info = {
+            "zeta": {
+                "location": "rho",
+                "is_vector": False,
+                "vector_pair": None,
+                "is_3d": False,
+                "validate": True,
+            },
+            "temp": {**default_info, "validate": True},
+            "salt": {**default_info, "validate": False},
+            "u": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "v",
+                "is_3d": True,
+                "validate": True,
+            },
+            "v": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "u",
+                "is_3d": True,
+                "validate": True,
+            },
+            "ubar": {
+                "location": "u",
+                "is_vector": True,
+                "vector_pair": "vbar",
+                "is_3d": False,
+                "validate": False,
+            },
+            "vbar": {
+                "location": "v",
+                "is_vector": True,
+                "vector_pair": "ubar",
+                "is_3d": False,
+                "validate": False,
+            },
+        }
 
-        self.variable_info = variable_info
+    def _process_bgc(self) -> xr.Dataset:
+        """Full BGC processing pipeline supporting multiple :class:`BGCSource` entries.
+
+        Called from ``__post_init__`` when ``self.type == "bgc"``.  Returns the fully
+        processed :class:`xarray.Dataset` that is assigned to ``self.ds``.
+        """
+        target_coords = get_target_coords(self.grid)
+        self.variable_info = dict(BGC_VARIABLE_INFO)
+        self._set_boundary_info()
+
+        # Pre-instantiate Mode A datasets; apply global 2-D fill upfront if requested
+        source_data: list[tuple[BGCSource, object]] = []
+        for src in self.source:
+            if src.name is not None:  # Mode A
+                raw_data = instantiate_bgc_dataset(
+                    src,
+                    self.start_time,
+                    self.end_time,
+                    self.use_dask,
+                    self.chunks,
+                    self.initial_slice_bounds,
+                )
+                if self.apply_2d_horizontal_fill:
+                    raw_data.choose_subdomain(target_coords, unchunk_lateral_dims=True)
+                    raw_data.convert_to_float64()
+                    raw_data.extrapolate_deepest_to_bottom()
+                    raw_data.apply_lateral_fill()
+            else:
+                raw_data = None
+            source_data.append((src, raw_data))
+
+        ds = xr.Dataset()
+        for direction, is_enabled in self.boundaries.items():
+            if is_enabled:
+                # Pre-compute both depth types so plotting always works
+                self._get_depth_coordinates(0, direction, "rho", "layer")
+                self._get_depth_coordinates(0, direction, "rho", "interface")
+
+                source_fields = []
+                for src, raw_data in source_data:
+                    partial = self._extract_bgc_source_fields(
+                        src, raw_data, direction, target_coords
+                    )
+                    source_fields.append((src, partial))
+
+                merged = merge_bgc_fields(source_fields)
+                merged = _broadcast_scalar_bgc_fields(merged)
+                merged = _broadcast_static_to_time(merged)
+
+                for var_name in merged:
+                    merged[var_name] = transpose_dimensions(merged[var_name])
+
+                merged = compute_missing_bgc_variables(merged)
+                ds = self._write_into_dataset(direction, merged, ds)
+
+        # Determine climatology flag and source name from Mode A sources
+        primary_lat_lon = next(
+            (src for src, _ in source_data if src.name is not None), None
+        )
+        climatology = primary_lat_lon.climatology if primary_lat_lon is not None else False
+        source_names = ", ".join(
+            src.name for src, _ in source_data if src.name is not None
+        ) or "constants"
+
+        # Pure-static sources produce no time dimension; add a single time step
+        # so _add_global_metadata / ROMS can handle the output consistently.
+        if "time" not in ds.dims:
+            ds = ds.expand_dims(
+                {"time": [np.datetime64(self.start_time, "ns")]}, axis=0
+            )
+
+        ds = self._add_global_metadata(
+            None, ds, source_name=source_names, climatology=climatology
+        )
+
+        if not self.bypass_validation:
+            self._validate(ds)
+
+        for var_name in ds.data_vars:
+            ds[var_name] = substitute_nans_by_fillvalue(ds[var_name])
+
+        return ds
+
+    def _extract_bgc_source_fields(
+        self,
+        src: BGCSource,
+        raw_data,
+        direction: str,
+        target_coords: dict,
+    ) -> dict[str, xr.DataArray]:
+        """Regrid / extract BGC fields from one source for one boundary direction.
+
+        Handles all three :class:`BGCSource` modes:
+
+        * **Mode B** (constants): returns 0-D scalar :class:`xarray.DataArray` objects;
+          broadcasting to boundary shape happens later in ``_process_bgc``.
+        * **Mode C** (algorithm): delegates to ``src.algorithm(physics_ds, direction)``;
+          result must already be on the ROMS boundary grid.
+        * **Mode A** (lat/lon dataset): performs lateral then vertical regridding.
+
+        All paths are dask-safe.
+        """
+        # --- Mode B: constants ---
+        if src.constants is not None:
+            return {var: xr.DataArray(float(val)) for var, val in src.constants.items()}
+
+        # --- Mode C: physics-derived algorithm ---
+        if src.physics_forcing is not None:
+            return src.algorithm(src.physics_forcing.ds, direction)
+
+        # --- Mode A: lat/lon dataset ---
+        bdry_target_coords = {
+            "lat": target_coords["lat"].isel(**self.bdry_coords["rho"][direction]),
+            "lon": target_coords["lon"].isel(**self.bdry_coords["rho"][direction]),
+            "straddle": target_coords["straddle"],
+        }
+
+        bdry_data = raw_data.choose_subdomain(
+            bdry_target_coords,
+            buffer_points=3,
+            return_copy=True,
+            unchunk_lateral_dims=True,
+        )
+
+        if not self.apply_2d_horizontal_fill:
+            bdry_data.convert_to_float64()
+            bdry_data.extrapolate_deepest_to_bottom()
+
+        # Collect variables provided by this source (required + optional present)
+        src_var_names = {
+            var: raw_data.var_names[var]
+            for var in raw_data.var_names
+            if raw_data.var_names[var] in raw_data.ds.data_vars
+        }
+        src_var_names.update({
+            var: raw_data.opt_var_names[var]
+            for var in raw_data.opt_var_names
+            if raw_data.opt_var_names[var] in raw_data.ds.data_vars
+        })
+
+        # Lateral regrid — all BGC vars are rho-point tracers (no vector handling)
+        lon = target_coords["lon"].isel(**self.bdry_coords["rho"][direction])
+        lat = target_coords["lat"].isel(**self.bdry_coords["rho"][direction])
+        lateral_regrid = LateralRegridToROMS(
+            {"lat": lat, "lon": lon}, bdry_data.dim_names
+        )
+
+        partial_fields: dict[str, xr.DataArray] = {}
+        for var_name, src_name in src_var_names.items():
+            partial_fields[var_name] = lateral_regrid.apply(bdry_data.ds[src_name])
+
+        # 1-D lateral fill per boundary direction
+        if not self.apply_2d_horizontal_fill and bdry_data.needs_lateral_fill:
+            if not self.bypass_validation:
+                self._validate_1d_fill(
+                    partial_fields, direction, bdry_data.dim_names["depth"]
+                )
+            for var_name in partial_fields:
+                partial_fields[var_name] = apply_1d_horizontal_fill(
+                    partial_fields[var_name]
+                )
+
+        # Vertical regrid — all BGC vars are 3-D at rho-points
+        # _get_depth_coordinates caches by key so repeated calls are no-ops
+        self._get_depth_coordinates(0, direction, "rho", "layer")
+        vertical_regrid = VerticalRegrid(
+            bdry_data.ds, source_dim=bdry_data.dim_names["depth"]
+        )
+        for var_name in list(partial_fields):
+            partial_fields[var_name] = vertical_regrid.apply(
+                partial_fields[var_name],
+                source_depth_coords=bdry_data.ds[bdry_data.dim_names["depth"]],
+                target_depth_coords=self.ds_depth_coords[
+                    f"layer_depth_rho_{direction}"
+                ],
+            )
+
+        return partial_fields
 
     def _write_into_dataset(self, direction, processed_fields, ds=None):
         if ds is None:
@@ -743,11 +953,29 @@ class BoundaryForcing:
 
             self.ds_depth_coords[key] = depth
 
-    def _add_global_metadata(self, data, ds=None):
+    def _add_global_metadata(
+        self,
+        data,
+        ds=None,
+        source_name: str | None = None,
+        climatology: bool | None = None,
+    ):
+        """Add global attributes and time coordinates to the output dataset.
+
+        Parameters
+        ----------
+        data : dataset object or None
+            Physics dataset (provides ``data.climatology``).  Pass ``None`` for the
+            BGC path and supply ``climatology`` explicitly instead.
+        ds : xr.Dataset, optional
+        source_name : str, optional
+            Override for the ``source`` attribute (BGC multi-source path).
+        climatology : bool, optional
+            Override for the climatology flag (BGC multi-source path).
+        """
         if ds is None:
             ds = xr.Dataset()
         ds.attrs["title"] = "ROMS boundary forcing file created by ROMS-Tools"
-        # Include the version of roms-tools
         try:
             roms_tools_version = importlib.metadata.version("roms-tools")
         except importlib.metadata.PackageNotFoundError:
@@ -755,7 +983,7 @@ class BoundaryForcing:
         ds.attrs["roms_tools_version"] = roms_tools_version
         ds.attrs["start_time"] = str(self.start_time)
         ds.attrs["end_time"] = str(self.end_time)
-        ds.attrs["source"] = self.source["name"]
+        ds.attrs["source"] = source_name if source_name is not None else self.source["name"]
         ds.attrs["model_reference_date"] = str(self.model_reference_date)
         ds.attrs["apply_2d_horizontal_fill"] = str(self.apply_2d_horizontal_fill)
         ds.attrs["adjust_depth_for_sea_surface_height"] = str(
@@ -766,8 +994,9 @@ class BoundaryForcing:
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
         ds.attrs["hc"] = self.grid.ds.attrs["hc"]
 
+        _climatology = climatology if climatology is not None else data.climatology
         ds, bry_time = add_time_info_to_ds(
-            ds, self.model_reference_date, data.climatology
+            ds, self.model_reference_date, _climatology
         )
 
         ds = ds.assign_coords({"bry_time": bry_time})
@@ -879,10 +1108,16 @@ class BoundaryForcing:
                         if self.apply_2d_horizontal_fill:
                             error_message = None
                         else:
+                            if isinstance(self.source, list):
+                                src_name = ", ".join(
+                                    s.name or "constants" for s in self.source
+                                )
+                            else:
+                                src_name = self.source.get("name", "unknown")
                             error_message = (
                                 f"{bdry_var_name} consists entirely of NaNs after regridding. "
                                 f"This may be due to the {direction}ern boundary being on land in the "
-                                f"{self.source['name']} data, which could have a coarser resolution than the ROMS domain. "
+                                f"{src_name} data, which could have a coarser resolution than the ROMS domain. "
                                 f"Try setting `apply_2d_horizontal_fill = True` to resolve this issue."
                             )
 

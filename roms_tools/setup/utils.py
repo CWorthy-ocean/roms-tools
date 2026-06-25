@@ -255,6 +255,10 @@ def interpolate_dynamic_bgc_by_calendar_year(
     years are linearly interpolated along the year axis, and the result is
     broadcast back to every ``river_time`` step. Leading and trailing NaN years
     are left unchanged.
+
+    # TODO: years with very few time steps (e.g. a 1-day buffer before start_time of Jan 1)
+    # produce unrealistic annual means. Consider excluding years with fewer than
+    # a minimum number of time steps before computing groupby mean.
     """
     calendar_years = abs_time.dt.year
     if time_dim not in calendar_years.dims:

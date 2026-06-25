@@ -10,11 +10,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from dask.diagnostics import ProgressBar
 
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
 from roms_tools.datasets.river_datasets import (
     DaiRiverDataset,
+    GloFASRiverDataset,
     RiverBGCDataset,
     RiverDataset,
     RiverTracerDefaultsDataset,
@@ -269,11 +271,18 @@ class RiverForcing:
                 "No river indices provided. Identify all rivers within the ROMS domain and assign each of them to the nearest coastal point."
             )
             target_coords = get_target_coords(self.grid)
+            target_coords["mask"] = self.grid.ds.mask_rho
             # maximum dx in grid
             dx = (
                 np.sqrt((1 / self.grid.ds.pm) ** 2 + (1 / self.grid.ds.pn) ** 2) / 2
             ).max()
-            original_indices = data.extract_relevant_rivers(target_coords, dx)
+
+            kwargs = {"domain_edge_buffer": self.domain_edge_buffer}
+            if self.coast_snap_buffer_km is not None:
+                kwargs["coast_snap_buffer_km"] = self.coast_snap_buffer_km
+
+            original_indices = data.extract_relevant_rivers(target_coords, dx, **kwargs)
+
             if len(original_indices) == 0:
                 raise ValueError(
                     "No relevant rivers found. Consider increasing domain size or using a different river dataset."
@@ -316,8 +325,10 @@ class RiverForcing:
 
         if "name" not in source:
             raise ValueError("`source` must include a 'name'.")
+        if source["name"] not in ("DAI", "GLOFAS"):
+            raise ValueError("`source` 'name' must be 'DAI' or 'GLOFAS'.")
         if "path" not in source and source["name"] != "DAI":
-            raise ValueError("`source` must include a 'path'.")
+            raise ValueError("`source` must include a 'path' for all sources except 'DAI'.")    
 
         # Set 'climatology' to False if not provided in 'source'
         return {**source, "climatology": source.get("climatology", False)}
@@ -406,22 +417,25 @@ class RiverForcing:
                 )
             seen_tuples.add(idx_pair)
 
-    def _get_data(self) -> RiverDataset:
-        source = self.source
-        if source is None:
-            raise RuntimeError("source must be set.")
-        if source["name"] != "DAI":
-            raise ValueError('Only "DAI" is a valid option for source["name"].')
-
-        data_dict: dict[str, Any] = {
+    def _get_data(self):
+        data_dict = {
             "start_time": self.start_time,
             "end_time": self.end_time,
-            "climatology": source["climatology"],
+            "climatology": self.source["climatology"],
         }
-        if "path" in source:
-            data_dict["filename"] = source["path"]
 
-        return DaiRiverDataset(**data_dict)
+        if self.source["name"] == "DAI":
+            if "path" in self.source.keys():
+                data_dict["filename"] = self.source["path"]
+            data = DaiRiverDataset(**data_dict)
+        elif self.source["name"] == "GLOFAS":
+            if "path" in self.source.keys():
+                data_dict["filename"] = self.source["path"]
+            data = GloFASRiverDataset(**data_dict)
+        else:
+            raise ValueError('Only "DAI" and GLOFAS are valid options for source["name"].')
+
+        return data
 
     def _get_bgc_dataset(self) -> RiverBGCDataset:
         """Instantiate the BGC dataset for the configured ``bgc_source``.
@@ -507,8 +521,17 @@ class RiverForcing:
             ds.tracer_name.values,
             ds["river_volume"],
         )
-        for tracer_name, values in merged.items():
-            self._set_river_tracer_values(ds, tracer_name, values)
+        # Build full tracer array at once instead of assigning slice by slice
+        tracer_arrays = []
+        for tracer_name in ds.tracer_name.values:
+            if str(tracer_name) in merged:
+                tracer_arrays.append(merged[str(tracer_name)])
+            else:
+                tracer_arrays.append(ds["river_tracer"].sel(ntracers=tracer_name))
+
+        ds["river_tracer"] = xr.concat(tracer_arrays, dim="ntracers").assign_coords(
+            ntracers=ds["river_tracer"].ntracers
+        )
         return ds
 
     def _move_rivers_to_closest_coast(self, target_coords, data):
@@ -704,8 +727,10 @@ class RiverForcing:
 
         # add compute on dask arrays to convert to in-memory numpy arrays so  
         # downstream functions work on concrete arrays
-        ds["river_volume"] = ds["river_volume"].compute(keep_attrs=True)
-        ds["river_tracer"] = ds["river_tracer"].compute(keep_attrs=True)
+        logging.info("Computing river forcing arrays...")
+        with ProgressBar():
+            ds["river_volume"] = ds["river_volume"].compute(keep_attrs=True)
+            ds["river_tracer"] = ds["river_tracer"].compute(keep_attrs=True)
 
         return ds
 
@@ -1056,6 +1081,7 @@ class RiverForcing:
         for j, (ax, indices) in enumerate(
             [(ax, ind) for ax, ind in zip(axs, [self.original_indices, self.indices])]
         ):
+            points = {}  # reset for each panel
             for name in river_names:
                 if name in indices:
                     for i, (eta_index, xi_index) in enumerate(indices[name]):
@@ -1166,7 +1192,7 @@ class RiverForcing:
             var_name_wo_river = var_name.split("_")[1]
             field = self.ds["river_tracer"].isel(
                 ntracers=self.ds.tracer_name == var_name_wo_river
-            )
+            ).squeeze("ntracers")
             units = d[var_name_wo_river]["units"]
             long_name = f"River {d[var_name_wo_river]['long_name']}"
 

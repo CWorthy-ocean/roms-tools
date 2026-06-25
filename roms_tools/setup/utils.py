@@ -1822,6 +1822,17 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
             f"No {forcing_object_name} configuration found in the YAML file."
         )
 
+    return deserialize_forcing_data(forcing_data)
+
+
+def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
+    """Restore datetimes, paths, and source/bgc_source dicts in a forcing-data block.
+
+    Converts ISO date strings to ``datetime`` objects, path-like strings back to
+    ``Path`` objects, and ``source``/``bgc_source`` nested dictionaries back to their
+    proper form. Used for both the top-level forcing block and nested forcing blocks
+    (e.g. an embedded ``physics_forcing``).
+    """
     # Convert ISO date strings to datetime objects
     for key, value in forcing_data.items():
         forcing_data[key] = deserialize_datetime(value)

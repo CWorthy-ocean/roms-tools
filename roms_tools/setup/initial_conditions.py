@@ -1,4 +1,5 @@
 import importlib.metadata
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -25,6 +26,7 @@ from roms_tools.regrid import (
 from roms_tools.setup.bgc_source import BGCSource, instantiate_bgc_dataset, merge_bgc_fields
 from roms_tools.setup.utils import (
     RawDataSource,
+    _compute_density_coord,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     from_yaml,
@@ -160,6 +162,15 @@ class InitialConditions:
     """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
+    use_density_interpolation: bool = False
+    """Interpolate BGC tracers in density space rather than depth space when True.
+
+    Requires that the BGC source dataset declares ``bgc_source_ts`` (a T/S pair for
+    the source density coordinate). The target density coordinate is built from the
+    physics source T/S already present in ``processed_fields``. Falls back to
+    depth-space with a log message if the BGC source has no T/S.  Only applied
+    when ``bgc_source`` is provided.
+    """
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -187,7 +198,10 @@ class InitialConditions:
             physics_time = processed_fields["temp"]["time"]
             source_fields = []
             for src in bgc_sources:
-                partial = self._process_data({}, type="bgc", bgc_source=src)
+                partial = self._process_data(
+                    {}, type="bgc", bgc_source=src,
+                    physics_fields=processed_fields,
+                )
                 # Align BGC time coordinate with the physics time coordinate
                 for var_name in list(partial):
                     if "time" in partial[var_name].coords:
@@ -223,6 +237,7 @@ class InitialConditions:
         processed_fields: dict,
         type: str = "physics",
         bgc_source: BGCSource | None = None,
+        physics_fields: dict | None = None,
     ) -> dict:
         """Regrid one data source (physics or a single BGC source) onto the ROMS grid.
 
@@ -235,6 +250,10 @@ class InitialConditions:
             ``"physics"`` or ``"bgc"``.
         bgc_source : BGCSource, optional
             The specific BGC source to process.  Required when ``type="bgc"``.
+        physics_fields : dict, optional
+            Already-regridded physics fields (temp/salt on sigma levels). When
+            provided and ``use_density_interpolation=True``, used to compute the
+            target density coordinate for BGC vertical interpolation.
 
         Returns
         -------
@@ -307,7 +326,10 @@ class InitialConditions:
             self._get_depth_coordinates(zeta, location, "layer")
 
         # Vertical regridding
-        processed_fields = self._regrid_vertically(data, processed_fields, var_names)
+        processed_fields = self._regrid_vertically(
+            data, processed_fields, var_names,
+            type=type, physics_fields=physics_fields,
+        )
 
         # Compute barotropic velocities
         if "u" in var_names and "v" in var_names:
@@ -386,6 +408,8 @@ class InitialConditions:
         data: ROMSDataset | LatLonDataset,
         processed_fields: dict[str, xr.DataArray],
         var_names: dict[str, dict[str, str | bool]],
+        type: str = "physics",
+        physics_fields: dict | None = None,
     ) -> dict[str, xr.DataArray]:
         """
         Perform vertical regridding of 3D variables to the model's vertical grid.
@@ -406,6 +430,13 @@ class InitialConditions:
                 - 'name': dataset variable name
                 - 'location': vertical location ('rho', 'u', 'v')
                 - 'is_3d': whether the variable is 3D and requires vertical regridding
+        type : str
+            ``"physics"`` or ``"bgc"``.
+        physics_fields : dict, optional
+            Already-regridded physics fields (temp/salt on sigma levels). When
+            provided together with ``use_density_interpolation=True`` and a BGC
+            source that declares ``bgc_source_ts``, used to build the target
+            density coordinate.
 
         Returns
         -------
@@ -454,21 +485,69 @@ class InitialConditions:
                             mask_edges=False,
                         )
             else:
-                # LatLonDataset: create a regrid object for all variables
+                # LatLonDataset: check for density-space interpolation for BGC.
+                ts_keys = tuple(getattr(data, "bgc_source_ts", ()))
+                aux_ts_vars = [v for v in ts_keys if v in filtered_vars and v in processed_fields]
+                has_source_ts = len(aux_ts_vars) == 2
+                use_density = (
+                    type == "bgc"
+                    and self.use_density_interpolation
+                    and has_source_ts
+                    and physics_fields is not None
+                    and "temp" in physics_fields
+                    and "salt" in physics_fields
+                )
+                if type == "bgc" and self.use_density_interpolation and not use_density:
+                    reason = (
+                        "this BGC source has no temperature/salinity"
+                        if not has_source_ts
+                        else "physics fields are unavailable"
+                    )
+                    logging.info(
+                        f"Density-space interpolation requested but {reason}; "
+                        "falling back to depth-space interpolation."
+                    )
+
+                source_density = target_density = None
+                if use_density:
+                    temp_key, salt_key = ts_keys
+                    source_density = _compute_density_coord(
+                        processed_fields[temp_key],
+                        processed_fields[salt_key],
+                        data.dim_names["depth"],
+                    )
+                    s_dim = next(
+                        d for d in physics_fields["temp"].dims if d.startswith("s_")
+                    )
+                    target_density = _compute_density_coord(
+                        physics_fields["temp"], physics_fields["salt"], s_dim
+                    )
+
                 vertical_regrid = VerticalRegrid(
                     data.ds, source_dim=data.dim_names["depth"]
                 )
-
-                for var_name in filtered_vars:
+                tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
+                for var_name in tracer_vars:
                     if var_name not in processed_fields:
                         continue
-                    processed_fields[var_name] = vertical_regrid.apply(
-                        processed_fields[var_name],
-                        source_depth_coords=data.ds[data.dim_names["depth"]],
-                        target_depth_coords=self.ds_depth_coords[
-                            f"layer_depth_{location}"
-                        ],
-                    )
+                    if use_density:
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
+                            source_depth_coords=source_density,
+                            target_depth_coords=target_density,
+                        )
+                    else:
+                        processed_fields[var_name] = vertical_regrid.apply(
+                            processed_fields[var_name],
+                            source_depth_coords=data.ds[data.dim_names["depth"]],
+                            target_depth_coords=self.ds_depth_coords[
+                                f"layer_depth_{location}"
+                            ],
+                        )
+
+                # Drop auxiliary T/S — not ROMS output variables.
+                for v in aux_ts_vars:
+                    processed_fields.pop(v, None)
 
         return processed_fields
 

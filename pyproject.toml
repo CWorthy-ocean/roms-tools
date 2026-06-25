@@ -37,6 +37,7 @@ dependencies = [
     "xgcm>=0.9.0",
     "numba>=0.61.2",
     "pydantic>2,<3",
+    "gsw",
 ]
 dynamic = ["version"]
 

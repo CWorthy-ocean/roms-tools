@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+import gsw
 import numba as nb
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
+from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.bgc_source import BGCSource
@@ -586,6 +588,76 @@ def compute_missing_bgc_variables(bgc_data: dict[str, xr.DataArray]) -> dict[str
     bgc_data.pop("CHL", None)
 
     return bgc_data
+
+
+def compute_potential_density(
+    temp: "xr.DataArray", salt: "xr.DataArray"
+) -> "xr.DataArray":
+    """Compute sigma-0 potential density anomaly (kg m⁻³ − 1000) via TEOS-10.
+
+    Wraps ``gsw.sigma0`` with ``xr.apply_ufunc`` for full dask compatibility.
+    Treats practical salinity as Absolute Salinity and in-situ temperature as
+    Conservative Temperature — an approximation sufficient for density-coordinate
+    interpolation.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        In-situ temperature (°C).
+    salt : xr.DataArray
+        Practical salinity (PSU).
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 (kg m⁻³ − 1000).
+    """
+    density = xr.apply_ufunc(
+        gsw.sigma0,
+        salt,
+        temp,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+    density = transpose_dimensions(density)
+    density.name = "sigma0"
+    density.attrs["long_name"] = "potential density anomaly"
+    density.attrs["units"] = "kg/m^3 - 1000"
+    return density
+
+
+def _compute_density_coord(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth_dim: str,
+) -> "xr.DataArray":
+    """Build a strictly monotonic potential-density coordinate for density-space
+    interpolation.
+
+    Computes sigma-0 from ``temp``/``salt`` and adds a tiny depth-index perturbation
+    (per the UCLA reference MATLAB implementation) so the profile is strictly increasing
+    along ``depth_dim`` — required by the ``xgcm`` transform. The result is
+    single-chunked along ``depth_dim``, as ``xgcm.transform`` requires.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        Temperature (°C) on the grid whose density coordinate is wanted.
+    salt : xr.DataArray
+        Practical salinity (PSU) on the same grid.
+    depth_dim : str
+        Name of the vertical dimension along which monotonicity is enforced.
+
+    Returns
+    -------
+    xr.DataArray
+        Sigma-0 plus a small monotonicity perturbation, single-chunked along
+        ``depth_dim``.
+    """
+    density = compute_potential_density(temp, salt)
+    n_depth = density.sizes[depth_dim]
+    density = density + xr.DataArray(np.arange(n_depth) * 1e-7, dims=[depth_dim])
+    return density.chunk({depth_dim: -1})
 
 
 def compute_missing_surface_bgc_variables(bgc_data):
@@ -1740,6 +1812,15 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
             f"No {forcing_object_name} configuration found in the YAML file."
         )
 
+    return deserialize_forcing_data(forcing_data)
+
+
+def deserialize_forcing_data(forcing_data: dict) -> dict:
+    """Restore datetimes, paths, and source/bgc_source dicts in a forcing-data block.
+
+    Used for both the top-level forcing block and nested forcing blocks
+    (e.g. an embedded ``physics_forcing``).
+    """
     # Convert ISO date strings to datetime objects
     for key, value in forcing_data.items():
         forcing_data[key] = deserialize_datetime(value)

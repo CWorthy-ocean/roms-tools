@@ -653,7 +653,7 @@ class LatLonDataset:
             return coords_ds
 
         if return_copy:
-            return LatLonDataset.from_ds(self, subdomain)
+            return type(self).from_ds(self, subdomain)
         else:
             self.ds = subdomain
             return None
@@ -1519,8 +1519,15 @@ class UnifiedBGCDataset(UnifiedDataset):
             "spCaCO3": "spCaCO3",
             "zooC": "zooC",
             "CHL": "CHL",
+            # Source T/S for density-coordinate vertical interpolation of BGC tracers.
+            # Use stable internal keys ``temp_bgc``/``salt_bgc`` so the pipeline can
+            # locate them without knowing dataset-specific variable names.
+            "temp_bgc": "temp_WOA",
+            "salt_bgc": "salt_WOA",
         }
     )
+    # Internal keys of the T/S pair used to build the source density coordinate.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
 
     climatology: bool = True
 
@@ -3067,24 +3074,29 @@ class GLODAPv2Dataset(LatLonDataset):
 class GLODAPv2BGCDataset(GLODAPv2Dataset):
     """GLODAPv2 2016b mapped to ROMS BGC variable names.
 
-    Loads six core BGC tracers plus temperature and salinity (needed for the
-    µmol kg⁻¹ → mmol m⁻³ unit conversion).  After :meth:`post_process` runs,
-    temperature and salinity are removed from the dataset so they are never
-    treated as BGC output variables by the downstream pipeline.
+    Loads six core BGC tracers plus temperature and salinity (T/S).  T/S serve
+    two roles:
+
+    1. **Unit conversion** in :meth:`post_process`: µmol kg⁻¹ → mmol m⁻³ using
+       TEOS-10 sigma-0 density.
+    2. **Density coordinate** for density-space vertical interpolation when the
+       downstream pipeline has ``use_density_interpolation=True``.
+
+    After vertical interpolation the pipeline drops T/S via the
+    ``bgc_source_ts`` mechanism; they are never written to ROMS output.
 
     Variables loaded
     ----------------
     BGC (kept in output): PO4, NO3, SiO3 (silicate), O2 (oxygen), DIC (TCO2),
     ALK (TAlk).
 
-    Ancillary (dropped after conversion): temperature, salinity.
+    Ancillary (for density, dropped by pipeline after vertical regrid):
+    temperature, salinity (stored internally as ``temp_bgc`` / ``salt_bgc``).
 
     Notes
     -----
     GLODAPv2 values are in **µmol kg⁻¹**.  :meth:`post_process` converts to
-    **mmol m⁻³** using ``val × ρ / 1000`` where ρ is the density returned by
-    :meth:`~GLODAPv2Dataset._compute_density` (currently a 1025 kg m⁻³
-    placeholder).
+    **mmol m⁻³** using ``val × (sigma0 + 1000) / 1000`` via TEOS-10.
     """
 
     dim_names: dict[str, str] = field(
@@ -3096,51 +3108,52 @@ class GLODAPv2BGCDataset(GLODAPv2Dataset):
     )
     var_names: dict[str, str] = field(
         default_factory=lambda: {
-            # BGC tracers (kept in output after unit conversion)
             "PO4": "PO4",
             "NO3": "NO3",
             "SiO3": "silicate",
             "O2": "oxygen",
             "DIC": "TCO2",
             "ALK": "TAlk",
-            # Ancillary — needed for density calculation, dropped afterwards
-            "temperature": "temperature",
-            "salinity": "salinity",
         }
     )
-    opt_var_names: dict[str, str] = field(default_factory=dict)
-
-    # File variable names of the ancillary fields to drop after post_process
-    _ANCILLARY_FILE_VARS: ClassVar[frozenset[str]] = frozenset(
-        ["temperature", "salinity"]
+    opt_var_names: dict[str, str] = field(
+        default_factory=lambda: {
+            # T/S for density-coordinate interpolation and unit conversion.
+            # Stable internal keys so the pipeline can locate them without
+            # knowing dataset-specific variable names.
+            "temp_bgc": "temperature",
+            "salt_bgc": "salinity",
+        }
     )
+    # Internal keys of the T/S pair that define the source density coordinate.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
 
     def post_process(self) -> None:
-        """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³ and drop ancillary fields.
+        """Convert BGC tracers from µmol kg⁻¹ to mmol m⁻³.
 
-        Steps (all dask-lazy — no ``.compute()`` is triggered):
+        Uses TEOS-10 sigma-0 from the loaded T/S to compute density (dask-lazy).
+        T/S remain in ``self.ds`` so the downstream pipeline can use them as the
+        source density coordinate for density-space vertical interpolation; the
+        pipeline drops them after regridding via ``bgc_source_ts``.
 
-        1. Compute seawater density from temperature and salinity via
-           :meth:`~GLODAPv2Dataset._compute_density`.
-        2. Multiply every BGC tracer by ``density / 1000`` to convert from
-           µmol kg⁻¹ to mmol m⁻³.
-        3. Drop ``temperature`` and ``salinity`` from ``self.ds`` so they are
-           not passed on as BGC output variables.
+        If T/S are absent (e.g. the file did not include them), falls back to a
+        uniform 1025 kg m⁻³ density.
         """
-        density = self._compute_density(
-            self.ds["temperature"], self.ds["salinity"]
-        )
+        from roms_tools.setup.utils import compute_potential_density
+
+        if "temperature" in self.ds.data_vars and "salinity" in self.ds.data_vars:
+            sigma0 = compute_potential_density(
+                self.ds["temperature"], self.ds["salinity"]
+            )
+            density = sigma0 + 1000.0  # kg m⁻³
+        else:
+            density = self._compute_density(
+                next(iter(self.ds.data_vars.values())),
+                next(iter(self.ds.data_vars.values())),
+            )
+
         conversion_factor = density / 1000.0  # µmol kg⁻¹ → mmol m⁻³
 
         for file_var in self.var_names.values():
-            if file_var in self._ANCILLARY_FILE_VARS:
-                continue
             if file_var in self.ds.data_vars:
                 self.ds[file_var] = self.ds[file_var] * conversion_factor
-
-        # Remove ancillary fields; the BGC pipeline filter
-        # (`if src_name in raw_data.ds.data_vars`) already excludes missing vars,
-        # but explicit removal is cleaner and avoids accidental regridding.
-        drop_vars = [v for v in self._ANCILLARY_FILE_VARS if v in self.ds.data_vars]
-        if drop_vars:
-            self.ds = self.ds.drop_vars(drop_vars)

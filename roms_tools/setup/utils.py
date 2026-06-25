@@ -850,6 +850,7 @@ def _compute_mld_warp(
     depth: "xr.DataArray",
     depth_dim: str,
     target_mld: "xr.DataArray",
+    target_H: "xr.DataArray | None" = None,
     reference_depth: float = MLD_REFERENCE_DEPTH,
     threshold: float = MLD_DENSITY_THRESHOLD,
 ) -> "xr.DataArray":
@@ -870,10 +871,11 @@ def _compute_mld_warp(
     it would otherwise compress the entire deep source column into the thin target
     layer. With 1:1, source water below the target floor is simply edge-clamped/unused.
 
-    Columns lacking a resolved mixed layer — fully mixed source, NaN MLD, or a degenerate
-    (≈0) source/target MLD — fall back to the identity map (``d_warp = |z|``), i.e. plain
-    depth interpolation for that column. Because ``xgcm.transform`` is per-column
-    independent, stratified and degenerate columns coexist in one call.
+    Columns lacking a resolved mixed layer — fully mixed source, fully mixed target,
+    NaN MLD, or a degenerate (≈0) source/target MLD — fall back to the identity map
+    (``d_warp = |z|``), i.e. plain depth interpolation for that column. Because
+    ``xgcm.transform`` is per-column independent, stratified and degenerate columns
+    coexist in one call.
 
     Returns the warped depth plus the same monotonicity perturbation as
     :func:`_compute_density_coord`, single-chunked along ``depth_dim``.
@@ -890,7 +892,7 @@ def _compute_mld_warp(
 
     # A resolved mixed layer on both sides is required for a strictly monotonic warp;
     # otherwise fall back to the identity (depth) map. A fully mixed source has
-    # mld_src == H_src.
+    # mld_src == H_src; a fully mixed target has target_mld == target_H.
     eps = 1e-6
     can_warp = (
         (H_src - mld_src > eps)
@@ -899,6 +901,10 @@ def _compute_mld_warp(
         & mld_src.notnull()
         & target_mld.notnull()
     )
+    if target_H is not None:
+        can_warp = can_warp & (
+            target_H - target_mld > eps
+        )  # fully-mixed target -> identity
 
     ml = absz <= mld_src
     warp_mixed = absz * (target_mld / mld_src)
@@ -939,12 +945,16 @@ def build_bgc_vertical_coords(
     if method == "density_mld":
         target_sigma0 = compute_potential_density(target_temp, target_salt)
         target_mld = compute_mld(target_sigma0, target_depth, target_depth_dim)
+        target_H = (
+            np.abs(target_depth).where(target_sigma0.notnull()).max(target_depth_dim)
+        )
         source_coord = _compute_mld_warp(
             source_temp,
             source_salt,
             source_depth,
             source_depth_dim,
             target_mld,
+            target_H=target_H,
         )
         target_coord = np.abs(target_depth).chunk({target_depth_dim: -1})
         return source_coord, target_coord

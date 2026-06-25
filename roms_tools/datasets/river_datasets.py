@@ -345,6 +345,27 @@ class RiverDataset:
 
         return ds
 
+    def load_data(self) -> xr.Dataset:
+        """Load dataset from the specified file.
+        
+        Returns
+        -------
+        ds : xr.Dataset
+            The loaded xarray Dataset containing the forcing data.
+        """
+        ds = load_data(
+            self.filename, self.dim_names, use_dask=True, decode_times=True
+        )
+
+        # Subset time lazily before compute to avoid loading full multi-year dataset.
+        # Add 1-day buffer on each side to ensure select_relevant_times has data at boundaries.
+        time_dim = self.dim_names["time"]
+        ds = ds.sel({time_dim: slice(
+            np.datetime64(self.start_time) - np.timedelta64(1, 'D'),
+            np.datetime64(self.end_time) + np.timedelta64(1, 'D')
+        )})
+        return ds
+
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
         """Decodes the 'name' variable (if byte-encoded) and updates the dataset.
 
@@ -525,64 +546,130 @@ class RiverDataset:
 
         return ds
 
-    def extract_relevant_rivers(self, target_coords, dx):
-        """Extracts a subset of the dataset based on the proximity of river mouths to
-        target coordinates.
+    def extract_relevant_rivers(self, target_coords, dx, coast_snap_buffer_km=None, domain_edge_buffer=20):
+        """Extract rivers within the ROMS domain and assign each to the nearest coastal grid cell.
 
-        This method calculates the distance between each river mouth and the provided target coordinates
-        (latitude and longitude) using the `gc_dist` function. It then filters the dataset to include only those
-        river stations whose minimum distance from the target is less than a specified threshold distance (`dx`).
+        Uses a three-step memory-efficient approach to avoid building the full
+        (eta_rho x xi_rho x n_stations) distance matrix, which would require
+        hundreds of GiB for large river datasets (like gloFAS):
+
+        1. Bounding box pre-filter — coarse reduction using lat/lon comparison to grid boundary.
+        2. cKDTree query_ball_point — finds stations within coast_snap_buffer_km of any coastal cell.
+        3. cKDTree nearest-neighbor query — assigns each surviving station to its closest coastal cell.
 
         Parameters
         ----------
         target_coords : dict
-            A dictionary containing the target coordinates for the comparison. It should include:
-            - "lon" (float): The target longitude in degrees.
-            - "lat" (float): The target latitude in degrees.
-            - "straddle" (bool): A flag indicating whether to adjust the longitudes for stations that cross the
-              International Date Line. If `True`, longitudes greater than 180 degrees are adjusted by subtracting 360,
-              otherwise, negative longitudes are adjusted by adding 360.
-
+            A dictionary containing the target coordinates for the comparison:
+            - "lon" (xarray.DataArray): Longitude coordinates of the ROMS grid.
+            - "lat" (xarray.DataArray): Latitude coordinates of the ROMS grid.
+            - "straddle" (bool): If True, longitudes > 180 are adjusted by
+            subtracting 360; otherwise, negative longitudes are adjusted by adding 360.
+            - "mask" (xarray.DataArray, optional): Ocean mask (1=ocean, 0=land).
+            If provided, the cKDTree is built on coastal cells only (~5-10% of
+            grid), reducing memory and computation by ~10-20x.
         dx : float
-            The maximum distance threshold (in meters) for including a river station. Only river mouths that are
-            within `dx` meters from the target coordinates will be included in the returned dataset.
+            Maximum distance threshold in meters. Only river mouths within dx
+            of any ROMS grid cell are included.
+        coast_snap_buffer_km : float, optional
+            If provided, only river mouths within this distance (in km) of any
+            coastal grid cell are included. Useful for datasets like GloFAS where
+            river mouths may be slightly offshore. If None, all rivers within the
+            bounding box are included.
+        domain_edge_buffer : int, optional
+            Number of grid cells beyond the domain edge to include in the bounding
+            box pre-filter. Catches rivers just outside the domain that may still
+            have relevant freshwater forcing. Default is 20.
 
         Returns
         -------
         indices : dict[str, list[tuple]]
-            A dictionary containing the indices of the rivers that are within the threshold distance from
-            the target coordinates. The dictionary structure consists of river names as keys, and each value is a list of tuples. Each tuple represents
-            a pair of indices corresponding to the `eta_rho` and `xi_rho` grid coordinates of the river.
+            River names as keys, each mapping to a list containing one tuple of
+            (eta_rho, xi_rho) grid indices of the nearest coastal cell.
         """
+        from roms_tools.setup.utils import build_kdtree_from_latlon, query_kdtree_nearest
+
         # Retrieve longitude and latitude of river mouths
         river_lon = self.ds[self.var_names["longitude"]]
         river_lat = self.ds[self.var_names["latitude"]]
 
-        # Adjust longitude based on whether it crosses the International Date Line (straddle case)
+        # Adjust longitude for date line straddling
         if target_coords["straddle"]:
             river_lon = xr.where(river_lon > 180, river_lon - 360, river_lon)
         else:
             river_lon = xr.where(river_lon < 0, river_lon + 360, river_lon)
 
-        from roms_tools.setup.utils import gc_dist
+        station_dim = self.dim_names["station"]
 
-        # Calculate the distance between the target coordinates and each river mouth
-        dist = gc_dist(target_coords["lon"], target_coords["lat"], river_lon, river_lat)
-        dist_min = dist.min(dim=["eta_rho", "xi_rho"])
-        # Filter the dataset to include only stations within the distance threshold
-        if (dist_min < dx).any():
-            ds = self.ds.where(dist_min < dx, drop=True)
-            ds = self.sort_by_river_volume(ds)
-            dist = dist.where(dist_min < dx, drop=True).transpose(
-                self.dim_names["station"], "eta_rho", "xi_rho"
-            )
+        # Build candidate point set — coastal cells only if mask provided, else all grid cells
+        target_lon_np   = target_coords["lon"].values
+        target_lat_np   = target_coords["lat"].values
+        eta_rho, xi_rho = target_lon_np.shape
 
-            river_indices = get_indices_of_nearest_grid_cell_for_rivers(dist, self)
+        if target_coords.get("mask") is not None:
+            mask_rho = target_coords["mask"].values
+            faces = np.zeros_like(mask_rho)
+            faces[1:,  :] += mask_rho[:-1, :]
+            faces[:-1, :] += mask_rho[1:,  :]
+            faces[:,  1:] += mask_rho[:, :-1]
+            faces[:, :-1] += mask_rho[:,  1:]
+            coast = (1 - mask_rho) * (faces > 0)
+            coast_eta, coast_xi = np.where(coast)
+            tree_lat = target_lat_np[coast_eta, coast_xi]
+            tree_lon = target_lon_np[coast_eta, coast_xi]
         else:
-            ds = xr.Dataset()
-            river_indices = {}
+            coast_eta = np.arange(eta_rho * xi_rho) // xi_rho
+            coast_xi  = np.arange(eta_rho * xi_rho) %  xi_rho
+            tree_lat  = target_lat_np.ravel()
+            tree_lon  = target_lon_np.ravel()
 
+        # Step 1: bounding box pre-filter with buffer to catch rivers just outside the domain
+        buffer_deg = float(dx) / 111000 * (domain_edge_buffer + 1)
+        lat_min = target_lat_np.min() - buffer_deg
+        lat_max = target_lat_np.max() + buffer_deg
+        lon_min = target_lon_np.min() - buffer_deg
+        lon_max = target_lon_np.max() + buffer_deg
+
+        rlat = river_lat.values
+        rlon = river_lon.values
+
+        in_bbox      = (rlat >= lat_min) & (rlat <= lat_max) & (rlon >= lon_min) & (rlon <= lon_max)
+        bbox_indices = np.where(in_bbox)[0]
+
+        if len(bbox_indices) == 0:
+            self.ds = xr.Dataset()
+            return {}
+
+        # Step 2: optional distance filter using query_ball_point
+        if coast_snap_buffer_km is not None:
+            from roms_tools.setup.utils import latlon_to_xyz
+            
+            dx_chord = 2 * np.sin((coast_snap_buffer_km * 1000) / (2 * 6371315.0))
+            tree     = build_kdtree_from_latlon(tree_lat, tree_lon)
+            counts   = tree.query_ball_point(
+                latlon_to_xyz(rlat[bbox_indices], rlon[bbox_indices]),
+                r=dx_chord, return_length=True,
+            )
+            final_indices = bbox_indices[counts > 0]
+        else:
+            tree          = build_kdtree_from_latlon(tree_lat, tree_lon)
+            final_indices = bbox_indices
+
+        # Step 3: assign each station to its nearest coastal cell
+        eta_argmin, xi_argmin, _ = query_kdtree_nearest(
+            tree, rlat[final_indices], rlon[final_indices], coast_eta, coast_xi,
+        )
+
+        # Subset dataset and build indices dict
+        ds      = self.ds.isel({station_dim: final_indices})
+        ds      = self.sort_by_river_volume(ds)
         self.ds = ds
+
+        names_final   = ds[self.var_names["name"]].values
+        river_indices = {
+            str(names_final[i]): [(int(eta_argmin[i]), int(xi_argmin[i]))]
+            for i in range(len(final_indices))
+        }
 
         return river_indices
 
@@ -662,6 +749,17 @@ class DaiRiverDataset(RiverDataset):
         }
     )
     climatology: bool = False
+   
+    def load_data(self) -> xr.Dataset:
+        """Load dataset from the specified file. Load Dai dataset from the specified file.
+        Overrides the base class to use use_dask=False, decode_times=False because Dai encodes
+        time as numeric YYYYMM values which are decoded manually in add_time_info().
+        Time subsetting is handled downstream by select_relevant_times() after
+        add_time_info() converts the numeric coordinates to datetimes.
+        """
+        return load_data(
+            self.filename, self.dim_names, use_dask=False, decode_times=False
+        )
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Adds time information to the dataset based on the climatology flag and
@@ -1050,7 +1148,7 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         river_names: list[str] | None = None,
     ) -> tuple[list[int], list[int]]:
         """RIVR2O ``(lat, lon)`` indices of the nearest cell with positive DIC export."""
-        from roms_tools.setup.utils import gc_dist
+        from roms_tools.setup.utils import build_kdtree_from_latlon, query_kdtree_nearest
 
         query_lon = np.atleast_1d(np.asarray(lon, dtype=float))
         query_lat = np.atleast_1d(np.asarray(lat, dtype=float))
@@ -1065,28 +1163,14 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
                 "river_names must have the same length as lon/lat query points."
             )
 
-        dist_warn_m = 100_000.0  # 100 km
-        nearest_lat = []
-        nearest_lon = []
-        for i, (q_lon, q_lat) in enumerate(zip(query_lon, query_lat, strict=True)):
-            dist = gc_dist(q_lon, q_lat, grid_lons, grid_lats)
-            nearest = int(np.argmin(dist))
-            min_dist_m = float(dist[nearest])
-            if min_dist_m > dist_warn_m:
-                label = river_names[i] if river_names is not None else f"point {i}"
-                logging.warning(
-                    "RIVR2O DIC export cell for %s is %.1f km from the river "
-                    "mouth (lat=%.4f, lon=%.4f); using grid cell lat_idx=%d, "
-                    "lon_idx=%d.",
-                    label,
-                    min_dist_m / 1000.0,
-                    q_lat,
-                    q_lon,
-                    int(lat_indices[nearest]),
-                    int(lon_indices[nearest]),
-                )
-            nearest_lat.append(int(lat_indices[nearest]))
-            nearest_lon.append(int(lon_indices[nearest]))
+        lat_indices, lon_indices, grid_lats, grid_lons = ( self._valid_dic_export_cell_indices() )
+
+        tree = build_kdtree_from_latlon(grid_lats, grid_lons)
+        nearest_lat, nearest_lon, _ = query_kdtree_nearest(
+            tree, query_lat, query_lon, lat_indices, lon_indices,
+            labels=river_names,
+        )
+
         return nearest_lat, nearest_lon
 
     def discharge_partition_weights(

@@ -17,6 +17,7 @@ import pandas as pd
 import xarray as xr
 import yaml
 from pydantic import BaseModel
+from scipy.spatial import cKDTree
 
 from roms_tools.constants import R_EARTH
 
@@ -276,8 +277,9 @@ def interpolate_dynamic_bgc_by_calendar_year(
         tagged = values.assign_coords(calendar_year=calendar_years)
         annual = tagged.groupby("calendar_year").mean(dim=time_dim, skipna=True)
         annual = annual.reindex(calendar_year=full_years)
+        annual = annual.chunk({"calendar_year": -1})
         annual = annual.interpolate_na(dim="calendar_year", method="linear")
-
+        
         year_indexer = xr.DataArray(
             year_at_steps,
             dims=[time_dim],
@@ -1250,6 +1252,39 @@ def _gc_dist_radians(lon1, lat1, lon2, lat2):
     dis = R_EARTH * dang
 
     return dis
+
+# --- cKDTree-based spatial lookup helpers ---
+def latlon_to_xyz(lat, lon):
+            lat_r = np.deg2rad(lat)
+            lon_r = np.deg2rad(lon)
+            return np.column_stack([
+                np.cos(lat_r) * np.cos(lon_r),
+                np.cos(lat_r) * np.sin(lon_r),
+                np.sin(lat_r)
+            ])
+
+def build_kdtree_from_latlon(lat, lon):
+    """Build a cKDTree on the unit sphere from lat/lon arrays."""
+    return cKDTree(latlon_to_xyz(lat, lon))
+
+def query_kdtree_nearest(tree, query_lat, query_lon, cand_eta, cand_xi,
+                         *, warn_dist_km=100.0, labels=None, workers=-1):
+    """Query a cKDTree for the nearest candidate grid cell to each query point."""
+    distances, nearest_idx = tree.query(latlon_to_xyz(query_lat, query_lon), workers=workers)
+    distances_km = 2 * 6371.0 * np.arcsin(np.clip(distances / 2, 0, 1))
+    eta_out = cand_eta[nearest_idx]
+    xi_out  = cand_xi[nearest_idx]
+    for i in range(len(distances_km)):
+        if distances_km[i] > warn_dist_km:
+            label = labels[i] if labels is not None else f"point {i}"
+            logging.warning(
+                "River '%s' is %.1f km from nearest coastal cell (%d, %d). "
+                "Check river mouth location.",
+                label, distances_km[i], int(eta_out[i]), int(xi_out[i])
+            )
+    return eta_out, xi_out, distances_km
+
+
 
 
 @nb.njit(

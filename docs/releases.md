@@ -18,6 +18,7 @@
 
 * `SurfaceForcing` was refactored to be more dask-lazy, such that data loading/streaming is minimized until `save` is called on the class, and thereby supports longer periods between start/end dates.
 * `SurfaceForcing` with `type='bgc'` has new data source option of 'MBL_co2' for time-varying co2; climatology no longer acceptd for xco2. ([#608](https://github.com/CWorthy-ocean/roms-tools/pull/608))
+* Density-space vertical interpolation for BGC tracers in `InitialConditions` and `BoundaryForcing` via new `use_density_interpolation` parameter (default `False`). The source density coordinate is built from the BGC dataset's own temperature/salinity (the unified dataset provides `temp_WOA`/`salt_WOA`). The target density uses the model's temperature/salinity: for `InitialConditions` this is the physics already in the same object, while for `BoundaryForcing` the physics `BoundaryForcing` must be passed as `physics_forcing=`. When a BGC source lacks temperature/salinity (e.g. CESM), interpolation falls back to depth space. A density `BoundaryForcing`'s `physics_forcing` companion is now embedded in and restored from its YAML, so `to_yaml`/`from_yaml` round-trips preserve density-space interpolation instead of silently falling back to depth ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620)).
 * `make_edata` changed to `make_nesting_info`
 * `to_yaml` and `from_yaml` were adjusted to handle child grids after they've been modified ([#573](https://github.com/CWorthy-ocean/roms-tools/pull/573))
 * Nesting now supports optional baroclinic pressure fluxes via metadata ([#568](https://github.com/CWorthy-ocean/roms-tools/pull/568))
@@ -61,6 +62,7 @@
 * The cdr notebook is updated to reflect interpolation option. Default is same as ROMS, no interpolation ([#601](https://github.com/CWorthy-ocean/roms-tools/pull/601))
 * `river_forcing.ipynb` documents RIVR2O BGC forcing, including climatological discharge with year-varying tracers ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
 * CDR analysis notebook: describe CO2 uptake (tonnes CO2) and CDR efficiency together, consistent with the metrics and figure. ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
+* Notebooks updated to document density-space BGC interpolation ([#620](https://github.com/CWorthy-ocean/roms-tools/pull/620))
 
 ### Bugfixes
 

@@ -147,6 +147,20 @@ class BGCSource:
     physics_forcing: Any | None = None
     algorithm: Callable | None = None
 
+    # --- Per-source fill before regridding ---
+    prefill: str | None = None
+    """Whole-domain source fill applied before regridding this source.
+
+    Mirrors the ``BoundaryForcing.prefill`` parameter but operates per-source
+    so that different BGC datasets can use different fill strategies.
+    Options: ``"2d_lateral_fill"``, ``"nearest_neighbor"``, ``"inverse_dist"``,
+    ``"nearest_s2d"``.  ``None`` (default) uses the xESMF masked-bilinear path
+    (nearest-neighbor pre-fill when xESMF is unavailable).
+    """
+    prefill_kwargs: dict | None = None
+    """Method-specific options for ``prefill`` (``num_src_pnts``/``dist_exponent``
+    for ``"inverse_dist"``). Ignored by other methods."""
+
     # --- Priority override ---
     overwrite_fields: list[str] | None = None
 

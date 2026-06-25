@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from roms_tools.fill import LateralFill
+from roms_tools.fill import LateralFill, nearest_neighbor_fill
 from roms_tools.utils import unchunk_dask
 
 
@@ -167,6 +167,46 @@ def test_apply_raises_if_var_dim_order_mismatch():
     var = xr.DataArray(np.ones((3, 3)), dims=("xi_rho", "eta_rho"))  # wrong order
     with pytest.raises(ValueError, match="dimension order is incorrect"):
         lf.apply(var)
+
+
+def test_nearest_neighbor_fill_leaves_no_nans_and_preserves_valid():
+    # Single ocean cell in the top-right corner; everything else is land/NaN.
+    mask = xr.DataArray(
+        np.array([[0, 0, 0], [0, 0, 0], [0, 0, 1]], dtype=bool),
+        dims=("eta_rho", "xi_rho"),
+    )
+    data = np.full((3, 3), np.nan)
+    data[2, 2] = 7.0
+    var = xr.DataArray(data, dims=("eta_rho", "xi_rho"))
+
+    filled = nearest_neighbor_fill(var, mask, dims=("eta_rho", "xi_rho"))
+
+    # No NaNs remain, the valid cell is unchanged, and every cell takes the only
+    # valid value available.
+    assert not filled.isnull().any()
+    assert float(filled.sel(eta_rho=2, xi_rho=2)) == 7.0
+    assert np.allclose(filled.values, 7.0)
+
+
+def test_nearest_neighbor_fill_broadcasts_over_extra_dims():
+    # Two valid columns; nearest fill should copy column-wise across a depth dim.
+    mask = xr.DataArray(
+        np.array([[1, 0, 0], [1, 0, 0]], dtype=bool), dims=("eta_rho", "xi_rho")
+    )
+    # depth=2, eta_rho=2, xi_rho=3
+    arr = np.full((2, 2, 3), np.nan)
+    arr[:, :, 0] = np.array([[1.0, 2.0], [10.0, 20.0]]).T  # valid column values
+    var = xr.DataArray(arr, dims=("depth", "eta_rho", "xi_rho"))
+
+    filled = nearest_neighbor_fill(var, mask, dims=("eta_rho", "xi_rho"))
+
+    assert not filled.isnull().any()
+    assert filled.dims == ("depth", "eta_rho", "xi_rho")
+    # Masked columns (xi_rho 1, 2) take the value of the nearest valid column (0).
+    for j in (1, 2):
+        assert np.array_equal(
+            filled.isel(xi_rho=j).values, filled.isel(xi_rho=0).values
+        )
 
 
 def test_apply_raises_if_var_has_nans_on_valid_mask():

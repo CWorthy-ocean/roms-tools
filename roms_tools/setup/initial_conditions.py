@@ -27,6 +27,7 @@ from roms_tools.setup.bgc_source import BGCSource, instantiate_bgc_dataset, merg
 from roms_tools.setup.utils import (
     RawDataSource,
     _compute_density_coord,
+    _xesmf_available,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     from_yaml,
@@ -34,6 +35,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     nan_check,
     pop_grid_data,
+    resolve_regrid_engine,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -272,7 +274,17 @@ class InitialConditions:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
-        data.apply_lateral_fill()
+        if type == "bgc" and bgc_source is not None:
+            # BGC: per-source prefill (None = xESMF masked-bilinear, no source fill)
+            if bgc_source.prefill is not None:
+                data.apply_prefill(
+                    bgc_source.prefill,
+                    prefill_kwargs=bgc_source.prefill_kwargs,
+                    prefill_was_user_set=True,
+                )
+        else:
+            # Physics: keep 2D lateral fill (safe backward-compatible default)
+            data.apply_lateral_fill()
         data.rotate_velocities_to_east_and_north()
 
         self._set_variable_info(data, type=type)
@@ -396,7 +408,19 @@ class InitialConditions:
             )
 
         else:
-            lateral_regrid_to_roms = LateralRegridToROMS(target_coords, data.dim_names)
+            use_xesmf = resolve_regrid_engine(None, xesmf_available=_xesmf_available())
+            # Source mask for xESMF masked-bilinear path (None = NaN-free source).
+            source_mask = (
+                data.ds["mask"] if use_xesmf and "mask" in data.ds.data_vars else None
+            )
+            lateral_regrid_to_roms = LateralRegridToROMS(
+                target_coords,
+                data.dim_names,
+                source_ds=data.ds,
+                use_xesmf=use_xesmf,
+                source_mask=source_mask,
+                extrap_method="inverse_dist" if use_xesmf else None,
+            )
             for var_name in var_names:
                 processed_fields[var_name] = lateral_regrid_to_roms.apply(
                     data.ds[var_names[var_name]["name"]]

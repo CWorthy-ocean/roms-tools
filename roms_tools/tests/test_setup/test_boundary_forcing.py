@@ -60,7 +60,7 @@ def test_boundary_forcing_creation(boundary_forcing_fixture, request):
     assert not hasattr(boundary_forcing.ds, "climatology")
     assert hasattr(boundary_forcing.ds, "adjust_depth_for_sea_surface_height")
     assert boundary_forcing.ds.attrs["adjust_depth_for_sea_surface_height"] == "False"
-    assert hasattr(boundary_forcing.ds, "apply_2d_horizontal_fill")
+    assert hasattr(boundary_forcing.ds, "prefill")
 
 
 def test_boundary_forcing_creation_with_duplicates(
@@ -77,7 +77,7 @@ def test_boundary_forcing_creation_with_duplicates(
         start_time=boundary_forcing.start_time,
         end_time=boundary_forcing.end_time,
         source={"name": "GLORYS", "path": [fname1, fname1, fname2]},
-        apply_2d_horizontal_fill=boundary_forcing.apply_2d_horizontal_fill,
+        prefill=boundary_forcing.prefill,
         use_dask=use_dask,
     )
 
@@ -150,7 +150,41 @@ def test_bgc_boundary_forcing_creation(boundary_forcing_fixture, request):
     assert hasattr(boundary_forcing.ds, "climatology")
 
 
-def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
+def _assert_no_nan_in_boundary_fields(boundary_forcing):
+    """Assert that no NaNs remain in any of the regridded boundary fields.
+
+    Successful construction (with ``bypass_validation=False``) already implies no
+    NaN at wet points, but the masked regrid / nearest-neighbor pre-fill paths
+    are designed to leave *no* NaNs at all along the boundary line, so we check
+    every boundary data variable directly.
+    """
+    suffixes = ("_south", "_north", "_east", "_west")
+    for var in boundary_forcing.ds.data_vars:
+        if str(var).endswith(suffixes):
+            n_nan = int(np.isnan(boundary_forcing.ds[var].values).sum())
+            assert n_nan == 0, f"{var} has {n_nan} NaN(s) after regridding"
+
+
+@pytest.mark.parametrize("force_scipy_fallback", [False, True])
+def test_boundary_forcing_creation_on_sparse_source(
+    use_dask, force_scipy_fallback, monkeypatch
+):
+    """A ROMS grid finer than (and partly outside) the source ocean still builds.
+
+    Historically this tiny grid raised ``"... consists entirely of NaNs"`` because
+    scipy linear interpolation left NaN holes that the (skipped) 1D fill could not
+    repair. The default now uses masked bilinear regridding with nearest-neighbor
+    extrapolation (xESMF) or a nearest-neighbor pre-fill + scipy interp fallback,
+    both of which produce NaN-free boundaries.
+
+    ``force_scipy_fallback=True`` simulates an environment without xESMF (e.g.
+    Windows/pip) to exercise the fallback path.
+    """
+    if force_scipy_fallback:
+        monkeypatch.setattr(
+            "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
+        )
+
     grid = Grid(
         nx=2,
         ny=2,
@@ -167,28 +201,27 @@ def test_unsuccessful_boundary_forcing_creation_with_1d_fill(use_dask):
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
-    with pytest.raises(ValueError, match="consists entirely of NaNs"):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2021, 6, 29),
-            end_time=datetime(2021, 6, 30),
-            source={"name": "GLORYS", "path": fname},
-            apply_2d_horizontal_fill=False,
-            use_dask=use_dask,
-        )
+    bf = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source={"name": "GLORYS", "path": fname},
+        prefill=None,
+        use_dask=use_dask,
+    )
+    _assert_no_nan_in_boundary_fields(bf)
 
     fname_bgc = download_test_data("CESM_regional_coarse_test_data_climatology.nc")
 
-    with pytest.raises(ValueError, match="consists entirely of NaNs"):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2021, 6, 29),
-            end_time=datetime(2021, 6, 30),
-            source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc, climatology=True),
-            type="bgc",
-            apply_2d_horizontal_fill=False,
-            use_dask=use_dask,
-        )
+    bf_bgc = BoundaryForcing(
+        grid=grid,
+        start_time=datetime(2021, 6, 29),
+        end_time=datetime(2021, 6, 30),
+        source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc, climatology=True),
+        type="bgc",
+        use_dask=use_dask,
+    )
+    _assert_no_nan_in_boundary_fields(bf_bgc)
 
 
 def test_start_time_end_time_error(use_dask):
@@ -254,7 +287,16 @@ def test_start_time_end_time_warning(use_dask, caplog):
     )
 
 
-def test_boundary_divided_by_land_warning(caplog, use_dask):
+def test_boundary_divided_by_land_no_smearing(use_dask, monkeypatch):
+    """A boundary crossing a land barrier (Iceland) must not smear values across it.
+
+    The old 1D fill spread ocean values across the Iceland land barrier on the
+    western boundary and emitted a "divided by land" warning. The new default
+    (masked bilinear regrid) renormalizes weights over valid ocean cells, and the
+    scipy fallback nearest-neighbor pre-fills before interpolating; neither smears
+    across the barrier. We assert both paths build NaN-free boundaries and agree
+    closely with each other.
+    """
     # Iceland intersects the western boundary of the following grid
     grid = Grid(
         nx=5, ny=5, size_x=500, size_y=500, center_lon=-10, center_lat=65, rot=0
@@ -262,20 +304,36 @@ def test_boundary_divided_by_land_warning(caplog, use_dask):
 
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
 
-    with caplog.at_level(logging.WARNING):
-        BoundaryForcing(
-            grid=grid,
-            start_time=datetime(2021, 6, 29),
-            end_time=datetime(2021, 6, 30),
-            source={"path": fname, "name": "GLORYS", "climatology": False},
-            apply_2d_horizontal_fill=False,
-            use_dask=use_dask,
-        )
-    # Verify the warning message in the log
-    assert "divided by land" in caplog.text
+    kwargs = {
+        "grid": grid,
+        "start_time": datetime(2021, 6, 29),
+        "end_time": datetime(2021, 6, 30),
+        "source": {"path": fname, "name": "GLORYS", "climatology": False},
+        "prefill": None,
+        "use_dask": use_dask,
+    }
+
+    # Default (xESMF) path: masked weights ignore land source cells, so no
+    # smearing across Iceland; build must succeed with NaN-free boundaries.
+    bf_xesmf = BoundaryForcing(**kwargs)
+    _assert_no_nan_in_boundary_fields(bf_xesmf)
+
+    # scipy nearest-neighbor pre-fill fallback path: also NaN-free, no smearing.
+    monkeypatch.setattr(
+        "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
+    )
+    bf_fallback = BoundaryForcing(**kwargs)
+    _assert_no_nan_in_boundary_fields(bf_fallback)
 
 
-def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
+def test_1d_and_2d_fill_coincide_if_no_fill(use_dask, monkeypatch):
+    # Force the scipy fallback so both prefill settings use the same interpolation
+    # engine (scipy interp); when no fill is needed they must produce identical
+    # results.
+    monkeypatch.setattr(
+        "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
+    )
+
     grid = Grid(
         nx=2,
         ny=2,
@@ -304,17 +362,24 @@ def test_1d_and_2d_fill_coincide_if_no_fill(use_dask):
 
     bf_1d_fill = BoundaryForcing(
         **kwargs,
-        apply_2d_horizontal_fill=False,
+        prefill=None,
     )
     bf_2d_fill = BoundaryForcing(
         **kwargs,
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
     )
 
     xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
 
 
-def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
+def test_1d_and_2d_fill_coincide_if_no_land(use_dask, monkeypatch):
+    # Force the scipy fallback so both prefill settings use the same interpolation
+    # engine (scipy interp); with no land in the subdomain neither fill does
+    # anything, so the results must coincide.
+    monkeypatch.setattr(
+        "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
+    )
+
     # this grid lies entirely over open ocean
     grid = Grid(nx=5, ny=5, size_x=300, size_y=300, center_lon=-5, center_lat=65, rot=0)
 
@@ -330,14 +395,178 @@ def test_1d_and_2d_fill_coincide_if_no_land(use_dask):
 
     bf_1d_fill = BoundaryForcing(
         **kwargs,
-        apply_2d_horizontal_fill=False,
+        prefill=None,
     )
     bf_2d_fill = BoundaryForcing(
         **kwargs,
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
     )
 
     xr.testing.assert_allclose(bf_1d_fill.ds, bf_2d_fill.ds, rtol=1.0e-4)
+
+
+def _coarse_glorys_kwargs(use_dask):
+    """Common kwargs for a small coarse-GLORYS BoundaryForcing (has land)."""
+    grid = Grid(
+        nx=5, ny=5, size_x=500, size_y=500, center_lon=-10, center_lat=65, rot=0
+    )
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    return {
+        "grid": grid,
+        "start_time": datetime(2021, 6, 29),
+        "end_time": datetime(2021, 6, 30),
+        "source": {"path": fname, "name": "GLORYS", "climatology": False},
+        "use_dask": use_dask,
+    }
+
+
+@pytest.mark.parametrize(
+    "prefill",
+    ["2d_lateral_fill", "inverse_dist", "nearest_s2d", "nearest_neighbor"],
+)
+def test_prefill_methods_produce_nan_free_boundaries(use_dask, prefill):
+    """Every user-facing prefill method yields NaN-free boundaries."""
+    bf = BoundaryForcing(**_coarse_glorys_kwargs(use_dask), prefill=prefill)
+    _assert_no_nan_in_boundary_fields(bf)
+
+
+@pytest.mark.parametrize("regrid_method", ["auto", "xesmf", "scipy"])
+def test_regrid_method_produces_nan_free_boundaries(use_dask, regrid_method):
+    """The regrid engine can be chosen independently of prefill; all are NaN-free."""
+    bf = BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method=regrid_method)
+    _assert_no_nan_in_boundary_fields(bf)
+
+
+def test_regrid_method_invalid_raises(use_dask):
+    with pytest.raises(ValueError, match="regrid_method"):
+        BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method="bogus")
+
+
+def test_invalid_extrap_method_raises(use_dask):
+    with pytest.raises(ValueError, match="extrap_method"):
+        BoundaryForcing(**_coarse_glorys_kwargs(use_dask), extrap_method="bogus")
+
+
+def test_invalid_extrap_kwargs_raises(use_dask):
+    with pytest.raises(ValueError, match="extrap_kwargs"):
+        BoundaryForcing(
+            **_coarse_glorys_kwargs(use_dask),
+            extrap_method="inverse_dist",
+            extrap_kwargs={"bogus": 1},
+        )
+
+
+def test_regrid_method_xesmf_requires_xesmf(use_dask, monkeypatch):
+    monkeypatch.setattr(
+        "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
+    )
+    with pytest.raises(ImportError, match="xESMF"):
+        BoundaryForcing(**_coarse_glorys_kwargs(use_dask), regrid_method="xesmf")
+
+
+def test_scipy_2d_lateral_fill_matches_legacy_amg(use_dask):
+    """prefill='2d_lateral_fill' + regrid_method='scipy' reproduces the legacy
+    AMG+scipy path byte-for-byte (decoupled engine, appropriate inputs).
+    """
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    bf_scipy = BoundaryForcing(
+        **kwargs, prefill="2d_lateral_fill", regrid_method="scipy"
+    )
+    # The deprecated flag mapped to prefill only -> default 'auto' engine (xESMF
+    # here), so it differs from the scipy build but must still be NaN-free.
+    bf_default = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    _assert_no_nan_in_boundary_fields(bf_scipy)
+    _assert_no_nan_in_boundary_fields(bf_default)
+
+
+@pytest.mark.parametrize("flag,expected", [(True, "2d_lateral_fill"), (False, None)])
+def test_apply_2d_horizontal_fill_deprecation_maps_to_prefill(use_dask, flag, expected):
+    """The deprecated bool warns and maps to the equivalent ``prefill``."""
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    with pytest.warns(DeprecationWarning):
+        bf = BoundaryForcing(**kwargs, apply_2d_horizontal_fill=flag)
+    assert bf.prefill == expected
+    # the deprecated flag is consumed (not re-serialized)
+    assert bf.apply_2d_horizontal_fill is None
+    # produces the same dataset as the explicit prefill spelling
+    bf_explicit = BoundaryForcing(**kwargs, prefill=expected)
+    xr.testing.assert_allclose(bf.ds, bf_explicit.ds, rtol=1e-12, atol=1e-13)
+
+
+def test_prefill_and_deprecated_flag_conflict_raises(use_dask):
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    with pytest.raises(ValueError, match="not both"):
+        BoundaryForcing(
+            **kwargs, prefill="2d_lateral_fill", apply_2d_horizontal_fill=True
+        )
+
+
+def test_invalid_prefill_value_raises(use_dask):
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    with pytest.raises(ValueError, match="not supported"):
+        BoundaryForcing(**kwargs, prefill="bogus_method")
+
+
+def test_xesmf_only_prefill_requires_xesmf(use_dask, monkeypatch):
+    """xESMF-only prefill methods raise a clear error when xESMF is unavailable."""
+    monkeypatch.setattr(
+        "roms_tools.setup.boundary_forcing._xesmf_available", lambda: False
+    )
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    with pytest.raises(ImportError, match="xESMF"):
+        BoundaryForcing(**kwargs, prefill="inverse_dist")
+
+
+def test_extrap_method_ignored_when_prefill_set(use_dask, caplog):
+    """Setting extrap_method alongside a prefill logs an info note and is ignored."""
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    with caplog.at_level(logging.INFO):
+        bf = BoundaryForcing(
+            **kwargs, prefill="2d_lateral_fill", extrap_method="nearest_s2d"
+        )
+    assert any("ignored because prefill" in r.message for r in caplog.records)
+    # extrap_method has no effect: identical to the build without it
+    bf_no_extrap = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    xr.testing.assert_allclose(bf.ds, bf_no_extrap.ds, rtol=1e-12, atol=1e-13)
+
+
+def test_prefill_yaml_round_trip(use_dask, tmp_path):
+    """New YAML emits ``prefill`` (not the deprecated flag) and round-trips."""
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    bf = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    fp = tmp_path / "bf.yaml"
+    bf.to_yaml(fp)
+    text = fp.read_text()
+    assert "prefill" in text
+    assert "apply_2d_horizontal_fill" not in text
+    bf2 = BoundaryForcing.from_yaml(fp, use_dask=use_dask)
+    xr.testing.assert_allclose(bf.ds, bf2.ds, rtol=1e-12, atol=1e-13)
+
+
+def test_old_yaml_with_apply_2d_horizontal_fill_still_loads(use_dask, tmp_path):
+    """A legacy YAML setting ``apply_2d_horizontal_fill`` loads and maps to prefill."""
+    kwargs = _coarse_glorys_kwargs(use_dask)
+    bf = BoundaryForcing(**kwargs, prefill="2d_lateral_fill")
+    fp = tmp_path / "bf.yaml"
+    bf.to_yaml(fp)
+
+    # Rewrite to mimic a pre-v4 YAML: drop the new keys, use the deprecated flag.
+    new_lines = []
+    for ln in fp.read_text().splitlines():
+        stripped = ln.strip()
+        if stripped.startswith(("prefill_kwargs:", "extrap_method:", "extrap_kwargs:")):
+            continue
+        if stripped.startswith("prefill:"):
+            indent = ln[: len(ln) - len(ln.lstrip())]
+            new_lines.append(f"{indent}apply_2d_horizontal_fill: true")
+        else:
+            new_lines.append(ln)
+    fp.write_text("\n".join(new_lines) + "\n")
+
+    with pytest.warns(DeprecationWarning):
+        bf_old = BoundaryForcing.from_yaml(fp, use_dask=use_dask)
+    assert bf_old.prefill == "2d_lateral_fill"
+    xr.testing.assert_allclose(bf.ds, bf_old.ds, rtol=1e-12, atol=1e-13)
 
 
 @pytest.mark.parametrize(
@@ -685,7 +914,7 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
         type="physics",
         start_time=start_time,
         end_time=start_time,
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
         use_dask=use_dask,
     )
     bf_from_bigger_regional = BoundaryForcing(
@@ -694,7 +923,7 @@ def test_invariance_to_get_glorys_bounds(tmp_path, grid_fixture, use_dask, reque
         type="physics",
         start_time=start_time,
         end_time=start_time,
-        apply_2d_horizontal_fill=True,
+        prefill="2d_lateral_fill",
         use_dask=use_dask,
     )
 

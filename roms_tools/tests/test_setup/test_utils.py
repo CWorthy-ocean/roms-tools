@@ -9,9 +9,11 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
+    _compute_density_coord,
     _infer_valid_boundaries_from_mask,
     calendar_midmonth_dates,
     check_and_set_boundaries,
+    compute_potential_density,
     expand_monthly_climatology_time_axis,
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
@@ -300,6 +302,124 @@ def test_check_and_set_full_user_boundaries(simple_mask):
     result = check_and_set_boundaries(boundaries, simple_mask)
 
     assert result == boundaries  # unchanged
+
+
+# test compute_potential_density
+
+
+def test_compute_potential_density_known_value():
+    """Verify sigma-0 against a known seawater value (T=20°C, S=35 PSU → ~24.64 kg/m³)."""
+    temp = xr.DataArray([[20.0]])
+    salt = xr.DataArray([[35.0]])
+    result = compute_potential_density(temp, salt)
+    assert float(result.values.flat[0]) == pytest.approx(24.64, abs=0.1)
+
+
+def test_compute_potential_density_dask():
+    """Verify compute_potential_density returns a lazy dask-backed array."""
+    import dask.array as da
+
+    temp = xr.DataArray(da.from_array([[20.0]], chunks=(1, 1)))
+    salt = xr.DataArray(da.from_array([[35.0]], chunks=(1, 1)))
+    result = compute_potential_density(temp, salt)
+    assert result.chunks is not None
+
+
+def test_compute_density_coord_constant_TS():
+    """For constant T/S, the density coordinate equals sigma0(S,T) plus the
+    monotonicity perturbation along the depth dimension.
+    """
+    import gsw
+
+    n_depth = 4
+    T_const, S_const = 10.0, 35.0
+    temp = xr.DataArray(np.full((n_depth, 1, 1), T_const), dims=["depth", "eta", "xi"])
+    salt = xr.DataArray(np.full((n_depth, 1, 1), S_const), dims=["depth", "eta", "xi"])
+
+    result = _compute_density_coord(temp, salt, "depth")
+
+    # gsw.sigma0 is invariant for constant T/S; only the per-index perturbation
+    # added along the depth axis changes the value across depth.
+    expected = gsw.sigma0(S_const, T_const) + np.arange(n_depth) * 1e-7
+    np.testing.assert_allclose(result.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
+
+
+def test_compute_density_coord_monotonic_and_chunked():
+    """The density coordinate is strictly increasing along the depth dim and is
+    single-chunked there (required by xgcm.transform).
+    """
+    # A stably stratified column: density should already increase with depth, and
+    # the perturbation guarantees strict monotonicity even for ties.
+    temp = xr.DataArray(
+        np.array([20.0, 20.0, 12.0, 4.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    ).chunk({"s_rho": 2})
+    salt = xr.DataArray(
+        np.array([34.0, 34.0, 34.8, 35.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    ).chunk({"s_rho": 2})
+
+    result = _compute_density_coord(temp, salt, "s_rho")
+
+    profile = result.values[:, 0, 0]
+    assert np.all(np.diff(profile) > 0), "density coordinate must be strictly monotonic"
+    # single chunk along the transformed dim
+    assert result.chunks is not None
+    s_axis = result.dims.index("s_rho")
+    assert len(result.chunks[s_axis]) == 1
+
+
+def test_density_space_interpolation_returns_correct_values():
+    """End-to-end correctness of density-space interpolation on a synthetic column.
+
+    A tracer placed on a source density coordinate (built from source T/S) and
+    interpolated onto a target density coordinate (built from target T/S) must equal
+    a direct 1-D linear interpolation of the tracer in density space. This pins the
+    full density-interpolation composition (``_compute_density_coord`` feeding
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    # Source column: stably stratified (colder/denser with depth) so the density
+    # coordinate is monotonic; a tracer that increases with depth.
+    src_temp = xr.DataArray(
+        np.array([25.0, 20.0, 15.0, 10.0]).reshape(-1, 1, 1),
+        dims=["depth", "eta", "xi"],
+    )
+    src_salt = xr.DataArray(np.full((4, 1, 1), 35.0), dims=["depth", "eta", "xi"])
+    tracer = xr.DataArray(
+        np.array([2000.0, 2100.0, 2200.0, 2300.0]).reshape(-1, 1, 1),
+        dims=["depth", "eta", "xi"],
+        name="ALK",
+    )
+
+    # Target ROMS sigma levels, with T/S chosen so the target densities fall strictly
+    # inside the source range (genuine interpolation, not edge clamping).
+    tgt_temp = xr.DataArray(
+        np.array([22.0, 17.0, 12.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    )
+    tgt_salt = xr.DataArray(np.full((3, 1, 1), 35.0), dims=["s_rho", "eta", "xi"])
+
+    source_density = _compute_density_coord(src_temp, src_salt, "depth")
+    target_density = _compute_density_coord(tgt_temp, tgt_salt, "s_rho")
+
+    src_rho = source_density.values[:, 0, 0]
+    tgt_rho = target_density.values[:, 0, 0]
+    # sanity: target densities are interior to the source range
+    assert tgt_rho.min() > src_rho.min()
+    assert tgt_rho.max() < src_rho.max()
+
+    ds = xr.Dataset({"ALK": tracer})
+    vertical_regrid = VerticalRegrid(ds, source_dim="depth")
+    regridded = vertical_regrid.apply(
+        ds["ALK"],
+        source_depth_coords=source_density,
+        target_depth_coords=target_density,
+    ).transpose("s_rho", "eta", "xi")
+
+    expected = np.interp(tgt_rho, src_rho, tracer.values[:, 0, 0])
+    np.testing.assert_allclose(regridded.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
 
 
 class TestMonthlyClimatologyExpansion:

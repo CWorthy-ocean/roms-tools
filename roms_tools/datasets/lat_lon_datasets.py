@@ -653,7 +653,7 @@ class LatLonDataset:
             return coords_ds
 
         if return_copy:
-            return LatLonDataset.from_ds(self, subdomain)
+            return type(self).from_ds(self, subdomain)
         else:
             self.ds = subdomain
             return None
@@ -1519,8 +1519,18 @@ class UnifiedBGCDataset(UnifiedDataset):
             "spCaCO3": "spCaCO3",
             "zooC": "zooC",
             "CHL": "CHL",
+            # Source temperature/salinity used to build the density coordinate for
+            # density-space interpolation of BGC tracers, under the stable internal keys
+            # ``temp_bgc``/``salt_bgc`` (declared as the density source in
+            # ``bgc_source_ts`` below). Optional: absent in older files, in which case
+            # interpolation falls back to depth space. If the file renames these
+            # variables, update only the values here.
+            "temp_bgc": "temp_WOA",
+            "salt_bgc": "salt_WOA",
         }
     )
+    # The opt_var_names keys (temp, salt) that supply the density-coordinate source.
+    bgc_source_ts: ClassVar[tuple[str, str]] = ("temp_bgc", "salt_bgc")
 
     climatology: bool = True
 
@@ -1554,10 +1564,10 @@ class UnifiedRestoringSurfaceDataset(UnifiedDataset):
             "latitude": "lat",
         }
     )
-    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt"})
+    var_names: dict[str, str] = field(default_factory=lambda: {"sss": "salt_WOA"})
     opt_var_names: dict[str, str] = field(
         default_factory=lambda: {
-            "sss": "salt",
+            "sss": "salt_WOA",
         }
     )
 

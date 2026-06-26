@@ -1259,6 +1259,10 @@ def _gc_dist_radians(lon1, lat1, lon2, lat2):
 
 # --- cKDTree-based spatial lookup helpers ---
 def latlon_to_xyz(lat, lon):
+    """Convert lat/lon coordinates (degrees) to unit-sphere XYZ vectors.
+    Used to prepare query and candidate points for cKDTree distance queries,
+    where chord distance on the unit sphere approximates great-circle distance."""
+
             lat_r = np.deg2rad(lat)
             lon_r = np.deg2rad(lon)
             return np.column_stack([
@@ -1273,7 +1277,43 @@ def build_kdtree_from_latlon(lat, lon):
 
 def query_kdtree_nearest(tree, query_lat, query_lon, cand_eta, cand_xi,
                          *, warn_dist_km=100.0, labels=None, workers=-1):
-    """Query a cKDTree for the nearest candidate grid cell to each query point."""
+    """Query a cKDTree for the nearest candidate grid cell to each query point.
+
+    For each query point (river mouth), finds the nearest candidate grid cell
+    (e.g. coastal cell) using Euclidean distance on the unit sphere, which
+    approximates great-circle distance. Emits a warning if the nearest cell
+    is farther than ``warn_dist_km``.
+
+    Parameters
+    ----------
+    tree : cKDTree
+        Tree built from candidate grid cell XYZ coordinates, e.g. via
+        ``build_kdtree_from_latlon``.
+    query_lat : array-like
+        Latitudes of query points (river mouths) in degrees.
+    query_lon : array-like
+        Longitudes of query points (river mouths) in degrees.
+    cand_eta : np.ndarray
+        Eta (row) indices of the candidate grid cells.
+    cand_xi : np.ndarray
+        Xi (column) indices of the candidate grid cells.
+    warn_dist_km : float, optional
+        Distance threshold in km beyond which a warning is logged. Default 100 km.
+    labels : list[str], optional
+        River names for use in warning messages. If None, points are labelled
+        by index.
+    workers : int, optional
+        Number of parallel workers for the tree query. Default -1 (all CPUs).
+
+    Returns
+    -------
+    eta_out : np.ndarray
+        Eta indices of the nearest candidate cell for each query point.
+    xi_out : np.ndarray
+        Xi indices of the nearest candidate cell for each query point.
+    distances_km : np.ndarray
+        Great-circle distances in km from each query point to its nearest cell.
+    """
     distances, nearest_idx = tree.query(latlon_to_xyz(query_lat, query_lon), workers=workers)
     distances_km = 2 * 6371.0 * np.arcsin(np.clip(distances / 2, 0, 1))
     eta_out = cand_eta[nearest_idx]

@@ -734,7 +734,18 @@ class RiverDataset:
 
 @dataclass(kw_only=True)
 class GloFASRiverDataset(RiverDataset):
-    """River discharge from GloFAS v4.0 with CF-compliant time encoding."""
+    """River discharge dataset from GloFAS v4.0.
+    Expects a NetCDF file preprocessed using the GloFAS Large-scale Drainage
+    Direction (LDD) algorithm, which places river mouths on coastal cells.
+    Time is encoded as CF-compliant datetime64 and decoded directly.
+
+    Variable name mappings:
+        - latitude:  ``lat_mou``
+        - longitude: ``lon_mou``
+        - flux:      ``FLOW`` (m³/s)
+        - ratio:     ``ratio_m2s``
+        - name:      ``riv_name``
+    """
 
     dim_names: dict = field(
         default_factory=lambda: {"station": "station", "time": "time"}
@@ -752,8 +763,11 @@ class GloFASRiverDataset(RiverDataset):
         default_factory=lambda: {"vol": "vol_stn"}
     )
     def extract_relevant_rivers(self, target_coords, dx, coast_snap_buffer_km=50.0, domain_edge_buffer=20):
-        """Extract relevant rivers, defaulting to a 50 km coastal snap buffer for GloFAS river mouths
-        because GloFAS is preprocessed using LDD to place rivers on coasts.
+        """Extract relevant rivers, defaulting to a 50 km coastal snap buffer.
+
+        GloFAS river mouths are preprocessed using the LDD algorithm to lie on
+        or very near the coast, so a tight 50 km buffer is appropriate.
+        See :meth:`RiverDataset.extract_relevant_rivers` for full documentation.
         """
         return super().extract_relevant_rivers(
         target_coords, dx,
@@ -770,7 +784,13 @@ class GloFASRiverDataset(RiverDataset):
 
 @dataclass(kw_only=True)
 class DaiRiverDataset(RiverDataset):
-    """Represents river data from the Dai river dataset."""
+    """River discharge dataset from Dai & Trenberth (2009).
+
+    Provides monthly climatological or time-varying discharge for ~1000 of
+    the world's largest rivers. Time is encoded as numeric YYYYMM values and
+    decoded manually in ``add_time_info``. River mouths may be placed inland,
+    so a generous coastal snap buffer (200 km default) is used.
+    """
 
     filename: str | Path | list[str | Path] = field(
         default_factory=lambda: download_river_data("dai_trenberth_may2019.nc")
@@ -846,9 +866,9 @@ class DaiRiverDataset(RiverDataset):
 
     def extract_relevant_rivers(self, target_coords, dx, coast_snap_buffer_km=200.0, domain_edge_buffer=20):
         """Extract relevant rivers, defaulting to a 200 km coastal snap buffer.
-        
-        Dai river mouths may be placed far inland, so a generous buffer is used
-        to include all legitimate rivers.
+
+        Dai river mouths may be placed far inland relative to the actual river
+        mouth, so a generous buffer is used to avoid excluding legitimate rivers.
         """
         return super().extract_relevant_rivers(
             target_coords, dx,

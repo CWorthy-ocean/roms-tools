@@ -1263,13 +1263,13 @@ def latlon_to_xyz(lat, lon):
     Used to prepare query and candidate points for cKDTree distance queries,
     where chord distance on the unit sphere approximates great-circle distance."""
 
-            lat_r = np.deg2rad(lat)
-            lon_r = np.deg2rad(lon)
-            return np.column_stack([
-                np.cos(lat_r) * np.cos(lon_r),
-                np.cos(lat_r) * np.sin(lon_r),
-                np.sin(lat_r)
-            ])
+    lat_r = np.deg2rad(lat)
+    lon_r = np.deg2rad(lon)
+    return np.column_stack([
+        np.cos(lat_r) * np.cos(lon_r),
+        np.cos(lat_r) * np.sin(lon_r),
+        np.sin(lat_r)
+    ])
 
 def build_kdtree_from_latlon(lat, lon):
     """Build a cKDTree on the unit sphere from lat/lon arrays."""

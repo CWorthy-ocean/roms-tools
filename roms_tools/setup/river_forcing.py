@@ -299,6 +299,24 @@ class RiverForcing:
 
         ds = self._create_river_forcing(data)
         ds = self._handle_overlapping_rivers(ds)
+        # Re-sort by final volume after overlap handling — absorbed rivers now have
+        # zero discharge so the original sort order is no longer meaningful
+        volume_means = ds["river_volume"].mean(dim="river_time")
+        sorted_nriver = np.argsort(volume_means.values)[::-1]
+        sorted_names = [str(ds.river_name.values[i]) for i in sorted_nriver]
+        self.indices = {name: self.indices[name] for name in sorted_names if name in self.indices}
+        ds = ds.isel(nriver=sorted_nriver)
+
+        if self.include_bgc and self.bgc_source is not None:
+            ds = self._apply_bgc_tracers(ds)
+
+        logging.info("Computing river forcing arrays...")
+        with ProgressBar():
+            ds["river_volume"] = ds["river_volume"].compute(keep_attrs=True)
+            ds["river_tracer"] = ds["river_tracer"].compute(keep_attrs=True)
+
+        ds = self._write_indices_into_dataset(ds)
+
         ds = self._write_indices_into_dataset(ds)
         self._validate(ds)
 

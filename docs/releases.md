@@ -33,6 +33,7 @@
 * RIVR2O concentrations vary by calendar year and are discharge-partitioned when rivers share a grid cell; missing annual files are linearly interpolated on the year axis ([#615](https://github.com/CWorthy-ocean/roms-tools/pull/615))
 * CDR metrics report CO2 uptake as mass in tonnes of CO2 for both the air-sea flux-difference and DIC-difference constructions (using CO2 molar mass and native flux or inventory units when available). ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
 * The CDR metrics figure from `ROMSOutput.cdr_metrics()` uses twin y-axes: CDR efficiency (dimensionless) and CO2 uptake (tonnes CO2), with title "CO2 uptake and CDR efficiency". ([#591](https://github.com/CWorthy-ocean/roms-tools/pull/591))
+* `SurfaceForcing` with `type='restoring'` now allows for making DIC and ALK restoring forces files ([#619](https://github.com/CWorthy-ocean/roms-tools/pull/619))
 
 
 ### Internal Changes

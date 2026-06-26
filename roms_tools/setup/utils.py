@@ -344,6 +344,8 @@ def get_variable_metadata():
         },
         "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
         "sss": {"long_name": "sea surface salinity", "units": "PSU"},
+        "sDIC": {"long_name": "sea surface DIC", "units": "mmol/m3"},
+        "sALK": {"long_name": "sea surface ALK", "units": "mmol/m3"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -671,6 +673,17 @@ def compute_potential_density(
     density.attrs["long_name"] = "potential density anomaly"
     density.attrs["units"] = "kg/m^3 - 1000"
     return density
+
+
+# Internal variable-name keys for the single source temperature/salinity pair used to
+# build the BGC density coordinate. A BGC dataset declares these keys in its
+# ``opt_var_names`` (mapping them to whatever the file calls the fields, e.g.
+# ``temp_WOA``/``salt_WOA``); the density-space interpolation in
+# ``InitialConditions``/``BoundaryForcing`` detects, uses, and then drops them. The keys
+# are deliberately NOT ``temp``/``salt`` so they cannot collide with the physics model
+# T/S that share ``processed_fields`` in ``InitialConditions``.
+BGC_SOURCE_TEMP = "temp_bgc"
+BGC_SOURCE_SALT = "salt_bgc"
 
 
 def _compute_density_coord(

@@ -971,7 +971,7 @@ def bgc_surface_forcing_from_mbl_co2(use_dask: bool) -> SurfaceForcing:
 def restoring_surface_forcing_from_unified_climatology(
     use_dask: bool,
 ) -> SurfaceForcing:
-    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    """Fixture for creating a SurfaceForcing object with salinity restoring forces from unified climatology."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -1003,7 +1003,7 @@ def restoring_surface_forcing_from_unified_climatology(
 def restoring_surface_forcing_from_woa_climatology(
     use_dask: bool,
 ) -> SurfaceForcing:
-    """Fixture for creating a SurfaceForcing object with restoring forces from climatology."""
+    """Fixture for creating a SurfaceForcing object with salinity restoring forces from WOA climatology."""
     grid = Grid(
         nx=5,
         ny=5,
@@ -1026,6 +1026,38 @@ def restoring_surface_forcing_from_woa_climatology(
         source={"name": "WOA", "path": fname_bgc, "climatology": True},  # type: ignore[dict-item]
         type="restoring",
         restoring_forces=["sss"],
+        coarse_grid_mode="never",
+        use_dask=use_dask,
+    )
+
+
+@pytest.fixture(scope="session")
+def restoring_surface_forcing_from_soda(
+    use_dask: bool,
+) -> SurfaceForcing:
+    """Fixture for creating a SurfaceForcing object with DIC/ALK restoring forces from OceanSODA."""
+    grid = Grid(
+        nx=5,
+        ny=5,
+        size_x=1800,
+        size_y=2400,
+        center_lon=180,
+        center_lat=61,
+        rot=20,
+    )
+
+    start_time = datetime(2020, 2, 1)
+    end_time = datetime(2020, 2, 1)
+
+    fname_bgc = Path(download_test_data("coarsened_OceanSODA_dataset.nc"))
+
+    return SurfaceForcing(
+        grid=grid,
+        start_time=start_time,
+        end_time=end_time,
+        source={"name": "SODA", "path": fname_bgc},  # type: ignore[dict-item]
+        type="restoring",
+        restoring_forces=["sDIC", "sALK"],
         coarse_grid_mode="never",
         use_dask=use_dask,
     )

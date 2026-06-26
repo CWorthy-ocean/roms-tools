@@ -1506,13 +1506,8 @@ class SODARestoringSurfaceDataset(SODADataset):
         """
         self.ds = self.ds.drop_vars("year")
 
-        mask = xr.where(
-            self.ds["dic"].isnull().any(dim=self.dim_names["time"]),
-            0,
-            1,
-        )
-
-        self.ds["mask"] = mask
+        condition = self.ds["dic"].isnull().any(dim=self.dim_names["time"])
+        self.ds["mask"] = xr.where(condition, 0, 1)
 
 
 @dataclass(kw_only=True)

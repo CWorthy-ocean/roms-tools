@@ -22,7 +22,6 @@ from roms_tools.constants import R_EARTH
 from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
-    from roms_tools.setup.bgc_source import BGCSource
     from roms_tools.setup.grid import Grid
 
 yaml.SafeDumper.add_multi_representer(
@@ -514,6 +513,12 @@ def get_variable_metadata():
             "flux_units": "mmol/s",
             "integrated_units": "mmol",
         },
+        "CHL": {
+            "long_name": "total chlorophyll",
+            "units": "mg/m^3",
+            "flux_units": "mg/s",
+            "integrated_units": "mg",
+        },
         "spChl": {
             "long_name": "small phytoplankton chlorophyll",
             "units": "mg/m^3",
@@ -609,169 +614,6 @@ def get_variable_metadata():
         "nhy": {"long_name": "NHy decomposition", "units": "kg/m^2/s"},
     }
     return d
-
-
-def derive_phytoplankton_from_chl(chl: xr.DataArray) -> dict[str, xr.DataArray]:
-    """Derive plankton community and zooplankton carbon from total chlorophyll.
-
-    All arithmetic is performed on :class:`xarray.DataArray` objects and is therefore
-    dask-safe (no ``.compute()`` is triggered).
-
-    Parameters
-    ----------
-    chl : xr.DataArray
-        Total chlorophyll concentration in mg m-3.
-
-    Returns
-    -------
-    dict[str, xr.DataArray]
-        Derived variables: ``zooC``, ``spChl``, ``spC``, ``spP``, ``spFe``,
-        ``spCaCO3``, ``diatChl``, ``diatC``, ``diatP``, ``diatFe``, ``diatSi``,
-        ``diazChl``, ``diazC``, ``diazP``, ``diazFe``.
-    """
-    return {
-        "zooC":    chl * 1.35,      # mmol m-3
-        "spChl":   chl * 0.675,     # mg m-3
-        "spC":     chl * 3.375,     # mmol m-3
-        "spP":     chl * 0.03,      # mmol m-3
-        "spFe":    chl * 1.35e-5,   # mmol m-3
-        "spCaCO3": chl * 0.0675,    # mmol m-3
-        "diatChl": chl * 0.0675,    # mg m-3
-        "diatC":   chl * 0.2025,    # mmol m-3
-        "diatP":   chl * 0.02,      # mmol m-3
-        "diatFe":  chl * 1.35e-6,   # mmol m-3
-        "diatSi":  chl * 0.0675,    # mmol m-3
-        "diazChl": chl * 0.0075,    # mg m-3
-        "diazC":   chl * 0.0375,    # mmol m-3
-        "diazP":   chl * 0.01,      # mmol m-3
-        "diazFe":  chl * 7.5e-7,    # mmol m-3
-    }
-
-
-def derive_ligand_from_iron(fe: xr.DataArray) -> xr.DataArray:
-    """Derive ligand concentration from iron: Lig = Fe × 3.
-
-    Dask-safe.
-
-    Parameters
-    ----------
-    fe : xr.DataArray
-        Iron concentration in mmol m-3.
-
-    Returns
-    -------
-    xr.DataArray
-        Ligand concentration in mmol m-3.
-    """
-    return fe * 3
-
-
-def derive_alt_co2_vars(
-    dic: xr.DataArray, alk: xr.DataArray
-) -> dict[str, xr.DataArray]:
-    """Derive ALT_CO2 variants: DIC_ALT_CO2 = DIC, ALK_ALT_CO2 = ALK.
-
-    Dask-safe.
-
-    Parameters
-    ----------
-    dic : xr.DataArray
-        Dissolved inorganic carbon in mmol m-3.
-    alk : xr.DataArray
-        Total alkalinity in meq m-3.
-
-    Returns
-    -------
-    dict[str, xr.DataArray]
-        ``DIC_ALT_CO2`` and ``ALK_ALT_CO2``.
-    """
-    return {"DIC_ALT_CO2": dic * 1, "ALK_ALT_CO2": alk * 1}
-
-
-def fill_bgc_defaults(
-    fields: dict[str, xr.DataArray],
-    template: xr.DataArray,
-) -> None:
-    """Fill constant-default BGC variables if absent.
-
-    Uses :func:`xarray.full_like` so that the result inherits the shape, dtype,
-    chunks, and coordinates of ``template`` without triggering any computation
-    (dask-safe).
-
-    Variables filled (if missing): ``NH4``, ``DOC``, ``DON``, ``DOP``, ``DOCr``,
-    ``DONr``, ``DOPr``.
-
-    Parameters
-    ----------
-    fields : dict[str, xr.DataArray]
-        In-place-modified dictionary of BGC variables.
-    template : xr.DataArray
-        An existing field used as shape/dtype/coordinate reference.  Typically
-        ``fields["ALK"]`` or the first available field.
-    """
-    defaults: dict[str, float] = {
-        "NH4":  1e-6,   # mmol m-3
-        "DOC":  1e-6,   # mmol m-3
-        "DON":  1.0,    # mmol m-3
-        "DOP":  0.1,    # mmol m-3
-        "DOCr": 1e-6,   # mmol m-3
-        "DONr": 0.8,    # mmol m-3
-        "DOPr": 0.003,  # mmol m-3
-    }
-    for var, val in defaults.items():
-        if var not in fields:
-            fields[var] = xr.full_like(template, val)
-
-
-def compute_missing_bgc_variables(bgc_data: dict[str, xr.DataArray]) -> dict[str, xr.DataArray]:
-    """Fill in missing BGC variables using relationships with existing variables.
-
-    Orchestrates :func:`derive_ligand_from_iron`, :func:`derive_alt_co2_vars`,
-    :func:`derive_phytoplankton_from_chl`, and :func:`fill_bgc_defaults`.  All
-    operations are dask-safe.
-
-    Parameters
-    ----------
-    bgc_data : dict[str, xr.DataArray]
-        Dictionary of BGC variables.  Modified in place and returned.
-
-        Assumed units:
-
-        * ``Fe``  — mmol m-3
-        * ``CHL`` — mg m-3
-        * ``ALK`` — meq m-3 (= mmol m-3)
-        * ``DIC`` — mmol m-3
-
-    Returns
-    -------
-    dict[str, xr.DataArray]
-        The updated dictionary.
-
-    Notes
-    -----
-    ``CHL`` is removed from the dictionary after phytoplankton variables are derived.
-    """
-    if "Fe" in bgc_data and "Lig" not in bgc_data:
-        bgc_data["Lig"] = derive_ligand_from_iron(bgc_data["Fe"])
-
-    if "DIC" in bgc_data and "DIC_ALT_CO2" not in bgc_data:
-        bgc_data["DIC_ALT_CO2"] = bgc_data["DIC"] * 1
-
-    if "ALK" in bgc_data and "ALK_ALT_CO2" not in bgc_data:
-        bgc_data["ALK_ALT_CO2"] = bgc_data["ALK"] * 1
-
-    if "CHL" in bgc_data:
-        for var, da in derive_phytoplankton_from_chl(bgc_data["CHL"]).items():
-            if var not in bgc_data:
-                bgc_data[var] = da
-
-    _template = bgc_data.get("ALK")
-    template = _template if _template is not None else next(iter(bgc_data.values()))
-    fill_bgc_defaults(bgc_data, template)
-
-    bgc_data.pop("CHL", None)
-
-    return bgc_data
 
 
 def compute_potential_density(
@@ -882,6 +724,98 @@ def compute_missing_surface_bgc_variables(bgc_data):
                 bgc_data[var_name] = factor * xr.ones_like(bgc_data["dust"])
 
     return bgc_data
+
+
+def _bgc_dataset_map() -> dict[str, type]:
+    """Registry mapping a BGC source ``name`` to its dataset class.
+
+    Imported lazily to avoid a circular import: ``lat_lon_datasets`` imports from
+    this module, so the dataset classes cannot be imported at module top level.
+    """
+    from roms_tools.datasets.lat_lon_datasets import (
+        CESMBGCDataset,
+        GLODAPv2BGCDataset,
+        UnifiedBGCDataset,
+    )
+    from roms_tools.datasets.roms_dataset import ROMSDataset
+
+    return {
+        "CESM_REGRIDDED": CESMBGCDataset,
+        "UNIFIED": UnifiedBGCDataset,
+        "GLODAP": GLODAPv2BGCDataset,
+        "ROMS": ROMSDataset,
+    }
+
+
+# Names that select a dataset-backed BGC source (Mode A).
+BGC_DATASET_NAMES: frozenset[str] = frozenset(
+    {"CESM_REGRIDDED", "UNIFIED", "GLODAP", "ROMS"}
+)
+
+
+def instantiate_bgc_dataset(
+    source: dict,
+    start_time: "datetime | None",
+    end_time: "datetime | None",
+    use_dask: bool,
+    chunks: dict | None,
+    initial_slice_bounds: dict | None,
+    roms_var_names: list[str] | None = None,
+    allow_flex_time: bool = False,
+    adjust_depth_for_sea_surface_height: bool = False,
+):
+    """Instantiate the raw dataset object for a dataset-backed BGC source.
+
+    Parameters
+    ----------
+    source : dict
+        BGC source dict with at least ``name`` (a key of the BGC dataset
+        registry) and ``path``.  ``climatology`` and ``grid`` (for ``"ROMS"``)
+        are read when present.
+    start_time, end_time : datetime or None
+        Time range for data selection.
+    use_dask : bool
+        Whether to load data lazily with dask.
+    chunks : dict or None
+        Dask chunk sizes.
+    initial_slice_bounds : dict or None
+        Optional lat/lon bounding box for initial data loading.
+    roms_var_names : list[str], optional
+        Required variable names; used only for the ``"ROMS"`` source.
+    allow_flex_time : bool, optional
+        Allow flexible time matching; used only for the ``"ROMS"`` source.
+    adjust_depth_for_sea_surface_height : bool, optional
+        Used only for the ``"ROMS"`` source.
+
+    Returns
+    -------
+    LatLonDataset or ROMSDataset
+        The instantiated dataset object.
+    """
+    name = source["name"]
+    dataset_cls = _bgc_dataset_map()[name]
+
+    if name == "ROMS":
+        return dataset_cls(
+            path=source["path"],
+            grid=source.get("grid"),
+            var_names=roms_var_names or [],
+            start_time=start_time,
+            allow_flex_time=allow_flex_time,
+            adjust_depth_for_sea_surface_height=adjust_depth_for_sea_surface_height,
+            use_dask=use_dask,
+            chunks=chunks,
+        )
+
+    return dataset_cls(
+        filename=source["path"],
+        start_time=start_time,
+        end_time=end_time,
+        climatology=source.get("climatology", False),
+        use_dask=use_dask,
+        chunks=chunks,
+        initial_slice_bounds=initial_slice_bounds,
+    )
 
 
 def get_tracer_metadata_dict(
@@ -1737,76 +1671,27 @@ def deserialize_datetime(
     return value
 
 
-def _bgc_source_to_dict(src: "BGCSource") -> dict[str, Any]:
-    """Serialize a single BGCSource dataclass to a plain dict (YAML-safe)."""
-    d: dict[str, Any] = {}
-    if src.name is not None:
-        d["name"] = src.name
-    if src.path is not None:
-        d["path"] = serialize_paths(src.path)
-    if src.climatology:
-        d["climatology"] = src.climatology
-    if src.grid is not None:
-        d["grid"] = serialize_grid(src.grid)
-    if src.constants is not None:
-        d["constants"] = dict(src.constants)
-    if src.prefill is not None:
-        d["prefill"] = src.prefill
-    if src.prefill_kwargs is not None:
-        d["prefill_kwargs"] = dict(src.prefill_kwargs)
-    if src.overwrite_fields is not None:
-        d["overwrite_fields"] = list(src.overwrite_fields)
-    # physics_forcing and algorithm are not YAML-serializable; omit silently
-    return d
-
-
-def _dict_to_bgc_source(d: dict[str, Any]) -> "BGCSource":
-    """Reconstruct a BGCSource from a serialized dict."""
-    from roms_tools.setup.bgc_source import BGCSource  # late import; avoids circular
-    from roms_tools.setup.grid import Grid
-
-    kwargs: dict[str, Any] = deepcopy(d)
-    if "path" in kwargs:
-        kwargs["path"] = normalize_paths(kwargs["path"])
-    if "grid" in kwargs and isinstance(kwargs["grid"], dict):
-        kwargs["grid"] = Grid(**kwargs["grid"])
-    known = {"name", "path", "climatology", "grid", "constants",
-             "prefill", "prefill_kwargs", "overwrite_fields"}
-    kwargs = {k: v for k, v in kwargs.items() if k in known}
-    return BGCSource(**kwargs)
-
-
 def serialize_source_dict(src: Any) -> Any:
-    """Serialize a source or BGC source for YAML or JSON output.
+    """Serialize a source / bgc_source dict for YAML or JSON output.
 
-    Handles plain dicts (physics sources), :class:`BGCSource` objects, and lists of
-    :class:`BGCSource` objects.  Converts :class:`~pathlib.Path` objects to strings and
+    Physics and BGC sources are both plain dicts (e.g.
+    ``{"name": "GLODAP", "path": ...}`` or ``{"name": "constants",
+    "constants": {...}}``).  Converts :class:`~pathlib.Path` objects to strings and
     nested :class:`~roms_tools.setup.grid.Grid` objects via :func:`serialize_grid`.
 
     Parameters
     ----------
     src :
-        Physics source dict, a :class:`BGCSource`, a list of them, or ``None``.
+        A source dict or ``None``.
 
     Returns
     -------
-    dict | list | None
+    dict | None
         A YAML-serializable representation of the source.
     """
     if src is None:
         return None
 
-    # BGCSource instance
-    from roms_tools.setup.bgc_source import BGCSource as _BGCSource  # late import
-
-    if isinstance(src, _BGCSource):
-        return _bgc_source_to_dict(src)
-
-    # list of BGCSource instances
-    if isinstance(src, list):
-        return [_bgc_source_to_dict(s) for s in src]
-
-    # Plain dict (physics source)
     src = deepcopy(src)
     if "path" in src:
         src["path"] = serialize_paths(src["path"])
@@ -1815,44 +1700,26 @@ def serialize_source_dict(src: Any) -> Any:
     return src
 
 
-def deserialize_source_dict(
-    src: Any, field_name: str = "source"
-) -> Any:
-    """Deserialize a source / bgc_source value from YAML.
+def deserialize_source_dict(src: Any, field_name: str = "source") -> Any:
+    """Deserialize a source / bgc_source dict from YAML.
 
-    Converts string paths back to :class:`~pathlib.Path` objects and reconstructs
-    :class:`BGCSource` objects when appropriate.
+    Converts string paths back to :class:`~pathlib.Path` objects.
 
     Parameters
     ----------
     src :
-        Serialized source value (dict, list, or ``None``).
+        Serialized source value (dict or ``None``).
     field_name : str
-        The name of the field being deserialized (``"source"`` or ``"bgc_source"``).
-        Used to decide whether to reconstruct :class:`BGCSource` objects.
+        Unused; retained for call-site compatibility.
 
     Returns
     -------
-    dict | BGCSource | list[BGCSource] | None
+    dict | None
     """
     if src is None:
         return None
 
-    # List of serialized BGCSource dicts
-    if isinstance(src, list):
-        return [_dict_to_bgc_source(item) for item in src]
-
     if isinstance(src, dict):
-        # bgc_source is always a BGCSource when not None
-        if field_name == "bgc_source":
-            return _dict_to_bgc_source(src)
-
-        # For source: if it contains BGCSource-only keys, reconstruct BGCSource
-        _bgc_only = {"constants", "algorithm", "physics_forcing", "overwrite_fields"}
-        if _bgc_only & src.keys():
-            return _dict_to_bgc_source(src)
-
-        # Plain physics dict
         src = deepcopy(src)
         if "path" in src:
             src["path"] = normalize_paths(src["path"])

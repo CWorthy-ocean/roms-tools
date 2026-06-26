@@ -23,16 +23,16 @@ from roms_tools.regrid import (
     LateralRegridToROMS,
     VerticalRegrid,
 )
-from roms_tools.setup.bgc_source import BGCSource, instantiate_bgc_dataset, merge_bgc_fields, warn_missing_bgc_variables
 from roms_tools.setup.utils import (
+    BGC_DATASET_NAMES,
     RawDataSource,
     _compute_density_coord,
     _xesmf_available,
     compute_barotropic_velocity,
-    compute_missing_bgc_variables,
     from_yaml,
     get_target_coords,
     get_variable_metadata,
+    instantiate_bgc_dataset,
     nan_check,
     pop_grid_data,
     resolve_regrid_engine,
@@ -149,9 +149,17 @@ class InitialConditions:
     """The date and time at which the initial conditions are set."""
     source: RawDataSource
     """Dictionary specifying the source of the physical initial condition data."""
-    bgc_source: BGCSource | list[BGCSource] | None = None
-    """BGC initial condition source(s).  A single :class:`~roms_tools.setup.bgc_source.BGCSource`
-    or an ordered list of them (first source has highest priority)."""
+    bgc_source: RawDataSource | None = None
+    """BGC initial condition source dict.  Use a dataset dict
+    (``{"name": "CESM_REGRIDDED", "path": ...}``) or a constants dict
+    (``{"name": "constants", "constants": {"Fe": 3.0e-3}}``).  ``climatology`` may be
+    set in the dict (defaults to False)."""
+    prefill: str | None = None
+    """Source-side fill applied to the BGC source before regridding (``None`` = the
+    default NaN-aware masked-bilinear path).  Options: ``"2d_lateral_fill"``,
+    ``"nearest_neighbor"``, ``"inverse_dist"``, ``"nearest_s2d"``."""
+    prefill_kwargs: dict | None = None
+    """Method-specific options for ``prefill``."""
     model_reference_date: datetime = datetime(2000, 1, 1)
     """The reference date for the model."""
     allow_flex_time: bool = False
@@ -191,29 +199,19 @@ class InitialConditions:
         processed_fields = self._process_data(processed_fields, type="physics")
 
         if self.bgc_source is not None:
-            # Normalise to list[BGCSource]
-            bgc_sources = (
-                [self.bgc_source]
-                if isinstance(self.bgc_source, BGCSource)
-                else self.bgc_source
-            )
             physics_time = processed_fields["temp"]["time"]
-            source_fields = []
-            for src in bgc_sources:
-                partial = self._process_data(
-                    {}, type="bgc", bgc_source=src,
-                    physics_fields=processed_fields,
-                )
-                # Align BGC time coordinate with the physics time coordinate
-                for var_name in list(partial):
-                    if "time" in partial[var_name].coords:
-                        partial[var_name] = partial[var_name].assign_coords(
-                            {"time": physics_time}
-                        )
-                source_fields.append((src, partial))
-            bgc_fields = merge_bgc_fields(source_fields)
-            bgc_fields = compute_missing_bgc_variables(bgc_fields)
-            warn_missing_bgc_variables(bgc_fields)
+            bgc_fields = self._process_data(
+                {}, type="bgc", bgc_source=self.bgc_source,
+                physics_fields=processed_fields,
+            )
+            # Align BGC time coordinate with the physics time coordinate
+            for var_name in list(bgc_fields):
+                if "time" in bgc_fields[var_name].coords:
+                    bgc_fields[var_name] = bgc_fields[var_name].assign_coords(
+                        {"time": physics_time}
+                    )
+            # Derivation of missing MARBL tracers is no longer performed here; call
+            # BGCMarbl.process_bgc_fields() on the finished object(s) for that.
             processed_fields.update(bgc_fields)
 
         for var_name in processed_fields:
@@ -239,7 +237,7 @@ class InitialConditions:
         self,
         processed_fields: dict,
         type: str = "physics",
-        bgc_source: BGCSource | None = None,
+        bgc_source: RawDataSource | None = None,
         physics_fields: dict | None = None,
     ) -> dict:
         """Regrid one data source (physics or a single BGC source) onto the ROMS grid.
@@ -251,7 +249,7 @@ class InitialConditions:
             physics, ignored for BGC — BGC returns a fresh partial dict).
         type : str
             ``"physics"`` or ``"bgc"``.
-        bgc_source : BGCSource, optional
+        bgc_source : dict, optional
             The specific BGC source to process.  Required when ``type="bgc"``.
         physics_fields : dict, optional
             Already-regridded physics fields (temp/salt on sigma levels). When
@@ -266,6 +264,15 @@ class InitialConditions:
         """
         target_coords = get_target_coords(self.grid)
 
+        # --- BGC constants: broadcast each value onto the physics tracer grid ---
+        if type == "bgc" and bgc_source is not None and bgc_source["name"] == "constants":
+            assert physics_fields is not None and "temp" in physics_fields
+            template = physics_fields["temp"]
+            return {
+                var: xr.full_like(template, float(val))
+                for var, val in bgc_source["constants"].items()
+            }
+
         data = self._get_data(forcing_type=type, bgc_source=bgc_source)
         data.choose_subdomain(
             target_coords,
@@ -274,12 +281,12 @@ class InitialConditions:
         # Enforce double precision to ensure reproducibility
         data.convert_to_float64()
         data.extrapolate_deepest_to_bottom()
-        if type == "bgc" and bgc_source is not None:
-            # BGC: per-source prefill (None = xESMF masked-bilinear, no source fill)
-            if bgc_source.prefill is not None:
+        if type == "bgc":
+            # BGC: prefill (None = xESMF masked-bilinear, no source fill)
+            if self.prefill is not None:
                 data.apply_prefill(
-                    bgc_source.prefill,
-                    prefill_kwargs=bgc_source.prefill_kwargs,
+                    self.prefill,
+                    prefill_kwargs=self.prefill_kwargs,
                     prefill_was_user_set=True,
                 )
         else:
@@ -591,18 +598,26 @@ class InitialConditions:
             "climatology": self.source.get("climatology", False),
         }
         if self.bgc_source is not None:
-            # Validate that bgc_source is BGCSource or list[BGCSource]
-            if isinstance(self.bgc_source, BGCSource):
-                pass  # already valid; list normalisation happens in __post_init__
-            elif isinstance(self.bgc_source, list) and all(
-                isinstance(s, BGCSource) for s in self.bgc_source
-            ):
-                if not self.bgc_source:
-                    raise ValueError("`bgc_source` list must not be empty.")
-            else:
+            if not isinstance(self.bgc_source, dict) or "name" not in self.bgc_source:
+                raise ValueError("`bgc_source` must be a dict including a 'name'.")
+            name = self.bgc_source["name"]
+            if name == "constants":
+                if not self.bgc_source.get("constants"):
+                    raise ValueError(
+                        "For bgc_source={'name': 'constants', ...} you must provide a "
+                        "non-empty 'constants' mapping."
+                    )
+            elif name not in BGC_DATASET_NAMES:
                 raise ValueError(
-                    "`bgc_source` must be a BGCSource or a list of BGCSource objects."
+                    f"Unknown BGC source name '{name}'. Valid options: "
+                    f"'constants' or one of {sorted(BGC_DATASET_NAMES)}."
                 )
+            elif "path" not in self.bgc_source:
+                raise ValueError("`bgc_source` must include a 'path'.")
+            self.bgc_source = {
+                **self.bgc_source,
+                "climatology": self.bgc_source.get("climatology", False),
+            }
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
                 f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
@@ -611,7 +626,7 @@ class InitialConditions:
     def _get_data(
         self,
         forcing_type: str = "physics",
-        bgc_source: BGCSource | None = None,
+        bgc_source: RawDataSource | None = None,
     ) -> LatLonDataset | ROMSDataset:
         """Instantiate the dataset for physics or a single BGC source.
 
@@ -619,7 +634,7 @@ class InitialConditions:
         ----------
         forcing_type : str
             ``"physics"`` or ``"bgc"``.
-        bgc_source : BGCSource, optional
+        bgc_source : dict, optional
             The BGC source to instantiate.  Required when ``forcing_type="bgc"``.
 
         Returns
@@ -629,8 +644,8 @@ class InitialConditions:
         if forcing_type == "bgc":
             # BGC instantiation is centralised in instantiate_bgc_dataset()
             assert bgc_source is not None, "_get_data(type='bgc') requires bgc_source"
-            roms_var_names = _set_required_vars("bgc") if bgc_source.name == "ROMS" else None
-            adjust_ssh = bgc_source.name == "ROMS"
+            roms_var_names = _set_required_vars("bgc") if bgc_source["name"] == "ROMS" else None
+            adjust_ssh = bgc_source["name"] == "ROMS"
             if adjust_ssh:
                 self.adjust_depth_for_sea_surface_height = True
             return instantiate_bgc_dataset(
@@ -960,14 +975,7 @@ class InitialConditions:
         )
         ds.attrs["source"] = self.source["name"]
         if self.bgc_source is not None:
-            bgc_sources = (
-                [self.bgc_source]
-                if isinstance(self.bgc_source, BGCSource)
-                else self.bgc_source
-            )
-            ds.attrs["bgc_source"] = ", ".join(
-                s.name or "constants" for s in bgc_sources
-            )
+            ds.attrs["bgc_source"] = self.bgc_source["name"]
 
         ds.attrs["theta_s"] = self.grid.ds.attrs["theta_s"]
         ds.attrs["theta_b"] = self.grid.ds.attrs["theta_b"]
@@ -1181,12 +1189,15 @@ class InitialConditions:
         grid = Grid.from_yaml(filepath)
         initial_conditions_params = from_yaml(cls, filepath)
 
-        # Deserialize nested grids inside 'source' (physics dict only).
-        # bgc_source was already reconstructed as BGCSource by from_yaml / deserialize_source_dict.
-        src_dict = initial_conditions_params.get("source")
-        if isinstance(src_dict, dict) and "grid" in src_dict and src_dict["grid"] is not None:
-            grid_data = pop_grid_data(src_dict["grid"])
-            src_dict["grid"] = Grid(**grid_data)
+        # Deserialize nested grids inside 'source' and 'bgc_source' (e.g. a ROMS
+        # parent grid).  Both are plain dicts; paths are normalized by from_yaml.
+        for key in ("source", "bgc_source"):
+            d = initial_conditions_params.get(key)
+            if isinstance(d, dict) and d.get("grid") is not None:
+                initial_conditions_params[key] = {
+                    **d,
+                    "grid": Grid(**pop_grid_data(d["grid"])),
+                }
 
         return cls(
             grid=grid,

@@ -8,7 +8,9 @@ import pytest
 import xarray as xr
 
 from conftest import calculate_data_hash
-from roms_tools import BGCSource, Grid, InitialConditions
+import copy
+
+from roms_tools import BGCMarbl, Grid, InitialConditions
 from roms_tools.datasets.download import download_test_data
 from roms_tools.datasets.lat_lon_datasets import (
     CESMBGCDataset,
@@ -177,45 +179,41 @@ def test_initial_conditions_creation_with_duplicates(use_dask: bool) -> None:
     ],
 )
 def test_initial_condition_creation_with_bgc(ic_fixture, request):
-    """Test the creation of the BoundaryForcing object."""
-    ic = request.getfixturevalue(ic_fixture)
-    expected_bgc_variables = [
-        "PO4",
-        "NO3",
-        "SiO3",
-        "NH4",
-        "Fe",
-        "Lig",
-        "O2",
-        "DIC",
-        "DIC_ALT_CO2",
-        "ALK",
-        "ALK_ALT_CO2",
-        "DOC",
-        "DON",
-        "DOP",
-        "DOCr",
-        "DONr",
-        "DOPr",
-        "zooC",
-        "spChl",
-        "spC",
-        "spP",
-        "spFe",
-        "spCaCO3",
-        "diatChl",
-        "diatC",
-        "diatP",
-        "diatFe",
-        "diatSi",
-        "diazChl",
-        "diazC",
-        "diazP",
-        "diazFe",
-    ]
+    """The IC object contains only the source's own BGC variables (raw).
 
-    for var in expected_bgc_variables:
-        assert var in ic.ds
+    MARBL derivation/fill is performed separately by
+    :meth:`BGCMarbl.process_bgc_fields`; here we only assert the source vars are
+    recognised MARBL names and the core nutrients are present.
+    """
+    ic = request.getfixturevalue(ic_fixture)
+    known = BGCMarbl().known_vars()
+    present_bgc = {str(v) for v in ic.ds.data_vars if str(v) in known}
+    assert present_bgc, "no BGC variables present"
+    assert present_bgc <= known
+    assert {"PO4", "NO3", "SiO3", "O2", "DIC", "ALK"} <= present_bgc
+
+
+@pytest.mark.parametrize(
+    "ic_fixture",
+    [
+        "initial_conditions_with_bgc",
+        "initial_conditions_with_unified_bgc_from_climatology",
+    ],
+)
+def test_process_bgc_fields_completes_initial_conditions(ic_fixture, request):
+    """BGCMarbl.process_bgc_fields() fills the full MARBL tracer set and drops CHL."""
+    ic = request.getfixturevalue(ic_fixture)
+
+    # Work on a copy so the session-scoped fixture is not mutated.
+    ic_copy = copy.copy(ic)
+    ic_copy.ds = ic.ds.copy(deep=True)
+
+    result = BGCMarbl().process_bgc_fields(ic_copy)
+    assert result is ic_copy
+
+    for var in BGCMarbl().tracer_vars():
+        assert var in ic_copy.ds, f"{var} missing"
+    assert "CHL" not in ic_copy.ds
 
 
 @pytest.mark.skipif(xesmf is None, reason="xesmf required")
@@ -242,7 +240,7 @@ def test_initial_conditions_raises_on_regridded_nans(use_dask):
             ini_time=datetime(1998, 1, 6),
             source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
             use_dask=use_dask,
-            bgc_source=BGCSource(name="ROMS", grid=parent_grid, path=restart_file),
+            bgc_source={"name": "ROMS", "grid": parent_grid, "path": restart_file},
         )
 
 
@@ -307,10 +305,10 @@ def test_initial_conditions_missing_physics_name(example_grid, use_dask):
         )
 
 
-# Test initialization with invalid bgc_source type (must be BGCSource, not dict)
+# Test initialization with a bgc_source dict missing its 'name'
 def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
     fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
-    with pytest.raises(ValueError, match="`bgc_source` must be a BGCSource"):
+    with pytest.raises(ValueError, match="`bgc_source` must be a dict including a 'name'"):
         InitialConditions(
             grid=example_grid,
             ini_time=datetime(2021, 6, 29),
@@ -320,10 +318,17 @@ def test_initial_conditions_missing_bgc_name(example_grid, use_dask):
         )
 
 
-# Test initialization with invalid bgc_source name
-def test_initial_conditions_missing_bgc_path(example_grid, use_dask):
-    with pytest.raises(ValueError, match="unknown name"):
-        BGCSource(name="INVALID_SOURCE")
+# Test initialization with an invalid bgc_source name
+def test_initial_conditions_invalid_bgc_name(example_grid, use_dask):
+    fname = Path(download_test_data("GLORYS_coarse_test_data.nc"))
+    with pytest.raises(ValueError, match="Unknown BGC source name"):
+        InitialConditions(
+            grid=example_grid,
+            ini_time=datetime(2021, 6, 29),
+            source={"name": "GLORYS", "path": fname},
+            bgc_source={"name": "INVALID_SOURCE", "path": "bgc_data.nc"},
+            use_dask=use_dask,
+        )
 
 
 # Test initialization with missing ini_time
@@ -364,11 +369,11 @@ def test_initial_conditions_default_bgc_climatology(example_grid, use_dask):
         grid=example_grid,
         ini_time=datetime(2021, 6, 29),
         source={"name": "GLORYS", "path": fname},
-        bgc_source=BGCSource(name="CESM_REGRIDDED", path=fname_bgc),
+        bgc_source={"name": "CESM_REGRIDDED", "path": fname_bgc},
         use_dask=use_dask,
     )
 
-    assert initial_conditions.bgc_source.climatology is False
+    assert initial_conditions.bgc_source["climatology"] is False
 
 
 @pytest.mark.parametrize(
@@ -467,7 +472,14 @@ def test_interpolation_from_climatology(use_dask):
 def test_computed_missing_optional_fields(
     initial_conditions_with_unified_bgc_from_climatology,
 ):
-    ds = initial_conditions_with_unified_bgc_from_climatology.ds
+    ic = initial_conditions_with_unified_bgc_from_climatology
+
+    # Missing tracers are filled by BGCMarbl.process_bgc_fields(), not at
+    # construction time.  Work on a copy so the session fixture is not mutated.
+    ic_copy = copy.copy(ic)
+    ic_copy.ds = ic.ds.copy(deep=True)
+    BGCMarbl().process_bgc_fields(ic_copy)
+    ds = ic_copy.ds
 
     # Use tight tolerances because 'DOC' and 'DOCr' can have values order 1e-6
 

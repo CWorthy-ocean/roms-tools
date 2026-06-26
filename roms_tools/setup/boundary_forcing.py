@@ -17,22 +17,17 @@ from roms_tools.datasets.lat_lon_datasets import (
 )
 from roms_tools.plot import line_plot, section_plot
 from roms_tools.regrid import LateralRegridToROMS, VerticalRegrid
-from roms_tools.setup.bgc_source import (
-    BGC_VARIABLE_INFO,
-    BGCSource,
-    instantiate_bgc_dataset,
-    merge_bgc_fields,
-    warn_missing_bgc_variables,
-)
+from roms_tools.setup.bgc_model import bgc_variable_info
 from roms_tools.setup.utils import (
+    BGC_DATASET_NAMES,
     RawDataSource,
     _compute_density_coord,
     _xesmf_available,
     add_time_info_to_ds,
     check_and_set_boundaries,
     compute_barotropic_velocity,
-    compute_missing_bgc_variables,
     deserialize_forcing_data,
+    instantiate_bgc_dataset,
     from_yaml,
     get_boundary_coords,
     get_target_coords,
@@ -56,32 +51,6 @@ from roms_tools.utils import (
     transpose_dimensions,
 )
 from roms_tools.vertical_coordinate import compute_depth
-
-
-def _broadcast_static_to_time(
-    fields: dict[str, xr.DataArray],
-) -> dict[str, xr.DataArray]:
-    """Broadcast time-free fields to match the time dimension of time-varying fields.
-
-    When a static (no-time) source such as GLODAPv2 is mixed with a time-varying
-    source (e.g. CESM, UNIFIED), the merged dict contains DataArrays with and without
-    a ``"time"`` dimension.  This function broadcasts the time-free arrays against the
-    first time-varying array found, using
-    :meth:`xarray.DataArray.broadcast_like` which is dask-safe — no ``.compute()``
-    is triggered.
-
-    If no time-varying field is present (pure static source), the dict is returned
-    unchanged; the caller must handle the no-time case.
-    """
-    time_template = next(
-        (da for da in fields.values() if "time" in da.dims), None
-    )
-    if time_template is None:
-        return fields
-    for var in list(fields):
-        if "time" not in fields[var].dims:
-            fields[var] = fields[var].broadcast_like(time_template)
-    return fields
 
 
 def _interpolate_phys_to_bgc_time(
@@ -139,26 +108,6 @@ def _interpolate_phys_to_bgc_time(
     if len(pads) > 1:
         phys_da = xr.concat(pads, dim=time_dim)
     return phys_da.interp({time_dim: bgc_time_coord}, method="linear")
-
-
-def _broadcast_scalar_bgc_fields(
-    fields: dict[str, xr.DataArray],
-) -> dict[str, xr.DataArray]:
-    """Broadcast any 0-D (scalar) DataArrays to match the first N-D field.
-
-    Called after :func:`~roms_tools.setup.bgc_source.merge_bgc_fields` to expand
-    Mode B (constant) contributions to the ROMS boundary shape.
-
-    Uses :meth:`xarray.DataArray.broadcast_like` which is dask-safe — no
-    ``.compute()`` is triggered.
-    """
-    template = next((da for da in fields.values() if da.ndim > 0), None)
-    if template is None:
-        return fields
-    for var in list(fields):
-        if fields[var].ndim == 0:
-            fields[var] = fields[var].broadcast_like(template)
-    return fields
 
 
 @dataclass(kw_only=True)
@@ -291,11 +240,12 @@ class BoundaryForcing:
     """The end time of the desired surface forcing data."""
     boundaries: dict[str, bool] | None = None
     """Dictionary specifying which boundaries are forced (south, east, north, west)."""
-    source: RawDataSource | BGCSource | list[BGCSource]
-    """Boundary forcing data source.  For ``type='physics'`` this is a
-    :data:`~roms_tools.setup.utils.RawDataSource` dict.  For ``type='bgc'`` this is a
-    :class:`~roms_tools.setup.bgc_source.BGCSource` or an ordered list of them (first
-    source has highest priority)."""
+    source: RawDataSource
+    """Boundary forcing data source dict.  For ``type='physics'`` use e.g.
+    ``{"name": "GLORYS", "path": ...}``.  For ``type='bgc'`` use a dataset dict
+    (``{"name": "GLODAP", "path": ...}``) or a constants dict
+    (``{"name": "constants", "constants": {"Fe": 3.0e-3}}``).  ``climatology`` may be
+    set in the dict (defaults to False)."""
     type: str = "physics"
     """Specifies the type of forcing data ("physics", "bgc")."""
     prefill: str | None = None
@@ -707,36 +657,23 @@ class BoundaryForcing:
     def _resolve_prefill_options(self) -> None:
         """Map the deprecated flag and validate the prefill + regrid options.
 
-        ``apply_2d_horizontal_fill`` is a deprecated alias for ``prefill`` on
-        the *physics* path.  For ``type='bgc'``, users should set
-        ``BGCSource.prefill`` per-source instead; setting
-        ``apply_2d_horizontal_fill`` on BoundaryForcing with ``type='bgc'``
-        emits a DeprecationWarning and has no effect (it is not mapped to any
-        source's prefill).  On the physics path, ``True`` maps to
-        ``prefill="2d_lateral_fill"`` and ``False`` to ``prefill=None``.
+        ``apply_2d_horizontal_fill`` is a deprecated alias for ``prefill`` (for both
+        physics and bgc): ``True`` maps to ``prefill="2d_lateral_fill"`` and ``False``
+        to ``prefill=None``.
         """
         if self.apply_2d_horizontal_fill is not None:
-            if self.type == "bgc":
-                warnings.warn(
-                    "`apply_2d_horizontal_fill` on BoundaryForcing has no effect "
-                    "for type='bgc'.  Set `prefill` on each BGCSource instead "
-                    "(e.g. BGCSource(..., prefill='2d_lateral_fill')).",
-                    DeprecationWarning,
-                    stacklevel=2,
+            warnings.warn(
+                "`apply_2d_horizontal_fill` is deprecated; use `prefill` instead "
+                "(True -> prefill='2d_lateral_fill', False -> prefill=None).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if self.prefill is not None:
+                raise ValueError(
+                    "Set either the deprecated `apply_2d_horizontal_fill` or "
+                    "`prefill`, not both."
                 )
-            else:
-                warnings.warn(
-                    "`apply_2d_horizontal_fill` is deprecated; use `prefill` instead "
-                    "(True -> prefill='2d_lateral_fill', False -> prefill=None).",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                if self.prefill is not None:
-                    raise ValueError(
-                        "Set either the deprecated `apply_2d_horizontal_fill` or "
-                        "`prefill`, not both."
-                    )
-                self.prefill = "2d_lateral_fill" if self.apply_2d_horizontal_fill else None
+            self.prefill = "2d_lateral_fill" if self.apply_2d_horizontal_fill else None
             # Reset the sentinel so it is not re-serialized going forward.
             self.apply_2d_horizontal_fill = None
 
@@ -776,25 +713,30 @@ class BoundaryForcing:
         # -------------------------------------------------------
         # Source configuration checks
         # -------------------------------------------------------
+        if not isinstance(self.source, dict):
+            raise ValueError("`source` must be a dict.")
+        if "name" not in self.source:
+            raise ValueError("`source` must include a 'name'.")
+
         if self.type == "bgc":
-            # Normalise to list[BGCSource]
-            if isinstance(self.source, BGCSource):
-                self.source = [self.source]
-            elif not isinstance(self.source, list) or not all(
-                isinstance(s, BGCSource) for s in self.source
-            ):
+            name = self.source["name"]
+            if name == "constants":
+                if not self.source.get("constants"):
+                    raise ValueError(
+                        "For source={'name': 'constants', ...} you must provide a "
+                        "non-empty 'constants' mapping."
+                    )
+            elif name not in BGC_DATASET_NAMES:
                 raise ValueError(
-                    "For type='bgc', `source` must be a BGCSource or a list of BGCSource objects."
+                    f"Unknown BGC source name '{name}'. Valid options: "
+                    f"'constants' or one of {sorted(BGC_DATASET_NAMES)}."
                 )
-            if not self.source:
-                raise ValueError(
-                    "For type='bgc', `source` must contain at least one BGCSource."
-                )
+            elif "path" not in self.source:
+                raise ValueError("`source` must include a 'path'.")
+            # Assign default value
+            self.source["climatology"] = self.source.get("climatology", False)
         else:
             # Physics: existing dict-based validation (unchanged)
-            if "name" not in self.source:
-                raise ValueError("`source` must include a 'name'.")
-
             if "path" not in self.source:
                 if self.source["name"] != "GLORYS":
                     raise ValueError("`source` must include a 'path'.")
@@ -886,7 +828,7 @@ class BoundaryForcing:
             "is_3d": True,
         }
 
-        # Physics variable metadata (BGC is handled in _process_bgc via BGC_VARIABLE_INFO)
+        # Physics variable metadata (BGC metadata is built in _process_bgc)
         self.variable_info = {
             "zeta": {
                 "location": "rho",
@@ -928,80 +870,58 @@ class BoundaryForcing:
         }
 
     def _process_bgc(self) -> xr.Dataset:
-        """Full BGC processing pipeline supporting multiple :class:`BGCSource` entries.
+        """Process a single BGC source into boundary forcing.
 
         Called from ``__post_init__`` when ``self.type == "bgc"``.  Returns the fully
-        processed :class:`xarray.Dataset` that is assigned to ``self.ds``.
+        processed :class:`xarray.Dataset` that is assigned to ``self.ds``.  The source
+        is either a dataset dict (regridded per boundary) or a constants dict (broadcast
+        to the boundary grid).  Derivation of missing MARBL tracers is *not* performed
+        here — call :meth:`~roms_tools.setup.bgc_model.BGCMarbl.process_bgc_fields` on
+        the finished object(s) for that.
         """
         target_coords = get_target_coords(self.grid)
-        self.variable_info = dict(BGC_VARIABLE_INFO)
         self._set_boundary_info()
 
-        # Pre-instantiate Mode A datasets; apply per-source whole-domain fill if requested
-        source_data: list[tuple[BGCSource, object]] = []
-        for src in self.source:
-            if src.name is not None:  # Mode A
-                raw_data = instantiate_bgc_dataset(
-                    src,
-                    self.start_time,
-                    self.end_time,
-                    self.use_dask,
-                    self.chunks,
-                    self.initial_slice_bounds,
+        is_constants = self.source["name"] == "constants"
+
+        # Dataset-backed source: instantiate once and (optionally) whole-domain prefill.
+        raw_data = None
+        if not is_constants:
+            raw_data = instantiate_bgc_dataset(
+                self.source,
+                self.start_time,
+                self.end_time,
+                self.use_dask,
+                self.chunks,
+                self.initial_slice_bounds,
+            )
+            if self.prefill is not None:
+                raw_data.choose_subdomain(target_coords, unchunk_lateral_dims=True)
+                raw_data.convert_to_float64()
+                raw_data.extrapolate_deepest_to_bottom()
+                raw_data.apply_prefill(
+                    self.prefill,
+                    prefill_kwargs=self.prefill_kwargs,
+                    prefill_was_user_set=True,
                 )
-                if src.prefill is not None:
-                    raw_data.choose_subdomain(target_coords, unchunk_lateral_dims=True)
-                    raw_data.convert_to_float64()
-                    raw_data.extrapolate_deepest_to_bottom()
-                    raw_data.apply_prefill(
-                        src.prefill,
-                        prefill_kwargs=src.prefill_kwargs,
-                        prefill_was_user_set=True,
-                    )
-            else:
-                raw_data = None
-            source_data.append((src, raw_data))
 
         ds = xr.Dataset()
-        _completeness_checked = False
         for direction, is_enabled in self.boundaries.items():
             if is_enabled:
                 # Pre-compute both depth types so plotting always works
                 self._get_depth_coordinates(0, direction, "rho", "layer")
                 self._get_depth_coordinates(0, direction, "rho", "interface")
 
-                source_fields = []
-                for src, raw_data in source_data:
-                    partial = self._extract_bgc_source_fields(
-                        src, raw_data, direction, target_coords
-                    )
-                    source_fields.append((src, partial))
+                fields = self._extract_bgc_fields(raw_data, direction, target_coords)
+                for var_name in fields:
+                    fields[var_name] = transpose_dimensions(fields[var_name])
 
-                merged = merge_bgc_fields(source_fields)
-                merged = _broadcast_scalar_bgc_fields(merged)
-                merged = _broadcast_static_to_time(merged)
+                ds = self._write_into_dataset(direction, fields, ds)
 
-                for var_name in merged:
-                    merged[var_name] = transpose_dimensions(merged[var_name])
-
-                merged = compute_missing_bgc_variables(merged)
-
-                if not _completeness_checked:
-                    warn_missing_bgc_variables(merged)
-                    _completeness_checked = True
-
-                ds = self._write_into_dataset(direction, merged, ds)
-
-        # Determine climatology flag and source name from Mode A sources.
-        # Use any() so that a non-climatology primary source (e.g. GLODAP)
-        # doesn't override a climatological secondary source (e.g. UNIFIED)
-        # that actually provides the time axis in the merged dataset.
-        climatology = any(
-            src.climatology for src, _ in source_data if src.name is not None
+        climatology = (
+            False if is_constants else bool(self.source.get("climatology", False))
         )
-        source_names = ", ".join(
-            src.name for src, _ in source_data if src.name is not None
-        ) or "constants"
+        source_names = self.source["name"]
 
         # Pure-static sources produce no time dimension.  ROMS requires at least two
         # boundary records that bracket the simulation window so it can interpolate.
@@ -1020,6 +940,17 @@ class BoundaryForcing:
             None, ds, source_name=source_names, climatology=climatology
         )
 
+        # Per-variable metadata for the BGC variables actually present (used by
+        # _validate and plot).  Built generically — no dependency on a specific
+        # BGC model — from the bare tracer names in the dataset.
+        bare_names = set()
+        for v in ds.data_vars:
+            for d in self.boundaries:
+                if self.boundaries[d] and str(v).endswith(f"_{d}"):
+                    bare_names.add(str(v)[: -(len(d) + 1)])
+                    break
+        self.variable_info = bgc_variable_info(bare_names)
+
         if not self.bypass_validation:
             self._validate(ds)
 
@@ -1028,34 +959,31 @@ class BoundaryForcing:
 
         return ds
 
-    def _extract_bgc_source_fields(
+    def _extract_bgc_fields(
         self,
-        src: BGCSource,
         raw_data,
         direction: str,
         target_coords: dict,
     ) -> dict[str, xr.DataArray]:
-        """Regrid / extract BGC fields from one source for one boundary direction.
+        """Regrid / extract BGC fields from the source for one boundary direction.
 
-        Handles all three :class:`BGCSource` modes:
+        Two modes:
 
-        * **Mode B** (constants): returns 0-D scalar :class:`xarray.DataArray` objects;
-          broadcasting to boundary shape happens later in ``_process_bgc``.
-        * **Mode C** (algorithm): delegates to ``src.algorithm(physics_ds, direction)``;
-          result must already be on the ROMS boundary grid.
-        * **Mode A** (lat/lon dataset): performs lateral then vertical regridding.
+        * **constants** (``raw_data is None``): broadcast each ``source["constants"]``
+          value to the boundary rho grid (depth × horizontal).
+        * **dataset**: perform lateral then vertical regridding of the source dataset.
 
         All paths are dask-safe.
         """
-        # --- Mode B: constants ---
-        if src.constants is not None:
-            return {var: xr.DataArray(float(val)) for var, val in src.constants.items()}
+        # --- constants ---
+        if raw_data is None:
+            template = self.ds_depth_coords[f"layer_depth_rho_{direction}"]
+            return {
+                var: xr.full_like(template, float(val))
+                for var, val in self.source["constants"].items()
+            }
 
-        # --- Mode C: physics-derived algorithm ---
-        if src.physics_forcing is not None:
-            return src.algorithm(src.physics_forcing.ds, direction)
-
-        # --- Mode A: lat/lon dataset ---
+        # --- dataset ---
         bdry_target_coords = {
             "lat": target_coords["lat"].isel(**self.bdry_coords["rho"][direction]),
             "lon": target_coords["lon"].isel(**self.bdry_coords["rho"][direction]),
@@ -1069,7 +997,7 @@ class BoundaryForcing:
             unchunk_lateral_dims=True,
         )
 
-        if src.prefill is None:
+        if self.prefill is None:
             # Default (no source prefill) path: prep per boundary.
             bdry_data.convert_to_float64()
             bdry_data.extrapolate_deepest_to_bottom()
@@ -1077,13 +1005,13 @@ class BoundaryForcing:
                 # xESMF unavailable: nearest-neighbor pre-fill the source so the
                 # subsequent scipy interpolation cannot propagate NaNs.
                 bdry_data.apply_nearest_neighbor_fill()
-        # When src.prefill is set the whole-domain fill was already applied in
+        # When self.prefill is set the whole-domain fill was already applied in
         # _process_bgc before the per-boundary loop.
 
         # Source mask for xESMF masked-bilinear path.
         # None means the source is already NaN-free (prefilled or UNIFIED-style
         # dataset with no mask) → plain bilinear regrid.
-        if self._use_xesmf and src.prefill is None:
+        if self._use_xesmf and self.prefill is None:
             tracer_mask = (
                 bdry_data.ds["mask"] if "mask" in bdry_data.ds.data_vars else None
             )
@@ -1091,8 +1019,8 @@ class BoundaryForcing:
             tracer_mask = None
 
         # With a prefilled (NaN-free) source no destination extrapolation is needed.
-        regrid_extrap = None if src.prefill is not None else (self.extrap_method or "inverse_dist")
-        regrid_extrap_kwargs = None if src.prefill is not None else self.extrap_kwargs
+        regrid_extrap = None if self.prefill is not None else (self.extrap_method or "inverse_dist")
+        regrid_extrap_kwargs = None if self.prefill is not None else self.extrap_kwargs
 
         # Collect variables provided by this source (required + optional present)
         src_var_names = {
@@ -1154,7 +1082,7 @@ class BoundaryForcing:
         if use_density:
             source_density, target_density = self._compute_bgc_density_coords(
                 direction, bdry_data, partial_fields,
-                bgc_climatology=src.climatology,
+                bgc_climatology=bool(self.source.get("climatology", False)),
             )
 
         tracer_vars = [v for v in partial_fields if v not in aux_ts_vars]
@@ -1476,20 +1404,19 @@ class BoundaryForcing:
                     if is_enabled:
                         bdry_var_name = f"{var_name}_{direction}"
 
+                        # A source may legitimately not provide every variable
+                        # (e.g. a constants-only source); skip absent ones.
+                        if bdry_var_name not in ds.data_vars:
+                            continue
+
                         # Check for NaN values at the first time step using the nan_check function
-                        if isinstance(self.source, list):
-                            src_names = ", ".join(
-                                s.name or "constants" for s in self.source
-                            )
-                        else:
-                            src_names = self.source.get("name", "unknown")
+                        src_names = self.source.get("name", "unknown")
                         error_message = (
                             f"{bdry_var_name} consists entirely of NaNs after regridding. "
                             f"This may be due to the {direction}ern boundary being entirely on land in the "
                             f"{src_names} data, which could have a coarser resolution than the ROMS domain. "
                             f"Try setting a `prefill` method (e.g. 'inverse_dist', 'nearest_neighbor', or "
-                            f"'2d_lateral_fill') to fill the source before regridding. For BGC sources, "
-                            f"set prefill on each BGCSource object."
+                            f"'2d_lateral_fill') to fill the source before regridding."
                         )
 
                         nan_check(

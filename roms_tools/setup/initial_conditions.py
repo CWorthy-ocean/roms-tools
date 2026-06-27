@@ -26,8 +26,9 @@ from roms_tools.regrid import (
     VerticalRegrid,
 )
 from roms_tools.setup.utils import (
+    BGC_INTERPOLATION_METHODS,
     RawDataSource,
-    _compute_density_coord,
+    build_bgc_vertical_coords,
     compute_barotropic_velocity,
     compute_missing_bgc_variables,
     from_yaml,
@@ -35,6 +36,7 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     nan_check,
     pop_grid_data,
+    resolve_deprecated_density_arg,
     substitute_nans_by_fillvalue,
     to_dict,
     write_to_yaml,
@@ -113,17 +115,30 @@ class InitialConditions:
         Indicates whether to skip validation checks in the processed data. When set to True,
         the validation process that ensures no NaN values exist at wet points
         in the processed dataset is bypassed. Defaults to False.
-    use_density_interpolation : bool, optional
-        If True, BGC tracers are vertically interpolated in density space
-        rather than depth space. Density is computed from the physics source T/S
-        (via TEOS-10 sigma-0) and used as the vertical coordinate for interpolation,
-        preserving water-mass properties. Only applies when ``bgc_source`` is provided
-        and the physics source is a lat/lon dataset (not a ROMS restart). Falls back
-        to depth-based interpolation if physics T/S are unavailable and notes in log.
+    bgc_interpolation_method : str, optional
+        Vertical interpolation method for BGC tracers. One of:
 
-        Interpolation uses ``xgcm.Grid.transform`` with the linear method inside
-        the source density range and edge-value (nearest-neighbor) extrapolation
-        outside (``mask_edges=False``).
+        - ``"depth"`` (default): linear interpolation in depth.
+        - ``"density"``: linear interpolation in potential-density (isopycnal) space,
+          preserving water-mass properties. Density is computed from temperature and
+          salinity via TEOS-10 sigma-0 — the BGC source's own T/S for the source
+          coordinate and the physics T/S for the target.
+        - ``"density_mld"``: the mixed layer depth (MLD) is found in the source and
+          target density fields; the source mixed layer is scaled so its MLD matches the
+          target's, and below the MLD the tracer is interpolated 1:1 in depth. This keeps
+          the mixed layers aligned while preserving the absolute depth of sub-mixed-layer
+          features, and avoids the surface degeneracy of pure density space.
+
+        ``"density"`` and ``"density_mld"`` only apply when ``bgc_source`` is provided,
+        the physics source is a lat/lon dataset (not a ROMS restart), and the BGC source
+        carries temperature/salinity (e.g. the unified dataset's ``temp_WOA``/
+        ``salt_WOA``); otherwise interpolation falls back to depth space and notes in
+        the log. Interpolation uses ``xgcm.Grid.transform`` with the linear method
+        inside the source range and edge-value extrapolation outside
+        (``mask_edges=False``).
+    use_density_interpolation : bool, optional
+        Deprecated. Use ``bgc_interpolation_method`` instead: ``True`` is equivalent to
+        ``bgc_interpolation_method="density"`` and ``False`` to ``"depth"``.
 
 
 
@@ -174,8 +189,12 @@ class InitialConditions:
     """Optional initial bounding slice when loading lat/lon forcing data with Dask."""
     bypass_validation: bool = False
     """Whether to skip validation checks in the processed data."""
-    use_density_interpolation: bool = False
-    """Whether to interpolate BGC tracers in density space rather than depth space."""
+    bgc_interpolation_method: str = "depth"
+    """Vertical interpolation method for BGC tracers: ``"depth"``, ``"density"``, or
+    ``"density_mld"``."""
+    use_density_interpolation: bool | None = None
+    """Deprecated: use ``bgc_interpolation_method`` instead. ``True`` maps to
+    ``"density"`` and ``False`` to ``"depth"``."""
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
@@ -185,6 +204,12 @@ class InitialConditions:
     """An xarray Dataset containing the depth coordinates."""
 
     def __post_init__(self):
+        # Resolve the deprecated `use_density_interpolation` argument before validation.
+        self.bgc_interpolation_method = resolve_deprecated_density_arg(
+            self.use_density_interpolation, self.bgc_interpolation_method
+        )
+        self.use_density_interpolation = None
+
         # Initialize depth coordinates
         self.ds_depth_coords = xr.Dataset()
 
@@ -455,49 +480,50 @@ class InitialConditions:
                 tracer_vars = [v for v in filtered_vars if v not in aux_ts_vars]
 
                 has_source_ts = len(aux_ts_vars) == 2
-                use_density = (
-                    type == "bgc" and self.use_density_interpolation and has_source_ts
+                has_target_ts = (
+                    "temp" in processed_fields and "salt" in processed_fields
                 )
-                if (
-                    type == "bgc"
-                    and self.use_density_interpolation
-                    and not has_source_ts
-                ):
+                # Resolve the requested method against availability of the T/S needed
+                # to build the density/MLD coordinates; fall back to depth otherwise.
+                method = self.bgc_interpolation_method if type == "bgc" else "depth"
+                if method != "depth" and not (has_source_ts and has_target_ts):
                     logging.info(
-                        "Density-space interpolation requested but the BGC source "
-                        "has no temperature/salinity; falling back to depth-space "
+                        f"{method!r} interpolation requested but the BGC source has "
+                        "no temperature/salinity; falling back to depth-space "
                         "interpolation."
                     )
+                    method = "depth"
 
-                source_density = None
-                target_density = None
-                if use_density:
+                source_coord = None
+                target_coord = None
+                if method != "depth":
                     temp_key, salt_key = ts_keys
-                    # Source density: the BGC dataset's own T/S at its source depth
-                    # levels (no regrid — already on this grid).
-                    source_density = _compute_density_coord(
-                        processed_fields[temp_key],
-                        processed_fields[salt_key],
-                        data.dim_names["depth"],
-                    )
-                    # Target density: the model's (physics) T/S on the ROMS sigma grid,
-                    # already present in the shared processed_fields from physics
-                    # processing.
                     s_dim = next(
                         d for d in processed_fields["temp"].dims if d.startswith("s_")
                     )
-                    target_density = _compute_density_coord(
-                        processed_fields["temp"], processed_fields["salt"], s_dim
+                    # Source coordinate uses the BGC dataset's own T/S (already on its
+                    # source depth grid); target uses the model's (physics) sigma-level
+                    # T/S, present in the shared processed_fields from physics processing.
+                    source_coord, target_coord = build_bgc_vertical_coords(
+                        method,
+                        source_temp=processed_fields[temp_key],
+                        source_salt=processed_fields[salt_key],
+                        source_depth=data.ds[data.dim_names["depth"]],
+                        source_depth_dim=data.dim_names["depth"],
+                        target_temp=processed_fields["temp"],
+                        target_salt=processed_fields["salt"],
+                        target_depth=self.ds_depth_coords[f"layer_depth_{location}"],
+                        target_depth_dim=s_dim,
                     )
 
                 for var_name in tracer_vars:
                     if var_name not in processed_fields:
                         continue
-                    if use_density:
+                    if method != "depth":
                         processed_fields[var_name] = vertical_regrid.apply(
                             processed_fields[var_name],
-                            source_depth_coords=source_density,
-                            target_depth_coords=target_density,
+                            source_depth_coords=source_coord,
+                            target_depth_coords=target_coord,
                         )
                     else:
                         processed_fields[var_name] = vertical_regrid.apply(
@@ -545,6 +571,11 @@ class InitialConditions:
         if not isinstance(self.ini_time, datetime):
             raise TypeError(
                 f"`ini_time` must be a datetime object, got {type(self.ini_time).__name__} instead."
+            )
+        if self.bgc_interpolation_method not in BGC_INTERPOLATION_METHODS:
+            raise ValueError(
+                f"`bgc_interpolation_method` must be one of "
+                f"{BGC_INTERPOLATION_METHODS}, got {self.bgc_interpolation_method!r}."
             )
 
     def _get_data(
@@ -1084,6 +1115,7 @@ class InitialConditions:
                 "ds_depth_coords",
                 "adjust_depth_for_sea_surface_height",
                 "use_dask",
+                "use_density_interpolation",
             ],
         )
         write_to_yaml(forcing_dict, filepath)

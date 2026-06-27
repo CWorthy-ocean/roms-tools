@@ -9,15 +9,20 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
+    BGC_INTERPOLATION_METHODS,
     _compute_density_coord,
+    _compute_mld_warp,
     _infer_valid_boundaries_from_mask,
+    build_bgc_vertical_coords,
     calendar_midmonth_dates,
     check_and_set_boundaries,
+    compute_mld,
     compute_potential_density,
     expand_monthly_climatology_time_axis,
     get_target_coords,
     interpolate_dynamic_bgc_by_calendar_year,
     month_to_time_index,
+    resolve_deprecated_density_arg,
     tile_monthly_climatology_on_calendar,
     validate_names,
 )
@@ -420,6 +425,444 @@ def test_density_space_interpolation_returns_correct_values():
 
     expected = np.interp(tgt_rho, src_rho, tracer.values[:, 0, 0])
     np.testing.assert_allclose(regridded.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
+
+
+# test mixed-layer-depth (MLD) computation and MLD-anchored interpolation
+
+
+def test_compute_mld_known_crossing():
+    """MLD is the linearly interpolated depth where sigma0 first exceeds the
+    reference-depth value by the threshold (0.03 kg/m³).
+    """
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    sig = xr.DataArray([24.0, 24.01, 24.02, 24.05, 24.20, 24.40], dims=["dep"])
+
+    # Default reference is 10 m: sigma0(10 m) = 24.005 (interp between 5 m and 15 m);
+    # crossing of 24.005 + 0.03 = 24.035 lies between dep=25 (24.02) and dep=50 (24.05):
+    # 25 + (24.035 - 24.02) / (24.05 - 24.02) * (50 - 25) = 37.5
+    assert float(compute_mld(sig, depth, "dep")) == pytest.approx(37.5, abs=1e-3)
+
+    # reference_depth=0 reproduces the surface-referenced (xroms) convention:
+    # surface sigma0 = 24.0; crossing of 24.03 between dep=25 and dep=50 -> 33.333...
+    assert float(compute_mld(sig, depth, "dep", reference_depth=0.0)) == pytest.approx(
+        33.3333, abs=1e-3
+    )
+
+
+def test_compute_mld_descending_depth_orientation():
+    """MLD is orientation-agnostic: a descending (ROMS s_rho, surface-last) profile
+    gives the same result as the equivalent ascending profile.
+    """
+    # same profile as the known-crossing test, reversed (surface = last index)
+    depth = xr.DataArray([200.0, 100.0, 50.0, 25.0, 15.0, 5.0], dims=["s_rho"])
+    sig = xr.DataArray([24.40, 24.20, 24.05, 24.02, 24.01, 24.0], dims=["s_rho"])
+    assert float(compute_mld(sig, depth, "s_rho")) == pytest.approx(37.5, abs=1e-3)
+
+
+def test_compute_mld_fully_mixed_returns_full_depth():
+    """A column that never reaches the threshold returns the deepest valid depth."""
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    sig = xr.DataArray(np.full(6, 24.0), dims=["dep"])
+    assert float(compute_mld(sig, depth, "dep")) == pytest.approx(200.0)
+
+
+def test_compute_mld_all_nan_returns_nan():
+    """An all-NaN (land) column returns NaN."""
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0], dims=["dep"])
+    sig = xr.DataArray(np.full(4, np.nan), dims=["dep"])
+    assert np.isnan(float(compute_mld(sig, depth, "dep")))
+
+
+def test_compute_mld_shallow_mixed_layer():
+    """A sharp near-surface gradient gives a shallow MLD within the upper interval."""
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0], dims=["dep"])
+    sig = xr.DataArray([24.0, 24.1, 24.2, 24.3], dims=["dep"])
+    # sigma0(10 m) = 24.05; crossing of 24.08 between dep=5 (24.0) and dep=15 (24.1):
+    # 5 + (24.08 - 24.0) / (24.1 - 24.0) * (15 - 5) = 13.0
+    assert float(compute_mld(sig, depth, "dep")) == pytest.approx(13.0, abs=1e-3)
+
+
+def test_compute_mld_3d_per_column():
+    """MLD is computed per horizontal column (supports spatially varying fields)."""
+    depth = xr.DataArray([5.0, 25.0, 100.0], dims=["dep"])
+    # column A stratified (crosses early), column B fully mixed
+    sig = xr.DataArray(
+        np.array([[24.0, 24.0], [24.1, 24.0], [24.5, 24.0]]),
+        dims=["dep", "x"],
+    )
+    mld = compute_mld(sig, depth, "dep")
+    assert mld.dims == ("x",)
+    assert float(mld.isel(x=0)) < 25.0  # stratified -> shallow MLD
+    assert float(mld.isel(x=1)) == pytest.approx(100.0)  # mixed -> full depth
+
+
+def test_compute_mld_warp_anchors_and_monotonic():
+    """The warped source depth maps surface->surface and MLD_src->MLD_tgt, is 1:1 in
+    depth below the MLD, strictly increasing along the depth dim, and single-chunked.
+    """
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    temp = xr.DataArray(np.full(6, 15.0), dims=["dep"])
+    # well-mixed to 25 m, then stratified
+    salt = xr.DataArray([35.0, 35.0, 35.0, 35.4, 35.8, 36.2], dims=["dep"])
+    mld_src = float(compute_mld(compute_potential_density(temp, salt), depth, "dep"))
+
+    target_mld = xr.DataArray(40.0)
+    warp = _compute_mld_warp(temp, salt, depth, "dep", target_mld)
+
+    profile = warp.values
+    assert np.all(np.diff(profile) > 0), "warp must be strictly monotonic"
+    # surface anchor: scaled within the mixed layer (~0 plus a negligible perturbation)
+    assert profile[0] == pytest.approx(5.0 * 40.0 / mld_src, abs=1e-3)
+    # below the MLD the map is 1:1 in depth: deepest level keeps its absolute offset
+    # below the (target) MLD, i.e. target_mld + (H_src - mld_src).
+    assert profile[-1] == pytest.approx(40.0 + (200.0 - mld_src), abs=1e-3)
+    # single chunk along the depth dim
+    assert warp.chunks is not None
+    assert len(warp.chunks[warp.dims.index("dep")]) == 1
+
+
+def test_density_mld_degenerates_to_depth():
+    """For fully mixed columns (no MLD), density_mld interpolation reduces to plain
+    depth interpolation (the warp is the identity), to within the 1e-7 perturbation.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    tracer = xr.DataArray(
+        np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+        dims=["dep"],
+        coords={"dep": depth},
+        name="ALK",
+    )
+    # fully mixed source and target T/S
+    src_temp = xr.DataArray(np.full(6, 15.0), dims=["dep"])
+    src_salt = xr.DataArray(np.full(6, 35.0), dims=["dep"])
+    tgt_depth = xr.DataArray([20.0, 60.0, 120.0, 180.0], dims=["s_rho"])
+    tgt_temp = xr.DataArray(np.full(4, 15.0), dims=["s_rho"])
+    tgt_salt = xr.DataArray(np.full(4, 35.0), dims=["s_rho"])
+
+    ds = xr.Dataset({"ALK": tracer})
+    vr = VerticalRegrid(ds, source_dim="dep")
+
+    depth_out = vr.apply(
+        ds["ALK"], source_depth_coords=depth, target_depth_coords=tgt_depth
+    )
+    src_coord, tgt_coord = build_bgc_vertical_coords(
+        "density_mld",
+        source_temp=src_temp,
+        source_salt=src_salt,
+        source_depth=depth,
+        source_depth_dim="dep",
+        target_temp=tgt_temp,
+        target_salt=tgt_salt,
+        target_depth=tgt_depth,
+        target_depth_dim="s_rho",
+    )
+    mld_out = vr.apply(
+        ds["ALK"], source_depth_coords=src_coord, target_depth_coords=tgt_coord
+    )
+    np.testing.assert_allclose(
+        depth_out.values, mld_out.values, atol=1e-4, equal_nan=True
+    )
+
+
+def test_density_mld_differs_from_depth_when_stratified():
+    """When the source has a resolved mixed layer, MLD-anchored interpolation differs
+    from plain depth interpolation.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    tracer = xr.DataArray(
+        np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+        dims=["dep"],
+        coords={"dep": depth},
+        name="ALK",
+    )
+    src_temp = xr.DataArray(np.full(6, 15.0), dims=["dep"])
+    src_salt = xr.DataArray([35.0, 35.0, 35.0, 35.4, 35.8, 36.2], dims=["dep"])
+    # target with a deeper, well-resolved mixed layer
+    tgt_depth = xr.DataArray([20.0, 60.0, 120.0, 180.0], dims=["s_rho"])
+    tgt_temp = xr.DataArray(np.full(4, 15.0), dims=["s_rho"])
+    tgt_salt = xr.DataArray([35.0, 35.0, 35.6, 36.2], dims=["s_rho"])
+
+    ds = xr.Dataset({"ALK": tracer})
+    vr = VerticalRegrid(ds, source_dim="dep")
+    depth_out = vr.apply(
+        ds["ALK"], source_depth_coords=depth, target_depth_coords=tgt_depth
+    )
+    src_coord, tgt_coord = build_bgc_vertical_coords(
+        "density_mld",
+        source_temp=src_temp,
+        source_salt=src_salt,
+        source_depth=depth,
+        source_depth_dim="dep",
+        target_temp=tgt_temp,
+        target_salt=tgt_salt,
+        target_depth=tgt_depth,
+        target_depth_dim="s_rho",
+    )
+    mld_out = vr.apply(
+        ds["ALK"], source_depth_coords=src_coord, target_depth_coords=tgt_coord
+    )
+    assert not np.allclose(depth_out.values, mld_out.values)
+
+
+def test_density_mld_interpolation_returns_correct_values():
+    """End-to-end correctness of MLD-anchored interpolation on a synthetic stratified
+    column. The regridded tracer must equal a direct 1-D linear interpolation of the
+    tracer against the warped source depth coordinate, evaluated at the (real) target
+    depths. This pins the full composition (``_compute_mld_warp`` feeding
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing, and also
+    checks the values explicitly against hand-computed anchors.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    tracer = xr.DataArray(
+        np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0]),
+        dims=["dep"],
+        coords={"dep": depth},
+        name="ALK",
+    )
+    # Source: well-mixed to ~25 m, then stratified (salt jump) so there is a clear MLD.
+    src_temp = xr.DataArray(np.full(6, 15.0), dims=["dep"])
+    src_salt = xr.DataArray([35.0, 35.0, 35.0, 35.4, 35.8, 36.2], dims=["dep"])
+    # Target sigma levels with a deeper, well-resolved mixed layer.
+    tgt_depth = xr.DataArray([10.0, 45.0, 110.0, 190.0], dims=["s_rho"])
+    tgt_temp = xr.DataArray(np.full(4, 15.0), dims=["s_rho"])
+    tgt_salt = xr.DataArray([35.0, 35.0, 35.6, 36.2], dims=["s_rho"])
+
+    src_coord, tgt_coord = build_bgc_vertical_coords(
+        "density_mld",
+        source_temp=src_temp,
+        source_salt=src_salt,
+        source_depth=depth,
+        source_depth_dim="dep",
+        target_temp=tgt_temp,
+        target_salt=tgt_salt,
+        target_depth=tgt_depth,
+        target_depth_dim="s_rho",
+    )
+
+    ds = xr.Dataset({"ALK": tracer})
+    vr = VerticalRegrid(ds, source_dim="dep")
+    regridded = vr.apply(
+        ds["ALK"], source_depth_coords=src_coord, target_depth_coords=tgt_coord
+    )
+
+    # The transform does linear interpolation of the tracer from the warped source
+    # depth coordinate onto the (real, positive-down) target depths.
+    src_warp = src_coord.values
+    tgt_d = np.abs(tgt_coord.values)
+    # genuine interpolation: target depths lie inside the warped source range
+    assert tgt_d.min() >= src_warp.min()
+    assert tgt_d.max() <= src_warp.max()
+    expected = np.interp(tgt_d, src_warp, tracer.values)
+    np.testing.assert_allclose(regridded.values, expected, rtol=0.0, atol=1e-5)
+
+
+def test_density_mld_shallow_target_does_not_pack_deep_source():
+    """With the 1:1 below-MLD slope, source water far below a shallow target floor is
+    edge-clamped/unused rather than compressed into the target column. Regridding onto a
+    shallow target must give the same result whether or not the deep (abyssal) source
+    levels are present.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    # Deep source to 5000 m, stratified with a shallow mixed layer.
+    depth = xr.DataArray(
+        [5.0, 15.0, 25.0, 50.0, 100.0, 500.0, 1000.0, 3000.0, 5000.0], dims=["dep"]
+    )
+    src_temp = xr.DataArray(np.full(9, 15.0), dims=["dep"])
+    src_salt = xr.DataArray(
+        [35.0, 35.0, 35.0, 35.4, 35.8, 36.0, 36.2, 36.4, 36.6], dims=["dep"]
+    )
+    tracer = xr.DataArray(
+        np.arange(9, dtype=float) * 10.0,
+        dims=["dep"],
+        coords={"dep": depth},
+        name="ALK",
+    )
+    # Shallow target shelf to ~190 m.
+    tgt_depth = xr.DataArray([10.0, 40.0, 100.0, 190.0], dims=["s_rho"])
+    tgt_temp = xr.DataArray(np.full(4, 15.0), dims=["s_rho"])
+    tgt_salt = xr.DataArray([35.0, 35.0, 35.8, 36.1], dims=["s_rho"])
+
+    def _mld_regrid(src_d, src_t, src_s, trc):
+        sc, tc = build_bgc_vertical_coords(
+            "density_mld",
+            source_temp=src_t,
+            source_salt=src_s,
+            source_depth=src_d,
+            source_depth_dim="dep",
+            target_temp=tgt_temp,
+            target_salt=tgt_salt,
+            target_depth=tgt_depth,
+            target_depth_dim="s_rho",
+        )
+        ds = xr.Dataset({"ALK": trc})
+        return VerticalRegrid(ds, source_dim="dep").apply(
+            ds["ALK"], source_depth_coords=sc, target_depth_coords=tc
+        )
+
+    full = _mld_regrid(depth, src_temp, src_salt, tracer)
+    # Drop the abyssal source levels (1000 m and deeper), keeping coverage just past the
+    # ~190 m target floor (through 500 m). The 1:1 below-MLD map means those abyssal
+    # levels warp far below the target floor and are never used.
+    sl = slice(0, 6)
+    truncated = _mld_regrid(
+        depth.isel(dep=sl),
+        src_temp.isel(dep=sl),
+        src_salt.isel(dep=sl),
+        tracer.isel(dep=sl),
+    )
+    # The shallow-target result is unaffected by the abyssal source levels.
+    np.testing.assert_allclose(full.values, truncated.values, atol=1e-4)
+
+
+def test_density_mld_per_column_mixed_and_stratified():
+    """In a single multi-column call, a fully mixed column falls back to the identity
+    (depth) warp while a stratified column gets a non-identity warp.
+    """
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    # column 0: fully mixed; column 1: stratified below ~25 m
+    salt = xr.DataArray(
+        np.column_stack(
+            [
+                np.full(6, 35.0),
+                np.array([35.0, 35.0, 35.0, 35.4, 35.8, 36.2]),
+            ]
+        ),
+        dims=["dep", "x"],
+    )
+    temp = xr.DataArray(np.full((6, 2), 15.0), dims=["dep", "x"])
+    target_mld = xr.DataArray([40.0, 40.0], dims=["x"])
+
+    warp = _compute_mld_warp(temp, salt, depth, "dep", target_mld)
+    absz = np.abs(depth.values)
+    # mixed column -> identity warp (up to the 1e-7 perturbation)
+    np.testing.assert_allclose(warp.isel(x=0).values, absz, atol=1e-3)
+    # stratified column -> warped away from identity
+    assert not np.allclose(warp.isel(x=1).values, absz, atol=1e-1)
+
+
+def test_compute_mld_warp_fully_mixed_target_degenerates():
+    """A fully-mixed target (target_mld == target_H) must degenerate to the identity warp,
+    symmetric to the existing fully-mixed source guard. Without the guard (or with a deep
+    target_H >> target_mld) the warp must differ from the identity.
+    """
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    temp = xr.DataArray(np.full(6, 15.0), dims=["dep"])
+    # well-mixed to 25 m, then stratified (same profile as anchors test)
+    salt = xr.DataArray([35.0, 35.0, 35.0, 35.4, 35.8, 36.2], dims=["dep"])
+    n = depth.sizes["dep"]
+    absz = np.abs(depth)
+    identity = absz.values + np.arange(n) * 1e-7
+
+    # Fully-mixed target: target_mld == target_H (no-crossing fallback from compute_mld).
+    target_mld_fm = xr.DataArray(200.0)
+    target_H_fm = xr.DataArray(200.0)
+    warp_fm = _compute_mld_warp(
+        temp, salt, depth, "dep", target_mld_fm, target_H=target_H_fm
+    )
+    assert np.allclose(warp_fm.values, identity), (
+        "fully-mixed target must produce identity warp"
+    )
+
+    # Without target_H guard: same stratified source but target_mld well below target_H
+    # -> the source MLD is warped (non-identity).
+    target_mld_st = xr.DataArray(40.0)
+    target_H_st = xr.DataArray(1000.0)
+    warp_st = _compute_mld_warp(
+        temp, salt, depth, "dep", target_mld_st, target_H=target_H_st
+    )
+    assert not np.allclose(warp_st.values, absz.values, atol=1e-1), (
+        "stratified target must produce non-identity warp"
+    )
+
+
+def test_density_mld_fully_mixed_target_degenerates_to_depth():
+    """build_bgc_vertical_coords with density_mld must fall back to plain depth
+    interpolation when the *target* column is fully mixed (no density crossing), while
+    the *source* is stratified. This mirrors test_density_mld_degenerates_to_depth but
+    with the asymmetry reversed: mixed target, stratified source.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    depth = xr.DataArray([5.0, 15.0, 25.0, 50.0, 100.0, 200.0], dims=["dep"])
+    tracer = xr.DataArray(
+        np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+        dims=["dep"],
+        coords={"dep": depth},
+        name="ALK",
+    )
+    # stratified source
+    src_temp = xr.DataArray(np.full(6, 15.0), dims=["dep"])
+    src_salt = xr.DataArray([35.0, 35.0, 35.0, 35.4, 35.8, 36.2], dims=["dep"])
+    # fully mixed target (uniform T/S -> no density crossing)
+    tgt_depth = xr.DataArray([20.0, 60.0, 120.0, 180.0], dims=["s_rho"])
+    tgt_temp = xr.DataArray(np.full(4, 15.0), dims=["s_rho"])
+    tgt_salt = xr.DataArray(np.full(4, 35.0), dims=["s_rho"])
+
+    ds = xr.Dataset({"ALK": tracer})
+    vr = VerticalRegrid(ds, source_dim="dep")
+
+    # Plain depth interpolation reference
+    depth_out = vr.apply(
+        ds["ALK"], source_depth_coords=depth, target_depth_coords=tgt_depth
+    )
+
+    # density_mld interpolation — should degenerate to depth when target is fully mixed
+    src_coord, tgt_coord = build_bgc_vertical_coords(
+        "density_mld",
+        source_temp=src_temp,
+        source_salt=src_salt,
+        source_depth=depth,
+        source_depth_dim="dep",
+        target_temp=tgt_temp,
+        target_salt=tgt_salt,
+        target_depth=tgt_depth,
+        target_depth_dim="s_rho",
+    )
+    mld_out = vr.apply(
+        ds["ALK"], source_depth_coords=src_coord, target_depth_coords=tgt_coord
+    )
+    np.testing.assert_allclose(
+        depth_out.values, mld_out.values, atol=1e-4, equal_nan=True
+    )
+
+
+def test_build_bgc_vertical_coords_invalid_method():
+    """An unknown method is rejected."""
+    da = xr.DataArray(np.full(3, 15.0), dims=["dep"])
+    with pytest.raises(ValueError, match="Unknown BGC interpolation method"):
+        build_bgc_vertical_coords(
+            "bogus",
+            source_temp=da,
+            source_salt=da,
+            source_depth=da,
+            source_depth_dim="dep",
+            target_temp=da,
+            target_salt=da,
+            target_depth=da,
+            target_depth_dim="dep",
+        )
+
+
+def test_resolve_deprecated_density_arg():
+    """The deprecated bool maps onto the method string and warns; an explicit new-style
+    method always wins.
+    """
+    assert resolve_deprecated_density_arg(None, "density_mld") == "density_mld"
+    with pytest.warns(DeprecationWarning):
+        assert resolve_deprecated_density_arg(True, "depth") == "density"
+    with pytest.warns(DeprecationWarning):
+        assert resolve_deprecated_density_arg(False, "depth") == "depth"
+    # explicit new-style argument overrides the deprecated bool
+    with pytest.warns(DeprecationWarning):
+        assert resolve_deprecated_density_arg(True, "density_mld") == "density_mld"
+    assert "density_mld" in BGC_INTERPOLATION_METHODS
 
 
 class TestMonthlyClimatologyExpansion:

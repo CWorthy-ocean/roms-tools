@@ -26,7 +26,6 @@ from roms_tools.regrid import (
 from roms_tools.setup.utils import (
     BGC_INTERPOLATION_METHODS,
     RawDataSource,
-    _compute_density_coord,
     _xesmf_available,
     add_time_info_to_ds,
     build_bgc_vertical_coords,

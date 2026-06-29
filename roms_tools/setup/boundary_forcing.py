@@ -25,8 +25,8 @@ from roms_tools.regrid import (
 )
 from roms_tools.setup.utils import (
     RawDataSource,
-    _xesmf_available,
     _compute_density_coord,
+    _xesmf_available,
     add_time_info_to_ds,
     check_and_set_boundaries,
     compute_barotropic_velocity,
@@ -38,8 +38,8 @@ from roms_tools.setup.utils import (
     get_variable_metadata,
     group_dataset,
     nan_check,
-    resolve_regrid_engine,
     pop_grid_data,
+    resolve_regrid_engine,
     substitute_nans_by_fillvalue,
     to_dict,
     validate_extrap,
@@ -740,6 +740,7 @@ class BoundaryForcing:
         self._use_xesmf = resolve_regrid_engine(
             self.regrid_method, xesmf_available=xesmf_available
         )
+
     def _compute_bgc_density_coords(
         self,
         direction: str,
@@ -1513,44 +1514,3 @@ class BoundaryForcing:
             physics_forcing=physics_forcing,
             use_dask=use_dask,
         )
-
-
-def apply_1d_horizontal_fill(data_array: xr.DataArray) -> xr.DataArray:
-    """Forward and backward fill NaN values in a single horizontal dimension for open
-    boundaries.
-
-    Parameters
-    ----------
-    data_array : xarray.DataArray
-        The data array to be updated.
-
-    Returns
-    -------
-    xarray.DataArray
-        The updated data array with NaN values filled.
-
-    Raises
-    ------
-    ValueError
-        If more than one horizontal dimension is found or none at all.
-    """
-    horizontal_dims = ["eta_rho", "eta_v", "xi_rho", "xi_u"]
-    selected_horizontal_dim = None
-
-    # Determine the horizontal dimension to fill
-    for dim in horizontal_dims:
-        if dim in data_array.dims:
-            if selected_horizontal_dim is not None:
-                raise ValueError(
-                    f"More than one horizontal dimension found in variable '{data_array.name}'."
-                )
-            selected_horizontal_dim = dim
-
-    if selected_horizontal_dim is None:
-        raise ValueError(
-            f"No valid horizontal dimension found for variable '{data_array.name}'."
-        )
-
-    # Forward and backward fill in the horizontal direction
-    filled = one_dim_fill(data_array, selected_horizontal_dim, direction="forward")
-    return one_dim_fill(filled, selected_horizontal_dim, direction="backward")

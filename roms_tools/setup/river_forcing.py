@@ -9,8 +9,8 @@ from typing import Annotated, Any, Literal, TypeAlias
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from dask.diagnostics import ProgressBar
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from roms_tools import Grid
 from roms_tools.constants import MAX_DISTINCT_COLORS
@@ -22,7 +22,6 @@ from roms_tools.datasets.river_datasets import (
     RiverTracerDefaultsDataset,
     Rivr2oRiverBGCDataset,
     fill_river_bgc_concentrations,
-    get_indices_of_nearest_grid_cell_for_rivers,
 )
 from roms_tools.plot import (
     assign_category_colors,
@@ -36,7 +35,6 @@ from roms_tools.setup.utils import (
     add_tracer_metadata_to_ds,
     expand_monthly_climatology_time_axis,
     from_yaml,
-    gc_dist,
     get_target_coords,
     get_tracer_defaults,
     get_variable_metadata,
@@ -243,16 +241,16 @@ class RiverForcing:
     ds: xr.Dataset = field(init=False, repr=False)
     """An xarray Dataset containing post-processed variables ready for input into
     ROMS."""
-    
+
     climatology: bool = field(init=False, repr=False)
     """Indicates whether the final river forcing is climatological."""
-   
+
     coast_snap_buffer_km: float | None = None
     """Maximum distance (in km) between a river mouth and the nearest coastal
     grid cell. River stations farther than this threshold are excluded in mapping.
     Can be overridden by the user for domains where the default (50km for GloFAS, None for Dai)
     is inappropriate."""
-    
+
     domain_edge_buffer: int = 20
     """Number of grid cells to include beyond the domain boundary when
     searching for relevant rivers. Defaults to 20. For small high-resolution
@@ -304,7 +302,9 @@ class RiverForcing:
         volume_means = ds["river_volume"].mean(dim="river_time")
         sorted_nriver = np.argsort(volume_means.values)[::-1]
         sorted_names = [str(ds.river_name.values[i]) for i in sorted_nriver]
-        self.indices = {name: self.indices[name] for name in sorted_names if name in self.indices}
+        self.indices = {
+            name: self.indices[name] for name in sorted_names if name in self.indices
+        }
         ds = ds.isel(nriver=sorted_nriver)
 
         if self.include_bgc and self.bgc_source is not None:
@@ -346,7 +346,9 @@ class RiverForcing:
         if source["name"] not in ("DAI", "GLOFAS"):
             raise ValueError("`source` 'name' must be 'DAI' or 'GLOFAS'.")
         if "path" not in source and source["name"] != "DAI":
-            raise ValueError("`source` must include a 'path' for all sources except 'DAI'.")    
+            raise ValueError(
+                "`source` must include a 'path' for all sources except 'DAI'."
+            )
 
         # Set 'climatology' to False if not provided in 'source'
         return {**source, "climatology": source.get("climatology", False)}
@@ -451,7 +453,9 @@ class RiverForcing:
                 data_dict["filename"] = self.source["path"]
             data = GloFASRiverDataset(**data_dict)
         else:
-            raise ValueError('Only "DAI" and GLOFAS are valid options for source["name"].')
+            raise ValueError(
+                'Only "DAI" and GLOFAS are valid options for source["name"].'
+            )
 
         return data
 
@@ -555,7 +559,7 @@ class RiverForcing:
     def _move_rivers_to_closest_coast(self, target_coords, data):
         """Move river mouths to the closest coastal grid cell.
 
-        Uses cKDTree for nearest-neighbor lookup instead of pairwise distance computation, 
+        Uses cKDTree for nearest-neighbor lookup instead of pairwise distance computation,
         making it significantly faster for large river datasets
 
         Parameters
@@ -573,7 +577,7 @@ class RiverForcing:
             - `ds`: The dataset containing river information.
             - `var_names`: A dictionary of variable names in the dataset (e.g.,
             longitude, latitude, station names).
-         
+
         Returns
         -------
         indices : dict[str, list[tuple]]
@@ -581,7 +585,10 @@ class RiverForcing:
             of tuples. Each tuple represents a pair of indices corresponding to the
             `eta_rho` and `xi_rho` grid coordinates of the river.
         """
-        from roms_tools.setup.utils import build_kdtree_from_latlon, query_kdtree_nearest
+        from roms_tools.setup.utils import (
+            build_kdtree_from_latlon,
+            query_kdtree_nearest,
+        )
 
         # Retrieve longitude and latitude of river mouths.
         river_lon = data.ds[data.var_names["longitude"]].values
@@ -594,27 +601,31 @@ class RiverForcing:
             river_lon = np.where(river_lon < 0, river_lon + 360, river_lon)
 
         # Identify coastal grid cells — land cells adjacent to ocean.
-        mask  = self.grid.ds.mask_rho.values  # (eta_rho, xi_rho)
+        mask = self.grid.ds.mask_rho.values  # (eta_rho, xi_rho)
         faces = np.zeros_like(mask)
-        faces[1:,  :] += mask[:-1, :]   # south neighbor
-        faces[:-1, :] += mask[1:,  :]   # north neighbor
-        faces[:,  1:] += mask[:, :-1]   # west neighbor
-        faces[:, :-1] += mask[:,  1:]   # east neighbor
+        faces[1:, :] += mask[:-1, :]  # south neighbor
+        faces[:-1, :] += mask[1:, :]  # north neighbor
+        faces[:, 1:] += mask[:, :-1]  # west neighbor
+        faces[:, :-1] += mask[:, 1:]  # east neighbor
         coast = (1 - mask) * (faces > 0)
 
         # Get eta, xi indices and lat/lon of coastal cells
         coast_eta, coast_xi = np.where(coast)
-        grid_lat  = target_coords["lat"].values
-        grid_lon  = target_coords["lon"].values
+        grid_lat = target_coords["lat"].values
+        grid_lon = target_coords["lon"].values
         coast_lat = grid_lat[coast_eta, coast_xi]
         coast_lon = grid_lon[coast_eta, coast_xi]
 
         # Find the indices of the closest coastal grid cell to the river mouth using kdtree.
         tree = build_kdtree_from_latlon(coast_lat, coast_lon)
         station_names = data.ds[data.var_names["name"]].values
-        
+
         eta_argmin, xi_argmin, _ = query_kdtree_nearest(
-            tree, river_lat, river_lon, coast_eta, coast_xi,
+            tree,
+            river_lat,
+            river_lon,
+            coast_eta,
+            coast_xi,
             labels=list(station_names),
         )
         river_indices = {
@@ -688,15 +699,17 @@ class RiverForcing:
         ds["river_volume"].attrs["long_name"] = "River volume flux"
         ds["river_volume"].attrs["units"] = "m^3/s"
 
-        # River tracers (per-tracer units live on tracer_unit, not on this array)
-        target_shape = (
-            ds.sizes["river_time"],
-            ds.sizes["ntracers"],
-            ds.sizes["nriver"],
+        n_tracers = len(ds["tracer_name"])
+        n_river_time = (
+            len(ds["river_time"])
+            if "river_time" in ds
+            else river_volume.sizes["river_time"]
         )
+        n_rivers = river_volume.sizes["nriver"]
+
         ds["river_tracer"] = xr.DataArray(
-            np.zeros(target_shape, dtype=np.float32),
-            dims=("river_time", "ntracers", "nriver"),
+            np.zeros((n_tracers, n_river_time, n_rivers), dtype=np.float32),
+            dims=("ntracers", "river_time", "nriver"),
         )
         ds["river_tracer"].attrs = {"long_name": "River tracer data"}
 
@@ -743,7 +756,7 @@ class RiverForcing:
         if self.include_bgc and self.bgc_source is not None:
             ds = self._apply_bgc_tracers(ds)
 
-        # add compute on dask arrays to convert to in-memory numpy arrays so  
+        # add compute on dask arrays to convert to in-memory numpy arrays so
         # downstream functions work on concrete arrays
         logging.info("Computing river forcing arrays...")
         with ProgressBar():
@@ -791,12 +804,14 @@ class RiverForcing:
             name_to_idx = {name: i for i, name in enumerate(ds.river_name.values)}
             for i, (idx_pair, river_list) in enumerate(overlapping_rivers.items()):
                 name = "overlap_" + river_list[0].replace("GloFAS_", "")
-                logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}") 
+                logging.debug(f"{name} at {idx_pair}: {', '.join(river_list)}")
                 new_nriver = ds.sizes["nriver"] + i + 1
                 (
                     combined_river_volume,
                     combined_river_tracer,
-                ) = self._create_combined_river(ds, name, new_nriver, idx_pair, river_list, name_to_idx)
+                ) = self._create_combined_river(
+                    ds, name, new_nriver, idx_pair, river_list, name_to_idx
+                )
                 combined_river_volumes.append(combined_river_volume)
                 combined_river_tracers.append(combined_river_tracer)
 
@@ -910,7 +925,9 @@ class RiverForcing:
         # Volume-weighted sum of river tracer contributions at the overlapping location
         weighted_tracers = xr.concat(
             [
-                (ds["river_tracer"].isel(nriver=idx) * weight.fillna(0.0)).astype("float64")
+                (ds["river_tracer"].isel(nriver=idx) * weight.fillna(0.0)).astype(
+                    "float64"
+                )
                 for idx, weight in zip(contributing_indices, weighted_volumes)
             ],
             dim="tmp",
@@ -981,11 +998,15 @@ class RiverForcing:
                     n_cells = len(self.indices[name])
                     n_overlaps = river_overlap_count.get(name, 0)
                     if n_cells > 0:
-                        scale_factors[name_to_idx[name]] = (n_cells - n_overlaps) / n_cells
-        
+                        scale_factors[name_to_idx[name]] = (
+                            n_cells - n_overlaps
+                        ) / n_cells
+
         # Apply all scale factors in a single operation
         attrs = ds["river_volume"].attrs
-        ds["river_volume"] = ds["river_volume"] * xr.DataArray(scale_factors, dims="nriver")
+        ds["river_volume"] = ds["river_volume"] * xr.DataArray(
+            scale_factors, dims="nriver"
+        )
         ds["river_volume"].attrs = attrs
 
         return ds
@@ -995,7 +1016,7 @@ class RiverForcing:
         "river_fraction" variables.
 
         This method creates new "river_index" and "river_fraction" variables using river station indices
-        from `self.indices` and assigns them to the dataset. Builds numpy arrays first and wraps in 
+        from `self.indices` and assigns them to the dataset. Builds numpy arrays first and wraps in
         xr.DataArray at the end, avoiding repeated xarray indexing overhead in the assignment loop.
 
         Parameters
@@ -1022,8 +1043,16 @@ class RiverForcing:
                 river_index_arr[eta_index, xi_index] = nriver_val
                 river_fraction_arr[eta_index, xi_index] = fraction
 
-        river_index = xr.DataArray(river_index_arr, dims=self.grid.ds.h.dims, attrs={"long_name": "River ID", "units": "none"})
-        river_fraction = xr.DataArray(river_fraction_arr, dims=self.grid.ds.h.dims, attrs={"long_name": "River volume fraction", "units": "none"})
+        river_index = xr.DataArray(
+            river_index_arr,
+            dims=self.grid.ds.h.dims,
+            attrs={"long_name": "River ID", "units": "none"},
+        )
+        river_fraction = xr.DataArray(
+            river_fraction_arr,
+            dims=self.grid.ds.h.dims,
+            attrs={"long_name": "River volume fraction", "units": "none"},
+        )
 
         ds["river_index"] = river_index
         ds["river_fraction"] = river_fraction
@@ -1095,11 +1124,10 @@ class RiverForcing:
         for ax in axs:
             plot_2d_horizontal_field(field, kwargs=kwargs, ax=ax, add_colorbar=False)
 
-        points = {}
         for j, (ax, indices) in enumerate(
             [(ax, ind) for ax, ind in zip(axs, [self.original_indices, self.indices])]
         ):
-            points = {}  # reset for each panel
+            points: dict[str, dict] = {}  # reset for each panel
             for name in river_names:
                 if name in indices:
                     for i, (eta_index, xi_index) in enumerate(indices[name]):
@@ -1208,9 +1236,11 @@ class RiverForcing:
         else:
             d = get_variable_metadata()
             var_name_wo_river = var_name.split("_")[1]
-            field = self.ds["river_tracer"].isel(
-                ntracers=self.ds.tracer_name == var_name_wo_river
-            ).squeeze("ntracers")
+            field = (
+                self.ds["river_tracer"]
+                .isel(ntracers=self.ds.tracer_name == var_name_wo_river)
+                .squeeze("ntracers")
+            )
             units = d[var_name_wo_river]["units"]
             long_name = f"River {d[var_name_wo_river]['long_name']}"
 

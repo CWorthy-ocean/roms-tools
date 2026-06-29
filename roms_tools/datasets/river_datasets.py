@@ -339,31 +339,19 @@ class RiverDataset:
         ds : xr.Dataset
             The loaded xarray Dataset containing the forcing data.
         """
-        ds = load_data(
-            self.filename, self.dim_names, use_dask=False, decode_times=False
-        )
-
-        return ds
-
-    def load_data(self) -> xr.Dataset:
-        """Load dataset from the specified file.
-        
-        Returns
-        -------
-        ds : xr.Dataset
-            The loaded xarray Dataset containing the forcing data.
-        """
-        ds = load_data(
-            self.filename, self.dim_names, use_dask=True, decode_times=True
-        )
+        ds = load_data(self.filename, self.dim_names, use_dask=True, decode_times=True)
 
         # Subset time lazily before compute to avoid loading full multi-year dataset.
         # Add 1-day buffer on each side to ensure select_relevant_times has data at boundaries.
         time_dim = self.dim_names["time"]
-        ds = ds.sel({time_dim: slice(
-            np.datetime64(self.start_time) - np.timedelta64(1, 'D'),
-            np.datetime64(self.end_time) + np.timedelta64(1, 'D')
-        )})
+        ds = ds.sel(
+            {
+                time_dim: slice(
+                    np.datetime64(self.start_time) - np.timedelta64(1, "D"),
+                    np.datetime64(self.end_time) + np.timedelta64(1, "D"),
+                )
+            }
+        )
         return ds
 
     def clean_up(self, ds: xr.Dataset) -> xr.Dataset:
@@ -546,7 +534,9 @@ class RiverDataset:
 
         return ds
 
-    def extract_relevant_rivers(self, target_coords, dx, coast_snap_buffer_km=None, domain_edge_buffer=20):
+    def extract_relevant_rivers(
+        self, target_coords, dx, coast_snap_buffer_km=None, domain_edge_buffer=20
+    ):
         """Extract rivers within the ROMS domain and assign each to the nearest coastal grid cell.
 
         Uses a three-step memory-efficient approach to avoid building the full
@@ -589,8 +579,11 @@ class RiverDataset:
             River names as keys, each mapping to a list containing one tuple of
             (eta_rho, xi_rho) grid indices of the nearest coastal cell.
         """
-        from roms_tools.setup.utils import build_kdtree_from_latlon, query_kdtree_nearest
-        
+        from roms_tools.setup.utils import (
+            build_kdtree_from_latlon,
+            query_kdtree_nearest,
+        )
+
         # Retrieve longitude and latitude of river mouths
         river_lon = self.ds[self.var_names["longitude"]]
         river_lat = self.ds[self.var_names["latitude"]]
@@ -604,26 +597,26 @@ class RiverDataset:
         station_dim = self.dim_names["station"]
 
         # Build candidate point set — coastal cells only if mask provided, else all grid cells
-        target_lon_np   = target_coords["lon"].values
-        target_lat_np   = target_coords["lat"].values
+        target_lon_np = target_coords["lon"].values
+        target_lat_np = target_coords["lat"].values
         eta_rho, xi_rho = target_lon_np.shape
 
         if target_coords.get("mask") is not None:
             mask_rho = target_coords["mask"].values
             faces = np.zeros_like(mask_rho)
-            faces[1:,  :] += mask_rho[:-1, :]
-            faces[:-1, :] += mask_rho[1:,  :]
-            faces[:,  1:] += mask_rho[:, :-1]
-            faces[:, :-1] += mask_rho[:,  1:]
+            faces[1:, :] += mask_rho[:-1, :]
+            faces[:-1, :] += mask_rho[1:, :]
+            faces[:, 1:] += mask_rho[:, :-1]
+            faces[:, :-1] += mask_rho[:, 1:]
             coast = (1 - mask_rho) * (faces > 0)
             coast_eta, coast_xi = np.where(coast)
             tree_lat = target_lat_np[coast_eta, coast_xi]
             tree_lon = target_lon_np[coast_eta, coast_xi]
         else:
             coast_eta = np.arange(eta_rho * xi_rho) // xi_rho
-            coast_xi  = np.arange(eta_rho * xi_rho) %  xi_rho
-            tree_lat  = target_lat_np.ravel()
-            tree_lon  = target_lon_np.ravel()
+            coast_xi = np.arange(eta_rho * xi_rho) % xi_rho
+            tree_lat = target_lat_np.ravel()
+            tree_lon = target_lon_np.ravel()
 
         # Step 1: bounding box pre-filter with buffer to catch rivers just outside the domain
         buffer_deg = float(dx) / 111000 * (domain_edge_buffer + 1)
@@ -635,7 +628,12 @@ class RiverDataset:
         rlat = river_lat.values
         rlon = river_lon.values
 
-        in_bbox      = (rlat >= lat_min) & (rlat <= lat_max) & (rlon >= lon_min) & (rlon <= lon_max)
+        in_bbox = (
+            (rlat >= lat_min)
+            & (rlat <= lat_max)
+            & (rlon >= lon_min)
+            & (rlon <= lon_max)
+        )
         bbox_indices = np.where(in_bbox)[0]
 
         if len(bbox_indices) == 0:
@@ -645,21 +643,22 @@ class RiverDataset:
         # Step 2: optional distance filter using query_ball_point
         if coast_snap_buffer_km is not None:
             from roms_tools.setup.utils import latlon_to_xyz
-            
+
             dx_chord = 2 * np.sin((coast_snap_buffer_km / 6371.0) / 2)
-            tree     = build_kdtree_from_latlon(tree_lat, tree_lon)
-            counts   = tree.query_ball_point(
+            tree = build_kdtree_from_latlon(tree_lat, tree_lon)
+            counts = tree.query_ball_point(
                 latlon_to_xyz(rlat[bbox_indices], rlon[bbox_indices]),
-                r=dx_chord, return_length=True,
+                r=dx_chord,
+                return_length=True,
             )
             final_indices = bbox_indices[counts > 0]
         else:
-            tree          = build_kdtree_from_latlon(tree_lat, tree_lon)
+            tree = build_kdtree_from_latlon(tree_lat, tree_lon)
             final_indices = bbox_indices
 
         # Subset dataset and sort first
-        ds      = self.ds.isel({station_dim: final_indices})
-        ds      = self.sort_by_river_volume(ds)
+        ds = self.ds.isel({station_dim: final_indices})
+        ds = self.sort_by_river_volume(ds)
         self.ds = ds
 
         # Step 3: assign each station to nearest any-grid-cell using sorted positions
@@ -670,14 +669,20 @@ class RiverDataset:
         else:
             sorted_lon = np.where(sorted_lon < 0, sorted_lon + 360, sorted_lon)
 
-        all_eta  = np.arange(eta_rho * xi_rho) // xi_rho
-        all_xi   = np.arange(eta_rho * xi_rho) %  xi_rho
-        all_tree = build_kdtree_from_latlon(target_lat_np.ravel(), target_lon_np.ravel())
+        all_eta = np.arange(eta_rho * xi_rho) // xi_rho
+        all_xi = np.arange(eta_rho * xi_rho) % xi_rho
+        all_tree = build_kdtree_from_latlon(
+            target_lat_np.ravel(), target_lon_np.ravel()
+        )
         eta_argmin, xi_argmin, _ = query_kdtree_nearest(
-            all_tree, sorted_lat, sorted_lon, all_eta, all_xi,
+            all_tree,
+            sorted_lat,
+            sorted_lon,
+            all_eta,
+            all_xi,
         )
 
-        names_final   = ds[self.var_names["name"]].values
+        names_final = ds[self.var_names["name"]].values
         river_indices = {
             str(names_final[i]): [(int(eta_argmin[i]), int(xi_argmin[i]))]
             for i in range(len(ds[self.dim_names["station"]]))
@@ -732,6 +737,7 @@ class RiverDataset:
         # Set the filtered dataset as the new `ds`
         self.ds = ds_filtered
 
+
 @dataclass(kw_only=True)
 class GloFASRiverDataset(RiverDataset):
     """River discharge dataset from GloFAS v4.0.
@@ -752,17 +758,18 @@ class GloFASRiverDataset(RiverDataset):
     )
     var_names: dict = field(
         default_factory=lambda: {
-            "latitude":  "lat_mou",
+            "latitude": "lat_mou",
             "longitude": "lon_mou",
-            "flux":      "FLOW",
-            "ratio":     "ratio_m2s",
-            "name":      "riv_name",
+            "flux": "FLOW",
+            "ratio": "ratio_m2s",
+            "name": "riv_name",
         }
     )
-    opt_var_names: dict = field(
-        default_factory=lambda: {"vol": "vol_stn"}
-    )
-    def extract_relevant_rivers(self, target_coords, dx, coast_snap_buffer_km=50.0, domain_edge_buffer=20):
+    opt_var_names: dict = field(default_factory=lambda: {"vol": "vol_stn"})
+
+    def extract_relevant_rivers(
+        self, target_coords, dx, coast_snap_buffer_km=50.0, domain_edge_buffer=20
+    ):
         """Extract relevant rivers, defaulting to a 50 km coastal snap buffer.
 
         GloFAS river mouths are preprocessed using the LDD algorithm to lie on
@@ -770,17 +777,20 @@ class GloFASRiverDataset(RiverDataset):
         See :meth:`RiverDataset.extract_relevant_rivers` for full documentation.
         """
         return super().extract_relevant_rivers(
-        target_coords, dx,
-        coast_snap_buffer_km=coast_snap_buffer_km,
-        domain_edge_buffer=domain_edge_buffer,
+            target_coords,
+            dx,
+            coast_snap_buffer_km=coast_snap_buffer_km,
+            domain_edge_buffer=domain_edge_buffer,
         )
 
     def add_time_info(self, ds: xr.Dataset) -> xr.Dataset:
         """Time is CF-compliant datetime64 — decode directly."""
         import pandas as pd
+
         time_dim = self.dim_names["time"]
         ds[time_dim] = pd.DatetimeIndex(ds[time_dim].values)
         return ds
+
 
 @dataclass(kw_only=True)
 class DaiRiverDataset(RiverDataset):
@@ -816,7 +826,7 @@ class DaiRiverDataset(RiverDataset):
         }
     )
     climatology: bool = False
-   
+
     def load_data(self) -> xr.Dataset:
         """Load dataset from the specified file. Load Dai dataset from the specified file.
         Overrides the base class to use use_dask=False, decode_times=False because Dai encodes
@@ -864,14 +874,17 @@ class DaiRiverDataset(RiverDataset):
 
         return ds
 
-    def extract_relevant_rivers(self, target_coords, dx, coast_snap_buffer_km=200.0, domain_edge_buffer=20):
+    def extract_relevant_rivers(
+        self, target_coords, dx, coast_snap_buffer_km=200.0, domain_edge_buffer=20
+    ):
         """Extract relevant rivers, defaulting to a 200 km coastal snap buffer.
 
         Dai river mouths may be placed far inland relative to the actual river
         mouth, so a generous buffer is used to avoid excluding legitimate rivers.
         """
         return super().extract_relevant_rivers(
-            target_coords, dx,
+            target_coords,
+            dx,
             coast_snap_buffer_km=coast_snap_buffer_km,
             domain_edge_buffer=domain_edge_buffer,
         )
@@ -1231,7 +1244,10 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         river_names: list[str] | None = None,
     ) -> tuple[list[int], list[int]]:
         """RIVR2O ``(lat, lon)`` indices of the nearest cell with positive DIC export."""
-        from roms_tools.setup.utils import build_kdtree_from_latlon, query_kdtree_nearest
+        from roms_tools.setup.utils import (
+            build_kdtree_from_latlon,
+            query_kdtree_nearest,
+        )
 
         query_lon = np.atleast_1d(np.asarray(lon, dtype=float))
         query_lat = np.atleast_1d(np.asarray(lat, dtype=float))
@@ -1244,16 +1260,22 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
 
         # Cache tree — built from the same DIC export cells every call
         if not hasattr(self, "_cached_dic_tree"):
-            lat_indices, lon_indices, grid_lats, grid_lons = self._valid_dic_export_cell_indices()
+            lat_indices, lon_indices, grid_lats, grid_lons = (
+                self._valid_dic_export_cell_indices()
+            )
             self._cached_dic_tree = (
                 build_kdtree_from_latlon(grid_lats, grid_lons),
                 lat_indices,
                 lon_indices,
             )
         tree, lat_indices, lon_indices = self._cached_dic_tree
-        
+
         nearest_lat, nearest_lon, _ = query_kdtree_nearest(
-            tree, query_lat, query_lon, lat_indices, lon_indices,
+            tree,
+            query_lat,
+            query_lon,
+            lat_indices,
+            lon_indices,
             labels=river_names,
         )
 
@@ -1275,9 +1297,14 @@ class Rivr2oRiverBGCDataset(RiverBGCDataset):
         the annual export (more carbon flux when ``Q`` is high).
         """
         import warnings
+
         # RuntimeWarning for division by zero in cell_weight is expected and handled by .where()
-        warnings.filterwarnings("ignore", message="invalid value encountered in divide",
-                            category=RuntimeWarning, module="dask")
+        warnings.filterwarnings(
+            "ignore",
+            message="invalid value encountered in divide",
+            category=RuntimeWarning,
+            module="dask",
+        )
 
         volume = river_volume
         if "points" in volume.dims:

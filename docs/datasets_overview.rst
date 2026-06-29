@@ -52,13 +52,17 @@ ROMS-Tools relies on several external datasets. Some are accessed automatically;
      - No (auto-downloaded)
      - `NCAR RDA <https://rda.ucar.edu/datasets/d551000/dataaccess/>`_
    * - WOA
-     - Surface Restoring Forcing
+     - Surface Restoring Forcing, sea surface salinity (`sss`)
      - Yes
      - `WOA, NOAA <https://www.ncei.noaa.gov/products/world-ocean-atlas>`_
    * - MBL_co2
      - Time-varying CO2, Surface Forcing
      - No (auto-downloaded)
      - `MBL, GML, NOAA <https://gml.noaa.gov/ccgg/mbl/data.php>`_
+   * - SODA
+     - Surface Restoring Forcing, sea surface salinity (`sDIC`, `sALK`)
+     - No (auto-downloaded)
+     - `OceanSODA-ETHZ, NOAA <https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:0220059>`_
 
 
 Manual Downloads
@@ -226,7 +230,7 @@ WOA Salinity Data
 
 A collection of salinity (and other variables) means based on profile data from the World Ocean Database (WOD). The `s_an` variable provided is the 'Objectively analyzed mean fields for sea_water_salinity'.
 
-:Required for: Surface Forcing (Restoring Forces)
+:Required for: Surface Forcing (Restoring Forces; Salinity)
 :Available at: `NOAA website <https://www.ncei.noaa.gov/products/world-ocean-atlas>`_
 
 For download instructions see :doc:`datasets`.
@@ -370,7 +374,26 @@ Data are available for 1979 to 2025. Downloaded automatically by ROMS-Tools.
 
 :Version: 2019
 :Required for: River Forcing
-:Available at: `NOAA's GML, MBL <https://gml.noaa.gov/ccgg/mbl/data.php>`_t
+:Available at: `NOAA's GML, MBL <https://gml.noaa.gov/ccgg/mbl/data.php>`_
+
+
+Download Instructions
+---------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   datasets
+
+
+OceanSODA
+~~~~~~~~~~~~~~~
+
+A global gridded marine carbonate system dataset calculated from machine learning estimates of Total Alkalinity and the fugacity of carbon dioxide. Data taken from NOAA's OceanSODA-ETHZ version 2025. Monthly data for years 1982-2024 at 1 degree resolution for the surface water. Downloaded automatically by ROMS-Tools.
+
+:Version: 2025
+:Required for: Surface Forcing (Restoring Forces; DIC & ALK)
+:Available at: `NOAA's OceanSODA <https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:0220059>`_
 
 
 Download Instructions

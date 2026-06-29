@@ -9,9 +9,16 @@ import xarray as xr
 from roms_tools import BoundaryForcing, Grid
 from roms_tools.datasets.download import download_test_data
 from roms_tools.setup.utils import (
+    _compute_density_coord,
     _infer_valid_boundaries_from_mask,
+    calendar_midmonth_dates,
     check_and_set_boundaries,
+    compute_potential_density,
+    expand_monthly_climatology_time_axis,
     get_target_coords,
+    interpolate_dynamic_bgc_by_calendar_year,
+    month_to_time_index,
+    tile_monthly_climatology_on_calendar,
     validate_names,
 )
 
@@ -295,3 +302,252 @@ def test_check_and_set_full_user_boundaries(simple_mask):
     result = check_and_set_boundaries(boundaries, simple_mask)
 
     assert result == boundaries  # unchanged
+
+
+# test compute_potential_density
+
+
+def test_compute_potential_density_known_value():
+    """Verify sigma-0 against a known seawater value (T=20°C, S=35 PSU → ~24.64 kg/m³)."""
+    temp = xr.DataArray([[20.0]])
+    salt = xr.DataArray([[35.0]])
+    result = compute_potential_density(temp, salt)
+    assert float(result.values.flat[0]) == pytest.approx(24.64, abs=0.1)
+
+
+def test_compute_potential_density_dask():
+    """Verify compute_potential_density returns a lazy dask-backed array."""
+    import dask.array as da
+
+    temp = xr.DataArray(da.from_array([[20.0]], chunks=(1, 1)))
+    salt = xr.DataArray(da.from_array([[35.0]], chunks=(1, 1)))
+    result = compute_potential_density(temp, salt)
+    assert result.chunks is not None
+
+
+def test_compute_density_coord_constant_TS():
+    """For constant T/S, the density coordinate equals sigma0(S,T) plus the
+    monotonicity perturbation along the depth dimension.
+    """
+    import gsw
+
+    n_depth = 4
+    T_const, S_const = 10.0, 35.0
+    temp = xr.DataArray(np.full((n_depth, 1, 1), T_const), dims=["depth", "eta", "xi"])
+    salt = xr.DataArray(np.full((n_depth, 1, 1), S_const), dims=["depth", "eta", "xi"])
+
+    result = _compute_density_coord(temp, salt, "depth")
+
+    # gsw.sigma0 is invariant for constant T/S; only the per-index perturbation
+    # added along the depth axis changes the value across depth.
+    expected = gsw.sigma0(S_const, T_const) + np.arange(n_depth) * 1e-7
+    np.testing.assert_allclose(result.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
+
+
+def test_compute_density_coord_monotonic_and_chunked():
+    """The density coordinate is strictly increasing along the depth dim and is
+    single-chunked there (required by xgcm.transform).
+    """
+    # A stably stratified column: density should already increase with depth, and
+    # the perturbation guarantees strict monotonicity even for ties.
+    temp = xr.DataArray(
+        np.array([20.0, 20.0, 12.0, 4.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    ).chunk({"s_rho": 2})
+    salt = xr.DataArray(
+        np.array([34.0, 34.0, 34.8, 35.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    ).chunk({"s_rho": 2})
+
+    result = _compute_density_coord(temp, salt, "s_rho")
+
+    profile = result.values[:, 0, 0]
+    assert np.all(np.diff(profile) > 0), "density coordinate must be strictly monotonic"
+    # single chunk along the transformed dim
+    assert result.chunks is not None
+    s_axis = result.dims.index("s_rho")
+    assert len(result.chunks[s_axis]) == 1
+
+
+def test_density_space_interpolation_returns_correct_values():
+    """End-to-end correctness of density-space interpolation on a synthetic column.
+
+    A tracer placed on a source density coordinate (built from source T/S) and
+    interpolated onto a target density coordinate (built from target T/S) must equal
+    a direct 1-D linear interpolation of the tracer in density space. This pins the
+    full density-interpolation composition (``_compute_density_coord`` feeding
+    ``VerticalRegrid.apply``) used by InitialConditions and BoundaryForcing.
+    """
+    from roms_tools.regrid import VerticalRegrid
+
+    # Source column: stably stratified (colder/denser with depth) so the density
+    # coordinate is monotonic; a tracer that increases with depth.
+    src_temp = xr.DataArray(
+        np.array([25.0, 20.0, 15.0, 10.0]).reshape(-1, 1, 1),
+        dims=["depth", "eta", "xi"],
+    )
+    src_salt = xr.DataArray(np.full((4, 1, 1), 35.0), dims=["depth", "eta", "xi"])
+    tracer = xr.DataArray(
+        np.array([2000.0, 2100.0, 2200.0, 2300.0]).reshape(-1, 1, 1),
+        dims=["depth", "eta", "xi"],
+        name="ALK",
+    )
+
+    # Target ROMS sigma levels, with T/S chosen so the target densities fall strictly
+    # inside the source range (genuine interpolation, not edge clamping).
+    tgt_temp = xr.DataArray(
+        np.array([22.0, 17.0, 12.0]).reshape(-1, 1, 1),
+        dims=["s_rho", "eta", "xi"],
+    )
+    tgt_salt = xr.DataArray(np.full((3, 1, 1), 35.0), dims=["s_rho", "eta", "xi"])
+
+    source_density = _compute_density_coord(src_temp, src_salt, "depth")
+    target_density = _compute_density_coord(tgt_temp, tgt_salt, "s_rho")
+
+    src_rho = source_density.values[:, 0, 0]
+    tgt_rho = target_density.values[:, 0, 0]
+    # sanity: target densities are interior to the source range
+    assert tgt_rho.min() > src_rho.min()
+    assert tgt_rho.max() < src_rho.max()
+
+    ds = xr.Dataset({"ALK": tracer})
+    vertical_regrid = VerticalRegrid(ds, source_dim="depth")
+    regridded = vertical_regrid.apply(
+        ds["ALK"],
+        source_depth_coords=source_density,
+        target_depth_coords=target_density,
+    ).transpose("s_rho", "eta", "xi")
+
+    expected = np.interp(tgt_rho, src_rho, tracer.values[:, 0, 0])
+    np.testing.assert_allclose(regridded.values[:, 0, 0], expected, rtol=0.0, atol=1e-6)
+
+
+class TestMonthlyClimatologyExpansion:
+    @staticmethod
+    def _monthly_climatology_ds() -> xr.Dataset:
+        months = np.arange(1, 13)
+        return xr.Dataset(
+            {
+                "river_volume": (
+                    ("river_time", "nriver"),
+                    np.arange(12 * 2, dtype=float).reshape(12, 2),
+                )
+            },
+            coords={
+                "river_time": months,
+                "month": ("river_time", months),
+                "nriver": [0, 1],
+            },
+            attrs={"climatology": "True"},
+        )
+
+    def test_month_to_time_index(self):
+        assert month_to_time_index(np.array([1, 2, 3])) == {1: 0, 2: 1, 3: 2}
+
+    def test_tile_monthly_climatology_on_calendar(self):
+        ds = self._monthly_climatology_ds()
+        dates = [
+            datetime(2020, 1, 15),
+            datetime(2020, 2, 15),
+            datetime(2021, 1, 15),
+        ]
+        tiled = tile_monthly_climatology_on_calendar(ds, dates)
+        assert tiled.sizes["river_time"] == 3
+        np.testing.assert_allclose(
+            tiled["river_volume"].isel(river_time=0).values,
+            ds["river_volume"].isel(river_time=0).values,
+        )
+        np.testing.assert_allclose(
+            tiled["river_volume"].isel(river_time=2).values,
+            ds["river_volume"].isel(river_time=0).values,
+        )
+        assert "month" not in tiled
+
+    def test_expand_monthly_climatology_time_axis(self):
+        ds = self._monthly_climatology_ds()
+        expanded = expand_monthly_climatology_time_axis(
+            ds,
+            datetime(2020, 1, 1),
+            datetime(2020, 3, 15),
+            datetime(2000, 1, 1),
+            discharge_climatology_attr="discharge_climatology",
+        )
+        assert expanded.sizes["river_time"] == 3
+        assert expanded.attrs["discharge_climatology"] == "True"
+        assert "climatology" not in expanded.attrs
+        assert "abs_time" in expanded
+        assert calendar_midmonth_dates(datetime(2020, 1, 1), datetime(2020, 3, 15)) == [
+            datetime(2020, m, 15) for m in (1, 2, 3)
+        ]
+
+    def test_calendar_midmonth_dates_short_window_without_15th(self):
+        # A sub-month window that skips the 15th must still yield one in-window
+        # date tagged to the correct month, not raise.
+        dates = calendar_midmonth_dates(datetime(2020, 1, 20), datetime(2020, 1, 28))
+        assert dates == [datetime(2020, 1, 20)]
+        assert dates[0].month == 1
+
+
+class TestInterpolateDynamicBGCByCalendarYear:
+    @staticmethod
+    def _monthly_abs_time(years: tuple[int, ...]) -> xr.DataArray:
+        dates = [datetime(year, month, 15) for year in years for month in range(1, 13)]
+        return xr.DataArray(
+            np.array(dates, dtype="datetime64[ns]"),
+            dims=["river_time"],
+        )
+
+    def test_interior_gap_year_is_linearly_interpolated(self):
+        abs_time = self._monthly_abs_time((2000, 2001, 2002))
+        years = abs_time.dt.year.values
+        values = np.empty((len(years), 1), dtype=np.float32)
+        for i, year in enumerate(years):
+            if year == 2001:
+                values[i, 0] = np.nan
+            elif year == 2000:
+                values[i, 0] = 100.0
+            else:
+                values[i, 0] = 200.0
+        dic = xr.DataArray(
+            values,
+            dims=["river_time", "nriver"],
+            coords={"river_time": abs_time, "nriver": [0]},
+        )
+        result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
+        gap = result["DIC"].sel(river_time=abs_time.dt.year == 2001)
+        np.testing.assert_allclose(gap.values, 150.0, rtol=1e-6)
+
+    def test_leading_and_trailing_nan_years_remain_nan(self):
+        abs_time = self._monthly_abs_time((2000, 2001, 2002))
+        years = abs_time.dt.year.values
+        values = np.where(years == 2001, 100.0, np.nan).astype(np.float32)[
+            :, np.newaxis
+        ]
+        dic = xr.DataArray(
+            values,
+            dims=["river_time", "nriver"],
+            coords={"river_time": abs_time, "nriver": [0]},
+        )
+        result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
+        assert np.all(np.isnan(result["DIC"].sel(river_time=abs_time.dt.year == 2000)))
+        assert np.all(np.isnan(result["DIC"].sel(river_time=abs_time.dt.year == 2002)))
+
+    def test_zero_export_year_is_not_interpolated(self):
+        abs_time = self._monthly_abs_time((2000, 2001, 2002))
+        years = abs_time.dt.year.values
+        values = np.empty((len(years), 1), dtype=np.float32)
+        for i, year in enumerate(years):
+            if year == 2001:
+                values[i, 0] = 0.0
+            elif year == 2000:
+                values[i, 0] = 100.0
+            else:
+                values[i, 0] = 200.0
+        dic = xr.DataArray(
+            values,
+            dims=["river_time", "nriver"],
+            coords={"river_time": abs_time, "nriver": [0]},
+        )
+        result = interpolate_dynamic_bgc_by_calendar_year({"DIC": dic}, abs_time)
+        gap = result["DIC"].sel(river_time=abs_time.dt.year == 2001)
+        np.testing.assert_allclose(gap.values, 0.0)

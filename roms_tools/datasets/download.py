@@ -30,6 +30,7 @@ river_data = pooch.create(
     # The registry specifies the files that can be fetched
     registry={
         "dai_trenberth_may2019.nc": "sha256:793849e6aa60d1f6bdb480c345515fb2453d903c0a30599241b3d752f53715ab",
+        "river_tracer_defaults.nc": "sha256:58b7f2e00c0a4f489fc0f345988b79a378ed56f5039d1409a00dc947275e7a61",
     },
 )
 
@@ -79,9 +80,10 @@ pup_test_data = pooch.create(
         "CESM_BGC_SURFACE_2012.nc": "3c4d156adca97909d0fac36bf50b99583ab37d8020d7a3e8511e92abf2331b38",
         "CESM_surface_global_test_data_climatology.nc": "a072757110c6f7b716a98f867688ef4195a5966741d2f368201ac24617254e35",
         "CESM_surface_global_test_data.nc": "874106ffbc8b1b220db09df1551bbb89d22439d795b4d1e5a24ee775e9a7bf6e",
-        "coarsened_UNIFIED_bgc_dataset.nc": "sha256:1f1e4304a497587f75d8e4cd64913caec797a98daf07de4468a2f04d1f0bc165",
+        "coarsened_UNIFIED_bgc_dataset.nc": "sha256:269d5bcd8e6e64d3400362ae0a65afe049810ce06c536ccf31cca7c00f321bc1",
         "WOA_2018_quarterDeg_coarsened.nc": "sha256:673ce3c3a98bb386ccd899dbc23eeedf7d9a665b68ea52c96fd69829a4b929a7",
         "mbl_co2_bgc_dataset.nc": "sha256:797a9ef48f3c83a6920e44c0b441feb00fb35553db09dea9ed4ff36dcd68d968",
+        "coarsened_OceanSODA_dataset.nc": "sha256:b4a284303c9c1a8904a6ea3fa338ff05ac042c0b024fb4e1ad4bbb1d9fedff38",
         "grid_created_with_matlab.nc": "fd537ef8159fabb18e38495ec8d44e2fa1b7fb615fcb1417dd4c0e1bb5f4e41d",
         "etopo5_coarsened_and_shifted.nc": "9a5cb4b38c779d22ddb0ad069b298b9722db34ca85a89273eccca691e89e6f96",
         "srtm15_coarsened.nc": "48bc8f4beecfdca9c192b13f4cbeef1455f49d8261a82563aaec5757e100dff9",
@@ -93,7 +95,16 @@ pup_test_data = pooch.create(
         "GSHHS_l_L1.shp": "bc76f101f9b8671f90e734b4026da91c20066fc627cc8b5889ba22d90cbf97e9",
         "GSHHS_l_L1.shx": "72879354892d80d6c39c612f645661ec0edc75f3f9f8f74b19d9387ae0327377",
         "EMODnet_C2_coarse100.nc": "4202a6a5877de726bf13f41de7a1edfea2db83278ce371fe7732eb4b6770ed6d",
+        "rivr2o_riverinputs_2000.nc": "sha256:1ff94f4b732bb5fd91276120979a6af38d9a6f257570bb7fcc676c651f36dac0",
+        "rivr2o_riverinputs_2001.nc": "sha256:3ca4ca6d12103ef8bdd67592c9eeaaf0e7a2a765f1d18ad4c978dee52ebbec04",
+        "rivr2o_riverinputs_2002.nc": "sha256:0f760d85962ad025c88d39158e2a80ee33bb2d039877ef7dcb650ef32f56f660",
     },
+)
+
+RIVR2O_TEST_DATA_FILES = (
+    "rivr2o_riverinputs_2000.nc",
+    "rivr2o_riverinputs_2001.nc",
+    "rivr2o_riverinputs_2002.nc",
 )
 
 
@@ -123,14 +134,36 @@ def download_river_data(filename: str) -> str:
     Parameters
     ----------
     filename : str
-        The name of the test data file to be downloaded. Available options:
+        The name of the river data file to be downloaded. Available options:
         - "dai_trenberth_may2019.nc"
+        - "river_tracer_defaults.nc"
+
     Returns
     -------
     str
-        The path to the downloaded test data file.
+        The path to the downloaded file.
     """
     # Fetch the file using Pooch, downloading if necessary
+    fname = river_data.fetch(filename)
+
+    return fname
+
+
+def download_river_tracer_defaults(filename: str = "river_tracer_defaults.nc") -> str:
+    """Download the river tracer default values NetCDF file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the river tracer defaults file to be downloaded. Available
+        options:
+        - "river_tracer_defaults.nc"
+
+    Returns
+    -------
+    str
+        The path to the downloaded file.
+    """
     fname = river_data.fetch(filename)
 
     return fname
@@ -174,6 +207,17 @@ def download_sal_data(filename: str) -> str:
     fname = sal_data.fetch(filename)
 
     return fname
+
+
+def download_rivr2o_test_data() -> list[str]:
+    """Download the regional RIVR2O test files from roms-tools-test-data.
+
+    Returns
+    -------
+    list[str]
+        Paths to the yearly NetCDF files (2000-2002).
+    """
+    return [download_test_data(filename) for filename in RIVR2O_TEST_DATA_FILES]
 
 
 def download_test_data(filename: str) -> str:

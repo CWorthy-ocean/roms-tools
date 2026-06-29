@@ -3,14 +3,16 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python>=3.11
+  - python>=3.12
   - numpy>2,<2.3
   # testing
   - zarr
   - pytest
   - pytest-xdist
   - h5py
+  - h5netcdf
   - flake8
   - black
   - pre-commit==3.8.0
   - coverage
+  - gsw

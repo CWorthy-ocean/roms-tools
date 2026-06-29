@@ -7,9 +7,11 @@ from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+import gsw
 import numba as nb
 import numpy as np
 import pandas as pd
@@ -18,6 +20,7 @@ import yaml
 from pydantic import BaseModel
 
 from roms_tools.constants import R_EARTH
+from roms_tools.utils import transpose_dimensions
 
 if typing.TYPE_CHECKING:
     from roms_tools.setup.grid import Grid
@@ -339,6 +342,140 @@ def assign_dates_to_climatology(ds: xr.Dataset, time_dim: str) -> xr.Dataset:
     return ds
 
 
+def calendar_midmonth_dates(start_time: datetime, end_time: datetime) -> list[datetime]:
+    """Return 15th-of-month dates between ``start_time`` and ``end_time``."""
+    dates: list[datetime] = []
+    year, month = start_time.year, start_time.month
+    while (year, month) <= (end_time.year, end_time.month):
+        candidate = datetime(year, month, 15)
+        if start_time <= candidate <= end_time:
+            dates.append(candidate)
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    if not dates:
+        # Window is shorter than a month and skips every 15th; fall back to a
+        # single representative mid-month date clamped into the window so the
+        # correct climatology month is still selected.
+        candidate = datetime(start_time.year, start_time.month, 15)
+        dates.append(min(max(candidate, start_time), end_time))
+    return dates
+
+
+def month_to_time_index(month_coord: np.ndarray | xr.DataArray) -> dict[int, int]:
+    """Map calendar month (1-12) to index along a monthly climatology axis."""
+    values = np.asarray(month_coord).astype(int)
+    return {int(month): idx for idx, month in enumerate(values)}
+
+
+def tile_monthly_climatology_on_calendar(
+    ds: xr.Dataset,
+    calendar_dates: Sequence[datetime],
+    *,
+    month_coord: str = "month",
+    time_dim: str = "river_time",
+) -> xr.Dataset:
+    """Repeat monthly climatology fields along a calendar date axis."""
+    if month_coord not in ds:
+        raise ValueError(f"Dataset must contain coordinate '{month_coord}'.")
+
+    month_to_index = month_to_time_index(ds[month_coord])
+    ds_base = ds.drop_vars(month_coord, errors="ignore")
+    pieces = [
+        ds_base.isel({time_dim: month_to_index[dt.month]}) for dt in calendar_dates
+    ]
+    ds_tiled = xr.concat(pieces, dim=time_dim)
+    return ds_tiled.assign_coords(
+        {time_dim: np.array(calendar_dates, dtype="datetime64[ns]")}
+    )
+
+
+def expand_monthly_climatology_time_axis(
+    ds: xr.Dataset,
+    start_time: datetime,
+    end_time: datetime,
+    model_reference_date: datetime | np.datetime64,
+    *,
+    time_dim: str = "river_time",
+    month_coord: str = "month",
+    discharge_climatology_attr: str = "discharge_climatology",
+) -> xr.Dataset:
+    """Expand a monthly climatology dataset to calendar mid-month times."""
+    calendar_dates = calendar_midmonth_dates(start_time, end_time)
+    ds_expanded = tile_monthly_climatology_on_calendar(
+        ds,
+        calendar_dates,
+        month_coord=month_coord,
+        time_dim=time_dim,
+    )
+    ds_expanded.attrs.pop("climatology", None)
+    ds_expanded.attrs[discharge_climatology_attr] = "True"
+    ds_expanded, time = add_time_info_to_ds(
+        ds_expanded,
+        model_reference_date,
+        climatology=False,
+        time_name=time_dim,
+    )
+    logging.info(
+        "Repeated 12-month discharge climatology on %d calendar river_time steps "
+        "(%s to %s).",
+        len(calendar_dates),
+        calendar_dates[0].date(),
+        calendar_dates[-1].date(),
+    )
+    return ds_expanded.assign_coords({time_dim: time})
+
+
+def interpolate_dynamic_bgc_by_calendar_year(
+    dynamic: dict[str, xr.DataArray],
+    abs_time: xr.DataArray,
+    *,
+    time_dim: str = "river_time",
+) -> dict[str, xr.DataArray]:
+    """Linearly interpolate interior gap years in dynamic BGC concentrations.
+
+    Each tracer is collapsed to one value per calendar year (mean of finite
+    ``river_time`` steps in that year), missing years are inserted, interior NaN
+    years are linearly interpolated along the year axis, and the result is
+    broadcast back to every ``river_time`` step. Leading and trailing NaN years
+    are left unchanged.
+    """
+    calendar_years = abs_time.dt.year
+    if time_dim not in calendar_years.dims:
+        raise ValueError(
+            f"abs_time must have dimension {time_dim!r}, got dims {calendar_years.dims}."
+        )
+
+    start_year = int(calendar_years.min())
+    end_year = int(calendar_years.max())
+    full_years = np.arange(start_year, end_year + 1)
+    year_at_steps = calendar_years.values
+
+    interpolated: dict[str, xr.DataArray] = {}
+    for tracer_name, values in dynamic.items():
+        if time_dim not in values.dims:
+            raise ValueError(
+                f"Dynamic tracer {tracer_name!r} must have dimension {time_dim!r}."
+            )
+
+        tagged = values.assign_coords(calendar_year=calendar_years)
+        annual = tagged.groupby("calendar_year").mean(dim=time_dim, skipna=True)
+        annual = annual.reindex(calendar_year=full_years)
+        annual = annual.interpolate_na(dim="calendar_year", method="linear")
+
+        year_indexer = xr.DataArray(
+            year_at_steps,
+            dims=[time_dim],
+            coords={time_dim: values.coords[time_dim]},
+        )
+        filled = annual.sel(calendar_year=year_indexer, drop=True)
+        dims = [d for d in (time_dim, "nriver") if d in values.dims]
+        interpolated[tracer_name] = filled.transpose(*dims).astype(np.float32)
+
+    return interpolated
+
+
 def get_variable_metadata():
     """Retrieves metadata for commonly used variables in the dataset.
 
@@ -391,6 +528,8 @@ def get_variable_metadata():
         },
         "salt": {"long_name": "salinity", "units": "PSU", "flux_units": "PSU/s"},
         "sss": {"long_name": "sea surface salinity", "units": "PSU"},
+        "sDIC": {"long_name": "sea surface DIC", "units": "mmol/m3"},
+        "sALK": {"long_name": "sea surface ALK", "units": "mmol/m3"},
         "zeta": {"long_name": "sea surface height", "units": "m"},
         "u": {"long_name": "u-flux component", "units": "m/s"},
         "v": {"long_name": "v-flux component", "units": "m/s"},
@@ -682,6 +821,96 @@ def compute_missing_bgc_variables(bgc_data):
     return bgc_data
 
 
+def compute_potential_density(
+    temp: "xr.DataArray", salt: "xr.DataArray"
+) -> "xr.DataArray":
+    """Compute sigma-0 potential density anomaly (kg/m³ - 1000) via TEOS-10 (gsw).
+
+    Wraps gsw.sigma0 with apply_ufunc for dask compatibility. Treats practical
+    salinity as Absolute Salinity and in-situ temperature as Conservative
+    Temperature — an approximation sufficient for density-coordinate interpolation.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        In-situ temperature (°C).
+    salt : xr.DataArray
+        Practical salinity (PSU).
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 (kg/m³ - 1000).
+    """
+    density = xr.apply_ufunc(
+        gsw.sigma0,
+        salt,
+        temp,
+        dask="parallelized",
+        output_dtypes=[temp.dtype],
+    )
+    # apply_ufunc preserves the input dim order, but normalize to the package's
+    # canonical order so this public function returns a predictable layout to
+    # users who call it directly.
+    density = transpose_dimensions(density)
+    density.name = "sigma0"
+    density.attrs["long_name"] = "potential density anomaly"
+    density.attrs["units"] = "kg/m^3 - 1000"
+    return density
+
+
+# Internal variable-name keys for the single source temperature/salinity pair used to
+# build the BGC density coordinate. A BGC dataset declares these keys in its
+# ``opt_var_names`` (mapping them to whatever the file calls the fields, e.g.
+# ``temp_WOA``/``salt_WOA``); the density-space interpolation in
+# ``InitialConditions``/``BoundaryForcing`` detects, uses, and then drops them. The keys
+# are deliberately NOT ``temp``/``salt`` so they cannot collide with the physics model
+# T/S that share ``processed_fields`` in ``InitialConditions``.
+BGC_SOURCE_TEMP = "temp_bgc"
+BGC_SOURCE_SALT = "salt_bgc"
+
+
+def _compute_density_coord(
+    temp: "xr.DataArray",
+    salt: "xr.DataArray",
+    depth_dim: str,
+) -> "xr.DataArray":
+    """Build a strictly monotonic potential-density coordinate for density-space
+    interpolation.
+
+    Computes sigma-0 from ``temp``/``salt`` and adds a tiny depth-index perturbation
+    (matching the reference MATLAB implementation) so the profile is strictly
+    increasing along ``depth_dim`` — required by the ``xgcm`` transform that consumes
+    it as a coordinate. The result is single-chunked along ``depth_dim``, which
+    ``xgcm.transform`` also requires.
+
+    The same helper builds both the *source* coordinate (``depth_dim`` = the BGC
+    source depth dimension) and the *target* coordinate (``depth_dim`` = the ROMS
+    ``s_rho`` dimension); the inputs differ (BGC's own T/S for the source, the model's
+    T/S for the target), but the construction is identical.
+
+    Parameters
+    ----------
+    temp : xr.DataArray
+        Temperature (°C) on the grid whose density coordinate is wanted.
+    salt : xr.DataArray
+        Practical salinity (PSU) on the same grid.
+    depth_dim : str
+        Name of the vertical dimension along which the coordinate must be monotonic.
+
+    Returns
+    -------
+    xr.DataArray
+        Potential density anomaly sigma-0 plus monotonicity perturbation, single-
+        chunked along ``depth_dim``.
+    """
+    density = compute_potential_density(temp, salt)
+    n_depth = density.sizes[depth_dim]
+    density = density + xr.DataArray(np.arange(n_depth) * 1e-7, dims=[depth_dim])
+    # xgcm.transform requires a single chunk along the dim being transformed.
+    return density.chunk({depth_dim: -1})
+
+
 def compute_missing_surface_bgc_variables(bgc_data):
     """Fills in missing surface biogeochemical (BGC) variables in the input dictionary.
 
@@ -722,6 +951,47 @@ def compute_missing_surface_bgc_variables(bgc_data):
     return bgc_data
 
 
+# Canonical ROMS-MARBL tracer list for river forcing and related setup code.
+# Defined here (not in river_datasets) so RiverForcing, BGC dataset classes, and
+# tracer metadata share one schema without circular imports between setup and datasets.
+MARBL_TRACER_NAMES = (
+    "temp",
+    "salt",
+    "PO4",
+    "NO3",
+    "SiO3",
+    "NH4",
+    "Fe",
+    "Lig",
+    "O2",
+    "DIC",
+    "DIC_ALT_CO2",
+    "ALK",
+    "ALK_ALT_CO2",
+    "DOC",
+    "DON",
+    "DOP",
+    "DOPr",
+    "DONr",
+    "DOCr",
+    "zooC",
+    "spChl",
+    "spC",
+    "spP",
+    "spFe",
+    "spCaCO3",
+    "diatChl",
+    "diatC",
+    "diatP",
+    "diatFe",
+    "diatSi",
+    "diazChl",
+    "diazC",
+    "diazP",
+    "diazFe",
+)
+
+
 def get_tracer_metadata_dict(
     include_bgc: bool = True,
     unit_type: Literal["concentration", "flux", "integrated"] = "concentration",
@@ -747,42 +1017,7 @@ def get_tracer_metadata_dict(
         containing 'units' and 'long_name' for each tracer.
     """
     if include_bgc:
-        tracer_names = [
-            "temp",
-            "salt",
-            "PO4",
-            "NO3",
-            "SiO3",
-            "NH4",
-            "Fe",
-            "Lig",
-            "O2",
-            "DIC",
-            "DIC_ALT_CO2",
-            "ALK",
-            "ALK_ALT_CO2",
-            "DOC",
-            "DON",
-            "DOP",
-            "DOPr",
-            "DONr",
-            "DOCr",
-            "zooC",
-            "spChl",
-            "spC",
-            "spP",
-            "spFe",
-            "spCaCO3",
-            "diatChl",
-            "diatC",
-            "diatP",
-            "diatFe",
-            "diatSi",
-            "diazChl",
-            "diazC",
-            "diazP",
-            "diazFe",
-        ]
+        tracer_names = list(MARBL_TRACER_NAMES)
     else:
         tracer_names = ["temp", "salt"]
 
@@ -856,52 +1091,37 @@ def add_tracer_metadata_to_ds(ds, include_bgc=True, with_flux_units=False):
 
 
 def get_tracer_defaults() -> dict[str, float]:
-    """Returns constant default tracer concentrations for ROMS-MARBL.
+    """Return constant default tracer concentrations for ROMS-MARBL.
 
-    These values represent typical physical and biogeochemical tracer levels
-    (e.g., temperature, salinity, nutrients, carbon) in freshwater.
+    Values are read from ``river_tracer_defaults.nc`` (recommended values at
+    ``value_option`` index 0) from the roms-tools-data repository.
+
+    This accessor lives in ``setup.utils`` rather than ``river_datasets`` so
+    ``RiverForcing``, fill sources, and other setup code can reuse the same
+    defaults without pulling in dataset implementations at import time. The
+    dataset class is loaded lazily in :func:`_load_tracer_defaults` to avoid a
+    circular import: ``river_datasets`` imports :data:`MARBL_TRACER_NAMES` from
+    here for schema validation.
 
     Returns
     -------
     dict
-        Dictionary of tracer names and their default concentrations
+        Dictionary of tracer names and their default concentrations.
     """
-    return {
-        "temp": 17.0,  # degrees C
-        "salt": 1.0,  # psu
-        "PO4": 2.7,  # mmol m-3
-        "NO3": 24.2,  # mmol m-3
-        "SiO3": 13.2,  # mmol m-3
-        "NH4": 2.2,  # mmol m-3
-        "Fe": 1.79,  # mmol m-3
-        "Lig": 3 * 1.79,  # mmol m-3, inferred from Fe
-        "O2": 187.5,  # mmol m-3
-        "DIC": 2370.0,  # mmol m-3
-        "DIC_ALT_CO2": 2370.0,  # mmol m-3
-        "ALK": 2310.0,  # meq m-3
-        "ALK_ALT_CO2": 2310.0,  # meq m-3
-        "DOC": 1e-4,  # mmol m-3
-        "DON": 1.0,  # mmol m-3
-        "DOP": 0.1,  # mmol m-3
-        "DOPr": 0.003,  # mmol m-3
-        "DONr": 0.8,  # mmol m-3
-        "DOCr": 1e-6,  # mmol m-3
-        "zooC": 2.7,  # mmol m-3
-        "spChl": 1.35,  # mg m-3
-        "spC": 6.75,  # mmol m-3
-        "spP": 1.5 * 0.03,  # mmol m-3, inferred from ?
-        "spFe": 2.7e-5,  # mmol m-3
-        "spCaCO3": 0.135,  # mmol m-3
-        "diatChl": 0.135,  # mg m-3
-        "diatC": 0.405,  # mmol m-3
-        "diatP": 1.5 * 0.02,  # mmol m-3, inferred from ?
-        "diatFe": 2.7e-6,  # mmol m-3
-        "diatSi": 0.135,  # mmol m-3
-        "diazChl": 0.015,  # mg m-3
-        "diazC": 0.075,  # mmol m-3
-        "diazP": 1.5 * 0.01,  # mmol m-3, inferred from ?
-        "diazFe": 1.5e-6,  # mmol m-3
-    }
+    return _load_tracer_defaults()
+
+
+@lru_cache(maxsize=1)
+def _load_tracer_defaults() -> dict[str, float]:
+    """Load and cache default tracer concentrations from ``river_tracer_defaults.nc``.
+
+    ``RiverTracerDefaultsDataset`` is imported inside this function so
+    ``river_datasets`` can import :data:`MARBL_TRACER_NAMES` from this module
+    without a circular dependency at module load time.
+    """
+    from roms_tools.datasets.river_datasets import RiverTracerDefaultsDataset
+
+    return RiverTracerDefaultsDataset().defaults
 
 
 def extract_single_value(data):
@@ -1575,7 +1795,9 @@ def deserialize_datetime(
     return value
 
 
-def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
+def serialize_source_dict(
+    src: dict[str, Any] | BaseModel | None,
+) -> dict[str, Any] | None:
     """Serialize a source or BGC source dictionary for YAML or JSON output.
 
     This function performs the following transformations:
@@ -1601,7 +1823,10 @@ def serialize_source_dict(src: dict[str, Any] | None) -> dict[str, Any] | None:
     if src is None:
         return None
 
-    src = deepcopy(src)
+    if isinstance(src, BaseModel):
+        src = src.model_dump(mode="python")
+    else:
+        src = deepcopy(src)
 
     # Serialize paths
     if "path" in src:
@@ -1691,7 +1916,7 @@ def to_dict(forcing_object, exclude: list[str] | None = None) -> dict:
         Serialized representation of the forcing object.
     """
     exclude_list = exclude or []
-    exclude_set: set[str] = {"grid", "parent_grid", "ds", *exclude_list}
+    exclude_set: set[str] = {"grid", "parent_grid", "ds", "_bgc_dataset", *exclude_list}
 
     # --- Serialize top-level grid(s) ---
     yaml_data = {}
@@ -1781,6 +2006,17 @@ def from_yaml(forcing_object: type, filepath: str | Path) -> dict[str, Any]:
             f"No {forcing_object_name} configuration found in the YAML file."
         )
 
+    return deserialize_forcing_data(forcing_data)
+
+
+def deserialize_forcing_data(forcing_data: dict[str, Any]) -> dict[str, Any]:
+    """Restore datetimes, paths, and source/bgc_source dicts in a forcing-data block.
+
+    Converts ISO date strings to ``datetime`` objects, path-like strings back to
+    ``Path`` objects, and ``source``/``bgc_source`` nested dictionaries back to their
+    proper form. Used for both the top-level forcing block and nested forcing blocks
+    (e.g. an embedded ``physics_forcing``).
+    """
     # Convert ISO date strings to datetime objects
     for key, value in forcing_data.items():
         forcing_data[key] = deserialize_datetime(value)
